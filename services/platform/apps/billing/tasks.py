@@ -2124,6 +2124,13 @@ def setup_billing_scheduled_tasks() -> dict[str, str]:
             "apps.billing.issuers.tasks.sweep_owed_reversals",
             "25 * * * *",
         ),
+        # Offset from the issuance sweep so a claim taken by one run is not judged
+        # stale by the other in the same minute; the lease is 10 minutes wide.
+        (
+            "billing-abandoned-claims",
+            "apps.billing.issuers.tasks.sweep_abandoned_claims",
+            "5,35 * * * *",
+        ),
         (
             "billing-vies-reverification",
             "apps.billing.tasks.reverify_expired_vat_validations",

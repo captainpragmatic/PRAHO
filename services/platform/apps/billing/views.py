@@ -26,7 +26,7 @@ from django.core.exceptions import ImproperlyConfigured, PermissionDenied, Valid
 from django.core.paginator import Paginator
 from django.db import DatabaseError, transaction
 from django.db.models import Count, Q, QuerySet, Sum
-from django.db.models.functions import ExtractMonth
+from django.db.models.functions import Coalesce, ExtractMonth, ExtractYear
 from django.http import (
     Http404,
     HttpRequest,
@@ -1625,6 +1625,118 @@ def process_payment(  # noqa: C901, PLR0911  # Explicit financial validation and
     return JsonResponse({"error": "Invalid method"}, status=405)
 
 
+def _revenue_documents(customer_ids: list[Any]) -> Any:
+    """Invoices whose money was collected, counted in the month of the invoice.
+
+    `refunded` counts here: the sale happened, and the refund is a separate event with a
+    date of its own. Dropping a refunded invoice rewrites the month it was sold in, so a
+    January report run in April answered differently from the same report run in February.
+
+    Credit notes are deliberately NOT here. A credit note is the provider path's fiscal
+    record of a refund that `_refund_corrections` already counts, so including it would
+    subtract the same money twice - and it exists on that path ONLY, which would make one
+    refund move revenue differently depending on which issuer happens to be configured.
+    """
+    from .invoice_models import DOCUMENT_KIND_INVOICE  # noqa: PLC0415
+
+    return Invoice.objects.filter(
+        customer_id__in=customer_ids,
+        document_kind=DOCUMENT_KIND_INVOICE,
+        # `partially_refunded` belongs here for the same reason `refunded` does, and its
+        # absence was worse: the arm matched nothing, so a 10 RON refund on a 500 RON
+        # invoice removed the whole 500 from revenue. The sale still happened; the refund
+        # subtracts exactly what went back.
+        status__in=("paid", "refunded", "partially_refunded"),
+    )
+
+
+def _refund_corrections(customer_ids: list[Any]) -> Any:
+    """Money returned, counted in the month it was returned.
+
+    `Refund` is the one record BOTH issuers write, and it is written at a single site, so
+    it is the only thing that can date a correction consistently. The built-in path creates
+    no credit note at all, and SmartBill refuses a partial storno - so a credit note can
+    never represent a partial refund, while a `Refund` row always carries the exact amount
+    that went back.
+    """
+    from .refund_models import Refund  # noqa: PLC0415
+
+    # Against an invoice THIS REPORT COUNTED, reached directly or through its payment -
+    # the same two links `_project_settled_refunds` uses to decide an invoice is refunded.
+    # Merely having an invoice link is not enough: a refund against an unissued draft, or
+    # against a credit note, would subtract money `_revenue_documents` never added. A
+    # refund attached only to an order or a proforma is likewise not this report's.
+    counted = _revenue_documents(customer_ids)
+    return (
+        Refund.objects.filter(status="completed")
+        .filter(Q(invoice__in=counted) | Q(payment__invoice__in=counted))
+        .distinct()
+    )
+
+
+def _monthly_revenue(customer_ids: list[Any]) -> list[dict[str, Any]]:
+    """Collected invoices less refunds, per month, each dated to its own event."""
+    invoiced = {
+        (row["year"], row["month"], row["currency__code"]): (row["revenue"] or 0, row["count"])
+        for row in _revenue_documents(customer_ids)
+        .annotate(year=ExtractYear("created_at"), month=ExtractMonth("created_at"))
+        .values("year", "month", "currency__code")
+        .annotate(revenue=Sum("total_cents"), count=Count("id"))
+    }
+    refunded = {
+        (row["year"], row["month"], row["currency__code"]): (row["refunded"] or 0)
+        for row in _refund_corrections(customer_ids)
+        # `processed_at` is when the money went back; `created_at` is when someone asked.
+        # A refund raised in January and settled in March belongs to March, which is the
+        # whole point of dating the correction to its own event.
+        .annotate(
+            settled=Coalesce("processed_at", "created_at"),
+        )
+        .annotate(year=ExtractYear("settled"), month=ExtractMonth("settled"))
+        .values("year", "month", "currency__code")
+        .annotate(refunded=Sum("amount_cents"))
+    }
+    # Keyed by (year, month): a bare month number merges January 2025 into January 2026.
+    # Grouped by currency as well as by month. Summing `total_cents` across currencies adds
+    # lei to euros - EUR and USD are staff-selectable and an invoice inherits its order's
+    # currency - so a combined figure is wrong under any label, and labelling it RON is how
+    # 100 lei beside 100 euro read as 200 lei.
+    return [
+        {
+            "year": year,
+            "month": month,
+            "currency": currency,
+            "revenue": invoiced.get(key, (0, 0))[0] - refunded.get(key, 0),
+            "count": invoiced.get(key, (0, 0))[1],
+        }
+        for key in sorted(set(invoiced) | set(refunded))
+        for year, month, currency in (key,)
+    ]
+
+
+def _revenue_by_currency(customer_ids: list[Any]) -> list[dict[str, Any]]:
+    """Collected less returned, per currency, for the figure the screen actually shows.
+
+    The scalar beside this one is kept because it is what the revenue-recognition tests pin,
+    and it is correct wherever a single currency is in use. It cannot be DISPLAYED with a
+    currency label, though: it sums `total_cents` across currencies without conversion, so a
+    100-lei invoice beside a 100-euro one produced 200 - a number with no meaning and no
+    truthful label.
+    """
+    collected = {
+        row["currency__code"]: row["total"] or 0
+        for row in _revenue_documents(customer_ids).values("currency__code").annotate(total=Sum("total_cents"))
+    }
+    returned = {
+        row["currency__code"]: row["total"] or 0
+        for row in _refund_corrections(customer_ids).values("currency__code").annotate(total=Sum("amount_cents"))
+    }
+    return [
+        {"currency": code, "revenue": collected.get(code, 0) - returned.get(code, 0)}
+        for code in sorted(set(collected) | set(returned))
+    ]
+
+
 @billing_staff_required
 def billing_reports(request: HttpRequest) -> HttpResponse:
     """
@@ -1638,19 +1750,17 @@ def billing_reports(request: HttpRequest) -> HttpResponse:
 
     # Monthly revenue - using Django ORM ExtractMonth instead of deprecated .extra()
     # to prevent SQL injection (OWASP A03:2021 - Injection)
-    monthly_stats = (
-        Invoice.objects.filter(customer_id__in=customer_ids, status="paid")
-        .annotate(month=ExtractMonth("created_at"))
-        .values("month")
-        .annotate(revenue=Sum("total_cents"), count=Count("id"))
-    )
+    monthly_stats = _monthly_revenue(customer_ids)
+
+    collected = _revenue_documents(customer_ids).aggregate(total=Sum("total_cents"))["total"] or 0
+    returned = _refund_corrections(customer_ids).aggregate(total=Sum("amount_cents"))["total"] or 0
 
     context = {
         "monthly_stats": monthly_stats,
-        "total_revenue": Invoice.objects.filter(customer_id__in=customer_ids, status="paid").aggregate(
-            total=Sum("total_cents")
-        )["total"]
-        or Decimal("0"),
+        # The scalar is what the revenue-recognition tests pin; the breakdown is what the
+        # screen renders, because only the breakdown can carry a currency truthfully.
+        "total_revenue": collected - returned,
+        "revenue_by_currency": _revenue_by_currency(customer_ids),
     }
 
     return render(request, "billing/reports.html", context)
@@ -1665,6 +1775,8 @@ def vat_report(request: HttpRequest) -> HttpResponse:
     if not isinstance(request.user, User):
         return redirect("users:login")
 
+    from .invoice_models import DOCUMENT_KIND_INVOICE  # noqa: PLC0415
+
     customer_ids = _get_accessible_customer_ids(request.user)
 
     # VAT calculations for the selected period
@@ -1672,16 +1784,56 @@ def vat_report(request: HttpRequest) -> HttpResponse:
     end_date = request.GET.get("end_date", timezone.now().date())
 
     invoices = Invoice.objects.filter(
-        customer_id__in=customer_ids, created_at__date__range=[start_date, end_date], status__in=["issued", "paid"]
+        customer_id__in=customer_ids,
+        created_at__date__range=[start_date, end_date],
+        # `refunded` is deliberately ABSENT, and that is not satisfactory - it is the least
+        # wrong of two wrong answers pending a decision. Keeping a refunded original would
+        # be right IF something corrected it: VAT is declared when a document is issued, and
+        # a filing already made cannot be un-filed by a later refund. But only the provider
+        # path produces a correcting credit note. Keeping it on the built-in path would
+        # leave that VAT overstated permanently, which is worse than the retroactive
+        # restatement that excluding it causes. Completing this needs a built-in correction
+        # document, or a rule for deriving the correction from the `Refund` row.
+        # `overdue` is an ISSUED document whose VAT is owed; omitting it made a period's
+        # VAT fall to zero the moment an invoice aged past its due date, and reappear if it
+        # was later paid. `refunded` is NOT here - see the note above.
+        status__in=["issued", "overdue", "paid", "partially_refunded"],
+        # Ordinary invoices only. Excluding the refunded original ALREADY restates the
+        # period, so summing its credit note's negative tax on top corrects the same refund
+        # twice - and only on the provider path, since that is the only one that mints a
+        # credit note. Excluding both keeps the pair netting to zero and makes the two
+        # issuers answer identically. It is the same tradeoff as the note above: restated
+        # rather than corrected, until there is a correction document on both paths.
+        document_kind=DOCUMENT_KIND_INVOICE,
     )
 
     total_vat = invoices.aggregate(total_vat=Sum("tax_cents"))["total_vat"] or Decimal("0")
     total_net = invoices.aggregate(total_net=Sum("subtotal_cents"))["total_net"] or Decimal("0")
 
+    # Per currency for the same reason the revenue screen is: these aggregate `tax_cents` and
+    # `subtotal_cents` with no conversion, so one combined trio cannot be labelled.
+    vat_summary_by_currency = [
+        {
+            "currency": row["currency__code"],
+            "net": row["net"] or 0,
+            "vat": row["vat"] or 0,
+            "gross": (row["net"] or 0) + (row["vat"] or 0),
+        }
+        for row in invoices.values("currency__code")
+        .annotate(net=Sum("subtotal_cents"), vat=Sum("tax_cents"))
+        .order_by("currency__code")
+    ]
+
     context = {
         "invoices": invoices,
+        "vat_summary_by_currency": vat_summary_by_currency,
         "total_vat": total_vat,
         "total_net": total_net,
+        # Supplied rather than derived in the template. The summary cards used to read
+        # `total_sales` and `net_sales`, which this view never set, so two of the three showed
+        # `0,00 RON` for as long as the screen existed - and a template expression would put the
+        # same arithmetic back out of reach of any test that checks the number.
+        "total_gross": total_net + total_vat,
         "start_date": start_date,
         "end_date": end_date,
     }
@@ -2425,6 +2577,88 @@ def operator_controls(request: HttpRequest) -> HttpResponse:
             "invoice_sequences": invoice_sequences,
             "current_sequence": invoice_sequences.filter(scope="default").first(),
         },
+    )
+
+
+@billing_configuration_required
+@require_http_methods(["GET"])
+def provider_reconciliation_queue(request: HttpRequest) -> HttpResponse:
+    """Provider issuances no automated path will move again.
+
+    Two kinds, deliberately listed apart because they need different decisions. An
+    `outcome_unknown` attempt MAY have created a fiscal document that PRAHO cannot look
+    up - the provider offers no search by our reference - so a human must identify it.
+    An exhausted row is a document the provider REFUSED until its retry budget ran out;
+    nothing was created, and what it needs is the underlying problem fixed.
+
+    Exhausted rows are derived from their persisted fields rather than given a state of
+    their own: the cap that stops them retrying is the same cap that excludes them from
+    the sweep, so no further `_claim` may ever happen for one and there is no later
+    moment at which to label it.
+
+    That derivation reads `pending` as well as `failed`. It read `failed` alone while that
+    was the only state a capped row could be in - `_finalize` spends the budget and always
+    leaves a terminal state behind. Migration 0057 backfills budgets spent before the column
+    existed, and `attempts` cannot say which state the spending ended in, so a capped
+    `pending` row is now reachable. Listing it is the point of deriving this set rather than
+    storing it.
+    """
+    from .issuers.models import MAX_SUBMISSIONS, IssuanceState, ProviderIssuance  # noqa: PLC0415  # ADR-0007
+
+    rows = ProviderIssuance.objects.select_related("invoice", "invoice__customer", "invoice__currency")
+    unresolved = rows.filter(state=IssuanceState.OUTCOME_UNKNOWN.value).order_by("created_at")
+    exhausted = rows.filter(
+        state__in=(IssuanceState.PENDING.value, IssuanceState.FAILED.value),
+        invoice__number__isnull=True,
+        submissions__gte=MAX_SUBMISSIONS,
+    ).order_by("created_at")
+    return render(
+        request,
+        "billing/provider_reconciliation_queue.html",
+        {"issuances": unresolved, "exhausted": exhausted, "max_submissions": MAX_SUBMISSIONS},
+    )
+
+
+@billing_configuration_required
+@require_http_methods(["GET", "POST"])
+def provider_reconciliation_adopt(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
+    """Adopt the provider document an operator identified by hand."""
+    from apps.common.request_ip import get_safe_client_ip  # noqa: PLC0415
+
+    from .forms import ProviderReconciliationForm  # noqa: PLC0415
+    from .issuers.models import IssuanceState, ProviderIssuance  # noqa: PLC0415  # ADR-0007
+    from .operator_controls import BillingControlActor, adopt_provider_document  # noqa: PLC0415
+
+    issuance = get_object_or_404(ProviderIssuance.objects.select_related("invoice", "invoice__customer"), pk=pk)
+    if issuance.state != IssuanceState.OUTCOME_UNKNOWN.value:
+        messages.error(request, _("That issuance is no longer awaiting reconciliation."))
+        return redirect("billing:provider_reconciliation_queue")
+
+    form = ProviderReconciliationForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        try:
+            legal_number = adopt_provider_document(
+                issuance_id=issuance.pk,
+                series=form.cleaned_data["series"],
+                number=form.cleaned_data["number"],
+                actor=BillingControlActor(
+                    user=cast(User, request.user),
+                    reason=form.cleaned_data["reason"],
+                    ip_address=get_safe_client_ip(request),
+                ),
+            )
+        except ValidationError as error:
+            _add_validation_errors(form, error)
+        else:
+            messages.success(
+                request,
+                _("Adopted provider document %(number)s.") % {"number": legal_number},
+            )
+            return redirect("billing:provider_reconciliation_queue")
+    return render(
+        request,
+        "billing/provider_reconciliation_form.html",
+        {"form": form, "issuance": issuance},
     )
 
 

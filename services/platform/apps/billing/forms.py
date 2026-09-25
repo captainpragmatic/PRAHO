@@ -17,6 +17,18 @@ _INPUT_CLASS = (
 )
 _CHECKBOX_CLASS = "h-4 w-4 rounded border-slate-600 bg-slate-900 text-blue-600 focus:ring-blue-500"
 
+# The charset `d390.py` uses for text PRAHO accepts from outside and then emits into an ANAF
+# filing, anchored at both ends because `RegexField` searches rather than fullmatches. It is
+# deliberately NOT `InvoiceSeriesForm.prefix`'s `[A-Z0-9-]`: that guards a string PRAHO
+# GENERATES, while a provider's series and number are strings PRAHO ACCEPTS and must reproduce
+# exactly. Nothing in this repo evidences SmartBill's own charset - the setting carries no
+# validator and the client performs no check - so this is not narrowed past the one precedent
+# that exists for externally supplied fiscal text.
+_PROVIDER_DOCUMENT_CHARSET = r"\A[A-Za-z0-9 +.@-]+\Z"
+_PROVIDER_DOCUMENT_CHARSET_ERROR = _(
+    "Use letters, digits, spaces and + - . @ only, exactly as the provider shows them."
+)
+
 
 class D390PeriodForm(forms.Form):
     month = forms.DateField(
@@ -174,3 +186,84 @@ def _style_form_fields(form: forms.Form) -> None:
             continue
         css_class = _CHECKBOX_CLASS if isinstance(field.widget, forms.CheckboxInput) else _INPUT_CLASS
         field.widget.attrs["class"] = css_class
+
+
+class ProviderReconciliationForm(forms.Form):
+    """Adopt a provider document an operator found by hand.
+
+    Deliberately asks for the number twice. The provider exposes no lookup by our
+    reference, so this number is a human's reading of a screen, and it is about to
+    become a legal fiscal number that cannot be changed afterwards. The confirmation
+    field is the same guard `InvoiceSeriesForm` puts on a series rotation, for the
+    same reason.
+    """
+
+    # No `.upper()` anywhere near these, unlike `InvoiceSeriesForm.clean_prefix`. SmartBill is
+    # case-significant on account-coupled names, which preflight enforces with an exact
+    # membership test, so upper-casing a lowercase series would write a WRONG legal number into
+    # a column that cannot be corrected afterwards.
+    #
+    # The charset is narrow enough to stop what actually arrives by accident - a newline carried
+    # in by a paste, a stray control character, a non-ASCII homoglyph that survives `.strip()` -
+    # and no narrower. This screen is the only exit from `outcome_unknown`, so over-rejecting
+    # strands the invoice permanently, and no regex can catch a mistyped digit in any case. The
+    # double-entry `confirmation` field and the composed-length check below are the real guards.
+    series = forms.RegexField(
+        regex=_PROVIDER_DOCUMENT_CHARSET,
+        max_length=50,
+        required=False,
+        help_text=_("Series exactly as the provider shows it, or blank if it has none."),
+        error_messages={"invalid": _PROVIDER_DOCUMENT_CHARSET_ERROR},
+    )
+    number = forms.RegexField(
+        regex=_PROVIDER_DOCUMENT_CHARSET,
+        max_length=50,
+        help_text=_("Document number exactly as the provider shows it."),
+        error_messages={"invalid": _PROVIDER_DOCUMENT_CHARSET_ERROR},
+    )
+    confirmation = forms.CharField(
+        max_length=50,
+        help_text=_("Type the document number again to confirm."),
+    )
+    reason = forms.CharField(
+        max_length=500,
+        widget=forms.Textarea(attrs={"rows": 3}),
+        help_text=_("What you checked at the provider, and how you identified this document."),
+    )
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        _style_form_fields(self)
+
+    def clean_series(self) -> str:
+        return str(self.cleaned_data.get("series") or "").strip()
+
+    def clean_number(self) -> str:
+        return str(self.cleaned_data["number"]).strip()
+
+    def clean(self) -> dict[str, Any]:
+        from .invoice_models import Invoice  # noqa: PLC0415  # deferred: forms is imported early
+
+        cleaned = super().clean() or {}
+        number = cleaned.get("number")
+        confirmation = (cleaned.get("confirmation") or "").strip()
+        if number and confirmation != number:
+            self.add_error("confirmation", _("The confirmation must exactly match the document number."))
+
+        # Composed exactly as `reconcile_confirmed_issued` composes it, and measured
+        # against the column rather than a literal, so the two cannot drift apart. The
+        # field limits are checked separately and never see the join: a 30-character
+        # series with a 50-character number is valid twice over and 81 characters once,
+        # which PostgreSQL answers with a DataError - a 500 instead of a field error, on
+        # the one screen whose output cannot be changed afterwards.
+        series = (cleaned.get("series") or "").strip()
+        if number:
+            legal_number = f"{series}-{number}" if series else number
+            limit = Invoice._meta.get_field("number").max_length
+            if limit is not None and len(legal_number) > limit:
+                self.add_error(
+                    "number",
+                    _("Series and number together make %(length)d characters; the legal number allows %(limit)d.")
+                    % {"length": len(legal_number), "limit": limit},
+                )
+        return cleaned

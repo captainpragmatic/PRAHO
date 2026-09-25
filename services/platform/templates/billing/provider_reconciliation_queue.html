@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans "Provider reconciliation" %} - PRAHO Platform{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 space-y-6">
+  {% trans "Provider reconciliation" as page_title %}
+  {% page_header title=page_title subtitle=_("Issuance attempts whose outcome is unknown") icon="warning" %}
+    {% url "billing:operator_controls" as controls_url %}
+    {% trans "Back to billing controls" as back_label %}
+    {% button back_label href=controls_url variant="secondary" %}
+  {% end_page_header %}
+
+  {% trans "Awaiting reconciliation" as queue_title %}
+  {% section_card title=queue_title %}
+    <p class="mb-4 text-sm text-slate-400">
+      {% blocktrans trimmed %}
+        Each attempt below may or may not have created a document at the provider. The
+        provider offers no lookup by our reference, so nothing automated can resolve
+        one. Check the provider's own interface, then record what you found.
+      {% endblocktrans %}
+    </p>
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-slate-700 text-sm">
+        <thead>
+          <tr class="text-left text-slate-400">
+            <th class="py-2 pr-4">{% trans "Customer" %}</th>
+            <th class="py-2 pr-4">{% trans "Document" %}</th>
+            <th class="py-2 pr-4">{% trans "Total" %}</th>
+            <th class="py-2 pr-4">{% trans "Attempted" %}</th>
+            <th class="py-2 pr-4">{% trans "Reason" %}</th>
+            <th class="py-2 text-right">{% trans "Action" %}</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-700/60">
+          {% for issuance in issuances %}
+          <tr>
+            <td class="py-3 pr-4 text-white">{{ issuance.invoice.customer }}</td>
+            <td class="py-3 pr-4 text-slate-300">
+              {{ issuance.invoice.display_number }}
+              <span class="block text-xs text-slate-500">{{ issuance.provider }}</span>
+            </td>
+            <td class="py-3 pr-4 text-slate-300">
+              {{ issuance.invoice.total }} {{ issuance.invoice.currency.code }}
+            </td>
+            <td class="py-3 pr-4 text-slate-400">{{ issuance.created_at|date:"d.m.Y H:i" }}</td>
+            <td class="py-3 pr-4 text-slate-400">{{ issuance.last_error|truncatechars:80 }}</td>
+            <td class="py-3 text-right">
+              {% url "billing:provider_reconciliation_adopt" issuance.pk as adopt_url %}
+              {% trans "Record what you found" as adopt_label %}
+              {% button adopt_label href=adopt_url variant="primary" %}
+            </td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="6" class="py-6 text-center text-slate-400">
+              {% trans "Nothing is awaiting reconciliation." %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% end_section_card %}
+
+  {% if exhausted %}
+  {% trans "Out of submission budget" as exhausted_title %}
+  {% section_card title=exhausted_title %}
+    <p class="mb-4 text-sm text-slate-400">
+      {% blocktrans trimmed with attempts=max_submissions %}
+        The provider refused each of these {{ attempts }} times and nothing was created,
+        so they are not retried and no sweep will pick them up again. Fix what the
+        provider objected to; renewing the budget is a separate, recorded decision.
+      {% endblocktrans %}
+    </p>
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-slate-700 text-sm">
+        <thead>
+          <tr class="text-left text-slate-400">
+            <th class="py-2 pr-4">{% trans "Customer" %}</th>
+            <th class="py-2 pr-4">{% trans "Document" %}</th>
+            <th class="py-2 pr-4">{% trans "Total" %}</th>
+            <th class="py-2 pr-4">{% trans "Attempts" %}</th>
+            <th class="py-2">{% trans "What the provider said" %}</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-700/60">
+          {% for issuance in exhausted %}
+          <tr>
+            <td class="py-3 pr-4 text-white">{{ issuance.invoice.customer }}</td>
+            <td class="py-3 pr-4 text-slate-300">
+              {{ issuance.invoice.display_number }}
+              <span class="block text-xs text-slate-500">{{ issuance.provider }}</span>
+            </td>
+            <td class="py-3 pr-4 text-slate-300">
+              {{ issuance.invoice.total }} {{ issuance.invoice.currency.code }}
+            </td>
+            <td class="py-3 pr-4 text-slate-400">{{ issuance.submissions }}</td>
+            <td class="py-3 text-slate-400">{{ issuance.last_error }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% end_section_card %}
+  {% endif %}
+</div>
+{% endblock %}

@@ -140,6 +140,13 @@ class IssuanceState(StrEnum):
     """A document MAY exist at the provider. Never retried automatically."""
 
 
+# Three real submissions, then a human. A refusal is REJECTED only from a recognised
+# refusal envelope, so retrying one is safe - but safe is not the same as likely to
+# succeed, and a permanent validation error would otherwise be resubmitted forever
+# against a rate-limited third party.
+MAX_SUBMISSIONS = 3
+
+
 class ProviderIssuance(models.Model):
     """The durable record of issuing one invoice through an external provider.
 
@@ -194,6 +201,10 @@ class ProviderIssuance(models.Model):
     observed_next_number_after = models.CharField(max_length=50, blank=True)
 
     attempts = models.PositiveIntegerField(default=0)
+    # Counted separately from `attempts`, which increments on claim - before pacing -
+    # so a deferral that sent nothing would consume a retry budget. This one advances
+    # only where a reply came back, which is the only place we know a request left.
+    submissions = models.PositiveIntegerField(default=0)
     last_error = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

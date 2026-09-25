@@ -354,7 +354,18 @@ class BaseUBLBuilder:
         stored record.
         """
         subtotal = Decimal(int(getattr(self.invoice, "subtotal_cents", 0) or 0)) / 100
-        return max(Decimal(0), self._get_line_gross() - subtotal)
+        from apps.billing.invoice_models import (  # noqa: PLC0415  # ADR-0007
+            DOCUMENT_KIND_CREDIT_NOTE,
+            DOCUMENT_KIND_INVOICE,
+        )
+
+        derived = self._get_line_gross() - subtotal
+        # Clamped towards zero in the document's OWN direction. A flat `max(0, ...)`
+        # reads a credit note's genuine -10.00 allowance as no allowance at all, which
+        # drops the discount from the document silently.
+        if getattr(self.invoice, "document_kind", DOCUMENT_KIND_INVOICE) == DOCUMENT_KIND_CREDIT_NOTE:
+            return min(Decimal(0), derived)
+        return max(Decimal(0), derived)
 
     def _validate_supported_adjustments(self, errors: list[str]) -> None:
         """Collect unsupported adjustment errors before any XML is emitted."""
@@ -371,7 +382,10 @@ class BaseUBLBuilder:
         document tax category (reason code 95 = Discount). No-op when discount is zero.
         """
         discount = self._get_document_discount()
-        if discount <= 0:
+        # Signed. A credit note's allowance points the way its lines do, so only a ZERO
+        # discount means there is nothing to emit. On an invoice the derivation is clamped
+        # at zero, which makes `== 0` and `<= 0` the same test there.
+        if discount == 0:
             return
         currency = self.invoice.currency.code
         ac = self._add_cac(self.root, "AllowanceCharge")
@@ -542,7 +556,16 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
 
     def _validate_invoice(self) -> None:
         """Validate invoice has required data for e-Factura."""
+        from apps.billing.invoice_models import DOCUMENT_KIND_CREDIT_NOTE  # noqa: PLC0415  # ADR-0007
+
         errors = []
+
+        if self.invoice.document_kind == DOCUMENT_KIND_CREDIT_NOTE:
+            # Fail closed rather than emit a 380 carrying negative amounts with no
+            # reference to the document it reverses. `builder_for` routes correctly, but
+            # nothing else stopped a caller naming this builder directly - which is how
+            # the staff download came to restate reversals as invoices.
+            errors.append("A credit note must be built by UBLCreditNoteBuilder, not as an invoice")
 
         if not self.invoice.number:
             errors.append("Invoice number is required")
@@ -1006,6 +1029,38 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
         super().__init__(invoice)
         self.original_invoice = original_invoice
 
+    def _format_amount(self, amount: Decimal | float | int) -> str:
+        """Emit UBL magnitudes, while the ledger stays signed.
+
+        EN16931 states a credit note's direction once, in `CreditNoteTypeCode` 381; the
+        amounts are magnitudes, and BR-27 forbids a negative item net price outright.
+        PRAHO's ledger negates every amount on a reversal, so the two conventions are
+        reconciled here - the single boundary all eleven monetary emissions on this path
+        cross, including the allowance inherited from `BaseUBLBuilder`, which a reader of
+        this class's own body would never see.
+
+        Converted here rather than in `_get_line_gross` / `_get_document_discount` /
+        `_get_tax_amount` because those feed a chain - tax-exclusive, then tax-inclusive,
+        then payable, plus a taxable amount recomputed independently and required to stay
+        numerically identical - and flipping sources is where a partial application
+        silently breaks BR-CO-13.
+
+        Negated rather than `abs()`-ed: negation is linear, so every reconciliation that
+        held over the signed values holds exactly over these. `abs()` would not survive a
+        mixed-sign line, because the absolute value of a sum is not the sum of absolutes.
+
+        Gated on the document's KIND, not on this class: the credit-note builder is also
+        handed ordinary invoice rows by tests that exercise its structure, and those carry
+        positive amounts already.
+        """
+        from apps.billing.invoice_models import DOCUMENT_KIND_CREDIT_NOTE  # noqa: PLC0415  # ADR-0007
+
+        if getattr(self.invoice, "document_kind", None) != DOCUMENT_KIND_CREDIT_NOTE:
+            return super()._format_amount(amount)
+        negated = -Decimal(str(amount))
+        # `-Decimal("0")` renders as "-0.00", which is not a magnitude.
+        return super()._format_amount(negated or Decimal(0))
+
     def build(self) -> str:
         """Generate complete UBL 2.1 Credit Note XML."""
         self._validate_invoice()
@@ -1181,7 +1236,9 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
         tax_excl.set("currencyID", currency)
         tax_incl = self._add_cbc(monetary_total, "TaxInclusiveAmount", self._format_amount(tax_inclusive))
         tax_incl.set("currencyID", currency)
-        if discount > 0:
+        # BT-107 must be present whenever `tax_exclusive` above consumed a discount,
+        # or BR-CO-13 has an unexplained gap between the lines and the tax-exclusive total.
+        if discount != 0:
             allow_elem = self._add_cbc(monetary_total, "AllowanceTotalAmount", self._format_amount(discount))
             allow_elem.set("currencyID", currency)
         payable = self._add_cbc(monetary_total, "PayableAmount", self._format_amount(tax_inclusive))
@@ -1228,3 +1285,21 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
         price = self._add_cac(cn_line, "Price")
         price_amount = self._add_cbc(price, "PriceAmount", self._format_amount(unit_price))
         price_amount.set("currencyID", self.invoice.currency.code)
+
+
+def builder_for(invoice: Invoice) -> UBLInvoiceBuilder | UBLCreditNoteBuilder:
+    """Pick the builder the document's kind requires.
+
+    Two call sites selected a builder independently - the ANAF submission path and the
+    staff XML download - and only one of them learned about credit notes, so the same
+    reversal was filed as a `<CreditNote>` and downloaded from our own UI as an
+    `<Invoice>`: type code 380, no reference to the document it reverses, and its
+    allowance dropped by a guard that only holds for invoices. They share this now,
+    because a pair of copies is how the first one came to be wrong unnoticed.
+    """
+    from apps.billing.invoice_models import DOCUMENT_KIND_CREDIT_NOTE  # noqa: PLC0415  # ADR-0007
+
+    if invoice.document_kind == DOCUMENT_KIND_CREDIT_NOTE:
+        # `reverses_invoice` is the link; `original_invoice` was never a field.
+        return UBLCreditNoteBuilder(invoice, invoice.reverses_invoice)
+    return UBLInvoiceBuilder(invoice)

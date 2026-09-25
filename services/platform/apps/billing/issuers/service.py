@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 import uuid
 from copy import deepcopy
-from typing import TYPE_CHECKING, assert_never
+from typing import TYPE_CHECKING, Any, assert_never
 
 from django.db import connection, transaction
 
@@ -34,7 +34,7 @@ from apps.billing.invoice_models import (
 from apps.common.types import Err, Ok, Result
 
 from .base import Ambiguous, Issued, PreparedDocument, Rejected
-from .models import IssuanceState, ProviderIssuance
+from .models import MAX_SUBMISSIONS, IssuanceState, ProviderIssuance
 from .policy import resolve_issuer
 from .smartbill.client import RateGateWait
 
@@ -150,6 +150,18 @@ def _claim(
             )
             return Err("A previous attempt was abandoned mid-flight; reconcile it manually")
 
+        # The budget is only real where ownership is taken. It lived in the sweep's WHERE
+        # clause alone, so two sweeps running before a worker drained the queue enqueued
+        # the same row twice and each task claimed independently - a live probe reached
+        # five submissions against a cap of three. Checked AFTER the branches above so a
+        # row that may hold a document at the provider is still routed to a human, and
+        # before the claim so the counters and the provider's own words survive intact.
+        if issuance.submissions >= MAX_SUBMISSIONS:
+            return Err(
+                f"This document has spent its {MAX_SUBMISSIONS} submission attempts; "
+                f"an operator must decide what happens next."
+            )
+
         issuance.claim(token=attempt_id, payload=prepared.payload, payload_hash=prepared.digest)
         issuance.save()
         return Ok(issuance.pk)
@@ -199,6 +211,11 @@ def _finalize(
                 f"(state={issuance.state}). Outcome recorded as evidence only."
             )
             return Err("Lost ownership of this issuance attempt; outcome not applied")
+
+        # Reaching `_finalize` at all means `submit` returned rather than raising
+        # `RateGateWait`, so a request did leave the machine. This is the honest place
+        # to spend the retry budget.
+        issuance.submissions += 1
 
         if isinstance(outcome, Issued):
             issuance.mark_issued(
@@ -261,9 +278,13 @@ def reconcile_confirmed_issued(
     working the same queue would otherwise both pass a state check on their own
     stale copies, and the later save would silently overwrite the first adopted
     number with a different one.
-    """
-    _refuse_if_inside_transaction()
 
+    No `_refuse_if_inside_transaction` here, unlike its neighbours: that guard exists so
+    a claim COMMITS before a provider call, and this command makes no call - an operator
+    already checked by hand. Refusing an enclosing transaction only forced the caller to
+    write the attribution for this act in a SEPARATE one, which is how a legal fiscal
+    number could be assigned with no record of who decided it.
+    """
     if not (number or "").strip():
         return Err("A provider document number is required to adopt a document")
     if not (operator_note or "").strip():
@@ -288,6 +309,14 @@ def reconcile_confirmed_issued(
         invoice.number = legal_number
         invoice.issue()
         invoice.save()
+        # The same convergence `_finalize` performs the moment a document legally exists,
+        # and for the same reason: money may already be recorded against what was an
+        # unnumbered draft. Without it an invoice already covered by payment or customer
+        # credit stays `issued` at a zero balance, so `paid_at` is never set, payment
+        # history and pending-service activation never run, and the issue signal can
+        # schedule reminders for a customer who owes nothing. It is a no-op for a credit
+        # note, which `update_status_from_payments` refuses to collect.
+        invoice.update_status_from_payments()
     logger.info(f"✅ [Issuance] Invoice {invoice.pk} reconciled to {legal_number} by operator")
     return Ok(legal_number)
 
@@ -392,6 +421,13 @@ def _open_storno_attempt(
             # evidence an operator has to reconcile against.
             return Err(claim_result.error)
 
+        # Only now. Holding the claim proves this reversal was `pending` or `failed` -
+        # not claimed, issued, or outcome_unknown - so it cannot be a document the provider
+        # may already hold. It also puts the write after the ProviderIssuance lock, which
+        # is the order `_finalize` and `adopt_provider_document` use; repairing before the
+        # claim took Invoice -> ProviderIssuance and could deadlock against them.
+        _repair_unissued_reversal(original, credit_note)
+
         return Ok((credit_note.pk, claim_result.unwrap()))
 
 
@@ -402,7 +438,12 @@ def _ineligible_by_provenance(original: Invoice) -> str | None:
         # attempt to be told so is worse than knowing.
         return "A credit note cannot itself be reversed"
     if original.issuer_provider == ISSUER_BUILTIN:
-        return "Built-in invoices are corrected through the e-Factura credit-note path"
+        # NOT "corrected through the e-Factura credit-note path" - that path does not
+        # exist. `_get_or_create_credit_note` below is the only thing in the codebase that
+        # mints a credit note, and this guard is what keeps built-in invoices away from it.
+        # A built-in refund today produces no correcting document at all; the refusal is
+        # accurate about the provider, and must not imply a correction happens elsewhere.
+        return "Built-in invoices are not reversed at a provider; no provider document exists to correct"
     return None
 
 
@@ -461,6 +502,62 @@ def _split_correction_refusal(original: Invoice) -> str | None:
     return None
 
 
+# Copied from the original at creation, and the two that a row created by an older
+# implementation can be missing. `subtotal/tax/total_cents` and the `bill_to_*` set have
+# been written on the create path since the first version, so they cannot be stale.
+_REVERSAL_FIELDS_TO_REPAIR = (
+    "exchange_to_ron",
+    "exchange_rate_as_of",
+    "exchange_rate_source",
+    "exchange_rate_source_reference",
+)
+
+
+def _repair_unissued_reversal(original: Invoice, credit_note: Invoice) -> None:
+    """Restore what an earlier attempt never wrote, while it is still repairable.
+
+    A reversal left pending by an interrupted or rate-gated attempt predates the fields
+    added since. `_freeze_fx` consumes a snapshot only when it finds all four fields, so
+    a note missing them resolves TODAY's rate at issuance and books the correction against
+    a different rate from the document it reverses - the residue the copy exists to
+    prevent. The same row can carry `discount_cents=0` against negated GROSS lines, which
+    makes the header contradict its own lines for every reader that recovers the discount
+    as the difference.
+
+    Only while unnumbered. A numbered credit note is a legal document: whatever it says is
+    what was filed, so repairing it would rewrite history rather than finish an attempt.
+
+    Written through the queryset so the protected `status` FSMField is never re-entered.
+    """
+    if credit_note.number:
+        return
+
+    repairs: dict[str, Any] = {}
+    if credit_note.discount_cents != -original.discount_cents:
+        repairs["discount_cents"] = -original.discount_cents
+    for field in _REVERSAL_FIELDS_TO_REPAIR:
+        expected = getattr(original, field)
+        if getattr(credit_note, field) != expected:
+            repairs[field] = expected
+    if not repairs:
+        return
+
+    # Compare-and-swap. The guard above read an unlocked copy, so between that read and
+    # this write another worker may have numbered and locked this document. Putting the
+    # state in the WHERE clause is what makes the check and the write one decision -
+    # PostgreSQL re-evaluates it after granting the row lock. `queryset.update()` bypasses
+    # `Invoice.save()`, so the locked-invoice guard would never have caught it.
+    applied = Invoice.objects.filter(pk=credit_note.pk, number__isnull=True, locked_at__isnull=True).update(**repairs)
+    if not applied:
+        logger.info(f"⏭️ [Issuance] Reversal {credit_note.pk} was issued concurrently; left as filed.")
+        return
+    # `.update()` fires no signals, so nothing else would record that a financial document
+    # was rewritten.
+    logger.info(f"✅ [Issuance] Repaired unissued reversal {credit_note.pk} from {original.pk}: {sorted(repairs)}")
+    for field, value in repairs.items():
+        setattr(credit_note, field, value)
+
+
 def _get_or_create_credit_note(original: Invoice) -> Invoice:
     """The reversal document for `original`, created once and reused thereafter.
 
@@ -478,6 +575,12 @@ def _get_or_create_credit_note(original: Invoice) -> Invoice:
         # exactly as it is, including one already issued.
         if not existing.lines.exists():
             _mirror_lines_negated(original, existing)
+        # The FX/discount repair deliberately does NOT happen here. This function runs
+        # before the reversal's own issuance state has been looked at, so a credit note in
+        # `outcome_unknown` - the state that exists precisely because the provider may hold
+        # a numbered document we never heard about - would be rewritten anyway, and the
+        # refusal that follows is deliberately not rolled back. It runs once a claim is
+        # held instead; see `_open_storno_attempt`.
         return existing
 
     credit_note = Invoice.objects.create(
@@ -491,6 +594,20 @@ def _get_or_create_credit_note(original: Invoice) -> Invoice:
         subtotal_cents=-original.subtotal_cents,
         tax_cents=-original.tax_cents,
         total_cents=-original.total_cents,
+        # Negated with the rest. Left at zero the header would contradict its own
+        # lines: they mirror the GROSS amounts while the subtotal is stored NET, so
+        # the discount is the difference and dropping it makes the document stop
+        # adding up for every reader that recovers it that way.
+        discount_cents=-original.discount_cents,
+        # The original's rate, not today's. A reversal restates the SAME taxable base,
+        # so re-resolving at the reversal date books a different RON amount from the
+        # document being reversed and leaves a residue that nets to nothing and shows
+        # up on no report. All four fields, because `_freeze_fx` consumes a snapshot
+        # only when it considers it complete.
+        exchange_to_ron=original.exchange_to_ron,
+        exchange_rate_as_of=original.exchange_rate_as_of,
+        exchange_rate_source=original.exchange_rate_source,
+        exchange_rate_source_reference=original.exchange_rate_source_reference,
         # The reversal inherits the original's fiscal identity: it is a correction
         # to that document, not a new commercial event.
         bill_to_name=original.bill_to_name,

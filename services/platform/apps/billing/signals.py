@@ -1259,15 +1259,31 @@ def _handle_invoice_refund_completion(invoice: Invoice) -> None:
 # ===============================================================================
 
 
+def _is_receivable(invoice: Invoice) -> bool:
+    """Whether this document asks the customer for money.
+
+    A credit note is an issued document with a negative total, so it satisfies every
+    "an invoice was created" and "an invoice was issued" check. Unguarded, the customer
+    receives the seeded receivable copy - a new-invoice announcement carrying a payment
+    due date - for a document that owes money TO them, and then a second one when it is
+    numbered. Only the customer-facing half is suppressed: billing statistics, e-Factura
+    and the compliance audit trail must still see the correction.
+    """
+    from .invoice_models import DOCUMENT_KIND_INVOICE  # ADR-0007: cross-module import at call time
+
+    return invoice.document_kind == DOCUMENT_KIND_INVOICE
+
+
 def _handle_new_invoice_creation(invoice: Invoice) -> None:
     """Handle new invoice creation tasks"""
     try:
-        # Send invoice notification to customer
-        _send_invoice_created_email(invoice)
+        if _is_receivable(invoice):
+            # Send invoice notification to customer
+            _send_invoice_created_email(invoice)
 
-        # Schedule payment reminders if not paid immediately
-        if invoice.status == "issued":
-            _schedule_payment_reminders(invoice)
+            # Schedule payment reminders if not paid immediately
+            if invoice.status == "issued":
+                _schedule_payment_reminders(invoice)
 
         # Update customer billing statistics
         _update_customer_billing_stats(invoice.customer)
@@ -1352,8 +1368,9 @@ def _handle_payment_status_change(payment: Payment, old_status: str, new_status:
 def _handle_invoice_issued(invoice: Invoice) -> None:
     """Handle invoice being issued"""
     try:
-        _send_invoice_issued_email(invoice)
-        _schedule_payment_reminders(invoice)
+        if _is_receivable(invoice):
+            _send_invoice_issued_email(invoice)
+            _schedule_payment_reminders(invoice)
 
         if _requires_efactura_submission(invoice):
             _trigger_efactura_submission(invoice)
@@ -1378,6 +1395,10 @@ def _handle_invoice_issued(invoice: Invoice) -> None:
 def _handle_invoice_paid(invoice: Invoice) -> None:
     """Handle invoice being paid"""
     try:
+        if not _is_receivable(invoice):
+            # Defence behind the transition guard, and it covers more than the receipt:
+            # this handler also credits payment history and activates pending services.
+            return
         if not invoice.paid_at:
             Invoice.objects.filter(pk=invoice.pk).update(paid_at=timezone.now())
 
@@ -1394,6 +1415,13 @@ def _handle_invoice_paid(invoice: Invoice) -> None:
 
 def _handle_invoice_overdue(invoice: Invoice) -> None:
     """Handle invoice becoming overdue"""
+    # Its three siblings - created, issued and paid - all check this; only overdue did
+    # not. A credit note has a negative total and nothing to collect, so reaching here
+    # would email the customer about an overdue document, blacken their payment history
+    # and schedule a service suspension over money they are owed.
+    if not _is_receivable(invoice):
+        return
+
     try:
         _send_invoice_overdue_email(invoice)
         _trigger_dunning_process(invoice)
@@ -1980,23 +2008,16 @@ def _handle_efactura_refund_reporting(invoice: Invoice) -> None:
 
                 efactura_doc = getattr(invoice, "efactura_document", None)
                 if efactura_doc and efactura_doc.status == EFacturaStatus.ACCEPTED.value:
-                    # Generate credit note XML via UBLCreditNoteBuilder
-                    try:
-                        from apps.billing.efactura.xml_builder import UBLCreditNoteBuilder
-
-                        builder = UBLCreditNoteBuilder(invoice, original_invoice=invoice)
-                        credit_note_xml = builder.build()
-
-                        # Store as EFacturaDocument for later submission
-                        EFacturaDocument.objects.create(
-                            invoice=invoice,
-                            document_type="credit_note",
-                            xml_content=credit_note_xml,
-                            status=EFacturaStatus.DRAFT.value,
-                        )
-                        logger.info(f"✅ [e-Factura] Credit note generated for refunded invoice {invoice.number}")
-                    except Exception as cn_err:
-                        logger.error(f"🔥 [e-Factura] Failed to generate credit note for {invoice.number}: {cn_err}")
+                    # A credit note is NOT generated here, and never was. This block used
+                    # to try, and could not succeed on any execution: it passed the
+                    # refunded original as its own `original_invoice`, and then wrote an
+                    # `EFacturaDocument` for an invoice whose own branch condition proves
+                    # it already has one - a OneToOneField, so an IntegrityError that the
+                    # surrounding `except` logged and swallowed every single time.
+                    #
+                    # The reversal is a real document with its own row, created by
+                    # `issue_storno_for_invoice` and typed by `_document_type_for`. All
+                    # that belongs here is the record that one is owed.
 
                     # Log compliance event
                     compliance_request = ComplianceEventRequest(
@@ -2290,7 +2311,9 @@ def _issuance_event_type(state: str) -> str:
 def _queue_provider_storno(invoice: Invoice) -> None:
     """A provider-issued invoice is corrected by a document, not by a status change.
 
-    Locally issued invoices already produce an e-Factura credit note on refund. Their
+    Built-in invoices produce no correcting document at all - this comment used to claim
+    they "already produce an e-Factura credit note on refund", and they never have. Their
+    refund is a status change and nothing more. Their
     provider-issued counterparts need the equivalent at the provider, or the customer
     holds a full invoice with nothing reversing it and the accountant's books show
     revenue that was returned.

@@ -108,6 +108,19 @@ class CIUSROValidator:
         "urn:cen.eu:en16931:2017#compliant#urn:efactura.mfinante.ro:CIUS-RO:1.0.1"
     )
 
+    # Every element that carries money, named once. Both the currency check and the
+    # credit-note magnitude check ask a question about "an amount", and a second copy of
+    # this list is how the two would come to disagree about what one is.
+    MONETARY_ELEMENT_XPATH: ClassVar[str] = (
+        ".//cbc:Amount | .//cbc:BaseAmount | .//cbc:PriceAmount | "
+        ".//cac:TaxTotal[cac:TaxSubtotal]/cbc:TaxAmount | "
+        ".//cac:TaxSubtotal/cbc:TaxAmount | .//cbc:TaxableAmount | "
+        ".//cbc:LineExtensionAmount | .//cbc:TaxExclusiveAmount | "
+        ".//cbc:TaxInclusiveAmount | .//cbc:AllowanceTotalAmount | "
+        ".//cbc:ChargeTotalAmount | .//cbc:PrepaidAmount | "
+        ".//cbc:PayableRoundingAmount | .//cbc:PayableAmount"
+    )
+
     # Romanian CUI validation pattern (8-10 digits)
     CUI_PATTERN: ClassVar[re.Pattern[str]] = re.compile(r"^(RO)?[0-9]{2,10}$")
 
@@ -529,16 +542,7 @@ class CIUSROValidator:
         document_currency: str,
         result: ValidationResult,
     ) -> None:
-        amount_xpath = (
-            ".//cbc:Amount | .//cbc:BaseAmount | .//cbc:PriceAmount | "
-            ".//cac:TaxTotal[cac:TaxSubtotal]/cbc:TaxAmount | "
-            ".//cac:TaxSubtotal/cbc:TaxAmount | .//cbc:TaxableAmount | "
-            ".//cbc:LineExtensionAmount | .//cbc:TaxExclusiveAmount | "
-            ".//cbc:TaxInclusiveAmount | .//cbc:AllowanceTotalAmount | "
-            ".//cbc:ChargeTotalAmount | .//cbc:PrepaidAmount | "
-            ".//cbc:PayableRoundingAmount | .//cbc:PayableAmount"
-        )
-        for amount in self._find_all(doc, amount_xpath):
+        for amount in self._find_all(doc, self.MONETARY_ELEMENT_XPATH):
             if amount.get("currencyID", "") != document_currency:
                 result.add_error(
                     "R051",
@@ -612,6 +616,22 @@ class CIUSROValidator:
             line_amount = self._get_text(line, ".//cbc:LineExtensionAmount")
             if not line_amount:
                 result.add_error("BR-25", "Line extension amount is mandatory", line_path)
+
+            # BR-27: BT-146 item net price shall not be negative. This is the whole of
+            # the sign checking here, deliberately. A broader "no negative amount on a
+            # credit note" rule lived here briefly and was wrong twice over: EN16931 allows
+            # a credit note to carry a negative LINE, and it allows a negative TOTAL, so
+            # the rule rejected valid documents - unconditionally, on the built-in
+            # e-Factura path too, since nothing gates this validator behind the provider
+            # setting. BR-27 alone catches the defect it was written for, because a
+            # whole-document sign flip emits a negative price as well. A credit note carries
+            # its direction in CreditNoteTypeCode 381, so negating the price states the
+            # reversal twice and breaks a rule EN16931 states outright - unlike the
+            # reconciliation rules, which are equalities that negation preserves and which
+            # therefore cannot see it at all.
+            price = self._decimal(line, ".//cac:Price/cbc:PriceAmount")
+            if price is not None and price < 0:
+                result.add_error("BR-27", f"Item net price {price} must not be negative", line_path)
 
             # BR-26: Item name
             item_name = self._get_text(line, ".//cac:Item/cbc:Name")
@@ -698,7 +718,12 @@ class CIUSROValidator:
         # BR-CO-16: PayableAmount == TaxInclusive - Prepaid, and Prepaid must not exceed TaxInclusive
         if tax_incl is not None and payable is not None and payable != tax_incl - prepaid:
             result.add_error("BR-CO-16", f"PayableAmount {payable} != TaxInclusive {tax_incl} - Prepaid {prepaid}")
-        if tax_incl is not None and prepaid > tax_incl:
+        # Compared as magnitudes. A local sanity rule, not an EN16931 one. Our own credit
+        # notes now carry positive magnitudes, so the `0 > -108.90` reading this was
+        # written for is no longer reachable from this generator - but the validator is
+        # handed XML it did not write, and a signed document must be answered about its
+        # prepayment rather than rejected wholesale for having one of zero.
+        if tax_incl is not None and abs(prepaid) > abs(tax_incl):
             result.add_error("BR-CO-16-PREPAID", f"PrepaidAmount {prepaid} exceeds TaxInclusiveAmount {tax_incl}")
 
         # The document-level TaxTotal must equal the sum of the per-category TaxSubtotal amounts —

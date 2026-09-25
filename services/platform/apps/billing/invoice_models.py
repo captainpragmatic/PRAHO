@@ -123,6 +123,16 @@ DOCUMENT_KIND_CHOICES: tuple[tuple[str, Any], ...] = (
 # ===============================================================================
 
 
+def _document_is_collectable(instance: models.Model) -> bool:
+    """Module-level so the transition condition is typed rather than an inline lambda.
+
+    django-fsm declares a condition as `Callable[[Model], bool]`, so the signature has
+    to be the framework's and the narrowing happens here - a lambda would simply lose
+    the type and mypy could not see the method it calls.
+    """
+    return cast("Invoice", instance)._is_collectable()
+
+
 class Invoice(models.Model):
     """
     Romanian compliant invoice model with address snapshots.
@@ -309,9 +319,16 @@ class Invoice(models.Model):
                 condition=models.Q(reverses_invoice__isnull=False),
                 name="invoice_one_reversal_per_original",
             ),
+            # A discount points the same way as the document it belongs to. The ledger
+            # invariant every reader relies on is `line gross - discount == subtotal`,
+            # and it only holds for a reversal if the discount is negated along with
+            # everything else. Orders and proformas keep their own non-negative rules.
             models.CheckConstraint(
-                condition=models.Q(discount_cents__gte=0),
-                name="invoice_discount_non_negative",
+                condition=(
+                    models.Q(document_kind=DOCUMENT_KIND_INVOICE, discount_cents__gte=0)
+                    | models.Q(document_kind=DOCUMENT_KIND_CREDIT_NOTE, discount_cents__lte=0)
+                ),
+                name="invoice_discount_matches_document_direction",
             ),
             models.CheckConstraint(
                 condition=models.Q(
@@ -624,7 +641,10 @@ class Invoice(models.Model):
         """Set — or CONSUME an already-frozen — RON FX snapshot for self.tax_point_date.
 
         RON documents carry no snapshot. For a foreign currency, if a COMPLETE snapshot is
-        already frozen (rate + as_of + source all present) it is consumed unchanged — this
+        already frozen (rate + as_of + source + source_reference all present) it is
+        consumed unchanged — all four, because `ExchangeRateService.resolve` refuses to
+        return a rate whose provenance reference is blank, so three-of-four is not
+        something it can produce and is therefore not evidence it vouched for. This
         is how ``issue()`` honours a rate frozen earlier at the reversible conversion moment,
         so a later ``FXRate`` row can never change an issued invoice's RON VAT. A partial
         legacy value (a bare ``exchange_to_ron`` from before migration 0039 added the
@@ -638,7 +658,12 @@ class Invoice(models.Model):
             self.exchange_rate_source = ""
             self.exchange_rate_source_reference = ""
             return
-        if self.exchange_to_ron is not None and self.exchange_rate_as_of is not None and self.exchange_rate_source:
+        if (
+            self.exchange_to_ron is not None
+            and self.exchange_rate_as_of is not None
+            and self.exchange_rate_source
+            and self.exchange_rate_source_reference
+        ):
             return  # a COMPLETE snapshot frozen at the reversible moment — consume, never re-resolve
         assert self.tax_point_date is not None  # callers (issue / freeze_fx_snapshot) set it first
         from apps.billing.exchange_rate_service import ExchangeRateError, ExchangeRateService  # noqa: PLC0415
@@ -677,7 +702,27 @@ class Invoice(models.Model):
             self.tax_point_date = timezone.localdate()
         self._freeze_fx()
 
-    @transition(field=status, source=["issued", "overdue"], target="paid")
+    def _is_collectable(self) -> bool:
+        """Whether this document can be paid at all.
+
+        A credit note's remaining amount clamps to zero because there is nothing to
+        collect, not because anyone settled it - so every "fully settled" check reads
+        true and it would walk into the paid lifecycle: a payment receipt, credited
+        payment history, activated services. `paid` carries collection semantics a
+        reversal does not have; its life ends at `issued`.
+
+        Expressed as a transition condition rather than a caller-side check because
+        four call sites can move an invoice to paid, and guarding callers leaves the
+        invariant breakable at the ones nobody remembered.
+        """
+        return self.document_kind == DOCUMENT_KIND_INVOICE
+
+    @transition(
+        field=status,
+        source=["issued", "overdue"],
+        target="paid",
+        conditions=[_document_is_collectable],
+    )
     def mark_as_paid(self) -> None:
         """Mark invoice as paid."""
         self.paid_at = timezone.now()
@@ -742,6 +787,11 @@ class Invoice(models.Model):
         """Update invoice status based on associated payments."""
         if self.status in ("paid", "void", "refunded"):
             return  # Terminal states — do not touch
+        if not self._is_collectable():
+            # Not a failure worth logging: a reversal was never going to be paid, and
+            # letting it reach the transition only produces a warning about a document
+            # behaving exactly as intended.
+            return
 
         remaining = self.amount_due
         if remaining <= 0:
@@ -857,12 +907,22 @@ class InvoiceLine(models.Model):
         ]
 
     def save(self, *args: Any, **kwargs: Any) -> None:
+        # Materialised once, and handed back, because this method inspects `update_fields` more
+        # than once and it may be any iterable. A generator was exhausted by the first look, so
+        # Django then received an empty field set - normally a silently dropped write, and under
+        # `python -O`, where its own assertion is stripped, a full update of amounts that nothing
+        # validated.
+        if kwargs.get("update_fields") is not None:
+            kwargs["update_fields"] = frozenset(kwargs["update_fields"])
         with transaction.atomic():
             parent_ids = {self.invoice_id}
-            original = type(self).objects.filter(pk=self.pk).first() if self.pk else None
+            # `is not None`, not truthiness: an explicit primary key of 0 is a saved row, and
+            # reading it as unsaved left both checks below with nothing to compare against and
+            # trusting the in-memory state - which is the one thing they must not do on an update.
+            original = type(self).objects.filter(pk=self.pk).first() if self.pk is not None else None
             if original:
                 parent_ids.add(original.invoice_id)
-            parents = Invoice.objects.select_for_update().filter(pk__in=parent_ids)
+            parents = list(Invoice.objects.select_for_update().filter(pk__in=parent_ids))
             if any(parent.locked_at for parent in parents):
                 mutable = {"service", "billing_cycle"}
                 changed = original is None or any(
@@ -872,11 +932,123 @@ class InvoiceLine(models.Model):
                 )
                 if changed:
                     raise ValidationError(_("Cannot modify lines on an issued invoice."))
-                # Linkage-only saves must not recalculate any frozen amounts.
+                # Linkage-only saves must not recalculate any frozen amounts - and must not be
+                # re-judged for direction either. This branch exists to let a frozen document's
+                # linkage be maintained, and a line already stored the wrong way round can no
+                # longer be corrected, so refusing here would only block the permitted save.
                 super().save(*args, **kwargs)
                 return
             self.calculate_totals()
+            # After `calculate_totals`, never before: `subtotal_cents` is a property and both
+            # `tax_cents` and `line_total_cents` are derived from it here, so an earlier check
+            # would judge whatever the previous save left behind.
+            update_fields = kwargs.get("update_fields")
+            self._refuse_a_line_pointing_against_its_document(
+                self._governing_parent(parents, original, update_fields), original, update_fields
+            )
             super().save(*args, **kwargs)
+
+    def _governing_parent(
+        self,
+        parents: list[Invoice],
+        original: InvoiceLine | None,
+        update_fields: Iterable[str] | None,
+    ) -> Invoice | None:
+        """The document this line will BELONG TO once the save returns.
+
+        Two things decide that, and getting either wrong reopens the bypass the direction check
+        exists to close. Both were found by review after a first attempt fixed only the narrow
+        case in front of it.
+
+        `update_fields` decides what is written, so it decides the parent too. A save that
+        reassigns `invoice` in memory while writing only the amounts leaves the persisted parent
+        untouched, so judging against the in-memory document approves amounts that then land
+        under a different one.
+
+        And the id must be normalised the way the database normalises it. `invoice_id` is
+        whatever the caller assigned, and Django resolves `1`, `"1"`, `"00001"` and `"+1"` to the
+        same row - so comparing the raw values, or even their text, misses spellings that store
+        perfectly well and leaves the check taking its "no such document" exit. Coercing through
+        the primary-key field closes the class instead of one member of it.
+
+        Two known limits, both left alone deliberately. This reads the default database rather
+        than the alias a `save(using=...)` will write to, so a deployment with more than one
+        business database could validate against one and persist to another; PRAHO has a single
+        business database and the portal has none, so there is nothing to thread the alias
+        through today. And `original` is read before the parent is locked, so under READ COMMITTED
+        a concurrent change to the parent between those two points is not seen. The window is
+        real but was never reproduced against PostgreSQL, and `select_for_update` is a no-op on
+        SQLite, so neither the defect nor a fix is observable from this suite - which makes an
+        extra query on every line save the wrong trade against an unverifiable claim.
+        """
+        target_id = self.invoice_id
+        if update_fields is not None and original is not None and not ({"invoice", "invoice_id"} & set(update_fields)):
+            target_id = original.invoice_id
+        # No `None` guard: `to_python(None)` returns `None`, and no persisted parent has a null
+        # primary key, so a line with no invoice assigned simply finds nothing here - which the
+        # caller already treats as "nothing to judge".
+        target = Invoice._meta.pk.to_python(target_id)
+        return next((parent for parent in parents if parent.pk == target), None)
+
+    def _amounts_that_will_be_stored(
+        self, original: InvoiceLine | None, update_fields: Iterable[str] | None
+    ) -> tuple[int, int, int]:
+        """The three signed amounts as the ROW will hold them once this save returns.
+
+        `update_fields` decides what is written, so it has to decide what is judged. A save
+        carrying a positive price in memory but writing only `invoice` leaves the STORED
+        negative amounts sitting under a new parent - which passes a check that reads the
+        in-memory object, and produces exactly the state that check exists to refuse.
+        """
+        names = ("unit_price_cents", "tax_cents", "line_total_cents")
+        if update_fields is None or original is None:
+            return cast("tuple[int, int, int]", tuple(getattr(self, name) for name in names))
+        written = set(update_fields)
+        return cast(
+            "tuple[int, int, int]",
+            tuple(getattr(self if name in written else original, name) for name in names),
+        )
+
+    def _refuse_a_line_pointing_against_its_document(
+        self,
+        parent: Invoice | None,
+        original: InvoiceLine | None = None,
+        update_fields: Iterable[str] | None = None,
+    ) -> None:
+        """Refuse a line whose direction disagrees with its document's kind.
+
+        `invoiceline_amounts_share_one_sign` proves this line's three amounts agree with each
+        other. It cannot prove they agree with the DOCUMENT: a SQL CHECK sees only its own row,
+        and Django rejects a joined lookup in a constraint condition, so the rule would need
+        `document_kind` denormalised onto this table behind a composite foreign key. That is a
+        new column on the highest-volume child table to express something this method gets for
+        free - the parent is already locked and in hand here, so this costs no extra query.
+
+        Without it a negative line was insertable on an ordinary invoice, and every reader that
+        walks the lines then disagreed with the header those lines were summed into. The
+        e-Factura builder is the clearest: it derives the document allowance as
+        `line_gross - header_subtotal` and clamps it to `max(0, ...)` for an invoice, so a
+        wrong-signed line makes the allowance stop accounting for the difference rather than
+        reporting one.
+
+        `discount_amount_cents` is deliberately not judged, for the same reason the constraint
+        leaves it out: it is a magnitude, not a signed amount, and stays positive on a
+        credit-note line.
+        """
+        if parent is None:
+            # The document does not exist; the foreign key is about to say so more clearly.
+            return
+        reversing = parent.document_kind == DOCUMENT_KIND_CREDIT_NOTE
+        amounts = self._amounts_that_will_be_stored(original, update_fields)
+        points_the_wrong_way = (
+            any(amount > 0 for amount in amounts) if reversing else any(amount < 0 for amount in amounts)
+        )
+        if points_the_wrong_way:
+            raise ValidationError(
+                _(
+                    "A line must point the way its document does: a credit note's lines are negative, an invoice's are not."
+                )
+            )
 
     def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
         with transaction.atomic():

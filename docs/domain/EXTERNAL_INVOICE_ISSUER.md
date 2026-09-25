@@ -64,14 +64,59 @@ ownership.
 
 A full refund of a SmartBill invoice issues a storno automatically. It becomes its
 own document — a credit note with its own legal number and negative totals, linked
-to the original — so VAT and revenue reporting net the correction without special
-handling.
+to the original.
+
+It is **not** what reporting nets, though an earlier version of this document said so.
+A credit note exists only on this path; the built-in issuer produces no correcting
+document at all, so netting through it would make the same refund move revenue
+differently depending on which issuer happened to be configured — and it cannot express
+a partial refund, because `/invoice/reverse` refuses one and no credit note is minted.
+Revenue and VAT take the correction from the `Refund` row instead, which both paths
+write at a single site and which carries the exact amount returned and the date it went
+back.
 
 A **partial** refund cannot be done at the provider at all, and raises a security
 event asking for manual correction. Reversing the whole document because part of it
 was refunded would credit the customer money they never got back.
 
 An invoice can be reversed once. A credit note cannot itself be reversed.
+
+### Which sign a reversal carries, and where
+
+Three readers, two conventions, and they are not a contradiction:
+
+| Reader | Convention | Why |
+|---|---|---|
+| The **ledger** | signed — every amount negated | reporting that sums invoice rows nets the correction without knowing this integration exists; DB constraints pin a credit note's subtotal, tax and total non-positive |
+| The **e-Factura XML** | positive magnitudes | EN16931 states direction once, in `CreditNoteTypeCode` **381**. BR-27 forbids a negative item net price outright, and 381 carrying negative amounts is wrong under either valid reading (380-with-negatives being the other) |
+| The **PDF** | signed | it is the copy a customer reads, and a Romanian storno conventionally shows negative totals |
+
+The XML and the PDF therefore agree on every magnitude and deliberately differ on sign.
+
+The conversion happens at one place — `UBLCreditNoteBuilder._format_amount`, the single
+boundary all eleven monetary emissions cross — and nowhere upstream of it. Converting in
+the source helpers instead would feed a chain (tax-exclusive → tax-inclusive → payable,
+plus a taxable amount recomputed independently and required to stay numerically identical),
+which is where a partial application silently breaks BR-CO-13.
+
+It negates rather than taking an absolute value. Negation is linear, so every EN16931
+reconciliation that held over the signed amounts holds exactly over the magnitudes;
+`abs()` would not survive a mixed-sign line, because the absolute value of a sum is not
+the sum of the absolutes.
+
+`CIUSROValidator` catches a whole-document flip through **BR-27** alone — the item net
+price goes negative along with everything else, and BR-27 forbids that outright. It needs
+a rule of that kind because the reconciliation rules cannot see the flip at all:
+BR-CO-10/13/15/16 are equalities, and negation preserves an equality, so a consistently
+negated document satisfies all four. That is why the negative representation looked
+correct for as long as it did.
+
+A broader local rule — no negative monetary amount anywhere on a credit note — was tried
+and **withdrawn**. EN16931 permits a credit note to carry a negative line *and* a negative
+total, so the rule rejected valid documents; and because nothing gates this validator
+behind the provider setting, it did so on the built-in e-Factura path too. The lesson is
+worth keeping: a locally invented rule that is stronger than the standard degrades every
+path that shares the validator, and BR-27 was sufficient all along.
 
 ## e-Factura
 

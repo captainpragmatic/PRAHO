@@ -318,6 +318,90 @@ class CIUSROValidatorTestCase(TestCase):
         self.assertFalse(result.is_valid)
         self.assertTrue(any(e.code == "BR-CO-16" for e in result.errors), [e.code for e in result.errors])
 
+    def test_br_co_16_prepaid_must_not_exceed_the_document_total(self):
+        """The rule is PRAHO's own, and nothing pinned it.
+
+        It is compared as MAGNITUDES so a credit note's negative total is not read as an
+        overpayment (`0 > -108.90`). That relaxation must not cost the rule its teeth on
+        the documents it was written for, so this is the ordinary invoice it must still
+        reject. PayableAmount is set to 1190 - 2000 so BR-CO-16 itself stays quiet and
+        only the prepaid rule can account for the failure.
+        """
+        xml = self._get_minimal_valid_xml().replace(
+            '<cbc:PayableAmount currencyID="RON">1190.00</cbc:PayableAmount>',
+            '<cbc:PrepaidAmount currencyID="RON">2000.00</cbc:PrepaidAmount>\n'
+            '            <cbc:PayableAmount currencyID="RON">-810.00</cbc:PayableAmount>',
+        )
+
+        result = self.validator.validate(xml)
+
+        codes = [e.code for e in result.errors]
+        self.assertIn("BR-CO-16-PREPAID", codes, codes)
+        self.assertNotIn("BR-CO-16", codes, f"only the prepaid rule may explain this: {codes}")
+
+    def test_br_27_rejects_a_negative_item_net_price(self):
+        """The one element where a negated credit note broke a STATED EN16931 rule.
+
+        Without this the validator cannot see the convention at all: BR-CO-10/13/15/16 are
+        equalities, and negation preserves them, so a consistently negated document passes
+        every one. Deleting this rule would therefore break no other test - which is the
+        whole reason it needs a test of its own.
+        """
+        xml = self._get_minimal_valid_xml().replace(
+            '<cbc:PriceAmount currencyID="RON">1000.00</cbc:PriceAmount>',
+            '<cbc:PriceAmount currencyID="RON">-1000.00</cbc:PriceAmount>',
+        )
+
+        codes = [e.code for e in self.validator.validate(xml).errors]
+
+        self.assertIn("BR-27", codes, codes)
+
+    def test_a_positive_item_net_price_is_accepted(self):
+        """The regression guard: BR-27 must not fire on an ordinary document."""
+        codes = [e.code for e in self.validator.validate(self._get_minimal_valid_xml()).errors]
+
+        self.assertNotIn("BR-27", codes, codes)
+
+    def _credit_note_xml(self) -> str:
+        return (
+            self._get_minimal_valid_xml()
+            .replace("<Invoice ", "<CreditNote ")
+            .replace("</Invoice>", "</CreditNote>")
+            .replace("Invoice-2", "CreditNote-2")
+            .replace("cac:InvoiceLine", "cac:CreditNoteLine")
+            .replace("cbc:InvoicedQuantity", "cbc:CreditedQuantity")
+            .replace(
+                "<cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>",
+                "<cbc:CreditNoteTypeCode>381</cbc:CreditNoteTypeCode>",
+            )
+        )
+
+    def test_a_credit_note_may_carry_negative_amounts(self):
+        """EN16931 allows it, for both lines and totals.
+
+        A rule forbidding every negative amount on a credit note lived here briefly and
+        rejected valid documents - unconditionally, so on the built-in e-Factura path too.
+        BR-27 is the sign constraint the standard actually states, and it catches the
+        whole-document flip this was written for anyway, because such a document emits a
+        negative item price as well.
+        """
+        xml = (
+            self._credit_note_xml()
+            .replace(
+                '<cbc:TaxInclusiveAmount currencyID="RON">1190.00</cbc:TaxInclusiveAmount>',
+                '<cbc:TaxInclusiveAmount currencyID="RON">-1190.00</cbc:TaxInclusiveAmount>',
+            )
+            .replace(
+                '<cbc:LineExtensionAmount currencyID="RON">1000.00</cbc:LineExtensionAmount>\n        <cac:Item>',
+                '<cbc:LineExtensionAmount currencyID="RON">-1000.00</cbc:LineExtensionAmount>\n        <cac:Item>',
+            )
+        )
+
+        codes = [e.code for e in self.validator.validate(xml).errors]
+
+        self.assertNotIn("BR-CN-SIGN", codes, f"that rule is retired; got {codes}")
+        self.assertNotIn("BR-27", codes, "the item price is still positive")
+
     def test_br_co_14_standard_tax_must_equal_base_times_rate(self):
         """BR-CO-14: standard-rate category tax must equal taxable base * rate."""
         xml = self._get_minimal_valid_xml().replace(

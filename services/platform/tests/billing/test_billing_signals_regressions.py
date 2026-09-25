@@ -14,7 +14,7 @@ from django.db import transaction
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
-from apps.billing.invoice_models import ISSUER_BUILTIN
+from apps.billing.invoice_models import DOCUMENT_KIND_CREDIT_NOTE, DOCUMENT_KIND_INVOICE, ISSUER_BUILTIN
 from apps.billing.models import (
     CreditLedger,
     Currency,
@@ -1342,6 +1342,7 @@ class TestHandleNewInvoiceCreation(TestCase):
     @patch("apps.billing.signals._send_invoice_created_email")
     def test_issued_invoice(self, mock_email, mock_reminders, mock_stats):
         invoice = MagicMock()
+        invoice.document_kind = "invoice"  # a real Invoice always has one
         invoice.status = "issued"
         _handle_new_invoice_creation(invoice)
         mock_email.assert_called_once()
@@ -1353,6 +1354,7 @@ class TestHandleNewInvoiceCreation(TestCase):
     @patch("apps.billing.signals._send_invoice_created_email")
     def test_draft_invoice_no_reminders(self, mock_email, mock_reminders, mock_stats):
         invoice = MagicMock()
+        invoice.document_kind = "invoice"  # a real Invoice always has one
         invoice.status = "draft"
         _handle_new_invoice_creation(invoice)
         mock_email.assert_called_once()
@@ -1448,6 +1450,7 @@ class TestHandleInvoiceIssued(TestCase):
     def test_with_efactura(self, mock_email, mock_reminders, mock_requires, mock_trigger, mock_audit):
         mock_requires.return_value = True
         invoice = MagicMock()
+        invoice.document_kind = "invoice"  # a real Invoice always has one
         _handle_invoice_issued(invoice)
         mock_email.assert_called_once()
         mock_reminders.assert_called_once()
@@ -1473,6 +1476,7 @@ class TestHandleInvoicePaid(TestCase):
     @patch("apps.billing.signals._send_payment_received_email")
     def test_sets_paid_at(self, mock_email, mock_cancel, mock_history, mock_activate):
         invoice = MagicMock()
+        invoice.document_kind = "invoice"  # a real Invoice always has one
         invoice.paid_at = None
         invoice.pk = 1
         _handle_invoice_paid(invoice)
@@ -1487,6 +1491,7 @@ class TestHandleInvoicePaid(TestCase):
     @patch("apps.billing.signals._send_payment_received_email")
     def test_already_paid_at(self, mock_email, mock_cancel, mock_history, mock_activate):
         invoice = MagicMock()
+        invoice.document_kind = "invoice"  # a real Invoice always has one
         invoice.paid_at = timezone.now()
         _handle_invoice_paid(invoice)
         # Should still process but not update paid_at
@@ -1498,12 +1503,39 @@ class TestHandleInvoiceOverdue(TestCase):
     @patch("apps.billing.signals._trigger_dunning_process")
     @patch("apps.billing.signals._send_invoice_overdue_email")
     def test_flow(self, mock_email, mock_dunning, mock_history, mock_suspend):
-        invoice = MagicMock()
+        # `document_kind` matters now: the handler refuses to chase anything that is not
+        # a receivable, so a double without one silently takes the early return.
+        invoice = MagicMock(document_kind=DOCUMENT_KIND_INVOICE)
         _handle_invoice_overdue(invoice)
         mock_email.assert_called_once()
         mock_dunning.assert_called_once()
         mock_history.assert_called_once_with(invoice.customer, "negative")
         mock_suspend.assert_called_once()
+
+
+class TestHandleInvoiceOverdueIsNotDunned(TestCase):
+    """A credit note must not be chased for money the customer is owed.
+
+    `test_flow` above asserts the side effects DO fire, so it passes whether or not the
+    receivable guard exists - removing the guard broke no test in the whole billing
+    package. This is the other direction, which is the one that proves the guard.
+    """
+
+    @patch("apps.billing.signals._handle_overdue_service_suspension")
+    @patch("apps.billing.signals._update_customer_payment_history")
+    @patch("apps.billing.signals._trigger_dunning_process")
+    @patch("apps.billing.signals._send_invoice_overdue_email")
+    def test_a_credit_note_is_not_emailed_blackened_or_suspended(
+        self, mock_email: MagicMock, mock_dunning: MagicMock, mock_history: MagicMock, mock_suspend: MagicMock
+    ) -> None:
+        credit_note = MagicMock(document_kind=DOCUMENT_KIND_CREDIT_NOTE)
+
+        _handle_invoice_overdue(credit_note)
+
+        mock_email.assert_not_called()
+        mock_dunning.assert_not_called()
+        mock_history.assert_not_called()
+        mock_suspend.assert_not_called()
 
 
 class TestHandleInvoiceVoided(TestCase):
@@ -2259,9 +2291,7 @@ class TestPaymentHandlersOnCommitDeferred(TestCase):
 
     @patch("apps.billing.signals._update_customer_payment_history")
     @patch("apps.billing.signals._send_payment_failed_email")
-    def test_failure_side_effects_not_called_on_rollback(
-        self, mock_email: MagicMock, mock_history: MagicMock
-    ) -> None:
+    def test_failure_side_effects_not_called_on_rollback(self, mock_email: MagicMock, mock_history: MagicMock) -> None:
         payment = MagicMock()
         payment.amount = "100.00"
         payment.currency.code = "RON"

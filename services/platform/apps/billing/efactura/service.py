@@ -45,7 +45,7 @@ from .client import (
 )
 from .models import EFacturaDocument, EFacturaDocumentType, EFacturaStatus
 from .validator import CIUSROValidator, ValidationResult
-from .xml_builder import UBLCreditNoteBuilder, UBLInvoiceBuilder, XMLBuilderError
+from .xml_builder import XMLBuilderError, builder_for
 
 if TYPE_CHECKING:
     from apps.billing.invoice_models import Invoice
@@ -105,6 +105,79 @@ class SubmissionClaim:
     xml_hash: str
     is_b2c: bool
     is_credit_note: bool
+
+
+def _repair_stale_document_type(document: EFacturaDocument, invoice: Invoice) -> None:
+    """Correct a row written before its invoice's kind was consulted.
+
+    `get_or_create(defaults=…)` applies `defaults` only on create, so a document row
+    written when both call sites hardcoded INVOICE keeps that value for a credit note
+    forever. `_prepare_and_claim_submission` reads `is_credit_note` from this stored
+    field, so the row would be submitted to ANAF as an ordinary invoice carrying negative
+    amounts and no reference to the document it reverses.
+
+    Bounded by `repairable_statuses()`: once anything has been sent, our copy has to keep
+    describing what was sent.
+    """
+    from apps.billing.invoice_models import DOCUMENT_KIND_CREDIT_NOTE  # noqa: PLC0415  # ADR-0007
+
+    # One direction only: a credit note still typed as an invoice. The opposite pairing is
+    # NOT corrected - a document deliberately typed CREDIT_NOTE against an ordinary invoice
+    # row is how the credit-note submission route is exercised, and forcing agreement both
+    # ways silently rerouted it, which two existing tests caught.
+    #
+    # Written as the whole predicate rather than the type check alone, to read identically
+    # to migration 0056's. The kind half cannot change an outcome today - for an ordinary
+    # invoice the expected type already equals the stored one - so mutation cannot kill it;
+    # it is here so the two statements of one rule stay legible side by side.
+    stale_credit_note = (
+        invoice.document_kind == DOCUMENT_KIND_CREDIT_NOTE
+        and document.document_type == EFacturaDocumentType.INVOICE.value
+    )
+    if not stale_credit_note:
+        return
+
+    expected = _document_type_for(invoice)
+    if document.status not in EFacturaStatus.repairable_statuses():
+        logger.warning(
+            f"⚠️ [e-Factura] Document for invoice {invoice.pk} is typed {document.document_type!r} "
+            f"but the invoice is a {expected!r}; left as filed because it is {document.status!r}."
+        )
+        return
+    document.document_type = expected
+    # The stored bytes were produced while this row said INVOICE, so `UBLInvoiceBuilder` wrote
+    # them: a 380 carrying negative amounts, with no reference to the document being reversed.
+    # Correcting the label and keeping the bytes leaves the row inconsistent in the one way that
+    # matters, because submission re-validates and files what is STORED, not what the label now
+    # claims. Blanking `xml_content` is sufficient rather than merely necessary: `submit`
+    # regenerates whenever it is empty, and `_generate_xml` picks the builder with
+    # `builder_for(invoice)`, which reads the INVOICE's `document_kind` and never this field.
+    #
+    # It is also permitted, which is worth stating because the XML is guarded. `save` refuses a
+    # change when a claim is held OR the stored status is one ANAF may have seen; this path is
+    # bounded by `repairable_statuses()`, none of which is frozen, and
+    # `efactura_claim_state_consistent` guarantees at the database level that nothing outside
+    # `uploading` holds a claim. `xml_hash` is recomputed by `save`, which adds it to
+    # `update_fields` itself, so setting it here would only be redundant.
+    document.xml_content = ""
+    document.xml_generated_at = None
+    document.save(update_fields=["document_type", "xml_content", "xml_generated_at", "updated_at"])
+
+
+def _document_type_for(invoice: Invoice) -> str:
+    """Which kind of document ANAF is being given.
+
+    Two call sites create an `EFacturaDocument` and both hardcoded INVOICE, so the
+    credit-note branch in `_generate_xml` could never fire: `UBLCreditNoteBuilder` was
+    unreachable and a reversal would have been filed as an ordinary invoice carrying
+    negative amounts. They share this rather than each deriving it, because a pair of
+    copies is how the first one came to be wrong without the second noticing.
+    """
+    from apps.billing.invoice_models import DOCUMENT_KIND_CREDIT_NOTE  # noqa: PLC0415  # ADR-0007
+
+    if invoice.document_kind == DOCUMENT_KIND_CREDIT_NOTE:
+        return str(EFacturaDocumentType.CREDIT_NOTE.value)
+    return str(EFacturaDocumentType.INVOICE.value)
 
 
 class EFacturaService:
@@ -221,11 +294,15 @@ class EFacturaService:
         document, _created = EFacturaDocument.objects.select_for_update().get_or_create(
             invoice=locked_invoice,
             defaults={
-                "document_type": EFacturaDocumentType.INVOICE.value,
+                "document_type": _document_type_for(invoice),
                 "status": EFacturaStatus.DRAFT.value,
                 "environment": getattr(settings, "EFACTURA_ENVIRONMENT", "test"),
             },
         )
+        # Under the lock, before anything reads `document.document_type` to choose a
+        # builder or to set `is_credit_note` on the claim below. A no-op for a row this
+        # call just created, whose type already agrees.
+        _repair_stale_document_type(document, locked_invoice)
         now = timezone.now()
 
         if document.status in {
@@ -634,25 +711,18 @@ class EFacturaService:
         document, _created = EFacturaDocument.objects.get_or_create(
             invoice=invoice,
             defaults={
-                "document_type": EFacturaDocumentType.INVOICE.value,
+                "document_type": _document_type_for(invoice),
                 "status": EFacturaStatus.DRAFT.value,
                 "environment": getattr(settings, "EFACTURA_ENVIRONMENT", "test"),
             },
         )
+        _repair_stale_document_type(document, invoice)
         return document
 
     def _generate_xml(self, invoice: Invoice, document: EFacturaDocument) -> str:
         """Generate UBL XML for invoice."""
         try:
-            builder: UBLInvoiceBuilder | UBLCreditNoteBuilder
-            if document.document_type == EFacturaDocumentType.CREDIT_NOTE.value:
-                # Get original invoice for credit note reference
-                original = getattr(invoice, "original_invoice", None)
-                builder = UBLCreditNoteBuilder(invoice, original)
-            else:
-                builder = UBLInvoiceBuilder(invoice)
-
-            xml_content = builder.build()
+            xml_content = builder_for(invoice).build()
 
             # Update document
             document.xml_content = xml_content

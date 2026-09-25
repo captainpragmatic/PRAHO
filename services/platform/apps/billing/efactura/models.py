@@ -57,6 +57,19 @@ class EFacturaStatus(StrEnum):
         return {cls.ACCEPTED.value, cls.REJECTED.value, cls.OUTCOME_UNKNOWN.value}
 
     @classmethod
+    def repairable_statuses(cls) -> set[str]:
+        """Statuses where a stored field may still be corrected.
+
+        Exactly the statuses `_prepare_and_claim_submission` allows a submission to start
+        from: nothing has reached ANAF, and the XML is regenerated or re-validated before
+        it does. Every other status either holds an in-flight upload claim or describes
+        bytes ANAF has already seen, where rewriting our copy would make the two disagree.
+
+        Deliberately not `terminal_statuses()`, which answers a different question.
+        """
+        return {cls.DRAFT.value, cls.QUEUED.value, cls.ERROR.value}
+
+    @classmethod
     def retryable_statuses(cls) -> set[str]:
         """Statuses that can be retried."""
         return {cls.ERROR.value, cls.QUEUED.value}

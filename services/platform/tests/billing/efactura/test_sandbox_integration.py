@@ -223,6 +223,31 @@ class EFacturaSandboxIntegrationTest(TestCase):
         # Local validation should pass for our test XML
         self.assertIsNotNone(result)
 
+    def test_anaf_accepts_a_credit_note_carrying_positive_magnitudes(self):
+        """Settle the one claim the local validator cannot: which sign convention is right.
+
+        PRAHO's ledger negates every amount on a reversal; the XML converts to magnitudes
+        because EN16931 puts the direction in `CreditNoteTypeCode` 381 and BR-27 forbids a
+        negative item net price. `CIUSROValidator` is a partial implementation by design,
+        so its agreement is an argument from the spec rather than an answer. This asks the
+        only authority that can give one.
+
+        The local half of this - that our own generator emits magnitudes and the
+        validator agrees - is covered by `test_credit_note_xml_totals`. What only ANAF
+        can answer is whether it accepts one. Skipped without sandbox credentials, like
+        everything else here, so the question is answerable the day they exist rather
+        than re-argued.
+        """
+        credit_note_xml = self.test_xml.replace("<Invoice", "<CreditNote").replace("</Invoice>", "</CreditNote>")
+
+        response = self.client.upload_credit_note(credit_note_xml, cif=self.config.company_cui)
+
+        self.assertIsNotNone(response)
+        self.assertTrue(
+            response.success,
+            f"ANAF refused a positive-magnitude credit note: {getattr(response, 'error_message', response)}",
+        )
+
     def test_full_submission_lifecycle(self):
         """
         End-to-end test: generate XML -> upload -> poll status.
