@@ -17,6 +17,18 @@ _INPUT_CLASS = (
 )
 _CHECKBOX_CLASS = "h-4 w-4 rounded border-slate-600 bg-slate-900 text-blue-600 focus:ring-blue-500"
 
+# The charset `d390.py` uses for text PRAHO accepts from outside and then emits into an ANAF
+# filing, anchored at both ends because `RegexField` searches rather than fullmatches. It is
+# deliberately NOT `InvoiceSeriesForm.prefix`'s `[A-Z0-9-]`: that guards a string PRAHO
+# GENERATES, while a provider's series and number are strings PRAHO ACCEPTS and must reproduce
+# exactly. Nothing in this repo evidences SmartBill's own charset - the setting carries no
+# validator and the client performs no check - so this is not narrowed past the one precedent
+# that exists for externally supplied fiscal text.
+_PROVIDER_DOCUMENT_CHARSET = r"\A[A-Za-z0-9 +.@-]+\Z"
+_PROVIDER_DOCUMENT_CHARSET_ERROR = _(
+    "Use letters, digits, spaces and + - . @ only, exactly as the provider shows them."
+)
+
 
 class D390PeriodForm(forms.Form):
     month = forms.DateField(
@@ -186,14 +198,28 @@ class ProviderReconciliationForm(forms.Form):
     same reason.
     """
 
-    series = forms.CharField(
-        max_length=30,
+    # No `.upper()` anywhere near these, unlike `InvoiceSeriesForm.clean_prefix`. SmartBill is
+    # case-significant on account-coupled names, which preflight enforces with an exact
+    # membership test, so upper-casing a lowercase series would write a WRONG legal number into
+    # a column that cannot be corrected afterwards.
+    #
+    # The charset is narrow enough to stop what actually arrives by accident - a newline carried
+    # in by a paste, a stray control character, a non-ASCII homoglyph that survives `.strip()` -
+    # and no narrower. This screen is the only exit from `outcome_unknown`, so over-rejecting
+    # strands the invoice permanently, and no regex can catch a mistyped digit in any case. The
+    # double-entry `confirmation` field and the composed-length check below are the real guards.
+    series = forms.RegexField(
+        regex=_PROVIDER_DOCUMENT_CHARSET,
+        max_length=50,
         required=False,
         help_text=_("Series exactly as the provider shows it, or blank if it has none."),
+        error_messages={"invalid": _PROVIDER_DOCUMENT_CHARSET_ERROR},
     )
-    number = forms.CharField(
+    number = forms.RegexField(
+        regex=_PROVIDER_DOCUMENT_CHARSET,
         max_length=50,
         help_text=_("Document number exactly as the provider shows it."),
+        error_messages={"invalid": _PROVIDER_DOCUMENT_CHARSET_ERROR},
     )
     confirmation = forms.CharField(
         max_length=50,
