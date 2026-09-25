@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -13,6 +14,8 @@ from django_fsm import TransitionNotAllowed
 
 from .invoice_models import InvoiceSequence
 from .payment_models import PaymentRetryPolicy
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     import uuid
@@ -258,6 +261,7 @@ def adopt_provider_document(
             # invoice's, while `invoice.issue()` is `source="draft"`. An invoice that moved on
             # since the ambiguous attempt raised straight through the view. Not about the number,
             # so it belongs in the non-field slot.
+            logger.exception(f"🔥 [Reconciliation] Issuance {issuance_id} could not be adopted")
             raise ValidationError(
                 {"__all__": _("This invoice can no longer be issued. Reload the queue and check its status.")}
             ) from exc
@@ -266,11 +270,21 @@ def adopt_provider_document(
             # same provider document can both pass it and collide at commit. An over-length
             # composed number arrives here too, from a caller that did not come through the form.
             # Keyed to `number`, which is the field they would retype.
+            #
+            # Logged with its cause because this arm is deliberately broad: any constraint
+            # failure reaches it, and the operator only ever sees "re-check the number". Without
+            # the traceback a genuine bug here would be indistinguishable from a race.
+            logger.exception(f"🔥 [Reconciliation] Issuance {issuance_id} could not be adopted")
             raise ValidationError(
                 {"number": _("That number could not be adopted. Re-check it at the provider and try again.")}
             ) from exc
         except ObjectDoesNotExist as exc:
-            # Deleted between this command's lock and the service's own re-read.
+            # Defensive, not demonstrated: the row is already locked above, so a deletion between
+            # that lock and the service's own re-read is prevented on a backend with real row
+            # locks. It is caught because this is the base class of every model's `DoesNotExist`
+            # and the alternative is a 500 on a screen that must not answer one - and logged,
+            # because anything arriving here is unexpected by construction.
+            logger.exception(f"🔥 [Reconciliation] Issuance {issuance_id} vanished mid-adoption")
             raise ValidationError({"__all__": _("That reconciliation no longer exists.")}) from exc
         if isinstance(outcome, Err):
             raise ValidationError({"__all__": outcome.error})

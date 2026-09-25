@@ -222,9 +222,10 @@ def sweep_abandoned_claims(limit: int = 100) -> dict[str, int]:
             issuance.save()
             # Worded to match `_claim`'s line for the identical quarantine: both call sites pass
             # the same `reason`, so they are one event, and a rollup alone cannot say WHICH
-            # documents may exist at the provider - which is the only thing an operator can act
-            # on. The aggregate below stays a warning because it is a gauge over a standing
-            # backlog; this is the event.
+            # documents may exist at the provider - the only thing an operator can act on. The
+            # aggregate below counts what THIS run quarantined, so it is a summary of these lines
+            # rather than a standing backlog; it stays at warning because repeating the same
+            # events at error level would only double the noise.
             logger.error(
                 f"🔥 [Issuance] Invoice {issuance.invoice_id} had an abandoned claim; quarantined "
                 f"for manual reconciliation rather than retried."

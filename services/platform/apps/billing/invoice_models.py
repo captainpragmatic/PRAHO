@@ -929,18 +929,46 @@ class InvoiceLine(models.Model):
                 super().save(*args, **kwargs)
                 return
             self.calculate_totals()
-            # On a reassignment `parents` holds BOTH documents, and the one that governs this
-            # line's direction is the one it is being saved ONTO. Matched as text because
-            # `invoice_id` is whatever the caller assigned - `str(pk)` is valid Django input and
-            # reaches the same row through the query above, while a lookup keyed on the column's
-            # own Python type missed it entirely, and the check's "no such document" exit then
-            # made that bypass indistinguishable from a clean save.
-            governing = next((parent for parent in parents if str(parent.pk) == str(self.invoice_id)), None)
             # After `calculate_totals`, never before: `subtotal_cents` is a property and both
             # `tax_cents` and `line_total_cents` are derived from it here, so an earlier check
             # would judge whatever the previous save left behind.
-            self._refuse_a_line_pointing_against_its_document(governing, original, kwargs.get("update_fields"))
+            update_fields = kwargs.get("update_fields")
+            self._refuse_a_line_pointing_against_its_document(
+                self._governing_parent(parents, original, update_fields), original, update_fields
+            )
             super().save(*args, **kwargs)
+
+    def _governing_parent(
+        self,
+        parents: list[Invoice],
+        original: InvoiceLine | None,
+        update_fields: Iterable[str] | None,
+    ) -> Invoice | None:
+        """The document this line will BELONG TO once the save returns.
+
+        Two things decide that, and getting either wrong reopens the bypass the direction check
+        exists to close. Both were found by review after a first attempt fixed only the narrow
+        case in front of it.
+
+        `update_fields` decides what is written, so it decides the parent too. A save that
+        reassigns `invoice` in memory while writing only the amounts leaves the persisted parent
+        untouched, so judging against the in-memory document approves amounts that then land
+        under a different one.
+
+        And the id must be normalised the way the database normalises it. `invoice_id` is
+        whatever the caller assigned, and Django resolves `1`, `"1"`, `"00001"` and `"+1"` to the
+        same row - so comparing the raw values, or even their text, misses spellings that store
+        perfectly well and leaves the check taking its "no such document" exit. Coercing through
+        the primary-key field closes the class instead of one member of it.
+        """
+        target_id = self.invoice_id
+        if update_fields is not None and original is not None and not ({"invoice", "invoice_id"} & set(update_fields)):
+            target_id = original.invoice_id
+        # No `None` guard: `to_python(None)` returns `None`, and no persisted parent has a null
+        # primary key, so a line with no invoice assigned simply finds nothing here - which the
+        # caller already treats as "nothing to judge".
+        target = Invoice._meta.pk.to_python(target_id)
+        return next((parent for parent in parents if parent.pk == target), None)
 
     def _amounts_that_will_be_stored(
         self, original: InvoiceLine | None, update_fields: Iterable[str] | None

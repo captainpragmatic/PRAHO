@@ -163,6 +163,39 @@ class InvoiceLineDirectionTests(TestCase):
         with self.assertRaises(ValidationError):
             line.save(update_fields=["invoice"])
 
+    def test_a_zero_padded_parent_id_does_not_bypass_the_guard(self) -> None:
+        """Django resolves `"00001"` and `"+1"` to invoice 1 and stores them there.
+
+        Comparing ids as text fixed `str(pk)` and left these: `"1" != "00001"`, so the lookup
+        missed and the guard took its "no such document" exit again. Only normalising through the
+        primary-key field's own coercion closes the class, rather than one member of it.
+        """
+        invoice = self._invoice()
+        for spelling in (f"{invoice.pk:05d}", f"+{invoice.pk}"):
+            with self.subTest(invoice_id=spelling):
+                line = self._line(invoice, -10000)
+                line.invoice_id = spelling
+
+                with self.assertRaises(ValidationError):
+                    line.save()
+
+    def test_a_partial_save_is_judged_against_the_parent_it_will_still_have(self) -> None:
+        """The mirror of the amounts rule, and the half that was missing.
+
+        `update_fields` decides what is written, so it decides the PARENT as well: reassigning
+        `invoice` in memory while writing only the amounts leaves the persisted parent untouched.
+        Judged against the in-memory credit note the negative amounts look right, and they land
+        under the ordinary invoice that the row actually still points at.
+        """
+        invoice = self._invoice()
+        line = self._line(invoice, 10000)
+        line.save()
+        line.invoice = self._credit_note()
+        line.unit_price_cents = -10000
+
+        with self.assertRaises(ValidationError):
+            line.save(update_fields=("unit_price_cents", "tax_cents", "line_total_cents"))
+
     # --- what must still be allowed ------------------------------------------------
 
     def test_a_positive_line_is_allowed_on_an_ordinary_invoice(self) -> None:
