@@ -152,6 +152,38 @@ class InvoiceLineDirectionTests(TestCase):
         self._line(self._invoice(), 0).save()
         self._line(self._credit_note(), 0).save()
 
+    def test_correcting_a_wrong_signed_line_is_allowed(self) -> None:
+        """This is what the check's position after `calculate_totals` buys.
+
+        A credit-note line stored the wrong way round is corrected by setting the price and
+        letting the derived amounts follow. Judged BEFORE that derivation the row still reads
+        `(-10000, +2100, +12100)` - mixed, and so refused in the reversing direction - which
+        would make the one save that repairs the row the one save that cannot happen.
+        """
+        credit_note = self._credit_note()
+        InvoiceLine.objects.bulk_create(
+            [
+                InvoiceLine(
+                    invoice=credit_note,
+                    kind="service",
+                    description="Stored the wrong way round",
+                    quantity=Decimal("1"),
+                    unit_price_cents=10000,
+                    tax_rate=Decimal("0.2100"),
+                    tax_cents=2100,
+                    line_total_cents=12100,
+                )
+            ]
+        )
+        line = InvoiceLine.objects.get(invoice=credit_note)
+
+        line.unit_price_cents = -10000
+        line.save()
+
+        stored = InvoiceLine.objects.get(pk=line.pk)
+        self.assertEqual(stored.tax_cents, -2100)
+        self.assertEqual(stored.line_total_cents, -12100)
+
     def test_a_linkage_only_save_on_a_locked_document_is_not_re_judged(self) -> None:
         """The frozen-document branch must not start refusing historical rows."""
         invoice = self._invoice()
