@@ -9,6 +9,11 @@ unblocks on payment rather than on issuance, so deferring costs nothing.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
+from typing import Any
+
+from django.core.cache import cache
+from django.db.models import Q
 
 from apps.common.types import Err
 
@@ -18,6 +23,10 @@ logger = logging.getLogger(__name__)
 
 # Rotation state for `sweep_owed_reversals`; its docstring explains why it exists.
 _REVERSAL_CURSOR_KEY = "billing:owed-reversal-sweep-cursor"
+# The same idea for `sweep_pending_issuances`, but a `(created_at, pk)` keyset rather than a
+# single integer: `ProviderIssuance.id` is a UUID and this sweep orders by `created_at`, so
+# `pk__gt` alone is neither the ordering nor a complete resume point.
+_PENDING_CURSOR_KEY = "billing:pending-issuance-sweep-cursor"
 
 
 def issue_invoice_task(invoice_id: int) -> dict[str, object]:
@@ -56,6 +65,28 @@ def queue_invoice_issuance(invoice_id: int) -> str | None:
     return task_id
 
 
+def _cursor_for(issuance: Any) -> list[str]:
+    """Where the next run resumes: the last examined row's ordering key, as plain strings.
+
+    Stored as text rather than as a datetime and a UUID so the value survives any cache
+    backend's serialisation unchanged.
+    """
+    return [issuance.created_at.isoformat(), str(issuance.pk)]
+
+
+def _resume_after(candidates: Any, cursor: Any) -> Any:
+    """Everything ordered after the cursor, by `(created_at, pk)`.
+
+    The second arm is what the tiebreaker is for: when a page ends between two rows sharing a
+    timestamp, `created_at__gt` alone would step over the one that was never examined.
+    """
+    if not cursor:
+        return candidates
+    stamp, last_pk = cursor
+    at = datetime.fromisoformat(stamp)
+    return candidates.filter(Q(created_at__gt=at) | Q(created_at=at, pk__gt=last_pk))
+
+
 def sweep_pending_issuances(limit: int = 100) -> dict[str, int]:
     """Pick up issuances whose queue callback never ran.
 
@@ -82,15 +113,36 @@ def sweep_pending_issuances(limit: int = 100) -> dict[str, int]:
     # from a recognised refusal envelope, which is the classifier's guarantee that
     # nothing was created. The cap is what keeps a permanent validation error from
     # being resubmitted forever against a rate-limited third party.
-    owed = (
+    candidates = (
         ProviderIssuance.objects.filter(
             state__in=(IssuanceState.PENDING.value, IssuanceState.FAILED.value),
             invoice__number__isnull=True,
             submissions__lt=MAX_SUBMISSIONS,
         )
         .select_related("invoice")
-        .order_by("created_at")[:limit]
+        # `pk` is not decoration: two rows can share a `created_at`, and without a tiebreaker
+        # the resume point below cannot tell which of them a page ended on.
+        .order_by("created_at", "pk")
     )
+
+    # A row that can never succeed - a credit note with no original to reverse, or one whose
+    # enqueue keeps failing - stays a candidate forever. Always taking the oldest N would let a
+    # handful of those occupy every run while a genuinely recoverable issuance behind them is
+    # never reached, and that invoice has no legal number and no other automated path to one.
+    # The cursor advances past whatever was examined and wraps at the end, so every candidate is
+    # reached within a bounded number of runs. This is `sweep_owed_reversals`' arrangement; only
+    # the key shape differs, because that one pages an integer primary key that is also its
+    # ordering key. Losing the cursor to cache eviction restarts the rotation, which is
+    # harmless, and where the cache is a no-op the sweep degrades to always scanning from the
+    # oldest row - correct, just not fair. Fairness only matters once rows are permanently
+    # stuck, which is itself the alarm condition.
+    cursor = cache.get(_PENDING_CURSOR_KEY)
+    owed = list(_resume_after(candidates, cursor)[:limit])
+    if not owed and cursor:
+        owed = list(candidates[:limit])
+    # Set BEFORE the work, as the sibling does, so a crash part-way through still advances and
+    # the same stuck row cannot be retried from the top of every run.
+    cache.set(_PENDING_CURSOR_KEY, _cursor_for(owed[-1]) if owed else None, timeout=None)
 
     results = {"queued": 0, "skipped": 0, "exhausted": 0}
     for issuance in owed:
@@ -196,8 +248,6 @@ def sweep_owed_reversals(limit: int = 100) -> dict[str, int]:
     settles it under lock, and a sweep that duplicated those rules is exactly how the
     two would drift apart.
     """
-    from django.core.cache import cache  # noqa: PLC0415
-
     from apps.billing.invoice_models import DOCUMENT_KIND_INVOICE, ISSUER_BUILTIN, Invoice  # noqa: PLC0415
 
     candidates = Invoice.objects.filter(
