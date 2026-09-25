@@ -912,8 +912,10 @@ class InvoiceLine(models.Model):
             original = type(self).objects.filter(pk=self.pk).first() if self.pk else None
             if original:
                 parent_ids.add(original.invoice_id)
-            parents = Invoice.objects.select_for_update().filter(pk__in=parent_ids)
-            if any(parent.locked_at for parent in parents):
+            # Keyed rather than iterated: on a reassignment this holds BOTH documents, and the
+            # one that governs this line's direction is the one it is being saved onto.
+            parents = {parent.pk: parent for parent in Invoice.objects.select_for_update().filter(pk__in=parent_ids)}
+            if any(parent.locked_at for parent in parents.values()):
                 mutable = {"service", "billing_cycle"}
                 changed = original is None or any(
                     getattr(self, field.attname) != getattr(original, field.attname)
@@ -922,11 +924,54 @@ class InvoiceLine(models.Model):
                 )
                 if changed:
                     raise ValidationError(_("Cannot modify lines on an issued invoice."))
-                # Linkage-only saves must not recalculate any frozen amounts.
+                # Linkage-only saves must not recalculate any frozen amounts - and must not be
+                # re-judged for direction either. This branch exists to let a frozen document's
+                # linkage be maintained, and a line already stored the wrong way round can no
+                # longer be corrected, so refusing here would only block the permitted save.
                 super().save(*args, **kwargs)
                 return
             self.calculate_totals()
+            # After `calculate_totals`, never before: `subtotal_cents` is a property and both
+            # `tax_cents` and `line_total_cents` are derived from it here, so an earlier check
+            # would judge whatever the previous save left behind.
+            self._refuse_a_line_pointing_against_its_document(parents.get(self.invoice_id))
             super().save(*args, **kwargs)
+
+    def _refuse_a_line_pointing_against_its_document(self, parent: Invoice | None) -> None:
+        """Refuse a line whose direction disagrees with its document's kind.
+
+        `invoiceline_amounts_share_one_sign` proves this line's three amounts agree with each
+        other. It cannot prove they agree with the DOCUMENT: a SQL CHECK sees only its own row,
+        and Django rejects a joined lookup in a constraint condition, so the rule would need
+        `document_kind` denormalised onto this table behind a composite foreign key. That is a
+        new column on the highest-volume child table to express something this method gets for
+        free - the parent is already locked and in hand here, so this costs no extra query.
+
+        Without it a negative line was insertable on an ordinary invoice, and every reader that
+        walks the lines then disagreed with the header those lines were summed into. The
+        e-Factura builder is the clearest: it derives the document allowance as
+        `line_gross - header_subtotal` and clamps it to `max(0, ...)` for an invoice, so a
+        wrong-signed line makes the allowance stop accounting for the difference rather than
+        reporting one.
+
+        `discount_amount_cents` is deliberately not judged, for the same reason the constraint
+        leaves it out: it is a magnitude, not a signed amount, and stays positive on a
+        credit-note line.
+        """
+        if parent is None:
+            # The document does not exist; the foreign key is about to say so more clearly.
+            return
+        reversing = parent.document_kind == DOCUMENT_KIND_CREDIT_NOTE
+        amounts = (self.unit_price_cents, self.tax_cents, self.line_total_cents)
+        points_the_wrong_way = (
+            any(amount > 0 for amount in amounts) if reversing else any(amount < 0 for amount in amounts)
+        )
+        if points_the_wrong_way:
+            raise ValidationError(
+                _(
+                    "A line must point the way its document does: a credit note's lines are negative, an invoice's are not."
+                )
+            )
 
     def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
         with transaction.atomic():
