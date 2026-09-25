@@ -1782,6 +1782,11 @@ def vat_report(request: HttpRequest) -> HttpResponse:
         "invoices": invoices,
         "total_vat": total_vat,
         "total_net": total_net,
+        # Supplied rather than derived in the template. The summary cards used to read
+        # `total_sales` and `net_sales`, which this view never set, so two of the three showed
+        # `0,00 RON` for as long as the screen existed - and a template expression would put the
+        # same arithmetic back out of reach of any test that checks the number.
+        "total_gross": total_net + total_vat,
         "start_date": start_date,
         "end_date": end_date,
     }
