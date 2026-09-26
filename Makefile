@@ -388,6 +388,34 @@ coverage-portal:
 	@$(PYTHON_PORTAL) -m pytest -q
 	@echo "✅ Portal coverage complete — see services/portal/htmlcov/."
 
+# Portal's real figure is the UNION of two datasets that cover different code: the unit suite
+# (no database, platform unimportable, most files mocked) and the browser suite (a live portal
+# against a live platform over real HMAC). Measured 2026-09-26: units 63%, browser 57.31%,
+# union 72.02% - so neither dataset alone is the answer, and reporting either as "portal
+# coverage" understates it by ~9 to ~15 points.
+PORTAL_COVERAGE_FLOOR ?= 70
+
+.PHONY: coverage-portal-union
+coverage-portal-union:
+	@echo "📊 [Portal] Union of the unit and browser suites — the honest figure..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@units="services/portal/.coverage"; e2e="output/playwright/coverage/.coverage.portal"; \
+	missing=""; \
+	[ -f "$$units" ] || missing="$$missing unit-data(run make coverage-portal)"; \
+	[ -f "$$e2e" ]   || missing="$$missing browser-data(run make test-e2e-coverage)"; \
+	if [ -n "$$missing" ]; then echo "❌ Missing:$$missing"; exit 1; fi; \
+	echo "  unit data   $$(date -r "$$units" '+%Y-%m-%d %H:%M')"; \
+	echo "  browser data $$(date -r "$$e2e" '+%Y-%m-%d %H:%M')"; \
+	echo "  (both are reported so a stale half cannot pass unnoticed)"; \
+	dir=$$(mktemp -d); trap 'rm -rf "$$dir"' EXIT; \
+	cp "$$units" "$$dir/.coverage.units"; cp "$$e2e" "$$dir/.coverage.browser"; \
+	cd services/portal && $(COVERAGE_RC) COVERAGE_FILE="$$dir/.coverage" $(COVERAGE_BIN) combine --quiet; \
+	$(COVERAGE_RC) COVERAGE_FILE="$$dir/.coverage" $(COVERAGE_BIN) xml -o coverage-portal-union.xml; \
+	rc=0; $(COVERAGE_RC) COVERAGE_FILE="$$dir/.coverage" $(COVERAGE_BIN) report --fail-under=$(PORTAL_COVERAGE_FLOOR) > "$$dir/report.txt" || rc=$$?; \
+	tail -2 "$$dir/report.txt"; \
+	if [ "$$rc" -ne 0 ]; then echo "❌ Portal union below the $(PORTAL_COVERAGE_FLOOR)% floor."; exit "$$rc"; fi; \
+	echo "✅ Portal union at or above the $(PORTAL_COVERAGE_FLOOR)% floor."
+
 coverage: coverage-platform coverage-platform-packages coverage-portal
 	@echo "✅ Coverage measured for both services."
 

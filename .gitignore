@@ -144,6 +144,7 @@ services/platform/media/
 services/platform/.coverage
 services/platform/coverage-platform.xml
 services/portal/coverage-portal.xml
+services/portal/coverage-portal-union.xml
 services/platform/htmlcov/
 services/platform/.pytest_cache/
 services/platform/__pycache__/
