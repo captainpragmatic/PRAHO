@@ -59,10 +59,11 @@ DEFAULT_ALLOWLIST = PROJECT_ROOT / "scripts" / "settings_allowlist.txt"
 PLATFORM_TESTS_DIR = PROJECT_ROOT / "services" / "platform" / "tests"
 DEFAULT_EFFECT_BASELINE = PROJECT_ROOT / "scripts" / "settings_effect_baseline.txt"
 DEFAULT_INERT_BASELINE = PROJECT_ROOT / "scripts" / "settings_inert_baseline.txt"
+DEFAULT_DRIFT_BASELINE = PROJECT_ROOT / "scripts" / "settings_drift_baseline.txt"
 PLATFORM_DIR = PROJECT_ROOT / "services" / "platform"
 
 # The two SettingsService methods that actually persist a value; helpers forwarding to either
-# count as writers too (see `_write_helper_names`).
+# count as writers too (see `_write_helper_positions`).
 _DIRECT_WRITERS = ("update_setting", "reset_setting_to_default")
 
 SEVERITY_ORDER = {"medium": 0, "low": 1, "info": 2}
@@ -648,24 +649,34 @@ def _normalize_for_comparison(value: Any) -> Any:
 def check_default_drift(
     defaults: dict[str, Any],
     call_sites: list[SettingsCallSite],
+    baseline: set[str] | None = None,
 ) -> list[Finding]:
     """Detect when an inline fallback disagrees with the catalog default.
 
     Example: the catalog has "billing.efactura_batch_size": 100 while a call site passes
     `SettingsService.get_integer_setting("billing.efactura_batch_size", 50)`.
 
-    Reported at LOW, not medium, and the reason is worth stating. Since ADR-0042 made the catalog
-    the resolution source, `get_setting` falls back to `DEFAULT_SETTINGS[key]` and only reaches the
-    caller's argument for a key the catalog does not declare - so for every catalog key the inline
-    fallback is UNREACHABLE. A drift is therefore misinformation rather than misbehaviour: it is
-    the number a reader of that module believes, and the number that would become operative if the
-    key ever left the catalog. Worth fixing, not worth failing a build over.
+    The inline fallback IS reachable for a catalog key, which is why this is medium rather than a
+    documentation nit. I first demoted it on the reasoning that `get_setting` falls back to
+    `DEFAULT_SETTINGS[key]` so the caller's argument is dead - true of `get_setting` itself, and
+    wrong about the typed wrappers. `get_integer_setting` returns the caller's `default` on
+    ValueError/TypeError (`services.py:475`), `get_decimal_setting` returns `default or
+    Decimal("0")` (`:486`), `get_list_setting` returns `default or []` (`:503`). A cached `None`, a
+    stored value that will not coerce, or a row written through a path that skipped validation all
+    land on the caller's number. So a drift is a live behavioural difference that appears exactly
+    when something has already gone slightly wrong - the worst time to also change a limit.
 
-    What the drift is genuinely diagnostic OF is check 6: eleven of the twelve drifts this first
-    surfaced belong to a getter nothing calls. The two numbers drifted apart precisely because no
-    live code path ever made them agree.
+    Baselined rather than fixed in bulk, because in this codebase the drifting `_DEFAULT_*`
+    constant is nearly always ALSO read directly by the enforcing code through a public alias, so
+    "align it to the catalog" changes what the system accepts. `products.max_price_cents` would
+    raise a price ceiling 100x. Each needs its intended value established and a consumer test.
+
+    What the drift is diagnostic OF is check 6: almost every drift here belongs to a getter nothing
+    calls. The two numbers drifted apart precisely because no live path ever made them agree.
     """
     findings: list[Finding] = []
+    known = baseline or set()
+    seen: set[str] = set()
 
     for call in call_sites:
         # A named fallback resolved to a module-level literal is as comparable as an inline one.
@@ -691,21 +702,38 @@ def check_default_drift(
         if canonical_norm == inline_norm:
             continue
 
+        seen.add(call.key)
+        if call.key in known:
+            continue
+
         findings.append(
             Finding(
                 file=call.file,
                 line=call.line,
-                severity="low",
+                severity="medium",
                 check="default-drift",
                 name=call.key,
                 message=(
                     f"Inline fallback {inline!r} disagrees with the catalog default {canonical!r} "
-                    f'for key "{call.key}". The catalog wins at runtime, so this number is '
-                    f"unreachable - and misleading to whoever reads it next. Align it."
+                    f'for key "{call.key}". The typed getters return this number when the stored '
+                    f"value will not coerce, so the two disagree in production. Establish which is "
+                    f"intended, test the consumer, then align - and check whether the constant is "
+                    f"also read directly by the enforcing code before changing it."
                 ),
             )
         )
 
+    findings.extend(
+        Finding(
+            file=str(DEFAULT_DRIFT_BASELINE.relative_to(PROJECT_ROOT)),
+            line=0,
+            severity="low",
+            check="default-drift-fixed",
+            name=key,
+            message=f"'{key}' no longer drifts. Remove it from the baseline in the same commit.",
+        )
+        for key in sorted(known - seen)
+    )
     return findings
 
 
@@ -729,33 +757,48 @@ def _module_string_constants(text: str) -> dict[str, str]:
     except SyntaxError:
         return {}
     constants: dict[str, str] = {}
-    for node in tree.body:
-        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
-            for target in node.targets:
-                if isinstance(target, ast.Name):
-                    constants[target.id] = node.value.value
+    # Module level, and one level into class bodies: a test class naming its key as
+    # `KEY = "app.x"` and writing `self.KEY` is as ordinary as a module constant, and a detector
+    # that only understands one of the two silently dictates which to use.
+    scopes = [tree.body, *(node.body for node in tree.body if isinstance(node, ast.ClassDef))]
+    for body in scopes:
+        for node in body:
+            if (
+                isinstance(node, ast.Assign)
+                and isinstance(node.value, ast.Constant)
+                and isinstance(node.value.value, str)
+            ):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        constants[target.id] = node.value.value
     return constants
 
 
 @cache
-def _write_helper_names(text: str) -> frozenset[str]:
-    """Local functions that forward a key parameter to a real writer.
+def _write_helper_positions(text: str) -> dict[str, int]:
+    """Local functions that forward a key parameter to a real writer, and WHICH parameter it is.
 
     Matching only the direct `SettingsService.update_setting("literal")` call is a style rule
     masquerading as a measurement. `tests/settings/test_localisation_consumers.py` drives four
-    localisation settings through customer forms, rendered dates and persisted addresses - about
-    as thorough an effect test as this repo has - through a two-line `set_value` helper, and the
+    localisation settings through customer forms, rendered dates and persisted addresses - about as
+    thorough an effect test as this repo has - through a two-line `set_value` helper, and the
     detector called all four untested. One level of indirection is where real tests live.
+
+    The position matters and assuming zero was wrong: a helper written `def write(value, key)` would
+    have credited `write("some.key", "other.key")` to the wrong key. `self` is discounted so the
+    index matches the call site's positional arguments.
     """
     try:
         tree = ast.parse(text)
     except SyntaxError:
-        return frozenset()
-    helpers: set[str] = set()
+        return {}
+    helpers: dict[str, int] = {}
     for node in ast.walk(tree):
         if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             continue
-        params = {arg.arg for arg in (*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs)}
+        params = [arg.arg for arg in (*node.args.posonlyargs, *node.args.args)]
+        if params and params[0] in ("self", "cls"):
+            params = params[1:]
         for call in ast.walk(node):
             if (
                 isinstance(call, ast.Call)
@@ -765,25 +808,72 @@ def _write_helper_names(text: str) -> frozenset[str]:
                 and isinstance(call.args[0], ast.Name)
                 and call.args[0].id in params
             ):
-                helpers.add(node.name)
-    return frozenset(helpers)
+                helpers[node.name] = params.index(call.args[0].id)
+    return helpers
 
 
-def _writes_this_key(text: str, key: str) -> bool:
-    """A write addressed to THIS key, not merely a file that happens to write something."""
-    quoted = re.escape(key)
-    writers = "|".join(re.escape(name) for name in (*_DIRECT_WRITERS, *_write_helper_names(text)))
-    if (
-        re.search(rf'({writers})\(\s*["\']{quoted}["\']', text)
-        or re.search(rf'["\']{quoted}["\']\s*:', text)
-        or re.search(rf'key\s*=\s*["\']{quoted}["\']', text)
-    ):
-        return True
-    aliases = [name for name, value in _module_string_constants(text).items() if value == key]
-    return any(
-        re.search(rf"({writers})\(\s*{re.escape(alias)}\b", text) or re.search(rf"\b{re.escape(alias)}\s*:", text)
-        for alias in aliases
-    )
+def _called_name(func: ast.expr) -> str:
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    if isinstance(func, ast.Name):
+        return func.id
+    return ""
+
+
+@cache
+def _written_keys(text: str) -> frozenset[str]:
+    r"""Setting keys this file WRITES, resolved from the AST rather than matched textually.
+
+    The regex version counted a read as a write: a bare `key\s*=\s*"..."` pattern matches
+    `SettingsService.get_setting(key="system.maintenance_mode")`, so a test that only read a key
+    back could earn it an effect credit. Only a writer's key argument counts now.
+    """
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return frozenset()
+    constants = _module_string_constants(text)
+    helpers = _write_helper_positions(text)
+    written: set[str] = set()
+
+    def resolve(node: ast.expr | None) -> str | None:
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return node.value
+        if isinstance(node, ast.Name):
+            return constants.get(node.id)
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id in ("self", "cls"):
+            return constants.get(node.attr)
+        return None
+
+    for call in ast.walk(tree):
+        if not isinstance(call, ast.Call):
+            continue
+        name = _called_name(call.func)
+        if name in _DIRECT_WRITERS:
+            position = 0
+        elif name in helpers:
+            position = helpers[name]
+        else:
+            continue
+        if len(call.args) > position:
+            key = resolve(call.args[position])
+            if key:
+                written.add(key)
+        for keyword in call.keywords:
+            if keyword.arg == "key":
+                key = resolve(keyword.value)
+                if key:
+                    written.add(key)
+
+    # The bulk-save payload shape: `{"app.key": value}`. A read never spells a key this way.
+    written |= {
+        node.value
+        for dict_node in ast.walk(tree)
+        if isinstance(dict_node, ast.Dict)
+        for node in dict_node.keys
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and "." in node.value
+    }
+    return frozenset(written)
 
 
 def _reaches_another_app(text: str) -> bool:
@@ -814,7 +904,7 @@ def effect_tested_keys(catalog_keys: set[str], test_files: list[Path]) -> set[st
         key
         for key in catalog_keys
         for path, text in texts.items()
-        if key in text and _writes_this_key(text, key) and _reaches_another_app(text)
+        if key in text and key in _written_keys(text) and _reaches_another_app(text)
     }
 
 
@@ -826,10 +916,17 @@ def check_untested_effects(catalog_keys: set[str], test_files: list[Path], basel
     customer-facing consequence at all - it was referenced, its default matched, its fallback was
     consistent, and enabling it did nothing a portal customer could see. Wiring is not effect.
 
-    A ratchet, not a cliff. 185 of 262 keys currently have no test that mentions them, and
-    demanding 185 tests today would only teach people to bypass the gate. So the baseline records
-    the keys that ARE effect-tested, and this fails when one of them stops being - which makes
-    progress monotonic and every future effect test permanent.
+    A ratchet, not a cliff. Most keys have no test that mentions them at all, and demanding that
+    many tests at once would only teach people to bypass the gate. So the baseline records the keys
+    that ARE effect-tested, and this fails when one of them stops being - which makes progress
+    monotonic and every future effect test permanent.
+
+    What a static check cannot do, said plainly: it cannot see assertions. Strip every assert from a
+    qualifying test file and the credit survives, because the write, the cross-app reach and the
+    request are all still there. So this measures the SHAPE of an effect test, not its force, and
+    the baseline is a floor on what has been attempted rather than a proof of what is covered.
+    Reading the test is still the only thing that establishes the assertion discriminates, which is
+    why the tests behind entries added here were mutation-checked by hand.
     """
     tested = effect_tested_keys(catalog_keys, test_files)
     findings: list[Finding] = [
@@ -867,59 +964,65 @@ def check_untested_effects(catalog_keys: set[str], test_files: list[Path], basel
 
 # ─── Check 6: Inert Settings ──────────────────────────────────────────────────
 
+# Modules doing any of these can reach a function without naming it, so no claim of deadness is
+# safe there. Narrow on purpose: a broad "looks dynamic" heuristic would excuse everything.
+_DYNAMIC_DISPATCH_MARKERS = ("import_string(", "globals()[", "getattr(sys.modules", "vars()[")
 
-def _settings_readers(files: list[Path]) -> dict[tuple[str, str], set[str]]:
-    """Module-level functions that read settings, mapped to the keys each one reads.
 
-    Module level only. A method's call sites resolve through `self`, an instance, or a subclass,
-    and guessing at that would manufacture false positives in a check whose whole value is that
-    its findings are certain.
+def _keys_read(node: ast.AST) -> set[str]:
+    """Literal setting keys read by `SettingsService.get_*` anywhere under `node`."""
+    return {
+        call.args[0].value
+        for call in ast.walk(node)
+        if isinstance(call, ast.Call)
+        and isinstance(call.func, ast.Attribute)
+        and call.func.attr in SETTINGS_GETTER_METHODS
+        and call.args
+        and isinstance(call.args[0], ast.Constant)
+        and isinstance(call.args[0].value, str)
+    }
+
+
+def _display_path(path: Path) -> str:
+    """Repo-relative where possible. Tolerating an outside path keeps the check unit-testable."""
+    try:
+        return str(path.relative_to(PROJECT_ROOT))
+    except ValueError:
+        return str(path)
+
+
+def _module_path(path: Path) -> str:
+    """`services/platform/apps/orders/tasks.py` -> `apps.orders.tasks`."""
+    try:
+        rel = path.relative_to(PLATFORM_DIR)
+    except ValueError:
+        return ""
+    return ".".join(rel.with_suffix("").parts)
+
+
+def _candidate_caller_files(reader: Path, texts: dict[Path, str]) -> list[Path]:
+    """Files that could possibly reference a function defined in `reader`.
+
+    Its own file; anything naming its module path (absolute import); and anything in the same
+    package directory, which may reach it by a relative import. Over-inclusion is the safe
+    direction - a file wrongly included can only make the check claim LESS.
+
+    Without this the sweep was name-only, and three modules define `get_task_time_limit()`:
+    `customers/tasks.py` calls its own, and that call made `provisioning/virtualmin_tasks.py`'s
+    unused copy look live. Name collisions hid four real dead readers.
     """
-    readers: dict[tuple[str, str], set[str]] = {}
-    for path in files:
-        text = path.read_text(errors="ignore")
-        if "SettingsService" not in text:
-            continue
-        try:
-            tree = ast.parse(text)
-        except SyntaxError:
-            continue
-        for node in tree.body:
-            if not isinstance(node, ast.FunctionDef):
-                continue
-            keys = {
-                call.args[0].value
-                for call in ast.walk(node)
-                if isinstance(call, ast.Call)
-                and isinstance(call.func, ast.Attribute)
-                and call.func.attr in SETTINGS_GETTER_METHODS
-                and call.args
-                and isinstance(call.args[0], ast.Constant)
-                and isinstance(call.args[0].value, str)
-            }
-            if keys:
-                readers[(str(path.relative_to(PROJECT_ROOT)), node.name)] = keys
-    return readers
-
-
-def _names_referenced_somewhere(files: list[Path], names: set[str]) -> set[str]:
-    """Of `names`, those appearing on any line that is not their own `def`.
-
-    A plain textual sweep on purpose: it counts a decorator, a dict of handlers, an `__all__`, a
-    string passed to `import_string` - every indirect route a caller can take. Over-counting is
-    the safe direction here, because a name this misses is reported as dead.
-    """
-    if not names:
-        return set()
-    patterns = {name: re.compile(rf"\b{re.escape(name)}\b") for name in names}
-    definitions = {name: re.compile(rf"\s*(?:async\s+)?def\s+{re.escape(name)}\b") for name in names}
-    referenced: set[str] = set()
-    for path in files:
-        for line in path.read_text(errors="ignore").splitlines():
-            for name in names - referenced:
-                if patterns[name].search(line) and not definitions[name].match(line):
-                    referenced.add(name)
-    return referenced
+    dotted = _module_path(reader)
+    tail = dotted.rsplit(".", 1)[-1]
+    return [
+        path
+        for path, text in texts.items()
+        if path == reader
+        or path.parent == reader.parent
+        or (dotted and dotted in text)
+        # An empty tail would make this `"import " in text` and match every module that imports
+        # anything, quietly turning the whole check off.
+        or (tail and f"import {tail}" in text)
+    ]
 
 
 def check_inert_settings(catalog_keys: set[str], files: list[Path], baseline: set[str]) -> list[Finding]:
@@ -928,35 +1031,89 @@ def check_inert_settings(catalog_keys: set[str], files: list[Path], baseline: se
     This is the shape that let `system.maintenance_mode` ship with no effect, and it is not rare.
     The repeated pattern is three lines:
 
-        _DEFAULT_X = 100                                    # what the code enforces
-        X = _DEFAULT_X                                      # what live logic actually reads
+        _DEFAULT_X = 100                                                 # what the code enforces
+        X = _DEFAULT_X                                                   # what live logic reads
         def get_x(): return SettingsService.get_integer_setting("app.x", _DEFAULT_X)   # uncalled
 
-    Live code compares against `X`; the getter that would consult the operator's configured value
-    is never called. The setting is editable in the UI and provably inert. Check 1 passes on every
-    one of them, because the key IS "referenced in app code" - inside the dead getter. That is the
-    difference between a key being present and a key having consequences, and 43 of 262 keys were
-    on the wrong side of it when this check was written.
+    Live code compares against the module constant. The getter that would consult the operator's
+    configured value is never called. The setting is editable in the UI and inert. Check 1 passes on
+    every one of them, because the key IS "referenced in app code" - inside the dead getter.
 
-    Ratchet, not cliff, and it ratchets in both directions: a NEW inert setting fails at medium,
-    and a baseline entry that became live fails at low until it is removed, so the list cannot rot
-    into a permanent excuse.
+    What this check can and cannot establish, stated plainly because the first version overclaimed.
+    It is a STATIC criterion: a module-level, undecorated function whose name appears nowhere in any
+    file that could import it. That is strong evidence and it is not proof of runtime
+    unreachability. Three escapes are handled by refusing to judge rather than by guessing -
+    decorated functions (a decorator receives the object, so the name need never appear again),
+    modules using `import_string`/`globals()[...]` dispatch, and any key that some OTHER reader
+    reads, including a method or module-level code. Anything else - a persisted task schedule naming
+    a dotted path, a caller outside services/platform - remains outside its reach, so a finding here
+    is "no reachable reader found", which is what the message says.
+
+    Ratchet, not cliff, and it ratchets both ways: a NEW inert setting fails at medium, and a
+    baseline entry that became live fails at low until removed, so the list cannot rot.
     """
-    readers = _settings_readers(files)
-    reader_names = {name for _, name in readers}
-    referenced = _names_referenced_somewhere(files, reader_names)
+    # Production files only. A setting read back by a test proves storage, not effect, and a getter
+    # called only from a test still leaves the setting with no production consequence - which is
+    # what this check is about. Including `tests/` had `audit.compliant_score_threshold` looking
+    # live on the strength of one `get_setting` call inside a storage test.
+    production = [path for path in files if "tests" not in path.parts]
+    texts = {path: path.read_text(errors="ignore") for path in production}
 
-    inert_keys: dict[str, str] = {}
+    parsed: list[tuple[Path, ast.Module, str]] = []
+    for path, text in texts.items():
+        if "SettingsService" not in text:
+            continue
+        try:
+            parsed.append((path, ast.parse(text), text))
+        except SyntaxError:
+            continue
+
+    # Candidate dead readers: module-level, undecorated, in a module with no dynamic dispatch.
+    candidates: dict[tuple[Path, str], set[str]] = {}
+    for path, tree, text in parsed:
+        if any(marker in text for marker in _DYNAMIC_DISPATCH_MARKERS):
+            continue
+        for node in tree.body:
+            if not isinstance(node, ast.FunctionDef) or node.decorator_list:
+                continue
+            keys = _keys_read(node) & catalog_keys
+            if keys:
+                candidates[(path, node.name)] = keys
+
+    dead: dict[tuple[Path, str], set[str]] = {}
+    for (path, name), keys in candidates.items():
+        pattern = re.compile(rf"\b{re.escape(name)}\b")
+        definition = re.compile(rf"\s*(?:async\s+)?def\s+{re.escape(name)}\b")
+        referenced = any(
+            pattern.search(line) and not definition.match(line)
+            for candidate in _candidate_caller_files(path, texts)
+            for line in texts[candidate].splitlines()
+        )
+        if not referenced:
+            dead[(path, name)] = keys
+
+    # Every key read from anywhere that is NOT one of those dead functions is live - including from
+    # a method, a class body or module scope. Codex found no case among the first 43 where a live
+    # method read the same key as a dead getter, but the subtraction costs nothing and removes a
+    # whole false-positive class rather than relying on that staying true.
+    dead_nodes = {(path, name) for path, name in dead}
     live_keys: set[str] = set()
-    for (rel_path, func_name), keys in readers.items():
-        for key in keys & catalog_keys:
-            if func_name in referenced:
-                live_keys.add(key)
-            else:
-                inert_keys.setdefault(key, f"{rel_path}:{func_name}()")
+    for path, tree, _text in parsed:
+        for node in tree.body:
+            if isinstance(node, ast.FunctionDef) and (path, node.name) in dead_nodes:
+                continue
+            live_keys |= _keys_read(node) & catalog_keys
+        live_keys |= {
+            key
+            for node in tree.body
+            if not isinstance(node, ast.FunctionDef | ast.ClassDef)
+            for key in _keys_read(node) & catalog_keys
+        }
 
-    # A key read from both a live path and a dead getter is not inert.
-    inert_keys = {key: where for key, where in inert_keys.items() if key not in live_keys}
+    inert: dict[str, str] = {}
+    for (path, name), keys in sorted(dead.items(), key=lambda item: (str(item[0][0]), item[0][1])):
+        for key in sorted(keys - live_keys):
+            inert.setdefault(key, f"{_display_path(path)}:{name}()")
 
     findings: list[Finding] = [
         Finding(
@@ -966,12 +1123,12 @@ def check_inert_settings(catalog_keys: set[str], files: list[Path], baseline: se
             check="inert-setting",
             name=key,
             message=(
-                f"'{key}' is read only by {where}, which nothing calls. The setting is editable "
-                f"and has no effect. Call the getter from the code that enforces the limit, or "
-                f"delete the key from the catalog."
+                f"'{key}' is read only by {where}, for which no reachable caller was found. The "
+                f"setting is editable and has no effect. Call the getter from the code that "
+                f"enforces the limit, or delete the key from the catalog."
             ),
         )
-        for key, where in sorted(inert_keys.items())
+        for key, where in sorted(inert.items())
         if key not in baseline
     ]
     findings.extend(
@@ -983,19 +1140,19 @@ def check_inert_settings(catalog_keys: set[str], files: list[Path], baseline: se
             name=key,
             message=f"'{key}' is no longer inert. Remove it from the baseline in the same commit.",
         )
-        for key in sorted(baseline - set(inert_keys))
+        for key in sorted(baseline - set(inert))
     )
-    if inert_keys:
+    if inert:
         findings.append(
             Finding(
                 file=str(DEFAULT_INERT_BASELINE.relative_to(PROJECT_ROOT)),
                 line=0,
                 severity="info",
                 check="inert-setting",
-                name=f"{len(inert_keys)}-of-{len(catalog_keys)}",
+                name=f"{len(inert)}-of-{len(catalog_keys)}",
                 message=(
-                    f"{len(inert_keys)}/{len(catalog_keys)} settings are read only from a getter "
-                    f"nothing calls. Every one is editable in the UI and inert."
+                    f"{len(inert)}/{len(catalog_keys)} settings are read only from a getter with no "
+                    f"reachable caller. Every one is editable in the UI and inert."
                 ),
             )
         )
@@ -1072,6 +1229,12 @@ def main() -> int:
         help="Keys known to have an effect test (default: scripts/settings_effect_baseline.txt)",
     )
     parser.add_argument(
+        "--drift-baseline",
+        type=Path,
+        default=DEFAULT_DRIFT_BASELINE,
+        help="Keys with a known fallback/catalog drift (default: scripts/settings_drift_baseline.txt)",
+    )
+    parser.add_argument(
         "--inert-baseline",
         type=Path,
         default=DEFAULT_INERT_BASELINE,
@@ -1104,7 +1267,7 @@ def main() -> int:
     )
     all_findings.extend(check_unwired_constants(app_files, allowlist, call_sites))
     all_findings.extend(check_hardcoded_candidates(app_files, allowlist))
-    all_findings.extend(check_default_drift(defaults, call_sites))
+    all_findings.extend(check_default_drift(defaults, call_sites, load_key_baseline(args.drift_baseline)))
     catalog_keys = set(extract_catalog_keys(CATALOG_FILE))
     all_findings.extend(
         check_untested_effects(
