@@ -171,13 +171,29 @@ class LoginDuringMaintenanceTests(SimpleTestCase):
         self.assertContains(response, "scheduled maintenance")
 
     def test_the_form_is_disabled_so_retyping_is_not_invited(self) -> None:
+        """Asserts the button's own attribute, which took three attempts to get right.
+
+        `assertContains(response, "disabled")` proves nothing: the shared button component always
+        emits `disabled:opacity-50 disabled:cursor-not-allowed` in its class list, so the literal
+        string is on every page that has a button. Comparing total counts between the two renders
+        proves nothing either - the maintenance render additionally carries the alert and a
+        populated error summary, which shift the count on their own. Measured: 22 against 20 with
+        the fix, and still higher without it.
+
+        ` disabled>` is the bare attribute closing the button tag: 1 against 0.
+        """
+        credentials = {"email": "someone@example.com", "password": "correct-horse"}
+
         with patch(
             "apps.users.views.api_client.authenticate_customer",
             side_effect=PlatformAPIError("unavailable", status_code=503),
         ):
-            response = Client().post("/login/", {"email": "someone@example.com", "password": "correct-horse"})
+            blocked = Client().post("/login/", credentials)
+        with patch("apps.users.views.api_client.authenticate_customer", return_value=None):
+            reachable = Client().post("/login/", credentials)
 
-        self.assertContains(response, "disabled")
+        self.assertIn(b" disabled>", blocked.content)
+        self.assertNotIn(b" disabled>", reachable.content)
 
     def test_a_genuinely_wrong_password_still_says_so(self) -> None:
         """The distinction has to work in both directions."""
