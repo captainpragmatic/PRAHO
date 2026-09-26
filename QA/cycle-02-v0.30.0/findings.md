@@ -106,8 +106,8 @@ discriminating marker was `b" disabled>"`: 1 with the fix, 0 without.
 **This is the cycle's largest finding.** Phase 3 set out to write effect tests for settings that
 had none; measuring first found something worth more.
 
-**43 of 262 keys (16%) are read only by a function that nothing calls.** The pattern is identical
-in all 43 and is three lines long:
+**56 of 262 keys (21%) have no reachable production reader.** The pattern is identical in almost
+all of them and is three lines long:
 
 ```python
 _DEFAULT_X = 100                                                 # what the code enforces
@@ -116,14 +116,35 @@ def get_x(): return SettingsService.get_integer_setting("app.x", _DEFAULT_X)   #
 ```
 
 Live code compares against the module constant. The getter that would consult the operator's
-configured value is never called from anywhere in `services/platform`, tests included. The
-existing consumer-contract check passes on every one of them, because the key *is* referenced in
-app code — inside the dead getter. That is the gap between a key being present and a key having
+configured value has no caller anywhere in production code. The existing consumer-contract check
+passes on every one of them, because the key *is* referenced in app code — inside the dead getter. That is the gap between a key being present and a key having
 consequences, and it is exactly how `system.maintenance_mode` shipped with nothing a customer
 could see.
 
 The full list is `scripts/settings_inert_baseline.txt`, gated by check 6 of
-`scripts/lint_settings_coverage.py` (`945c6df4`). The ones that matter most:
+`scripts/lint_settings_coverage.py`. The first count was 43 and was too low for two reasons an
+independent review found, both now fixed and both regression-tested in
+`services/platform/tests/common/test_lint_settings_coverage.py`:
+
+- **Name collisions.** The caller sweep matched a bare function name anywhere in the tree. Three
+  modules define `get_task_time_limit()`; `customers/tasks.py` calls its own, and that call made the
+  unused copies in `orders/tasks.py` and `provisioning/virtualmin_tasks.py` look live. References are
+  now counted only in files that could actually import the definition. Four dead readers surfaced.
+- **Tests counted as production.** The sweep included `services/platform/tests/`, so a getter called
+  only from a test — or a key merely read back by a storage test — looked live.
+  `audit.compliant_score_threshold` was exonerated by one `get_setting` call inside a validation
+  test. Nine more surfaced once the check was scoped to production code, including
+  `billing.subscription_grace_period_days`, described in the catalog as "days a customer can use
+  service after payment failure", whose getter has no production caller at all. Subscriptions apply
+  no grace period from that setting.
+
+What the check can and cannot establish is now written into its docstring and its baseline header. The
+criterion is static: a module-level, undecorated function, in a module with no dynamic dispatch, whose
+name appears in no production file that could import it, and whose keys no other production reader
+reads. A finding is "no reachable production reader found", not proof of runtime unreachability.
+Decorated functions and `import_string`-style dispatch make it refuse to judge rather than guess.
+
+The ones that matter most:
 
 | Key | Why it matters |
 |---|---|
@@ -156,14 +177,38 @@ written in.
 - **Check 5 (effect coverage) matched only a direct `update_setting("literal")` call.**
   `tests/settings/test_localisation_consumers.py` drives four localisation settings through
   customer forms, rendered dates and persisted addresses — about as thorough an effect test as this
-  repo has — through a two-line `set_value` helper, and all four were reported untested. Effect
-  coverage was 56/262 measured wrongly; it is **61/262** measured right, with no new test written.
+  repo has — through a two-line `set_value` helper, and all four were reported untested. It also
+  credited a **read** as a write, because a bare `key = "..."` pattern matches
+  `get_setting(key="...")`; two keys held a false credit on that basis, one of them from a mock's
+  `side_effect` comparison, which is a test that stubs the settings read — the opposite of an effect
+  test. Write detection is now AST-based and resolves the helper's key *parameter position*, because
+  assuming the first argument would credit `def write(value, key)` to the wrong string.
 
-The 12 drifts are reported at **low**, not medium, and the demotion is the honest reading: since
-ADR-0042, `get_setting` falls back to `DEFAULT_SETTINGS[key]` and reaches the caller's argument
-only for a key the catalog does not declare, so for every catalog key the inline fallback is
-**unreachable**. A drift is misinformation rather than misbehaviour — the number the next reader
-believes, and the number that would become operative if the key ever left the catalog.
+  Effect coverage was 56/262 measured wrongly. It is **68/262** measured right: 10 from tests written
+  this cycle, the rest from correcting the detector.
+
+  What check 5 still cannot do is see assertions — strip every `assert` from a qualifying file and the
+  credit survives. It measures the shape of an effect test, not its force, so the baseline is a floor
+  on what has been attempted. That is written into the check and the baseline header rather than left
+  for someone to discover.
+
+**A correction, because the first version of this section was wrong.** I demoted the 12 drifts to
+`low` on the reasoning that `get_setting` falls back to `DEFAULT_SETTINGS[key]`, making the caller's
+inline argument unreachable for a catalog key. That is true of `get_setting` and false of the typed
+wrappers. `get_integer_setting` returns the caller's `default` on `ValueError`/`TypeError`
+(`services.py:475`), `get_decimal_setting` returns `default or Decimal("0")` (`:486`),
+`get_list_setting` returns `default or []` (`:503`). A cached `None`, a stored value that will not
+coerce, or a row written through a path that skipped validation all land on the caller's number. So a
+drift is a live behavioural difference that shows up exactly when something has already gone slightly
+wrong — the worst moment to also change a limit. Severity is back to **medium**, with the 12 recorded
+in `scripts/settings_drift_baseline.txt`.
+
+They are baselined rather than fixed because "align it to the catalog" is not a safe default here: the
+drifting `_DEFAULT_*` constant is nearly always **also** read directly by the enforcing code through a
+public alias. Aligning `products.max_price_cents` would raise a price ceiling 100×;
+`provisioning.max_username_uniqueness_attempts` would cut collision retries from 1000 to 10;
+`notifications.max_name_length` would start rejecting campaign names it accepts today. Each needs its
+intended value established and a consumer test.
 
 ### Effect tests added
 
@@ -174,6 +219,40 @@ wrong tax name would put a legally incorrect VAT description on a Romanian fisca
 `test_smartbill_mapper.py` covers the mapper thoroughly but constructs `SmartBillAccountConfig`
 directly, so it proves the mapper and cannot prove the settings. The new tests close that span:
 setting → `_config_from_settings()` → `build_invoice_payload`.
+
+**Eight of the nine `company.*` keys** now have effect tests
+(`tests/settings/test_company_identity_effects.py`). Their consumer is not Python — it is
+`{% setting %}` inside `templates/legal/privacy_policy.html` and `terms_of_service.html`, the pages
+carrying PRAHO's legal identity for GDPR purposes — so the tests request the page and assert the
+rendered text, with a paired default test and a cache test. That shape is what forced the detector fix
+above: a render test imports nothing from `apps.` at all.
+
+Writing them surfaced two more defects.
+
+**`company.legal_name` only half-works.** The identity block of both legal pages honours the setting;
+five prose sentences across the same two pages hardcode "PragmaticHost SRL" inside `{% blocktrans %}`
+blocks. Change the setting and the Terms of Service names the configured company in its identity block
+and a different company in the sentence saying who the agreement binds you to — a legal document
+naming two entities. Not fixed here: interpolating the name rewrites five translatable msgids, which
+costs the existing Romanian translations of legal prose, and that is a call for whoever owns them. The
+defect is pinned by `LegalProseHardcodesTheCompanyNameTests`, which fails the day it is fixed — at
+which point the test should be deleted.
+
+The same class extends into the portal and cannot be fixed the same way: ten portal templates hardcode
+`support@pragmatichost.com` or `privacy@pragmatichost.com`, and the portal has no business DB, so
+`{% setting %}` does not exist there. Only 4 of 262 settings cross the HMAC boundary today (via
+`/api/localisation/`). Making company identity available to the portal is a contract change, not a
+template edit.
+
+**A third variety of inert setting**, invisible to check 6. `company.email_noreply` is read by a live
+method, so the getter is called — but
+`getattr(settings, "DEFAULT_FROM_EMAIL", None) or SettingsService.get_setting("company.email_noreply", …)`
+takes the Django setting, and every shipped settings module gives `DEFAULT_FROM_EMAIL` a non-empty
+value. The left operand is never falsy, so the value is never used. Both branches are asserted in
+`NoReplyAddressPrecedenceTests` rather than only the tidy one, because blanking
+`DEFAULT_FROM_EMAIL` to show the setting "working" would hide the fact that no deployment reaches it.
+Compare `apps/common/context_processors._maintenance_mode_active`, which gets the same precedence
+right by testing `is not None` on a setting that may legitimately be unset.
 
 ---
 
@@ -222,10 +301,14 @@ buys a per-render settings read for nothing.
 | Item | Verdict | Note |
 |---|---|---|
 | Version bump to 0.30.0 | NOT-RUN | Also: `README.md` carries a stale `tests-7,000+` badge (actual 10,964) and no coverage badge |
-| The 43 inert settings | FAIL | Baselined and gated; each fix is its own change |
+| The 56 inert settings | FAIL | Baselined and gated; each fix is its own change |
+| The 12 fallback/catalog drifts | FAIL | Baselined and gated; each needs its intended value decided |
+| `company.legal_name` hardcoded in legal prose | FAIL | Pinned by a test; fix costs 5 translated msgids |
+| Portal templates hardcoding company identity | FAIL | Needs the settings contract extended across HMAC |
+| `company.email_noreply` shadowed by `DEFAULT_FROM_EMAIL` | FAIL | Precedence pinned by a test |
 | Price-override path (§4) | FAIL | Issue to file |
 | `romanian_business_context` (§5) | FAIL | Deletion, separate commit |
-| Effect tests for the 22 remaining business-zone settings | NOT-RUN | `company.*` (9), `orders.*` (7), `billing.*` (3), plus one each in customers, security, support |
+| Effect tests for the 9 remaining testable business-zone settings | NOT-RUN | `orders` (4), `billing` (2), and one each in customers, security, support. The `company` group is done. Four more — the two `orders.max_price_override_*`, `orders.max_payment_failures_before_fail`, `billing.subscription_grace_period_days` — cannot be effect-tested at all, because they are inert |
 | Portal coverage 72.02% → 90-95% | NOT-RUN | |
 | `provisioning` 55.50% → 80% | NOT-RUN | |
 | Route and button sweep (398 platform + 80 portal named routes) | NOT-RUN | `scripts/lint_template_components.py` is portal-only; 91 live TMPL blockers are hidden behind `\|\| true` in the Makefile |

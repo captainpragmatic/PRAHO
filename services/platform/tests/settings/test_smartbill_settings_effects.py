@@ -32,6 +32,8 @@ from tests.factories.billing_factories import CustomerFactory, InvoiceLineFactor
 
 SERIES_KEY = "integrations.smartbill_invoice_series"
 TAX_NAMES_KEY = "integrations.smartbill_tax_names"
+MEASURING_UNIT_KEY = "integrations.smartbill_measuring_unit"
+UNIT_FROM_SETTINGS = "ora"  # distinct from the catalog default "buc"
 SERIES_REFUSAL = "No SmartBill invoice series configured"
 TAX_NAME_REFUSAL = "No SmartBill tax name configured"
 
@@ -77,8 +79,11 @@ class SmartBillSettingEffectTests(TestCase):
             line_total_cents=12100,
             tax_category_code="S",
         )
-        # A measuring unit is required independently; set it so it cannot mask the assertions.
-        SettingsService.update_setting("integrations.smartbill_measuring_unit", "buc")
+        # A measuring unit is required independently, so it must be set or every assertion below
+        # would be masked by that refusal. Deliberately NOT the catalog default "buc": writing a
+        # value a setting already has earns the key an effect credit while proving nothing about it,
+        # and `test_the_configured_series_is_what_reaches_the_payload` asserts this one lands too.
+        SettingsService.update_setting(MEASURING_UNIT_KEY, UNIT_FROM_SETTINGS)
 
     def _refusals(self) -> tuple[str, ...]:
         result = build_invoice_payload(self.invoice, _config_from_settings())
@@ -106,7 +111,10 @@ class SmartBillSettingEffectTests(TestCase):
         result = build_invoice_payload(self.invoice, _config_from_settings())
 
         self.assertTrue(result.is_ok(), result.error if result.is_err() else "")
-        self.assertEqual(result.unwrap().payload["seriesName"], "SERIES-FROM-SETTINGS")
+        payload = result.unwrap().payload
+        self.assertEqual(payload["seriesName"], "SERIES-FROM-SETTINGS")
+        for product in payload["products"]:
+            self.assertEqual(product["measuringUnitName"], UNIT_FROM_SETTINGS)
 
     # --- integrations.smartbill_tax_names ------------------------------------------
 
@@ -129,7 +137,12 @@ class SmartBillSettingEffectTests(TestCase):
         result = build_invoice_payload(self.invoice, _config_from_settings())
 
         self.assertTrue(result.is_ok(), result.error if result.is_err() else "")
-        self.assertIn("NAME-FROM-SETTINGS", str(result.unwrap().payload))
+        # The field, not the payload's repr. Searching the whole structure would also pass if the
+        # name landed in `measuringUnitName` or a description, which is a different bug entirely.
+        products = result.unwrap().payload["products"]
+        self.assertTrue(products)
+        for product in products:
+            self.assertEqual(product["taxName"], "NAME-FROM-SETTINGS")
 
     def test_a_mapping_for_a_different_rate_does_not_satisfy_this_one(self) -> None:
         """The mapping is keyed on category and rate together, which is the point of it."""
