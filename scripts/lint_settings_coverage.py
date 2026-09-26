@@ -48,6 +48,8 @@ from apps.settings.key_scan import extract_catalog_defaults, extract_string_lite
 SETUP_DEFAULTS_GLOB = "setup_default_settings.py"
 
 DEFAULT_ALLOWLIST = PROJECT_ROOT / "scripts" / "settings_allowlist.txt"
+PLATFORM_TESTS_DIR = PROJECT_ROOT / "services" / "platform" / "tests"
+DEFAULT_EFFECT_BASELINE = PROJECT_ROOT / "scripts" / "settings_effect_baseline.txt"
 
 SEVERITY_ORDER = {"medium": 0, "low": 1, "info": 2}
 
@@ -99,6 +101,22 @@ class Finding:
 
 
 # ─── Allowlist loading ────────────────────────────────────────────────────────
+
+
+def extract_catalog_keys(catalog_path: Path) -> set[str]:
+    """Every `SettingDef(key=...)` in the catalog, by text rather than import.
+
+    Deliberately no Django: this script runs in the lint phase, before any app is loaded.
+    """
+    return set(re.findall(r'key="([a-z0-9_.]+)"', catalog_path.read_text()))
+
+
+def load_effect_baseline(path: Path) -> set[str]:
+    if not path.exists():
+        return set()
+    return {
+        line.strip() for line in path.read_text().splitlines() if line.strip() and not line.lstrip().startswith("#")
+    }
 
 
 def load_allowlist(path: Path) -> tuple[set[str], set[str]]:
@@ -621,6 +639,113 @@ def check_default_drift(
 SEVERITY_ICONS = {"medium": "📋", "low": "ℹ️", "info": "💡"}
 
 
+def _module_string_constants(text: str) -> dict[str, str]:
+    """Module-level `NAME = "literal"` pairs, so a test may name its key once and reuse it.
+
+    Without this the detector silently dictates test style: the first tests written against it
+    used `SERIES_KEY = "integrations.smartbill_invoice_series"` and were reported as untested
+    while passing, because only the literal at the call site was ever matched. That is the same
+    blind spot `key_scan.extract_settings_call_keys` documents, and a measurement that quietly
+    under-reports is worse than none.
+    """
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return {}
+    constants: dict[str, str] = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    constants[target.id] = node.value.value
+    return constants
+
+
+def _writes_this_key(text: str, key: str) -> bool:
+    """A write addressed to THIS key, not merely a file that happens to write something."""
+    quoted = re.escape(key)
+    if (
+        re.search(rf'(update_setting|reset_setting_to_default)\(\s*["\']{quoted}["\']', text)
+        or re.search(rf'["\']{quoted}["\']\s*:', text)
+        or re.search(rf'key\s*=\s*["\']{quoted}["\']', text)
+    ):
+        return True
+    aliases = [name for name, value in _module_string_constants(text).items() if value == key]
+    return any(
+        re.search(rf"(update_setting|reset_setting_to_default)\(\s*{re.escape(alias)}\b", text)
+        or re.search(rf"\b{re.escape(alias)}\s*:", text)
+        for alias in aliases
+    )
+
+
+def _reaches_another_app(text: str) -> bool:
+    """An effect test calls into a DIFFERENT app; reading the key back is not an effect."""
+    return any(app != "settings" for app in re.findall(r"from apps\.(\w+)", text))
+
+
+def effect_tested_keys(catalog_keys: set[str], test_files: list[Path]) -> set[str]:
+    """Keys some test writes and then observes through another app's behaviour.
+
+    This is the shape `tests/settings/test_settings_integration.py` established: set the value,
+    call a different app's object, assert what it does. Reading the key back through
+    `SettingsService` proves storage, which the other four checks already cover.
+    """
+    texts = {path: path.read_text(errors="ignore") for path in test_files}
+    return {
+        key
+        for key in catalog_keys
+        for path, text in texts.items()
+        if key in text and _writes_this_key(text, key) and _reaches_another_app(text)
+    }
+
+
+def check_untested_effects(catalog_keys: set[str], test_files: list[Path], baseline: set[str]) -> list[Finding]:
+    """Check 5 — a setting whose EFFECT nothing asserts.
+
+    The other four checks are about wiring: is the key referenced, do the defaults agree, does a
+    fallback drift. `system.maintenance_mode` passed every one of them while having no
+    customer-facing consequence at all - it was referenced, its default matched, its fallback was
+    consistent, and enabling it did nothing a portal customer could see. Wiring is not effect.
+
+    A ratchet, not a cliff. 185 of 262 keys currently have no test that mentions them, and
+    demanding 185 tests today would only teach people to bypass the gate. So the baseline records
+    the keys that ARE effect-tested, and this fails when one of them stops being - which makes
+    progress monotonic and every future effect test permanent.
+    """
+    tested = effect_tested_keys(catalog_keys, test_files)
+    findings: list[Finding] = [
+        Finding(
+            file=str(DEFAULT_EFFECT_BASELINE.relative_to(PROJECT_ROOT)),
+            line=0,
+            severity="medium",
+            check="untested-effect-regression",
+            name=key,
+            message=(
+                f"'{key}' was effect-tested and no longer is. Restore the test, or remove the key "
+                f"from the baseline in the same commit and say why."
+            ),
+        )
+        for key in sorted(baseline - tested)
+    ]
+
+    untested = sorted(catalog_keys - tested)
+    if untested:
+        findings.append(
+            Finding(
+                file=str(DEFAULT_EFFECT_BASELINE.relative_to(PROJECT_ROOT)),
+                line=0,
+                severity="info",
+                check="untested-effect",
+                name=f"{len(untested)}-of-{len(catalog_keys)}",
+                message=(
+                    f"{len(tested)}/{len(catalog_keys)} settings have an effect test. "
+                    f"Add one with any change that touches a setting; the baseline only moves up."
+                ),
+            )
+        )
+    return findings
+
+
 def format_text(findings: list[Finding]) -> str:
     if not findings:
         return "No settings coverage issues found."
@@ -684,6 +809,12 @@ def main() -> int:
         default=DEFAULT_ALLOWLIST,
         help="Path to allowlist file (default: scripts/settings_allowlist.txt)",
     )
+    parser.add_argument(
+        "--effect-baseline",
+        type=Path,
+        default=DEFAULT_EFFECT_BASELINE,
+        help="Keys known to have an effect test (default: scripts/settings_effect_baseline.txt)",
+    )
     args = parser.parse_args()
 
     # Load allowlist (constants for Check 2/3, orphan keys for Check 1)
@@ -712,6 +843,14 @@ def main() -> int:
     all_findings.extend(check_unwired_constants(app_files, allowlist, call_sites))
     all_findings.extend(check_hardcoded_candidates(app_files, allowlist))
     all_findings.extend(check_default_drift(defaults, call_sites))
+    catalog_keys = set(extract_catalog_keys(CATALOG_FILE))
+    all_findings.extend(
+        check_untested_effects(
+            catalog_keys,
+            iter_python_files(PLATFORM_TESTS_DIR),
+            load_effect_baseline(args.effect_baseline),
+        )
+    )
 
     # Sort by severity, then file, then line
     all_findings.sort(key=lambda f: (SEVERITY_ORDER.get(f.severity, 99), f.file, f.line))
