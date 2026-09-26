@@ -1,9 +1,9 @@
 {% load i18n %}
 {% load ui_components %}
 
-{# Sibling of rate_limit_inline_alert.html. Blue rather than amber: maintenance is a planned
+{% comment %} Sibling of rate_limit_inline_alert.html. Blue rather than amber: maintenance is a planned
    state and nothing is wrong with the customer's account, which is the distinction the previous
-   behaviour destroyed by rendering an empty list instead. #}
+   behaviour destroyed by rendering an empty list instead. {% endcomment %}
 <div class="bg-blue-900/30 border border-blue-500/50 rounded-lg p-6" role="alert" aria-live="polite">
   <div class="flex items-start gap-3">
     <div class="mt-0.5">

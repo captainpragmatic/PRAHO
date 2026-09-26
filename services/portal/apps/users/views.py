@@ -26,7 +26,11 @@ from apps.common.decorators import (
 )
 from apps.common.localisation_middleware import sync_language_selection
 from apps.common.localisation_services import store_localisation_preferences
-from apps.common.rate_limit_feedback import get_maintenance_message, is_rate_limited_error
+from apps.common.rate_limit_feedback import (
+    get_maintenance_message,
+    get_retry_after_from_error,
+    is_rate_limited_error,
+)
 from apps.users.forms import (
     ChangePasswordForm,
     CompanyCreationForm,
@@ -890,7 +894,18 @@ def mfa_backup_codes_view(request: HttpRequest) -> HttpResponse:
     if not request.session.get("user_id"):
         return redirect("users:login")
     user_id = int(request.session["user_id"])
-    profile = api_client.get_customer_profile(user_id) or {}
+    try:
+        profile = api_client.get_customer_profile(user_id) or {}
+    except PlatformAPIError as exc:
+        # `get_customer_profile` now propagates a degraded platform instead of returning None, so
+        # this view needs a handler: without one a maintenance window turned the backup-code page
+        # into a 500, where before it redirected with a warning. Redirecting on an unknown MFA state
+        # is the safe answer - "enable 2FA first" would be a guess, and the codes themselves are
+        # never re-displayable.
+        if not exc.is_degraded:
+            raise
+        messages.warning(request, get_maintenance_message(get_retry_after_from_error(exc)))
+        return redirect("users:mfa_management")
     if not profile.get("mfa_enabled"):
         messages.warning(request, _("You need to enable 2FA first before accessing backup codes."))
         return redirect("users:mfa_management")

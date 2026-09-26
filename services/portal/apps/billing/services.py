@@ -31,11 +31,29 @@ logger = logging.getLogger(__name__)
 def _raise_if_degraded(exc: Exception) -> None:
     """Re-raise a degraded-platform error so the view can say what happened.
 
-    Renamed from `_raise_if_rate_limited`, because it only ever re-raised throttles: a
-    maintenance 503 fell through and this module returned an empty page instead, which rendered
-    as "you have no documents" with nothing to explain it. The name would now be a lie.
+    Widened from `_raise_if_rate_limited`, which only ever re-raised throttles: a maintenance 503
+    fell through and this module returned an empty page instead, rendering as "you have no
+    documents" with nothing to explain it.
+
+    Use this ONLY where the caller has a handler that renders the maintenance state. Widening a
+    propagation changes behaviour for the newly propagated case, and a caller that previously could
+    not receive an exception will not start handling one just because the name changed - see
+    `_raise_if_rate_limited` below.
     """
     if isinstance(exc, PlatformAPIError) and exc.is_degraded:
+        raise exc
+
+
+def _raise_if_rate_limited(exc: Exception) -> None:
+    """Re-raise a throttle only, leaving a maintenance 503 to this module's graceful return.
+
+    Kept deliberately, for call sites whose callers have no exception handler and whose existing
+    degraded return is already the right customer-facing answer. Widening every site to
+    `_raise_if_degraded` was mechanical and wrong: the recurring-payment endpoints below already
+    answered "temporarily unavailable" in their JSON contract, and making them raise turned five
+    uncaught callers into 500s - a worse outcome than the empty-state bug being fixed.
+    """
+    if isinstance(exc, PlatformAPIError) and exc.is_rate_limited:
         raise exc
 
 
@@ -406,7 +424,9 @@ class RecurringPaymentsService:
                 user_id=user_id,
             )
         except Exception as error:
-            _raise_if_degraded(error)
+            # Rate limiting only. `recurring_payments_view` and the four JSON mutation endpoints
+            # beneath it have no exception handler, and this dict IS their contract.
+            _raise_if_rate_limited(error)
             logger.error("Recurring-payment API call failed for customer %s: %s", customer_id, error)
             return {"success": False, "error": "Recurring-payment service is temporarily unavailable"}
 
