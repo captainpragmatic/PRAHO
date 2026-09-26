@@ -27,6 +27,7 @@ import ast
 import sys
 import tempfile
 from pathlib import Path
+from typing import ClassVar
 
 from django.test import SimpleTestCase
 
@@ -102,23 +103,120 @@ class WrittenKeyDetectionTests(SimpleTestCase):
         self.assertIn(KEY, lint._written_keys(source))
 
 
-class ObservationOutsideSettingsTests(SimpleTestCase):
-    """An effect must be observed outside the settings app: another app, or a rendered page."""
+class ReaderReachabilityTests(SimpleTestCase):
+    """An effect is observed through the code that READS the key, not merely "another app"."""
 
-    def test_importing_another_app_qualifies(self) -> None:
-        self.assertTrue(lint._reaches_another_app("from apps.billing.models import Invoice\n"))
+    GRAPH: ClassVar[dict[str, set[str]]] = {
+        "apps.api.localisation.views": {"apps.common.localisation_services"},
+        "apps.common.localisation_services": {"apps.settings.services"},
+        "apps.orders.tasks": {"apps.settings.services"},
+        "apps.unrelated.views": {"apps.customers.models"},
+    }
 
-    def test_importing_only_the_settings_app_does_not(self) -> None:
-        self.assertFalse(lint._reaches_another_app("from apps.settings.services import SettingsService\n"))
+    def test_the_reader_itself_is_reached(self) -> None:
+        self.assertTrue(lint.reaches_reader("apps.orders.tasks", {"apps.orders.tasks"}, self.GRAPH))
 
-    def test_requesting_a_page_outside_the_settings_app_qualifies(self) -> None:
-        """The only shape available to a key whose sole consumer is `{% setting %}` in a template."""
-        self.assertTrue(lint._reaches_another_app('self.client.get("/privacy-policy/")'))
-        self.assertTrue(lint._reaches_another_app('self.client.get(reverse("privacy_policy"))'))
+    def test_a_reader_one_hop_away_is_reached(self) -> None:
+        """`test_localisation_api.py` goes through the API view, which calls the reading module."""
+        self.assertTrue(
+            lint.reaches_reader(
+                "apps.api.localisation.views", {"apps.common.localisation_services"}, self.GRAPH
+            )
+        )
 
-    def test_requesting_the_settings_app_s_own_pages_does_not(self) -> None:
-        self.assertFalse(lint._reaches_another_app('self.client.post("/settings/save/", data)'))
-        self.assertFalse(lint._reaches_another_app('self.client.get(reverse("settings:list"))'))
+    def test_an_unrelated_module_does_not_reach_the_reader(self) -> None:
+        self.assertFalse(lint.reaches_reader("apps.unrelated.views", {"apps.orders.tasks"}, self.GRAPH))
+
+    def test_depth_is_bounded(self) -> None:
+        graph = {"a": {"b"}, "b": {"c"}, "c": {"d"}}
+        self.assertTrue(lint.reaches_reader("a", {"c"}, graph, depth=2))
+        self.assertFalse(lint.reaches_reader("a", {"d"}, graph, depth=2))
+
+    def test_a_module_path_becomes_a_dotted_name(self) -> None:
+        self.assertEqual(lint._module_name("services/platform/apps/orders/tasks.py"), "apps.orders.tasks")
+
+
+class EffectCreditScopeTests(SimpleTestCase):
+    """The write and the observation must belong to the SAME class.
+
+    File scope was the defect an external review found: eight keys held credit because a write in one
+    class was qualified by an unrelated request or import in another. Each test below is one of those
+    shapes, reduced to its essentials.
+    """
+
+    KEY = "orders.card_timeout_hours"
+    READERS: ClassVar[dict[str, set[str]]] = {KEY: {"apps.orders.tasks"}}
+    GRAPH: ClassVar[dict[str, set[str]]] = {"apps.orders.tasks": set(), "apps.audit.views": set()}
+
+    def credit(self, source: str) -> set[str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "test_probe.py"
+            path.write_text(source)
+            return lint.effect_tested_keys({self.KEY}, [path], self.READERS, self.GRAPH, set())
+
+    def test_a_write_observed_through_the_reader_in_the_same_class_earns_credit(self) -> None:
+        source = (
+            "from apps.orders.tasks import process_pending_orders\n"
+            "class T:\n"
+            f'    def test_x(self):\n        SettingsService.update_setting("{self.KEY}", 6)\n'
+            "        process_pending_orders()\n"
+        )
+        self.assertIn(self.KEY, self.credit(source))
+
+    def test_a_write_qualified_by_a_different_class_earns_nothing(self) -> None:
+        """The exact shape of the eight false credits."""
+        source = (
+            "from apps.orders.tasks import process_pending_orders\n"
+            "class Writes:\n"
+            f'    def test_x(self):\n        SettingsService.update_setting("{self.KEY}", 6)\n'
+            "class Observes:\n"
+            "    def test_y(self):\n        process_pending_orders()\n"
+        )
+        self.assertNotIn(self.KEY, self.credit(source))
+
+    def test_a_write_observed_through_an_unrelated_module_earns_nothing(self) -> None:
+        source = (
+            "from apps.audit.views import audit_list\n"
+            "class T:\n"
+            f'    def test_x(self):\n        SettingsService.update_setting("{self.KEY}", 6)\n'
+            "        audit_list()\n"
+        )
+        self.assertNotIn(self.KEY, self.credit(source))
+
+    def test_a_read_back_earns_nothing(self) -> None:
+        """Writing then reading the key back proves storage, which other checks already cover."""
+        source = (
+            "class T:\n"
+            f'    def test_x(self):\n        SettingsService.update_setting("{self.KEY}", 6)\n'
+            f'        self.assertEqual(SettingsService.get_integer_setting("{self.KEY}", 0), 6)\n'
+        )
+        self.assertNotIn(self.KEY, self.credit(source))
+
+    def test_a_template_only_key_is_earned_by_rendering_a_page(self) -> None:
+        source = (
+            "class T:\n"
+            '    def test_x(self):\n        SettingsService.update_setting("company.legal_name", "X SRL")\n'
+            '        self.client.get("/privacy-policy/")\n'
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "test_probe.py"
+            path.write_text(source)
+            credited = lint.effect_tested_keys(
+                {"company.legal_name"}, [path], {}, {}, {"company.legal_name"}
+            )
+        self.assertIn("company.legal_name", credited)
+
+    def test_a_module_level_key_collection_the_class_uses_counts_as_written(self) -> None:
+        """`PRIVACY_KEYS = {...}` iterated by the class; seven company keys depend on this."""
+        source = (
+            "from apps.orders.tasks import process_pending_orders\n"
+            f'KEYS = {{"{self.KEY}": 6}}\n'
+            "class T:\n"
+            "    def test_x(self):\n        for k, v in KEYS.items():\n"
+            "            SettingsService.update_setting(k, v)\n"
+            "        process_pending_orders()\n"
+        )
+        self.assertIn(self.KEY, self.credit(source))
 
 
 class InertSettingDetectionTests(SimpleTestCase):

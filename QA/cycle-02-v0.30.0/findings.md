@@ -184,8 +184,19 @@ written in.
   test. Write detection is now AST-based and resolves the helper's key *parameter position*, because
   assuming the first argument would credit `def write(value, key)` to the wrong string.
 
-  Effect coverage was 56/262 measured wrongly. It is **68/262** measured right: 10 from tests written
-  this cycle, the rest from correcting the detector.
+  Effect coverage was 56/262 measured wrongly, then reported as 68 and 77 — **and those were wrong
+  too, in the other direction.** An independent review found the criterion combined "writes the key"
+  and "reaches another app" across a whole FILE, never tying them to the same test. Eight keys held
+  credit that way: `virtualmin.rate_limit_qps` was qualified by an unrelated dashboard request
+  elsewhere in a settings-permissions file, and `audit.compliant_score_threshold` by a test that only
+  checks validation rejects a negative score and never touches compliance classification.
+
+  The criterion is now per test CLASS, and the observation must be of the key's **actual reader** —
+  the production module that calls `SettingsService` for it, or one reachable within two import hops.
+  That data was always available from `collect_settings_calls`; the check simply had not used it.
+  Validated on both sides before being adopted: all eight false credits are rejected and none of the
+  cycle's real effect tests is lost. The defensible figure is **56/262**, which is where this cycle
+  started — the 21 keys that lost credit never had a test that drove the setting anywhere.
 
   What check 5 still cannot do is see assertions — strip every `assert` from a qualifying file and the
   credit survives. It measures the shape of an effect test, not its force, so the baseline is a floor

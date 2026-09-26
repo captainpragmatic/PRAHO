@@ -876,39 +876,212 @@ def _written_keys(text: str) -> frozenset[str]:
     return frozenset(written)
 
 
-def _reaches_another_app(text: str) -> bool:
-    """An effect test observes the change OUTSIDE the settings app; a read-back is not an effect.
+def production_readers(app_files: list[Path]) -> dict[str, set[str]]:
+    """Which production MODULES read each setting key.
 
-    Two shapes qualify. A test that imports another app's code, and a test that requests a page
-    through the Django test client - which leaves the settings app by construction, since the
-    view, the template and every tag it loads live elsewhere. The second shape was missing, and
-    it is the only one available to six of the nine `company.*` keys, whose sole consumer is
-    `{% setting %}` in `templates/legal/`: such a test imports nothing from `apps.` at all.
-    A request to the settings app's own pages still does not count.
+    This is what makes an effect claim checkable. The earlier version asked only whether a test file
+    reached "another app" somewhere, which is satisfied by any import at all - so
+    `virtualmin.rate_limit_qps` earned credit from a settings-permissions test because an unrelated
+    dashboard request elsewhere in the same file qualified it. Knowing the key's actual consumer turns
+    "this test touches something" into "this test touches the code that reads this setting".
     """
-    if any(app != "settings" for app in re.findall(r"from apps\.(\w+)", text)):
-        return True
-    targets = re.findall(r'client\.(?:get|post|put|patch|delete)\(\s*(?:reverse\(\s*)?["\']([^"\']+)', text)
-    return any(not target.lstrip("/").startswith("settings") for target in targets)
+    readers: dict[str, set[str]] = {}
+    for call in collect_settings_calls(app_files):
+        readers.setdefault(call.key, set()).add(_module_name(call.file))
+    return readers
 
 
-def effect_tested_keys(catalog_keys: set[str], test_files: list[Path]) -> set[str]:
-    """Keys some test writes and then observes through another app's behaviour.
+def _module_name(relative_path: str) -> str:
+    """`services/platform/apps/orders/tasks.py` -> `apps.orders.tasks`."""
+    return relative_path.replace("services/platform/", "").removesuffix(".py").replace("/", ".")
 
-    This is the shape `tests/settings/test_settings_integration.py` established: set the value,
-    call a different app's object, assert what it does. Reading the key back through
-    `SettingsService` proves storage, which the other four checks already cover.
+
+def production_import_graph(app_files: list[Path]) -> dict[str, set[str]]:
+    """Module -> the `apps.*` modules it imports from, function-level imports included.
+
+    ADR-0007 pushes cross-app imports inside functions, so a module-level-only scan would miss most
+    of this codebase's real edges.
     """
-    texts = {path: path.read_text(errors="ignore") for path in test_files}
-    return {
-        key
-        for key in catalog_keys
-        for path, text in texts.items()
-        if key in text and key in _written_keys(text) and _reaches_another_app(text)
-    }
+    graph: dict[str, set[str]] = {}
+    for path in app_files:
+        text = path.read_text(errors="ignore")
+        module = _module_name(str(path.relative_to(PROJECT_ROOT)))
+        graph[module] = set(re.findall(r"from (apps\.[\w.]+) import", text))
+    return graph
 
 
-def check_untested_effects(catalog_keys: set[str], test_files: list[Path], baseline: set[str]) -> list[Finding]:
+def reaches_reader(start: str, readers: set[str], graph: dict[str, set[str]], depth: int = 2) -> bool:
+    """Whether `start` reaches a reading module within `depth` import hops.
+
+    Depth matters and 0 is too strict: `tests/settings/test_localisation_api.py` drives
+    `system.customer_date_format` through `apps.api.localisation.views`, which calls
+    `get_localisation_defaults()` in `apps.common.localisation_services` - the module that actually
+    reads the key. Requiring the test to import the reader itself would reject a genuine effect test
+    for the crime of going through the front door.
+    """
+    seen, frontier = {start}, [(start, 0)]
+    while frontier:
+        module, hops = frontier.pop()
+        if module in readers:
+            return True
+        if hops >= depth:
+            continue
+        for nxt in graph.get(module, ()):
+            if nxt not in seen:
+                seen.add(nxt)
+                frontier.append((nxt, hops + 1))
+    return False
+
+
+def template_consumed_keys(template_files: list[Path]) -> set[str]:
+    """Keys a template reads via `{% setting %}` and its typed siblings.
+
+    Nine keys have no Python reader at all - the `company.*` identity values are consumed only by
+    `templates/legal/`. For those the only possible observation is a rendered page.
+    """
+    keys: set[str] = set()
+    for path in template_files:
+        keys |= set(re.findall(r'setting\w*\s+["\']([a-z0-9_.]+)["\']', path.read_text(errors="ignore")))
+    return keys
+
+
+def _module_key_collections(tree: ast.Module, catalog_keys: set[str]) -> dict[str, set[str]]:
+    """Module-level `NAME = {"app.key": ...}` collections, so a class that uses NAME counts as writing them.
+
+    Without this, `tests/settings/test_company_identity_effects.py` loses seven of its ten keys: they
+    live in module-level `PRIVACY_KEYS`/`TERMS_KEYS` dicts that the test class iterates. Scoping the
+    write to the class is right; pretending the class cannot see its own module is not.
+    """
+    collections: dict[str, set[str]] = {}
+    for node in tree.body:
+        if not isinstance(node, ast.Assign) or not isinstance(node.targets[0], ast.Name):
+            continue
+        value = node.value
+        if isinstance(value, ast.Dict):
+            literals = {k.value for k in value.keys if isinstance(k, ast.Constant) and isinstance(k.value, str)}
+        elif isinstance(value, ast.List | ast.Tuple | ast.Set):
+            literals = {e.value for e in value.elts if isinstance(e, ast.Constant) and isinstance(e.value, str)}
+        else:
+            continue
+        if literals & catalog_keys:
+            collections[node.targets[0].id] = literals & catalog_keys
+    return collections
+
+
+def _written_under(
+    node: ast.AST,
+    constants: dict[str, str],
+    helpers: dict[str, int],
+    collections: dict[str, set[str]],
+    referenced: set[str],
+) -> set[str]:
+    """Keys written anywhere under `node`, resolving aliases from the module's constants."""
+
+    def resolve(expr: ast.expr | None) -> str | None:
+        if isinstance(expr, ast.Constant) and isinstance(expr.value, str):
+            return expr.value
+        if isinstance(expr, ast.Name):
+            return constants.get(expr.id)
+        if isinstance(expr, ast.Attribute) and isinstance(expr.value, ast.Name) and expr.value.id in ("self", "cls"):
+            return constants.get(expr.attr)
+        return None
+
+    written: set[str] = set()
+    for call in ast.walk(node):
+        if not isinstance(call, ast.Call):
+            continue
+        name = _called_name(call.func)
+        position = 0 if name in _DIRECT_WRITERS else helpers.get(name)
+        if position is None:
+            continue
+        if len(call.args) > position and (key := resolve(call.args[position])):
+            written.add(key)
+        written |= {resolved for kw in call.keywords if kw.arg == "key" and (resolved := resolve(kw.value))}
+    for dict_node in ast.walk(node):
+        if isinstance(dict_node, ast.Dict):
+            written |= {
+                k.value
+                for k in dict_node.keys
+                if isinstance(k, ast.Constant) and isinstance(k.value, str) and "." in k.value
+            }
+    for name, keys in collections.items():
+        if name in referenced:
+            written |= keys
+    return written
+
+
+def effect_tested_keys(
+    catalog_keys: set[str],
+    test_files: list[Path],
+    readers: dict[str, set[str]],
+    graph: dict[str, set[str]],
+    template_keys: set[str],
+) -> set[str]:
+    """Keys a test writes and then observes through the code that actually reads them.
+
+    The criterion, per TEST CLASS rather than per file:
+
+    1. the class writes the key, and
+    2. the class uses a symbol imported from a module that reads that key, or reaches one within two
+       import hops - or, for a key whose only consumer is a template, the class requests a page.
+
+    Scope is the class because that is the unit real tests are organised in: the write often sits in
+    `setUp` or a helper while each test observes. File scope, which this used before, let a write in
+    one class be qualified by an unrelated request in another - eight keys held credit that way,
+    including `audit.compliant_score_threshold`, whose qualifying test only checks that settings
+    validation rejects a negative score and never touches compliance classification.
+
+    What this still cannot do is inspect assertions: a qualifying class with every `assert` stripped
+    keeps its credit. It now measures that a test drove the setting INTO its consumer, which is a far
+    stronger claim than the previous "the file mentions both", and still not a proof of coverage.
+    """
+    credited: set[str] = set()
+    for path in test_files:
+        source = path.read_text(errors="ignore")
+        try:
+            tree = ast.parse(source)
+        except SyntaxError:
+            continue
+        constants = _module_string_constants(source)
+        helpers = _write_helper_positions(source)
+        collections = _module_key_collections(tree, catalog_keys)
+        imported: dict[str, set[str]] = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                imported.setdefault(node.module, set()).update(a.asname or a.name for a in node.names)
+        lines = source.splitlines()
+
+        for cls in (n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)):
+            referenced = {n.id for n in ast.walk(cls) if isinstance(n, ast.Name)} | {
+                n.attr for n in ast.walk(cls) if isinstance(n, ast.Attribute)
+            }
+            written = _written_under(cls, constants, helpers, collections, referenced) & catalog_keys
+            if not written:
+                continue
+            body = "\n".join(lines[cls.lineno - 1 : (cls.end_lineno or cls.lineno)])
+            makes_request = bool(re.search(r"client\.(?:get|post|put|patch|delete)\(", body))
+            used_modules = {module for module, names in imported.items() if names & referenced}
+            for key in written:
+                key_readers = readers.get(key, set())
+                observed_through_reader = bool(key_readers) and any(
+                    reaches_reader(module, key_readers, graph) for module in used_modules
+                )
+                # A key with no Python reader at all - the `company.*` identity values - can only be
+                # observed on a rendered page.
+                rendered_on_a_page = key in template_keys and makes_request
+                if observed_through_reader or rendered_on_a_page:
+                    credited.add(key)
+    return credited
+
+
+def check_untested_effects(  # noqa: PLR0913  # One argument per input the criterion needs
+    catalog_keys: set[str],
+    test_files: list[Path],
+    baseline: set[str],
+    readers: dict[str, set[str]],
+    graph: dict[str, set[str]],
+    template_keys: set[str],
+) -> list[Finding]:
     """Check 5 — a setting whose EFFECT nothing asserts.
 
     The other four checks are about wiring: is the key referenced, do the defaults agree, does a
@@ -928,7 +1101,7 @@ def check_untested_effects(catalog_keys: set[str], test_files: list[Path], basel
     Reading the test is still the only thing that establishes the assertion discriminates, which is
     why the tests behind entries added here were mutation-checked by hand.
     """
-    tested = effect_tested_keys(catalog_keys, test_files)
+    tested = effect_tested_keys(catalog_keys, test_files, readers, graph, template_keys)
     findings: list[Finding] = [
         Finding(
             file=str(DEFAULT_EFFECT_BASELINE.relative_to(PROJECT_ROOT)),
@@ -1274,6 +1447,9 @@ def main() -> int:
             catalog_keys,
             iter_python_files(PLATFORM_TESTS_DIR),
             load_key_baseline(args.effect_baseline),
+            production_readers(app_files),
+            production_import_graph(app_files),
+            template_consumed_keys(template_files),
         )
     )
     # Check 6 sweeps the whole platform tree, not just apps/: a getter may be called from a
