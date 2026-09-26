@@ -27,6 +27,34 @@ def is_rate_limited_error(error: Exception) -> bool:
     return isinstance(error, PlatformAPIError) and bool(error.is_rate_limited)
 
 
+def is_maintenance_error(error: Exception) -> bool:
+    return isinstance(error, PlatformAPIError) and bool(error.is_maintenance)
+
+
+def get_maintenance_message(retry_after: int | None) -> str:
+    if retry_after:
+        return _(
+            "We're carrying out scheduled maintenance. Your data is safe - please try again in %(seconds)s seconds."
+        ) % {"seconds": retry_after}
+    return _("We're carrying out scheduled maintenance. Your data is safe - please try again shortly.")
+
+
+def build_maintenance_context(request: HttpRequest, error: Exception) -> dict[str, str | bool | int | None]:
+    """The shape `build_rate_limited_context` established, for the other degraded state.
+
+    "Your data is safe" is the load-bearing half of the message. The failure this replaces did not
+    merely fail to explain itself - it showed a customer an empty invoice list, which reads as
+    their records having gone missing.
+    """
+    retry_after = get_retry_after_from_error(error)
+    return {
+        "maintenance": True,
+        "maintenance_retry_after": retry_after,
+        "maintenance_message": get_maintenance_message(retry_after),
+        "maintenance_retry_url": request.get_full_path(),
+    }
+
+
 def get_rate_limit_message(retry_after: int | None) -> str:
     if retry_after:
         return _("We're receiving many requests right now. Please try again in %(seconds)s seconds.") % {
@@ -68,12 +96,18 @@ def handle_platform_error(
     """
     Centralized error handler for platform API errors in views.
 
-    Returns context dict for rate-limited errors (inline alert),
-    or adds messages.error for other errors and returns empty dict.
+    Returns a context dict for the two states a template can present specifically - rate limited
+    and maintenance - or adds messages.error for anything else and returns an empty dict.
     """
     if is_rate_limited_error(error):
         error_logger.warning("⚠️ Rate limited: %s", error)
         return build_rate_limited_context(request, error)
+    if is_maintenance_error(error):
+        # Warning, not error: a maintenance window is a planned state, and paging someone about
+        # their own maintenance is how alerts get ignored. No `fallback_message` either - the
+        # specific notice replaces the generic one rather than joining it.
+        error_logger.warning("⚠️ Platform in maintenance: %s", error)
+        return build_maintenance_context(request, error)
     error_logger.error("🔥 %s", error)
     if fallback_message:
         messages.error(request, fallback_message)

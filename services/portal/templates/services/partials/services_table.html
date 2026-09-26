@@ -3,6 +3,10 @@
 
 {% if rate_limited %}
 {% include "components/rate_limit_inline_alert.html" %}
+{% elif maintenance %}
+{% comment %} Before this arm existed a maintenance window fell through to the empty state below,
+   telling the customer they had no services rather than that we were unavailable. {% endcomment %}
+{% include "components/maintenance_inline_alert.html" %}
 {% elif services %}
 
 {# Desktop Table #}
@@ -90,10 +94,10 @@
 {% include 'components/pagination.html' with page_obj=paginator_data extra_params=pagination_params %}
 
 {% else %}
-{# Empty State — three cases, in order:
+{% comment %} Empty State — three cases, in order:
    1. a search term that matched nothing → search-empty message (even inside a status tab),
    2. a filtered tab with no services    → status-specific message,
-   3. the unfiltered list                → "browse plans to get started" call to action. #}
+   3. the unfiltered list                → "browse plans to get started" call to action. {% endcomment %}
 <div class="bg-slate-800/50 border border-slate-700 rounded-lg">
   <div class="text-center py-12 px-6">
     <div class="mx-auto h-16 w-16 bg-slate-700 rounded-full flex items-center justify-center mb-4">

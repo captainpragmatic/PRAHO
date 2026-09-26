@@ -13,18 +13,16 @@ These tests ensure HMAC authentication is production-ready and secure
 against real-world attack scenarios and configuration mistakes.
 """
 
-import os
 import hashlib
 import hmac
-from unittest.mock import patch, Mock
-from typing import Dict, Any
+import os
+from unittest.mock import Mock, patch
 
 import requests
-from django.test import SimpleTestCase, override_settings
 from django.core.exceptions import ImproperlyConfigured
-from django.conf import settings
+from django.test import SimpleTestCase, override_settings
 
-from apps.api_client.services import PlatformAPIClient
+from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 
 
 class HMACProductionSecurityTestCase(SimpleTestCase):
@@ -44,24 +42,23 @@ class HMACProductionSecurityTestCase(SimpleTestCase):
         ]
 
         for weak_secret in weak_secrets:
-            with self.subTest(secret=weak_secret):
-                with override_settings(
-                    DEBUG=False,  # Production mode
-                    PLATFORM_API_SECRET=weak_secret,
-                    PORTAL_ID="production-test"
-                ):
-                    # In production, weak secrets should be detected
-                    # This would typically be in settings validation
-                    if len(weak_secret) < 32:
-                        # Weak secret should be detected
-                        # Test that client creation works (validation would be in production settings)
-                        try:
-                            client = PlatformAPIClient()
-                            # Production validation would happen at settings level, not client level
-                            self.assertIsNotNone(client)
-                        except (ImproperlyConfigured, ValueError):
-                            # This is acceptable - production should reject weak secrets
-                            pass
+            with self.subTest(secret=weak_secret), override_settings(
+                DEBUG=False,  # Production mode
+                PLATFORM_API_SECRET=weak_secret,
+                PORTAL_ID="production-test"
+            ):
+                # In production, weak secrets should be detected
+                # This would typically be in settings validation
+                if len(weak_secret) < 32:
+                    # Weak secret should be detected
+                    # Test that client creation works (validation would be in production settings)
+                    try:
+                        client = PlatformAPIClient()
+                        # Production validation would happen at settings level, not client level
+                        self.assertIsNotNone(client)
+                    except (ImproperlyConfigured, ValueError):
+                        # This is acceptable - production should reject weak secrets
+                        pass
 
     def test_production_requires_proper_environment_variables(self):
         """🔐 Test production configuration validates environment variables"""
@@ -100,35 +97,34 @@ class HMACProductionSecurityTestCase(SimpleTestCase):
         ]
 
         for insecure_url in insecure_urls:
-            with self.subTest(url=insecure_url):
-                with override_settings(
-                    DEBUG=False,  # Production mode
-                    PLATFORM_API_BASE_URL=insecure_url,
-                    PLATFORM_API_SECRET="secure-production-hmac-secret-key-32chars",
-                    PORTAL_ID="production-ssl-test"
-                ):
-                    client = PlatformAPIClient()
+            with self.subTest(url=insecure_url), override_settings(
+                DEBUG=False,  # Production mode
+                PLATFORM_API_BASE_URL=insecure_url,
+                PLATFORM_API_SECRET="secure-production-hmac-secret-key-32chars",
+                PORTAL_ID="production-ssl-test"
+            ):
+                client = PlatformAPIClient()
 
-                    # Production should warn about or reject insecure URLs
-                    if insecure_url.startswith('http://'):
-                        # Should either upgrade to HTTPS or reject
-                        with patch('apps.common.outbound_http._session.request') as mock_request:
-                            mock_response = Mock()
-                            mock_response.status_code = 200
-                            mock_response.json.return_value = {'success': True}
-                            mock_request.return_value = mock_response
+                # Production should warn about or reject insecure URLs
+                if insecure_url.startswith('http://'):
+                    # Should either upgrade to HTTPS or reject
+                    with patch('apps.common.outbound_http._session.request') as mock_request:
+                        mock_response = Mock()
+                        mock_response.status_code = 200
+                        mock_response.json.return_value = {'success': True}
+                        mock_request.return_value = mock_response
 
-                            client.authenticate_customer('test@example.com', 'password123')
+                        client.authenticate_customer('test@example.com', 'password123')
 
-                            # Verify the actual URL used was HTTPS (if auto-upgraded)
-                            call_args = mock_request.call_args
-                            if call_args:
-                                actual_url = call_args.kwargs.get('url', '')
-                                # In production, should either use HTTPS or fail
-                                self.assertTrue(
-                                    actual_url.startswith('https://') or mock_request.call_count == 0,
-                                    f"Production should use HTTPS or fail, got: {actual_url}"
-                                )
+                        # Verify the actual URL used was HTTPS (if auto-upgraded)
+                        call_args = mock_request.call_args
+                        if call_args:
+                            actual_url = call_args.kwargs.get('url', '')
+                            # In production, should either use HTTPS or fail
+                            self.assertTrue(
+                                actual_url.startswith('https://') or mock_request.call_count == 0,
+                                f"Production should use HTTPS or fail, got: {actual_url}"
+                            )
 
     @override_settings(
         DEBUG=False,
@@ -372,9 +368,7 @@ class HMACProductionDeploymentTestCase(SimpleTestCase):
                     try:
                         client = PlatformAPIClient()
                         # Should detect missing configuration
-                        if config_key == 'PLATFORM_API_SECRET' and not hasattr(client, 'portal_secret'):
-                            pass  # Expected failure
-                        elif config_key == 'PORTAL_ID' and not hasattr(client, 'portal_id'):
+                        if (config_key == 'PLATFORM_API_SECRET' and not hasattr(client, 'portal_secret')) or (config_key == 'PORTAL_ID' and not hasattr(client, 'portal_id')):
                             pass  # Expected failure
                     except (ImproperlyConfigured, AttributeError):
                         # Expected for missing critical configuration
@@ -422,13 +416,23 @@ class HMACProductionDeploymentTestCase(SimpleTestCase):
             client = PlatformAPIClient()
 
             # Test recovery from various production errors
+            # A 503 is deliberately NOT here any more. This list asserted that every error
+            # flattens to None, and for the platform's own maintenance signal that was the bug:
+            # None means "invalid credentials" to the login view, so a customer in a maintenance
+            # window was told their correct password was wrong, retyped it, and was told again.
+            # 503 now raises a recognisable error, asserted separately below.
+            #
+            # The rest stay, because the resilience this test was written to protect is real: the
+            # portal must not 500 because a socket closed. 502 and 504 have the same shape as 503
+            # and are knowingly left alone - the honest message for a crashed upstream is not
+            # "scheduled maintenance", and widening `authenticate_customer`'s contract that far is
+            # a larger change than this one.
             error_recovery_scenarios = [
                 # Network errors
                 requests.exceptions.ConnectionError("Network unreachable"),
                 requests.exceptions.Timeout("Connection timeout"),
 
                 # HTTP errors
-                Mock(status_code=503, json=lambda: {'error': 'Service unavailable'}),
                 Mock(status_code=502, json=lambda: {'error': 'Bad gateway'}),
 
                 # SSL errors
@@ -448,6 +452,17 @@ class HMACProductionDeploymentTestCase(SimpleTestCase):
 
                         # Should fail safely without exceptions
                         self.assertIsNone(result, "Production should handle errors gracefully")
+
+            # The platform's maintenance signal must reach the caller, not be flattened.
+            with patch('apps.common.outbound_http._session.request') as mock_request:
+                mock_request.return_value = Mock(status_code=503, json=lambda: {'error': 'maintenance'})
+                with self.assertRaises(PlatformAPIError) as caught:
+                    client.authenticate_customer('test@example.com', 'password123')
+
+                self.assertTrue(
+                    caught.exception.is_maintenance,
+                    "A 503 must be recognisable as maintenance so login does not report bad credentials",
+                )
 
     def test_production_logging_does_not_expose_secrets(self):
         """🔐 Test production logging doesn't expose HMAC secrets"""

@@ -26,7 +26,11 @@ from apps.common.decorators import (
 )
 from apps.common.localisation_middleware import sync_language_selection
 from apps.common.localisation_services import store_localisation_preferences
-from apps.common.rate_limit_feedback import is_rate_limited_error
+from apps.common.rate_limit_feedback import (
+    get_maintenance_message,
+    get_retry_after_from_error,
+    is_rate_limited_error,
+)
 from apps.users.forms import (
     ChangePasswordForm,
     CompanyCreationForm,
@@ -214,6 +218,12 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
         next_url = _get_safe_redirect_target(request, fallback="/dashboard/")
         return redirect(next_url)
 
+    # Drives the maintenance notice and the disabled submit below. Until `authenticate_customer`
+    # stopped swallowing a 503 into `None`, this state was unreachable: a maintenance window
+    # produced "Invalid email address or password", so the customer retyped a correct password
+    # and was told it was wrong again.
+    maintenance = False
+
     if request.method == "GET":
         form = CustomerLoginForm()
     else:  # POST
@@ -308,8 +318,12 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
                     logger.warning(f"⚠️ [Portal Auth] Invalid credentials for {email}")
                     form.add_error(None, _("Invalid email address or password. Please try again."))
 
-            except PlatformAPIError as e:  # rate-limit-aware — custom form error with retry_after countdown
-                if getattr(e, "is_rate_limited", False):
+            except PlatformAPIError as e:  # degradation-aware — specific form error per state
+                if getattr(e, "is_maintenance", False):
+                    logger.warning(f"⚠️ [Portal Auth] Login attempted during maintenance for {email}")
+                    maintenance = True
+                    form.add_error(None, get_maintenance_message(getattr(e, "retry_after", None)))
+                elif getattr(e, "is_rate_limited", False):
                     retry_after = getattr(e, "retry_after", None) or 30
                     logger.warning(f"⚠️ [Portal Auth] Login rate-limited for {email} (retry_after={retry_after}s)")
                     form.add_error(
@@ -331,6 +345,7 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
         "form": form,
         "page_title": _("Customer Login"),
         "brand_name": "PRAHO Portal",
+        "maintenance": maintenance,
     }
 
     return render(request, "users/login.html", context)
@@ -879,7 +894,18 @@ def mfa_backup_codes_view(request: HttpRequest) -> HttpResponse:
     if not request.session.get("user_id"):
         return redirect("users:login")
     user_id = int(request.session["user_id"])
-    profile = api_client.get_customer_profile(user_id) or {}
+    try:
+        profile = api_client.get_customer_profile(user_id) or {}
+    except PlatformAPIError as exc:
+        # `get_customer_profile` now propagates a degraded platform instead of returning None, so
+        # this view needs a handler: without one a maintenance window turned the backup-code page
+        # into a 500, where before it redirected with a warning. Redirecting on an unknown MFA state
+        # is the safe answer - "enable 2FA first" would be a guess, and the codes themselves are
+        # never re-displayable.
+        if not exc.is_degraded:
+            raise
+        messages.warning(request, get_maintenance_message(get_retry_after_from_error(exc)))
+        return redirect("users:mfa_management")
     if not profile.get("mfa_enabled"):
         messages.warning(request, _("You need to enable 2FA first before accessing backup codes."))
         return redirect("users:mfa_management")

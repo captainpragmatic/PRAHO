@@ -877,6 +877,14 @@ class MaintenanceModeMiddleware:
         "/settings/api/health/",
     )
 
+    # Machine surfaces, which get a parseable body rather than a page. These are NOT exempt -
+    # gating them is the point, since they are every request the customer portal makes - but
+    # answering them in HTML meant the portal's client called `response.json()`, raised
+    # ValueError, and replaced the reason with "Invalid response format". A maintenance window
+    # then looked identical to any other failure: empty invoice lists, and a login response
+    # indistinguishable from a wrong password.
+    API_PREFIXES = ("/api/",)
+
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
         self.get_response = get_response
 
@@ -884,7 +892,7 @@ class MaintenanceModeMiddleware:
         if self._maintenance_active() and not self._is_exempt(request):
             user = getattr(request, "user", None)
             if user is None or not getattr(user, "is_staff_user", False):
-                return self._maintenance_response()
+                return self._maintenance_response(request)
         return self.get_response(request)
 
     @staticmethod
@@ -900,9 +908,42 @@ class MaintenanceModeMiddleware:
     def _is_exempt(cls, request: HttpRequest) -> bool:
         return request.path.startswith(cls.EXEMPT_PREFIXES)
 
+    @classmethod
+    def _wants_json(cls, request: HttpRequest) -> bool:
+        """Path first, Accept as a courtesy: the portal's client does not set Accept."""
+        return request.path.startswith(cls.API_PREFIXES) or "application/json" in request.headers.get("Accept", "")
+
+    @classmethod
+    def _maintenance_response(cls, request: HttpRequest) -> HttpResponse:
+        response = cls._json_response() if cls._wants_json(request) else cls._html_response()
+        response["Retry-After"] = "600"
+        return response
+
     @staticmethod
-    def _maintenance_response() -> HttpResponse:
-        response = HttpResponse(
+    def _json_response() -> HttpResponse:
+        # `error` is the stable machine-readable marker; `detail` is for a human reading a log.
+        # Deliberately hand-built rather than rendered: a maintenance response must not depend on
+        # template loading, context processors or the database, all of which may be exactly what
+        # is being maintained.
+        return HttpResponse(
+            json.dumps(
+                {
+                    "error": "maintenance",
+                    "detail": str(_("The platform is temporarily unavailable for scheduled maintenance.")),
+                    "retry_after": 600,
+                }
+            ),
+            status=503,
+            content_type="application/json",
+        )
+
+    @staticmethod
+    def _html_response() -> HttpResponse:
+        # Inline for the same reason: `templates/503.html` exists but is deliberately left unwired,
+        # because it extends `base.html` and would drag context processors and queries into the one
+        # response that has to work when those are degraded. A render failure here would turn a
+        # clean 503 into a 500.
+        return HttpResponse(
             '<!doctype html><html><head><title>503</title></head><body style="font-family:system-ui;'
             "background:#0f172a;color:#e2e8f0;display:flex;align-items:center;justify-content:center;"
             'height:100vh;margin:0"><div style="text-align:center"><h1>🚧 '
@@ -913,5 +954,3 @@ class MaintenanceModeMiddleware:
             status=503,
             content_type="text/html",
         )
-        response["Retry-After"] = "600"
-        return response

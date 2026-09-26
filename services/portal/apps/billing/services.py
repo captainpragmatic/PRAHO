@@ -28,8 +28,31 @@ from .serializers import (
 logger = logging.getLogger(__name__)
 
 
+def _raise_if_degraded(exc: Exception) -> None:
+    """Re-raise a degraded-platform error so the view can say what happened.
+
+    Widened from `_raise_if_rate_limited`, which only ever re-raised throttles: a maintenance 503
+    fell through and this module returned an empty page instead, rendering as "you have no
+    documents" with nothing to explain it.
+
+    Use this ONLY where the caller has a handler that renders the maintenance state. Widening a
+    propagation changes behaviour for the newly propagated case, and a caller that previously could
+    not receive an exception will not start handling one just because the name changed - see
+    `_raise_if_rate_limited` below.
+    """
+    if isinstance(exc, PlatformAPIError) and exc.is_degraded:
+        raise exc
+
+
 def _raise_if_rate_limited(exc: Exception) -> None:
-    """Re-raise rate-limited errors so views can show appropriate feedback."""
+    """Re-raise a throttle only, leaving a maintenance 503 to this module's graceful return.
+
+    Kept deliberately, for call sites whose callers have no exception handler and whose existing
+    degraded return is already the right customer-facing answer. Widening every site to
+    `_raise_if_degraded` was mechanical and wrong: the recurring-payment endpoints below already
+    answered "temporarily unavailable" in their JSON contract, and making them raise turned five
+    uncaught callers into 500s - a worse outcome than the empty-state bug being fixed.
+    """
     if isinstance(exc, PlatformAPIError) and exc.is_rate_limited:
         raise exc
 
@@ -93,7 +116,7 @@ class InvoiceViewService:
             )
         except Exception as error:
             logger.error("Error retrieving billing documents for customer %s: %s", customer_id, error)
-            _raise_if_rate_limited(error)
+            _raise_if_degraded(error)
             return BillingDocumentPage()
 
     def get_customer_invoices(self, customer_id: int, user_id: int, force_sync: bool = False) -> list[Invoice]:
@@ -127,7 +150,7 @@ class InvoiceViewService:
 
         except Exception as e:
             logger.error(f"🔥 [Invoice API] Error retrieving invoices for customer {customer_id}: {e}")
-            _raise_if_rate_limited(e)
+            _raise_if_degraded(e)
             return []
 
     def get_invoice_detail(
@@ -162,7 +185,7 @@ class InvoiceViewService:
 
         except Exception as e:
             logger.error(f"🔥 [Invoice API] Error retrieving invoice {invoice_number}: {e}")
-            _raise_if_rate_limited(e)
+            _raise_if_degraded(e)
             return None
 
     def get_invoice_summary(self, customer_id: int, user_id: int) -> dict[str, Any]:
@@ -197,12 +220,12 @@ class InvoiceViewService:
 
             except Exception as e:
                 logger.error(f"🔥 [Invoice API] Failed to parse summary for customer {customer_id}: {e}")
-                _raise_if_rate_limited(e)
+                _raise_if_degraded(e)
                 return self._empty_summary()
 
         except Exception as e:
             logger.error(f"🔥 [Invoice API] Error retrieving summary for customer {customer_id}: {e}")
-            _raise_if_rate_limited(e)
+            _raise_if_degraded(e)
             return self._empty_summary()
 
     def get_customer_proformas(self, customer_id: int, user_id: int, force_sync: bool = False) -> list[Proforma]:
@@ -236,7 +259,7 @@ class InvoiceViewService:
 
         except Exception as e:
             logger.error(f"🔥 [Proforma API] Error retrieving proformas for customer {customer_id}: {e}")
-            _raise_if_rate_limited(e)
+            _raise_if_degraded(e)
             return []
 
     def get_proforma_detail(
@@ -298,7 +321,7 @@ class InvoiceViewService:
 
         except Exception as e:
             logger.error(f"🔥 [Proforma API] Error retrieving proforma {proforma_number}: {e}")
-            _raise_if_rate_limited(e)
+            _raise_if_degraded(e)
             return None
 
     def get_invoice_pdf(self, invoice_number: str, customer_id: int, user_id: int | None = None) -> bytes:
@@ -371,7 +394,7 @@ class InvoiceViewService:
 
         except Exception as e:
             logger.error(f"🔥 [Refund API] Error requesting refund for invoice {invoice_number}: {e}")
-            _raise_if_rate_limited(e)
+            _raise_if_degraded(e)
             return {"success": False, "error": str(e)}
 
     def _empty_summary(self) -> dict[str, Any]:
@@ -401,6 +424,8 @@ class RecurringPaymentsService:
                 user_id=user_id,
             )
         except Exception as error:
+            # Rate limiting only. `recurring_payments_view` and the four JSON mutation endpoints
+            # beneath it have no exception handler, and this dict IS their contract.
             _raise_if_rate_limited(error)
             logger.error("Recurring-payment API call failed for customer %s: %s", customer_id, error)
             return {"success": False, "error": "Recurring-payment service is temporarily unavailable"}
@@ -550,7 +575,7 @@ class BillingDataSyncService:
 
         except Exception as e:
             logger.error(f"🔥 [Currency API] Error retrieving currencies: {e}")
-            _raise_if_rate_limited(e)
+            _raise_if_degraded(e)
             return []
 
 

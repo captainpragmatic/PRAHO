@@ -4,6 +4,10 @@
 
 {% if rate_limited %}
 {% include "components/rate_limit_inline_alert.html" %}
+{% elif maintenance %}
+{% comment %} Before this arm existed a maintenance window fell through to the empty state below,
+   telling the customer they had no invoices rather than that we were unavailable. {% endcomment %}
+{% include "components/maintenance_inline_alert.html" %}
 {% elif invoices %}
 
 {# Desktop Table #}
