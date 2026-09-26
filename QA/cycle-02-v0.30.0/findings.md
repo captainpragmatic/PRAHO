@@ -220,7 +220,7 @@ wrong tax name would put a legally incorrect VAT description on a Romanian fisca
 directly, so it proves the mapper and cannot prove the settings. The new tests close that span:
 setting → `_config_from_settings()` → `build_invoice_payload`.
 
-**Eight of the nine `company.*` keys** now have effect tests
+**All ten `company.*` keys** now have effect tests
 (`tests/settings/test_company_identity_effects.py`). Their consumer is not Python — it is
 `{% setting %}` inside `templates/legal/privacy_policy.html` and `terms_of_service.html`, the pages
 carrying PRAHO's legal identity for GDPR purposes — so the tests request the page and assert the
@@ -308,7 +308,8 @@ buys a per-render settings read for nothing.
 | `company.email_noreply` shadowed by `DEFAULT_FROM_EMAIL` | FAIL | Precedence pinned by a test |
 | Price-override path (§4) | FAIL | Issue to file |
 | `romanian_business_context` (§5) | FAIL | Deletion, separate commit |
-| Effect tests for the 9 remaining testable business-zone settings | NOT-RUN | `orders` (4), `billing` (2), and one each in customers, security, support. The `company` group is done. Four more — the two `orders.max_price_override_*`, `orders.max_payment_failures_before_fail`, `billing.subscription_grace_period_days` — cannot be effect-tested at all, because they are inert |
+| Effect tests for the business zone | **PASS** | Every testable key in `company`, `orders`, `billing`, `customers`, `security`, `support`, `domains`, `localisation` and `platform` now has one. The four that do not — the two `orders.max_price_override_*`, `orders.max_payment_failures_before_fail`, `billing.subscription_grace_period_days` — have no effect to test, because they are inert |
+| Effect tests for `integrations` (149 keys) and `advanced` (90) | NOT-RUN | The deferred cut. `efactura` alone is 43 |
 | Portal coverage 72.02% → 90-95% | NOT-RUN | |
 | `provisioning` 55.50% → 80% | NOT-RUN | |
 | Route and button sweep (398 platform + 80 portal named routes) | NOT-RUN | `scripts/lint_template_components.py` is portal-only; 91 live TMPL blockers are hidden behind `\|\| true` in the Makefile |
@@ -324,3 +325,26 @@ buys a per-render settings read for nothing.
   `tax_service.py:234`, `tax_models.py:134`, `tax_models.py:145`. Same class as the bug fixed in
   `6b31b800`; they deserve their own pass rather than a drive-by.
 - `portal/apps/billing/schemas.py:134` — drives the customer-facing overdue flag from UTC.
+
+---
+
+## 6. Two settings that are live in code but shadowed in practice
+
+Neither is inert by check 6's criterion — the getter is called — yet neither can take effect in a
+normal deployment. Both were found by writing the effect test and watching it fail for the wrong
+reason, which is the argument for writing them.
+
+**`orders.bank_transfer_timeout_hours`.** The sweep repairs a missing proforma at `tasks.py:206`
+*before* it computes the timeout at `:227`, and an offline order with a proforma anchors on
+`proforma.valid_until`. So for any order with a positive total the `bank_transfer_fallback` branch is
+unreachable, and the setting governs only an order whose proforma creation failed. The UI presents it
+as the bank-transfer window. Both halves are pinned in
+`tests/orders/test_order_settings_effects.py`: the setting does reach the deadline function, and the
+sweep does create the proforma first.
+
+**`company.email_noreply`.** Covered in §3 — `DEFAULT_FROM_EMAIL` is never falsy, so the `or` never
+reaches it.
+
+The common shape is a setting behind a precedence rule whose other side is always present. Check 6
+cannot see either, because the read is reached; it is the *value* that is discarded. Worth a check 7
+if a third turns up.
