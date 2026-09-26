@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_No unreleased changes._
+
+---
+
+## [0.30.0] - 2026-09-26
+
 ### Added
 
 - SmartBill can now be selected as the invoice issuer, from Settings → Integrations. It
@@ -25,6 +31,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rather than quietly resolving to the built-in issuer. Quietly resolving it meant a typo
   had PRAHO mint legal Romanian invoice numbers from its own sequence for an operator who
   was trying to hand exactly that responsibility to SmartBill.
+- Maintenance mode is now something a customer can see. Turning it on in Settings shows a
+  notice on every portal page that needs the platform, and the login form explains why it is
+  unavailable instead of behaving as though the password were wrong.
+- Two new checks in the settings guardrail. One asks whether anything tests what a setting
+  actually DOES, rather than only that it is referenced somewhere. The other finds settings
+  that are editable but have no effect at all, because the only code reading them is never
+  called. 56 of 262 settings turned out to be in that state — recorded so the number can only
+  go down, and listed under Known limitations below.
+- The browser test suite now runs nightly and reports how much of each service it covers. It
+  is the only place the customer portal is exercised against a real platform, and it
+  previously ran in no automated pipeline at all.
 
 ### Fixed
 
@@ -33,6 +50,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   prove the document was not created; resending on one risks a second legally
   numbered invoice, which can only be reversed, never deleted.
 
+- A customer in a maintenance window saw their tickets, invoices and services as simply
+  MISSING — "No Support Tickets Yet" on a full account — and an unauthenticated visitor got
+  the same message as a wrong password. Every portal page that reads from the platform now
+  says what is happening and when to come back.
+- The Romanian VAT report silently omitted everything issued that day, for the three hours
+  after midnight local time. It defaulted its period to the UTC date while filtering on the
+  Bucharest one, and returned a successful, empty-looking page throughout.
+- Coverage was measured wrongly in four separate ways and reported figures nobody could rely
+  on — 28% on pull requests and 88% nightly, against a true 72%. Parallel test workers were
+  discarded, no configuration was loaded, test files counted as covered source, and the whole
+  settings app was excluded by a stray pattern. Per-package floors now guard the money and
+  access paths individually, because a healthy average hides a weak package.
 - An interrupted storno no longer makes an invoice permanently un-reversible. A credit
   note that exists but was never submitted is resumed rather than treated as proof the
   reversal already happened.
@@ -88,6 +117,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   SmartBill Cloud.
 - An issuance whose outcome is unknown (a lost response) is never retried automatically
   and waits for an operator to confirm what exists at the provider.
+- 56 of the 262 runtime settings are editable but currently have no effect, because the only
+  code that reads them is never called. Among them: the registration rate limit per IP, the
+  caps on a staff price override (#542), the product price ceiling, and the subscription
+  grace period after a failed payment. Each needs wiring deliberately, since connecting one
+  changes what the system accepts. The full list ships in the repository and a check now
+  prevents the number growing.
 
 ---
 

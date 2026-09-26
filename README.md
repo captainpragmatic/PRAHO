@@ -1,8 +1,8 @@
 # PRAHO Platform - PRAHO Really Automates Hosting Operations
 
-> **Pre-release software (v0.29.0-alpha)** - Under active development. Not yet recommended for production use.
+> **Pre-release software (v0.30.0-alpha)** - Under active development. Not yet recommended for production use.
 
-[![Version](https://img.shields.io/badge/version-0.28.0--alpha-orange.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.30.0--alpha-orange.svg)](CHANGELOG.md)
 [![Django 5.2](https://img.shields.io/badge/Django-5.2-green.svg)](https://www.djangoproject.com/)
 [![Python 3.13+](https://img.shields.io/badge/Python-3.13+-blue.svg)](https://www.python.org/)
 [![PostgreSQL 16+](https://img.shields.io/badge/PostgreSQL-16+-blue.svg)](https://www.postgresql.org/)
@@ -13,7 +13,9 @@
 [![Platform CI](https://github.com/captainpragmatic/PRAHO/actions/workflows/platform.yml/badge.svg)](https://github.com/captainpragmatic/PRAHO/actions/workflows/platform.yml)
 [![Portal CI](https://github.com/captainpragmatic/PRAHO/actions/workflows/portal.yml/badge.svg)](https://github.com/captainpragmatic/PRAHO/actions/workflows/portal.yml)
 [![Integration Tests](https://github.com/captainpragmatic/PRAHO/actions/workflows/integration.yml/badge.svg)](https://github.com/captainpragmatic/PRAHO/actions/workflows/integration.yml)
-![Tests](https://img.shields.io/badge/tests-7%2C000%2B-brightgreen.svg)
+![Tests](https://img.shields.io/badge/tests-10%2C000%2B-brightgreen.svg)
+![Platform coverage](https://img.shields.io/badge/platform_coverage-72%25-yellow.svg)
+![Portal coverage](https://img.shields.io/badge/portal_coverage-72%25-yellow.svg)
 
 [![mypy: strict](https://img.shields.io/badge/mypy-strict_%E2%9C%93-brightgreen.svg)](https://mypy-lang.org/)
 [![Ruff](https://img.shields.io/badge/Ruff-lint_%E2%9C%93-brightgreen.svg)](https://docs.astral.sh/ruff/)
@@ -259,7 +261,7 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 ## Versioning
 
-This project follows [Semantic Versioning](https://semver.org/). Current version: **v0.29.0** (alpha).
+This project follows [Semantic Versioning](https://semver.org/). Current version: **v0.30.0** (alpha).
 
 - Pre-1.0: API and features may change between minor versions
 - Each minor bump (0.Y.0) represents a new feature milestone
