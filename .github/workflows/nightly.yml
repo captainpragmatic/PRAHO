@@ -147,9 +147,24 @@ jobs:
     - name: Platform tests with coverage (no failfast — complete picture)
       run: |
         cd services/platform
+        # Same config fix as platform.yml. The threshold moved from 80 to 70, and that is not a
+        # relaxation: the old 80 was measured with no `omit` in effect, so ~1,900 test files -
+        # each ~100% covered by construction - counted as covered source and inflated it
+        # (153,126 statements against a true 70,261). The real app-only figure measured
+        # 2026-09-26 is 72.39%, so 70 sits just under reality and actually catches regression,
+        # where the nominal 80 never could. Raise it as the number climbs; never lower it to
+        # make a run pass.
+        export COVERAGE_RCFILE="$GITHUB_WORKSPACE/pyproject.toml"
         PYTHONPATH=$(pwd) "$UV_PROJECT_ENVIRONMENT/bin/coverage" run manage.py test tests --settings=config.settings.test --verbosity=2
+        "$UV_PROJECT_ENVIRONMENT/bin/coverage" combine
         "$UV_PROJECT_ENVIRONMENT/bin/coverage" xml -o coverage-nightly.xml
-        "$UV_PROJECT_ENVIRONMENT/bin/coverage" report --show-missing --fail-under=80
+        "$UV_PROJECT_ENVIRONMENT/bin/coverage" report --show-missing --fail-under=70
+
+    - name: Per-package coverage floors (money and access paths)
+      run: |
+        # A healthy global average can hide a weak package, which is the whole reason this
+        # exists alongside the global floor. Reads the combined data from the step above.
+        make coverage-platform-packages
 
     - name: Portal tests
       env:
@@ -192,5 +207,87 @@ jobs:
         name: nightly-reports-${{ matrix.branch }}
         path: |
           services/platform/coverage-nightly.xml
+        if-no-files-found: warn
+        retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # Browser suite: both services live, real HMAC between them, server-side coverage.
+  #
+  # This job exists because the absence of it was the root cause of a whole class of
+  # bug. The browser suite is the only place the portal is exercised against a real
+  # platform - its 179 portal tests mock nothing - and it ran in no CI workflow at all,
+  # reporting no coverage. Work invested there moved no number anyone watched, so the
+  # QA walkthrough stayed manual, went stale, and a setting could be "verified" while
+  # its customer-facing consequence was untested. Nightly rather than PR CI: the suite
+  # takes minutes, not seconds, and browser tests are the flakiest thing here.
+  #
+  # Self-contained on purpose. Portal's honest coverage is the UNION of its unit and
+  # browser suites, and computing that where both datasets already exist beats shipping
+  # half of it between jobs as an artifact.
+  #
+  # No postgres service: the e2e settings use their own SQLite files.
+  # ---------------------------------------------------------------------------
+  nightly-e2e:
+    needs: check-activity
+    if: needs.check-activity.outputs.branches != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        branch: ${{ fromJSON(needs.check-activity.outputs.branches) }}
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: ${{ matrix.branch }}
+        fetch-depth: 0
+
+    - name: Install uv and sync dependencies
+      uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+        cache-dependency-glob: "uv.lock"
+
+    - name: Set up Python and install dependencies
+      run: |
+        uv python install
+        uv sync --all-groups
+
+    # `make build-css` shells out to `npx --no-install`, so node_modules must exist or the
+    # CSS never builds and the fixtures' CSS checks have nothing to inspect.
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+
+    - name: Install node dependencies
+      run: npm ci
+
+    - name: Install the browser Playwright drives
+      run: '"$UV_PROJECT_ENVIRONMENT/bin/playwright" install --with-deps chromium'
+
+    # Boots both services, seeds fixtures, verifies a signed portal->platform read, runs the
+    # suite, then stops the stack - which is when coverage is written and reported, because
+    # the servers save on SIGTERM.
+    - name: Browser suite with server-side coverage
+      run: make test-e2e-coverage
+
+    - name: Portal unit coverage (the other half of the union)
+      run: make coverage-portal
+
+    - name: Portal coverage floor, unit and browser suites combined
+      run: make coverage-portal-union
+
+    - name: Upload browser evidence and coverage
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: nightly-e2e-${{ matrix.branch }}
+        path: |
+          output/playwright/runs/
+          output/playwright/coverage/
+          logs/
         if-no-files-found: warn
         retention-days: 30

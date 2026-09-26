@@ -23,6 +23,9 @@ missing-key assertion depends on.
 
 from __future__ import annotations
 
+from datetime import UTC, date, datetime
+from unittest.mock import patch
+
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -174,3 +177,41 @@ class MixedCurrencyReportTests(TestCase):
         self.assertContains(response, "18,63 RON")
         self.assertContains(response, "10,79 EUR")
         self.assertNotContains(response, TOTAL_VAT)
+
+
+class VatReportTimezoneBoundaryTests(BillingReportScreenTestCase):
+    """The VAT report silently dropped everything issued "today" for three hours a night.
+
+    `end_date` defaulted to `timezone.now().date()` - a UTC date - while `created_at__date`
+    resolves in the active timezone, which is `Europe/Bucharest`. Between 21:00 and 24:00 UTC
+    those two disagree, so an invoice issued at 01:00 Bucharest carried `created_at__date` of
+    tomorrow relative to a range that ended yesterday, and fell outside it.
+
+    The screen showed an empty compliance report during exactly the window a Romanian
+    accountant working late would be reading it, and said nothing. `views.py:866` in this same
+    file already used `timezone.localdate()`, which is the idiom this was missing.
+
+    Discovered because these tests assert the rendered figures rather than a status code: the
+    page returned 200 throughout.
+    """
+
+    # 22:32 UTC on the 25th is 01:32 on the 26th in Bucharest — inside the broken window.
+    UTC_EVENING = datetime(2026, 9, 25, 22, 32, tzinfo=UTC)
+
+    def test_an_invoice_issued_after_local_midnight_is_still_reported(self) -> None:
+        self._paid_invoices()
+        Invoice.objects.filter(customer=self.customer).update(created_at=self.UTC_EVENING)
+
+        with patch.object(timezone, "now", return_value=self.UTC_EVENING):
+            response = self.client.get(reverse("billing:vat_report"))
+
+        self.assertContains(response, TOTAL_VAT, msg_prefix="collected VAT vanished across the UTC/local date boundary")
+        self.assertContains(response, TOTAL_NET)
+
+    def test_the_period_defaults_to_local_dates_not_utc(self) -> None:
+        """The range itself must be expressed in the timezone the lookup compares against."""
+        with patch.object(timezone, "now", return_value=self.UTC_EVENING):
+            response = self.client.get(reverse("billing:vat_report"))
+
+        self.assertEqual(response.context["end_date"], date(2026, 9, 26))
+        self.assertEqual(response.context["start_date"], date(2026, 9, 1))

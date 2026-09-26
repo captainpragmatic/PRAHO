@@ -318,6 +318,107 @@ test-portal:
 	@$(PYTHON_PORTAL) -m pytest -v
 	@echo "✅ Portal tests completed - database access properly blocked!"
 
+# ===============================================================================
+# TEST COVERAGE 📊
+# ===============================================================================
+# The invocation lives here and nowhere else, because two things were wrong in CI and
+# both are easy to get wrong again.
+#
+# 1. Coverage does NOT walk up for its config. Run from `services/platform`, it found no
+#    `[tool.coverage.*]` at all - so `source`, the `omit` of tests and migrations, and
+#    `branch` were all silently inactive, and test files were counted as covered source.
+#    `COVERAGE_RCFILE` is what points it at the repo-root config.
+# 2. Django's `--parallel` forks workers through multiprocessing. Without
+#    `concurrency = multiprocessing` their data is discarded and only the parent is
+#    measured - which imports everything and executes almost no test code. Per-process
+#    files must then be merged with `combine` before any report.
+#
+# Together those produced a reported 28% on every PR. Portal is deliberately NOT routed
+# through here: its `--cov=apps` flag in `services/portal/pytest.ini` already scopes it
+# correctly, pytest-cov does its own combining, and forcing this config on it would risk
+# a number that is currently right.
+COVERAGE_BIN = $(PWD)/$(VENV_DIR)/bin/coverage
+COVERAGE_RC = COVERAGE_RCFILE=$(PWD)/pyproject.toml
+# Global floor. 50 was the agreed minimum, but the measured number is 72.39%, and a gate 22
+# points below reality would let coverage rot silently. Set just under the real figure so it
+# ratchets. Raise it as the number climbs; never lower it to make a run pass.
+PLATFORM_COVERAGE_FLOOR ?= 70
+# Packages that carry money, provisioning and access decisions get their own floor, because
+# a healthy global average can hide a weak one.
+# Measured 2026-09-26: billing 88.44, settings 78.50, users 74.57, provisioning 55.50.
+# Floors sit just under those so they ratchet and cannot silently slip. The AGREED TARGET is
+# 80% for every one of these; provisioning is the real gap. Raise a floor when the number
+# rises; never lower one to make a run pass.
+PLATFORM_PACKAGE_FLOORS = billing:85 settings:75 users:70 provisioning:55
+
+coverage-platform:
+	@echo "📊 [Platform] Coverage over apps/ and config/ — tests and migrations excluded..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@cd services/platform && rm -f .coverage .coverage.*
+	@cd services/platform && $(COVERAGE_RC) PYTHONPATH=$(PWD)/services/platform $(COVERAGE_BIN) run manage.py test tests --settings=$(PLATFORM_TEST_SETTINGS) --verbosity=2 --parallel
+	@cd services/platform && $(COVERAGE_RC) $(COVERAGE_BIN) combine
+	@cd services/platform && $(COVERAGE_RC) $(COVERAGE_BIN) xml -o coverage-platform.xml
+	@cd services/platform && $(COVERAGE_RC) $(COVERAGE_BIN) report --show-missing --fail-under=$(PLATFORM_COVERAGE_FLOOR)
+	@echo "✅ Platform coverage complete (floor $(PLATFORM_COVERAGE_FLOOR)%)."
+
+coverage-platform-packages:
+	@echo "📊 [Platform] Per-package floors for the packages that carry money and access..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@cd services/platform && failed=""; \
+	for pair in $(PLATFORM_PACKAGE_FLOORS); do \
+		pkg="$${pair%%:*}"; floor="$${pair##*:}"; \
+		pct=$$($(COVERAGE_RC) $(COVERAGE_BIN) report --include="*/apps/$$pkg/*" 2>/dev/null \
+			| awk '/^TOTAL/ { gsub("%","",$$NF); print $$NF; exit }'); \
+		if [ -z "$$pct" ]; then \
+			printf "  %-14s %8s   floor %3s%%   NO DATA\n" "$$pkg" "-" "$$floor"; \
+			failed="$$failed $$pkg(no-data)"; \
+		elif awk -v p="$$pct" -v f="$$floor" 'BEGIN { exit !(p+0 < f+0) }'; then \
+			printf "  %-14s %7.2f%%   floor %3s%%   BELOW\n" "$$pkg" "$$pct" "$$floor"; \
+			failed="$$failed $$pkg"; \
+		else \
+			printf "  %-14s %7.2f%%   floor %3s%%   ok\n" "$$pkg" "$$pct" "$$floor"; \
+		fi; \
+	done; \
+	if [ -n "$$failed" ]; then echo "❌ Below floor:$$failed"; echo "   (reads the combined data — run 'make coverage-platform' first)"; exit 1; fi; \
+	echo "✅ Every critical package is at or above its floor."
+
+coverage-portal:
+	@echo "📊 [Portal] Coverage over apps/ — already scoped by pytest.ini --cov=apps..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@$(PYTHON_PORTAL) -m pytest -q
+	@echo "✅ Portal coverage complete — see services/portal/htmlcov/."
+
+# Portal's real figure is the UNION of two datasets that cover different code: the unit suite
+# (no database, platform unimportable, most files mocked) and the browser suite (a live portal
+# against a live platform over real HMAC). Measured 2026-09-26: units 63%, browser 57.31%,
+# union 72.02% - so neither dataset alone is the answer, and reporting either as "portal
+# coverage" understates it by ~9 to ~15 points.
+PORTAL_COVERAGE_FLOOR ?= 70
+
+.PHONY: coverage-portal-union
+coverage-portal-union:
+	@echo "📊 [Portal] Union of the unit and browser suites — the honest figure..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@units="services/portal/.coverage"; e2e="output/playwright/coverage/.coverage.portal"; \
+	missing=""; \
+	[ -f "$$units" ] || missing="$$missing unit-data(run make coverage-portal)"; \
+	[ -f "$$e2e" ]   || missing="$$missing browser-data(run make test-e2e-coverage)"; \
+	if [ -n "$$missing" ]; then echo "❌ Missing:$$missing"; exit 1; fi; \
+	echo "  unit data   $$(date -r "$$units" '+%Y-%m-%d %H:%M')"; \
+	echo "  browser data $$(date -r "$$e2e" '+%Y-%m-%d %H:%M')"; \
+	echo "  (both are reported so a stale half cannot pass unnoticed)"; \
+	dir=$$(mktemp -d); trap 'rm -rf "$$dir"' EXIT; \
+	cp "$$units" "$$dir/.coverage.units"; cp "$$e2e" "$$dir/.coverage.browser"; \
+	cd services/portal && $(COVERAGE_RC) COVERAGE_FILE="$$dir/.coverage" $(COVERAGE_BIN) combine --quiet; \
+	$(COVERAGE_RC) COVERAGE_FILE="$$dir/.coverage" $(COVERAGE_BIN) xml -o coverage-portal-union.xml; \
+	rc=0; $(COVERAGE_RC) COVERAGE_FILE="$$dir/.coverage" $(COVERAGE_BIN) report --fail-under=$(PORTAL_COVERAGE_FLOOR) > "$$dir/report.txt" || rc=$$?; \
+	tail -2 "$$dir/report.txt"; \
+	if [ "$$rc" -ne 0 ]; then echo "❌ Portal union below the $(PORTAL_COVERAGE_FLOOR)% floor."; exit "$$rc"; fi; \
+	echo "✅ Portal union at or above the $(PORTAL_COVERAGE_FLOOR)% floor."
+
+coverage: coverage-platform coverage-platform-packages coverage-portal
+	@echo "✅ Coverage measured for both services."
+
 test-integration:
 	@echo "🔄 [Integration] Testing services communication and cache functionality..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -361,6 +462,29 @@ test-e2e:
 	@$(PYTHON_SHARED) scripts/e2e_stack.py test
 
 test-with-e2e: test-e2e
+
+# The browser suite is where the portal's real behaviour lives - 179 unmocked tests driving a
+# live portal against a live platform over real HMAC - and it earned no coverage credit at all,
+# because the app executes inside the `runserver` subprocesses rather than the pytest process.
+# Portal unit tests are structurally capped (no database, platform unimportable, most files
+# mocked), so this is the only route to the portal target.
+#
+# Opt-in rather than folded into `test-e2e`: coverage tracing slows every request and these
+# tests have timeouts, so a default-on tracer would trade suite stability for a number.
+#
+# E2E_PATHS scopes it, e.g. make test-e2e-coverage E2E_PATHS=tests/e2e/portal/
+E2E_PATHS ?=
+
+.PHONY: test-e2e-coverage
+test-e2e-coverage: check-venv-platform build-css
+	@echo "🎭 [E2E] Browser suite with server-side coverage..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@E2E_COVERAGE=1 $(PYTHON_SHARED) scripts/e2e_stack.py start
+	@rc=0; $(PYTHON_SHARED) scripts/e2e_stack.py test $(E2E_PATHS) || rc=$$?; \
+		$(PYTHON_SHARED) scripts/e2e_stack.py stop; \
+		echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"; \
+		grep "^E2E coverage" logs/e2e-supervisor.log || echo "⚠️  No coverage lines in logs/e2e-supervisor.log"; \
+		exit $$rc
 
 test-e2e-platform:
 	@$(PYTHON_SHARED) scripts/e2e_stack.py test tests/e2e/platform/
