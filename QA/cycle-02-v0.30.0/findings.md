@@ -28,7 +28,7 @@ A finding is only PASS when the test that proves it is named. "Tests pass" is no
 ## 1. The measurement was wrong before the QA was
 
 Coverage was broken four separate ways, each reproduced locally before being fixed
-(`1dfa71bb`, `caa6e081`, `270d1a6d`, `1c109951`).
+(#543).
 
 | # | Defect | Evidence |
 |---|---|---|
@@ -47,7 +47,7 @@ number is structurally capped, because `pytest.ini` sets `-p no:django_db`, the 
 `timezone.now().date()` (UTC) while filtering on `created_at__date` (resolved in
 `Europe/Bucharest`), so for three hours every night — 00:00 to 03:00 local — the Romanian VAT
 compliance screen silently reported nothing for everything issued that local day, returning 200
-throughout. Fixed in `6b31b800`. It was caught only because those tests assert rendered figures
+throughout. Fixed in #543. It was caught only because those tests assert rendered figures
 rather than status codes, which is this cycle's thesis demonstrated by accident.
 
 ### Root cause of the staleness, by 5 Whys
@@ -62,7 +62,7 @@ rather than status codes, which is this cycle's thesis demonstrated by accident.
 
 **Root cause: effort invested in end-to-end QA was invisible to every gate in the project.** That
 is why the walkthrough stayed manual, why it went stale, and why a setting could be "verified"
-while its customer-facing consequence was untested. Fixed in `1c109951`: the browser suite runs
+while its customer-facing consequence was untested. Fixed in #543: the browser suite runs
 nightly, reports server-side coverage, and portal's floor is gated on the union.
 
 ---
@@ -81,7 +81,7 @@ for exactly one status (429) and dropped 503 into `return {}`.
 | HTMX tab/search showed nothing at all | Three views passed no `fallback_message` |
 | Login was byte-identical to a wrong password | `api_client/services.py` converted 503 to `None`, making the correct branch dead code for 503 |
 
-Fixed across `317d7413`, `d1bc16e8`, `38ee9f9e`. **PASS** is now carried by
+Fixed in #544. **PASS** is now carried by
 `tests/e2e/portal/test_maintenance_window.py`, which toggles the real setting through the
 platform's own `/settings/save/` endpoint as staff and observes the portal — OFF → ON → OFF,
 including that document counts survive the window.
@@ -212,7 +212,7 @@ intended value established and a consumer test.
 
 ### Effect tests added
 
-All five `critical=True` keys are now effect-tested (`6fc8d57c`).
+All five `critical=True` keys are now effect-tested (#545).
 `integrations.smartbill_invoice_series` and `integrations.smartbill_tax_names` were merely
 mentioned, never driven; each decides whether an invoice may be sent to SmartBill at all, and a
 wrong tax name would put a legally incorrect VAT description on a Romanian fiscal document.
@@ -324,7 +324,7 @@ buys a per-render settings read for nothing.
   maintenance window.
 - Three money-critical `timezone.now().date()` sites that pick **VAT rates** by date:
   `tax_service.py:234`, `tax_models.py:134`, `tax_models.py:145`. Same class as the bug fixed in
-  `6b31b800`; they deserve their own pass rather than a drive-by.
+  #543; they deserve their own pass rather than a drive-by.
 - `portal/apps/billing/schemas.py:134` — drives the customer-facing overdue flag from UTC.
 
 ---
