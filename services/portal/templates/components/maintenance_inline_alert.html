@@ -1,0 +1,24 @@
+{% load i18n %}
+{% load ui_components %}
+
+{# Sibling of rate_limit_inline_alert.html. Blue rather than amber: maintenance is a planned
+   state and nothing is wrong with the customer's account, which is the distinction the previous
+   behaviour destroyed by rendering an empty list instead. #}
+<div class="bg-blue-900/30 border border-blue-500/50 rounded-lg p-6" role="alert" aria-live="polite">
+  <div class="flex items-start gap-3">
+    <div class="mt-0.5">
+      {% icon "info" size="sm" css_class="text-blue-300" %}
+    </div>
+    <div>
+      <h3 class="text-blue-200 font-medium">{% trans "Scheduled maintenance" %}</h3>
+      <p class="text-blue-100/90 mt-1">{{ maintenance_message }}</p>
+      <a
+        href="{{ maintenance_retry_url|default:request.get_full_path }}"
+        class="mt-4 inline-flex items-center px-4 py-2 text-sm font-medium rounded-md bg-blue-600 text-white hover:bg-blue-500 transition-colors"
+        aria-label="{% trans 'Try again' %}"
+      >
+        {% trans "Try again" %}
+      </a>
+    </div>
+  </div>
+</div>

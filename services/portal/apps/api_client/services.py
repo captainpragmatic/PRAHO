@@ -75,13 +75,14 @@ def _resolve_portal_signing_secret() -> str:
 class PlatformAPIError(Exception):
     """Exception raised when platform API calls fail"""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # Error metadata, not behaviour: each field is one fact about the response
         self,
         message: str,
         status_code: int | None = None,
         response_data: dict[str, Any] | None = None,
         retry_after: int | None = None,
         is_rate_limited: bool | None = None,
+        is_maintenance: bool | None = None,
     ):
         self.message = message
         self.status_code = status_code
@@ -90,7 +91,29 @@ class PlatformAPIError(Exception):
         self.is_rate_limited = bool(
             is_rate_limited if is_rate_limited is not None else status_code == HTTPStatus.TOO_MANY_REQUESTS
         )
+        # The sibling `is_rate_limited` had for a long time, and its absence was the whole bug:
+        # every consumer downstream could tell a throttle from a failure and had no way to tell an
+        # outage from either, so a maintenance window rendered as "you have nothing yet".
+        self.is_maintenance = bool(
+            is_maintenance if is_maintenance is not None else status_code == HTTPStatus.SERVICE_UNAVAILABLE
+        )
         super().__init__(message)
+
+    @property
+    def is_degraded(self) -> bool:
+        """The platform is up but not answering right now, so the caller must SURFACE this.
+
+        Ten places asked `is_rate_limited` to decide whether to propagate or flatten to `None` or
+        an empty collection - two duplicated helpers in the billing and tickets services, and
+        eight inline checks here. Every one of them reported a maintenance window as missing data,
+        and fixing any one alone would have left the rest doing it. This property is the single
+        thing they now share; it lives on the exception because a helper in
+        `common/rate_limit_feedback` cannot be imported here without a cycle.
+
+        A genuine failure is deliberately NOT degraded: flattening that to an empty list is a
+        different judgement, and not one this change is making.
+        """
+        return self.is_rate_limited or self.is_maintenance
 
 
 class PlatformAPIClient:
@@ -632,7 +655,7 @@ class PlatformAPIClient:
             return None
 
         except PlatformAPIError as e:
-            if e.is_rate_limited:
+            if e.is_degraded:
                 raise  # Let caller handle rate-limit UX
             logger.warning(f"⚠️ [API Client] Customer authentication failed for {email}: {e}")
             return None
@@ -714,7 +737,7 @@ class PlatformAPIClient:
             return None
 
         except PlatformAPIError as e:
-            if e.is_rate_limited:
+            if e.is_degraded:
                 raise
             logger.warning(f"⚠️ [API Client] Failed to get customer profile: {e}")
             return None
@@ -735,7 +758,7 @@ class PlatformAPIClient:
             return bool(data.get("success", False))
 
         except PlatformAPIError as e:
-            if e.is_rate_limited:
+            if e.is_degraded:
                 raise
             logger.warning(f"⚠️ [API Client] Failed to update customer profile: {e}")
             return False
@@ -758,7 +781,7 @@ class PlatformAPIClient:
             return bool(data.get("success", False))
 
         except PlatformAPIError as e:
-            if e.is_rate_limited:
+            if e.is_degraded:
                 raise
             logger.warning(f"⚠️ [API Client] Failed to update customer password: {e}")
             return False
@@ -785,7 +808,7 @@ class PlatformAPIClient:
                 }
             return None
         except PlatformAPIError as e:
-            if e.is_rate_limited:
+            if e.is_degraded:
                 raise
             logger.warning(f"⚠️ [API Client] Failed to setup TOTP MFA: {e}")
             return None
@@ -798,7 +821,7 @@ class PlatformAPIClient:
             )
             return data if data.get("success") else None
         except PlatformAPIError as e:
-            if e.is_rate_limited:
+            if e.is_degraded:
                 raise
             logger.warning(f"⚠️ [API Client] Failed to verify TOTP: {e}")
             return None
@@ -809,7 +832,7 @@ class PlatformAPIClient:
             data = self._make_request("POST", "/users/mfa/setup/webauthn/", data={"customer_id": customer_id})
             return data if data.get("success") else None
         except PlatformAPIError as e:
-            if e.is_rate_limited:
+            if e.is_degraded:
                 raise
             logger.warning(f"⚠️ [API Client] Failed to setup WebAuthn MFA: {e}")
             return None

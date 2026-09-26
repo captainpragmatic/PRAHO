@@ -3,6 +3,10 @@
 
 {% if rate_limited %}
 {% include "components/rate_limit_inline_alert.html" %}
+{% elif maintenance %}
+{# Before this arm existed a maintenance window fell through to the empty state below,
+   telling the customer they had no services rather than that we were unavailable. #}
+{% include "components/maintenance_inline_alert.html" %}
 {% elif services %}
 
 {# Desktop Table #}
