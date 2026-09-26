@@ -4,7 +4,6 @@ Security headers, Romanian compliance, and audit logging.
 """
 
 import base64
-import contextlib
 import hashlib
 import hmac
 import json
@@ -23,6 +22,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import get_user_model, logout
 from django.core.cache import cache
+from django.db import DatabaseError
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
 from django.utils import timezone
@@ -750,8 +750,20 @@ class SessionSecurityMiddleware:
             logger.critical(
                 "🔥 [SessionSecurityMiddleware] Session security check failed — invalidating session for safety: %s", e
             )
-            with contextlib.suppress(Exception):
+            try:
                 request.session.flush()
+            except DatabaseError as flush_error:
+                # The line above promises the session was invalidated. If the flush itself failed it
+                # was NOT, and the request continues with a session a security check just rejected.
+                # An operator reading that CRITICAL has to be able to tell those two apart.
+                # `DatabaseError` is the accurate set rather than a defensive `Exception`:
+                # SESSION_ENGINE is the db backend and `flush()` is clear + delete, with no save, so
+                # a broader catch here would only hide a programming error.
+                logger.critical(
+                    "🔥 [SessionSecurityMiddleware] Session invalidation FAILED after a failed "
+                    "security check — the session is still valid: %s",
+                    flush_error,
+                )
 
     def _should_log_activity(self, request: HttpRequest) -> bool:
         """Determine if this request should be logged for activity tracking"""

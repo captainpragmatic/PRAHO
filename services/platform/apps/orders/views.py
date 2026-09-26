@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.contenttypes.models import ContentType
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Count, Q, QuerySet
@@ -211,15 +211,23 @@ def _get_vat_rate_for_order(order: Order) -> Decimal:
             "customer_id": str(customer.id),
             "order_id": None,
         }
-        # Include per-customer overrides from tax profile if available
+        # Include per-customer overrides from tax profile if available.
+        #
+        # `ObjectDoesNotExist` only, matching `apps/api/orders/views.py:71` which builds the same
+        # CustomerVATInfo correctly. The previous `except Exception: pass` meant a DatabaseError
+        # reading the profile silently produced a dict WITHOUT the customer's overrides, so the
+        # order took the country's default VAT with nothing logged — a wrong rate on a Romanian
+        # fiscal document. That case now reaches the outer handler, which logs and falls back
+        # deliberately.
         try:
             tax_profile = customer.tax_profile
+        except ObjectDoesNotExist:
+            tax_profile = None  # No tax profile — the immutable order snapshot governs
+        if tax_profile is not None:
             info["is_vat_payer"] = tax_profile.is_vat_payer
             info["reverse_charge_eligible"] = tax_profile.reverse_charge_eligible
             if tax_profile.vat_rate is not None:
                 info["custom_vat_rate"] = tax_profile.vat_rate
-        except Exception:  # noqa: S110
-            pass  # No tax profile — use the immutable order snapshot
         # Use 10000 (100.00) as dummy subtotal — we only need the rate
         result = OrderVATCalculator.calculate_vat(subtotal_cents=10000, customer_info=info)
         return (result.vat_rate / Decimal("100")).quantize(Decimal("0.0001"))

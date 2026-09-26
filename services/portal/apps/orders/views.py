@@ -1383,10 +1383,23 @@ def confirm_payment(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911, PLR
         finally:
             # Clear idempotency key on failure so the customer can retry.
             # Keep it on success to prevent double-charging.
-            # contextlib.suppress prevents cache errors from masking the return value.
             if not payment_confirmed:
-                with contextlib.suppress(Exception):
+                try:
                     cache.delete(idem_key)
+                except Exception as cache_error:
+                    # Broad deliberately, and logged rather than suppressed. This runs in a
+                    # `finally`, so it must never raise and mask the JsonResponse above - but the
+                    # consequence of failing quietly is that the key survives and the customer
+                    # CANNOT retry a payment that just failed, which is exactly the kind of thing
+                    # nobody discovers until they are on the phone about it. The breadth is honest:
+                    # the cache backend is pluggable (LocMem today, Redis anticipated) and Django's
+                    # cache API defines no common exception, so there is no accurate narrow set.
+                    logger.warning(
+                        "⚠️ [Orders] Could not clear idempotency key %s after a failed payment — "
+                        "the customer may be unable to retry: %s",
+                        idem_key,
+                        cache_error,
+                    )
 
     except json.JSONDecodeError:
         return JsonResponse({"success": False, "error": "Invalid request data"}, status=400)
