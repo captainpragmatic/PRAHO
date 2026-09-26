@@ -70,6 +70,9 @@ notifications.max_subject_length
 notifications.max_template_size
 
 # orders
+# The two max_price_override_* keys are tracked in #542 along with the deeper defect: the
+# validator that would enforce them has no callers, and the path that applies a manual price
+# checks nothing at all. Wiring the getters without deciding the intended cap would be worse.
 orders.max_payment_failures_before_fail
 orders.max_price_override_cents
 orders.max_price_override_multiplier

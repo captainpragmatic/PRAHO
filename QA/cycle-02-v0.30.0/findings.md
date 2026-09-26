@@ -256,7 +256,7 @@ right by testing `is not None` on a setting that may legitimately be unset.
 
 ---
 
-## 4. FAIL — the staff price-override path has no validation at all
+## 4. FAIL — the staff price-override path has no validation at all (#542)
 
 Found while triaging §3, and it is a security finding in its own right rather than a settings one.
 
@@ -274,7 +274,8 @@ neither is connected to the path that applies the override.
 catalog and the code constant disagree by 2× so it is not yet established *which* cap is intended,
 and the validator's own `staff_role in ["admin", "billing"]` check may duplicate or contradict the
 view decorator already in place. This needs its own change with a plan review, per the money-path
-rule. **Action: file as an issue before this branch merges.**
+rule. Tracked as **#542**, which also carries the third copy of the same policy at
+`views.py:1412` that would need reconciling with the validator.
 
 ---
 
@@ -306,7 +307,7 @@ buys a per-render settings read for nothing.
 | `company.legal_name` hardcoded in legal prose | FAIL | Pinned by a test; fix costs 5 translated msgids |
 | Portal templates hardcoding company identity | FAIL | Needs the settings contract extended across HMAC |
 | `company.email_noreply` shadowed by `DEFAULT_FROM_EMAIL` | FAIL | Precedence pinned by a test |
-| Price-override path (§4) | FAIL | Issue to file |
+| Price-override path (§4) | FAIL | Tracked as #542 |
 | `romanian_business_context` (§5) | FAIL | Deletion, separate commit |
 | Effect tests for the business zone | **PASS** | Every testable key in `company`, `orders`, `billing`, `customers`, `security`, `support`, `domains`, `localisation` and `platform` now has one. The four that do not — the two `orders.max_price_override_*`, `orders.max_payment_failures_before_fail`, `billing.subscription_grace_period_days` — have no effect to test, because they are inert |
 | Effect tests for `integrations` (149 keys) and `advanced` (90) | NOT-RUN | The deferred cut. `efactura` alone is 43 |
