@@ -14,6 +14,7 @@ import socket
 import subprocess
 import sys
 import time
+from functools import partial
 from pathlib import Path
 from uuid import uuid4
 
@@ -24,6 +25,12 @@ LOGS = ROOT / "logs"
 STATE = LOGS / "e2e-stack.json"
 FIXTURES = LOGS / "e2e-fixtures.json"
 SERVICES = {"platform": 8700, "portal": 8701}
+# Server-side coverage data. The browser suite exercises the app inside the `runserver`
+# subprocesses, so measuring the pytest process would report almost nothing - it drives a
+# browser and imports no business code. Opt-in via E2E_COVERAGE=1, because coverage tracing
+# slows every request and the 311 browser tests have timeouts; a default-on tracer would trade
+# suite stability for a number.
+COVERAGE_DIR = ROOT / "output" / "playwright" / "coverage"
 
 
 def environment(service: str = "platform") -> dict[str, str]:
@@ -142,11 +149,55 @@ def check(*, during_startup: bool = False) -> dict:
     return state
 
 
+def report_coverage() -> None:
+    """Combine and report what each SERVER executed, one dataset per service.
+
+    Each server wrote to its own `COVERAGE_FILE` base, so `combine` globs only that service's
+    per-process files and the two codebases never mix. Reporting runs with the service directory
+    as the working directory because the root config's `source = ["apps", "config", "ui"]` is
+    relative - the same relative names have to resolve to the same tree they were measured in.
+    """
+    for service in SERVICES:
+        produced = sorted(COVERAGE_DIR.glob(f".coverage.{service}.*"))
+        if not produced:
+            print(f"E2E coverage: no data for {service}. Did its server start under coverage?")
+            continue
+        service_dir = ROOT / "services" / service
+        env = {
+            **os.environ,
+            "COVERAGE_RCFILE": str(ROOT / "pyproject.toml"),
+            "COVERAGE_FILE": str(COVERAGE_DIR / f".coverage.{service}"),
+        }
+        run = partial(subprocess.run, cwd=service_dir, env=env, check=False)
+        run([sys.executable, "-m", "coverage", "combine", "--quiet"])
+        run([sys.executable, "-m", "coverage", "xml", "-o", str(COVERAGE_DIR / f"coverage-e2e-{service}.xml")])
+        summary = subprocess.run(
+            [sys.executable, "-m", "coverage", "report"],
+            cwd=service_dir,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        # Only the TOTAL: the per-file table is hundreds of lines and the xml already holds it.
+        total = next((line for line in summary.stdout.splitlines() if line.startswith("TOTAL")), None)
+        print(f"E2E coverage [{service}] from {len(produced)} process file(s): {total or 'no TOTAL reported'}")
+    print(f"E2E coverage: xml written to {COVERAGE_DIR}")
+
+
 def serve(instance: str) -> None:
     require_free_ports()
     LOGS.mkdir(exist_ok=True)
     children: list[subprocess.Popen] = []
     stopping = False
+    measuring_coverage = os.environ.get("E2E_COVERAGE") == "1"
+    if measuring_coverage:
+        COVERAGE_DIR.mkdir(parents=True, exist_ok=True)
+        # Stale data from an earlier stack would be combined into this one and report lines
+        # nothing in this run executed.
+        for stale in COVERAGE_DIR.glob(".coverage.*"):
+            stale.unlink()
+        print("E2E coverage: servers will run under coverage; the report follows shutdown.")
 
     def stop(_signum, _frame):
         nonlocal stopping
@@ -162,6 +213,7 @@ def serve(instance: str) -> None:
                 "root": str(ROOT),
                 "ready": False,
                 "source": source_version(),
+                "coverage": measuring_coverage,
             }
             STATE.write_text(json.dumps(state))
             for service, port in SERVICES.items():
@@ -189,11 +241,21 @@ def serve(instance: str) -> None:
                         raise subprocess.CalledProcessError(setup.returncode, command)
                     if stopping:
                         raise RuntimeError("E2E setup cancelled.")
+                server_command = [sys.executable, "manage.py", "runserver", f"127.0.0.1:{port}", "--noreload"]
+                server_env = environment(service)
+                if measuring_coverage:
+                    # `coverage run` rather than a sitecustomize hook: the stack owns this
+                    # launch, so making it explicit here beats mutating site-packages.
+                    server_command = [sys.executable, "-m", "coverage", "run", *server_command[1:]]
+                    server_env.update(
+                        COVERAGE_RCFILE=str(ROOT / "pyproject.toml"),
+                        COVERAGE_FILE=str(COVERAGE_DIR / f".coverage.{service}"),
+                    )
                 children.append(
                     subprocess.Popen(
-                        [sys.executable, "manage.py", "runserver", f"127.0.0.1:{port}", "--noreload"],
+                        server_command,
                         cwd=ROOT / "services" / service,
-                        env=environment(service),
+                        env=server_env,
                         stdout=log,
                         stderr=subprocess.STDOUT,
                     )
@@ -234,8 +296,17 @@ def serve(instance: str) -> None:
                 try:
                     child.wait(timeout=10)
                 except subprocess.TimeoutExpired:
+                    # A killed server never ran its SIGTERM handler, so its coverage is lost.
+                    print("E2E coverage: a server had to be killed; its data for this run is incomplete.")
                     child.kill()
                     child.wait()
+            if measuring_coverage:
+                # Reported here and not in `test()`: coverage writes on SIGTERM, which
+                # `child.terminate()` above is what sends, so the data is only whole now.
+                try:
+                    report_coverage()
+                except Exception as error:  # never mask the real shutdown reason
+                    print(f"E2E coverage: reporting failed ({error}). Data kept in {COVERAGE_DIR}.")
             if STATE.exists() and json.loads(STATE.read_text()).get("instance") == instance:
                 STATE.unlink()
 
@@ -288,9 +359,15 @@ def test(paths: list[str]) -> int:
         "pytest",
         *(paths or ["tests/e2e/"]),
         "-v",
+        # The pytest process drives a browser and imports no business code; the coverage that
+        # matters is collected inside the servers, by `serve()`.
         "--no-cov",
         f"--junitxml={artifact / 'junit.xml'}",
-        "--tracing=retain-on-failure",
+        # Playwright tracing is dropped when the servers are under coverage. Measured: the same
+        # file gives 21 passed / 0 errors normally and 21 passed / 3 errors with both
+        # instrumentations on, every error a `Tracing.stop: ENOENT` on the trace artifact rather
+        # than a test failure. A coverage run wants the number; `make test-e2e` keeps the traces.
+        "--tracing=off" if state.get("coverage") else "--tracing=retain-on-failure",
         "--screenshot=only-on-failure",
         f"--output={artifact / 'browser'}",
     ]

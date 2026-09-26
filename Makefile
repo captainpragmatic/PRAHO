@@ -435,6 +435,29 @@ test-e2e:
 
 test-with-e2e: test-e2e
 
+# The browser suite is where the portal's real behaviour lives - 179 unmocked tests driving a
+# live portal against a live platform over real HMAC - and it earned no coverage credit at all,
+# because the app executes inside the `runserver` subprocesses rather than the pytest process.
+# Portal unit tests are structurally capped (no database, platform unimportable, most files
+# mocked), so this is the only route to the portal target.
+#
+# Opt-in rather than folded into `test-e2e`: coverage tracing slows every request and these
+# tests have timeouts, so a default-on tracer would trade suite stability for a number.
+#
+# E2E_PATHS scopes it, e.g. make test-e2e-coverage E2E_PATHS=tests/e2e/portal/
+E2E_PATHS ?=
+
+.PHONY: test-e2e-coverage
+test-e2e-coverage: check-venv-platform build-css
+	@echo "🎭 [E2E] Browser suite with server-side coverage..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@E2E_COVERAGE=1 $(PYTHON_SHARED) scripts/e2e_stack.py start
+	@rc=0; $(PYTHON_SHARED) scripts/e2e_stack.py test $(E2E_PATHS) || rc=$$?; \
+		$(PYTHON_SHARED) scripts/e2e_stack.py stop; \
+		echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"; \
+		grep "^E2E coverage" logs/e2e-supervisor.log || echo "⚠️  No coverage lines in logs/e2e-supervisor.log"; \
+		exit $$rc
+
 test-e2e-platform:
 	@$(PYTHON_SHARED) scripts/e2e_stack.py test tests/e2e/platform/
 
