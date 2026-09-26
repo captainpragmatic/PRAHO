@@ -301,7 +301,7 @@ buys a per-render settings read for nothing.
 
 | Item | Verdict | Note |
 |---|---|---|
-| Version bump to 0.30.0 | NOT-RUN | Also: `README.md` carries a stale `tests-7,000+` badge (actual 10,964) and no coverage badge |
+| Version bump to 0.30.0 | **PASS** | Done. The README `tests` badge was stale by 3,900 (now 10,000+), the Version badge had been left at 0.28.0 by the previous bump, and platform/portal coverage badges were added |
 | The 56 inert settings | FAIL | Baselined and gated; each fix is its own change |
 | The 12 fallback/catalog drifts | FAIL | Baselined and gated; each needs its intended value decided |
 | `company.legal_name` hardcoded in legal prose | FAIL | Pinned by a test; fix costs 5 translated msgids |
