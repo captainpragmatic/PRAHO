@@ -1,0 +1,100 @@
+# Settings whose EFFECT a test asserts: it writes the key, then observes it outside the settings
+# app - another app's behaviour, or a rendered page. Reading the value back through SettingsService
+# proves storage, which the other checks in lint_settings_coverage.py already cover.
+#
+# This is a ratchet. `system.maintenance_mode` passed every wiring check while having no
+# customer-facing consequence at all, which is why an effect dimension exists. Demanding an effect
+# test for all 262 keys at once would only teach people to bypass the gate, so the list records what
+# IS tested and the check fails when something leaves it.
+#
+# What the detector cannot see is assertions. A qualifying file with every assert stripped still
+# earns its credit, because the write, the cross-app reach and the request are all still there. So
+# this list is a floor on what has been attempted, not a proof of what is covered - reading the test
+# is what establishes the assertion discriminates.
+#
+# Two entries were removed on 2026-09-26 as false credits once the write detection moved from regex
+# to AST. `node_deployment.terraform_s3_key_prefix` matched `SettingDef(key="...")` in a catalog
+# test, and `notifications.max_async_attachment_kb` matched `if key == "..."` inside a MOCK's
+# side_effect - a test that stubs the settings read, the exact opposite of an effect test.
+#
+# Adding a key here requires the test that earns it. Removing one requires saying why, in the same
+# commit.
+#
+# Recorded 2026-09-26 at 77 of 262 keys.
+audit.compliant_score_threshold
+backup.s3_bucket_name
+billing.efactura_api_timeout_seconds
+billing.efactura_batch_size
+billing.efactura_deadline_warning_hours
+billing.efactura_submission_deadline_days
+billing.invoice_generation_lead_days
+billing.invoice_issuer
+billing.invoice_payment_terms_days
+billing.large_refund_notification_threshold_cents
+billing.max_payment_amount_cents
+billing.proforma_validity_days
+billing.recurring_auto_collection_enabled
+company.address
+company.email_contact
+company.email_dpo
+company.email_finance
+company.email_noreply
+company.email_privacy
+company.email_support
+company.legal_name
+company.phone
+company.registration_number
+customers.base_credit_score
+customers.credit_adjustments
+customers.engagement_activity_weight
+customers.engagement_order_weight
+customers.engagement_recency_weight
+domains.expiry_critical_days
+domains.expiry_warning_days
+domains.renewal_notice_schedule_days
+domains.whois_privacy_price_cents
+infrastructure.auto_drain_enabled
+infrastructure.drain_enabled
+infrastructure.health_check_timeout_seconds
+infrastructure.remediation_boot_grace_seconds
+infrastructure.remediation_verify_max_wait_seconds
+infrastructure.remediation_verify_poll_interval_seconds
+integrations.smartbill_invoice_series
+integrations.smartbill_measuring_unit
+integrations.smartbill_tax_names
+integrations.stripe_enabled
+integrations.stripe_publishable_key
+integrations.stripe_secret_key
+integrations.stripe_webhook_secret
+node_deployment.dns_cloudflare_api_token
+node_deployment.dns_cloudflare_zone_id
+node_deployment.dns_default_zone
+orders.bank_transfer_timeout_hours
+orders.card_timeout_hours
+orders.max_paid_order_confirmation_failures
+orders.review_threshold_cents
+promotions.max_coupon_batch_size
+promotions.max_discount_percent
+provisioning.backup_retention_days
+provisioning.migration_enabled
+provisioning.migration_spool_dir
+provisioning.recovery_excellent_threshold
+provisioning.recovery_good_threshold
+provisioning.recovery_warning_threshold
+security.join_request_notification_limit_per_customer_per_hour
+security.max_session_age_seconds
+security.membership_invitation_limit_per_inviter_per_hour
+security.welcome_invite_limit_per_target_per_hour
+system.customer_date_format
+system.default_country
+system.default_language
+system.maintenance_mode
+system.staff_date_format
+system.timezone
+tickets.allowed_file_extensions
+tickets.auto_close_inactive_hours
+tickets.max_file_size_bytes
+tickets.security_alert_threshold
+users.admin_session_timeout_minutes
+users.shared_device_timeout_minutes
+virtualmin.rate_limit_qps
