@@ -3,7 +3,7 @@
 # ===============================================================================
 # Enhanced for Platform/Portal separation with scoped PYTHONPATH security
 
-.PHONY: help install check-env check-venv-platform dev dev-e2e dev-e2e-bg dev-e2e-csp dev-platform dev-portal dev-all test test-fast test-file test-platform test-platform-fast test-ci test-ci-focused test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-file test-e2e-csp test-e2e-orm test-security test-cache show-test-deps install-frontend build-css watch-css check-css-tooling migrate check-migrations fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-imports lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict
+.PHONY: help install check-env check-venv-platform dev dev-e2e dev-e2e-bg dev-e2e-csp dev-platform dev-portal dev-all test test-fast test-file test-platform test-platform-fast test-ci test-ci-focused test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-file test-e2e-csp test-e2e-orm test-security test-cache show-test-deps install-frontend build-css watch-css check-css-tooling migrate check-migrations fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-error-handling lint-health lint-credentials lint-audit lint-fsm lint-imports lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict
 
 # ===============================================================================
 # SCOPED PYTHON ENVIRONMENTS 🔒
@@ -574,11 +574,13 @@ else
 	@echo "📋 Phase 5: i18n coverage scan"
 	@$(PYTHON_SHARED) scripts/lint_i18n_coverage.py --fail-on high --allowlist scripts/i18n_coverage_allowlist.txt services/platform/apps services/portal/apps services/platform/templates services/portal/templates
 	@echo "📋 Phase 6: Code health scan"
-	@$(VENV_DIR)/bin/python scripts/code_health_scan.py --min-severity=high --exclude-tests --allowlist=scripts/code_health_allowlist.txt services/platform/apps || true
+	@$(VENV_DIR)/bin/python scripts/code_health_scan.py --min-severity=high --exclude-tests --allowlist=scripts/code_health_allowlist.txt services/platform/apps
 	@echo "📋 Phase 7: FSM guardrail lint (ADR-0034)"
 	@$(MAKE) lint-fsm
 	@echo "📋 Phase 8: Cross-app model import lint (ADR-0007)"
 	@$(MAKE) lint-imports
+	@echo "📋 Phase 9: Error handling risk scan"
+	@$(MAKE) lint-error-handling
 	@echo "🎉 All services linting complete!"
 endif
 
@@ -670,8 +672,18 @@ lint-security:
 	@echo "🔒 [Security] PRAHO architectural security scan..."
 	@$(VENV_DIR)/bin/python scripts/security_scanner.py services/ --min-severity HIGH || true
 	@echo "🔒 [Security] Error handling risk scan..."
-	@$(VENV_DIR)/bin/python scripts/error_handling_scan.py services/ --exclude-tests --min-severity high || true
+	@$(MAKE) lint-error-handling
 	@echo "✅ Security linting complete!"
+
+# Blocking on purpose, and it is the point of the target. This scan previously ran with `|| true`
+# inside lint-security, which itself runs with `continue-on-error: true` in both workflows that call
+# it - three layers of suppression over a scanner that was reporting five HIGH findings. A gate that
+# cannot fail is a getter nobody calls. `lint-security` keeps its allowance because semgrep is still
+# an unstable dependency there; this scan does not need it, so it goes into `make lint` where CI
+# actually blocks on the result.
+lint-error-handling:
+	@echo "🧯 [Error Handling] Scanning for swallowed failures..."
+	@$(VENV_DIR)/bin/python scripts/error_handling_scan.py services/ --exclude-tests --min-severity high
 
 lint-credentials:
 	@echo "🔑 [Credentials] Hardcoded credentials security check..."

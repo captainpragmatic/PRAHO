@@ -149,3 +149,79 @@ class ConfirmPaymentUserIdValidationTests(SimpleTestCase):
         self.assertGreater(guard_pos, -1, "user_id guard missing from confirm_payment")
         self.assertGreater(cast_pos, -1, "int(user_id) cast missing from confirm_payment")
         self.assertLess(guard_pos, cast_pos, "user_id guard must come before int(user_id) cast")
+
+
+@override_settings(SESSION_ENGINE="django.contrib.sessions.backends.cache")
+class ConfirmPaymentIdempotencyKeyCleanupTests(SimpleTestCase):
+    """A surviving idempotency key means the customer cannot retry a payment that just failed.
+
+    The key is cleared in a `finally` so a retry is possible, and the delete used to run under
+    `contextlib.suppress(Exception)` — correctly preventing a cache error from masking the response,
+    but silently. A key that outlives its failed payment blocks the customer for the full 300-second
+    timeout with nothing in the logs to explain it.
+    """
+
+    def setUp(self) -> None:
+        cache.clear()
+        self.client = Client()
+        session = self.client.session
+        for key, value in {"active_customer_id": 123, "customer_id": 123, "user_id": 456}.items():
+            session[key] = value
+        session.save()
+
+    def _payload(self, intent: str) -> str:
+        return json.dumps({
+            "payment_intent_id": intent,
+            "order_id": "550e8400-e29b-41d4-a716-446655440000",
+            "gateway": "stripe",
+        })
+
+    @patch("apps.orders.views.PlatformAPIClient")
+    def test_a_failed_cleanup_is_logged_rather_than_swallowed(self, mock_api_class: object) -> None:
+        """Revert the fix and this fails: the suppression left no trace of a stuck customer."""
+        mock_api = mock_api_class.return_value
+        # A payment that did not complete: the view returns 400 and the `finally` clears the key.
+        mock_api.post_billing.return_value = {"success": True, "status": "requires_payment_method"}
+        mock_api.post.return_value = {"success": True}
+
+        # Selective on purpose. This suite runs with the CACHE session backend, so a blanket patch of
+        # `cache.delete` also breaks `session.flush()` in `apps/users/middleware.py` and the error
+        # escapes from there instead of from the site under test.
+        real_delete = cache.delete
+
+        def fail_only_for_the_idempotency_key(key: str, *args: object, **kwargs: object) -> bool:
+            if str(key).startswith("confirm_payment:"):
+                raise RuntimeError("cache backend gone")
+            return real_delete(key, *args, **kwargs)
+
+        with (
+            patch("apps.orders.views.cache.delete", side_effect=fail_only_for_the_idempotency_key),
+            self.assertLogs("apps.orders.views", level="WARNING") as logs,
+        ):
+            response = self.client.post(
+                "/order/confirm-payment/", data=self._payload("pi_cleanupfail12345678"),
+                content_type="application/json",
+            )
+
+        self.assertTrue(
+            any("Could not clear idempotency key" in line for line in logs.output),
+            f"a failed cleanup must say the customer may be unable to retry; got {logs.output}",
+        )
+        # And the cache error must not have replaced the view's own answer.
+        self.assertEqual(response.status_code, 400)
+
+    @patch("apps.orders.views.PlatformAPIClient")
+    def test_a_successful_cleanup_logs_no_warning_about_the_key(self, mock_api_class: object) -> None:
+        """The other direction, so the assertion above cannot pass by always logging."""
+        mock_api = mock_api_class.return_value
+        mock_api.post_billing.return_value = {"success": True, "status": "requires_payment_method"}
+        mock_api.post.return_value = {"success": True}
+
+        response = self.client.post(
+            "/order/confirm-payment/", data=self._payload("pi_cleanupok123456789"),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        # The key is gone, so an immediate retry is not blocked as a duplicate.
+        self.assertIsNone(cache.get("confirm_payment:123:pi_cleanupok123456789"))
