@@ -1,0 +1,86 @@
+# Settings read only from a function nothing calls — check 6 of scripts/lint_settings_coverage.py
+#
+# Each key below is editable in the platform settings UI and has NO effect. The pattern is
+# identical in every case and is three lines long:
+#
+#     _DEFAULT_X = 100                                                   # what the code enforces
+#     X = _DEFAULT_X                                                     # what live logic reads
+#     def get_x(): return SettingsService.get_integer_setting("app.x", _DEFAULT_X)    # uncalled
+#
+# Live code compares against the module constant `X`. The getter that would consult the operator's
+# configured value is never called, from anywhere in services/platform - including tests. Check 1
+# (orphan settings) passes on all of them, because the key IS referenced in app code: inside the
+# dead getter. That is the gap between a key being present and a key having consequences, and it is
+# the same gap that let `system.maintenance_mode` ship with no customer-facing effect.
+#
+# This file is a ratchet in both directions. A NEW inert setting fails the check at medium. A key
+# here that becomes live fails at low until it is removed from this list, so the list cannot rot
+# into a permanent excuse.
+#
+# Fixing one means calling the getter from the code that enforces the limit - which changes what
+# the system accepts, so each is a deliberate change with its own test, not a sweep. Deleting the
+# key from the catalog is an equally valid fix where the setting should never have been offered.
+#
+# Recorded 2026-09-26 at 43 of 262 keys.
+
+
+# audit
+audit.compliant_score_threshold
+audit.max_files_displayed
+audit.max_violations_displayed
+audit.partial_score_threshold
+
+# billing
+billing.alert_cooldown_hours
+billing.event_grace_period_hours
+
+# common
+common.cache_timeout_long
+common.cache_timeout_medium
+common.cache_timeout_short
+common.cache_timeout_very_long
+common.default_orphans
+common.max_header_json_length
+common.max_summarized_args
+common.proximity_line_threshold
+common.query_warning_threshold
+common.sql_display_limit
+common.value_summary_limit
+
+# notifications
+notifications.max_name_length
+notifications.max_recipients_per_batch
+notifications.max_subject_length
+notifications.max_template_size
+
+# orders
+orders.max_payment_failures_before_fail
+orders.max_price_override_cents
+orders.max_price_override_multiplier
+orders.max_search_query_length
+
+# products
+products.max_json_content_size
+products.max_price_cents
+
+# promotions
+promotions.max_code_generation_attempts
+
+# provisioning
+provisioning.bulk_operation_threshold
+provisioning.cache_timeout
+provisioning.health_check_timeout_seconds
+provisioning.long_provisioning_threshold_minutes
+provisioning.max_concurrent_health_checks
+provisioning.max_error_display
+provisioning.max_username_uniqueness_attempts
+provisioning.overall_health_check_timeout
+provisioning.resource_usage_alert_threshold
+provisioning.server_overload_threshold
+provisioning.ssh_timeout
+provisioning.sudo_command_timeout
+
+# common
+security.registration_rate_limit_per_ip
+users.credential_max_age_days
+users.credential_rotation_retry_limit
