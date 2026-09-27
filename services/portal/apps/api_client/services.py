@@ -844,14 +844,14 @@ class PlatformAPIClient:
             data={"user_id": user_id, "password": password, "token": token},
         )
 
-    def disable_mfa(self, user_id: int, password: str, token: str) -> bool:
+    def disable_mfa(self, user_id: int, password: str, token: str) -> dict[str, object] | None:
         data = self._make_request(
             "POST",
             "/users/mfa/disable/",
             user_id=user_id,
             data={"user_id": user_id, "password": password, "token": token},
         )
-        return bool(data.get("success", False))
+        return data if data.get("success") else None
 
     # ===============================================================================
     # GENERIC HTTP METHODS

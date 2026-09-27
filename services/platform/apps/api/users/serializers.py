@@ -134,6 +134,8 @@ class MFAVerifySerializer(serializers.Serializer):
         """Validate token format"""
         if not value.isdigit():
             raise serializers.ValidationError(_("Token must contain only digits."))
+        if len(value) == BACKUP_CODE_LENGTH and not self.context["user"].two_factor_enabled:
+            raise serializers.ValidationError(_("Finish setup with the 6-digit code."))
         return value
 
     def create(self, validated_data: dict[str, Any]) -> dict[str, Any]:
@@ -152,12 +154,9 @@ class MFAVerifySerializer(serializers.Serializer):
         # Check if it's a 6-digit TOTP token
         if len(token) == TOTP_TOKEN_LENGTH:
             if totp.verify(token, valid_window=1):  # Allow 30 seconds window
-                # Enable 2FA
-                user.two_factor_enabled = True
-
-                # Generate backup codes
-                backup_codes = user.generate_backup_codes()
-                user.save()
+                with transaction.atomic():
+                    backup_codes = user.generate_backup_codes()
+                    MFAService.apply_state_change(user, action="enable")
 
                 logger.info(f"✅ [2FA] Two-factor authentication enabled for user: {user.email}")
 
@@ -214,11 +213,7 @@ class MFADisableSerializer(serializers.Serializer):
         """
         user = self.context["user"]
 
-        # Disable 2FA
-        user.two_factor_enabled = False
-        user.two_factor_secret = ""
-        user.backup_tokens = []
-        user.save(update_fields=["two_factor_enabled", "_two_factor_secret", "backup_tokens"])
+        MFAService.apply_state_change(user, action="disable")
 
         logger.warning(f"⚠️ [2FA] Two-factor authentication disabled for user: {user.email}")
 

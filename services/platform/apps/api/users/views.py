@@ -633,6 +633,7 @@ def mfa_verify_api(request: HttpRequest, user: User) -> Response:
         serializer = MFAVerifySerializer(data=request.data, context={"request": request, "user": user})
         serializer.is_valid(raise_exception=True)
         result = serializer.save()
+        result["session_auth_hash"] = user.get_session_auth_hash()
     return Response(result)
 
 
@@ -646,7 +647,9 @@ def mfa_disable_api(request: HttpRequest, user: User) -> Response:
         user = User.objects.select_for_update().get(pk=user.pk)
         serializer = MFADisableSerializer(data=request.data, context={"request": request, "user": user})
         serializer.is_valid(raise_exception=True)
-        return Response(serializer.save())
+        result = serializer.save()
+        result["session_auth_hash"] = user.get_session_auth_hash()
+        return Response(result)
 
 
 @api_view(["POST"])

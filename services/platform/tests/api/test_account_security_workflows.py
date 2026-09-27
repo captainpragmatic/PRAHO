@@ -150,6 +150,7 @@ class AccountSecurityWorkflows(HMACTestMixin, TestCase):
         self.request_security("mfa/setup/")
         response = self.request_security("mfa/verify/", token="11111111")
         self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("Finish setup with the 6-digit code.", response.json()["token"])
         self.user.refresh_from_db()
         self.assertFalse(self.user.mfa_enabled)
 

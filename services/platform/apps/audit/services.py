@@ -1465,6 +1465,7 @@ class GDPRDeletionService:
             user.last_privacy_policy_accepted = None
 
             # Clear sensitive fields
+            # The unusable password revokes sessions independently of the MFA credential version.
             user.set_unusable_password()
             if hasattr(user, "two_factor_enabled"):
                 user.two_factor_enabled = False

@@ -15,6 +15,7 @@ from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.db import models
 from django.db.models import QuerySet
 from django.utils import timezone
+from django.utils.crypto import salted_hmac
 from django.utils.translation import gettext_lazy as _
 
 from apps.common.localisation import DATE_FORMAT_CHOICES, validate_timezone
@@ -163,6 +164,17 @@ class User(AbstractUser):
 
     def __str__(self) -> str:
         return f"{self.get_full_name()} ({self.email})"
+
+    def _get_session_auth_hash(self, secret: str | None = None) -> str:
+        """Bind sessions to a monotonically increasing MFA credential version."""
+        try:
+            # Django caches this indexed reverse one-to-one lookup per instance.
+            version = self.credential_version.version
+        except UserCredentialVersion.DoesNotExist:
+            version = 0
+        value = self.password if version == 0 else f"{self.password}|v{version}"
+        key_salt = "django.contrib.auth.models.AbstractBaseUser.get_session_auth_hash"
+        return salted_hmac(key_salt, value, secret=secret, algorithm="sha256").hexdigest()
 
     def get_full_name(self) -> str:
         """Get user's full name or email if name not available"""
@@ -397,6 +409,13 @@ class User(AbstractUser):
     def mfa_enabled(self) -> bool:
         """Alias for two_factor_enabled - for MFA API compatibility"""
         return self.two_factor_enabled
+
+
+class UserCredentialVersion(models.Model):
+    """Keep session revocation state outside ordinary user saves."""
+
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="credential_version")
+    version = models.PositiveIntegerField(default=0)
 
 
 class CustomerMembership(models.Model):

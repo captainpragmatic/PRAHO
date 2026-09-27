@@ -1201,11 +1201,9 @@ class SessionSecurityService:
         if not user:
             return
 
-        # Clear 2FA configuration
-        user.two_factor_enabled = False
-        user.two_factor_secret = ""  # This will encrypt empty string
-        user.backup_tokens = []
-        user.save(update_fields=["two_factor_enabled", "_two_factor_secret", "backup_tokens"])
+        from .mfa import MFAService  # noqa: PLC0415
+
+        MFAService.apply_state_change(user, action="recover")
 
         # Invalidate all sessions for security
         cls._invalidate_all_user_sessions(user.id)

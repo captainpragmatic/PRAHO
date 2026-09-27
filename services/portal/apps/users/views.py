@@ -19,6 +19,7 @@ from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_http_methods
 
 from apps.api_client.services import PlatformAPIError, api_client
+from apps.common.constants import BACKUP_CODE_LENGTH
 from apps.common.decorators import (
     log_access_attempt,
     require_any_role,
@@ -161,13 +162,17 @@ def _handle_totp_setup_post(request: HttpRequest, customer_id: str, token: str) 
     """Handle POST request for TOTP setup verification"""
     if not token:
         return _handle_mfa_error_redirect(request, "users:mfa_setup_totp", _("Please enter the verification code."))
+    if len(token) == BACKUP_CODE_LENGTH:
+        mark_auth_failure(request, bucket="reauth")
+        return _handle_mfa_error_redirect(request, "users:mfa_setup_totp", _("Finish setup with the 6-digit code."))
 
     try:
         user_id = request.session.get("user_id")
         result = api_client.verify_totp_mfa(customer_id, token, user_id=user_id)
-        if result:
+        if result and result.get("success"):
+            request.session["session_auth_hash"] = result.get("session_auth_hash") or ""
             request.session.cycle_key()
-            request.session["new_mfa_backup_codes"] = result["backup_codes"]
+            request.session["new_mfa_backup_codes"] = result.get("backup_codes", [])
             logger.info(f"✅ [Portal 2FA] TOTP enabled successfully for customer {customer_id}")
             return _handle_mfa_success_redirect(
                 request, "users:mfa_backup_codes", _("Two-factor authentication has been enabled successfully!")
@@ -987,13 +992,17 @@ def mfa_disable_view(request: HttpRequest) -> HttpResponse:
     form = MFAReauthenticationForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         try:
-            if api_client.disable_mfa(
+            result = api_client.disable_mfa(
                 int(request.session["user_id"]), form.cleaned_data["password"], form.cleaned_data["token"]
-            ):
+            )
+            if result and result.get("success"):
+                request.session["session_auth_hash"] = result.get("session_auth_hash") or ""
                 request.session.cycle_key()
                 request.session.pop("new_mfa_backup_codes", None)
                 messages.success(request, _("Two-factor authentication has been disabled."))
                 return redirect("users:mfa_management")
+            mark_auth_failure(request, bucket="reauth")
+            form.add_error(None, _("Could not disable MFA. Check your password and authentication code."))
         except PlatformAPIError:
             mark_auth_failure(request, bucket="reauth")
             form.add_error(None, _("Could not disable MFA. Check your password and authentication code."))
