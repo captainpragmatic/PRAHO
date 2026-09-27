@@ -20,7 +20,13 @@ from rest_framework.views import APIView
 from apps.api.core import ReadOnlyAPIViewSet
 from apps.api.core.permissions import IsAuthenticatedAndAccessible
 from apps.api.core.throttling import AuthThrottle, BurstAPIThrottle
-from apps.api.secure_auth import public_api_endpoint, require_customer_authentication, require_portal_authentication
+from apps.api.secure_auth import (
+    BILLING_ROLES,
+    public_api_endpoint,
+    require_customer_authentication,
+    require_customer_role_in,
+    require_portal_authentication,
+)
 from apps.common.localisation import country_name
 from apps.common.localisation_services import get_localisation_defaults
 from apps.common.performance.rate_limiting import (
@@ -701,7 +707,7 @@ def customer_detail_api(request: HttpRequest, customer: Customer) -> Response:
 # request, so without them the pre-auth path is unthrottled. This restores the full
 # DEFAULT_THROTTLE_CLASSES set for this endpoint.
 @throttle_classes([PortalHMACRateThrottle, PortalHMACBurstThrottle, CustomerRateThrottle, BurstRateThrottle])
-@require_customer_authentication
+@require_customer_role_in(*BILLING_ROLES)
 def update_customer_billing_address(  # noqa: C901, PLR0912, PLR0915  # Complexity: multi-step business logic
     request: Request, customer: Customer
 ) -> Response:

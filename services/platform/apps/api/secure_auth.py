@@ -1,14 +1,17 @@
-# ===============================================================================
-# UNIFIED SECURE API AUTHENTICATION - ANTI-ENUMERATION 🔐
-# ===============================================================================
+"""Secure Portal API authentication.
+
+Decorators: require_customer_authentication, require_customer_role_in,
+require_user_authentication, require_portal_service_authentication,
+require_portal_authentication, public_api_endpoint.
+"""
 
 import json
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
-from django.http import HttpRequest, JsonResponse
+from django.http import HttpRequest, HttpResponseBase, JsonResponse
 from rest_framework.response import Response
 
 from apps.common.constants import HMAC_NTP_SKEW_SECONDS, HMAC_TIMESTAMP_WINDOW_SECONDS
@@ -16,6 +19,9 @@ from apps.customers.models import Customer
 from apps.users.models import CustomerMembership, User
 
 logger = logging.getLogger(__name__)
+
+BILLING_ROLES: frozenset[str] = frozenset({"owner", "billing"})
+SUPPORT_ROLES: frozenset[str] = frozenset({"owner", "billing", "tech"})
 
 
 def _uniform_error_response(
@@ -115,20 +121,20 @@ def _validate_customer_exists(customer_id: str | int) -> tuple[Customer | None, 
 
 def _validate_user_membership(
     body_user_id: str | int, customer: Customer, action: str, customer_id: int
-) -> tuple[bool, Response | None]:
+) -> tuple[CustomerMembership | None, Response | None]:
     """Validate user membership to customer"""
     # Resolve user identity from signed body only (no header reliance)
     try:
         resolved_user_id = int(body_user_id)
     except (TypeError, ValueError):
         logger.warning(f"🚨 [API Security] Invalid user_id format in HMAC context: {body_user_id}")
-        return False, _uniform_error_response("Authentication required", 401)
+        return None, _uniform_error_response("Authentication required", 401)
 
     try:
         user = User.objects.get(id=resolved_user_id, is_active=True)
     except User.DoesNotExist:
         logger.warning(f"🚨 [API Security] User not found or inactive: {resolved_user_id}")
-        return False, _uniform_error_response("Authentication required", 401)
+        return None, _uniform_error_response("Authentication required", 401)
 
     membership = CustomerMembership.objects.filter(user=user, customer=customer, is_active=True).first()
 
@@ -136,14 +142,17 @@ def _validate_user_membership(
         logger.warning(
             f"🚨 [API Security] User {user.email} attempted {action} for customer {customer_id} without membership"
         )
-        return False, _uniform_error_response()  # Generic "access denied"
+        return None, _uniform_error_response()  # Generic "access denied"
 
     logger.debug(f"✅ [API Security] {user.email} authenticated for {customer.company_name} ({action})")
-    return True, None
+    return membership, None
 
 
-def get_authenticated_customer(request: HttpRequest) -> tuple[Customer | None, Response | None]:
+def get_authenticated_customer(  # noqa: PLR0911
+    request: HttpRequest, *, roles: frozenset[str] | None = None
+) -> tuple[Customer | None, Response | None]:
     """
+
     🔒 Get customer from HMAC-authenticated request with membership validation.
 
     This is the SINGLE authentication function for all customer APIs:
@@ -186,15 +195,19 @@ def get_authenticated_customer(request: HttpRequest) -> tuple[Customer | None, R
     if customer_error or customer is None:
         return None, customer_error or _uniform_error_response()
 
-    # Step 3: Validate user has membership to this customer
-    # Note: For session validation, we skip this check since we're validating the user themselves
-    if not request.path.endswith("/session/validate/"):
+    # Role-restricted requests always require an active membership.
+    if roles is not None or not request.path.endswith("/session/validate/"):
         if body_user_id is None:
             logger.warning("🔥 [API Security] Missing user_id in request body")
             return None, _uniform_error_response()
-        has_membership, membership_error = _validate_user_membership(body_user_id, customer, action, customer_id)
-        if not has_membership:
+        membership, membership_error = _validate_user_membership(body_user_id, customer, action, customer_id)
+        if membership is None:
             return None, membership_error
+        if roles is not None and membership.role not in roles:
+            logger.warning("🚨 [API Security] Role %s not allowed for %s", membership.role, request.path)
+            return None, _uniform_error_response()
+        request._customer_role = membership.role  # type: ignore[attr-defined]  # request-scoped auth context for views
+        request._customer_user = membership.user  # type: ignore[attr-defined]  # request-scoped auth context for views
 
     # Success!
     logger.debug(f"✅ [API Security] Customer {customer.company_name} authenticated for {action}")
@@ -274,8 +287,35 @@ def require_customer_authentication(view_func: Callable[..., Any]) -> Callable[.
     return wrapper
 
 
+def require_customer_role_in(
+    *roles: str,
+) -> Callable[[Callable[..., HttpResponseBase]], Callable[..., HttpResponseBase]]:
+    """Require an active customer membership with one of the allowed roles."""
+    allowed_roles = frozenset(roles)
+
+    def decorator(view_func: Callable[..., HttpResponseBase]) -> Callable[..., HttpResponseBase]:
+        def wrapper(request: HttpRequest, *args: object, **kwargs: object) -> HttpResponseBase:
+            logger.debug("🔧 [Auth Decorator] require_customer_role_in called for %s", request.path)
+            customer, error_response = get_authenticated_customer(request, roles=allowed_roles)
+            if error_response is not None:
+                logger.warning("🚨 [API Security] Customer role authentication failed for %s", request.path)
+                return cast(HttpResponseBase, error_response)
+            logger.debug(
+                "✅ [Auth Decorator] Role authentication successful for %s - Customer: %s",
+                request.path,
+                customer.company_name if customer else "None",
+            )
+            return view_func(request, customer, *args, **kwargs)
+
+        wrapper._praho_view = view_func  # type: ignore[attr-defined]  # lets tests introspect the wrapped view's signature
+        return wrapper
+
+    return decorator
+
+
 def require_user_authentication(view_func: Callable[..., Any]) -> Callable[..., Any]:
     """
+
     🔒 Decorator for API views requiring user authentication (session validation).
 
     Usage:

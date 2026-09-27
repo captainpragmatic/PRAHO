@@ -20,7 +20,12 @@ from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from apps.api.secure_auth import public_api_endpoint, require_customer_authentication
+from apps.api.secure_auth import (
+    BILLING_ROLES,
+    public_api_endpoint,
+    require_customer_authentication,
+    require_customer_role_in,
+)
 from apps.billing.models import Currency
 from apps.common.localisation import normalize_country_code
 from apps.common.performance.rate_limiting import (
@@ -586,7 +591,7 @@ def preflight_order(  # noqa: PLR0911, PLR0915  # Complexity: multi-step busines
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # No permissions required (auth handled by secure_auth)
 @throttle_classes([PortalHMACRateThrottle, PortalHMACBurstThrottle, OrderCreateThrottle])
-@require_customer_authentication
+@require_customer_role_in(*BILLING_ROLES)
 def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-step business logic
     request: Request, customer: Customer
 ) -> Response:  # Complexity: order processing pipeline  # Complexity: multi-step business logic
@@ -861,7 +866,7 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # No permissions required (auth handled by secure_auth)
 @throttle_classes([PortalHMACRateThrottle, PortalHMACBurstThrottle, OrderListThrottle])
-@require_customer_authentication
+@require_customer_role_in(*BILLING_ROLES)
 def order_list(request: Request, customer: Customer) -> Response:
     """
     List orders for authenticated customer.
@@ -893,7 +898,7 @@ def order_list(request: Request, customer: Customer) -> Response:
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # No permissions required (auth handled by secure_auth)
 @throttle_classes([PortalHMACRateThrottle, PortalHMACBurstThrottle, OrderListThrottle])
-@require_customer_authentication
+@require_customer_role_in(*BILLING_ROLES)
 def order_detail(request: Request, customer: Customer, order_id: str) -> Response:
     """
     Get order details for authenticated customer.
@@ -988,7 +993,7 @@ def _provision_confirmed_order_item(item: Any, customer: Any, order: Any) -> dic
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])
 @throttle_classes([PortalHMACRateThrottle, PortalHMACBurstThrottle, OrderListThrottle])
-@require_customer_authentication
+@require_customer_role_in(*BILLING_ROLES)
 def confirm_order(request: Request, customer: Customer, order_id: str) -> Response:  # noqa: PLR0911, PLR0912, PLR0915, C901
     """
     Confirm order after successful payment and trigger service provisioning.

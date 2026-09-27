@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import time
 from unittest.mock import patch
 
 from django.core.cache import cache
@@ -35,7 +36,11 @@ class ConfirmPaymentUserIdValidationTests(SimpleTestCase):
         for key, value in kwargs.items():
             if value is not None:
                 session[key] = value
+        if session.get("customer_id") and session.get("user_id"):
+            session["user_memberships"] = [{"customer_id": session["customer_id"], "role": "owner"}]
+            session["user_memberships_fetched_at"] = time.time()
         session.save()
+
 
     def test_fully_missing_auth_redirects_to_login(self) -> None:
         """When no auth context at all, decorator redirects to login."""

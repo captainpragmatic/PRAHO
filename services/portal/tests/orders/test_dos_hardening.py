@@ -9,6 +9,7 @@ No database access — all tests use SimpleTestCase + locmem cache.
 """
 
 import json
+import time
 from unittest.mock import MagicMock, patch
 
 from django.core.cache import cache
@@ -36,7 +37,10 @@ def _auth_session_with_cart(client: Client) -> str:
     session = client.session
     session["customer_id"] = 42
     session["user_id"] = 7
+    session["user_memberships"] = [{"customer_id": session["customer_id"], "role": "owner"}]
+    session["user_memberships_fetched_at"] = time.time()
     session.save()
+
 
     from apps.orders.services import GDPRCompliantCartSession  # noqa: PLC0415
 
@@ -174,7 +178,11 @@ class TestConfirmPaymentIdempotency(SimpleTestCase):
         for key, value in kwargs.items():
             if value is not None:
                 session[key] = value
+        if session.get("customer_id") and session.get("user_id"):
+            session["user_memberships"] = [{"customer_id": session["customer_id"], "role": "owner"}]
+            session["user_memberships_fetched_at"] = time.time()
         session.save()
+
 
     def test_duplicate_confirm_payment_returns_already_processing(self) -> None:
         """Second confirm_payment call with same PI returns idempotent response."""

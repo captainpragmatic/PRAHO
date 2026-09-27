@@ -14,7 +14,12 @@ from rest_framework.decorators import api_view, authentication_classes, permissi
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from apps.api.secure_auth import public_api_endpoint, require_customer_authentication
+from apps.api.secure_auth import (
+    BILLING_ROLES,
+    public_api_endpoint,
+    require_customer_authentication,
+    require_customer_role_in,
+)
 from apps.billing.recurring_locking import lock_recurring_collection_customer
 from apps.common.tax_service import TaxService
 from apps.customers.models import Customer
@@ -346,7 +351,7 @@ def available_service_plans_api(request: HttpRequest) -> Response:
 @api_view(["POST"])
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
-@require_customer_authentication
+@require_customer_role_in(*BILLING_ROLES)
 def update_service_auto_renew_api(request: HttpRequest, customer: Customer, service_id: int) -> Response:
     """
     🔄 Update Service Auto-Renew API

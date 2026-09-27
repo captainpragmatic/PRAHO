@@ -14,6 +14,7 @@ from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_http_methods
 
 from apps.common.api_utils import DictAsObj
+from apps.common.decorators import _get_user_role_for_customer, require_support_access
 from apps.common.pagination import PaginatorData, build_pagination_params
 from apps.common.rate_limit_feedback import handle_platform_error, is_rate_limited_error
 from apps.services.services import services_api
@@ -210,10 +211,11 @@ def ticket_detail(request: HttpRequest, ticket_id: int) -> HttpResponse:
             ticket = ticket_response
             replies = ticket.get("comments", [])  # Fallback if response format is different
 
+        role = _get_user_role_for_customer(request, str(customer_id))
         context = {
             "ticket": ticket,
             "replies": replies,
-            "can_reply": ticket.get("status") not in ["closed", "resolved"],  # Customer can reply unless closed
+            "can_reply": role in {"owner", "billing", "tech"} and ticket.get("status") not in ["closed", "resolved"],
         }
 
         logger.info(f"✅ [Tickets View] Loaded ticket {ticket_id} details for customer {customer_id}")
@@ -229,6 +231,7 @@ def ticket_detail(request: HttpRequest, ticket_id: int) -> HttpResponse:
 
 
 @csrf_protect
+@require_support_access()
 def ticket_create(request: HttpRequest) -> HttpResponse:
     """
     Create new support ticket view.
@@ -387,6 +390,7 @@ def ticket_attachment_download(request: HttpRequest, ticket_id: int, attachment_
 
 
 @require_http_methods(["POST"])
+@require_support_access()
 def ticket_reply(request: HttpRequest, ticket_id: int) -> HttpResponse:
     """
     Add customer reply to existing ticket.

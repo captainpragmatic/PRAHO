@@ -29,7 +29,9 @@ from apps.api.core.permissions import IsAuthenticatedAndAccessible
 # Names of auth decorator wrapper functions (matched via __qualname__)
 _AUTH_DECORATOR_QUALNAMES = {
     "require_customer_authentication",
+    "require_customer_role_in",
     "require_user_authentication",
+
     "require_portal_service_authentication",
     "require_portal_authentication",
 }

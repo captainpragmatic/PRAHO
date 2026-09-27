@@ -14,6 +14,7 @@ No database access — all tests use SimpleTestCase + locmem cache.
 """
 
 import json
+import time
 from pathlib import Path
 from typing import ClassVar
 from unittest.mock import MagicMock, patch
@@ -75,7 +76,10 @@ class TestAgreeTermsValidation(SimpleTestCase):
         session = self.client.session
         session["customer_id"] = 42
         session["user_id"] = 7
+        session["user_memberships"] = [{"customer_id": session["customer_id"], "role": "owner"}]
+        session["user_memberships_fetched_at"] = time.time()
         session.save()
+
 
         # Build a cart directly using SessionStore mapped to client session key
         from apps.orders.services import GDPRCompliantCartSession  # noqa: PLC0415
@@ -163,7 +167,10 @@ class TestCartVersionMismatch(SimpleTestCase):
         session = self.client.session
         session["customer_id"] = 42
         session["user_id"] = 7
+        session["user_memberships"] = [{"customer_id": session["customer_id"], "role": "owner"}]
+        session["user_memberships_fetched_at"] = time.time()
         session.save()
+
 
         from apps.orders.services import GDPRCompliantCartSession  # noqa: PLC0415
 
@@ -273,7 +280,10 @@ class TestCardPaymentRouting(SimpleTestCase):
         session = self.client.session
         session["customer_id"] = 42
         session["user_id"] = 7
+        session["user_memberships"] = [{"customer_id": session["customer_id"], "role": "owner"}]
+        session["user_memberships_fetched_at"] = time.time()
         session.save()
+
 
         from apps.orders.services import GDPRCompliantCartSession  # noqa: PLC0415
 
@@ -1134,7 +1144,10 @@ class TestBankTransferConfirmationHeader(SimpleTestCase):
         session = self.client.session
         session["customer_id"] = 42
         session["user_id"] = 7
+        session["user_memberships"] = [{"customer_id": session["customer_id"], "role": "owner"}]
+        session["user_memberships_fetched_at"] = time.time()
         session.save()
+
 
     def _get_confirmation(self, order_data: dict) -> "HttpResponse":  # noqa: F821
         with patch("apps.orders.views.PlatformAPIClient") as mock_cls:
@@ -1173,7 +1186,10 @@ class TestBankTransferInstructionsCard(SimpleTestCase):
         session = self.client.session
         session["customer_id"] = 42
         session["user_id"] = 7
+        session["user_memberships"] = [{"customer_id": session["customer_id"], "role": "owner"}]
+        session["user_memberships_fetched_at"] = time.time()
         session.save()
+
 
     def _get_confirmation(self, order_data: dict) -> "HttpResponse":  # noqa: F821
         with patch("apps.orders.views.PlatformAPIClient") as mock_cls:
@@ -1240,7 +1256,10 @@ class TestBankTransferContextPassthrough(SimpleTestCase):
         session = self.client.session
         session["customer_id"] = 42
         session["user_id"] = 7
+        session["user_memberships"] = [{"customer_id": session["customer_id"], "role": "owner"}]
+        session["user_memberships_fetched_at"] = time.time()
         session.save()
+
 
     def test_bank_details_in_context_for_bank_transfer(self) -> None:
         """bank_details context variable must contain iban, bank_name, beneficiary."""

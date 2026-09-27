@@ -44,7 +44,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods, require_POST
 from django_fsm import TransitionNotAllowed
 
-from apps.api.secure_auth import get_authenticated_customer
+from apps.api.secure_auth import BILLING_ROLES, get_authenticated_customer
 from apps.billing.efactura.settings import ro_local_date
 from apps.billing.pdf_generators import RomanianProformaPDFGenerator
 from apps.common.constants import DEFAULT_PAGE_SIZE
@@ -156,8 +156,11 @@ def _resolve_authorized_refund_actor(raw_user_id: object, customer: Customer) ->
     return membership.user
 
 
-def _require_customer_auth_for_portal_api(request: HttpRequest) -> tuple[Customer | None, JsonResponse | None]:
+def _require_customer_auth_for_portal_api(
+    request: HttpRequest, *, roles: frozenset[str] | None = None
+) -> tuple[Customer | None, JsonResponse | None]:
     """Validate portal HMAC + customer membership and return JsonResponse on failure."""
+
     # Test runner compatibility: PORTAL_HMAC_BYPASS=True is set only in test.py
     # and e2e.py. Hard-fail if bypass is enabled outside a safe environment.
     # Safe = TESTING=True (test runner) or DEBUG=True (local dev).
@@ -177,7 +180,7 @@ def _require_customer_auth_for_portal_api(request: HttpRequest) -> tuple[Custome
         except (TypeError, ValueError, Customer.DoesNotExist, json.JSONDecodeError, UnicodeDecodeError):
             return None, JsonResponse({"success": False, "error": "Invalid request format"}, status=400)
 
-    customer, error_response = get_authenticated_customer(request)
+    customer, error_response = get_authenticated_customer(request, roles=roles)
     if error_response is None:
         return customer, None
 
@@ -188,6 +191,9 @@ def _require_customer_auth_for_portal_api(request: HttpRequest) -> tuple[Custome
     status_code = getattr(error_response, "status_code", 403)
     response = JsonResponse(payload, status=status_code)
     for header_name, header_value in getattr(error_response, "headers", {}).items():
+        # The unrendered DRF Response advertises text/html; the denial body is JSON.
+        if header_name.lower() == "content-type":
+            continue
         response[header_name] = header_value
     return None, response
 
@@ -2036,7 +2042,7 @@ def api_create_payment_intent(  # noqa: C901, PLR0911, PLR0912  # Complexity: mu
     gateway is derived from authoritative server data.
     """
     logger = logging.getLogger(__name__)
-    customer, auth_error = _require_customer_auth_for_portal_api(request)
+    customer, auth_error = _require_customer_auth_for_portal_api(request, roles=BILLING_ROLES)
     if auth_error is not None:
         return auth_error
     assert customer is not None
@@ -2044,6 +2050,7 @@ def api_create_payment_intent(  # noqa: C901, PLR0911, PLR0912  # Complexity: mu
         # Parse request data
         data = json.loads(request.body)
         order_id = data.get("order_id")
+
         amount_cents = data.get("amount_cents")
         currency = data.get("currency", "RON")
         customer_id = data.get("customer_id")
@@ -2128,7 +2135,7 @@ def api_confirm_payment(  # noqa: PLR0911  # Complexity: multi-step business log
     }
     """
     logger = logging.getLogger(__name__)
-    customer, auth_error = _require_customer_auth_for_portal_api(request)
+    customer, auth_error = _require_customer_auth_for_portal_api(request, roles=BILLING_ROLES)
     if auth_error is not None:
         return auth_error
     assert customer is not None
@@ -2136,6 +2143,7 @@ def api_confirm_payment(  # noqa: PLR0911  # Complexity: multi-step business log
         # Parse request data
         data = json.loads(request.body)
         payment_intent_id = data.get("payment_intent_id")
+
         customer_id = data.get("customer_id")
         gateway = data.get("gateway", "stripe")
 

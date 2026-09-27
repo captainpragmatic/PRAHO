@@ -196,7 +196,10 @@ class OrderIdempotencySecurityTestCase(SimpleTestCase):
         session = self.client.session
         session['customer_id'] = 123
         session['user_id'] = 456
+        session["user_memberships"] = [{"customer_id": session["customer_id"], "role": "owner"}]
+        session["user_memberships_fetched_at"] = time.time()
         session.save()
+
 
     @patch('apps.orders.views.OrderSecurityHardening.fail_closed_on_cache_failure', return_value=None)
     @patch('apps.orders.views.OrderSecurityHardening.validate_request_size', return_value=None)
@@ -623,7 +626,10 @@ class OrderCartVersioningSecurityTestCase(SimpleTestCase):
         session = self.client.session
         session['customer_id'] = 123
         session['user_id'] = 456
+        session["user_memberships"] = [{"customer_id": session["customer_id"], "role": "owner"}]
+        session["user_memberships_fetched_at"] = time.time()
         session.save()
+
 
         # Mock Platform API so add_item() doesn't trigger M8 fallback.
         _mock_api_instance = Mock()

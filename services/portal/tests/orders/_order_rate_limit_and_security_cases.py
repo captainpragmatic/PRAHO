@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from decimal import ROUND_HALF_EVEN, ROUND_HALF_UP, Decimal
 from unittest.mock import MagicMock, patch
 
@@ -51,7 +52,10 @@ def _populate_session_with_cart(client: Client) -> str:
     session = client.session
     session["customer_id"] = 42
     session["user_id"] = 7
+    session["user_memberships"] = [{"customer_id": session["customer_id"], "role": "owner"}]
+    session["user_memberships_fetched_at"] = time.time()
     session.save()
+
 
     from apps.orders.services import GDPRCompliantCartSession  # noqa: PLC0415
 
@@ -223,7 +227,11 @@ class TestConfirmPaymentIdempotencyRound2(SimpleTestCase):
         for key, value in kwargs.items():
             if value is not None:
                 session[key] = value
+        if session.get("customer_id") and session.get("user_id"):
+            session["user_memberships"] = [{"customer_id": session["customer_id"], "role": "owner"}]
+            session["user_memberships_fetched_at"] = time.time()
         session.save()
+
 
     def test_duplicate_returns_200_not_409(self) -> None:
         """Duplicate confirm_payment with same PI must return HTTP 200 (not 409 which breaks frontend JS)."""
@@ -440,7 +448,11 @@ class TestGatewayValidation(SimpleTestCase):
         for key, value in kwargs.items():
             if value is not None:
                 session[key] = value
+        if session.get("customer_id") and session.get("user_id"):
+            session["user_memberships"] = [{"customer_id": session["customer_id"], "role": "owner"}]
+            session["user_memberships_fetched_at"] = time.time()
         session.save()
+
 
     def test_stripe_gateway_is_accepted(self) -> None:
         """The 'stripe' gateway must NOT be rejected at the gateway validation step."""
@@ -938,7 +950,11 @@ class TestOrderConfirmationUUIDValidation(SimpleTestCase):
         for key, value in kwargs.items():
             if value is not None:
                 session[key] = value
+        if session.get("customer_id") and session.get("user_id"):
+            session["user_memberships"] = [{"customer_id": session["customer_id"], "role": "owner"}]
+            session["user_memberships_fetched_at"] = time.time()
         session.save()
+
 
     def test_path_traversal_order_id_redirects_to_catalog(self) -> None:
         """order_confirmation with path traversal order_id must redirect to catalog, NOT make API call."""

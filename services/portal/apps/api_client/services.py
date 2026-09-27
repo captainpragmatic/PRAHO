@@ -1022,17 +1022,6 @@ class PlatformAPIClient:
         request_data = {"customer_id": customer_id, "action": "get_services_summary", "timestamp": time.time()}
         return self._make_request("POST", "/api/services/summary/", data=request_data, idempotent=True)
 
-    def update_service_auto_renew_secure(self, customer_id: int, service_id: int, auto_renew: bool) -> dict[str, Any]:
-        """🔒 Update service auto-renew - SECURE HMAC BODY"""
-        request_data = {
-            "customer_id": customer_id,
-            "service_id": service_id,
-            "auto_renew": auto_renew,
-            "action": "update_auto_renew",
-            "timestamp": time.time(),
-        }
-        return self._make_request("POST", f"/api/services/{service_id}/auto-renew/", data=request_data)
-
     def download_ticket_attachment(
         self, customer_id: int, user_id: int, ticket_id: int, attachment_id: int
     ) -> tuple[bytes, dict[str, str]]:

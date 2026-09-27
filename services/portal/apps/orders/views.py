@@ -32,6 +32,7 @@ from django.utils.translation import gettext_lazy as _l
 from django.views.decorators.http import require_http_methods
 
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
+from apps.common.decorators import require_billing_access
 from apps.common.rate_limit_feedback import get_rate_limit_message, is_rate_limited_error
 from apps.common.request_ip import get_safe_client_ip
 
@@ -911,6 +912,7 @@ def calculate_totals_htmx(request: HttpRequest) -> HttpResponse:  # noqa: PLR091
 
 
 @require_customer_authentication
+@require_billing_access()
 def checkout(request: HttpRequest) -> HttpResponse:
     """
     Checkout page with preflight validation before order creation.
@@ -989,6 +991,7 @@ def checkout(request: HttpRequest) -> HttpResponse:
 
 
 @require_customer_authentication
+@require_billing_access()
 @require_http_methods(["POST"])
 def create_order(request: HttpRequest) -> HttpResponse:
     """Create order — handles bank transfer and no-JS Stripe fallback.
@@ -1002,6 +1005,7 @@ def create_order(request: HttpRequest) -> HttpResponse:
 
 
 @require_customer_authentication
+@require_billing_access()
 @require_http_methods(["POST"])
 def process_payment(request: HttpRequest) -> HttpResponse:
     """Process Stripe payment — delegates to shared order creation logic."""
@@ -1023,6 +1027,7 @@ def _parse_order_timestamp(order_data: dict[str, Any]) -> None:
 
 
 @require_customer_authentication
+@require_billing_access()
 def order_confirmation(request: HttpRequest, order_id: str) -> HttpResponse:
     """
     Order confirmation page showing order details.
@@ -1247,6 +1252,7 @@ def payment_success_webhook(request: HttpRequest) -> JsonResponse:
 
 
 @require_customer_authentication
+@require_billing_access()
 @require_http_methods(["POST"])
 def confirm_payment(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911, PLR0912, PLR0915, C901
     """

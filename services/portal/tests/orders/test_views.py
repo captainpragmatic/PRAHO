@@ -4,6 +4,7 @@ Tests authentication, cart operations, and order creation flows.
 """
 
 import json
+import time
 from unittest.mock import Mock, patch
 
 from django.contrib.messages.middleware import MessageMiddleware
@@ -87,7 +88,10 @@ class TestOrderViews(SimpleTestCase):
         session['customer_id'] = self.mock_customer_data['customer_id']
         session['user_id'] = self.mock_customer_data['user_id']
         session['email'] = self.mock_customer_data['email']
+        session["user_memberships"] = [{"customer_id": session["customer_id"], "role": "owner"}]
+        session["user_memberships_fetched_at"] = time.time()
         session.save()
+
 
     def test_require_customer_authentication_decorator(self):
         """Test the authentication decorator"""
