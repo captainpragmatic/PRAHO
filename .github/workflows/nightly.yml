@@ -285,9 +285,19 @@ jobs:
       if: always()
       with:
         name: nightly-e2e-${{ matrix.branch }}
+        # `coverage-portal-union.xml` is the gated figure itself. The coverage directory above holds
+        # the two half-datasets that were MEASURED; this is the union the portal floor is actually
+        # checked against, and without it the one number this job passes or fails on was destroyed
+        # with the runner. `make coverage-portal-union` writes the xml before applying the floor, so
+        # it is present on a failing run too - which is when it is worth having.
+        #
+        # The comment lives here and not inside `path:` below: that is a `|` literal block, where a
+        # `#` line is not a comment but another glob pattern. The first version of this put it there
+        # and `yaml.safe_load` accepted it happily - five bogus patterns in the path list.
         path: |
           output/playwright/runs/
           output/playwright/coverage/
+          services/portal/coverage-portal-union.xml
           logs/
         if-no-files-found: warn
         retention-days: 30
