@@ -342,7 +342,7 @@ test-integration:
 		--ds="$${DJANGO_SETTINGS_MODULE:-config.settings.test}" -o addopts= -v
 	@echo "🧪 Running integration, parity and deploy tests..."
 	@PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -m pytest \
-		tests/integration/ tests/test_cross_service_parity.py -v
+		tests/integration/ tests/test_cross_service_parity.py tests/deploy/ -v
 	@echo "✅ Integration tests completed!"
 
 test-cache:

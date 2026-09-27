@@ -2,7 +2,7 @@
 # PRAHO - Caddy Configuration for Portal-Only Deployment
 # =============================================================================
 
-{$DOMAIN:localhost} {
+{$PORTAL_DOMAIN} {
     tls {$ACME_EMAIL:admin@example.com}
 
     header {
@@ -22,7 +22,7 @@
         header Cache-Control "public, max-age=31536000, immutable"
     }
 
-    handle /health/* {
+    handle /status/ {
         reverse_proxy portal:8701
     }
 

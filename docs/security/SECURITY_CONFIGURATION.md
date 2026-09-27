@@ -149,6 +149,89 @@ sudo systemctl enable --now certbot-renew.timer
 
 ---
 
+## Caddy hostname routing and staff access
+
+Caddy requires two distinct bare hostnames: `PORTAL_DOMAIN` and `PLATFORM_DOMAIN`.
+Both services own `/dashboard/`, `/billing/`, `/tickets/`, `/i18n/`,
+`/cookie-policy/` and `/api/`. One hostname cannot serve both sets of routes.
+The former path split never made the complete staff and customer UIs reachable together.
+
+| Hostname | Path | Edge policy and owner |
+|----------|------|-----------------------|
+| Portal | `/static/*` | Portal static files |
+| Portal | `/status/` | Public Portal health |
+| Portal | All other paths, including `/api/*` | Portal, with a 5 MB request body cap |
+| Platform | `/api/users/health/*` | Public Platform health |
+| Platform | `/integrations/webhooks/*` | Platform; provider authentication remains in Django |
+| Platform | `/api/*` | Platform; application authentication remains in Django |
+| Platform | All other paths, including static/media and staff login | Staff CIDR allowlist, otherwise 403 |
+
+The API is intentionally reachable independently of the staff CIDR gate.
+`PortalServiceHMACMiddleware._AUTH_EXEMPT_EXACT_PATHS_RAW` currently exempts
+`/api/users/health` and `/api/orders/products` (with trailing-slash normalization). Its authenticated staff-session GET exception
+under `/api/customers/` also remains reachable through the public API handle.
+Caddy does not replace these application authentication rules.
+
+### Upgrade / PR deploy notes
+
+- Set DNS and certificates for both hostnames before switching the Caddy config.
+  Pass both domain variables to both Django services and include each public
+  hostname in that service's `ALLOWED_HOSTS`. Production settings derive CSRF
+  trusted origins from those hosts and absolute URLs from the domain variables.
+- Standalone Compose accepts `PLATFORM_ALLOWED_CIDRS="127.0.0.1/32 ::1/128"`.
+  CIDRs are **space-separated**; commas make Caddy validation fail.
+  Replace/add the actual staff or VPN networks before deploying.
+  `PORTAL_TRUSTED_PROXY_CIDRS` is a separate, comma-separated Django setting.
+- Existing Ansible installations must set `platform_allowed_ips` in inventory
+  host_vars/group_vars at upgrade. Both roles now default to
+  `["127.0.0.1/32", "::1/128"]`; an empty list also falls back to loopback.
+  The standalone Compose environment variable does not configure Ansible.
+- `DOMAIN` remains a legacy fallback for the Portal in combined/Portal-only
+  Compose and for the Platform in Platform-only Compose. Set both explicit domain
+  variables when deploying; the combined Platform default is `platform.localhost`.
+- Update external monitors to Portal `/status/` and Platform
+  `/api/users/health/`. Remove the old `/health/` and `/portal-health/` URLs.
+  Update bookmarks and integrations that relied on the former shared hostname.
+- Caddy must be the edge. Its [remote_ip matcher](https://caddyserver.com/docs/caddyfile/matchers#remote-ip)
+  uses the immediate peer; client-supplied `X-Forwarded-For` and `X-Real-IP`
+  do not grant staff access. [Sibling handles](https://caddyserver.com/docs/caddyfile/directives/handle)
+  keep the public routes outside the staff gate.
+- Verify the peer observed through Docker's published port before trusting the
+  allowlist. If distinct clients appear as the same bridge/proxy address, allowing
+  that address admits all of them. Fix ingress source preservation or enforce the
+  staff boundary at the preceding ingress; do not allow a shared gateway blindly.
+- Prevent direct access to Django from bypassing Caddy. Platform-only Compose
+  still publishes port 8700; restrict it with the deployment firewall/private
+  network. Portal-only also publishes 8701.
+
+### Routing acceptance
+
+Run `pytest -o addopts='' tests/deploy/test_caddy_routing.py -m 'not docker'`
+for template, defaults, host propagation and route structure contracts.
+Run `pytest -o addopts='' tests/deploy/test_caddy_routing.py -m docker -s`
+with a working Docker daemon and the official `caddy:2-alpine` image.
+These checks validate all three static configs and both rendered templates,
+reject comma-separated CIDRs, and exercise the actual Caddy proxy and allowlist.
+The HTTP routing fixture substitutes observable upstreams; it retains the
+production matchers, sibling handles and gate. It checks an allowed loopback
+peer, a separate container peer and traffic through the published Docker port,
+including spoofed forwarding headers. Record the reported peer addresses.
+
+Container routing probes do not establish Django login or CSRF correctness.
+Before rollout, start real Platform and Portal services behind a local Caddy
+container using the two hostnames and trusted local HTTPS certificates. Set
+`DEBUG=False`, the domains, host lists, Portal proxy trust and shared HMAC secrets.
+From a non-loopback customer connection, log in at the Portal hostname, open
+the dashboard, and submit a real form such as a language change at
+`/i18n/setlang/` with its CSRF token; verify the resulting saved/session state.
+From an explicitly allowed staff connection, log in at the Platform hostname
+and open the staff dashboard. From an untrusted connection, verify staff login
+and dashboard return 403 even with spoofed forwarding headers, while both
+health endpoints and a correctly signed API request remain reachable.
+Record these results in the deployment/PR evidence before approval.
+
+---
+
 ## 4. Security Headers
 
 ### Django SecurityHeadersMiddleware
@@ -520,7 +603,12 @@ Platform responses standardize `429` handling with parseable error payloads and 
 
 - [ ] Set secure `DJANGO_SECRET_KEY` (50+ characters, not `django-insecure-` prefix)
 - [ ] Set `DJANGO_ENCRYPTION_KEY` and `CREDENTIAL_VAULT_MASTER_KEY`
-- [ ] Configure `ALLOWED_HOSTS` for your domain (no wildcards)
+- [ ] Configure distinct `PORTAL_DOMAIN` and `PLATFORM_DOMAIN`, pass both to both services, and include each public hostname in its service's `ALLOWED_HOSTS` (no wildcards)
+- [ ] Set staff/VPN CIDRs before upgrade: space-separated `PLATFORM_ALLOWED_CIDRS` for Compose or `platform_allowed_ips` for Ansible; empty Ansible lists no longer allow public staff access
+- [ ] Validate all five Caddy configurations and confirm comma-separated staff CIDRs fail validation
+- [ ] Record non-loopback peer addresses through Docker's published port and verify spoofed forwarding headers cannot grant staff access
+- [ ] Verify real Portal login/form submission and allowed staff login through local Caddy with `DEBUG=False`
+- [ ] Restrict direct Django ports and update monitors/bookmarks for the two hostnames and actual health URLs
 - [ ] Enable SSL/TLS with valid certificate
 - [ ] Set secure database passwords with `DB_SSLMODE=require`
 - [ ] Configure email with TLS encryption

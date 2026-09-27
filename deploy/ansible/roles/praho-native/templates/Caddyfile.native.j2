@@ -30,12 +30,15 @@
     }
 
     # Portal health check
-    handle /health/* {
+    handle /status/ {
         reverse_proxy localhost:{{ portal_port }}
     }
 
     # All other traffic → Portal
     handle {
+        request_body {
+            max_size 5MB
+        }
         reverse_proxy localhost:{{ portal_port }} {
             header_up X-Real-IP {remote_host}
             header_up X-Forwarded-For {remote_host}
@@ -52,91 +55,60 @@
 }
 
 # ---------------------------------------------------------------------------
-# 2. Platform — staff/admin service (IP-restricted when configured)
+# 2. Platform — staff/admin service (IP-restricted by default)
 # ---------------------------------------------------------------------------
 {{ deployed_env.PLATFORM_DOMAIN }} {
     tls {{ deployed_env.ACME_EMAIL | default('admin@example.com') }}
 
-{% if platform_allowed_ips | default([]) | length > 0 %}
-    @allowed remote_ip {{ platform_allowed_ips | join(' ') }}
-    handle @allowed {
-        # Security headers
-        header {
-            X-Frame-Options "DENY"
-            X-Content-Type-Options "nosniff"
-            Permissions-Policy "camera=(), microphone=(), geolocation=()"
-            Referrer-Policy "strict-origin-when-cross-origin"
-            Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
-            -Server
-        }
+    header {
+        X-Frame-Options "DENY"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+        -Server
+    }
 
-        encode gzip zstd
+    encode gzip zstd
 
-        # Platform static files
+    handle /api/users/health/* {
+        reverse_proxy localhost:{{ platform_port }}
+    }
+
+    handle /integrations/webhooks/* {
+        reverse_proxy localhost:{{ platform_port }}
+    }
+
+    # Django enforces API authentication, including its explicit public exceptions.
+    handle /api/* {
+        reverse_proxy localhost:{{ platform_port }}
+    }
+
+    # An omitted or empty list keeps the loopback restriction.
+    @staff remote_ip {{ platform_allowed_ips | default(['127.0.0.1/32', '::1/128'], true) | join(' ') }}
+    handle @staff {
         handle_path /static/* {
             root * {{ project_root }}/static
             file_server
             header Cache-Control "public, max-age=31536000, immutable"
         }
 
-        # Media files
         handle_path /media/* {
             root * {{ project_root }}/media
             file_server
             header Cache-Control "public, max-age=86400"
         }
 
-        # All Platform routes
-        reverse_proxy localhost:{{ platform_port }} {
-            header_up X-Real-IP {remote_host}
-            header_up X-Forwarded-For {remote_host}
-            header_up X-Forwarded-Proto {scheme}
+        handle {
+            reverse_proxy localhost:{{ platform_port }} {
+                header_up X-Real-IP {remote_host}
+                header_up X-Forwarded-For {remote_host}
+                header_up X-Forwarded-Proto {scheme}
+            }
         }
     }
 
-    # Reject all other IPs
     respond "Access denied" 403
-{% else %}
-    # No IP restriction configured — unrestricted access
-    header {
-        X-Frame-Options "DENY"
-        X-Content-Type-Options "nosniff"
-        Permissions-Policy "camera=(), microphone=(), geolocation=()"
-        Referrer-Policy "strict-origin-when-cross-origin"
-        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
-        -Server
-    }
-
-    encode gzip zstd
-
-    # Platform static files
-    handle_path /static/* {
-        root * {{ project_root }}/static
-        file_server
-        header Cache-Control "public, max-age=31536000, immutable"
-    }
-
-    # Media files
-    handle_path /media/* {
-        root * {{ project_root }}/media
-        file_server
-        header Cache-Control "public, max-age=86400"
-    }
-
-    # Health check (no restriction)
-    handle /api/users/health/* {
-        reverse_proxy localhost:{{ platform_port }}
-    }
-
-    # All Platform routes
-    handle {
-        reverse_proxy localhost:{{ platform_port }} {
-            header_up X-Real-IP {remote_host}
-            header_up X-Forwarded-For {remote_host}
-            header_up X-Forwarded-Proto {scheme}
-        }
-    }
-{% endif %}
 
     log {
         output file /var/log/caddy/platform-access.log {
