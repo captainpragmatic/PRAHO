@@ -119,33 +119,44 @@ def forwarded_client_ip(request: HttpRequest | Request) -> str | None:
         if getattr(request, "_portal_authenticated", False) is not True:
             return None
         request_data = request.data if hasattr(request, "data") else json.loads(request.body)
-        return str(ipaddress.ip_address(request_data.get("client_ip")))
+        raw = request_data.get("client_ip")
+        if not isinstance(raw, str):
+            return None
+        return str(ipaddress.ip_address(raw))
     except Exception:
         return None
 
 
-def fixed_window_limited(key: str, rate: str) -> tuple[bool, int]:
-    """Charge a fixed-window counter, denying requests if the cache fails."""
+def fixed_window_limited(key: str, rate: str, *, charge: bool = True) -> tuple[bool, int]:
+    """Charge or peek at a fixed-window counter, denying requests if the cache fails.
+
+    A peek denies when the budget is exhausted. A charge denies when the new
+    count exceeds the budget. Window identity is independent of backend TTLs.
+    """
     if not getattr(settings, "RATE_LIMITING_ENABLED", True):
         return False, 0
 
     max_calls, window = parse_rate_string(rate)
-    window_start_key = f"{key}:start"
     now = time.time()
+    window_index = int(now // window)
+    counter_key = f"{key}:{window_index}"
     try:
-        cache.add(key, 0, timeout=window)
-        cache.add(window_start_key, now, timeout=window)
-        current = cache.incr(key)
-        if current <= max_calls:
-            return False, 0
+        if charge:
+            cache.add(counter_key, 0, timeout=window * 2)
+            try:
+                current = cache.incr(counter_key)
+            except ValueError:
+                # Recover from an add/increment expiry race; this fallback is non-atomic.
+                current = (cache.get(counter_key) or 0) + 1
+                cache.set(counter_key, current, timeout=window * 2)
+            limited = current > max_calls
+        else:
+            current = cache.get(counter_key, 0)
+            limited = current >= max_calls
 
-        window_start_raw = cache.get(window_start_key)
-        try:
-            window_start = float(window_start_raw)
-        except (TypeError, ValueError):
-            window_start = now
-        elapsed = max(0.0, now - window_start)
-        return True, max(1, math.ceil(window - elapsed))
+        if not limited:
+            return False, 0
+        return True, max(1, math.ceil(window - (now % window)))
     except Exception:
         logger.error("🔥 [RateLimiter] Cache failure during fixed-window rate limiting — denying request")
         return True, window
@@ -336,7 +347,11 @@ class ForwardedClientIPThrottle(EndpointRateThrottle):
 
 
 class LoginClientIPThrottle(ForwardedClientIPThrottle):
-    """Limit login attempts from an authenticated forwarded client IP."""
+    """Carry auth_login_ip through startup scope validation.
+
+    portal_login_api is a plain Django view and uses fixed_window_limited
+    directly to peek before authentication and charge only failed logins.
+    """
 
     scope = "auth_login_ip"
 

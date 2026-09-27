@@ -50,8 +50,15 @@ HMAC_TIMING_THRESHOLD = 0.002
 
 
 def _client_ip_payload(client_ip: str) -> dict[str, str]:
-    """Include only a valid, normalized client IP in the signed request."""
-    if client_ip:
+    """Include a valid, normalized client IP in the signed request only when it means something.
+
+    Without trusted proxies outside DEBUG every client resolves to the proxy address, so the
+    IP is omitted and the Platform's per-client limiters stand down rather than keying every
+    customer on one address.
+    """
+    from apps.common.rate_limiting import _client_ip_is_distinguishable  # noqa: PLC0415
+
+    if client_ip and _client_ip_is_distinguishable():
         with suppress(ValueError):
             return {"client_ip": str(ipaddress.ip_address(client_ip))}
     return {}
@@ -573,7 +580,7 @@ class PlatformAPIClient:
     def authenticate_customer(
         self, email: str, password: str, mfa_token: str = "", client_ip: str = ""
     ) -> dict[str, Any] | None:
-        """Authenticate customer with email and password via platform API"""
+        """Authenticate a customer, propagating throttles and service failures to the caller."""
 
         start_time = time.perf_counter()
         min_duration = float(getattr(settings, "PLATFORM_API_AUTH_MIN_DURATION_SECONDS", 0.0))
@@ -608,8 +615,8 @@ class PlatformAPIClient:
             return None
 
         except PlatformAPIError as e:
-            if e.is_rate_limited:
-                raise  # Let caller handle rate-limit UX
+            if e.is_rate_limited or e.status_code not in {400, 401, 403}:
+                raise  # Throttles and outages are the caller's to report, not a wrong password
             logger.warning(f"⚠️ [API Client] Customer authentication failed for {email}: {e}")
             return None
         finally:

@@ -433,10 +433,10 @@ def public_api_endpoint(view_func: Callable[..., Any]) -> Callable[..., Any]:
     """
     Marker decorator: this endpoint is intentionally public (no auth required).
 
-    CI test ``tests.api.test_api_auth_coverage`` enforces that every API view
-    has either this marker or a secure auth decorator.  Adding this decorator
-    is a conscious assertion that the endpoint was reviewed and deemed safe
-    to expose without authentication.
+    ``tests/api/test_api_auth_regressions.py::TestAPIAuthCoverage`` enforces
+    that every /api/ view has this marker or an auth decorator. It does not
+    check middleware exempt-path consistency. Adding this decorator asserts
+    that the endpoint was reviewed and deemed safe to expose without authentication.
     """
     view_func._is_public_api_endpoint = True  # type: ignore[attr-defined]  # marker for CI auth coverage test
     return view_func

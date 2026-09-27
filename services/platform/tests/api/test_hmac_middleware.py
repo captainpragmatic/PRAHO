@@ -262,7 +262,7 @@ class PortalHMACTests(TestCase):
         with patch("apps.common.middleware.time.time", return_value=1005.0):
             is_limited, retry_after = middleware._rate_limited("portal-rl", "127.0.0.1")
         self.assertTrue(is_limited)
-        self.assertEqual(retry_after, 55)
+        self.assertEqual(retry_after, 15)
 
     @override_settings(HMAC_RATE_LIMIT_MAX_AUTH_CALLS=2)
     def test_auth_paths_use_a_separate_bucket(self) -> None:

@@ -23,7 +23,7 @@ class ForwardedClientIPTests(SimpleTestCase):
     def _request(self, data: dict[str, str], *, authenticated: bool = True) -> HttpRequest:
         request = self.factory.post("/api/users/login/", data, content_type="application/json")
         if authenticated:
-            request._portal_authenticated = True  # type: ignore[attr-defined]  # middleware contract
+            request._portal_authenticated = True  # middleware contract
         return request
 
     def test_forwarded_client_ip_returns_authenticated_ipv4(self) -> None:
@@ -41,7 +41,7 @@ class ForwardedClientIPTests(SimpleTestCase):
 
     def test_forwarded_client_ip_rejects_non_json_body(self) -> None:
         request = self.factory.post("/api/users/login/", "not-json", content_type="text/plain")
-        request._portal_authenticated = True  # type: ignore[attr-defined]  # middleware contract
+        request._portal_authenticated = True  # middleware contract
         self.assertIsNone(forwarded_client_ip(request))
 
     def test_forwarded_client_ip_canonicalises_ipv6(self) -> None:
@@ -96,16 +96,17 @@ class FixedWindowLimitTests(SimpleTestCase):
         with patch("apps.common.performance.rate_limiting.time.time", return_value=1000.0):
             self.assertEqual(fixed_window_limited("k", "1/minute"), (False, 0))
         with patch("apps.common.performance.rate_limiting.time.time", return_value=1005.0):
-            self.assertEqual(fixed_window_limited("k", "1/minute"), (True, 55))
+            self.assertEqual(fixed_window_limited("k", "1/minute"), (True, 15))
         with patch("apps.common.performance.rate_limiting.time.time", return_value=1061.0):
             self.assertEqual(fixed_window_limited("k", "1/minute"), (False, 0))
 
     @override_settings(RATE_LIMITING_ENABLED=False)
     def test_disabled_fixed_window_never_charges_cache(self) -> None:
-        for _ in range(3):
-            self.assertEqual(fixed_window_limited("k", "2/minute"), (False, 0))
-        self.assertIsNone(cache.get("k"))
-        self.assertIsNone(cache.get("k:start"))
+        with patch("apps.common.performance.rate_limiting.time.time", return_value=1000.0):
+            for _ in range(3):
+                self.assertEqual(fixed_window_limited("k", "2/minute"), (False, 0))
+                self.assertEqual(fixed_window_limited("k", "2/minute", charge=False), (False, 0))
+            self.assertIsNone(cache.get("k:16"))
 
     def test_fixed_window_fails_closed_on_cache_errors(self) -> None:
         for operation in ("add", "incr", "get"):
@@ -116,4 +117,7 @@ class FixedWindowLimitTests(SimpleTestCase):
                     f"apps.common.performance.rate_limiting.cache.{operation}",
                     side_effect=ConnectionError("Cache unavailable"),
                 ):
-                    self.assertEqual(fixed_window_limited("k", "1/minute"), (True, 60))
+                    self.assertEqual(
+                        fixed_window_limited("k", "1/minute", charge=operation != "get"),
+                        (True, 60),
+                    )

@@ -31,8 +31,12 @@ class LoginClientIPLimitsTests(HMACTestMixin, TestCase):
     client_ip = "203.0.113.10"
 
     def setUp(self) -> None:
+        clock = patch("apps.common.performance.rate_limiting.time.time", return_value=1_800_000_001.0)
+        clock.start()
+        self.addCleanup(clock.stop)
         cache.clear()
         self.addCleanup(cache.clear)
+        self.login_cache_key = f"login_ip:{self.client_ip}:30000000"
         self.users: list[User] = [
             User.objects.create_user(email=f"login-limit-{index}@example.com", password=self.password)
             for index in range(12)
@@ -62,6 +66,15 @@ class LoginClientIPLimitsTests(HMACTestMixin, TestCase):
         )
         self.assertEqual(response.status_code, 401, response.content)
 
+    def test_successful_logins_do_not_consume_the_client_failure_budget(self) -> None:
+        for user in self.users[:11]:
+            response = self.portal_post(
+                self.login_path, {"email": user.email, "password": self.password, "client_ip": self.client_ip}
+            )
+            self.assertEqual(response.status_code, 200, response.content)
+            self.assertTrue(response.json()["success"])
+        self.assertIsNone(cache.get(self.login_cache_key))
+
     def test_throttled_login_does_no_credential_work(self) -> None:
         self.exhaust_client_limit()
         self.user.refresh_from_db()
@@ -89,19 +102,20 @@ class LoginClientIPLimitsTests(HMACTestMixin, TestCase):
         )
         self.assertEqual(response.status_code, 401, response.content)
         self.assertEqual(response.json(), {"error": "HMAC authentication failed"})
-        self.assertIsNone(cache.get("login_ip:203.0.113.10"))
+        self.assertIsNone(cache.get(self.login_cache_key))
         self.user.refresh_from_db()
         self.assertEqual(self.user.failed_login_attempts, 0)
 
     def test_malformed_or_absent_client_ip_disables_the_per_client_limit(self) -> None:
-        for forwarded_data in ({"client_ip": "not-an-ip"}, {}):
+        for forwarded_data in ({"client_ip": "not-an-ip"}, {"client_ip": 1}, {}):
             with self.subTest(forwarded_data=forwarded_data):
                 for user in self.users:
                     response = self.portal_post(
                         self.login_path, {"email": user.email, "password": "wrong", **forwarded_data}
                     )
                     self.assertEqual(response.status_code, 401, response.content)
-        self.assertIsNone(cache.get("login_ip:not-an-ip"))
+        self.assertIsNone(cache.get("login_ip:not-an-ip:30000000"))
+        self.assertIsNone(cache.get("login_ip:0.0.0.1:30000000"))
 
     @override_settings(RATE_LIMITING_ENABLED=False)
     def test_kill_switch_disables_the_limit(self) -> None:
@@ -110,15 +124,14 @@ class LoginClientIPLimitsTests(HMACTestMixin, TestCase):
                 self.login_path, {"email": user.email, "password": "wrong", "client_ip": self.client_ip}
             )
             self.assertEqual(response.status_code, 401, response.content)
-        self.assertIsNone(cache.get("login_ip:203.0.113.10"))
+        self.assertIsNone(cache.get(self.login_cache_key))
 
     def test_password_reset_request_requires_hmac(self) -> None:
         path = "/api/users/password/reset/"
         response = self.client.post(path, json.dumps({"email": self.user.email}), content_type="application/json")
         self.assertEqual(response.status_code, 401, response.content)
-        response = self.portal_post(path, {"email": self.user.email, "client_ip": self.client_ip})
-        # The view may return 500 until a later package adds its email templates.
-        self.assertNotEqual(response.status_code, 401, response.content)
+        signed = self.portal_post(path, {"email": self.user.email, "client_ip": self.client_ip})
+        self.assertNotEqual(signed.status_code, 401, signed.content)
 
     def test_lockout_ladder_starts_at_the_default_threshold(self) -> None:
         self.assertEqual(settings.ACCOUNT_LOCKOUT_THRESHOLD, 5)

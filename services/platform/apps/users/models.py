@@ -272,11 +272,14 @@ class User(AbstractUser):
     def increment_failed_login_attempts(self) -> None:
         """Increment failed login attempts and apply progressive lockout.
 
-        Portal login protection combines per-IP and per-account limits with
-        the Platform per-forwarded-IP login limit and per-portal auth bucket.
-        Account lockout begins at ACCOUNT_LOCKOUT_THRESHOLD consecutive failures.
-        The progressive delays (5->15->30->60->120->240 min) start at that
-        threshold and remain capped at four hours.
+        Account lockout begins at ACCOUNT_LOCKOUT_THRESHOLD consecutive failures
+        (default 5) for both Portal and staff web logins. The staff web path
+        calls this method from _handle_failed_login and is protected by
+        rate_limit(key="ip", rate="15/m") and rate_limit(key="post:email", rate="8/m").
+        Portal login has separate Portal IP/account limits, a Platform forwarded-IP
+        failure budget and a per-portal authentication request budget.
+        The progressive delays (5->15->30->60->120->240 min) start at the threshold
+        and remain capped at four hours.
 
         The deprecated MAX_LOGIN_ATTEMPTS constant in constants.py is NOT used.
         Configure ACCOUNT_LOCKOUT_THRESHOLD and lockout_delays to adjust lockout.

@@ -212,9 +212,10 @@ Source: `config/settings/base.py` — `PASSWORD_HASHERS`
 
 ### Account Lockout
 
-- `ACCOUNT_LOCKOUT_THRESHOLD = 5` — lockout starts at the fifth consecutive failure
+- `ACCOUNT_LOCKOUT_THRESHOLD = 5` — lockout starts at the fifth consecutive failure for Portal and staff web logins
 - The ladder starts at the threshold: failures 5/6/7/8/9/10+ lock for 5/15/30/60/120/240 minutes
-- Platform login limit: 10 attempts/minute per valid forwarded client IP in an HMAC-signed body, before password checks
+- Staff web login calls `increment_failed_login_attempts` through `_handle_failed_login`; its POST decorators enforce `rate_limit(key="ip", rate="15/m")` and `rate_limit(key="post:email", rate="8/m")`
+- Platform Portal-login limit: 10 failures/minute per valid forwarded client IP in an HMAC-signed body; the budget is checked before password verification and charged only for rejected credentials, locked/inactive accounts or failed MFA
 - Platform password reset request and confirmation limit: 5 requests/minute shared per valid forwarded client IP
 - Missing or malformed forwarded IPs skip only the per-client limit; the per-portal auth bucket still applies
 - Both password reset endpoints require Portal HMAC authentication
@@ -235,8 +236,32 @@ Source: `config/settings/prod.py`
 
 ### Login Rate Limiting
 
-- 10 requests/minute global on login endpoint
-- 5 requests/minute per email address
+- Portal login: 5 failures per IP per 15 minutes and 5 failures per email per 30 minutes; successful login clears these counters
+- Portal MFA reauthentication: 5 failures per session user per 15 minutes, checked only for POSTs under `/mfa/`
+- Denied customer switches do not consume authentication budgets
+- Registration and password reset requests use a separate Portal IP volume budget of 10 POSTs per 15 minutes
+- Platform outages and transport failures do not consume Portal login failure budgets
+- Staff web login: 15 POSTs/minute per IP and 8 POSTs/minute per submitted email, plus the account lockout above
+
+### Portal Proxy Trust
+
+Set `PORTAL_TRUSTED_PROXY_CIDRS` to a comma-separated list of trusted reverse
+proxy CIDRs. Production and staging refuse to start with an empty list.
+The deployment check reports `portal.E001` outside DEBUG and `portal.W001` in DEBUG.
+
+For native Caddy on the same host, use `127.0.0.1/32,::1/128`. For Docker,
+use the Compose network subnet containing the proxy; `172.16.0.0/12` is an
+example range and should be narrowed to the actual project subnet. Managed
+container deployments must use their ingress proxy's CIDRs. Docker Ansible
+deployments supply the `portal_trusted_proxy_cidrs` variable; native deployments
+copy the operator env file documented by the root `.env.example.*` files.
+
+If custom settings run outside DEBUG without proxy trust, Portal authentication
+IP and volume buckets are disabled and a security warning is logged once per
+process. The email and MFA user budgets remain active. Login requests omit
+`client_ip` from their signed body, so Platform also skips its forwarded-IP
+login budget. With configured trust, only headers from trusted proxy addresses
+are used to resolve the client IP.
 
 > For MFA setup and key management details, see [MFA Setup and Key Management](MFA-SETUP-AND-KEY-MANAGEMENT.md).
 
@@ -273,9 +298,9 @@ TIMESTAMP
 
 ### HMAC Rate Limiting
 
-- General bucket: `hmac_rl:{portal_id}:{client_ip}`, default 300 calls per 60 seconds.
+- General bucket: `hmac_rl:{portal_id}:{client_ip}:{window_index}`, default 300 calls per 60 seconds.
 - Login, password reset, and reset confirmation share a separate
-  `hmac_rl:{portal_id}:{client_ip}:auth` bucket, default 120 calls per 60 seconds.
+  `hmac_rl:{portal_id}:{client_ip}:auth:{window_index}` bucket, default 120 calls per 60 seconds.
   Paths match with or without trailing slashes. Exhausting this bucket does not
   consume the general bucket.
 - `client_ip` in these middleware keys is the transport/proxy-resolved IP, usually
@@ -285,11 +310,18 @@ TIMESTAMP
   as a Django setting (default 120; no environment-variable mapping).
 - Login and both password-reset endpoints require HMAC authentication;
   registration remains exempt.
-- Reusable `LoginClientIPThrottle` (`auth_login_ip`, `10/minute`) and
-  `ResetClientIPThrottle` (`auth_reset_ip`, `5/minute`) key on the canonical
-  end-user `client_ip` forwarded in the signed request body. They return no key
-  when the HMAC authentication flag or a valid body IP is absent, without falling
-  back to the transport IP. Endpoint attachment is deferred to B2.
+- Fixed-window counters include `window_index = int(now // window)` in their
+  keys. Window rollover therefore works with DatabaseCache even when incrementing
+  a counter changes its expiry. Retry-After reports the time until the next boundary.
+- `LoginClientIPThrottle` carries `auth_login_ip` (`10/minute`) through startup
+  validation. The plain Django `portal_login_api` view uses `fixed_window_limited`
+  with `login_ip:{client_ip}:{window_index}`, peeking before authentication and
+  charging only failures.
+- `ResetClientIPThrottle` (`auth_reset_ip`, `5/minute`) is attached to both password
+  reset endpoints. Its per-client budget becomes active when Portal forwards
+  `client_ip` on those calls; that forwarding is scheduled for a later package.
+- Forwarded-IP limits accept only a valid IP string in an HMAC-authenticated body.
+  Missing or malformed IPs skip that limit without falling back to the transport IP.
 
 
 ### CSRF and Host Validation

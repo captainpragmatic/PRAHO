@@ -84,6 +84,12 @@ def _mask_email(email: str) -> str:
     return f"{masked_local}@{domain}"
 
 
+def _charge_login_failure(forwarded_ip: str | None) -> None:
+    """Charge the per-client login failure budget; successful logins never count."""
+    if forwarded_ip is not None:
+        fixed_window_limited(f"login_ip:{forwarded_ip}", settings.THROTTLE_RATES["auth_login_ip"])
+
+
 @csrf_exempt  # nosemgrep: no-csrf-exempt — HMAC-authenticated inter-service endpoint
 @require_http_methods(["POST"])
 @require_portal_authentication
@@ -110,7 +116,7 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911 -- 
         forwarded_ip = forwarded_client_ip(request)
         if forwarded_ip is not None:
             limited, retry_after = fixed_window_limited(
-                f"login_ip:{forwarded_ip}", settings.THROTTLE_RATES["auth_login_ip"]
+                f"login_ip:{forwarded_ip}", settings.THROTTLE_RATES["auth_login_ip"], charge=False
             )
             if limited:
                 response = JsonResponse(
@@ -129,12 +135,14 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911 -- 
                 failed_user = User.objects.get(email=email)
                 failed_user.increment_failed_login_attempts()
             logger.warning("⚠️ [Portal API Auth] Failed login — ip=%s", forwarded_ip or client_ip)
+            _charge_login_failure(forwarded_ip)
             return JsonResponse({"success": False, "error": "Invalid email or password"}, status=401)
 
         # Same generic error for locked/inactive — attacker cannot distinguish
         if user.is_account_locked() or not user.is_active:
             reason = "locked" if user.is_account_locked() else "inactive"
             logger.warning("⚠️ [Portal API Auth] Login rejected (%s) — ip=%s", reason, forwarded_ip or client_ip)
+            _charge_login_failure(forwarded_ip)
             return JsonResponse({"success": False, "error": "Invalid email or password"}, status=401)
 
         # A password alone must never establish a session for an enrolled user.
@@ -144,6 +152,7 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911 -- 
                 token = str(data.get("mfa_token", ""))
                 if not token or not MFAService.verify_mfa_code(user, token, request)["success"]:
                     user.increment_failed_login_attempts()
+                    _charge_login_failure(forwarded_ip)
                     return JsonResponse({"success": False, "error": "Invalid authentication code"}, status=401)
 
         # Success: reset lockout counter

@@ -8,12 +8,14 @@ from django.core.cache import cache
 from django.test import SimpleTestCase, override_settings
 from django.urls import reverse
 from requests import Response
+from requests.exceptions import ConnectionError as RequestsConnectionError
 
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 
 
 @override_settings(
     RATE_LIMITING_ENABLED=True,
+    IPWARE_TRUSTED_PROXY_LIST=["127.0.0.1/32"],
     SESSION_ENGINE="django.contrib.sessions.backends.cache",
     CACHES={
         "default": {
@@ -145,12 +147,111 @@ class AuthenticationRateLimitTests(SimpleTestCase):
     def test_service_error_preserves_counters(self) -> None:
         cache.set(self.ip_key, 2, 900)
         cache.set(self.account_key, 2, 1800)
-        with patch("apps.users.views.api_client") as platform:
-            platform.authenticate_customer.side_effect = PlatformAPIError("unavailable", status_code=503)
+        upstream = Response()
+        upstream.status_code = 503
+        upstream._content = b'{"error": "Service unavailable"}'
+        upstream.headers["Content-Type"] = "application/json"
+        upstream.headers["Retry-After"] = "0"
+        with patch("apps.api_client.services.portal_request", return_value=upstream):
             response = self.client.post(reverse("users:login"), self.credentials)
-        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Authentication service is temporarily unavailable")
         self.assertEqual(cache.get(self.ip_key), 2)
         self.assertEqual(cache.get(self.account_key), 2)
+
+    def test_connection_error_preserves_counters(self) -> None:
+        cache.set(self.ip_key, 2, 900)
+        cache.set(self.account_key, 2, 1800)
+        with patch(
+            "apps.api_client.services.portal_request",
+            side_effect=RequestsConnectionError("Connection refused"),
+        ):
+            response = self.client.post(reverse("users:login"), self.credentials)
+        self.assertContains(response, "Authentication service is temporarily unavailable")
+        self.assertEqual(cache.get(self.ip_key), 2)
+        self.assertEqual(cache.get(self.account_key), 2)
+
+    @override_settings(
+        MIDDLEWARE=[
+            "django.contrib.sessions.middleware.SessionMiddleware",
+            "django.contrib.messages.middleware.MessageMiddleware",
+            "apps.common.rate_limiting.AuthenticationRateLimitMiddleware",
+        ]
+    )
+    def test_rejected_totp_codes_use_the_user_budget(self) -> None:
+        session = self.client.session
+        session.update({"user_id": 42, "customer_id": 7, "email": self.email})
+        session.save()
+        key = "auth_reauth_user_42"
+        with patch("apps.users.views.api_client") as platform:
+            platform.verify_totp_mfa.return_value = None
+            for _ in range(5):
+                response = self.client.post(reverse("users:mfa_setup_totp"), {"token": "123456"})
+                self.assertRedirects(response, reverse("users:mfa_setup_totp"), fetch_redirect_response=False)
+            self.assertEqual(cache.get(key), 5)
+            self.assertIsNone(cache.get(self.ip_key))
+            self.assertIsNone(cache.get(self.account_key))
+            response = self.client.post(
+                reverse("users:mfa_setup_totp"), {"token": "123456"}, HTTP_HX_REQUEST="true"
+            )
+            self.assertEqual(response.status_code, 429)
+            self.assertEqual(cache.get(key), 5)
+            self.assertIsNone(cache.get(self.ip_key))
+
+            response = self.client.get(reverse("users:mfa_disable"))
+            self.assertEqual(response.status_code, 200)
+
+    @override_settings(
+        MIDDLEWARE=[
+            "django.contrib.sessions.middleware.SessionMiddleware",
+            "django.contrib.messages.middleware.MessageMiddleware",
+            "apps.common.rate_limiting.AuthenticationRateLimitMiddleware",
+        ]
+    )
+    def test_mfa_reauthentication_views_share_the_user_budget(self) -> None:
+        session = self.client.session
+        session.update({"user_id": 42, "customer_id": 7, "email": self.email})
+        session.save()
+        with patch("apps.users.views.api_client") as platform:
+            platform.get_customer_profile.return_value = {"mfa_enabled": True, "backup_codes_count": 3}
+            platform.disable_mfa.side_effect = PlatformAPIError("Invalid credentials", status_code=401)
+            platform.regenerate_backup_codes.side_effect = PlatformAPIError("Invalid credentials", status_code=401)
+            for name in ("users:mfa_disable", "users:mfa_backup_codes"):
+                response = self.client.post(
+                    reverse(name), {"password": "test-password", "token": "123456"}
+                )
+                self.assertEqual(response.status_code, 200)
+            self.assertEqual(cache.get("auth_reauth_user_42"), 2)
+            self.assertIsNone(cache.get(self.ip_key))
+            self.assertIsNone(cache.get(self.account_key))
+
+    @override_settings(
+        MIDDLEWARE=[
+            "django.contrib.sessions.middleware.SessionMiddleware",
+            "django.contrib.messages.middleware.MessageMiddleware",
+            "apps.common.rate_limiting.AuthenticationRateLimitMiddleware",
+        ]
+    )
+    def test_denied_switch_preserves_all_authentication_buckets(self) -> None:
+        session = self.client.session
+        session.update({"user_id": 42, "customer_id": 7, "email": self.email})
+        session.save()
+        expected = {
+            self.ip_key: 2,
+            self.account_key: 2,
+            self.volume_key: 2,
+            "auth_reauth_user_42": 2,
+        }
+        cache.set_many(expected, timeout=900)
+        with patch("apps.users.views.api_client") as platform:
+            for result in ({"success": False}, {"success": True, "data": {"has_access": False}}):
+                with self.subTest(result=result):
+                    platform.post.return_value = result
+                    response = self.client.post(
+                        reverse("users:switch_customer"), {"customer_id": 99, "email": self.email}
+                    )
+                    self.assertRedirects(response, "/profile/", fetch_redirect_response=False)
+                    self.assertEqual(self.client.session["customer_id"], 7)
+                    self.assertEqual(cache.get_many(expected), expected)
 
     def test_volume_paths_ignore_login_limits_and_count_invalid_forms(self) -> None:
         cache.set(self.ip_key, 5, 900)

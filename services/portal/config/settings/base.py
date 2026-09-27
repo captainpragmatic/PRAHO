@@ -351,5 +351,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # Aligned with platform setting name — both services use IPWARE_TRUSTED_PROXY_LIST
 # Trusted proxy CIDR list for get_safe_client_ip().
 # Set to your load balancer / CDN CIDR(s) in production.
-# Leave empty to use REMOTE_ADDR only (safe default for direct connections).
-IPWARE_TRUSTED_PROXY_LIST: list[str] = []
+# Production and staging require explicit proxy CIDRs.
+IPWARE_TRUSTED_PROXY_LIST: list[str] = [
+    cidr.strip() for cidr in os.environ.get("PORTAL_TRUSTED_PROXY_CIDRS", "").split(",") if cidr.strip()
+]

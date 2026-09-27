@@ -19,11 +19,25 @@ from django.utils.translation import gettext as _
 from apps.common.request_ip import get_safe_client_ip
 
 logger = logging.getLogger(__name__)
+_proxy_warning_logged = False
 
 
-def mark_auth_failure(request: HttpRequest) -> None:
-    """Set the request-local _portal_auth_outcome consumed by the authentication limiter."""
+def _client_ip_is_distinguishable() -> bool:
+    """Report whether IP buckets can distinguish clients in this configuration."""
+    global _proxy_warning_logged  # noqa: PLW0603
+    distinguishable = settings.DEBUG or bool(getattr(settings, "IPWARE_TRUSTED_PROXY_LIST", []))
+    if not distinguishable and not _proxy_warning_logged:
+        _proxy_warning_logged = True
+        logger.warning(
+            "🚨 [RateLimit] PORTAL_TRUSTED_PROXY_CIDRS is empty; authentication IP and volume limits are disabled."
+        )
+    return distinguishable
+
+
+def mark_auth_failure(request: HttpRequest, bucket: str = "login") -> None:
+    """Record the authentication outcome and the budget it should consume."""
     setattr(request, "_portal_auth_outcome", "failure")  # noqa: B010
+    setattr(request, "_portal_auth_bucket", bucket)  # noqa: B010
 
 
 def mark_auth_success(request: HttpRequest) -> None:
@@ -50,6 +64,8 @@ class AuthenticationRateLimitMiddleware:
     ACCOUNT_WINDOW_SECONDS = 1800  # 30 minutes
     VOLUME_RATE_LIMIT = 10
     VOLUME_WINDOW_SECONDS = 900
+    REAUTH_RATE_LIMIT = 5
+    REAUTH_WINDOW_SECONDS = 900
 
     # Response timing constants
 
@@ -97,10 +113,13 @@ class AuthenticationRateLimitMiddleware:
             outcome = getattr(request, "_portal_auth_outcome", None)
             if self._is_volume_endpoint(request):
                 self._record_volume_attempt(request)
-            elif outcome == "failure" or (outcome is None and self._is_auth_failure(response)):
-                self._record_failed_attempt(request)
-            elif outcome == "success":
-                self._clear_rate_limits(request)
+            elif outcome == "failure" and getattr(request, "_portal_auth_bucket", "login") == "reauth":
+                self._record_reauth_attempt(request)
+            elif request.path.startswith("/login/"):
+                if outcome == "failure" or (outcome is None and self._is_auth_failure(response)):
+                    self._record_failed_attempt(request)
+                elif outcome == "success":
+                    self._clear_rate_limits(request)
 
         # Apply uniform response timing to prevent timing attacks
         self._uniform_response_delay(start_time)
@@ -116,55 +135,63 @@ class AuthenticationRateLimitMiddleware:
         return request.path.startswith(("/password-reset/", "/register/"))
 
     def _check_rate_limits(self, request: HttpRequest) -> HttpResponse | None:
-        """
-        🔒 Check the volume budget or the authentication IP and account limits.
-
-        Returns error response if rate limited, None if allowed.
-        Browser requests get a redirect with message; API/HTMX requests get JSON.
-        """
+        """Check the separate MFA, volume or login budgets, failing closed on cache errors."""
         try:
-            client_ip = self._get_client_ip(request)
-
+            if request.path.startswith("/mfa/"):
+                return self._check_reauth_budget(request)
             if self._is_volume_endpoint(request):
-                volume_attempts = cache.get(f"auth_volume_ip_{client_ip}", 0)
-                if volume_attempts >= self.VOLUME_RATE_LIMIT:
-                    logger.warning(
-                        "🚨 [RateLimit] Authentication volume limit exceeded: %s (%s requests)",
-                        client_ip,
-                        volume_attempts,
-                    )
-                    error_msg = _("Too many authentication attempts. Please try again in 15 minutes.")
-                    return self._rate_limit_response(request, error_msg, self.VOLUME_WINDOW_SECONDS, 429)
-                return None
+                return self._check_volume_budget(request)
+            if request.path.startswith("/login/"):
+                return self._check_login_budgets(request)
+            return None
+        except Exception as e:
+            logger.error("🔥 [RateLimit] Rate limiting check failed: %s", e)
+            error_msg = _("Service temporarily unavailable. Please try again later.")
+            return self._rate_limit_response(request, error_msg, 300, 503)
 
-            # Check IP-based rate limiting
+    def _check_reauth_budget(self, request: HttpRequest) -> HttpResponse | None:
+        """MFA re-authentication failures are budgeted per session user, never per address."""
+        user_id = request.session.get("user_id")
+        if user_id is None:
+            return None
+        attempts = cache.get(f"auth_reauth_user_{user_id}", 0)
+        if attempts < self.REAUTH_RATE_LIMIT:
+            return None
+        error_msg = _("Too many authentication attempts. Please try again in 15 minutes.")
+        return self._rate_limit_response(request, error_msg, self.REAUTH_WINDOW_SECONDS, 429)
 
-            ip_cache_key = f"auth_ip_attempts_{client_ip}"
-            ip_attempts = cache.get(ip_cache_key, 0)
+    def _check_volume_budget(self, request: HttpRequest) -> HttpResponse | None:
+        """Registration and password-reset POSTs share a per-address volume budget."""
+        if not _client_ip_is_distinguishable():
+            return None
+        client_ip = self._get_client_ip(request)
+        volume_attempts = cache.get(f"auth_volume_ip_{client_ip}", 0)
+        if volume_attempts < self.VOLUME_RATE_LIMIT:
+            return None
+        logger.warning(
+            "🚨 [RateLimit] Authentication volume limit exceeded: %s (%s requests)", client_ip, volume_attempts
+        )
+        error_msg = _("Too many authentication attempts. Please try again in 15 minutes.")
+        return self._rate_limit_response(request, error_msg, self.VOLUME_WINDOW_SECONDS, 429)
 
+    def _check_login_budgets(self, request: HttpRequest) -> HttpResponse | None:
+        """Login failures are budgeted per address when clients are distinguishable, and per account."""
+        if _client_ip_is_distinguishable():
+            client_ip = self._get_client_ip(request)
+            ip_attempts = cache.get(f"auth_ip_attempts_{client_ip}", 0)
             if ip_attempts >= self.IP_RATE_LIMIT:
-                logger.warning(f"🚨 [RateLimit] IP rate limit exceeded: {client_ip} ({ip_attempts} attempts)")
+                logger.warning("🚨 [RateLimit] IP rate limit exceeded: %s (%s attempts)", client_ip, ip_attempts)
                 error_msg = _("Too many authentication attempts. Please try again in 15 minutes.")
                 return self._rate_limit_response(request, error_msg, self.IP_WINDOW_SECONDS, 429)
 
-            # Check account-based rate limiting (if email provided)
-            email = self._extract_email_from_request(request)
-            if email:
-                account_cache_key = f"auth_account_attempts_{email}"
-                account_attempts = cache.get(account_cache_key, 0)
-
-                if account_attempts >= self.ACCOUNT_RATE_LIMIT:
-                    logger.warning(f"🚨 [RateLimit] Account rate limit exceeded: {email} ({account_attempts} attempts)")
-                    error_msg = _("Account temporarily locked due to too many failed attempts.")
-                    return self._rate_limit_response(request, error_msg, self.ACCOUNT_WINDOW_SECONDS, 429)
-
-            return None  # Rate limits not exceeded
-
-        except Exception as e:
-            # Fail closed - block request if cache/rate limiting fails
-            logger.error(f"🔥 [RateLimit] Rate limiting check failed: {e}")
-            error_msg = _("Service temporarily unavailable. Please try again later.")
-            return self._rate_limit_response(request, error_msg, 300, 503)
+        email = self._extract_email_from_request(request)
+        if email:
+            account_attempts = cache.get(f"auth_account_attempts_{email}", 0)
+            if account_attempts >= self.ACCOUNT_RATE_LIMIT:
+                logger.warning("🚨 [RateLimit] Account rate limit exceeded: %s (%s attempts)", email, account_attempts)
+                error_msg = _("Account temporarily locked due to too many failed attempts.")
+                return self._rate_limit_response(request, error_msg, self.ACCOUNT_WINDOW_SECONDS, 429)
+        return None
 
     def _is_api_or_htmx_request(self, request: HttpRequest) -> bool:
         """Check if this is an API/HTMX request (expects JSON) vs browser form submission."""
@@ -188,8 +215,25 @@ class AuthenticationRateLimitMiddleware:
         messages.error(request, error_msg)
         return redirect("users:login")
 
+    def _record_reauth_attempt(self, request: HttpRequest) -> None:
+        """Count MFA reauthentication failures against the session user."""
+        user_id = request.session.get("user_id")
+        if user_id is None:
+            return
+        key = f"auth_reauth_user_{user_id}"
+        try:
+            cache.add(key, 0, timeout=self.REAUTH_WINDOW_SECONDS)
+            try:
+                cache.incr(key)
+            except ValueError:
+                cache.set(key, 1, timeout=self.REAUTH_WINDOW_SECONDS)
+        except Exception as e:
+            logger.error("🔥 [RateLimit] Failed to record reauthentication attempt: %s", e)
+
     def _record_volume_attempt(self, request: HttpRequest) -> None:
         """Count registration and password reset POSTs without changing login buckets."""
+        if not _client_ip_is_distinguishable():
+            return
         try:
             client_ip = self._get_client_ip(request)
             cache_key = f"auth_volume_ip_{client_ip}"
@@ -207,15 +251,15 @@ class AuthenticationRateLimitMiddleware:
         try:
             client_ip = self._get_client_ip(request)
 
-            # Atomic increment — prevents lost updates under concurrent requests.
-            # Pattern: cache.add() initializes if absent; cache.incr() atomically increments.
-            ip_cache_key = f"auth_ip_attempts_{client_ip}"
-            try:
-                cache.add(ip_cache_key, 0, timeout=self.IP_WINDOW_SECONDS)
-                ip_attempts = cache.incr(ip_cache_key)
-            except ValueError:
-                cache.set(ip_cache_key, 1, timeout=self.IP_WINDOW_SECONDS)
-                ip_attempts = 1
+            ip_attempts = 0
+            if _client_ip_is_distinguishable():
+                ip_cache_key = f"auth_ip_attempts_{client_ip}"
+                try:
+                    cache.add(ip_cache_key, 0, timeout=self.IP_WINDOW_SECONDS)
+                    ip_attempts = cache.incr(ip_cache_key)
+                except ValueError:
+                    cache.set(ip_cache_key, 1, timeout=self.IP_WINDOW_SECONDS)
+                    ip_attempts = 1
 
             # Record account-based attempt (if email provided)
             email = self._extract_email_from_request(request)
@@ -245,8 +289,9 @@ class AuthenticationRateLimitMiddleware:
             client_ip = self._get_client_ip(request)
             email = self._extract_email_from_request(request)
 
-            # Clear IP-based rate limit
-            cache.delete(f"auth_ip_attempts_{client_ip}")
+            # Clear the IP budget only when clients can be distinguished.
+            if _client_ip_is_distinguishable():
+                cache.delete(f"auth_ip_attempts_{client_ip}")
 
             # Clear account-based rate limit
             if email:

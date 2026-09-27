@@ -173,7 +173,7 @@ def _handle_totp_setup_post(request: HttpRequest, customer_id: str, token: str) 
                 request, "users:mfa_backup_codes", _("Two-factor authentication has been enabled successfully!")
             )
         else:
-            mark_auth_failure(request)
+            mark_auth_failure(request, bucket="reauth")
             return _handle_mfa_error_redirect(
                 request, "users:mfa_setup_totp", _("Invalid verification code. Please try again.")
             )
@@ -964,7 +964,7 @@ def mfa_backup_codes_view(request: HttpRequest) -> HttpResponse:
             request.session["new_mfa_backup_codes"] = result["backup_codes"]
             return redirect("users:mfa_backup_codes")
         except PlatformAPIError:
-            mark_auth_failure(request)
+            mark_auth_failure(request, bucket="reauth")
             form.add_error(None, _("Could not regenerate codes. Check your password and authentication code."))
 
     return render(
@@ -995,7 +995,7 @@ def mfa_disable_view(request: HttpRequest) -> HttpResponse:
                 messages.success(request, _("Two-factor authentication has been disabled."))
                 return redirect("users:mfa_management")
         except PlatformAPIError:
-            mark_auth_failure(request)
+            mark_auth_failure(request, bucket="reauth")
             form.add_error(None, _("Could not disable MFA. Check your password and authentication code."))
 
     return render(request, "users/mfa_disable.html", {"form": form})
@@ -1293,7 +1293,6 @@ def switch_customer_view(request: HttpRequest) -> HttpResponse:
         )
 
         if not response or not response.get("success"):
-            mark_auth_failure(request)
             logger.warning(
                 f"🚨 [Security] Platform API rejected customer switch: user {user_id} -> customer {customer_id}"
             )
@@ -1304,7 +1303,6 @@ def switch_customer_view(request: HttpRequest) -> HttpResponse:
         # Extract verified access information
         verification_data = response.get("data", {})
         if not verification_data.get("has_access"):
-            mark_auth_failure(request)
             logger.warning(
                 f"🚨 [Security] Unauthorized customer switch attempt: user {user_id} -> customer {customer_id}"
             )

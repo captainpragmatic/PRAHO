@@ -354,7 +354,8 @@ class GDPRComplianceMiddleware:
 
 #
 # Each exempt path must have @public_api_endpoint on the corresponding view.
-# CI test tests.api.test_api_auth_coverage enforces this invariant.
+# tests/api/test_api_auth_regressions.py::TestAPIAuthCoverage checks that every
+# /api/ view has an auth decorator or public marker; it does not compare exempt paths.
 _AUTH_EXEMPT_EXACT_PATHS_RAW: frozenset[str] = frozenset(
     {
         "/api/users/register",
@@ -399,42 +400,29 @@ class PortalServiceHMACMiddleware:
         }:
             key = f"{key}:auth"
             max_calls = self._rl_max_auth_calls
-        window_start_key = f"{key}:start"
-
         now = time.time()
+        window_index = int(now // self._rl_window)
+        counter_key = f"{key}:{window_index}"
         try:
-            # Initialize counter if absent
-            cache.add(key, 0, timeout=self._rl_window)
-            cache.add(window_start_key, now, timeout=self._rl_window)
-            # Increment atomically
-            current = cache.incr(key)
-        except Exception:
-            # Fallback if backend doesn't support incr reliably
+            cache.add(counter_key, 0, timeout=self._rl_window * 2)
             try:
-                current = (cache.get(key) or 0) + 1
-                cache.set(key, current, timeout=self._rl_window)
-                if cache.get(window_start_key) is None:
-                    cache.set(window_start_key, now, timeout=self._rl_window)
-            except Exception:
-                # Cache is completely unreachable — deny the request (fail-closed)
-                logger.critical(
-                    "🔥 [HMACRateLimiter] Cache unreachable for rate limiting — denying request for portal %s from %s",
-                    portal_id,
-                    client_ip,
-                )
-                return True, self._rl_window
+                current = cache.incr(counter_key)
+            except ValueError:
+                # Recover from an add/increment expiry race; this fallback is non-atomic.
+                current = (cache.get(counter_key) or 0) + 1
+                cache.set(counter_key, current, timeout=self._rl_window * 2)
+        except Exception:
+            logger.error(
+                "🔥 [HMACRateLimiter] Cache unreachable for rate limiting — denying request for portal %s from %s",
+                portal_id,
+                client_ip,
+            )
+            return True, self._rl_window
 
         if current <= max_calls:
             return False, 0
 
-        window_start_raw = cache.get(window_start_key)
-        try:
-            window_start = float(window_start_raw)
-        except (TypeError, ValueError):
-            window_start = now
-
-        elapsed = max(0.0, now - window_start)
-        retry_after = max(1, math.ceil(self._rl_window - elapsed))
+        retry_after = max(1, math.ceil(self._rl_window - (now % self._rl_window)))
         return True, retry_after
 
     def _verify_signature_by_mode(self, portal_id: str, sig_ok: Callable[[str], bool]) -> str:
