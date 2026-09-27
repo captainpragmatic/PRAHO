@@ -991,8 +991,8 @@ def checkout(request: HttpRequest) -> HttpResponse:
 
 
 @require_customer_authentication
-@require_billing_access()
 @require_http_methods(["POST"])
+@require_billing_access()
 def create_order(request: HttpRequest) -> HttpResponse:
     """Create order — handles bank transfer and no-JS Stripe fallback.
 
@@ -1005,8 +1005,8 @@ def create_order(request: HttpRequest) -> HttpResponse:
 
 
 @require_customer_authentication
-@require_billing_access()
 @require_http_methods(["POST"])
+@require_billing_access()
 def process_payment(request: HttpRequest) -> HttpResponse:
     """Process Stripe payment — delegates to shared order creation logic."""
     result = _validate_checkout_request(request)
@@ -1252,8 +1252,8 @@ def payment_success_webhook(request: HttpRequest) -> JsonResponse:
 
 
 @require_customer_authentication
-@require_billing_access()
 @require_http_methods(["POST"])
+@require_billing_access()
 def confirm_payment(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911, PLR0912, PLR0915, C901
     """
     Confirm payment and trigger service creation.
