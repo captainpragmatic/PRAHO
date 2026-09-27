@@ -27,9 +27,8 @@ from apps.common.decorators import (
 from apps.common.localisation_middleware import sync_language_selection
 from apps.common.localisation_services import store_localisation_preferences
 from apps.common.rate_limit_feedback import (
+    build_maintenance_context,
     get_degraded_message,
-    get_maintenance_message,
-    get_retry_after_from_error,
     is_rate_limited_error,
 )
 from apps.users.forms import (
@@ -223,7 +222,12 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
     # stopped swallowing a 503 into `None`, this state was unreachable: a maintenance window
     # produced "Invalid email address or password", so the customer retyped a correct password
     # and was told it was wrong again.
-    maintenance = False
+    # Not just a boolean: `components/maintenance_inline_alert.html` renders a heading and a message
+    # from the context, and this view supplied neither. The heading was hardcoded in the template until
+    # the declared/undeclared distinction made it dynamic, so a real window here silently degraded to
+    # "Temporarily unavailable" - and `maintenance_message` was never set at ALL, so the alert had been
+    # rendering with an empty body. Found by running the browser test rather than by reading it.
+    degraded_context: dict[str, object] = {}
 
     if request.method == "GET":
         form = CustomerLoginForm()
@@ -327,7 +331,9 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
                     # outage reported as a wrong password. `get_degraded_message` decides whether the
                     # wording may call it planned.
                     logger.warning(f"⚠️ [Portal Auth] Login attempted while the platform was unavailable for {email}")
-                    maintenance = True
+                    degraded_context = build_maintenance_context(request, e)
+                    # Also inline on the form: the alert explains the state, the form error explains
+                    # why this particular submission went nowhere.
                     form.add_error(None, get_degraded_message(e))
                 elif getattr(e, "is_rate_limited", False):
                     retry_after = getattr(e, "retry_after", None) or 30
@@ -351,7 +357,7 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
         "form": form,
         "page_title": _("Customer Login"),
         "brand_name": "PRAHO Portal",
-        "maintenance": maintenance,
+        **degraded_context,
     }
 
     return render(request, "users/login.html", context)
@@ -910,7 +916,9 @@ def mfa_backup_codes_view(request: HttpRequest) -> HttpResponse:
         # never re-displayable.
         if not exc.is_degraded:
             raise
-        messages.warning(request, get_maintenance_message(get_retry_after_from_error(exc)))
+        # `get_degraded_message`, not the maintenance wording: an undeclared 502/503/504 here would
+        # otherwise tell the customer their data is safe during a failure nobody has explained.
+        messages.warning(request, get_degraded_message(exc))
         return redirect("users:mfa_management")
     if not profile.get("mfa_enabled"):
         messages.warning(request, _("You need to enable 2FA first before accessing backup codes."))

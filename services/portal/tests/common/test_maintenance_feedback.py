@@ -260,3 +260,66 @@ class LoginDuringAnUndeclaredOutageTests(SimpleTestCase):
         body = response.content.decode().lower()
         self.assertIn("scheduled maintenance", body)
         self.assertIn("your data is safe", body)
+
+
+class TheMaintenanceAlertItselfTests(SimpleTestCase):
+    """The alert's own heading and body, which no other part of the page can supply.
+
+    Every login assertion above is satisfied by the FORM ERROR. `get_degraded_message` puts
+    "We're carrying out scheduled maintenance. Your data is safe - please try again in 600 seconds."
+    into `form.add_error`, so a lowercased body contains "scheduled maintenance" and "your data is
+    safe" whether or not the alert rendered at all - and the whole portal unit suite passed with the
+    context fix reverted. Measured, not assumed: 1183 passed against a bare `maintenance = True`.
+
+    What was actually broken behind that green: the view set the boolean and nothing else, so the
+    heading fell through to its `|default:` ("Temporarily unavailable" on a window the platform had
+    declared) and `maintenance_message` was never set at ALL, rendering an empty paragraph. Both
+    were found by running the browser test, which asserts "Scheduled maintenance" with a capital S -
+    the one spelling only the `<h3>` produces. Case-folding the body is what hid it.
+
+    So these assertions deliberately read the context keys the template consumes, and the heading as
+    an element's whole text content, rather than prose the page carries for other reasons.
+    """
+
+    DECLARED = PlatformAPIError(
+        "maint", status_code=503, response_data={"error": "maintenance"}, retry_after=600
+    )
+    UNDECLARED = PlatformAPIError("boom", status_code=503, response_data={"error": "boom"}, retry_after=600)
+    EMPTY_ALERT_BODY = '<p class="text-blue-100/90 mt-1"></p>'
+
+    def _post_login_with(self, error: PlatformAPIError) -> HttpResponse:
+        with patch("apps.users.views.api_client.authenticate_customer", side_effect=error):
+            return Client().post("/login/", {"email": "someone@example.com", "password": "correct-horse"})
+
+    def test_a_declared_window_supplies_the_heading_the_template_reads(self) -> None:
+        response = self._post_login_with(self.DECLARED)
+
+        # Rendered first, deliberately. A missing context key raises KeyError, so asserting the
+        # context before the markup means a regression short-circuits the test before it ever
+        # reaches the customer-visible half - and that half would then be unproven.
+        self.assertContains(response, ">Scheduled maintenance<")
+        self.assertEqual(response.context["maintenance_heading"], "Scheduled maintenance")
+
+    def test_the_alert_body_is_not_empty(self) -> None:
+        """The pre-existing half of the bug: a blue box with a heading and no explanation."""
+        response = self._post_login_with(self.DECLARED)
+
+        self.assertNotContains(response, self.EMPTY_ALERT_BODY)
+        self.assertIn("Your data is safe", response.context["maintenance_message"])
+
+    def test_an_undeclared_outage_does_not_announce_itself_as_planned_work(self) -> None:
+        response = self._post_login_with(self.UNDECLARED)
+
+        self.assertNotContains(response, ">Scheduled maintenance<")
+        self.assertNotContains(response, self.EMPTY_ALERT_BODY)
+        self.assertEqual(response.context["maintenance_heading"], "Temporarily unavailable")
+        self.assertNotIn("Your data is safe", response.context["maintenance_message"])
+
+    def test_a_wrong_password_renders_no_alert_at_all(self) -> None:
+        """`maintenance` used to be set to False explicitly; it is now simply absent on this path."""
+        with patch("apps.users.views.api_client.authenticate_customer", return_value=None):
+            response = Client().post("/login/", {"email": "someone@example.com", "password": "wrong"})
+
+        self.assertFalse(response.context.get("maintenance"))
+        self.assertNotContains(response, ">Scheduled maintenance<")
+        self.assertNotContains(response, ">Temporarily unavailable<")
