@@ -18,13 +18,19 @@ Layer 3 (portal middleware):
 
 from __future__ import annotations
 
+import ipaddress
+import json
 import logging
+import math
 import re
+import time
 from collections.abc import Sequence
 from typing import Any, cast
 
 from django.conf import settings
+from django.core.cache import cache
 from django.core.exceptions import ImproperlyConfigured
+from django.http import HttpRequest
 from django.utils.module_loading import import_string
 from rest_framework.request import Request
 from rest_framework.throttling import AnonRateThrottle, SimpleRateThrottle, UserRateThrottle
@@ -107,8 +113,47 @@ def parse_rate_string(rate: str) -> tuple[int, int]:
     raise ValueError(f"Unsupported rate period: {rate!r}")
 
 
+def forwarded_client_ip(request: HttpRequest | Request) -> str | None:
+    """Read an end-user IP only from a body authenticated by the HMAC middleware."""
+    try:
+        if getattr(request, "_portal_authenticated", False) is not True:
+            return None
+        request_data = request.data if hasattr(request, "data") else json.loads(request.body)
+        return str(ipaddress.ip_address(request_data.get("client_ip")))
+    except Exception:
+        return None
+
+
+def fixed_window_limited(key: str, rate: str) -> tuple[bool, int]:
+    """Charge a fixed-window counter, denying requests if the cache fails."""
+    if not getattr(settings, "RATE_LIMITING_ENABLED", True):
+        return False, 0
+
+    max_calls, window = parse_rate_string(rate)
+    window_start_key = f"{key}:start"
+    now = time.time()
+    try:
+        cache.add(key, 0, timeout=window)
+        cache.add(window_start_key, now, timeout=window)
+        current = cache.incr(key)
+        if current <= max_calls:
+            return False, 0
+
+        window_start_raw = cache.get(window_start_key)
+        try:
+            window_start = float(window_start_raw)
+        except (TypeError, ValueError):
+            window_start = now
+        elapsed = max(0.0, now - window_start)
+        return True, max(1, math.ceil(window - elapsed))
+    except Exception:
+        logger.error("🔥 [RateLimiter] Cache failure during fixed-window rate limiting — denying request")
+        return True, window
+
+
 def validate_throttle_rate_map(rates: dict[str, str]) -> None:
     """Validate throttle rates and raise clear startup errors for invalid values."""
+
     invalid_entries: list[str] = []
     for scope, rate in rates.items():
         try:
@@ -268,7 +313,7 @@ class EndpointRateThrottle(_ConfigurableRateThrottle):
 
     cache_format = "throttle_endpoint_%(scope)s_%(ident)s"
 
-    def get_cache_key(self, request: Request, view: Any) -> str:
+    def get_cache_key(self, request: Request, view: Any) -> str | None:
         if _is_portal_authenticated(request):
             ident = f"portal_{_extract_hmac_identity(request)}"
         elif request.user and request.user.is_authenticated:
@@ -279,9 +324,33 @@ class EndpointRateThrottle(_ConfigurableRateThrottle):
         return self.cache_format % {"scope": self.scope, "ident": ident}
 
 
+class ForwardedClientIPThrottle(EndpointRateThrottle):
+    """Throttle the end-user IP supplied in the Portal's authenticated body."""
+
+    # Unlike the endpoint base, this throttle can opt out when no signed IP exists.
+    def get_cache_key(self, request: Request, view: Any) -> str | None:
+        ip = forwarded_client_ip(request)
+        if ip is None:
+            return None
+        return self.cache_format % {"scope": self.scope, "ident": f"client_{ip}"}
+
+
+class LoginClientIPThrottle(ForwardedClientIPThrottle):
+    """Limit login attempts from an authenticated forwarded client IP."""
+
+    scope = "auth_login_ip"
+
+
+class ResetClientIPThrottle(ForwardedClientIPThrottle):
+    """Limit password resets from an authenticated forwarded client IP."""
+
+    scope = "auth_reset_ip"
+
+
 class CustomerRateThrottle(_CustomTimeRateMixin, SimpleRateThrottle):  # type: ignore[misc]  # DRF throttle base uses dynamic attrs
     """
     Rate throttling based on customer account.
+
     Customers share rate limits across all their users.
 
     Rate limits can be customized per customer tier:

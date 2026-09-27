@@ -7,11 +7,13 @@ import urllib.parse
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.http import HttpResponse
 from django.test import RequestFactory, TestCase, override_settings
 
 from apps.common import middleware as _middleware_module
-from apps.common.middleware import PortalServiceHMACMiddleware
+from apps.common.middleware import PortalServiceHMACMiddleware, _is_auth_exempt
+from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
 
 User = get_user_model()
 
@@ -262,8 +264,25 @@ class PortalHMACTests(TestCase):
         self.assertTrue(is_limited)
         self.assertEqual(retry_after, 55)
 
+    @override_settings(HMAC_RATE_LIMIT_MAX_AUTH_CALLS=2)
+    def test_auth_paths_use_a_separate_bucket(self) -> None:
+        middleware = PortalServiceHMACMiddleware(lambda req: HttpResponse("ok"))
+        results = [middleware._rate_limited("portal-x", "10.0.0.1", path="/api/users/login/") for _ in range(3)]
+        self.assertEqual(results[:2], [(False, 0), (False, 0)])
+        self.assertTrue(results[2][0])
+        self.assertGreaterEqual(results[2][1], 1)
+        self.assertEqual(
+            middleware._rate_limited("portal-x", "10.0.0.1", path="/api/billing/documents/"),
+            (False, 0),
+        )
+
+    def test_password_reset_path_is_no_longer_exempt(self) -> None:
+        self.assertFalse(_is_auth_exempt("/api/users/password/reset/"))
+        self.assertTrue(_is_auth_exempt("/api/users/register/"))
+
     @override_settings(PLATFORM_API_SECRET="unit-test-secret", CACHES=LOCMEM_TEST_CACHE)
     def test_nonce_replay_rejected(self):
+
         # Same nonce should be rejected on second use
         method = "POST"
         raw_path = "/api/test/"
@@ -298,3 +317,44 @@ class PortalHMACTests(TestCase):
         r2 = middleware(request2)
         self.assertEqual(r1.status_code, 200)
         self.assertEqual(r2.status_code, 401)
+
+
+@override_settings(
+    PLATFORM_API_SECRET=HMAC_TEST_SECRET,
+    MIDDLEWARE=HMAC_TEST_MIDDLEWARE,
+    PORTAL_HMAC_MODE="legacy",
+    RATE_LIMITING_ENABLED=True,
+    HMAC_RATE_LIMIT_MAX_AUTH_CALLS=2,
+    HMAC_RATE_LIMIT_MAX_CALLS=3,
+    CACHES={
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "hmac-auth-bucket-routing-tests",
+        }
+    },
+)
+class HMACAuthBucketRoutingTests(HMACTestMixin, TestCase):
+    def setUp(self) -> None:
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def test_signed_auth_paths_share_a_bucket_without_charging_general_traffic(self) -> None:
+        login = self.portal_post("/api/users/login/", {})
+        reset = self.portal_post("/api/users/password/reset/", {})
+        confirm = self.portal_post("/api/users/password/reset/confirm/", {})
+        self.assertEqual(login.status_code, 400)
+        self.assertEqual(reset.status_code, 400)
+        self.assertEqual(reset["X-Portal-Auth"], "hmac-verified")
+        self.assertEqual(confirm.status_code, 429)
+        self.assertGreaterEqual(int(confirm["Retry-After"]), 1)
+
+        responses = [self.portal_post("/api/users/user/", {}) for _ in range(4)]
+        for response in responses[:3]:
+            self.assertNotEqual(response.status_code, 429)
+            self.assertEqual(response["X-Portal-Auth"], "hmac-verified")
+        self.assertEqual(responses[3].status_code, 429)
+
+    def test_unsigned_password_reset_is_rejected_before_the_view(self) -> None:
+        response = self.client.post("/api/users/password/reset/", {}, content_type="application/json")
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json(), {"error": "HMAC authentication failed"})

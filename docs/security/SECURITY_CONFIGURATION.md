@@ -268,9 +268,24 @@ TIMESTAMP
 
 ### HMAC Rate Limiting
 
-- Key: `hmac_rl:{portal_id}:{client_ip}`
-- Default: 300 calls per 60 seconds
-- Configurable via `HMAC_RATE_LIMIT_WINDOW` and `HMAC_RATE_LIMIT_MAX_CALLS`
+- General bucket: `hmac_rl:{portal_id}:{client_ip}`, default 300 calls per 60 seconds.
+- Login, password reset, and reset confirmation share a separate
+  `hmac_rl:{portal_id}:{client_ip}:auth` bucket, default 120 calls per 60 seconds.
+  Paths match with or without trailing slashes. Exhausting this bucket does not
+  consume the general bucket.
+- `client_ip` in these middleware keys is the transport/proxy-resolved IP, usually
+  the Portal container's IP, rather than the end-user IP.
+- `HMAC_RATE_LIMIT_WINDOW` controls both windows; `HMAC_RATE_LIMIT_MAX_CALLS`
+  controls the general cap. `HMAC_RATE_LIMIT_MAX_AUTH_CALLS` controls the auth cap
+  as a Django setting (default 120; no environment-variable mapping).
+- Login and both password-reset endpoints require HMAC authentication;
+  registration remains exempt.
+- Reusable `LoginClientIPThrottle` (`auth_login_ip`, `10/minute`) and
+  `ResetClientIPThrottle` (`auth_reset_ip`, `5/minute`) key on the canonical
+  end-user `client_ip` forwarded in the signed request body. They return no key
+  when the HMAC authentication flag or a valid body IP is absent, without falling
+  back to the transport IP. Endpoint attachment is deferred to B2.
+
 
 ### CSRF and Host Validation
 

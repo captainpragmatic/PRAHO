@@ -732,6 +732,9 @@ THROTTLE_RATES = {
     "burst": "60/10s",
     # Per-view API throttles (apps.api.core.throttling)
     "auth": "10/minute",
+    # End-user IP from the Portal's signed body; no throttle key (None) when absent.
+    "auth_login_ip": "10/minute",
+    "auth_reset_ip": "5/minute",
     "sustained": "2000/hour",
     "api_burst": "120/min",
     # Built-in DRF classes used directly by decorators

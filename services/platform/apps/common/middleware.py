@@ -348,15 +348,16 @@ class GDPRComplianceMiddleware:
 # The Portal's PlatformAPIClient always signs ALL requests with HMAC,
 # so portal calls never rely on this exempt list.
 # The startswith->exact-match change (commit 2577b41d) was intentional:
-# it prevents unintended sub-path exemptions (e.g., /api/users/password/reset/confirm/).
+# it prevents unintended sub-path exemptions (e.g., /api/users/register/extra/).
+# Login and both password-reset endpoints require HMAC authentication.
 # Exempt paths stored without trailing slash; matching normalizes both sides.
+
 #
 # Each exempt path must have @public_api_endpoint on the corresponding view.
 # CI test tests.api.test_api_auth_coverage enforces this invariant.
 _AUTH_EXEMPT_EXACT_PATHS_RAW: frozenset[str] = frozenset(
     {
         "/api/users/register",
-        "/api/users/password/reset",
         "/api/users/health",
         "/api/orders/products",
     }
@@ -385,11 +386,21 @@ class PortalServiceHMACMiddleware:
         # Rate limit config (fallbacks if not in settings)
         self._rl_window = int(getattr(settings, "HMAC_RATE_LIMIT_WINDOW", 60))
         self._rl_max_calls = int(getattr(settings, "HMAC_RATE_LIMIT_MAX_CALLS", 300))
+        self._rl_max_auth_calls = int(getattr(settings, "HMAC_RATE_LIMIT_MAX_AUTH_CALLS", 120))
 
-    def _rate_limited(self, portal_id: str, client_ip: str) -> tuple[bool, int]:
-        """Rate limiting keyed by portal_id and IP with accurate remaining wait seconds."""
+    def _rate_limited(self, portal_id: str, client_ip: str, *, path: str = "") -> tuple[bool, int]:
+        """Keep authentication traffic in a separate portal/IP fixed-window bucket."""
         key = f"hmac_rl:{portal_id}:{client_ip}"
+        max_calls = self._rl_max_calls
+        if path.rstrip("/") in {
+            "/api/users/login",
+            "/api/users/password/reset",
+            "/api/users/password/reset/confirm",
+        }:
+            key = f"{key}:auth"
+            max_calls = self._rl_max_auth_calls
         window_start_key = f"{key}:start"
+
         now = time.time()
         try:
             # Initialize counter if absent
@@ -413,7 +424,7 @@ class PortalServiceHMACMiddleware:
                 )
                 return True, self._rl_window
 
-        if current <= self._rl_max_calls:
+        if current <= max_calls:
             return False, 0
 
         window_start_raw = cache.get(window_start_key)
@@ -611,9 +622,9 @@ class PortalServiceHMACMiddleware:
         is_billing_api = request.path.startswith(self._BILLING_API_PREFIXES)
         if is_api or is_billing_api:
             # Skip HMAC validation for public endpoints only (exact match to prevent bypass).
-            # NOTE: /api/users/login/ is NOT exempt - the portal service signs
-            # login requests with HMAC, so we validate portal origin to prevent
-            # direct credential brute-force from external attackers.
+            # Login and both password-reset endpoints require signed Portal requests
+            # to prevent direct credential brute-force and reset-mail abuse.
+
             if _is_auth_exempt(request.path):
                 logger.debug("🔓 [HMAC Auth] Skipping HMAC validation for auth endpoint: %s", request.path)
                 return self.get_response(request)
@@ -661,7 +672,7 @@ class PortalServiceHMACMiddleware:
 
             # Post-auth rate limiting: keyed by the verified portal_id (not the raw header).
             if rate_limit_enabled:
-                is_limited, retry_after = self._rate_limited(request._portal_id, client_ip)
+                is_limited, retry_after = self._rate_limited(request._portal_id, client_ip, path=request.path)
                 if is_limited:
                     logger.warning(f"🚨 [HMAC Auth] Rate limit exceeded for portal={request._portal_id} ip={client_ip}")
                     response = HttpResponse(
