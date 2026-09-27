@@ -20,7 +20,7 @@ from django.contrib.messages import get_messages
 from django.contrib.messages.storage.fallback import FallbackStorage
 from django.contrib.sessions.middleware import SessionMiddleware
 from django.http import HttpResponse
-from django.test import Client, SimpleTestCase
+from django.test import Client, SimpleTestCase, override_settings
 from django.test.client import RequestFactory
 
 from apps.api_client.services import PlatformAPIError
@@ -29,6 +29,8 @@ from apps.common.rate_limit_feedback import (
     handle_platform_error,
     is_maintenance_error,
 )
+from apps.services.services import ServicesAPIClient
+from apps.services.services import _raise_if_degraded as services_raise_if_degraded
 from apps.tickets.services import _raise_if_degraded as tickets_raise_if_degraded
 
 
@@ -163,6 +165,14 @@ class DegradedStateIsPropagatedNotFlattenedTests(SimpleTestCase):
         """The duplicated helper had to be found as well, not just the first one."""
         with self.assertRaises(PlatformAPIError):
             tickets_raise_if_degraded(PlatformAPIError("unavailable", status_code=503))
+
+    def test_services_re_raises_maintenance_too(self) -> None:
+        """The THIRD copy, which the original sweep missed entirely. See the class below."""
+        with self.assertRaises(PlatformAPIError):
+            services_raise_if_degraded(PlatformAPIError("unavailable", status_code=503))
+
+    def test_services_still_flattens_an_ordinary_failure(self) -> None:
+        services_raise_if_degraded(PlatformAPIError("boom", status_code=500))
 
 
 class LoginDuringMaintenanceTests(SimpleTestCase):
@@ -351,3 +361,103 @@ class TheMaintenanceAlertItselfTests(SimpleTestCase):
         self.assertFalse(response.context.get("maintenance"))
         self.assertNotContains(response, ">Scheduled maintenance<")
         self.assertNotContains(response, ">Temporarily unavailable<")
+
+
+@override_settings(
+    SESSION_ENGINE="django.contrib.sessions.backends.cache",
+    CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
+)
+class TheServicesAppWasSkippedByTheWideningTests(SimpleTestCase):
+    """Billing got `_raise_if_degraded` at eight sites, tickets at one, services at none.
+
+    So during a window the dashboard badge read "0 active services", the plans list was empty and the
+    usage panel showed zeros - the reported bug itself, in the one app the sweep missed. What hid it:
+    `get_customer_services`, `get_service_detail` and `request_service_action` always re-raised, so
+    the services LIST page did reach its `{% elif maintenance %}` arm and looked correct. The four
+    calls below did not.
+
+    The callers were checked one at a time rather than widened mechanically. Four of them handled only
+    rate-limiting and then fell through to `messages.error("Service not found or access denied.")`, so
+    a blind widening would have replaced an empty page with a false statement about the customer's own
+    account. Two of those already made that statement before the widening, because the detail call
+    always re-raised.
+    """
+
+    MAINTENANCE = PlatformAPIError(
+        "unavailable", status_code=503, response_data={"error": "maintenance"}, retry_after=600
+    )
+    ORDINARY = PlatformAPIError("boom", status_code=500)
+
+    def _platform_raising(self, error: PlatformAPIError):
+        return patch("apps.services.services.ServicesAPIClient._make_request", side_effect=error)
+
+    def _session_client(self) -> Client:
+        client = Client()
+        session = client.session
+        session["customer_id"] = 1
+        session["user_id"] = 2
+        session.save()
+        return client
+
+    def _calls(self, client: ServicesAPIClient) -> dict[str, object]:
+        return {
+            "get_services_summary": lambda: client.get_services_summary(1, 2),
+            "get_service_usage": lambda: client.get_service_usage(1, 2, 3),
+            "get_service_domains": lambda: client.get_service_domains(1, 3),
+            "get_available_plans": lambda: client.get_available_plans(1),
+        }
+
+    def test_all_four_flattening_calls_now_propagate_a_window(self) -> None:
+        client = ServicesAPIClient()
+        for name, call in self._calls(client).items():
+            with self.subTest(call=name), self._platform_raising(self.MAINTENANCE), self.assertRaises(PlatformAPIError):
+                call()
+
+    def test_an_ordinary_failure_is_still_flattened(self) -> None:
+        """Both directions. A 500 must keep returning the graceful shape, not start breaking pages."""
+        client = ServicesAPIClient()
+        with self._platform_raising(self.ORDINARY):
+            self.assertEqual(client.get_available_plans(1), [])
+            self.assertEqual(client.get_service_domains(1, 3), [])
+            self.assertEqual(client.get_services_summary(1, 2).get("active_services"), 0)
+            self.assertEqual(client.get_service_usage(1, 2, 3).get("bandwidth_used"), 0)
+
+    def test_a_window_is_not_reported_as_the_service_not_existing(self) -> None:
+        """The misstatement, which predates the widening and is the worse half of this.
+
+        `get_service_detail` always re-raised, so opening a service during a window already answered
+        "Service not found or access denied" - a claim about the customer's own account that is false.
+        """
+        with self._platform_raising(self.MAINTENANCE):
+            response = self._session_client().get("/services/3/", follow=True)
+
+        body = response.content.decode()
+        self.assertNotIn("Service not found or access denied", body)
+        self.assertIn("scheduled maintenance", body.lower())
+
+    def test_the_usage_panel_says_maintenance_rather_than_failing_silently(self) -> None:
+        """Capital S: the alert's own heading, which nothing else on this partial produces."""
+        with self._platform_raising(self.MAINTENANCE):
+            response = self._session_client().get("/services/3/usage/")
+
+        body = response.content.decode()
+        self.assertIn("Scheduled maintenance", body)
+        self.assertNotIn("Unable to load usage data", body)
+
+    def test_an_ordinary_usage_failure_does_not_borrow_the_maintenance_wording(self) -> None:
+        """The other direction, so the new arm cannot fire for a failure nobody declared.
+
+        Written first as "still shows the generic error", which FAILED and was informative: a 500 is
+        flattened by the service layer into a zeros dict with no `error` key, so the view's `except`
+        never runs and the panel renders an empty chart. The view's "Unable to load usage data" arm is
+        therefore unreachable - it was already unreachable before this change, because the only thing
+        the service layer raised was a throttle and the view re-raises those. Pre-existing, the same
+        bug class as this branch (a platform failure shown as zeros), and outside its maintenance
+        scope; asserted here as what the code actually does rather than what the arm suggests.
+        """
+        with self._platform_raising(self.ORDINARY):
+            response = self._session_client().get("/services/3/usage/")
+
+        body = response.content.decode()
+        self.assertNotIn("Scheduled maintenance", body)
+        self.assertNotIn("Temporarily unavailable", body)

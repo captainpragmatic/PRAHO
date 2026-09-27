@@ -12,7 +12,13 @@ from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy
 
 from apps.common.pagination import PaginatorData, build_pagination_params
-from apps.common.rate_limit_feedback import handle_platform_error, is_rate_limited_error
+from apps.common.rate_limit_feedback import (
+    build_maintenance_context,
+    get_degraded_message,
+    handle_platform_error,
+    is_rate_limited_error,
+    is_unavailable_error,
+)
 
 from .services import PlatformAPIError, services_api
 
@@ -297,6 +303,15 @@ def service_detail(request: HttpRequest, service_id: int) -> HttpResponse:
     except PlatformAPIError as e:
         if is_rate_limited_error(e):
             raise
+        if is_unavailable_error(e):
+            # NOT "Service not found or access denied". That sentence is a statement about the
+            # customer's own account, and during a maintenance window it is false - it tells them
+            # their service is gone or that they have lost access to it. This path already said it
+            # before the service layer was widened, because `get_service_detail` always re-raised.
+            # The list is where the maintenance alert lives, so that is where they are sent.
+            logger.warning(f"⚠️ [Services View] Service {service_id} unavailable, platform degraded: {e}")
+            messages.warning(request, get_degraded_message(e))
+            return redirect("services:list")
         logger.error(f"🔥 [Services View] Error loading service {service_id} for customer {customer_id}: {e}")
         messages.error(request, _("Service not found or access denied."))
         return redirect("services:list")
@@ -327,6 +342,16 @@ def service_usage(request: HttpRequest, service_id: int) -> HttpResponse:
     except PlatformAPIError as e:
         if is_rate_limited_error(e):
             raise
+        if is_unavailable_error(e):
+            # The partial gains the same `{% if maintenance %}` arm the tables have, rather than a
+            # reworded error state: its generic arm is hardcoded "Unable to load usage data" in red,
+            # which gives no cause and reads as our fault. `usage` is deliberately absent here.
+            logger.warning(f"⚠️ [Services View] Usage for {service_id} unavailable, platform degraded: {e}")
+            return render(
+                request,
+                "services/partials/usage_chart.html",
+                {"period": period, "service_id": service_id, **build_maintenance_context(request, e)},
+            )
         logger.error(f"🔥 [Services View] Error loading usage for service {service_id}: {e}")
         return render(
             request,
@@ -386,10 +411,17 @@ def service_request_action(request: HttpRequest, service_id: int) -> HttpRespons
         except PlatformAPIError as e:
             if is_rate_limited_error(e):
                 raise
-            logger.error(
-                f"🔥 [Services View] Error submitting {action} request for service {service_id} by customer {customer_id}: {e}"
-            )
-            messages.error(request, _("Unable to submit service request. Please try again later."))
+            if is_unavailable_error(e):
+                # The generic wording was not wrong here, only vague: it gave no reason and no
+                # sense of when to come back. This path already received a window, because
+                # `request_service_action` always re-raised.
+                logger.warning(f"⚠️ [Services View] {action} for {service_id} not submitted, platform degraded: {e}")
+                messages.warning(request, get_degraded_message(e))
+            else:
+                logger.error(
+                    f"🔥 [Services View] Error submitting {action} request for service {service_id} by customer {customer_id}: {e}"
+                )
+                messages.error(request, _("Unable to submit service request. Please try again later."))
 
         return redirect("services:detail", service_id=service_id)
 
@@ -415,8 +447,15 @@ def service_request_action(request: HttpRequest, service_id: int) -> HttpRespons
     except PlatformAPIError as e:
         if is_rate_limited_error(e):
             raise
-        logger.error(f"🔥 [Services View] Error loading service action form for service {service_id}: {e}")
-        messages.error(request, _("Service not found or access denied."))
+        # One exit for both, rather than a return per branch: the destination is the same and the
+        # extra return tripped PLR0911 on this function, which already has six.
+        if is_unavailable_error(e):
+            # Same reasoning as `service_detail`: a window is not the customer losing access.
+            logger.warning(f"⚠️ [Services View] Action form for {service_id} unavailable, platform degraded: {e}")
+            messages.warning(request, get_degraded_message(e))
+        else:
+            logger.error(f"🔥 [Services View] Error loading service action form for service {service_id}: {e}")
+            messages.error(request, _("Service not found or access denied."))
         return redirect("services:list")
 
 
