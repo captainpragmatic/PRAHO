@@ -10,12 +10,14 @@ from django.db import transaction
 from django.db.models import Count, Q
 from django.http import HttpRequest
 from django.utils import timezone
+from django.utils.translation import gettext as _
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from apps.api.secure_auth import (
     BILLING_ROLES,
+    SUPPORT_ROLES,
     public_api_endpoint,
     require_customer_authentication,
     require_customer_role_in,
@@ -32,6 +34,76 @@ from .serializers import (
 )
 
 logger = logging.getLogger(__name__)
+
+MAX_SERVICE_ACTION_REASON_LENGTH = 2000
+
+
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([AllowAny])
+@require_customer_role_in(*SUPPORT_ROLES)
+def request_service_action_api(request: HttpRequest, customer: Customer, service_id: int) -> Response:
+    """Create a support ticket for a customer's service action request."""
+    from apps.api.tickets.helpers import create_customer_ticket  # noqa: PLC0415
+    from apps.tickets.models import SupportCategory  # noqa: PLC0415
+
+    labels = {
+        "upgrade_request": _("Upgrade request"),
+        "downgrade_request": _("Downgrade request"),
+        "suspend_request": _("Suspension request"),
+        "cancel_request": _("Cancellation request"),
+    }
+    request_data = request.data if hasattr(request, "data") else {}
+    action = request_data.get("action")
+    if not isinstance(action, str) or action not in labels:
+        return Response({"success": False, "error": _("Invalid action")}, status=400)
+
+    requires_reason = action in {"suspend_request", "cancel_request"}
+    if requires_reason and getattr(request, "_customer_role", None) not in BILLING_ROLES:
+        return Response({"success": False, "error": _("Access denied")}, status=403)
+
+    reason = request_data.get("reason", "")
+    if (
+        not isinstance(reason, str)
+        or len(reason) > MAX_SERVICE_ACTION_REASON_LENGTH
+        or (requires_reason and not reason.strip())
+    ):
+        return Response({"success": False, "error": _("Invalid reason")}, status=400)
+    reason = reason.strip()
+
+    try:
+        service = Service.objects.get(id=service_id, customer=customer)
+    except Service.DoesNotExist:
+        return Response({"success": False, "error": _("Service not found")}, status=404)
+
+    label = labels[action]
+    with transaction.atomic():
+        category, _created = SupportCategory.objects.get_or_create(
+            name="Service Requests",
+            defaults={
+                "name_en": "Service Requests",
+                "description": "Customer requests to upgrade, downgrade, suspend or cancel a service",
+                "icon": "server",
+                "color": "#6366F1",
+            },
+        )
+        ticket = create_customer_ticket(
+            customer=customer,
+            title=f"{label}: {service.service_name}",
+            description=reason or label,
+            category=category,
+            priority="high" if action == "cancel_request" else "normal",
+            related_service=service,
+            created_by=getattr(request, "_customer_user", None),
+            contact_email=customer.primary_email,
+            contact_person=customer.name,
+        )
+
+    logger.info("✅ [Services API] Created service request ticket %s for service %s", ticket.ticket_number, service_id)
+    return Response(
+        {"success": True, "data": {"request_id": ticket.ticket_number, "ticket_id": ticket.id, "action": action}},
+        status=201,
+    )
 
 
 @api_view(["POST"])

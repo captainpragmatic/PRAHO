@@ -2,11 +2,12 @@
 # TICKETS API SERIALIZERS - CUSTOMER SUPPORT OPERATIONS <�
 # ===============================================================================
 
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
+from apps.provisioning.service_models import Service
 from apps.tickets.models import SupportCategory, Ticket, TicketAttachment, TicketComment
 
 # Validation constants
@@ -269,6 +270,7 @@ class TicketDetailSerializer(serializers.ModelSerializer):
     attachments = serializers.SerializerMethodField()
 
     # Service info
+    related_service = serializers.SerializerMethodField()
     related_service_name = serializers.SerializerMethodField()
 
     class Meta:
@@ -293,6 +295,7 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             "category",
             "assigned_to_name",
             "created_by_name",
+            "related_service",
             "related_service_name",
             "is_escalated",
             "is_public",
@@ -324,9 +327,15 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             return obj.created_by.get_full_name()
         return ""
 
+    def get_related_service(self, obj: "Ticket") -> int | None:
+        """Expose only a service belonging to the ticket's customer."""
+        if obj.related_service is not None and obj.related_service.customer_id == obj.customer_id:
+            return obj.related_service_id
+        return None
+
     def get_related_service_name(self, obj: "Ticket") -> str:
-        """Get related service name if any"""
-        if obj.related_service:
+        """Expose only a service belonging to the ticket's customer."""
+        if obj.related_service is not None and obj.related_service.customer_id == obj.customer_id:
             return str(obj.related_service)
         return ""
 
@@ -356,6 +365,16 @@ class TicketDetailSerializer(serializers.ModelSerializer):
 
 class TicketCreateSerializer(serializers.ModelSerializer):
     """Ticket creation serializer for customer submissions"""
+
+    related_service = serializers.PrimaryKeyRelatedField(
+        queryset=Service.objects.none(), required=False, allow_null=True
+    )
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        cast(serializers.PrimaryKeyRelatedField, self.fields["related_service"]).queryset = Service.objects.filter(
+            customer=self.context["customer"]
+        )
 
     class Meta:
         model = Ticket

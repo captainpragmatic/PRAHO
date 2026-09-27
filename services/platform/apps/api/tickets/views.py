@@ -24,6 +24,7 @@ from apps.tickets.models import SupportCategory, Ticket, TicketAttachment, Ticke
 from apps.tickets.services import TicketStatusService
 
 from .attachments import decode_attachments
+from .helpers import create_customer_ticket
 from .serializers import (
     CommentCreateSerializer,
     SupportCategorySerializer,
@@ -338,20 +339,15 @@ def customer_ticket_create_api(request: HttpRequest, customer: Customer) -> Resp
 
         # Validate request data
         logger.debug(f"🔍 [Tickets API] Validating ticket data: {ticket_data}")
-        serializer = TicketCreateSerializer(data=ticket_data)
+        serializer = TicketCreateSerializer(data=ticket_data, context={"customer": customer})
         if not serializer.is_valid():
             logger.error(f"🔥 [Tickets API] Validation failed: {serializer.errors}")
             return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Create ticket with customer email if not provided
-        validated_data = serializer.validated_data
-        if not validated_data.get("contact_email"):
-            validated_data["contact_email"] = customer.primary_email
-        if not validated_data.get("contact_person"):
-            validated_data["contact_person"] = customer.name
-
-        ticket = Ticket.objects.create(
-            customer=customer, source="api", created_by=getattr(request, "_customer_user", None), **validated_data
+        ticket = create_customer_ticket(
+            customer=customer,
+            created_by=getattr(request, "_customer_user", None),
+            **serializer.validated_data,
         )
 
         # Return created ticket details

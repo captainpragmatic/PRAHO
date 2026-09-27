@@ -1090,8 +1090,6 @@ def order_refund_request(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
                 "description": "Billing and refund related issues",
                 "icon": "credit-card",
                 "color": "#10B981",
-                "sla_response_hours": 24,
-                "sla_resolution_hours": 48,
             },
         )
 
