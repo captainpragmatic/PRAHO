@@ -76,6 +76,12 @@
 
     # Portal handles everything else (customer-facing)
     handle {
+        # Cap request bodies at the edge. The application already limits
+        # ticket attachments to 1 MiB aggregate; 5MB leaves multipart headroom
+        # while stopping oversized uploads before they reach the Portal.
+        request_body {
+            max_size 5MB
+        }
         reverse_proxy portal:8701 {
             header_up X-Real-IP {remote_host}
             header_up X-Forwarded-For {remote_host}
