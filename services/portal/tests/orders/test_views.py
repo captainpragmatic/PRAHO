@@ -11,7 +11,7 @@ from django.contrib.messages.middleware import MessageMiddleware
 from django.contrib.sessions.middleware import SessionMiddleware
 from django.core.exceptions import ValidationError
 from django.http import HttpRequest
-from django.test import Client, SimpleTestCase, override_settings
+from django.test import Client, TestCase, override_settings
 from django.utils import timezone
 
 from apps.api_client.services import PlatformAPIError
@@ -69,7 +69,7 @@ _IMPORTED_ORDER_VIEW_CASES = (
 
 
 @override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
-class TestOrderViews(SimpleTestCase):
+class TestOrderViews(TestCase):
     """Test order-related views and authentication"""
 
     def setUp(self):
@@ -320,7 +320,7 @@ class TestOrderViews(SimpleTestCase):
 
 
 @override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
-class TestCartErrorResponses(SimpleTestCase):
+class TestCartErrorResponses(TestCase):
     """Cart errors must return 422 with target-independent HTMX toast events."""
 
     def setUp(self):
@@ -368,7 +368,7 @@ class TestCartErrorResponses(SimpleTestCase):
 
 
 @override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
-class TestOrderViewsIntegration(SimpleTestCase):
+class TestOrderViewsIntegration(TestCase):
     """Integration tests for order flow"""
 
     def setUp(self):
@@ -411,7 +411,7 @@ class TestOrderViewsIntegration(SimpleTestCase):
 
 
 @override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
-class TestOrderViewsSecurity(SimpleTestCase):
+class TestOrderViewsSecurity(TestCase):
     """Security tests for order views"""
 
     def test_csrf_protection_on_state_changing_operations(self):

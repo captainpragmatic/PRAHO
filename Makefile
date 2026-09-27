@@ -372,7 +372,7 @@ test-security:
 	@echo "🧪 Testing platform uses database cache (base settings, not dev override)..."
 	@cd services/platform && DJANGO_SETTINGS_MODULE=config.settings.base PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -c "import django; django.setup(); from django.conf import settings; cache_backend = settings.CACHES['default']['BACKEND']; assert 'DatabaseCache' in cache_backend, f'Should use database cache, got: {cache_backend}'; print('✅ Platform base settings use database cache')"
 	@echo "🧪 Testing portal has no business database access..."
-	@cd services/portal && DJANGO_SETTINGS_MODULE=config.settings.dev PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/$(VENV_DIR)/bin/python -c "import django; django.setup(); from django.conf import settings; db = settings.DATABASES.get('default', {}); is_sqlite = 'sqlite3' in db.get('ENGINE', ''); print('✅ Portal uses SQLite for sessions only (no PostgreSQL):', is_sqlite)"
+	@cd services/portal && DJANGO_SETTINGS_MODULE=config.settings.dev PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/$(VENV_DIR)/bin/python -c "import django; django.setup(); from django.conf import settings; db = settings.DATABASES.get('default', {}); is_sqlite = 'sqlite3' in db.get('ENGINE', ''); assert is_sqlite, f'Portal must use SQLite, got: {db}'; from django.apps import apps; assert {model._meta.label for model in apps.get_models()} == {'sessions.Session', 'common.Counter'}; print('✅ Portal database contains only session and counter models')"
 	@echo "🧪 Running portal database access prevention test..."
 	@cd services/portal && DJANGO_SETTINGS_MODULE=config.settings.dev PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/$(VENV_DIR)/bin/python -m pytest tests/security/test_import_isolation_guard.py::test_db_access_blocked -v
 	@echo "🎉 All security isolation tests passed!"
@@ -493,8 +493,9 @@ migrate:
 	@echo "🗄️ [Platform] Running database migrations..."
 	@$(PYTHON_PLATFORM_MANAGE) makemigrations --settings=config.settings.dev
 	@$(PYTHON_PLATFORM_MANAGE) migrate --settings=config.settings.dev
-	@echo "🗄️ [Portal] Running session table migration..."
-	@$(PYTHON_PORTAL_MANAGE) migrate sessions --settings=config.settings.dev
+	@echo "🗄️ [Portal] Migrating sessions and infrastructure tables..."
+	@$(PYTHON_PORTAL_MANAGE) migrate sessions --noinput --settings=config.settings.dev
+	@$(PYTHON_PORTAL_MANAGE) migrate common --noinput --settings=config.settings.dev
 
 check-migrations:
 	@echo "🔎 [Platform] Checking model and migration state..."

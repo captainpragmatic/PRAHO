@@ -2,29 +2,52 @@
 # =============================================================================
 # PRAHO Portal — Docker Entrypoint
 # =============================================================================
-# Runs on every container start. Portal uses a local SQLite file for session
-# storage only (no business data). The session table migration is idempotent.
-# Supports command override: if arguments are passed (e.g., from docker-compose
-# `command:`), they run instead of the default gunicorn.
-set -e
+# Runs on every container start. SQLite stores sessions and infrastructure guards.
+# Supports command overrides after migrations and deployment checks succeed.
+set -euo pipefail
 
 SESSION_DB="${SESSION_DB_PATH:-portal.sqlite3}"
-
-# Ensure parent directory exists and is writable (handles Docker volume mounts)
+export SESSION_DB_PATH="$SESSION_DB"
 SESSION_DIR=$(dirname "$SESSION_DB")
-mkdir -p "$SESSION_DIR" 2>/dev/null || true
+mkdir -p "$SESSION_DIR"
 
-# Pre-flight: if session DB exists but is corrupted, delete and recreate.
-# Session data is disposable — losing it just forces re-login.
+# Delete only after integrity_check proves corruption. Lock, permission and I/O
+# failures abort startup and preserve the database for recovery.
 if [ -f "$SESSION_DB" ]; then
-    if ! python -c "import sqlite3; sqlite3.connect('$SESSION_DB').execute('PRAGMA integrity_check')" 2>/dev/null; then
-        echo "⚠️ Corrupt session DB detected, recreating..."
+    if python - "$SESSION_DB" <<'PY'
+import sqlite3
+import sys
+from pathlib import Path
+
+try:
+    with sqlite3.connect(Path(sys.argv[1]).resolve().as_uri() + "?mode=rw", uri=True) as connection:
+        results = connection.execute("PRAGMA integrity_check").fetchall()
+except sqlite3.DatabaseError as error:
+    code = getattr(error, "sqlite_errorcode", 0) & 0xFF
+    if code not in (sqlite3.SQLITE_CORRUPT, sqlite3.SQLITE_NOTADB):
+        raise
+    print(f"integrity_check failed: {error}", file=sys.stderr)
+    sys.exit(20)
+if results != [("ok",)]:
+    print(f"integrity_check failed: {results}", file=sys.stderr)
+    sys.exit(20)
+PY
+    then
+        :
+    else
+        integrity_status=$?
+        if [ "$integrity_status" -ne 20 ]; then
+            exit "$integrity_status"
+        fi
+        echo "🚨 [Portal] Corrupt database removed; sessions, replay and idempotency guards were reset." >&2
         rm -f "$SESSION_DB" "${SESSION_DB}-wal" "${SESSION_DB}-shm"
     fi
 fi
 
-echo "🗄️ Ensuring session table exists..."
+echo "✅ [Portal] Migrating sessions and infrastructure tables..."
 python manage.py migrate sessions --noinput
+python manage.py migrate common --noinput
+python manage.py check --deploy --fail-level ERROR
 
 echo "🧹 Clearing expired sessions..."
 python manage.py clearsessions

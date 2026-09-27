@@ -12,7 +12,7 @@ import time
 from unittest.mock import MagicMock, patch
 
 from django.contrib.messages import get_messages
-from django.test import SimpleTestCase, override_settings
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from apps.api_client.services import PlatformAPIError
@@ -64,7 +64,7 @@ def _rate_limited_error(retry_after: int = 30) -> PlatformAPIError:
     SESSION_ENGINE="django.contrib.sessions.backends.cache",
     CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
 )
-class OrdersRateLimitViewTests(SimpleTestCase):
+class OrdersRateLimitViewTests(TestCase):
     def _login_session(self) -> None:
         session = self.client.session
         session["customer_id"] = 1
@@ -113,7 +113,7 @@ class OrdersRateLimitViewTests(SimpleTestCase):
         self.assertEqual(data["retry_after"], 45)
 
 
-class OrdersServicesRateLimitTests(SimpleTestCase):
+class OrdersServicesRateLimitTests(TestCase):
     def test_calculate_re_raises_rate_limited_error(self) -> None:
         cart = MagicMock()
         cart.has_items.return_value = True

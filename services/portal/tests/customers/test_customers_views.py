@@ -1,7 +1,7 @@
 """
 Portal Customer Views Tests — team, tax profile, addresses.
 
-Uses SimpleTestCase (no business DB) and mocks the Platform API client,
+Uses TestCase (no business DB) and mocks the Platform API client,
 following the established Portal testing pattern.
 """
 
@@ -9,7 +9,7 @@ import time
 from typing import Any
 from unittest.mock import patch
 
-from django.test import Client, SimpleTestCase, override_settings
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
 from apps.api_client.services import PlatformAPIError
@@ -30,7 +30,7 @@ SESSION_DEFAULTS = {
     SESSION_ENGINE="django.contrib.sessions.backends.cache",
     CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
 )
-class TeamViewTests(SimpleTestCase):
+class TeamViewTests(TestCase):
     """Test the team list view."""
 
     def _set_session(self, **overrides):
@@ -103,7 +103,7 @@ class TeamViewTests(SimpleTestCase):
     SESSION_ENGINE="django.contrib.sessions.backends.cache",
     CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
 )
-class AddressViewTests(SimpleTestCase):
+class AddressViewTests(TestCase):
     """Test the addresses list and add views."""
 
     def _set_session(self, **overrides):
@@ -178,7 +178,7 @@ class AddressViewTests(SimpleTestCase):
     SESSION_ENGINE="django.contrib.sessions.backends.cache",
     CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
 )
-class TeamRoleViewTests(SimpleTestCase):
+class TeamRoleViewTests(TestCase):
     """Test the team role-change endpoint (POST)."""
 
     def _set_session(self, **overrides):
@@ -217,7 +217,7 @@ class TeamRoleViewTests(SimpleTestCase):
     SESSION_ENGINE="django.contrib.sessions.backends.cache",
     CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
 )
-class TeamRemoveViewTests(SimpleTestCase):
+class TeamRemoveViewTests(TestCase):
     """Test the team member removal endpoint (POST)."""
 
     def _set_session(self, **overrides):
@@ -254,7 +254,7 @@ class TeamRemoveViewTests(SimpleTestCase):
     SESSION_ENGINE="django.contrib.sessions.backends.cache",
     CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
 )
-class AddressDeleteViewTests(SimpleTestCase):
+class AddressDeleteViewTests(TestCase):
     """Test the address deletion endpoint (POST)."""
 
     def _set_session(self, **overrides):
@@ -291,7 +291,7 @@ class AddressDeleteViewTests(SimpleTestCase):
     SESSION_ENGINE="django.contrib.sessions.backends.cache",
     CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
 )
-class AddressSetPrimaryViewTests(SimpleTestCase):
+class AddressSetPrimaryViewTests(TestCase):
     """Test setting an address as primary (POST)."""
 
     def _set_session(self, **overrides):
@@ -328,7 +328,7 @@ class AddressSetPrimaryViewTests(SimpleTestCase):
     SESSION_ENGINE="django.contrib.sessions.backends.cache",
     CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
 )
-class AddressSetBillingViewTests(SimpleTestCase):
+class AddressSetBillingViewTests(TestCase):
     """Test setting an address as billing (POST)."""
 
     def _set_session(self, **overrides):
@@ -365,7 +365,7 @@ class AddressSetBillingViewTests(SimpleTestCase):
     SESSION_ENGINE="django.contrib.sessions.backends.cache",
     CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
 )
-class NavigationTests(SimpleTestCase):
+class NavigationTests(TestCase):
     """Test that navigation links appear correctly."""
 
     def _set_session(self, **overrides):
@@ -408,7 +408,7 @@ class NavigationTests(SimpleTestCase):
     SESSION_ENGINE="django.contrib.sessions.backends.cache",
     CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
 )
-class CompanyProfileEditTests(SimpleTestCase):
+class CompanyProfileEditTests(TestCase):
     """Test that the company profile edit page works correctly."""
 
     def _set_session(self, **overrides):
@@ -471,7 +471,7 @@ class CompanyProfileEditTests(SimpleTestCase):
     SESSION_ENGINE="django.contrib.sessions.backends.cache",
     CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
 )
-class TeamRemoveConfirmTests(SimpleTestCase):
+class TeamRemoveConfirmTests(TestCase):
     """F4: Destructive remove uses a delegated data-confirm submit gate, not inline confirm or inert hx-confirm."""
 
     def _set_session(self, **overrides):
@@ -520,7 +520,7 @@ class TeamRemoveConfirmTests(SimpleTestCase):
     SESSION_ENGINE="django.contrib.sessions.backends.cache",
     CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
 )
-class AddressDeleteConfirmTests(SimpleTestCase):
+class AddressDeleteConfirmTests(TestCase):
     """F4: Destructive delete uses a delegated data-confirm submit gate, not inline confirm or inert hx-confirm."""
 
     def _set_session(self, **overrides):
@@ -568,7 +568,7 @@ class AddressDeleteConfirmTests(SimpleTestCase):
         "BACKEND": "django.core.cache.backends.locmem.LocMemCache", "LOCATION": "tax-profile-vies-views",
     }},
 )
-class TaxProfileViewTests(SimpleTestCase):
+class TaxProfileViewTests(TestCase):
 
     """F6: Admin role must be allowed to edit the tax profile."""
 
@@ -636,7 +636,7 @@ class TaxProfileViewTests(SimpleTestCase):
     SESSION_ENGINE="django.contrib.sessions.backends.cache",
     CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
 )
-class TeamRoleValidationTests(SimpleTestCase):
+class TeamRoleValidationTests(TestCase):
     """F7: Invalid roles must be rejected on both invite and role-change endpoints."""
 
     def _set_session(self, **overrides):
@@ -710,7 +710,7 @@ class TeamRoleValidationTests(SimpleTestCase):
     SESSION_ENGINE="django.contrib.sessions.backends.cache",
     CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
 )
-class AddressFormTypesTests(SimpleTestCase):
+class AddressFormTypesTests(TestCase):
     """F14: Address form must offer only valid address types matching the model."""
 
     def _set_session(self, **overrides):
@@ -745,7 +745,7 @@ class AddressFormTypesTests(SimpleTestCase):
     SESSION_ENGINE="django.contrib.sessions.backends.cache",
     CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
 )
-class ProfilePageRedesignTests(SimpleTestCase):
+class ProfilePageRedesignTests(TestCase):
     """Phase 10: Profile page UX — nav dropdown, buttons, notifications, simplified company card."""
 
     def _set_session(self, **overrides):

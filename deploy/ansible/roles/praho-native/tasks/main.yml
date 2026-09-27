@@ -339,23 +339,60 @@
   become_user: "{{ project_user }}"
   environment: "{{ django_env }}"
 
-- name: Collect Portal static files
-  command: >
-    {{ project_root }}/.venv-linux/bin/python manage.py collectstatic --noinput
+- name: Set Portal Django environment
+  set_fact:
+    portal_django_env:
+      PYTHONPATH: "{{ project_root }}/src/services/portal"
+      DJANGO_SETTINGS_MODULE: "{{ django_settings_module }}"
+      DJANGO_SECRET_KEY: "{{ deployed_env.DJANGO_SECRET_KEY }}"
+      ALLOWED_HOSTS: "{{ deployed_env.PORTAL_DOMAIN }},localhost,127.0.0.1"
+      PORTAL_DOMAIN: "{{ deployed_env.PORTAL_DOMAIN }}"
+      PLATFORM_API_BASE_URL: "http://localhost:{{ platform_port }}/api"
+      PLATFORM_API_ALLOW_INSECURE_HTTP: "true"
+      DJANGO_SECURE_SSL_REDIRECT: "false"
+      PLATFORM_API_SECRET: "{{ deployed_env.PLATFORM_API_SECRET | default(deployed_env.HMAC_SECRET | default('')) }}"
+      STATIC_ROOT: "{{ project_root }}/portal-static"
+      SESSION_DB_PATH: "{{ deployed_env.SESSION_DB_PATH | default(project_root + '/src/services/portal/portal.sqlite3') }}"
+      PORTAL_TRUSTED_PROXY_CIDRS: "{{ deployed_env.PORTAL_TRUSTED_PROXY_CIDRS | default('127.0.0.1/32,::1/128') }}"
+
+- name: Create Portal database directory
+  file:
+    path: "{{ portal_django_env.SESSION_DB_PATH | dirname }}"
+    state: directory
+    owner: "{{ project_user }}"
+    group: "{{ project_group }}"
+    mode: "0700"
+
+- name: Run Portal migrations
+  command:
+    argv:
+      - "{{ project_root }}/.venv-linux/bin/python"
+      - manage.py
+      - migrate
+      - "{{ item }}"
+      - --noinput
+  loop:
+    - sessions
+    - common
   args:
     chdir: "{{ project_root }}/src/services/portal"
   become_user: "{{ project_user }}"
-  environment:
-    PYTHONPATH: "{{ project_root }}/src/services/portal"
-    DJANGO_SETTINGS_MODULE: "{{ django_settings_module }}"
-    DJANGO_SECRET_KEY: "{{ deployed_env.DJANGO_SECRET_KEY }}"
-    ALLOWED_HOSTS: "{{ deployed_env.PORTAL_DOMAIN }},localhost,127.0.0.1"
-    PORTAL_DOMAIN: "{{ deployed_env.PORTAL_DOMAIN }}"
-    PLATFORM_API_BASE_URL: "http://localhost:{{ platform_port }}/api"
-    PLATFORM_API_ALLOW_INSECURE_HTTP: "true"
-    DJANGO_SECURE_SSL_REDIRECT: "false"
-    PLATFORM_API_SECRET: "{{ deployed_env.PLATFORM_API_SECRET | default(deployed_env.HMAC_SECRET | default('')) }}"
-    STATIC_ROOT: "{{ project_root }}/portal-static"
+  environment: "{{ portal_django_env }}"
+
+- name: Check Portal deployment
+  command: "{{ project_root }}/.venv-linux/bin/python manage.py check --deploy --fail-level ERROR"
+  args:
+    chdir: "{{ project_root }}/src/services/portal"
+  become_user: "{{ project_user }}"
+  environment: "{{ portal_django_env }}"
+  changed_when: false
+
+- name: Collect Portal static files
+  command: "{{ project_root }}/.venv-linux/bin/python manage.py collectstatic --noinput"
+  args:
+    chdir: "{{ project_root }}/src/services/portal"
+  become_user: "{{ project_user }}"
+  environment: "{{ portal_django_env }}"
 
 - name: Set up initial data (categories, settings, tasks, templates, superuser)
   command: >
@@ -529,14 +566,13 @@
 
 - name: Wait for portal to respond
   uri:
-    url: "http://localhost:{{ portal_port }}/"
+    url: "http://localhost:{{ portal_port }}/billing/"
     status_code:
       - 200
-      - 301
       - 302
     follow_redirects: none
   register: portal_health
-  until: portal_health.status in [200, 301, 302]
+  until: portal_health.status in [200, 302]
   retries: 15
   delay: 5
 

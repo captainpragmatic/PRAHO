@@ -20,6 +20,7 @@ from django.utils import timezone as django_timezone
 from django.utils.http import urlencode
 
 from apps.api_client.services import PlatformAPIError, api_client
+from apps.common import counters
 from apps.common.localisation_services import store_localisation_preferences
 
 logger = logging.getLogger(__name__)
@@ -273,7 +274,7 @@ class PortalAuthenticationMiddleware:
                 return None
         return lock_key, token
 
-    def _perform_validation(  # noqa: C901, PLR0912 -- session refresh and explicit error policies
+    def _perform_validation(  # noqa: C901, PLR0911, PLR0912 -- session refresh and explicit error policies
         self, request: HttpRequest, user_id: str, now: datetime
     ) -> bool:
         """
@@ -319,7 +320,7 @@ class PortalAuthenticationMiddleware:
 
                 logger.debug(f"✅ [Auth] User {user_id} validated successfully")
                 # Reset fail-open circuit breaker on successful validation (#130/M1)
-                cache.delete(f"auth:fail_open:{user_id}")
+                counters.reset(f"auth:fail_open:{user_id}")
                 return True
             else:
                 logger.warning(f"❌ [Auth] User {user_id} validation failed - account disabled/deleted")
@@ -345,10 +346,10 @@ class PortalAuthenticationMiddleware:
             # but force logout after too many consecutive fail-opens for same user.
             fail_open_key = f"auth:fail_open:{user_id}"
             try:
-                fail_count = cache.incr(fail_open_key)
-            except ValueError:
-                cache.set(fail_open_key, 1, timeout=3600)  # 1h window
-                fail_count = 1
+                fail_count = counters.increment(fail_open_key, 3600)
+            except Exception:
+                logger.exception("🔥 [Auth] Counter store unavailable; denying access for user %s", user_id)
+                return False
 
             if fail_count >= _MAX_FAIL_OPEN_COUNT:
                 logger.warning(

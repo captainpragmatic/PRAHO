@@ -5,12 +5,13 @@ from unittest.mock import patch
 
 from django.contrib.messages import get_messages
 from django.core.cache import cache
-from django.test import SimpleTestCase, override_settings
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from requests import Response
 from requests.exceptions import ConnectionError as RequestsConnectionError
 
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
+from apps.common import counters
 
 
 @override_settings(
@@ -24,7 +25,7 @@ from apps.api_client.services import PlatformAPIClient, PlatformAPIError
         }
     },
 )
-class AuthenticationRateLimitTests(SimpleTestCase):
+class AuthenticationRateLimitTests(TestCase):
     def setUp(self) -> None:
         cache.clear()
         self.addCleanup(cache.clear)
@@ -47,8 +48,8 @@ class AuthenticationRateLimitTests(SimpleTestCase):
                 response = self.client.post(reverse("users:login"), self.credentials)
                 self.assertEqual(response.status_code, 200)
 
-            self.assertEqual(cache.get(self.ip_key), 5)
-            self.assertEqual(cache.get(self.account_key), 5)
+            self.assertEqual(counters.peek(self.ip_key), 5)
+            self.assertEqual(counters.peek(self.account_key), 5)
             response = self.client.post(reverse("users:login"), self.credentials, follow=False)
             self.assertRedirects(response, reverse("users:login"), fetch_redirect_response=False)
             self.assertIn(
@@ -60,18 +61,18 @@ class AuthenticationRateLimitTests(SimpleTestCase):
             self.assertIn("Too many authentication attempts", response.json()["error"])
             self.assertEqual(response.json()["retry_after"], 900)
             self.assertEqual(response.json()["attempts_remaining"], 0)
-            self.assertEqual(cache.get(self.ip_key), 5)
-            self.assertEqual(cache.get(self.account_key), 5)
+            self.assertEqual(counters.peek(self.ip_key), 5)
+            self.assertEqual(counters.peek(self.account_key), 5)
 
     def test_successful_login_clears_counters(self) -> None:
-        cache.set(self.ip_key, 3, 900)
-        cache.set(self.account_key, 3, 1800)
+        counters.increment(self.ip_key, 900, delta=3)
+        counters.increment(self.account_key, 1800, delta=3)
         with patch("apps.users.views.api_client") as platform:
             platform.authenticate_customer.return_value = None
             response = self.client.post(reverse("users:login"), self.credentials)
             self.assertEqual(response.status_code, 200)
-            self.assertEqual(cache.get(self.ip_key), 4)
-            self.assertEqual(cache.get(self.account_key), 4)
+            self.assertEqual(counters.peek(self.ip_key), 4)
+            self.assertEqual(counters.peek(self.account_key), 4)
 
             platform.authenticate_customer.return_value = {
                 "valid": True,
@@ -86,23 +87,23 @@ class AuthenticationRateLimitTests(SimpleTestCase):
 
         self.assertRedirects(response, "/dashboard/", fetch_redirect_response=False)
         self.assertEqual(self.client.session["user_id"], 1)
-        self.assertIsNone(cache.get(self.ip_key))
-        self.assertIsNone(cache.get(self.account_key))
+        self.assertEqual(counters.peek(self.ip_key), 0)
+        self.assertEqual(counters.peek(self.account_key), 0)
 
     def test_failed_login_does_not_clear_existing_counter(self) -> None:
-        cache.set(self.ip_key, 2, 900)
+        counters.increment(self.ip_key, 900, delta=2)
         with patch("apps.users.views.api_client") as platform:
             platform.authenticate_customer.return_value = None
             response = self.client.post(reverse("users:login"), self.credentials)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(cache.get(self.ip_key), 3)
+        self.assertEqual(counters.peek(self.ip_key), 3)
 
     def test_reset_requests_use_their_own_volume_bucket(self) -> None:
         for _ in range(10):
             response = self.client.post(reverse("users:password_reset"), {"email": "x@example.com"})
             self.assertRedirects(response, reverse("users:login"), fetch_redirect_response=False)
-        self.assertEqual(cache.get(self.volume_key), 10)
+        self.assertEqual(counters.peek(self.volume_key), 10)
 
         response = self.client.post(reverse("users:password_reset"), {"email": "x@example.com"})
         self.assertRedirects(response, reverse("users:login"), fetch_redirect_response=False)
@@ -110,9 +111,9 @@ class AuthenticationRateLimitTests(SimpleTestCase):
             "Too many authentication attempts",
             " ".join(str(message) for message in get_messages(response.wsgi_request)),
         )
-        self.assertIsNone(cache.get(self.ip_key))
-        self.assertIsNone(cache.get("auth_account_attempts_x@example.com"))
-        self.assertEqual(cache.get(self.volume_key), 11)
+        self.assertEqual(counters.peek(self.ip_key), 0)
+        self.assertEqual(counters.peek("auth_account_attempts_x@example.com"), 0)
+        self.assertEqual(counters.peek(self.volume_key), 11)
 
     def test_login_body_carries_client_ip(self) -> None:
         with patch("apps.users.views.api_client") as platform:
@@ -131,8 +132,8 @@ class AuthenticationRateLimitTests(SimpleTestCase):
             platform.authenticate_customer.return_value = {"valid": False}
             response = self.client.post(reverse("users:login"), self.credentials)
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(cache.get(self.ip_key), 1)
-        self.assertEqual(cache.get(self.account_key), 1)
+        self.assertEqual(counters.peek(self.ip_key), 1)
+        self.assertEqual(counters.peek(self.account_key), 1)
 
     def test_upstream_throttle_counts_as_failure(self) -> None:
         with patch("apps.users.views.api_client") as platform:
@@ -141,12 +142,12 @@ class AuthenticationRateLimitTests(SimpleTestCase):
             )
             response = self.client.post(reverse("users:login"), self.credentials)
         self.assertContains(response, "Too many login attempts")
-        self.assertEqual(cache.get(self.ip_key), 1)
-        self.assertEqual(cache.get(self.account_key), 1)
+        self.assertEqual(counters.peek(self.ip_key), 1)
+        self.assertEqual(counters.peek(self.account_key), 1)
 
     def test_service_error_preserves_counters(self) -> None:
-        cache.set(self.ip_key, 2, 900)
-        cache.set(self.account_key, 2, 1800)
+        counters.increment(self.ip_key, 900, delta=2)
+        counters.increment(self.account_key, 1800, delta=2)
         upstream = Response()
         upstream.status_code = 503
         upstream._content = b'{"error": "Service unavailable"}'
@@ -155,20 +156,20 @@ class AuthenticationRateLimitTests(SimpleTestCase):
         with patch("apps.api_client.services.portal_request", return_value=upstream):
             response = self.client.post(reverse("users:login"), self.credentials)
         self.assertContains(response, "Authentication service is temporarily unavailable")
-        self.assertEqual(cache.get(self.ip_key), 2)
-        self.assertEqual(cache.get(self.account_key), 2)
+        self.assertEqual(counters.peek(self.ip_key), 2)
+        self.assertEqual(counters.peek(self.account_key), 2)
 
     def test_connection_error_preserves_counters(self) -> None:
-        cache.set(self.ip_key, 2, 900)
-        cache.set(self.account_key, 2, 1800)
+        counters.increment(self.ip_key, 900, delta=2)
+        counters.increment(self.account_key, 1800, delta=2)
         with patch(
             "apps.api_client.services.portal_request",
             side_effect=RequestsConnectionError("Connection refused"),
         ):
             response = self.client.post(reverse("users:login"), self.credentials)
         self.assertContains(response, "Authentication service is temporarily unavailable")
-        self.assertEqual(cache.get(self.ip_key), 2)
-        self.assertEqual(cache.get(self.account_key), 2)
+        self.assertEqual(counters.peek(self.ip_key), 2)
+        self.assertEqual(counters.peek(self.account_key), 2)
 
     @override_settings(
         MIDDLEWARE=[
@@ -187,15 +188,15 @@ class AuthenticationRateLimitTests(SimpleTestCase):
             for _ in range(5):
                 response = self.client.post(reverse("users:mfa_setup_totp"), {"token": "123456"})
                 self.assertRedirects(response, reverse("users:mfa_setup_totp"), fetch_redirect_response=False)
-            self.assertEqual(cache.get(key), 5)
-            self.assertIsNone(cache.get(self.ip_key))
-            self.assertIsNone(cache.get(self.account_key))
+            self.assertEqual(counters.peek(key), 5)
+            self.assertEqual(counters.peek(self.ip_key), 0)
+            self.assertEqual(counters.peek(self.account_key), 0)
             response = self.client.post(
                 reverse("users:mfa_setup_totp"), {"token": "123456"}, HTTP_HX_REQUEST="true"
             )
             self.assertEqual(response.status_code, 429)
-            self.assertEqual(cache.get(key), 5)
-            self.assertIsNone(cache.get(self.ip_key))
+            self.assertEqual(counters.peek(key), 5)
+            self.assertEqual(counters.peek(self.ip_key), 0)
 
             response = self.client.get(reverse("users:mfa_disable"))
             self.assertEqual(response.status_code, 200)
@@ -220,9 +221,9 @@ class AuthenticationRateLimitTests(SimpleTestCase):
                     reverse(name), {"password": "test-password", "token": "123456"}
                 )
                 self.assertEqual(response.status_code, 200)
-            self.assertEqual(cache.get("auth_reauth_user_42"), 2)
-            self.assertIsNone(cache.get(self.ip_key))
-            self.assertIsNone(cache.get(self.account_key))
+            self.assertEqual(counters.peek("auth_reauth_user_42"), 2)
+            self.assertEqual(counters.peek(self.ip_key), 0)
+            self.assertEqual(counters.peek(self.account_key), 0)
 
     @override_settings(
         MIDDLEWARE=[
@@ -241,7 +242,8 @@ class AuthenticationRateLimitTests(SimpleTestCase):
             self.volume_key: 2,
             "auth_reauth_user_42": 2,
         }
-        cache.set_many(expected, timeout=900)
+        for key, count in expected.items():
+            counters.increment(key, 900, delta=count)
         with patch("apps.users.views.api_client") as platform:
             for result in ({"success": False}, {"success": True, "data": {"has_access": False}}):
                 with self.subTest(result=result):
@@ -251,26 +253,26 @@ class AuthenticationRateLimitTests(SimpleTestCase):
                     )
                     self.assertRedirects(response, "/profile/", fetch_redirect_response=False)
                     self.assertEqual(self.client.session["customer_id"], 7)
-                    self.assertEqual(cache.get_many(expected), expected)
+                    self.assertEqual({key: counters.peek(key) for key in expected}, expected)
 
     def test_volume_paths_ignore_login_limits_and_count_invalid_forms(self) -> None:
-        cache.set(self.ip_key, 5, 900)
-        cache.set(self.account_key, 5, 1800)
+        counters.increment(self.ip_key, 900, delta=5)
+        counters.increment(self.account_key, 1800, delta=5)
         for name in ("users:password_reset", "users:register"):
             response = self.client.post(reverse(name), {"email": self.email})
             self.assertEqual(response.status_code, 302 if name == "users:password_reset" else 200)
-        self.assertEqual(cache.get(self.volume_key), 2)
-        self.assertEqual(cache.get(self.ip_key), 5)
-        self.assertEqual(cache.get(self.account_key), 5)
+        self.assertEqual(counters.peek(self.volume_key), 2)
+        self.assertEqual(counters.peek(self.ip_key), 5)
+        self.assertEqual(counters.peek(self.account_key), 5)
 
     def test_volume_limit_does_not_block_login(self) -> None:
-        cache.set(self.volume_key, 10, 900)
+        counters.increment(self.volume_key, 900, delta=10)
         with patch("apps.users.views.api_client") as platform:
             platform.authenticate_customer.return_value = None
             response = self.client.post(reverse("users:login"), self.credentials)
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(cache.get(self.ip_key), 1)
-        self.assertEqual(cache.get(self.volume_key), 10)
+        self.assertEqual(counters.peek(self.ip_key), 1)
+        self.assertEqual(counters.peek(self.volume_key), 10)
 
     def test_client_ip_is_normalized_in_signed_request_body(self) -> None:
         response = Response()

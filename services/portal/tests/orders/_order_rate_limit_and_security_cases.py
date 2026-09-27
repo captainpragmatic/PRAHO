@@ -1,7 +1,7 @@
 """
 Chaos Monkey Round 2 — regression tests for C/H/M findings.
 
-All portal tests use SimpleTestCase (no database access).
+Tests use Portal infrastructure tables and a local session cache.
 Covers: C1, C3, C4, H1, H3, H4, H5, M1, M4, M8
 
 Duplicate confirm_payment returns HTTP 200 with success=True. From the
@@ -21,7 +21,9 @@ from django.contrib.sessions.backends.cache import SessionStore
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.http import HttpRequest, HttpResponse
-from django.test import Client, SimpleTestCase, override_settings
+from django.test import Client, TestCase, override_settings
+
+from apps.common import counters
 
 _CACHE_SETTINGS = {
     "SESSION_ENGINE": "django.contrib.sessions.backends.cache",
@@ -76,7 +78,7 @@ def _populate_session_with_cart(client: Client) -> str:
 
 
 @override_settings(**_CACHE_SETTINGS, RATE_LIMITING_ENABLED=True)
-class TestCartSessionRateLimit(SimpleTestCase):
+class TestCartSessionRateLimit(TestCase):
     """C1: Cart mutation endpoints enforce a per-session rate limit of 30/min."""
 
     def setUp(self) -> None:
@@ -130,14 +132,15 @@ class TestCartSessionRateLimit(SimpleTestCase):
         # Rate limiter keys on user_id, not session_key
         limit = APIRateLimitMiddleware.CART_SESSION_RATE_LIMIT
         cart_cache_key = f"cart_session_{session['user_id']}"
-        cache.set(cart_cache_key, limit, timeout=60)
+        counters.increment(cart_cache_key, 60, delta=limit)
 
         request = HttpRequest()
         request.META["wsgi.input"] = None
         # Attach session with a known key
         request.session = session  # type: ignore[assignment]  # Django test: inject SessionStore
 
-        response = mw._check_cart_session_rate_limit(request)
+        request.path = "/order/cart/add/"
+        response = mw(request)
         assert response is not None, "Expected 429 response, got None"
         self.assertEqual(response.status_code, 429)
 
@@ -157,13 +160,14 @@ class TestCartSessionRateLimit(SimpleTestCase):
         # Set counter well below limit — keyed on user_id
         limit = APIRateLimitMiddleware.CART_SESSION_RATE_LIMIT
         cart_cache_key = f"cart_session_{session['user_id']}"
-        cache.set(cart_cache_key, limit - 5, timeout=60)
+        counters.increment(cart_cache_key, 60, delta=limit - 5)
 
         request = HttpRequest()
         request.session = session  # type: ignore[assignment]  # Django test: inject SessionStore
 
-        response = mw._check_cart_session_rate_limit(request)
-        self.assertIsNone(response)
+        request.path = "/order/cart/add/"
+        response = mw(request)
+        self.assertEqual(response.status_code, 200)
 
     def test_no_session_key_returns_none(self) -> None:
         """When request has no session, _check_cart_session_rate_limit returns None (falls through to IP)."""
@@ -192,15 +196,17 @@ class TestCartSessionRateLimit(SimpleTestCase):
         limit = APIRateLimitMiddleware.CART_SESSION_RATE_LIMIT
 
         # Saturate user A — keyed on user_id, not session_key
-        cache.set(f"cart_session_{session_a['user_id']}", limit, timeout=60)
+        counters.increment(f"cart_session_{session_a['user_id']}", 60, delta=limit)
 
         request_a = HttpRequest()
         request_a.session = session_a  # type: ignore[assignment]  # Django test: inject SessionStore
         request_b = HttpRequest()
         request_b.session = session_b  # type: ignore[assignment]  # Django test: inject SessionStore
 
-        self.assertIsNotNone(mw._check_cart_session_rate_limit(request_a), "User A should be blocked")
-        self.assertIsNone(mw._check_cart_session_rate_limit(request_b), "User B should be allowed")
+        request_a.path = "/order/cart/add/"
+        request_b.path = "/order/cart/add/"
+        self.assertEqual(mw(request_a).status_code, 429, "User A should be blocked")
+        self.assertEqual(mw(request_b).status_code, 200, "User B should be allowed")
 
     def test_cart_session_rate_limit_constant_is_30(self) -> None:
         """CART_SESSION_RATE_LIMIT must equal 30 per the chaos monkey spec."""
@@ -215,7 +221,7 @@ class TestCartSessionRateLimit(SimpleTestCase):
 
 
 @override_settings(**_CACHE_SETTINGS)
-class TestConfirmPaymentIdempotencyRound2(SimpleTestCase):
+class TestConfirmPaymentIdempotencyRound2(TestCase):
     """C3/M1: confirm_payment must return 200/success:True for duplicates and clear idem_key on failure."""
 
     def setUp(self) -> None:
@@ -238,7 +244,7 @@ class TestConfirmPaymentIdempotencyRound2(SimpleTestCase):
         self._set_session(active_customer_id=42, customer_id=42, user_id=7)
 
         # Pre-populate idempotency key so the second call sees it
-        cache.set("confirm_payment:42:pi_dup001test1234567890", "processing", timeout=300)
+        self.assertTrue(counters.claim("confirm_payment:42:pi_dup001test1234567890", 300, "owner"))
 
         response = self.client.post(
             "/order/confirm-payment/",
@@ -254,7 +260,7 @@ class TestConfirmPaymentIdempotencyRound2(SimpleTestCase):
     def test_duplicate_returns_success_true(self) -> None:
         """Duplicate confirm_payment must set success=True (customer's payment IS processing)."""
         self._set_session(active_customer_id=42, customer_id=42, user_id=7)
-        cache.set("confirm_payment:42:pi_dup002test1234567890", "processing", timeout=300)
+        self.assertTrue(counters.claim("confirm_payment:42:pi_dup002test1234567890", 300, "owner"))
 
         response = self.client.post(
             "/order/confirm-payment/",
@@ -290,7 +296,7 @@ class TestConfirmPaymentIdempotencyRound2(SimpleTestCase):
         self.assertEqual(response.status_code, 400)
         # idem_key must be cleared so customer can retry
         idem_key = "confirm_payment:42:pi_fail01test1234567890"
-        self.assertIsNone(cache.get(idem_key), "idem_key should be cleared after payment API failure")
+        self.assertTrue(counters.claim(idem_key, 300, "retry"), "Failed payment must allow a retry")
 
     @patch("apps.orders.views.PlatformAPIClient")
     def test_idem_key_kept_when_payment_succeeded_but_order_update_failed(self, mock_api_class: MagicMock) -> None:
@@ -319,7 +325,7 @@ class TestConfirmPaymentIdempotencyRound2(SimpleTestCase):
 
         # idem_key must still be set to prevent double-charge
         idem_key = "confirm_payment:42:pi_partial01test1234567890"
-        self.assertIsNotNone(cache.get(idem_key), "idem_key must be kept to prevent double-charge")
+        self.assertFalse(counters.claim(idem_key, 300, "retry"), "Successful payment must retain its claim")
 
 
 # ---------------------------------------------------------------------------
@@ -328,7 +334,7 @@ class TestConfirmPaymentIdempotencyRound2(SimpleTestCase):
 
 
 @override_settings(**_CACHE_SETTINGS)
-class TestIdempotencyFallbackKeyNoTimestamp(SimpleTestCase):
+class TestIdempotencyFallbackKeyNoTimestamp(TestCase):
     """C4: The auto-generated idempotency key must be deterministic — no time component."""
 
     def setUp(self) -> None:
@@ -390,7 +396,7 @@ class TestIdempotencyFallbackKeyNoTimestamp(SimpleTestCase):
 # ---------------------------------------------------------------------------
 
 
-class TestBankersRoundingImport(SimpleTestCase):
+class TestBankersRoundingImport(TestCase):
     """H1: views.py must import and use ROUND_HALF_EVEN, not ROUND_HALF_UP."""
 
     def test_round_half_even_is_imported(self) -> None:
@@ -436,7 +442,7 @@ class TestBankersRoundingImport(SimpleTestCase):
 
 
 @override_settings(**_CACHE_SETTINGS)
-class TestGatewayValidation(SimpleTestCase):
+class TestGatewayValidation(TestCase):
     """H3: confirm_payment must reject unknown gateways with HTTP 400."""
 
     def setUp(self) -> None:
@@ -545,7 +551,7 @@ class TestGatewayValidation(SimpleTestCase):
 # ---------------------------------------------------------------------------
 
 
-class TestDangerousURISchemeValidation(SimpleTestCase):
+class TestDangerousURISchemeValidation(TestCase):
     """H4: validate_domain_name and validate_notes must reject dangerous URI schemes."""
 
     def setUp(self) -> None:
@@ -622,7 +628,7 @@ class TestDangerousURISchemeValidation(SimpleTestCase):
 
 
 @override_settings(**_CACHE_SETTINGS)
-class TestTotalCentsZeroRejection(SimpleTestCase):
+class TestTotalCentsZeroRejection(TestCase):
     """H5: When total_cents is 0 or negative, order creation must redirect to checkout with an error."""
 
     def setUp(self) -> None:
@@ -732,7 +738,7 @@ class TestTotalCentsZeroRejection(SimpleTestCase):
 
 
 @override_settings(**_CACHE_SETTINGS)
-class TestPaymentMethodValidation(SimpleTestCase):
+class TestPaymentMethodValidation(TestCase):
     """M4: Checkout must reject missing or invalid payment_method values."""
 
     def setUp(self) -> None:
@@ -864,7 +870,7 @@ class TestPaymentMethodValidation(SimpleTestCase):
 
 
 @override_settings(**_CACHE_SETTINGS)
-class TestCartVersionHashExcludesUpdatedAt(SimpleTestCase):
+class TestCartVersionHashExcludesUpdatedAt(TestCase):
     """M8: _generate_cart_version must be stable across updated_at changes."""
 
     def setUp(self) -> None:
@@ -938,7 +944,7 @@ class TestCartVersionHashExcludesUpdatedAt(SimpleTestCase):
 
 
 @override_settings(**_CACHE_SETTINGS)
-class TestOrderConfirmationUUIDValidation(SimpleTestCase):
+class TestOrderConfirmationUUIDValidation(TestCase):
     """H6: order_confirmation must reject non-UUID order_id to prevent path traversal."""
 
     def setUp(self) -> None:
@@ -1072,8 +1078,8 @@ class TestOrderConfirmationUUIDValidation(SimpleTestCase):
 
 
 @override_settings(**_CACHE_SETTINGS)
-class TestOrderCreationAtomicIdempotency(SimpleTestCase):
-    """C1 (new): _create_and_process_order must use cache.add() for atomic TOCTOU-safe idempotency."""
+class TestOrderCreationAtomicIdempotency(TestCase):
+    """Checkout reserves a shared claim before creating an order."""
 
     def setUp(self) -> None:
         cache.clear()
@@ -1087,25 +1093,24 @@ class TestOrderCreationAtomicIdempotency(SimpleTestCase):
         session.save()
 
     def test_cache_add_false_with_valid_order_id_redirects_to_confirmation(self) -> None:
-        """When cache.add() returns False and cached value is a valid UUID, redirect to confirmation."""
+        """A completed claim replays the existing order confirmation."""
         cart_version = _populate_session_with_cart(self.client)
 
         existing_order_id = "550e8400-e29b-41d4-a716-446655440099"
 
-        # Simulate: key already acquired with a real order_id
+        key = "orders:idempotency:42:completed-checkout"
+        self.assertTrue(counters.claim(key, 300, "owner"))
+        self.assertTrue(counters.complete(key, "owner", existing_order_id))
         with (
-            patch("apps.orders.views.cache") as mock_cache,
             patch("apps.orders.views.OrderSecurityHardening.fail_closed_on_cache_failure", return_value=None),
             patch("apps.orders.views.OrderSecurityHardening.validate_request_size", return_value=None),
             patch("apps.orders.views.OrderSecurityHardening.check_suspicious_patterns", return_value=None),
         ):
-            mock_cache.add.return_value = False
-            mock_cache.get.return_value = existing_order_id
-
             response = self.client.post(
                 "/order/create/",
                 {
                     "agree_terms": "on",
+                    "idempotency_key": "completed-checkout",
                     "cart_version": cart_version,
                     "payment_method": "card",
                 },
@@ -1117,30 +1122,29 @@ class TestOrderCreationAtomicIdempotency(SimpleTestCase):
         self.assertIn(existing_order_id, response["Location"])
 
     def test_cache_add_false_with_in_progress_marker_redirects_to_checkout(self) -> None:
-        """When cache.add() returns False and cached value is in-progress marker, redirect to checkout."""
+        """An owned claim returns a conflict while the order is in progress."""
         cart_version = _populate_session_with_cart(self.client)
 
+        self.assertTrue(counters.claim("orders:idempotency:42:pending-checkout", 300, "owner"))
         with (
-            patch("apps.orders.views.cache") as mock_cache,
             patch("apps.orders.views.OrderSecurityHardening.fail_closed_on_cache_failure", return_value=None),
             patch("apps.orders.views.OrderSecurityHardening.validate_request_size", return_value=None),
             patch("apps.orders.views.OrderSecurityHardening.check_suspicious_patterns", return_value=None),
         ):
-            mock_cache.add.return_value = False
-            mock_cache.get.return_value = "__in_progress__"
-
             response = self.client.post(
                 "/order/create/",
                 {
                     "agree_terms": "on",
+                    "idempotency_key": "pending-checkout",
                     "cart_version": cart_version,
                     "payment_method": "card",
                 },
                 HTTP_X_FORWARDED_FOR="127.0.0.1",
             )
 
-        self.assertEqual(response.status_code, 302)
-        self.assertIn("/order/checkout/", response["Location"])
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("being processed", response.json()["error"])
+        self.assertFalse(counters.release("orders:idempotency:42:pending-checkout", "loser"))
 
     def test_cache_key_deleted_on_order_creation_failure(self) -> None:
         """On order creation failure (API error), the cache key must be deleted so customer can retry."""
@@ -1219,22 +1223,28 @@ class TestOrderCreationAtomicIdempotency(SimpleTestCase):
         self.assertIn("/order/confirmation/", response2["Location"])
 
     def test_uses_cache_add_not_cache_get_at_start(self) -> None:
-        """Regression guard: _create_and_process_order must start with cache.add(), not cache.get()."""
+        """Regression guard: _create_and_process_order must start with claim(), not lookup()."""
         import inspect  # noqa: PLC0415
 
         from apps.orders import views  # noqa: PLC0415
 
         source = inspect.getsource(views._create_and_process_order)
 
-        # Find the idempotency section — the FIRST cache operation must be cache.add
+        # Find the idempotency section — the FIRST cache operation must be claim
         # Locate line positions
         lines = source.splitlines()
         first_cache_op_line = next(
-            (line.strip() for line in lines if "cache.get(idem_cache_key)" in line or "cache.add(idem_cache_key" in line),
+            (
+                line.strip()
+                for line in lines
+                if "counters.lookup(idem_cache_key)" in line or "counters.claim(idem_cache_key" in line
+            ),
             None,
         )
         self.assertIsNotNone(first_cache_op_line, "No cache operation found for idem_cache_key")
-        self.assertIn("cache.add(", first_cache_op_line, "First idempotency cache op must be cache.add(), not cache.get()")
+        self.assertIn(
+            "counters.claim(", first_cache_op_line, "First idempotency store operation must be claim(), not lookup()"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1243,7 +1253,7 @@ class TestOrderCreationAtomicIdempotency(SimpleTestCase):
 
 
 @override_settings(**_CACHE_SETTINGS)
-class TestAddToCartToastProductName(SimpleTestCase):
+class TestAddToCartToastProductName(TestCase):
     """M3: add_to_cart must show the name of the product being added, not cart_items[-1]."""
 
     def setUp(self) -> None:
@@ -1324,7 +1334,7 @@ class TestAddToCartToastProductName(SimpleTestCase):
 
 
 @override_settings(**_CACHE_SETTINGS)
-class TestOrderValidationFormatStringSafety(SimpleTestCase):
+class TestOrderValidationFormatStringSafety(TestCase):
     """M4: Order validation error message must not crash on user-supplied curly braces."""
 
     def setUp(self) -> None:

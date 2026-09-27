@@ -6,7 +6,7 @@ No database access — enforced by Portal's pytest plugin.
 import json
 from unittest.mock import MagicMock, patch
 
-from django.test import Client, SimpleTestCase, override_settings
+from django.test import Client, SimpleTestCase, TestCase, override_settings
 
 from apps.api_client.services import PlatformAPIError
 
@@ -130,7 +130,7 @@ class CookiePolicyPageTests(SimpleTestCase):
     SESSION_ENGINE='django.contrib.sessions.backends.cache',
     CACHES={'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}},
 )
-class ConsentHistoryRealAPITests(SimpleTestCase):
+class ConsentHistoryRealAPITests(TestCase):
     """Tests that consent_history_view calls real Platform API."""
 
     @patch('apps.users.views.api_client')
@@ -159,7 +159,7 @@ class ConsentHistoryRealAPITests(SimpleTestCase):
     SESSION_ENGINE='django.contrib.sessions.backends.cache',
     CACHES={'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}},
 )
-class DataExportRealAPITests(SimpleTestCase):
+class DataExportRealAPITests(TestCase):
     """Tests that data_export_view calls real Platform API."""
 
     @patch('apps.users.views.api_client')

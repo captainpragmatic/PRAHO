@@ -11,10 +11,11 @@ from django.contrib.sessions.backends.cache import SessionStore
 from django.contrib.sessions.middleware import SessionMiddleware
 from django.core.cache import cache
 from django.http import HttpRequest, HttpResponse
-from django.test import RequestFactory, SimpleTestCase, override_settings
+from django.test import RequestFactory, TransactionTestCase, override_settings
 from django.utils import timezone
 
 from apps.api_client.services import PlatformAPIClient
+from apps.common import counters
 from apps.users.middleware import PortalAuthenticationMiddleware
 
 
@@ -30,7 +31,7 @@ from apps.users.middleware import PortalAuthenticationMiddleware
         }
     },
 )
-class SessionRevocationTests(SimpleTestCase):
+class SessionRevocationTests(TransactionTestCase):
     def setUp(self) -> None:
         super().setUp()
         production_settings = override_settings(DEBUG=False, PLATFORM_API_ALLOW_INSECURE_HTTP=True)
@@ -87,13 +88,14 @@ class SessionRevocationTests(SimpleTestCase):
                 with patch("apps.api_client.services.portal_request", return_value=denial):
                     response = PortalAuthenticationMiddleware(get_response=downstream)(request)
                 self.assert_rejected(request, response, downstream)
-                self.assertIsNone(cache.get("auth:fail_open:42"))
+                self.assertEqual(counters.peek("auth:fail_open:42"), 0)
 
     @override_settings(PLATFORM_API_ALLOW_INSECURE_HTTP=True)
     def test_authentication_faults_use_the_bounded_fail_open_breaker(self) -> None:
         for status_code, message in ((401, "HMAC authentication failed"), (403, "Access denied")):
             with self.subTest(status_code=status_code):
                 cache.clear()
+                counters.reset("auth:fail_open:42")
                 request = self.authenticated_request()
                 session_key = request.session.session_key
                 validated_at = request.session["validated_at"]
@@ -105,14 +107,14 @@ class SessionRevocationTests(SimpleTestCase):
                 self.assertEqual(request.session["user_id"], 42)
                 self.assertEqual(request.session["session_auth_hash"], "stored")
                 self.assertEqual(request.session["validated_at"], validated_at)
-                self.assertEqual(cache.get("auth:fail_open:42"), 1)
+                self.assertEqual(counters.peek("auth:fail_open:42"), 1)
 
-                cache.set("auth:fail_open:42", 4)
+                counters.increment("auth:fail_open:42", 3600, delta=3)
                 with patch("apps.api_client.services.portal_request", return_value=fault):
                     response = PortalAuthenticationMiddleware(lambda request: HttpResponse("allowed"))(request)
                 self.assertEqual(response.status_code, 302)
                 self.assertNotIn("user_id", request.session)
-                self.assertEqual(cache.get("auth:fail_open:42"), 5)
+                self.assertEqual(counters.peek("auth:fail_open:42"), 5)
 
     def test_empty_hash_forces_validation_before_future_deadline(self) -> None:
         request = self.authenticated_request("")
@@ -171,7 +173,7 @@ class SessionRevocationTests(SimpleTestCase):
         self.assertEqual(request.session["user_id"], 42)
         self.assertEqual(request.session["validated_at"], validated_at)
         self.assertEqual(request.session["next_validate_at"], next_validate_at)
-        self.assertEqual(cache.get("auth:fail_open:42"), 1)
+        self.assertEqual(counters.peek("auth:fail_open:42"), 1)
         self.assertEqual(json.loads(transport.call_args.kwargs["data"])["session_auth_hash"], "stored")
 
     def test_missing_hash_forces_immediate_validation(self) -> None:
@@ -369,7 +371,7 @@ class SessionRevocationTests(SimpleTestCase):
         with patch("apps.api_client.services.portal_request", return_value=limited):
             response = PortalAuthenticationMiddleware(lambda request: HttpResponse("allowed"))(request)
         self.assertEqual(response.content, b"allowed")
-        self.assertEqual(cache.get("auth:fail_open:42"), 1)
+        self.assertEqual(counters.peek("auth:fail_open:42"), 1)
         self.assertEqual(request.session["validated_at"], validated_at)
         self.assertIsNone(cache.get(key))
 
@@ -381,7 +383,7 @@ class SessionRevocationTests(SimpleTestCase):
         with patch("apps.api_client.services.portal_request", return_value=limited):
             for count in range(1, 6):
                 response = middleware(request)
-                self.assertEqual(cache.get("auth:fail_open:42"), count)
+                self.assertEqual(counters.peek("auth:fail_open:42"), count)
                 self.assertIsNone(cache.get(key))
                 if count < 5:
                     self.assertEqual(response.content, b"allowed")

@@ -9,9 +9,11 @@ from django.core.cache import cache
 from django.core.checks import Error, Tags, run_checks
 from django.core.checks import Warning as CheckWarning
 from django.core.exceptions import ImproperlyConfigured
-from django.test import SimpleTestCase, override_settings
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from requests import Response
+
+from apps.common import counters
 
 
 @override_settings(
@@ -25,7 +27,7 @@ from requests import Response
         }
     },
 )
-class ProxyTrustTests(SimpleTestCase):
+class ProxyTrustTests(TestCase):
     def setUp(self) -> None:
         # conftest.py forces settings.DEBUG = True before every test, after a class-level
         # override has been applied; enabling this one here runs after that fixture.
@@ -48,29 +50,29 @@ class ProxyTrustTests(SimpleTestCase):
             for _ in range(5):
                 response = self.client.post("/login/", {"email": email, "password": "wrong"})
                 self.assertEqual(response.status_code, 200)
-            self.assertIsNone(cache.get("auth_ip_attempts_127.0.0.1"))
-            self.assertEqual(cache.get(f"auth_account_attempts_{email}"), 5)
+            self.assertEqual(counters.peek("auth_ip_attempts_127.0.0.1"), 0)
+            self.assertEqual(counters.peek(f"auth_account_attempts_{email}"), 5)
 
             response = self.client.post(
                 "/login/", {"email": "another@example.com", "password": "wrong"}, HTTP_HX_REQUEST="true"
             )
             self.assertEqual(response.status_code, 200)
-            self.assertEqual(cache.get("auth_account_attempts_another@example.com"), 1)
-            self.assertIsNone(cache.get("auth_ip_attempts_127.0.0.1"))
+            self.assertEqual(counters.peek("auth_account_attempts_another@example.com"), 1)
+            self.assertEqual(counters.peek("auth_ip_attempts_127.0.0.1"), 0)
 
             response = self.client.post(
                 "/login/", {"email": email, "password": "wrong"}, HTTP_HX_REQUEST="true"
             )
             self.assertEqual(response.status_code, 429)
             self.assertIn("Account temporarily locked", response.json()["error"])
-            self.assertEqual(cache.get(f"auth_account_attempts_{email}"), 5)
+            self.assertEqual(counters.peek(f"auth_account_attempts_{email}"), 5)
 
     def test_indistinguishable_clients_skip_volume_limits(self) -> None:
         for _ in range(11):
             response = self.client.post(reverse("users:register"), {}, HTTP_HX_REQUEST="true")
             self.assertEqual(response.status_code, 200)
-        self.assertIsNone(cache.get("auth_volume_ip_127.0.0.1"))
-        self.assertIsNone(cache.get("auth_ip_attempts_127.0.0.1"))
+        self.assertEqual(counters.peek("auth_volume_ip_127.0.0.1"), 0)
+        self.assertEqual(counters.peek("auth_ip_attempts_127.0.0.1"), 0)
 
     @override_settings(IPWARE_TRUSTED_PROXY_LIST=["10.0.0.0/8"])
     def test_trusted_proxy_uses_forwarded_ip_for_login_bucket(self) -> None:
@@ -83,8 +85,8 @@ class ProxyTrustTests(SimpleTestCase):
                 HTTP_X_FORWARDED_FOR="203.0.113.7",
             )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(cache.get("auth_ip_attempts_203.0.113.7"), 1)
-        self.assertIsNone(cache.get("auth_ip_attempts_10.0.0.5"))
+        self.assertEqual(counters.peek("auth_ip_attempts_203.0.113.7"), 1)
+        self.assertEqual(counters.peek("auth_ip_attempts_10.0.0.5"), 0)
 
     def test_signed_login_omits_indistinguishable_ip(self) -> None:
         response = self.client.post(

@@ -17,13 +17,13 @@ import time
 from unittest.mock import patch
 
 from django.core.cache import cache
-from django.test import Client, SimpleTestCase, override_settings
+from django.test import Client, TestCase, override_settings
 
 from apps.orders.views import confirm_payment
 
 
 @override_settings(SESSION_ENGINE="django.contrib.sessions.backends.cache")
-class ConfirmPaymentUserIdValidationTests(SimpleTestCase):
+class ConfirmPaymentUserIdValidationTests(TestCase):
     """Verify confirm_payment handles user_id edge cases gracefully."""
 
     def setUp(self) -> None:
