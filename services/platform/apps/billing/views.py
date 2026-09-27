@@ -1770,9 +1770,12 @@ def vat_report(request: HttpRequest) -> HttpResponse:
 
     customer_ids = _get_accessible_customer_ids(request.user)
 
-    # VAT calculations for the selected period
-    start_date = request.GET.get("start_date", timezone.now().replace(day=1).date())
-    end_date = request.GET.get("end_date", timezone.now().date())
+    # VAT calculations for the selected period. The default period is the local calendar
+    # month: `created_at__date` below is evaluated in the configured time zone, and the UTC
+    # date lags it by a day every evening, which dropped today's invoices from the screen.
+    today = timezone.localdate()
+    start_date = request.GET.get("start_date", today.replace(day=1))
+    end_date = request.GET.get("end_date", today)
 
     invoices = Invoice.objects.filter(
         customer_id__in=customer_ids,
