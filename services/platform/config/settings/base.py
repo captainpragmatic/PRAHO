@@ -652,9 +652,6 @@ VIRTUALMIN_TIMEOUTS = {
 # RATE LIMITING CONFIGURATION 🔒
 # ===============================================================================
 
-# Cache backend for rate limiting (uses database cache)
-RATE_LIMIT_CACHE = "default"
-
 # Single source of truth for rate limiting — sets RATE_LIMITING_ENABLED
 from ._rate_limiting import configure_rate_limiting  # noqa: E402
 

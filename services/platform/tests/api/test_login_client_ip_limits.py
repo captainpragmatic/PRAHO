@@ -9,6 +9,8 @@ from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
+from apps.common import counters
+from apps.common.models import Counter
 from apps.users.models import User
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
 
@@ -73,7 +75,7 @@ class LoginClientIPLimitsTests(HMACTestMixin, TestCase):
             )
             self.assertEqual(response.status_code, 200, response.content)
             self.assertTrue(response.json()["success"])
-        self.assertIsNone(cache.get(self.login_cache_key))
+        self.assertEqual(counters.peek(self.login_cache_key), 0)
 
     def test_throttled_login_does_no_credential_work(self) -> None:
         self.exhaust_client_limit()
@@ -102,7 +104,7 @@ class LoginClientIPLimitsTests(HMACTestMixin, TestCase):
         )
         self.assertEqual(response.status_code, 401, response.content)
         self.assertEqual(response.json(), {"error": "HMAC authentication failed"})
-        self.assertIsNone(cache.get(self.login_cache_key))
+        self.assertEqual(counters.peek(self.login_cache_key), 0)
         self.user.refresh_from_db()
         self.assertEqual(self.user.failed_login_attempts, 0)
 
@@ -114,8 +116,8 @@ class LoginClientIPLimitsTests(HMACTestMixin, TestCase):
                         self.login_path, {"email": user.email, "password": "wrong", **forwarded_data}
                     )
                     self.assertEqual(response.status_code, 401, response.content)
-        self.assertIsNone(cache.get("login_ip:not-an-ip:30000000"))
-        self.assertIsNone(cache.get("login_ip:0.0.0.1:30000000"))
+        self.assertEqual(counters.peek("login_ip:not-an-ip:30000000"), 0)
+        self.assertEqual(counters.peek("login_ip:0.0.0.1:30000000"), 0)
 
     @override_settings(RATE_LIMITING_ENABLED=False)
     def test_kill_switch_disables_the_limit(self) -> None:
@@ -124,7 +126,9 @@ class LoginClientIPLimitsTests(HMACTestMixin, TestCase):
                 self.login_path, {"email": user.email, "password": "wrong", "client_ip": self.client_ip}
             )
             self.assertEqual(response.status_code, 401, response.content)
-        self.assertIsNone(cache.get(self.login_cache_key))
+        self.assertEqual(counters.peek(self.login_cache_key), 0)
+
+        self.assertEqual(Counter.objects.count(), 0)
 
     def test_password_reset_request_requires_hmac(self) -> None:
         path = "/api/users/password/reset/"

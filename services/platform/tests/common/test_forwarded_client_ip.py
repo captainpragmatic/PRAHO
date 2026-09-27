@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import time
 from unittest.mock import patch
 
 from django.core.cache import cache
+from django.db import OperationalError
 from django.http import HttpRequest
-from django.test import RequestFactory, SimpleTestCase, override_settings
+from django.test import RequestFactory, SimpleTestCase, TestCase, override_settings
 from rest_framework.parsers import JSONParser
 from rest_framework.request import Request
 
+from apps.common import counters
+from apps.common.models import Counter
 from apps.common.performance.rate_limiting import (
     LoginClientIPThrottle,
     ResetClientIPThrottle,
@@ -79,7 +83,7 @@ class ForwardedClientIPTests(SimpleTestCase):
         }
     },
 )
-class FixedWindowLimitTests(SimpleTestCase):
+class FixedWindowLimitTests(TestCase):
     def setUp(self) -> None:
         cache.clear()
         self.addCleanup(cache.clear)
@@ -106,18 +110,18 @@ class FixedWindowLimitTests(SimpleTestCase):
             for _ in range(3):
                 self.assertEqual(fixed_window_limited("k", "2/minute"), (False, 0))
                 self.assertEqual(fixed_window_limited("k", "2/minute", charge=False), (False, 0))
-            self.assertIsNone(cache.get("k:16"))
+            self.assertEqual(Counter.objects.count(), 0)
 
     def test_fixed_window_fails_closed_on_cache_errors(self) -> None:
-        for operation in ("add", "incr", "get"):
+        for operation in ("increment", "peek"):
             with self.subTest(operation=operation):
-                cache.clear()
+                counters.reset(f"k:{int(time.time() // 60)}")
                 self.assertEqual(fixed_window_limited("k", "1/minute"), (False, 0))
                 with patch(
-                    f"apps.common.performance.rate_limiting.cache.{operation}",
-                    side_effect=ConnectionError("Cache unavailable"),
+                    f"apps.common.counters.{operation}",
+                    side_effect=OperationalError("Counter store unavailable"),
                 ):
                     self.assertEqual(
-                        fixed_window_limited("k", "1/minute", charge=operation != "get"),
+                        fixed_window_limited("k", "1/minute", charge=operation != "peek"),
                         (True, 60),
                     )

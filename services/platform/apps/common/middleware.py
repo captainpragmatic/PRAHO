@@ -28,7 +28,7 @@ from django.shortcuts import redirect
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
-from apps.common import portal_hmac
+from apps.common import counters, portal_hmac
 from apps.common.constants import HMAC_NTP_SKEW_SECONDS, HMAC_TIMESTAMP_WINDOW_SECONDS, HTTP_CLIENT_ERROR_THRESHOLD
 from apps.common.logging import clear_request_id, set_request_id
 from apps.common.request_ip import get_safe_client_ip
@@ -403,16 +403,10 @@ class PortalServiceHMACMiddleware:
         window_index = int(now // self._rl_window)
         counter_key = f"{key}:{window_index}"
         try:
-            cache.add(counter_key, 0, timeout=self._rl_window * 2)
-            try:
-                current = cache.incr(counter_key)
-            except ValueError:
-                # Recover from an add/increment expiry race; this fallback is non-atomic.
-                current = (cache.get(counter_key) or 0) + 1
-                cache.set(counter_key, current, timeout=self._rl_window * 2)
+            current = counters.increment(counter_key, self._rl_window * 2)
         except Exception:
             logger.error(
-                "🔥 [HMACRateLimiter] Cache unreachable for rate limiting — denying request for portal %s from %s",
+                "🔥 [HMACRateLimiter] Counter store unavailable — denying request for portal %s from %s",
                 portal_id,
                 client_ip,
             )

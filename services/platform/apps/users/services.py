@@ -14,7 +14,7 @@ from django.contrib.sessions.models import Session
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.mail import send_mail
-from django.db import transaction
+from django.db import Error, transaction
 from django.db.models import Q
 from django.http import HttpRequest
 from django.template.loader import render_to_string
@@ -24,6 +24,7 @@ from django.utils.functional import Promise
 from django.utils.http import urlsafe_base64_encode
 from django.utils.translation import gettext_lazy as _
 
+from apps.common import counters
 from apps.common.constants import (
     IDENTIFIER_MAX_LENGTH,
     MIN_RESPONSE_TIME_SECONDS,
@@ -974,45 +975,36 @@ class SecureCustomerUserService:
 
         Wraps the private email helper with a per-user rate limit (3/hour) so a
         compromised inviter credential cannot bomb the same target with invite
-        emails. Returns False when the cache guard rejects the send so callers
-        can surface a warning to staff.
+        emails. Returns False when the counter store rejects or cannot record
+        the send, so callers can surface a warning to staff.
         """
         guard_key = f"welcome_invite:{user.pk}"
         invite_limit = SettingsService.get_integer_setting("security.welcome_invite_limit_per_target_per_hour", 3)
 
-        # Atomic check-and-claim: cache.add seeds the counter at 0 only if it
-        # does not already exist (no-op when the window is in flight); cache.incr
-        # is atomic on memcached/Redis backends. The previous get+set pattern
-        # raced under concurrency — two callers could observe count=2 and both
-        # write count=3, exceeding the intended cap.
         try:
-            cache.add(guard_key, 0, timeout=3600)
-            sent_count = cache.incr(guard_key)
-        except ValueError:
-            # Backend lacks persistent storage / atomic incr (e.g. DummyCache
-            # used in some test settings). Skip the rate-limit guard — the
-            # view-layer @throttle_classes still bounds traffic, and falling
-            # through preserves correctness in the non-cached case.
-            return cls._send_welcome_email_secure(user, customer, request_ip=request_ip)
+            sent_count = counters.increment(guard_key, 3600)
+            if sent_count > invite_limit:
+                counters.release(guard_key)
+                logger.warning(
+                    "⚠️ [Welcome Invite] Rate limit hit for user %s (%s/%s per hour)",
+                    user.pk,
+                    sent_count - 1,
+                    invite_limit,
+                )
+                log_security_event(
+                    "welcome_invite_rate_limited",
+                    {"user_id": user.id, "customer_id": customer.id, "count": sent_count - 1},
+                    request_ip,
+                )
+                return False
 
-        if sent_count > invite_limit:
-            cache.decr(guard_key)  # release our claim — we will not send
-            logger.warning(
-                f"🚦 [Welcome Invite] Rate limit hit for user {user.pk} ({sent_count - 1}/{invite_limit} per hour)"
-            )
-            log_security_event(
-                "welcome_invite_rate_limited",
-                {"user_id": user.id, "customer_id": customer.id, "count": sent_count - 1},
-                request_ip,
-            )
+            sent = cls._send_welcome_email_secure(user, customer, request_ip=request_ip)
+            if not sent:
+                counters.release(guard_key)
+            return sent
+        except Error:
+            logger.error("🔥 [Welcome Invite] Counter store unavailable", exc_info=True)
             return False
-
-        sent = cls._send_welcome_email_secure(user, customer, request_ip=request_ip)
-        if not sent:
-            # Underlying send failed — give the quota slot back so retries are
-            # not penalised for a transient SMTP failure.
-            cache.decr(guard_key)
-        return sent
 
     @classmethod
     def _notify_owners_of_join_request_secure(

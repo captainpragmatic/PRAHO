@@ -28,7 +28,6 @@ from collections.abc import Sequence
 from typing import Any, cast
 
 from django.conf import settings
-from django.core.cache import cache
 from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpRequest
 from django.utils.module_loading import import_string
@@ -128,7 +127,7 @@ def forwarded_client_ip(request: HttpRequest | Request) -> str | None:
 
 
 def fixed_window_limited(key: str, rate: str, *, charge: bool = True) -> tuple[bool, int]:
-    """Charge or peek at a fixed-window counter, denying requests if the cache fails.
+    """Charge or peek at a fixed-window counter, denying requests if the store fails.
 
     A peek denies when the budget is exhausted. A charge denies when the new
     count exceeds the budget. Window identity is independent of backend TTLs.
@@ -136,29 +135,26 @@ def fixed_window_limited(key: str, rate: str, *, charge: bool = True) -> tuple[b
     if not getattr(settings, "RATE_LIMITING_ENABLED", True):
         return False, 0
 
+    # Deferred: apps.common.apps imports this module before the model registry is ready.
+    from apps.common import counters  # noqa: PLC0415
+
     max_calls, window = parse_rate_string(rate)
     now = time.time()
     window_index = int(now // window)
     counter_key = f"{key}:{window_index}"
     try:
         if charge:
-            cache.add(counter_key, 0, timeout=window * 2)
-            try:
-                current = cache.incr(counter_key)
-            except ValueError:
-                # Recover from an add/increment expiry race; this fallback is non-atomic.
-                current = (cache.get(counter_key) or 0) + 1
-                cache.set(counter_key, current, timeout=window * 2)
+            current = counters.increment(counter_key, window * 2)
             limited = current > max_calls
         else:
-            current = cache.get(counter_key, 0)
+            current = counters.peek(counter_key)
             limited = current >= max_calls
 
         if not limited:
             return False, 0
         return True, max(1, math.ceil(window - (now % window)))
     except Exception:
-        logger.error("🔥 [RateLimiter] Cache failure during fixed-window rate limiting — denying request")
+        logger.error("🔥 [RateLimiter] Counter store failure during fixed-window rate limiting — denying request")
         return True, window
 
 
