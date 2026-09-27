@@ -102,20 +102,25 @@ class MaintenanceSwitch:
 
 
 def document_identities(page: Page) -> set[str]:
-    """Identities of the documents on the page, so before/after can be compared by WHICH, not how many.
+    r"""Which documents the page shows, by the link each row navigates to.
 
-    Document numbers when they can be recognised - a Romanian fiscal number is the one thing about an
-    invoice that cannot change - and the whole row text otherwise. The fallback is deliberate: this
-    test cannot be run outside a booted stack, so a pattern tuned against the wrong fixture data would
-    fail in CI for a reason that has nothing to do with maintenance mode. Row text is a weaker identity
-    than a number but a real one, and within a single run the same rows render the same way.
+    Every row carries `data-href` = `/billing/invoices/<number>/` or `/billing/proformas/<number>/`,
+    so it already states the document's type and its number and nothing else. That is a complete
+    identity needing no parsing, which is why this reads the attribute instead of mining the row text.
+
+    The regex this replaces was wrong in two ways, both reproduced by running it rather than reading
+    it. `\b[A-Z]{2,}[-/]?[\w-]*\d{3,}\b` reduced `INV-2026/0001` and `INV-2026/0002` both to
+    `INV-2026`, so a swap between two documents of the same year compared EQUAL - the second time
+    that same collision was fixed and reappeared in another spelling. Worse, the fallback was
+    all-or-nothing: `numbers or set(rows)` means that once ANY row matched, every row that did not
+    was discarded silently. A proforma numbered `E2E-PRO-1-01` yields no match (no three consecutive
+    digits), so it contributed nothing to a comparison that claimed to cover every document.
+
+    No fallback here on purpose. If the rows stop carrying the attribute this returns an empty set,
+    and the caller's `assert documents_before` fails loudly rather than comparing nothing to nothing.
     """
-    rows = [text.strip() for text in page.locator(DOCUMENT_ROW).all_inner_texts() if text.strip()]
-    # `[\w-]*` before the serial matters: `\b[A-Z]{2,}[-/]?\d{3,}\b` stopped at the first group, so
-    # INV-2026-0001 and INV-2026-0002 both reduced to "INV-2026" and compared EQUAL - a swap between
-    # two invoices of the same year would have gone undetected by the very assertion added to catch it.
-    numbers = {match for row in rows for match in re.findall(r"\b[A-Z]{2,}[-/]?[\w-]*\d{3,}\b", row)}
-    return numbers or set(rows)
+    rows = page.locator(DOCUMENT_ROW).all()
+    return {href for row in rows if (href := row.get_attribute("data-href"))}
 
 
 def assert_platform_serves_again() -> None:

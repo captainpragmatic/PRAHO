@@ -285,11 +285,30 @@ class TheMaintenanceAlertItselfTests(SimpleTestCase):
         "maint", status_code=503, response_data={"error": "maintenance"}, retry_after=600
     )
     UNDECLARED = PlatformAPIError("boom", status_code=503, response_data={"error": "boom"}, retry_after=600)
-    EMPTY_ALERT_BODY = '<p class="text-blue-100/90 mt-1"></p>'
+    # A paragraph carrying at least one character that is neither whitespace nor the start of a tag.
+    # `<p[^>]*>\s*\S` would be satisfied by `<p class="x"></p>`, because `\S` matches the `<` of the
+    # closing tag - which is the empty paragraph this is meant to rule out.
+    PARAGRAPH_WITH_TEXT = r"<p[^>]*>\s*[^<\s]"
 
     def _post_login_with(self, error: PlatformAPIError) -> HttpResponse:
         with patch("apps.users.views.api_client.authenticate_customer", side_effect=error):
             return Client().post("/login/", {"email": "someone@example.com", "password": "correct-horse"})
+
+    def _alert_region(self, response: HttpResponse, heading: str) -> str:
+        """The alert's OWN markup, sliced between its heading and its retry link.
+
+        Both halves of this page put their message in a `<p>`: the alert uses `text-blue-100/90` and
+        `components/form_error_summary.html` uses `text-red-100`. So "some `<p>` contains this
+        sentence" is satisfied by the FORM ERROR, which carries the same words - the original trap,
+        one level down. Slicing to the alert's own region is what makes the assertion about the alert.
+
+        Anchored on the alert's own content rather than on its CSS classes, so restyling it cannot
+        fail this spuriously. `users/login.html` renders the alert before the form, so the region
+        cannot reach the error summary.
+        """
+        body = response.content.decode()
+        start = body.index(heading)
+        return body[start : body.index("Try again", start)]
 
     def test_a_declared_window_supplies_the_heading_the_template_reads(self) -> None:
         response = self._post_login_with(self.DECLARED)
@@ -301,17 +320,26 @@ class TheMaintenanceAlertItselfTests(SimpleTestCase):
         self.assertEqual(response.context["maintenance_heading"], "Scheduled maintenance")
 
     def test_the_alert_body_is_not_empty(self) -> None:
-        """The pre-existing half of the bug: a blue box with a heading and no explanation."""
-        response = self._post_login_with(self.DECLARED)
+        """The pre-existing half of the bug: a blue box with a heading and no explanation.
 
-        self.assertNotContains(response, self.EMPTY_ALERT_BODY)
+        Asserted positively. The first version only checked that the exact empty-paragraph markup was
+        absent, which deleting the paragraph altogether also satisfies - absence of an empty `<p>` is
+        not evidence of a full one.
+        """
+        response = self._post_login_with(self.DECLARED)
+        alert = self._alert_region(response, "Scheduled maintenance")
+
+        self.assertRegex(alert, self.PARAGRAPH_WITH_TEXT, "the alert rendered no paragraph with text in it")
+        self.assertIn("Your data is safe", alert)
         self.assertIn("Your data is safe", response.context["maintenance_message"])
 
     def test_an_undeclared_outage_does_not_announce_itself_as_planned_work(self) -> None:
         response = self._post_login_with(self.UNDECLARED)
+        alert = self._alert_region(response, "Temporarily unavailable")
 
         self.assertNotContains(response, ">Scheduled maintenance<")
-        self.assertNotContains(response, self.EMPTY_ALERT_BODY)
+        self.assertRegex(alert, self.PARAGRAPH_WITH_TEXT, "the alert rendered no paragraph with text in it")
+        self.assertNotIn("Your data is safe", alert, "nobody knows that during an unexplained failure")
         self.assertEqual(response.context["maintenance_heading"], "Temporarily unavailable")
         self.assertNotIn("Your data is safe", response.context["maintenance_message"])
 
