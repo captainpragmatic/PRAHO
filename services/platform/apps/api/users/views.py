@@ -9,11 +9,13 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
+from django.conf import settings
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.http import HttpRequest, JsonResponse
+from django.utils.translation import gettext as _
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
@@ -40,6 +42,9 @@ from apps.common.performance.rate_limiting import (
     EndpointRateThrottle,
     PortalHMACBurstThrottle,
     PortalHMACRateThrottle,
+    ResetClientIPThrottle,
+    fixed_window_limited,
+    forwarded_client_ip,
 )
 from apps.common.request_ip import get_safe_client_ip
 from apps.customers.models import Customer
@@ -85,9 +90,10 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911 -- 
     Authentication endpoint for portal service.
     Validates user credentials and returns user data for session creation.
 
-    Rate limiting: No DRF throttle here — PortalServiceHMACMiddleware enforces
-    300 req/min per portal+IP before this view is reached.  Account lockout
-    (below) provides per-account brute-force protection on top of that.
+    Rate limiting: PortalServiceHMACMiddleware applies the per-portal auth
+    bucket before this view. A per-forwarded-IP limit runs before credential
+    checks, followed by per-account lockout at ACCOUNT_LOCKOUT_THRESHOLD.
+
     """
     try:
         # Parse request body
@@ -99,11 +105,20 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911 -- 
             return JsonResponse({"success": False, "error": "Email and password are required"}, status=400)
 
         client_ip = get_safe_client_ip(request)
+        forwarded_ip = forwarded_client_ip(request)
+        if forwarded_ip is not None:
+            limited, retry_after = fixed_window_limited(
+                f"login_ip:{forwarded_ip}", settings.THROTTLE_RATES["auth_login_ip"]
+            )
+            if limited:
+                response = JsonResponse(
+                    {"success": False, "error": _("Too many login attempts"), "retry_after": retry_after},
+                    status=429,
+                )
+                response["Retry-After"] = str(retry_after)
+                return response
 
-        # Authenticate user.
-        # Timing: Argon2 hashing dominates (~100-200ms); DB writes add <5ms.
-        # HMAC middleware rate-limits at 300/min; Portal pads via
-        # PLATFORM_API_AUTH_MIN_DURATION_SECONDS.  Accepted risk.
+        # Apply the forwarded-IP limit before expensive credential checks.
         user = authenticate(request, username=email, password=password)
 
         if user is None:
@@ -111,13 +126,13 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911 -- 
             with contextlib.suppress(User.DoesNotExist):
                 failed_user = User.objects.get(email=email)
                 failed_user.increment_failed_login_attempts()
-            logger.warning("[Portal API Auth] Failed login — ip=%s", client_ip)
+            logger.warning("⚠️ [Portal API Auth] Failed login — ip=%s", forwarded_ip or client_ip)
             return JsonResponse({"success": False, "error": "Invalid email or password"}, status=401)
 
         # Same generic error for locked/inactive — attacker cannot distinguish
         if user.is_account_locked() or not user.is_active:
             reason = "locked" if user.is_account_locked() else "inactive"
-            logger.warning("[Portal API Auth] Login rejected (%s) — ip=%s", reason, client_ip)
+            logger.warning("⚠️ [Portal API Auth] Login rejected (%s) — ip=%s", reason, forwarded_ip or client_ip)
             return JsonResponse({"success": False, "error": "Invalid email or password"}, status=401)
 
         # A password alone must never establish a session for an enrolled user.
@@ -134,9 +149,10 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911 -- 
         user.account_locked_until = None
         user.save(update_fields=["failed_login_attempts", "account_locked_until"])
 
-        logger.info("[Portal API Auth] User authenticated successfully — ip=%s", client_ip)
+        logger.info("✅ [Portal API Auth] User authenticated successfully — ip=%s", forwarded_ip or client_ip)
 
         # Return user data for portal service
+
         user_data = {
             "id": user.id,
             "email": user.email,
@@ -619,15 +635,19 @@ def mfa_status_api(request: HttpRequest, user: User) -> Response:
 
 
 @api_view(["POST"])
-@authentication_classes([])  # No DRF authentication - credential auth performed in the view
+@authentication_classes([])  # HMAC authentication is handled by middleware and the decorator.
 @permission_classes([AllowAny])
-@throttle_classes([AuthThrottle])
-@public_api_endpoint
+@throttle_classes(
+    [PortalHMACRateThrottle, PortalHMACBurstThrottle, ResetClientIPThrottle, CustomerRateThrottle, BurstRateThrottle]
+)
+@require_portal_authentication
 def password_reset_request_api(request: HttpRequest) -> Response:
     """
-    🔑 Request Password Reset -- intentionally public.
+    🔑 Request Password Reset through an HMAC-signed Portal call.
 
-    Anonymous users must be able to request password resets.
+    The Portal signs requests for anonymous users. Valid requests keep a
+    neutral response whether or not the account exists.
+
 
     POST /api/users/password/reset/
     {
@@ -665,16 +685,19 @@ def password_reset_request_api(request: HttpRequest) -> Response:
 
 
 @api_view(["POST"])
-@authentication_classes([])  # No DRF authentication - credential auth performed in the view
+@authentication_classes([])  # HMAC authentication is handled by middleware and the decorator.
 @permission_classes([AllowAny])
-@throttle_classes([AuthThrottle])
-@public_api_endpoint
+@throttle_classes(
+    [PortalHMACRateThrottle, PortalHMACBurstThrottle, ResetClientIPThrottle, CustomerRateThrottle, BurstRateThrottle]
+)
+@require_portal_authentication
 def password_reset_confirm_api(request: HttpRequest) -> Response:
     """
-    🔐 Confirm Password Reset -- intentionally public.
+    🔐 Confirm Password Reset through an HMAC-signed Portal call.
 
-    Token-validated endpoint; no HMAC needed since the reset token
-    itself proves possession of the email account.
+    The Portal signs the call; the reset token separately proves possession
+    of the email account.
+
 
     POST /api/users/password/reset/confirm/
     {

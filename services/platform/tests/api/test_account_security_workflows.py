@@ -119,8 +119,8 @@ class AccountSecurityWorkflows(HMACTestMixin, TestCase):
         body = json.dumps(data).encode()
         return self.client.put(path, body, content_type="application/json", **hmac_headers("PUT", path, body))
 
-    @override_settings(ACCOUNT_LOCKOUT_THRESHOLD=5)
     def test_password_change_checks_current_password_and_preserves_other_user(self):
+
         self.assertEqual(self.change_password(current_password="wrong").status_code, 400)
         self.user.refresh_from_db()
         self.assertTrue(self.user.check_password("Original-secure123!"))
@@ -164,8 +164,8 @@ class AccountSecurityWorkflows(HMACTestMixin, TestCase):
         response = self.request_security("mfa/disable/", password="Original-secure123!", token=codes[0])
         self.assertEqual(response.status_code, 200, response.content)
 
-    @override_settings(ACCOUNT_LOCKOUT_THRESHOLD=5)
     def test_login_requires_second_factor_and_recovery_code_is_single_use(self):
+
         _, codes = self.enroll()
         credentials = {"email": self.user.email, "password": "Original-secure123!"}
         self.assertEqual(self.portal_post("/api/users/login/", credentials.copy()).status_code, 401)
@@ -201,8 +201,10 @@ class AccountSecurityWorkflows(HMACTestMixin, TestCase):
         self.assertEqual(self.change_password().status_code, 400)
         self.assertEqual(self.change_password(token=codes[0]).status_code, 200)
 
+    @override_settings(ACCOUNT_LOCKOUT_THRESHOLD=1)
     def test_wrong_current_password_applies_account_lockout(self):
         self.assertEqual(self.change_password(current_password="wrong").status_code, 400)
+
         self.user.refresh_from_db()
         self.assertTrue(self.user.is_account_locked())
         self.assertEqual(self.change_password().status_code, 400)

@@ -212,9 +212,14 @@ Source: `config/settings/base.py` — `PASSWORD_HASHERS`
 
 ### Account Lockout
 
-- `ACCOUNT_LOCKOUT_THRESHOLD = 1` — progressive lockout starts on first failed attempt
-- Lockout escalation: 5 min -> 15 min -> 30 min -> 60 min -> 120 min -> 240 min
+- `ACCOUNT_LOCKOUT_THRESHOLD = 5` — lockout starts at the fifth consecutive failure
+- The ladder starts at the threshold: failures 5/6/7/8/9/10+ lock for 5/15/30/60/120/240 minutes
+- Platform login limit: 10 attempts/minute per valid forwarded client IP in an HMAC-signed body, before password checks
+- Platform password reset request and confirmation limit: 5 requests/minute shared per valid forwarded client IP
+- Missing or malformed forwarded IPs skip only the per-client limit; the per-portal auth bucket still applies
+- Both password reset endpoints require Portal HMAC authentication
 - Tracked via `failed_login_attempts` and `account_locked_until` fields on User model
+
 
 ### Session Security
 

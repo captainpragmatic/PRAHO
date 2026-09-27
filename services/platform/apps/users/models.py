@@ -272,14 +272,15 @@ class User(AbstractUser):
     def increment_failed_login_attempts(self) -> None:
         """Increment failed login attempts and apply progressive lockout.
 
-        Design: Lockout starts on FIRST failed attempt (no threshold).
-        This is intentional — progressive delays (5->15->30->60->120->240 min)
-        make brute-force impractical while keeping the implementation simple.
-        Combined with rate limiting (10/min per IP, 5/min per email), this
-        provides defense-in-depth.
+        Portal login protection combines per-IP and per-account limits with
+        the Platform per-forwarded-IP login limit and per-portal auth bucket.
+        Account lockout begins at ACCOUNT_LOCKOUT_THRESHOLD consecutive failures.
+        The progressive delays (5->15->30->60->120->240 min) start at that
+        threshold and remain capped at four hours.
 
         The deprecated MAX_LOGIN_ATTEMPTS constant in constants.py is NOT used.
-        To adjust lockout behavior, modify lockout_delays below.
+        Configure ACCOUNT_LOCKOUT_THRESHOLD and lockout_delays to adjust lockout.
+
 
         Uses F() expression for atomic increment to prevent lost updates
         under concurrent requests.
@@ -306,11 +307,7 @@ class User(AbstractUser):
         # Progressive lockout delays: 5min → 15min → 30min → 1hr → 2hr → 4hr
         lockout_delays = [5, 15, 30, 60, 120, 240]  # minutes
 
-        if self.failed_login_attempts >= len(lockout_delays):
-            # Cap at maximum lockout (4 hours)
-            lockout_minutes = lockout_delays[-1]
-        else:
-            lockout_minutes = lockout_delays[self.failed_login_attempts - 1]
+        lockout_minutes = lockout_delays[min(self.failed_login_attempts - threshold, len(lockout_delays) - 1)]
 
         self.account_locked_until = timezone.now() + timedelta(minutes=lockout_minutes)
         self.save(update_fields=["account_locked_until"])

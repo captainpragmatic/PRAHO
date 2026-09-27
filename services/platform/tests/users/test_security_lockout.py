@@ -5,20 +5,10 @@ Tests progressive lockout delays, security measures, and integration with existi
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
-
-from apps.common.request_ip import get_safe_client_ip
 from django.core.cache import cache
-
-from apps.common.request_ip import get_safe_client_ip
-from django.test import Client, TestCase
-
-from apps.common.request_ip import get_safe_client_ip
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
-
-from apps.common.request_ip import get_safe_client_ip
 from django.utils import timezone
-
-from apps.common.request_ip import get_safe_client_ip
 
 from apps.users.models import UserLoginLog
 
@@ -43,8 +33,10 @@ class AccountLockoutTestCase(TestCase):
         # Clear any existing cache/rate limiting data
         cache.clear()
 
+    @override_settings(ACCOUNT_LOCKOUT_THRESHOLD=1)
     def test_user_model_lockout_methods(self):
         """Test User model lockout helper methods"""
+
         # Initially not locked
         self.assertFalse(self.user.is_account_locked())
         self.assertEqual(self.user.failed_login_attempts, 0)
@@ -68,8 +60,10 @@ class AccountLockoutTestCase(TestCase):
         self.assertIsNone(self.user.account_locked_until)
         self.assertEqual(self.user.get_lockout_remaining_time(), 0)
 
+    @override_settings(ACCOUNT_LOCKOUT_THRESHOLD=1)
     def test_progressive_lockout_timing(self):
         """Test progressive lockout delays"""
+
         base_time = timezone.now()
 
         # 1st failure (5 min lockout)
@@ -135,8 +129,10 @@ class AccountLockoutTestCase(TestCase):
         self.assertIsNone(self.user.account_locked_until)
         self.assertFalse(self.user.is_account_locked())
 
+    @override_settings(ACCOUNT_LOCKOUT_THRESHOLD=1)
     def test_failed_login_increments_attempts(self):
         """Test that failed login increments failed attempts"""
+
         # Wrong password
         response = self.client.post(self.login_url, {
             'email': 'test@example.com',
@@ -156,8 +152,10 @@ class AccountLockoutTestCase(TestCase):
         login_logs = UserLoginLog.objects.filter(user=self.user, status='failed_password')
         self.assertEqual(login_logs.count(), 1)
 
+    @override_settings(ACCOUNT_LOCKOUT_THRESHOLD=1)
     def test_login_blocked_when_locked(self):
         """Test that login is blocked when account is locked"""
+
         # Lock account
         self.user.increment_failed_login_attempts()
         self.user.refresh_from_db()
@@ -192,8 +190,10 @@ class AccountLockoutTestCase(TestCase):
         login_logs = UserLoginLog.objects.filter(user=None, status='failed_user_not_found')
         self.assertEqual(login_logs.count(), 1)
 
+    @override_settings(ACCOUNT_LOCKOUT_THRESHOLD=1)
     def test_lockout_time_expiry(self):
         """Test that lockout expires after the specified time"""
+
         # Lock account with 5 minute lockout
         self.user.increment_failed_login_attempts()
         self.user.refresh_from_db()
@@ -212,8 +212,10 @@ class AccountLockoutTestCase(TestCase):
         self.assertFalse(self.user.is_account_locked())
         self.assertEqual(self.user.get_lockout_remaining_time(), 0)
 
+    @override_settings(ACCOUNT_LOCKOUT_THRESHOLD=1)
     def test_multiple_failed_attempts_progression(self):
         """Test multiple failed login attempts show correct progression"""
+
         # First failed attempt - 5 minute lockout
         self.client.post(self.login_url, {
             'email': 'test@example.com',
