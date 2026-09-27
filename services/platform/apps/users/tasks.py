@@ -23,7 +23,7 @@ from apps.audit.models import AuditEvent
 from apps.audit.services import AuditService
 from apps.settings.services import SettingsService
 from apps.users.mfa import WebAuthnCredential
-from apps.users.models import APIToken, User, UserLoginLog
+from apps.users.models import APIToken, User, UserLoginLog, UserSession
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,40 @@ TASK_RETRY_DELAY = 300  # 5 minutes
 TASK_MAX_RETRIES = 2
 TASK_SOFT_TIME_LIMIT = 300  # 5 minutes
 TASK_TIME_LIMIT = 600  # 10 minutes
+
+
+def reconcile_session_index() -> dict[str, int]:
+    """Index sessions missed by old workers and prune rows whose session is gone."""
+    indexed = 0
+    last_key = ""
+    while True:
+        with transaction.atomic():
+            sessions = list(
+                Session.objects.select_for_update()
+                .exclude(session_key__in=UserSession.objects.values("session_key"))
+                .filter(session_key__gt=last_key)
+                .order_by("session_key")[:500]
+            )
+            if not sessions:
+                break
+            last_key = sessions[-1].session_key
+            for session in sessions:
+                user_id = session.get_decoded().get("_auth_user_id")
+                if user_id is None:
+                    continue
+                try:
+                    user_exists = User.objects.filter(pk=user_id).exists()
+                except (TypeError, ValueError, OverflowError):
+                    continue
+                if user_exists:
+                    _entry, created = UserSession.objects.get_or_create(
+                        session_key=session.session_key, defaults={"user_id": user_id}
+                    )
+                    indexed += int(created)
+
+    pruned, _deleted = UserSession.objects.exclude(session_key__in=Session.objects.values("session_key")).delete()
+    logger.info("✅ [SessionSecurity] Reconciled %s sessions; pruned %s orphaned index rows", indexed, pruned)
+    return {"indexed": indexed, "pruned": pruned}
 
 
 def cleanup_expired_2fa_sessions() -> dict[str, Any]:
@@ -79,6 +113,10 @@ def cleanup_expired_2fa_sessions() -> dict[str, Any]:
                 deleted_count = Session.objects.filter(session_key__in=expired_sessions).delete()[0]
                 results["cleaned_sessions"] = deleted_count
                 logger.info(f"🧹 [UserSecurity] Cleaned {deleted_count} expired 2FA sessions")
+
+            index_result = reconcile_session_index()
+            results["indexed_sessions"] = index_result["indexed"]
+            results["pruned_session_index"] = index_result["pruned"]
 
             # Clean up cache-based 2FA challenges (pattern-based cleanup)
             cache_patterns = ["webauthn_challenge_*", "2fa_challenge_*", "mfa_challenge_*", "totp_challenge_*"]
@@ -404,6 +442,10 @@ def cleanup_expired_password_reset_tokens() -> dict[str, Any]:
             deleted_count = Session.objects.filter(session_key__in=reset_sessions).delete()[0]
             results["cleaned_sessions"] = deleted_count
             logger.info(f"🔑 [UserSecurity] Cleaned {deleted_count} expired password reset sessions")
+
+        index_result = reconcile_session_index()
+        results["indexed_sessions"] = index_result["indexed"]
+        results["pruned_session_index"] = index_result["pruned"]
 
         # Clean up old password reset related audit events (keep last 30 days)
         audit_cutoff = timezone.now() - timedelta(days=30)

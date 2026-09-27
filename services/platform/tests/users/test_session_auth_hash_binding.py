@@ -4,7 +4,6 @@ import json
 import time
 
 from django.contrib.auth.tokens import default_token_generator
-from django.contrib.sessions.backends.db import SessionStore
 from django.contrib.sessions.models import Session
 from django.core.cache import cache
 from django.http import HttpResponse
@@ -12,7 +11,8 @@ from django.test import TestCase, override_settings
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
 
-from apps.users.models import User
+from apps.users.models import User, UserSession
+from apps.users.session_backend import SessionStore
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin, hmac_headers
 
 
@@ -75,6 +75,7 @@ class SessionAuthHashBindingTests(HMACTestMixin, TestCase):
         staff_session["_auth_user_id"] = str(self.user.pk)
         staff_session["_auth_user_hash"] = old_hash
         staff_session.save()
+        self.assertTrue(UserSession.objects.filter(user=self.user, session_key=staff_session.session_key).exists())
         other = User.objects.create_user(email="unaffected@example.com", password=self.password)
         other_session = SessionStore()
         other_session["_auth_user_id"] = str(other.pk)
@@ -96,7 +97,9 @@ class SessionAuthHashBindingTests(HMACTestMixin, TestCase):
         self.assertNotEqual(old_hash, new_hash)
         self.assertEqual(response.json(), {"success": True, "session_auth_hash": new_hash})
         self.assertFalse(Session.objects.filter(session_key=staff_session.session_key).exists())
+        self.assertFalse(UserSession.objects.filter(session_key=staff_session.session_key).exists())
         self.assertTrue(Session.objects.filter(session_key=other_session.session_key).exists())
+        self.assertTrue(UserSession.objects.filter(user=other, session_key=other_session.session_key).exists())
         self.assertEqual(self.validate_session(old_hash).status_code, 401)
         self.assertEqual(self.validate_session(new_hash).status_code, 200)
 

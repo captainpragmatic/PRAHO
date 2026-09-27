@@ -240,8 +240,9 @@ CACHES = {
 # SESSION & COOKIE SETTINGS
 # ===============================================================================
 
-# Use DB-backed sessions across environments (simple and persistent)
-SESSION_ENGINE = "django.contrib.sessions.backends.db"
+# Persist sessions and their per-user revocation index in the same transaction.
+# Deploy: migrate, drain old workers, then run reconcile_session_index before trusting revocation.
+SESSION_ENGINE = "apps.users.session_backend"
 
 SESSION_COOKIE_AGE = 86400  # 24 hours
 SESSION_COOKIE_HTTPONLY = True

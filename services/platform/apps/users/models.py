@@ -695,4 +695,20 @@ class APIToken(models.Model):
         return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
 
 
+class UserSession(models.Model):
+    """Map persisted authenticated sessions to their owner for revocation.
+
+    The session store writes a row on every save of an authenticated session. A session
+    outlives a hard-deleted user (Django only anonymises the request), so the reference
+    carries no database constraint: with one, that browser's next request would fail at
+    commit instead of being redirected to login. The ORM still cascades on user deletion.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="session_index", db_constraint=False
+    )
+    session_key = models.CharField(max_length=40, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
 # Import MFA models to ensure they're recognized by Django

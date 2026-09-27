@@ -14,7 +14,6 @@ from django.contrib.sessions.models import Session
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.mail import send_mail
-from django.core.signing import BadSignature
 from django.db import transaction
 from django.db.models import Q
 from django.http import HttpRequest
@@ -53,7 +52,7 @@ from apps.customers.models import Customer
 from apps.customers.profile_models import CustomerBillingProfile, CustomerTaxProfile
 from apps.settings.services import SettingsService
 
-from .models import APIToken, CustomerMembership
+from .models import APIToken, CustomerMembership, UserSession
 
 """
 SECURE User Registration Services - PRAHO Platform
@@ -1358,49 +1357,28 @@ class SessionSecurityService:
 
     @classmethod
     def _invalidate_other_user_sessions(cls, user_id: int, keep_session_key: str) -> None:
-        """Invalidate all sessions for a user except specified one"""
-        try:
-            count = 0
-
-            for session in Session.objects.all():
-                try:
-                    session_data = session.get_decoded()
-                    session_user_id = session_data.get("_auth_user_id")
-
-                    if session_user_id == str(user_id) and session.session_key != keep_session_key:
-                        session.delete()
-                        count += 1
-                except (BadSignature, TypeError, UnicodeDecodeError, ValueError):
-                    # Skip invalid/corrupted sessions during cleanup
-                    logger.debug("Skipping undecodable session while invalidating other user sessions")
-                    continue
-
-            logger.info(f"🗑️ [SessionSecurity] Invalidated {count} other sessions for user {user_id}")
-        except Exception as e:
-            logger.error(f"🔥 [SessionSecurity] Error invalidating sessions for user {user_id}: {e}")
+        """Invalidate indexed sessions except the caller's current session."""
+        cls._invalidate_all_user_sessions(user_id, keep_session_key=keep_session_key)
 
     @classmethod
-    def _invalidate_all_user_sessions(cls, user_id: int) -> None:
-        """Invalidate all sessions for a user"""
+    def _invalidate_all_user_sessions(cls, user_id: int, keep_session_key: str | None = None) -> None:
+        """Delete only the captured session keys and their matching index rows."""
         try:
-            count = 0
+            with transaction.atomic():
+                index = UserSession.objects.filter(user_id=user_id)
+                if keep_session_key is not None and not index.exists():
+                    logger.error("🚨 [SessionSecurity] session index empty for an active user: %s", user_id)
 
-            for session in Session.objects.all():
-                try:
-                    session_data = session.get_decoded()
-                    session_user_id = session_data.get("_auth_user_id")
+                sessions = Session.objects.filter(session_key__in=index.values("session_key"))
+                if keep_session_key is not None:
+                    sessions = sessions.exclude(session_key=keep_session_key)
+                keys = list(sessions.values_list("session_key", flat=True))
+                count, _deleted = Session.objects.filter(session_key__in=keys).delete()
+                UserSession.objects.filter(session_key__in=keys).delete()
 
-                    if session_user_id == str(user_id):
-                        session.delete()
-                        count += 1
-                except (BadSignature, TypeError, UnicodeDecodeError, ValueError):
-                    # Skip invalid/corrupted sessions during cleanup
-                    logger.debug("Skipping undecodable session while invalidating all user sessions")
-                    continue
-
-            logger.warning(f"🗑️ [SessionSecurity] Invalidated {count} sessions for user {user_id}")
-        except Exception as e:
-            logger.error(f"🔥 [SessionSecurity] Error invalidating all sessions for user {user_id}: {e}")
+            logger.info("✅ [SessionSecurity] Invalidated %s sessions for user %s", count, user_id)
+        except Exception:
+            logger.exception("🔥 [SessionSecurity] Error invalidating sessions for user %s", user_id)
 
     @classmethod
     def _clear_sensitive_session_data(cls, request: HttpRequest) -> None:
