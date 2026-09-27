@@ -32,9 +32,11 @@ from __future__ import annotations
 
 import json
 import re
+from http import HTTPStatus
 
 import pytest
 import requests
+from playwright.sync_api import Page
 
 from tests.e2e.helpers import (
     BASE_URL,
@@ -99,6 +101,45 @@ class MaintenanceSwitch:
         assert response.status_code == 200, f"could not set {KEY}={active}: {response.status_code} {response.text[:200]}"
 
 
+def document_identities(page: Page) -> set[str]:
+    """Identities of the documents on the page, so before/after can be compared by WHICH, not how many.
+
+    Document numbers when they can be recognised - a Romanian fiscal number is the one thing about an
+    invoice that cannot change - and the whole row text otherwise. The fallback is deliberate: this
+    test cannot be run outside a booted stack, so a pattern tuned against the wrong fixture data would
+    fail in CI for a reason that has nothing to do with maintenance mode. Row text is a weaker identity
+    than a number but a real one, and within a single run the same rows render the same way.
+    """
+    rows = [text.strip() for text in page.locator(DOCUMENT_ROW).all_inner_texts() if text.strip()]
+    # `[\w-]*` before the serial matters: `\b[A-Z]{2,}[-/]?\d{3,}\b` stopped at the first group, so
+    # INV-2026-0001 and INV-2026-0002 both reduced to "INV-2026" and compared EQUAL - a swap between
+    # two invoices of the same year would have gone undetected by the very assertion added to catch it.
+    numbers = {match for row in rows for match in re.findall(r"\b[A-Z]{2,}[-/]?[\w-]*\d{3,}\b", row)}
+    return numbers or set(rows)
+
+
+def assert_platform_serves_again() -> None:
+    """Prove the gate is open by asking the platform UNAUTHENTICATED, on a path it gates.
+
+    The earlier version fetched the portal's `/login/` and asserted 200, which establishes nothing:
+    that page renders without contacting the platform at all and answers 200 straight through a
+    maintenance window. Nor would a staff request work - `MaintenanceModeMiddleware.__call__` lets any
+    `is_staff_user` past the gate, which is exactly how `MaintenanceSwitch` turns maintenance off while
+    it is on, so a signed-in probe cannot tell the two states apart either.
+
+    `/api/localisation/` is under `API_PREFIXES` and not in `EXEMPT_PREFIXES`, so anonymously it
+    answers 503 with `{"error": "maintenance"}` while the window is open and rejects the unsigned
+    request some other way once it is closed. The discriminator is the marker, not the status: this
+    fixture's job is to leave the stack usable for the 311 tests that follow, and "not 503-with-marker"
+    is the property they need.
+    """
+    probe = requests.post(f"{PLATFORM_BASE_URL}/api/localisation/", json={}, timeout=TIMEOUT)
+    body = probe.text[:200]
+    assert not (probe.status_code == HTTPStatus.SERVICE_UNAVAILABLE and "maintenance" in body), (
+        f"the platform is still in maintenance after teardown cleared it: {probe.status_code} {body}"
+    )
+
+
 @pytest.fixture
 def maintenance_switch():
     """Guarantees the platform is left usable, and proves it rather than assuming it.
@@ -114,8 +155,7 @@ def maintenance_switch():
         yield switch
     finally:
         switch.set(False)
-        recovered = requests.get(f"{BASE_URL}{LOGIN_URL}", timeout=TIMEOUT)
-        assert recovered.status_code == 200, "portal did not recover after maintenance was cleared"
+        assert_platform_serves_again()
 
 
 def test_a_maintenance_window_is_announced_and_recovered_from(customer_page, browser, maintenance_switch):
@@ -124,8 +164,8 @@ def test_a_maintenance_window_is_announced_and_recovered_from(customer_page, bro
 
     # --- OFF: real documents, and the membership cache warmed for what follows -----
     customer_page.goto(invoices)
-    documents_before = customer_page.locator(DOCUMENT_ROW).count()
-    assert documents_before > 0, "fixture customer should hold documents before the window opens"
+    documents_before = document_identities(customer_page)
+    assert documents_before, "fixture customer should hold documents before the window opens"
     assert EMPTY_STATE not in customer_page.content()
 
     # --- ON ------------------------------------------------------------------------
@@ -157,6 +197,8 @@ def test_a_maintenance_window_is_announced_and_recovered_from(customer_page, bro
     customer_page.goto(invoices)
     recovered = customer_page.content()
     assert MAINTENANCE_HEADING not in recovered, "the maintenance notice outlived the window"
-    assert customer_page.locator(DOCUMENT_ROW).count() == documents_before, (
+    # Identities, not a count. Equal counts would be satisfied by a different set of the same size -
+    # and "the right NUMBER of invoices came back" is not the reassurance this test exists to give.
+    assert document_identities(customer_page) == documents_before, (
         "documents did not come back exactly as they were"
     )
