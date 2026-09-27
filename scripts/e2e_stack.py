@@ -178,7 +178,8 @@ def report_coverage() -> bool:
         }
         run = partial(subprocess.run, cwd=service_dir, env=env, check=False)
         # `check=False` plus an unread return code is how a failed combine became a silent
-        # half-measurement. Read them.
+        # half-measurement. Read every one of them - the first version of this fix read the two in
+        # this loop and left `report`'s unread below, which is the same bug in the same function.
         for step in (
             ["combine", "--quiet"],
             ["xml", "-o", str(COVERAGE_DIR / f"coverage-e2e-{service}.xml")],
@@ -195,6 +196,9 @@ def report_coverage() -> bool:
             capture_output=True,
             text=True,
         )
+        if summary.returncode != 0:
+            print(f"E2E coverage: FAILED - `coverage report` exited {summary.returncode} for {service}")
+            ok = False
         # Only the TOTAL: the per-file table is hundreds of lines and the xml already holds it.
         total = next((line for line in summary.stdout.splitlines() if line.startswith("TOTAL")), None)
         if total is None:

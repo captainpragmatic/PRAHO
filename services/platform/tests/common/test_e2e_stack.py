@@ -13,6 +13,8 @@ from pathlib import Path
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
+from coverage import CoverageData
+
 ROOT = Path(__file__).resolve().parents[4]
 spec = importlib.util.spec_from_file_location("e2e_stack_under_test", ROOT / "scripts/e2e_stack.py")
 stack = importlib.util.module_from_spec(spec)
@@ -298,9 +300,47 @@ class CoverageReportingReportsFailureTests(TestCase):
     and these tests pin that the marker only appears when it should.
     """
 
+    # One result per subprocess `report_coverage` runs, in order, per service: combine, xml, report.
+    # Only `report`'s stdout is read, and only for a line starting with TOTAL.
+    STEPS = ("combine", "xml", "report")
+    TOTAL_LINE = "TOTAL                     1000    100    200     20    88%"
+
+    def _results(self, failing: int | None = None) -> list[Mock]:
+        """Successful results for every subprocess, with optionally ONE made to fail.
+
+        The point of building all of them is that the failure under test must be the ONLY reason
+        `report_coverage` can return False. The first version of this test mocked a single result of
+        `returncode=1, stdout=""` for every call, which fails for two independent reasons - the status
+        AND the absent TOTAL - so deleting the status check outright left the test green. A failing
+        `report` here still returns its TOTAL line for exactly that reason.
+        """
+        results = []
+        for _ in stack.SERVICES:
+            results += [Mock(returncode=0, stdout=""), Mock(returncode=0, stdout="")]
+            results.append(Mock(returncode=0, stdout=f"{self.TOTAL_LINE}\n"))
+        if failing is not None:
+            results[failing] = Mock(returncode=2, stdout=results[failing].stdout)
+        return results
+
+    def _run_with(self, results: list[Mock]) -> tuple[bool, str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            coverage_dir = Path(tmp)
+            for service in stack.SERVICES:
+                (coverage_dir / f".coverage.{service}.probe").write_text("placeholder")
+            buffer = io.StringIO()
+            with (
+                patch.object(stack, "COVERAGE_DIR", coverage_dir),
+                patch.object(stack.subprocess, "run", side_effect=results),
+                contextlib.redirect_stdout(buffer),
+            ):
+                ok = stack.report_coverage()
+        return ok, buffer.getvalue()
+
     def test_no_data_for_a_service_is_a_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, patch.object(stack, "COVERAGE_DIR", Path(tmp)):
-            self.assertFalse(stack.report_coverage())
+            # `assertIs(..., False)`, not `assertFalse`: the implementation this replaced returned
+            # None, which is falsy, so `assertFalse` passed against the very version being fixed.
+            self.assertIs(stack.report_coverage(), False)
 
     def test_the_ok_marker_is_printed_only_on_success(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, patch.object(stack, "COVERAGE_DIR", Path(tmp)):
@@ -308,18 +348,108 @@ class CoverageReportingReportsFailureTests(TestCase):
             with contextlib.redirect_stdout(buffer):
                 ok = stack.report_coverage()
         output = buffer.getvalue()
-        self.assertFalse(ok)
+        self.assertIs(ok, False)
         self.assertIn("E2E coverage: FAILED", output)
         self.assertNotIn("E2E coverage: OK", output)
 
-    def test_a_failed_coverage_subprocess_is_a_failure(self) -> None:
-        """A non-zero `combine` or `xml` used to be discarded entirely."""
+    def test_each_coverage_subprocess_failure_is_caught_on_its_own(self) -> None:
+        """Every one of the three, independently. Two of them were unread before this branch."""
+        for index, step in enumerate(self.STEPS):
+            with self.subTest(step=step):
+                ok, output = self._run_with(self._results(failing=index))
+                self.assertIs(ok, False, f"a failing `coverage {step}` was not reported as a failure")
+                self.assertIn(f"`coverage {step}` exited 2", output)
+                self.assertNotIn("E2E coverage: OK", output)
+
+    def test_a_clean_run_returns_true_and_prints_the_marker(self) -> None:
+        """The positive control. Without it, a function that always returned False would pass above."""
+        ok, output = self._run_with(self._results())
+
+        self.assertIs(ok, True)
+        self.assertIn("E2E coverage: OK", output)
+        self.assertNotIn("E2E coverage: FAILED", output)
+        self.assertIn("88%", output, "the TOTAL line the report produced should be echoed")
+
+
+class CoverageUnionGateCanFailTests(TestCase):
+    """`make coverage-portal-union` runs in nightly only, so its failure path had run nowhere.
+
+    Its per-half probe asked whether each dataset was READABLE, and `coverage report` exits 0 on a
+    dataset whose every file sits at 0%. So a browser half that measured nothing passed the check and
+    the union silently became the unit half alone - the exact failure the target exists to prevent,
+    and one its own comment claimed it had closed. Reproduced against the real recipe before the
+    per-half minimum was added.
+
+    These tests drive the recipe itself rather than a reimplementation of it, because the defect was
+    in the recipe. That is what `PORTAL_UNIT_COVERAGE` / `PORTAL_E2E_COVERAGE` exist for.
+    """
+
+    IN_SCOPE = ROOT / "services" / "portal" / "apps" / "common" / "retry_after.py"
+    # Resolved rather than spelled "make": the recipe under test is the deliverable, and a
+    # partial executable path is one more thing that can differ between here and CI.
+    MAKE = shutil.which("make") or "make"
+
+    def _dataset(self, path: Path, *, measured: bool) -> Path:
+        """A structurally valid portal dataset that either did or did not measure anything.
+
+        For the dead half the recorded line number is impossible rather than absent. Coverage
+        intersects executed lines with the file's real statements, so the file still appears in the
+        report at 0% - which is the shape that slipped through. A dataset with NO files reports "No
+        data to report" and exits 1, a different failure that the readability check already caught,
+        so using one would have tested the wrong thing.
+        """
+        data = CoverageData(basename=str(path))
+        data.add_lines({str(self.IN_SCOPE): list(range(1, 400)) if measured else [10**6]})
+        data.write()
+        return path
+
+    def _union(self, *, unit: Path, browser: Path) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(  # noqa: S603 -- a fixed make target with paths this test created
+            [
+                self.MAKE,
+                "coverage-portal-union",
+                f"PORTAL_UNIT_COVERAGE={unit}",
+                f"PORTAL_E2E_COVERAGE={browser}",
+            ],
+            cwd=ROOT,
+            # `PWD` and not just `cwd`: the Makefile resolves `COVERAGE_BIN` through `$(PWD)`, which
+            # is the ENVIRONMENT variable, not make's own directory. `subprocess(cwd=...)` changes
+            # the directory without touching it, so the venv path resolved under services/platform -
+            # where the Django runner happens to run - and every coverage call was "No such file".
+            # MAKELEVEL and MAKEFLAGS are dropped because this suite is itself launched from make,
+            # and inheriting them turns this into a recursive sub-make.
+            env={k: v for k, v in os.environ.items() if k not in {"MAKELEVEL", "MAKEFLAGS"}}
+            | {"PWD": str(ROOT)},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def _halves(self, tmp: str, *, unit_measured: bool, browser_measured: bool) -> dict[str, Path]:
+        return {
+            "unit": self._dataset(Path(tmp) / "unit", measured=unit_measured),
+            "browser": self._dataset(Path(tmp) / "browser", measured=browser_measured),
+        }
+
+    def test_a_browser_half_that_measured_nothing_fails_the_union(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            coverage_dir = Path(tmp)
-            for service in stack.SERVICES:
-                (coverage_dir / f".coverage.{service}.probe").write_text("placeholder")
-            with (
-                patch.object(stack, "COVERAGE_DIR", coverage_dir),
-                patch.object(stack.subprocess, "run", return_value=Mock(returncode=1, stdout="")),
-            ):
-                self.assertFalse(stack.report_coverage())
+            result = self._union(**self._halves(tmp, unit_measured=True, browser_measured=False))
+
+        self.assertNotEqual(result.returncode, 0, "a browser half at 0% passed the union gate")
+        self.assertIn("The browser dataset", result.stdout)
+
+    def test_a_unit_half_that_measured_nothing_fails_too(self) -> None:
+        """Both directions. The gate is about EITHER half being dead, not only the browser one."""
+        with tempfile.TemporaryDirectory() as tmp:
+            result = self._union(**self._halves(tmp, unit_measured=False, browser_measured=True))
+
+        self.assertNotEqual(result.returncode, 0, "a unit half at 0% passed the union gate")
+        self.assertIn("The units dataset", result.stdout)
+
+    def test_two_measured_halves_pass(self) -> None:
+        """The positive control: without it, a target that always failed would satisfy both above."""
+        with tempfile.TemporaryDirectory() as tmp:
+            result = self._union(**self._halves(tmp, unit_measured=True, browser_measured=True))
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("at or above the", result.stdout)

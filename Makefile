@@ -394,12 +394,24 @@ coverage-portal:
 # union 72.02% - so neither dataset alone is the answer, and reporting either as "portal
 # coverage" understates it by ~9 to ~15 points.
 PORTAL_COVERAGE_FLOOR ?= 70
+# Each half of the union must have measured SOMETHING. `coverage report` exits 0 on a dataset whose
+# files are all at 0%, so "the dataset is readable" was never evidence that the suite ran under the
+# tracer: a browser half that measured nothing passed, and the union silently became the unit half
+# alone - the exact failure this target exists to prevent. Reproduced with a dataset reporting 0.00%.
+# 1% is deliberately far below either half's real figure (units ~63%, browser ~39% from ONE test
+# file), so this can only fire when a half genuinely measured next to nothing.
+COVERAGE_HALF_MIN ?= 1
+# Overridable so the gate itself can be tested with synthetic halves. A gate whose ability to FAIL
+# is never exercised is the same problem as no gate: this target runs only in nightly, so without
+# this its failure path had never been executed anywhere.
+PORTAL_UNIT_COVERAGE ?= services/portal/.coverage
+PORTAL_E2E_COVERAGE ?= output/playwright/coverage/.coverage.portal
 
 .PHONY: coverage-portal-union
 coverage-portal-union:
 	@echo "📊 [Portal] Union of the unit and browser suites — the honest figure..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@units="services/portal/.coverage"; e2e="output/playwright/coverage/.coverage.portal"; \
+	@units="$(PORTAL_UNIT_COVERAGE)"; e2e="$(PORTAL_E2E_COVERAGE)"; \
 	missing=""; \
 	[ -f "$$units" ] || missing="$$missing unit-data(run make coverage-portal)"; \
 	[ -f "$$e2e" ]   || missing="$$missing browser-data(run make test-e2e-coverage)"; \
@@ -413,8 +425,8 @@ coverage-portal-union:
 	cp "$$e2e" "$$dir/.coverage.browser" || { echo "❌ Cannot read the browser dataset"; exit 1; }; \
 	for half in units browser; do \
 		cp "$$dir/.coverage.$$half" "$$dir/.probe"; \
-		if ! (cd services/portal && $(COVERAGE_RC) COVERAGE_FILE="$$dir/.probe" $(COVERAGE_BIN) report > "$$dir/$$half.txt" 2>&1); then \
-			echo "❌ The $$half dataset is unreadable or empty, so the union would silently be the other half alone:"; \
+		if ! (cd services/portal && $(COVERAGE_RC) COVERAGE_FILE="$$dir/.probe" $(COVERAGE_BIN) report --fail-under=$(COVERAGE_HALF_MIN) > "$$dir/$$half.txt" 2>&1); then \
+			echo "❌ The $$half dataset is unreadable, empty, or measured under $(COVERAGE_HALF_MIN)%, so the union would silently be the other half alone:"; \
 			sed 's/^/   /' "$$dir/$$half.txt" | tail -3; exit 1; \
 		fi; \
 	done; \
