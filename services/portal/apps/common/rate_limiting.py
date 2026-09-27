@@ -21,6 +21,16 @@ from apps.common.request_ip import get_safe_client_ip
 logger = logging.getLogger(__name__)
 
 
+def mark_auth_failure(request: HttpRequest) -> None:
+    """Set the request-local _portal_auth_outcome consumed by the authentication limiter."""
+    setattr(request, "_portal_auth_outcome", "failure")  # noqa: B010
+
+
+def mark_auth_success(request: HttpRequest) -> None:
+    """Set the request-local _portal_auth_outcome consumed by the authentication limiter."""
+    setattr(request, "_portal_auth_outcome", "success")  # noqa: B010
+
+
 class AuthenticationRateLimitMiddleware:
     """
     🔒 Rate limiting middleware for authentication endpoints to prevent brute force attacks.
@@ -38,8 +48,11 @@ class AuthenticationRateLimitMiddleware:
     IP_WINDOW_SECONDS = 900  # 15 minutes
     ACCOUNT_RATE_LIMIT = 5  # Max attempts per account
     ACCOUNT_WINDOW_SECONDS = 1800  # 30 minutes
+    VOLUME_RATE_LIMIT = 10
+    VOLUME_WINDOW_SECONDS = 900
 
     # Response timing constants
+
     MIN_RESPONSE_TIME = 0.1  # 100ms minimum response time
     MAX_RESPONSE_TIME = 0.5  # 500ms maximum response time
 
@@ -71,17 +84,23 @@ class AuthenticationRateLimitMiddleware:
         if request.method == "POST":
             rate_limit_response = self._check_rate_limits(request)
             if rate_limit_response:
+                if self._is_volume_endpoint(request):
+                    self._record_volume_attempt(request)
                 return rate_limit_response
 
         # Process the request
         start_time = time.time()
         response = self.get_response(request)
 
-        # Track failed authentication attempts
-        if request.method == "POST" and self._is_auth_failure(response):
-            self._record_failed_attempt(request)
-        elif request.method == "POST" and self._is_auth_success(response):
-            self._clear_rate_limits(request)
+        # Volume endpoints count every POST; authentication needs an explicit outcome.
+        if request.method == "POST":
+            outcome = getattr(request, "_portal_auth_outcome", None)
+            if self._is_volume_endpoint(request):
+                self._record_volume_attempt(request)
+            elif outcome == "failure" or (outcome is None and self._is_auth_failure(response)):
+                self._record_failed_attempt(request)
+            elif outcome == "success":
+                self._clear_rate_limits(request)
 
         # Apply uniform response timing to prevent timing attacks
         self._uniform_response_delay(start_time)
@@ -92,16 +111,34 @@ class AuthenticationRateLimitMiddleware:
         """Check if request is for an authentication endpoint"""
         return any(request.path.startswith(path) for path in self.AUTH_PATHS)
 
+    def _is_volume_endpoint(self, request: HttpRequest) -> bool:
+        """Identify endpoints that consume a separate IP request budget."""
+        return request.path.startswith(("/password-reset/", "/register/"))
+
     def _check_rate_limits(self, request: HttpRequest) -> HttpResponse | None:
         """
-        🔒 Check both IP and account rate limits.
+        🔒 Check the volume budget or the authentication IP and account limits.
+
         Returns error response if rate limited, None if allowed.
         Browser requests get a redirect with message; API/HTMX requests get JSON.
         """
         try:
             client_ip = self._get_client_ip(request)
 
+            if self._is_volume_endpoint(request):
+                volume_attempts = cache.get(f"auth_volume_ip_{client_ip}", 0)
+                if volume_attempts >= self.VOLUME_RATE_LIMIT:
+                    logger.warning(
+                        "🚨 [RateLimit] Authentication volume limit exceeded: %s (%s requests)",
+                        client_ip,
+                        volume_attempts,
+                    )
+                    error_msg = _("Too many authentication attempts. Please try again in 15 minutes.")
+                    return self._rate_limit_response(request, error_msg, self.VOLUME_WINDOW_SECONDS, 429)
+                return None
+
             # Check IP-based rate limiting
+
             ip_cache_key = f"auth_ip_attempts_{client_ip}"
             ip_attempts = cache.get(ip_cache_key, 0)
 
@@ -148,13 +185,25 @@ class AuthenticationRateLimitMiddleware:
                 status=status_code,
             )
         # Browser form submission — redirect to login page with error message.
-        # nosemgrep: open-redirect — LOGIN_URL is a server-side Django setting, not user input.
         messages.error(request, error_msg)
-        login_url = settings.LOGIN_URL if hasattr(settings, "LOGIN_URL") else "/login/"
-        return redirect(login_url)
+        return redirect("users:login")
+
+    def _record_volume_attempt(self, request: HttpRequest) -> None:
+        """Count registration and password reset POSTs without changing login buckets."""
+        try:
+            client_ip = self._get_client_ip(request)
+            cache_key = f"auth_volume_ip_{client_ip}"
+            try:
+                cache.add(cache_key, 0, timeout=self.VOLUME_WINDOW_SECONDS)
+                cache.incr(cache_key)
+            except ValueError:
+                cache.set(cache_key, 1, timeout=self.VOLUME_WINDOW_SECONDS)
+        except Exception as e:
+            logger.error("🔥 [RateLimit] Failed to record authentication volume: %s", e)
 
     def _record_failed_attempt(self, request: HttpRequest) -> None:
         """🔒 Record failed authentication attempt for both IP and account"""
+
         try:
             client_ip = self._get_client_ip(request)
 
@@ -213,11 +262,6 @@ class AuthenticationRateLimitMiddleware:
         """Check if response indicates authentication failure"""
         # HTTP status codes that indicate auth failure
         return response.status_code in [400, 401, 403, 422, 423]
-
-    def _is_auth_success(self, response: HttpResponse) -> bool:
-        """Check if response indicates authentication success"""
-        # HTTP status codes that indicate auth success
-        return response.status_code in [200, 201, 302]  # 302 for redirects after login
 
     def _extract_email_from_request(self, request: HttpRequest) -> str | None:
         """Safely extract email from request data"""

@@ -44,8 +44,6 @@ INSTALLED_APPS: list[str] = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
 MIDDLEWARE: list[str] = [
     "django.middleware.security.SecurityMiddleware",
-    # 🔒 SECURITY: Auth rate limiting before sessions (IP-only, no session needed)
-    "apps.common.rate_limiting.AuthenticationRateLimitMiddleware",  # Auth rate limiting
     "django.contrib.sessions.middleware.SessionMiddleware",  # DB-backed sessions
     # 🔒 SECURITY: API rate limiting after sessions (cart limits need session key)
     "apps.common.rate_limiting.APIRateLimitMiddleware",  # API + cart session rate limiting
@@ -53,6 +51,8 @@ MIDDLEWARE: list[str] = [
     "django.middleware.common.CommonMiddleware",  # After locale
     "django.middleware.csrf.CsrfViewMiddleware",  # CSRF protection
     "django.contrib.messages.middleware.MessageMiddleware",  # Messages support
+    # 🔒 SECURITY: Run after messages so throttled browser POSTs can carry an error message.
+    "apps.common.rate_limiting.AuthenticationRateLimitMiddleware",  # Auth rate limiting
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     # 🔒 SECURITY: Session security after authentication
     "apps.common.middleware.SessionSecurityMiddleware",  # Session protection

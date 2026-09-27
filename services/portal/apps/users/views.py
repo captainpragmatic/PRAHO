@@ -27,6 +27,8 @@ from apps.common.decorators import (
 from apps.common.localisation_middleware import sync_language_selection
 from apps.common.localisation_services import store_localisation_preferences
 from apps.common.rate_limit_feedback import is_rate_limited_error
+from apps.common.rate_limiting import mark_auth_failure, mark_auth_success
+from apps.common.request_ip import get_safe_client_ip
 from apps.users.forms import (
     ChangePasswordForm,
     CompanyCreationForm,
@@ -169,6 +171,7 @@ def _handle_totp_setup_post(request: HttpRequest, customer_id: str, token: str) 
                 request, "users:mfa_backup_codes", _("Two-factor authentication has been enabled successfully!")
             )
         else:
+            mark_auth_failure(request)
             return _handle_mfa_error_redirect(
                 request, "users:mfa_setup_totp", _("Invalid verification code. Please try again.")
             )
@@ -228,9 +231,11 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
                 # Validate credentials via Platform API
                 mfa_token = form.cleaned_data.get("mfa_token", "")
                 auth_response = (
-                    api_client.authenticate_customer(email, password, mfa_token=mfa_token)
+                    api_client.authenticate_customer(
+                        email, password, mfa_token=mfa_token, client_ip=get_safe_client_ip(request)
+                    )
                     if mfa_token
-                    else api_client.authenticate_customer(email, password)
+                    else api_client.authenticate_customer(email, password, client_ip=get_safe_client_ip(request))
                 )
 
                 if auth_response and auth_response.get("valid"):
@@ -302,15 +307,19 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
                         messages.success(request, _("Sign in confirmed!"))
 
                     next_url = _get_safe_redirect_target(request, fallback="/dashboard/")
+                    mark_auth_success(request)
                     return redirect(next_url)
 
                 else:
                     logger.warning(f"⚠️ [Portal Auth] Invalid credentials for {email}")
+                    mark_auth_failure(request)
                     form.add_error(None, _("Invalid email address or password. Please try again."))
 
             except PlatformAPIError as e:  # rate-limit-aware — custom form error with retry_after countdown
                 if getattr(e, "is_rate_limited", False):
+                    mark_auth_failure(request)
                     retry_after = getattr(e, "retry_after", None) or 30
+
                     logger.warning(f"⚠️ [Portal Auth] Login rate-limited for {email} (retry_after={retry_after}s)")
                     form.add_error(
                         None,
@@ -893,7 +902,9 @@ def mfa_backup_codes_view(request: HttpRequest) -> HttpResponse:
             request.session["new_mfa_backup_codes"] = result["backup_codes"]
             return redirect("users:mfa_backup_codes")
         except PlatformAPIError:
+            mark_auth_failure(request)
             form.add_error(None, _("Could not regenerate codes. Check your password and authentication code."))
+
     return render(
         request,
         "users/mfa_backup_codes.html",
@@ -922,7 +933,9 @@ def mfa_disable_view(request: HttpRequest) -> HttpResponse:
                 messages.success(request, _("Two-factor authentication has been disabled."))
                 return redirect("users:mfa_management")
         except PlatformAPIError:
+            mark_auth_failure(request)
             form.add_error(None, _("Could not disable MFA. Check your password and authentication code."))
+
     return render(request, "users/mfa_disable.html", {"form": form})
 
 
@@ -1218,15 +1231,18 @@ def switch_customer_view(request: HttpRequest) -> HttpResponse:
         )
 
         if not response or not response.get("success"):
+            mark_auth_failure(request)
             logger.warning(
                 f"🚨 [Security] Platform API rejected customer switch: user {user_id} -> customer {customer_id}"
             )
+
             messages.error(request, _("Customer access verification failed. Please try again."))
             return redirect("/profile/")
 
         # Extract verified access information
         verification_data = response.get("data", {})
         if not verification_data.get("has_access"):
+            mark_auth_failure(request)
             logger.warning(
                 f"🚨 [Security] Unauthorized customer switch attempt: user {user_id} -> customer {customer_id}"
             )

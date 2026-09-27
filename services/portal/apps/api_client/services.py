@@ -19,6 +19,7 @@ Security guidelines for all requests:
 import base64
 import hashlib
 import hmac
+import ipaddress
 import json
 import logging
 import random
@@ -26,6 +27,7 @@ import secrets
 import threading
 import time
 import urllib.parse
+from contextlib import suppress
 from http import HTTPStatus
 from typing import Any, cast
 
@@ -560,16 +562,23 @@ class PlatformAPIClient:
         """Read the explicit, non-sensitive portal display contract."""
         return self._make_request("POST", "/localisation/", data={})
 
-    def authenticate_customer(self, email: str, password: str, mfa_token: str = "") -> dict[str, Any] | None:
+    def authenticate_customer(
+        self, email: str, password: str, mfa_token: str = "", client_ip: str = ""
+    ) -> dict[str, Any] | None:
         """Authenticate customer with email and password via platform API"""
+
         start_time = time.perf_counter()
         min_duration = float(getattr(settings, "PLATFORM_API_AUTH_MIN_DURATION_SECONDS", 0.0))
         try:
             # Use existing platform login endpoint
+            request_body = {"email": email, "password": password, **({"mfa_token": mfa_token} if mfa_token else {})}
+            if client_ip:
+                with suppress(ValueError):
+                    request_body["client_ip"] = str(ipaddress.ip_address(client_ip))
             data = self._make_request(
                 "POST",
                 "/users/login/",
-                data={"email": email, "password": password, **({"mfa_token": mfa_token} if mfa_token else {})},
+                data=request_body,
                 retry_on_status={503},
                 max_retries=1,
             )
