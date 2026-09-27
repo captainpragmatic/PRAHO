@@ -13,7 +13,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from django.core.exceptions import ObjectDoesNotExist
-from django.db import DatabaseError, transaction
+from django.db import DatabaseError, InterfaceError, transaction
 
 from apps.common.outbound_http import OutboundSecurityError, normalize_tls_cert_fingerprint
 from apps.common.types import Err, Ok, Result
@@ -290,9 +290,10 @@ class NodeRegistrationService:
             )
             if not updated:
                 # Narrow on purpose: the row may have been deleted concurrently, or the connection
-                # may hiccup. Anything else here is a bug and should surface rather than hide behind
-                # "cosmetic".
-                with contextlib.suppress(ObjectDoesNotExist, DatabaseError):
+                # may hiccup. `InterfaceError` is named alongside `DatabaseError` because it is a
+                # SIBLING of it under PEP 249's `Error`, not a subclass - a closed connection is
+                # precisely the hiccup this tolerates. Anything else is a bug and should surface.
+                with contextlib.suppress(ObjectDoesNotExist, DatabaseError, InterfaceError):
                     server.refresh_from_db()
                 return Err(f"Server {server.hostname} left 'disabled' before activation (now '{server.status}')")
         except Exception as e:
@@ -303,9 +304,11 @@ class NodeRegistrationService:
             return Err(f"Credential verification raised for {server.hostname}: {e}")
 
         # Activation committed. The final refresh is cosmetic — a hiccup here must NOT turn a
-        # successful activation into a reported failure. Same two exceptions as above, and for the
+        # successful activation into a reported failure. Same three exceptions as above, and for the
         # same reason: a concurrent delete or a connection blip is expected, an AttributeError is not.
-        with contextlib.suppress(ObjectDoesNotExist, DatabaseError):
+        # This site is past the CAS commit, so an escape here would turn a node that IS active into
+        # a raised exception - the exact outcome the comment above promises cannot happen.
+        with contextlib.suppress(ObjectDoesNotExist, DatabaseError, InterfaceError):
             server.refresh_from_db()
         logger.info(f"✅ [Registration] Node {server.hostname} credential-verified and activated")
         return Ok(server)

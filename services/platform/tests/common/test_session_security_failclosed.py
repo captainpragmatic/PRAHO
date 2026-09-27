@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.sessions.backends.db import SessionStore
-from django.db import DatabaseError
+from django.db import DatabaseError, InterfaceError
 from django.http import HttpRequest, HttpResponse
 from django.test import TestCase
 
@@ -90,3 +90,36 @@ class SessionSecurityFailClosedTests(TestCase):
             mw._process_session_security(request)
 
         self.assertFalse(any("Session invalidation FAILED" in line for line in logs.output))
+
+    @patch("apps.common.middleware.SessionSecurityService")
+    def test_an_interface_error_during_invalidation_does_not_escape(self, mock_svc_class):
+        """`InterfaceError` is a SIBLING of `DatabaseError`, not a subclass.
+
+        Django follows PEP 249: `Error` has exactly two direct subclasses, `InterfaceError` and
+        `DatabaseError`. Catching only the latter misses a broken connection - which is the single
+        most likely database failure at the moment a security check has already gone wrong. Escaping
+        here is a 500 from middleware, on a request that previously always completed.
+
+        `apps/billing/refund_service.py` already names `(OperationalError, InterfaceError)` in five
+        places, so the precedent was in the codebase and these sites did not follow it.
+        """
+        mock_svc_class.update_session_timeout.side_effect = RuntimeError("service down")
+        mw = SessionSecurityMiddleware(lambda r: HttpResponse("ok"))
+
+        user = User.objects.create_user(email="iface-fail@example.com", password="TestPass123!")
+        request = HttpRequest()
+        request.method = "GET"
+        request.path = "/billing/invoices/"
+        request.META["SERVER_NAME"] = "testserver"
+        request.META["SERVER_PORT"] = "80"
+        request.session = SessionStore()
+        request.session.create()
+        request.user = user
+
+        with (
+            patch.object(request.session, "flush", side_effect=InterfaceError("connection already closed")),
+            self.assertLogs("apps.common.middleware", level="CRITICAL") as logs,
+        ):
+            mw._process_session_security(request)  # must not raise
+
+        self.assertTrue(any("Session invalidation FAILED" in line for line in logs.output))
