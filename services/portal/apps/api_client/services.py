@@ -21,9 +21,7 @@ import hashlib
 import hmac
 import json
 import logging
-import math
 import random
-import re
 import secrets
 import threading
 import time
@@ -47,13 +45,6 @@ HTTP_TOO_MANY_REQUESTS = 429
 logger = logging.getLogger(__name__)
 
 HMAC_TIMING_THRESHOLD = 0.002
-
-
-_HMAC_SIGNATURE_RE = re.compile(r"^[0-9a-fA-F]{64}$")
-_HMAC_NONCE_RE = re.compile(r"^[A-Za-z0-9_-]{8,256}$")
-_HMAC_PORTAL_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
-# Int-only — platform validates with int(), floats would fail
-_HMAC_TIMESTAMP_RE = re.compile(r"^[0-9]+$")
 
 
 def _resolve_portal_signing_secret() -> str:
@@ -255,37 +246,6 @@ class PlatformAPIClient:
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
-
-    def _get_header_case_insensitive(self, headers: dict[str, Any], name: str) -> Any:
-        for key, value in headers.items():
-            if isinstance(key, str) and key.lower() == name.lower():
-                return value
-        return None
-
-    def _headers_allow_success_fallback(self, headers: dict[str, Any]) -> bool:
-        """
-        Allow lenient fallback for mock Platform responses that only include
-        {"success": true}, while still rejecting obviously malformed auth headers.
-        """
-        portal_id = self._get_header_case_insensitive(headers, "X-Portal-Id")
-        signature = self._get_header_case_insensitive(headers, "X-Signature")
-        nonce = self._get_header_case_insensitive(headers, "X-Nonce")
-        timestamp = self._get_header_case_insensitive(headers, "X-Timestamp")
-
-        if not isinstance(portal_id, str) or not _HMAC_PORTAL_ID_RE.fullmatch(portal_id):
-            return False
-        if not isinstance(signature, str) or not _HMAC_SIGNATURE_RE.fullmatch(signature):
-            return False
-        if not isinstance(nonce, str) or not _HMAC_NONCE_RE.fullmatch(nonce):
-            return False
-        if not isinstance(timestamp, str) or not _HMAC_TIMESTAMP_RE.fullmatch(timestamp):
-            return False
-
-        try:
-            timestamp_value = float(timestamp)
-        except (TypeError, ValueError):
-            return False
-        return math.isfinite(timestamp_value) and timestamp_value > 0
 
     def _normalize_endpoint(self, endpoint: str) -> str:
         normalized = "/" + endpoint.strip().lstrip("/")
@@ -625,10 +585,6 @@ class PlatformAPIClient:
                     "customer_id": user_data.get("customer_id"),
                     "customer_data": data.get("user", {}),
                 }
-            if data.get("success") and self._headers_allow_success_fallback(
-                getattr(self._thread_local, "last_request_headers", {})
-            ):
-                return {"valid": True}
             return None
 
         except PlatformAPIError as e:

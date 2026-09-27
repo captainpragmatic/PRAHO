@@ -241,7 +241,11 @@ class HMACProductionSecurityTestCase(SimpleTestCase):
             mock_response = Mock()
             if hmac.compare_digest(signature, expected_signature):
                 mock_response.status_code = 200
-                mock_response.json.return_value = {'success': True, 'authenticated': True}
+                mock_response.json.return_value = {
+                    'success': True,
+                    'user': {'id': 1, 'email': 'user@example.com', 'customer_id': 1},
+                }
+
             else:
                 mock_response.status_code = 401
                 mock_response.json.return_value = {'error': 'HMAC authentication failed'}
