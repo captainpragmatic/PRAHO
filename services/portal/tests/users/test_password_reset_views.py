@@ -70,6 +70,13 @@ class PasswordResetViewTests(SimpleTestCase):
         self.assertFormError(response.context["form"], None, "New password and confirmation don't match.")
         self.platform.confirm_password_reset.assert_not_called()
 
+    def test_confirm_short_password_is_rejected_before_calling_platform(self) -> None:
+        short = {"new_password": "Short-1234", "confirm_password": "Short-1234"}
+        response = self.client.post(self.confirm_url, short)
+        self.assertEqual(response.status_code, 200)
+        self.assertFormError(response.context["form"], None, "Password must be at least 12 characters long.")
+        self.platform.confirm_password_reset.assert_not_called()
+
     def test_confirm_valid_password_redirects_to_login(self) -> None:
         response = self.client.post(self.confirm_url, self.body)
         self.platform.confirm_password_reset.assert_called_with(

@@ -48,7 +48,7 @@ class Command(BaseCommand):
         self.stdout.write(message % {"count": processed, "failed": failed})
 
     def _report_blocked_orders(self) -> None:
-        from apps.billing.vies_evidence import vies_verified_for  # noqa: PLC0415
+        from apps.billing.vies_evidence import vat_number_matches_country, vies_verified_for  # noqa: PLC0415
         from apps.common.localisation import normalize_country_code  # noqa: PLC0415
         from apps.common.tax_service import TaxService  # noqa: PLC0415
         from apps.orders.models import Order  # noqa: PLC0415
@@ -67,7 +67,15 @@ class Command(BaseCommand):
             except ObjectDoesNotExist:
                 profile = None
             vat_number = billing.get("vat_number") or billing.get("vat_id")
-            if not vies_verified_for(profile, vat_number):
+            # Mirror the resolver: evidence counts only for a VAT payer whose verified number
+            # is the invoiced one and was issued by the billing country.
+            evidenced = (
+                profile is not None
+                and profile.is_vat_payer is True
+                and vies_verified_for(profile, vat_number)
+                and vat_number_matches_country(vat_number, country)
+            )
+            if not evidenced:
                 blocked.append(str(order.pk))
         self.stdout.write(_("Blocked orders: %(count)d") % {"count": len(blocked)})
         for order_id in blocked:

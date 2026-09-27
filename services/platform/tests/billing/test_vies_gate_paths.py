@@ -14,6 +14,7 @@ from django.utils import timezone
 from apps.billing.models import Currency
 from apps.billing.services import _build_customer_vat_info
 from apps.common.tax_service import TaxService, VATScenario
+from apps.customers.contact_models import CustomerAddress
 from apps.customers.models import Customer, CustomerTaxProfile
 from apps.orders.models import Order, OrderItem
 from apps.orders.preflight import OrderPreflightValidationService
@@ -98,6 +99,37 @@ class VIESGatePathTests(TestCase):
              self.profile.vies_verified_at, self.profile.vies_verified_name),
             expected,
         )
+
+    def test_greek_number_with_greek_address_is_queued_for_vies(self) -> None:
+        CustomerAddress.objects.create(
+            customer=self.customer, is_billing=True, is_current=True,
+            address_line1="Odos 1", city="Athens", country="GR",
+        )
+        with patch("apps.customers.signals._trigger_vat_validation") as trigger:
+            self.profile.vat_number = "GR094259216"
+            self.profile.save(update_fields=["vat_number"])
+        trigger.assert_called_once()
+
+    def test_command_counts_orders_whose_evidence_the_resolver_rejects(self) -> None:
+        order = self._order()
+        for label, profile_changes, address_changes in (
+            ("not a VAT payer", {"is_vat_payer": False}, {}),
+            (
+                "number issued elsewhere",
+                {"is_vat_payer": True, "vat_number": "FR40303265045"},
+                {"vat_number": "FR40303265045"},
+            ),
+        ):
+            with self.subTest(label=label):
+                CustomerTaxProfile.objects.filter(pk=self.profile.pk).update(**profile_changes)
+                Order.objects.filter(pk=order.pk).update(
+                    billing_address={**order.billing_address, **address_changes}
+                )
+                output = StringIO()
+                with patch("django_q.tasks.async_task"):
+                    call_command("validate_vat_numbers", "--blocked-orders", stdout=output)
+                self.assertIn("Blocked orders: 1", output.getvalue())
+                self.assertIn(str(order.pk), output.getvalue())
 
     def test_migration_clears_stale_human_flag(self) -> None:
         CustomerTaxProfile.objects.filter(pk=self.profile.pk).update(vies_verification_status="pending")

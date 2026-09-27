@@ -426,7 +426,7 @@ def validate_vat_number(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Explicit va
 
     from apps.billing.gateways.vies_gateway import VIESGateway  # noqa: PLC0415
     from apps.billing.tax_models import VATValidation  # noqa: PLC0415
-    from apps.billing.vies_evidence import normalize_vat_number  # noqa: PLC0415
+    from apps.billing.vies_evidence import normalize_vat_number, profile_vat_identity  # noqa: PLC0415
     from apps.common.eu_vat_validator import (  # noqa: PLC0415
         is_eu_country,
         parse_vat_number,
@@ -442,8 +442,8 @@ def validate_vat_number(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Explicit va
             logger.info("[VAT] No VAT number for tax profile %s", tax_profile_id)
             return {"success": True, "tax_profile_id": str(tax_profile.id), "message": "No VAT number to validate"}
 
-        # Step 1: Parse country + digits
-        country_code, vat_digits = parse_vat_number(tax_profile.vat_number)
+        # Step 1: Parse country + digits against the billing country (EL for Greece)
+        country_code, vat_digits = profile_vat_identity(tax_profile)
 
         if not is_eu_country(country_code):
             with transaction.atomic():

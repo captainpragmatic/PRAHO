@@ -268,7 +268,8 @@ def handle_tax_profile_changes(
 
         # A changed number cannot inherit the previous number's evidence.
         if created or old_values.get("vat_number") != instance.vat_number:
-            from apps.common.eu_vat_validator import is_eu_country, parse_vat_number
+            from apps.billing.vies_evidence import profile_vat_identity
+            from apps.common.eu_vat_validator import is_eu_country
 
             if not created:
                 CustomerTaxProfile.objects.filter(pk=instance.pk).update(  # fsm-bypass: plain CharField, not FSMField
@@ -282,7 +283,7 @@ def handle_tax_profile_changes(
                 instance.vies_verified_at = None
                 instance.vies_verified_name = ""
             try:
-                vat_country = parse_vat_number(instance.vat_number)[0]
+                vat_country = profile_vat_identity(instance)[0]
             except ValueError:
                 vat_country = ""
             if is_eu_country(vat_country):

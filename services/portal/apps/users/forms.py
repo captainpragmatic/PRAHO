@@ -584,7 +584,7 @@ class PasswordResetConfirmForm(forms.Form):
     new_password = forms.CharField(
         label=_("New Password"),
         widget=forms.PasswordInput(attrs={"autocomplete": "new-password"}),
-        help_text=_("Choose a strong password with at least 8 characters."),
+        help_text=_("Choose a strong password with at least 12 characters."),
     )
     confirm_password = forms.CharField(
         label=_("Confirm New Password"),
@@ -600,8 +600,9 @@ class PasswordResetConfirmForm(forms.Form):
         if new_password and confirm_password and new_password != confirm_password:
             raise ValidationError(_("New password and confirmation don't match."))
 
-        if new_password and len(new_password) < CHANGE_PASSWORD_MIN_LENGTH:
-            raise ValidationError(_("Password must be at least 8 characters long."))
+        # The Platform's reset serializer requires twelve characters; say so before the round trip.
+        if new_password and len(new_password) < REGISTRATION_PASSWORD_MIN_LENGTH:
+            raise ValidationError(_("Password must be at least 12 characters long."))
 
         return cleaned_data
 

@@ -13,6 +13,7 @@ from apps.billing.gateways.vies_gateway import VIESResponse
 from apps.billing.tasks import validate_vat_number
 from apps.billing.tax_models import VATValidation
 from apps.common.eu_vat_validator import VATFormatResult
+from apps.customers.contact_models import CustomerAddress
 from apps.customers.models import Customer, CustomerTaxProfile
 
 User = get_user_model()
@@ -56,6 +57,31 @@ class VATValidationEvidencePersistenceTests(TestCase):
             vies_verification_status="valid", reverse_charge_eligible=True,
             vies_verified_at=self.verified_at, vies_verified_name="Original GmbH",
         )
+
+    def test_number_is_resolved_against_the_billing_country(self) -> None:
+        for country, number, expected in (
+            ("DE", "136695976", ("DE", "136695976")),
+            ("GR", "GR094259216", ("EL", "094259216")),
+        ):
+            with self.subTest(country=country, number=number):
+                CustomerAddress.objects.filter(customer=self.profile.customer).delete()
+                CustomerAddress.objects.create(
+                    customer=self.profile.customer, is_billing=True, is_current=True,
+                    address_line1="Teststrasse 1", city="Somewhere", country=country,
+                )
+                CustomerTaxProfile.objects.filter(pk=self.profile.pk).update(
+                    vat_number=number, vies_verification_status="pending"
+                )
+                response = VIESResponse(
+                    is_valid=True, country_code=expected[0], vat_number=expected[1], api_available=True,
+                )
+                with patch(_GATEWAY, return_value=response) as gateway:
+                    validate_vat_number(str(self.profile.pk))
+                gateway.assert_called_once()
+                passed = tuple(gateway.call_args.args) + tuple(gateway.call_args.kwargs.values())
+                self.assertEqual(passed[:2], expected)
+                self.profile.refresh_from_db()
+                self.assertEqual(self.profile.vies_verification_status, "valid")
 
     def test_vies_outage_keeps_recent_valid_profile(self) -> None:
         validation = VATValidation.objects.create(
