@@ -636,6 +636,20 @@ CATALOG: tuple[SettingDef, ...] = (
         critical=True,
     ),
     SettingDef(
+        key="billing.reverse_charge_requires_vies",
+        data_type="boolean",
+        default=True,
+        input_kind="toggle",
+        group="billing",
+        section=_("VAT"),
+        label=_("Reverse charge requires VIES evidence"),
+        help_text=_(
+            "When on, an EU business is zero-rated under reverse charge only after its VAT number "
+            "was confirmed in VIES. "
+            "When off, a VAT number on file is enough (not recommended)."
+        ),
+    ),
+    SettingDef(
         key="billing.subscription_grace_period_days",
         data_type="integer",
         default=7,

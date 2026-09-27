@@ -1323,8 +1323,11 @@ def customer_update(request: HttpRequest, customer: Customer) -> Response:
 @authentication_classes([])
 @permission_classes([AllowAny])
 @require_customer_authentication
-def customer_tax_profile_update(request: HttpRequest, customer: Customer) -> Response:
+def customer_tax_profile_update(  # noqa: C901, PLR0912  # Validate each permitted field before saving the profile
+    request: HttpRequest, customer: Customer
+) -> Response:
     """Update customer tax profile (CUI, VAT number, etc.)."""
+
     data = _get_request_data(request)
     try:
         user_id = _extract_user_id(data)
@@ -1338,8 +1341,10 @@ def customer_tax_profile_update(request: HttpRequest, customer: Customer) -> Res
             status=status.HTTP_403_FORBIDDEN,
         )
 
-    tax_bool_fields = {"is_vat_payer", "reverse_charge_eligible"}
+    tax_bool_fields = {"is_vat_payer"}
     tax_string_fields = {"cui", "vat_number", "registration_number"}
+    if "reverse_charge_eligible" in data:
+        logger.info("✅ [Customer API] Ignored derived reverse-charge flag for customer %s", customer.id)
 
     tax_profile, _created = CustomerTaxProfile.objects.get_or_create(customer=customer)
     update_fields = []
@@ -1364,7 +1369,18 @@ def customer_tax_profile_update(request: HttpRequest, customer: Customer) -> Res
                             {"success": False, "error": f"Invalid CUI: {result.error_message}"},
                             status=status.HTTP_400_BAD_REQUEST,
                         )
+                if field == "vat_number" and value:
+                    from apps.common.eu_vat_validator import parse_vat_number, validate_vat_format  # noqa: PLC0415
+
+                    country_code, vat_digits = parse_vat_number(value)
+                    vat_result = validate_vat_format(country_code, vat_digits)
+                    if not vat_result.is_valid:
+                        return Response(
+                            {"success": False, "error": f"Invalid VAT number: {vat_result.error_message}"},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
             setattr(tax_profile, field, value)
+
             update_fields.append(field)
 
     if update_fields:

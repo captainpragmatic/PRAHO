@@ -260,7 +260,11 @@ def _build_customer_vat_info(
     info["vat_number"] = getattr(tax_profile, "vat_number", None)
     info["is_vat_payer"] = bool(getattr(tax_profile, "is_vat_payer", False))
     info["reverse_charge_eligible"] = bool(getattr(tax_profile, "reverse_charge_eligible", False))
+    from apps.billing.vies_evidence import vies_verified_for  # noqa: PLC0415
+
+    info["vies_verified"] = vies_verified_for(tax_profile, info.get("vat_number"))
     vat_rate_override = getattr(tax_profile, "vat_rate", None)
+
     if vat_rate_override is not None:
         info["custom_vat_rate"] = vat_rate_override
     return info

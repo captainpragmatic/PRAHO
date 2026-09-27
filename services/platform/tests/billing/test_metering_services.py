@@ -1024,7 +1024,10 @@ class UsageInvoiceServiceTestCase(TestCase):
         self.assertEqual(invoice.bill_to_country, "RO")
 
     def test_usage_invoice_records_reverse_charge_decision_and_category(self):
-        CustomerTaxProfile.objects.create(customer=self.customer, vat_number="DE136695976", is_vat_payer=True)
+        CustomerTaxProfile.objects.create(
+            customer=self.customer, vat_number="DE136695976", is_vat_payer=True, vies_verification_status="valid",
+        )
+
         CustomerAddress.objects.create(
             customer=self.customer,
             is_billing=True,

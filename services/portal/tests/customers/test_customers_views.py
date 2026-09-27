@@ -564,9 +564,12 @@ class AddressDeleteConfirmTests(SimpleTestCase):
 
 @override_settings(
     SESSION_ENGINE="django.contrib.sessions.backends.cache",
-    CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
+    CACHES={"default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache", "LOCATION": "tax-profile-vies-views",
+    }},
 )
 class TaxProfileViewTests(SimpleTestCase):
+
     """F6: Admin role must be allowed to edit the tax profile."""
 
     def setUp(self) -> None:
@@ -588,8 +591,12 @@ class TaxProfileViewTests(SimpleTestCase):
         mock_api.post.return_value = {"success": True, "tax_profile": {}}
         self.client.post(
             reverse("customers:tax_profile"),
-            {"cui": "12345678", "is_vat_payer": "on"},
+            {"cui": "12345678", "is_vat_payer": "on", "reverse_charge_eligible": "on"},
         )
+        if role in {"owner", "billing"}:
+            payload = mock_api.update_customer_tax_profile.call_args.kwargs["data"]
+            self.assertNotIn("reverse_charge_eligible", payload)
+            self.assertIs(payload["is_vat_payer"], True)
 
     @patch("apps.customers.views.api_client")
     def test_admin_role_cannot_edit_tax_profile(self, mock_api: Any) -> None:

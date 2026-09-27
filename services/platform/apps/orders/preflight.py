@@ -132,6 +132,11 @@ class OrderPreflightValidationService:
                 if tax_profile is not None:
                     customer_vat_info["is_vat_payer"] = tax_profile.is_vat_payer
                     customer_vat_info["reverse_charge_eligible"] = tax_profile.reverse_charge_eligible
+                    from apps.billing.vies_evidence import vies_verified_for  # noqa: PLC0415
+
+                    customer_vat_info["vies_verified"] = vies_verified_for(
+                        tax_profile, customer_vat_info.get("vat_number")
+                    )
                     if tax_profile.vat_rate is not None:
                         customer_vat_info["custom_vat_rate"] = tax_profile.vat_rate
                 vat_result = OrderVATCalculator.calculate_vat(
@@ -142,13 +147,31 @@ class OrderPreflightValidationService:
             expected_total_cents = int(vat_result.total_cents)
 
             if int(order.tax_cents) != expected_tax_cents:
-                errors.append(
-                    str(
-                        _("VAT mismatch: order={}¢ vs computed={}¢ ({})").format(
-                            order.tax_cents, expected_tax_cents, vat_result.reasoning
+                from apps.common.tax_service import TaxService, VATScenario  # noqa: PLC0415
+
+                if (
+                    vat_result.scenario != VATScenario.EU_B2B_REVERSE_CHARGE
+                    and int(order.tax_cents) == 0
+                    and TaxService.is_eu_country(country)
+                    and country != TaxService.get_supplier_country()
+                ):
+                    errors.append(
+                        str(
+                            _(
+                                "VAT evidence missing for reverse charge; this order cannot be confirmed until "
+                                "the customer's VAT number is confirmed in VIES"
+                            )
                         )
                     )
-                )
+                else:
+                    errors.append(
+                        str(
+                            _("VAT mismatch: order={}¢ vs computed={}¢ ({})").format(
+                                order.tax_cents, expected_tax_cents, vat_result.reasoning
+                            )
+                        )
+                    )
+
             if int(order.total_cents) != expected_total_cents:
                 errors.append(
                     str(

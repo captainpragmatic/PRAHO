@@ -51,6 +51,10 @@
             {% endif %}
           </div>
           {% endfor %}
+          <div>
+            <span class="block text-sm font-medium text-slate-300">{% trans "Reverse charge (VIES)" %}</span>
+            <p class="text-sm text-slate-400">{{ form.instance.get_vies_verification_status_display }}</p>
+          </div>
         </div>
 
         <!-- Form Actions -->

@@ -86,6 +86,7 @@ class D390FixtureMixin:
                 "vat_number": vat,
                 "is_business": True,
                 "is_vat_payer": True,
+                "vies_verified": True,
             },
         )
         data = {
@@ -152,6 +153,7 @@ class ECSalesAggregationTests(D390FixtureMixin, TestCase):
                     "vat_number": "EL094259216",
                     "is_business": True,
                     "is_vat_payer": True,
+                    "vies_verified": True,
                 },
             )
         )

@@ -161,7 +161,6 @@ class CustomerTaxProfileForm(forms.ModelForm):
             "is_vat_payer",
             "vat_number",
             "vat_rate",
-            "reverse_charge_eligible",
         )
 
         widgets: ClassVar[dict[str, forms.Widget]] = {

@@ -62,7 +62,9 @@ class CustomerVATInfo(TypedDict, total=False):
     Per-customer overrides (from CustomerTaxProfile):
         is_vat_payer: If False, customer is not VAT-registered → no reverse charge, treated as B2C
         custom_vat_rate: Explicit per-customer rate override (as percentage, e.g. 15.0)
-        reverse_charge_eligible: If True + EU country + VAT number → force reverse charge
+        vies_verified: VIES confirmed the exact VAT number used by this document
+        reverse_charge_eligible: Deprecated compatibility field; not used for tax decisions
+
 
     Audit context:
         customer_id: For audit logging
@@ -77,7 +79,8 @@ class CustomerVATInfo(TypedDict, total=False):
     # Per-customer overrides from CustomerTaxProfile
     is_vat_payer: bool
     custom_vat_rate: Decimal | None
-    reverse_charge_eligible: bool
+    vies_verified: bool
+    reverse_charge_eligible: bool  # Deprecated; retained for caller compatibility.
 
 
 @dataclass
@@ -282,39 +285,22 @@ class TaxConfiguration:
     def calculate_vat(
         cls, amount_cents: int, country_code: str = "", is_business: bool = False, vat_number: str | None = None
     ) -> VATResult:
+        """Calculate VAT through the scenario resolver without writing an audit event.
+
+        Without profile evidence this adapter never grants reverse charge.
+        Amounts use ROUND_HALF_EVEN; vat_rate_percent remains a percent Decimal.
         """
-        Calculate VAT for an amount using proper rounding.
-
-        Args:
-            amount_cents: Amount in cents
-            country_code: Country for VAT rate
-            is_business: Whether customer is a business (for EU reverse charge)
-            vat_number: VAT number for reverse charge checking
-
-        Returns:
-            VATResult with vat_cents, total_cents, and vat_rate_percent
-        """
-        supplier_country = cls.get_supplier_country()
-        country_code = country_code.upper().strip() if country_code else supplier_country
-
-        # EU B2B reverse charge: 0% VAT when the business customer is in an EU
-        # country other than the supplier's own — a domestic sale is not cross-border.
-        if is_business and vat_number and cls.is_eu_country(country_code) and country_code != supplier_country:
-            logger.info(f"💰 [TaxService] EU B2B reverse charge: {country_code} VAT {vat_number} → 0% VAT")
-            return VATResult(
-                vat_cents=0,
-                total_cents=amount_cents,
-                vat_rate_percent=Decimal("0.0"),
-            )
-
-        # Get VAT rate as decimal (e.g., 0.21 for 21%)
-        vat_rate = cls.get_vat_rate(country_code, as_decimal=True)
-
-        # Calculate VAT with banker's rounding
-        vat_amount = Decimal(amount_cents) * vat_rate
+        customer_info: CustomerVATInfo = {
+            "country": country_code,
+            "is_business": is_business,
+            "vat_number": vat_number,
+        }
+        _scenario, vat_rate, _is_business, _vat_number = cls._determine_vat_scenario(
+            country_code, is_business, vat_number, customer_info=customer_info
+        )
+        vat_amount = Decimal(amount_cents) * (vat_rate / Decimal("100"))
         vat_cents = int(vat_amount.quantize(Decimal("1"), rounding=ROUND_HALF_EVEN))
-
-        return VATResult(vat_cents=vat_cents, total_cents=amount_cents + vat_cents, vat_rate_percent=vat_rate * 100)
+        return VATResult(vat_cents=vat_cents, total_cents=amount_cents + vat_cents, vat_rate_percent=vat_rate)
 
     @classmethod
     def invalidate_cache(cls, country_code: str | None = None) -> None:
@@ -453,8 +439,9 @@ class TaxConfiguration:
         Per-customer overrides (from CustomerTaxProfile) are checked FIRST:
         1. is_vat_payer=False → disable reverse charge, treat as B2C consumer
         2. custom_vat_rate set → use that rate (CUSTOM_RATE_OVERRIDE scenario)
-        3. reverse_charge_eligible + EU + VAT number → force reverse charge
+        3. EU cross-border VAT payer with matching VIES evidence → reverse charge
         """
+        from apps.billing.config import reverse_charge_requires_vies  # noqa: PLC0415
 
         # Normalize and validate country code
         country_code = country_code.upper().strip() if country_code else cls.get_supplier_country()
@@ -483,13 +470,13 @@ class TaxConfiguration:
                     )
                     return VATScenario.CUSTOM_RATE_OVERRIDE, Decimal(str(custom_rate)), is_business, vat_number
 
-                # 3. Reverse charge via profile flag (EU B2B shortcut)
+                # 3. Only evidence for the invoiced VAT number permits reverse charge.
                 if (
                     customer_info.get("is_vat_payer") is True
-                    and customer_info.get("reverse_charge_eligible")
                     and vat_number
                     and country_code in cls.get_eu_countries()
                     and country_code != cls.get_supplier_country()
+                    and (customer_info.get("vies_verified") is True or not reverse_charge_requires_vies())
                 ):
                     return VATScenario.EU_B2B_REVERSE_CHARGE, Decimal("0.0"), is_business, vat_number
 
@@ -512,13 +499,9 @@ class TaxConfiguration:
 
         # EU member states with valid codes
         elif country_code in cls.get_eu_countries():
-            if is_business and vat_number and customer_info and customer_info.get("is_vat_payer") is True:
-                # B2B EU: Reverse charge (0% VAT, customer pays in their country)
-                return VATScenario.EU_B2B_REVERSE_CHARGE, Decimal("0.0"), is_business, vat_number
-            else:
-                # B2C EU: Apply customer country VAT rate
-                vat_rate = cls.get_vat_rate(country_code)
-                return VATScenario.EU_B2C, vat_rate, is_business, vat_number
+            # EU businesses without evidence also pay destination VAT.
+            vat_rate = cls.get_vat_rate(country_code)
+            return VATScenario.EU_B2C, vat_rate, is_business, vat_number
 
         # Unknown/Invalid country codes - fail safe to the supplier's own rate.
         # This branch is taken precisely when the data is already bad, so charging
@@ -569,7 +552,10 @@ class TaxConfiguration:
             return f"Domestic business ({supplier_country}) - apply {supplier_country} VAT {vat_rate}%"
 
         if scenario == VATScenario.EU_B2C:
+            if is_business:
+                return "EU business without VIES-verified VAT number → destination VAT"
             eu_rate = cls.get_vat_rate(country_code)
+
             return f"EU consumer ({country_code}) - apply destination country VAT {eu_rate}%"
 
         if scenario == VATScenario.EU_B2B_REVERSE_CHARGE:

@@ -401,8 +401,11 @@ def start_dunning_process(invoice_id: str) -> dict[str, Any]:  # noqa: PLR0912  
         return {"success": False, "error": str(e)}
 
 
-def validate_vat_number(tax_profile_id: str) -> dict[str, Any]:
+def validate_vat_number(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Explicit validation and locked persistence stages
+    tax_profile_id: str,
+) -> dict[str, Any]:
     """Validate a customer's VAT number with format check and VIES verification.
+
 
     Routing logic:
     - Detects country from VAT prefix (defaults to RO if no prefix).
@@ -422,6 +425,8 @@ def validate_vat_number(tax_profile_id: str) -> dict[str, Any]:
     logger.info("[VAT] Validating VAT number for tax profile %s", tax_profile_id)
 
     from apps.billing.gateways.vies_gateway import VIESGateway  # noqa: PLC0415
+    from apps.billing.tax_models import VATValidation  # noqa: PLC0415
+    from apps.billing.vies_evidence import normalize_vat_number  # noqa: PLC0415
     from apps.common.eu_vat_validator import (  # noqa: PLC0415
         is_eu_country,
         parse_vat_number,
@@ -431,6 +436,7 @@ def validate_vat_number(tax_profile_id: str) -> dict[str, Any]:
 
     try:
         tax_profile = CustomerTaxProfile.objects.select_related("customer").get(id=tax_profile_id)
+        validated_number = normalize_vat_number(tax_profile.vat_number)
 
         if not tax_profile.vat_number:
             logger.info("[VAT] No VAT number for tax profile %s", tax_profile_id)
@@ -440,7 +446,13 @@ def validate_vat_number(tax_profile_id: str) -> dict[str, Any]:
         country_code, vat_digits = parse_vat_number(tax_profile.vat_number)
 
         if not is_eu_country(country_code):
-            _update_tax_profile_vies(tax_profile, status="not_applicable")
+            with transaction.atomic():
+                tax_profile = CustomerTaxProfile.objects.select_for_update().get(pk=tax_profile_id)
+                if normalize_vat_number(tax_profile.vat_number) != validated_number:
+                    logger.warning("⚠️ [VAT] Number changed during validation for profile %s", tax_profile_id)
+                    return {"success": True, "skipped": "vat_number_changed"}
+                _update_tax_profile_vies(tax_profile, status="not_applicable")
+
             return {
                 "success": True,
                 "tax_profile_id": str(tax_profile.id),
@@ -451,6 +463,10 @@ def validate_vat_number(tax_profile_id: str) -> dict[str, Any]:
         fmt = validate_vat_format(country_code, vat_digits)
         if not fmt.is_valid:
             with transaction.atomic():
+                tax_profile = CustomerTaxProfile.objects.select_for_update().get(pk=tax_profile_id)
+                if normalize_vat_number(tax_profile.vat_number) != validated_number:
+                    logger.warning("⚠️ [VAT] Number changed during validation for profile %s", tax_profile_id)
+                    return {"success": True, "skipped": "vat_number_changed"}
                 _store_validation(
                     fmt.country_code,
                     vat_digits,
@@ -492,12 +508,34 @@ def validate_vat_number(tax_profile_id: str) -> dict[str, Any]:
             is_valid = False  # Format passed but VIES not confirmed — not valid for reverse charge
             status = "format_only"
             logger.warning(
-                "[VAT] VIES unavailable for %s, format-only recorded (not eligible for reverse charge)",
+                "⚠️ [VAT] VIES unavailable for %s; checking existing evidence before persistence",
                 fmt.full_vat_number,
             )
 
-        # Step 4: Store results — atomic to keep VATValidation + TaxProfile in sync
+        # Step 4: Bind persistence and outage handling to the current locked profile.
         with transaction.atomic():
+            tax_profile = CustomerTaxProfile.objects.select_for_update().get(pk=tax_profile_id)
+            if normalize_vat_number(tax_profile.vat_number) != validated_number:
+                logger.warning("⚠️ [VAT] Number changed during validation for profile %s", tax_profile_id)
+                return {"success": True, "skipped": "vat_number_changed"}
+            now = timezone.now()
+            grace = timedelta(days=getattr(settings, "VIES_OUTAGE_GRACE_DAYS", 14))
+            if (
+                not vies.api_available
+                and tax_profile.vies_verification_status == CustomerTaxProfile.VIESVerificationStatus.VALID
+                and tax_profile.vies_verified_at is not None
+                and now - grace <= tax_profile.vies_verified_at <= now
+            ):
+                validation = (
+                    VATValidation.objects.select_for_update()
+                    .filter(country_code=country_code, vat_number=vat_digits, is_valid=True)
+                    .first()
+                )
+                if validation is not None:
+                    validation.expires_at = max(validation.expires_at or now, now) + timedelta(hours=24)
+                    validation.save(update_fields=["expires_at"])
+                logger.warning("⚠️ [VAT] VIES unavailable; preserving recent evidence for %s", validated_number)
+                return {"success": True, "status": "vies_unavailable_grace"}
             _store_validation(
                 country_code,
                 vat_digits,

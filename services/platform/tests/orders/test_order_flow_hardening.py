@@ -169,7 +169,9 @@ class TestPreflightOrderService(TestCase):
             vat_number='DE123456789',
             is_vat_payer=True,
             reverse_charge_eligible=True,
+            vies_verification_status="valid",
         )
+
         order = Order.objects.create(
             customer=customer,
             currency=self.currency,

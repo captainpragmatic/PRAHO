@@ -118,6 +118,15 @@ def get_invoice_payment_terms_days() -> int:
         return _get_positive_int("BILLING_PAYMENT_TERMS_DAYS", 14)
 
 
+def reverse_charge_requires_vies() -> bool:
+    """Return the evidence policy, requiring VIES if settings cannot be read."""
+    try:
+        return SettingsService.get_boolean_setting("billing.reverse_charge_requires_vies", True)
+    except Exception:
+        logger.warning("⚠️ [Billing] Cannot read reverse-charge evidence policy; requiring VIES", exc_info=True)
+        return True
+
+
 # Backward-compatible module-level (for code that reads it at import time)
 DEFAULT_PAYMENT_TERMS_DAYS = 14
 

@@ -266,13 +266,27 @@ def handle_tax_profile_changes(
         if instance.cui and (created or old_values.get("cui") != instance.cui):
             _validate_romanian_cui(instance)
 
-        # VAT number validation for EU customers (only when the VAT number changed)
-        if (
-            instance.vat_number
-            and instance.vat_number.startswith(("RO", "DE", "FR", "IT"))
-            and (created or old_values.get("vat_number") != instance.vat_number)
-        ):
-            _trigger_vat_validation(instance)
+        # A changed number cannot inherit the previous number's evidence.
+        if created or old_values.get("vat_number") != instance.vat_number:
+            from apps.common.eu_vat_validator import is_eu_country, parse_vat_number
+
+            if not created:
+                CustomerTaxProfile.objects.filter(pk=instance.pk).update(  # fsm-bypass: plain CharField, not FSMField
+                    vies_verification_status=CustomerTaxProfile.VIESVerificationStatus.PENDING,
+                    reverse_charge_eligible=False,
+                    vies_verified_at=None,
+                    vies_verified_name="",
+                )
+                instance.vies_verification_status = CustomerTaxProfile.VIESVerificationStatus.PENDING
+                instance.reverse_charge_eligible = False
+                instance.vies_verified_at = None
+                instance.vies_verified_name = ""
+            try:
+                vat_country = parse_vat_number(instance.vat_number)[0]
+            except ValueError:
+                vat_country = ""
+            if is_eu_country(vat_country):
+                _trigger_vat_validation(instance)
 
         # Compliance logging for Romanian tax authorities
         if is_romanian_registration:

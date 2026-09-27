@@ -168,7 +168,9 @@ class OrderCreateCustomerScopingTests(TestCase):
             vat_number="DE123456789",
             is_vat_payer=True,
             reverse_charge_eligible=True,
+            vies_verification_status="valid",
         )
+
         product = Product.objects.create(
             slug="preview-reverse-charge-hosting",
             name="Preview reverse-charge hosting",

@@ -415,7 +415,10 @@ class SubscriptionInvoicePaymentTestCase(_SubscriptionInvoicePaymentFixture, Tes
         self.assertEqual(cycle.proforma.bill_to_tax_id, "")
 
     def test_recurring_proforma_records_and_preserves_reverse_charge_evidence(self) -> None:
-        CustomerTaxProfile.objects.create(customer=self.customer, vat_number="DE136695976", is_vat_payer=True)
+        CustomerTaxProfile.objects.create(
+            customer=self.customer, vat_number="DE136695976", is_vat_payer=True, vies_verification_status="valid",
+        )
+
         CustomerAddress.objects.create(customer=self.customer, is_billing=True, address_line1="Example 1",
             city="Berlin", county="Berlin", postal_code="10115", country="DE")
         now = timezone.now()

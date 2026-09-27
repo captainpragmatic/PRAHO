@@ -216,6 +216,9 @@ def _get_vat_rate_for_order(order: Order) -> Decimal:
             tax_profile = customer.tax_profile
             info["is_vat_payer"] = tax_profile.is_vat_payer
             info["reverse_charge_eligible"] = tax_profile.reverse_charge_eligible
+            from apps.billing.vies_evidence import vies_verified_for  # noqa: PLC0415
+
+            info["vies_verified"] = vies_verified_for(tax_profile, info.get("vat_number"))
             if tax_profile.vat_rate is not None:
                 info["custom_vat_rate"] = tax_profile.vat_rate
         except Exception:  # noqa: S110
@@ -673,6 +676,9 @@ def order_create_preview(request: HttpRequest) -> HttpResponse:
         if tax_profile is not None:
             customer_vat_info["is_vat_payer"] = tax_profile.is_vat_payer
             customer_vat_info["reverse_charge_eligible"] = tax_profile.reverse_charge_eligible
+            from apps.billing.vies_evidence import vies_verified_for  # noqa: PLC0415
+
+            customer_vat_info["vies_verified"] = vies_verified_for(tax_profile, customer_vat_info.get("vat_number"))
             if tax_profile.vat_rate is not None:
                 customer_vat_info["custom_vat_rate"] = tax_profile.vat_rate
         vat_result = OrderVATCalculator.calculate_vat(subtotal_cents=subtotal_cents, customer_info=customer_vat_info)

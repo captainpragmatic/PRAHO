@@ -86,6 +86,9 @@ def _customer_vat_info(
     if tax_profile is not None:
         info["is_vat_payer"] = tax_profile.is_vat_payer
         info["reverse_charge_eligible"] = tax_profile.reverse_charge_eligible
+        from apps.billing.vies_evidence import vies_verified_for  # noqa: PLC0415
+
+        info["vies_verified"] = vies_verified_for(tax_profile, info.get("vat_number"))
         if tax_profile.vat_rate is not None:
             info["custom_vat_rate"] = tax_profile.vat_rate
     return info

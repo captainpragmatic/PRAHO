@@ -262,7 +262,11 @@ class OrderCalculationService:
                 tax_profile = customer.tax_profile
                 customer_vat_info["is_vat_payer"] = tax_profile.is_vat_payer
                 customer_vat_info["reverse_charge_eligible"] = tax_profile.reverse_charge_eligible
+                from apps.billing.vies_evidence import vies_verified_for  # noqa: PLC0415
+
+                customer_vat_info["vies_verified"] = vies_verified_for(tax_profile, customer_vat_info.get("vat_number"))
                 # Pass custom rate if explicitly set (None means "use country default")
+
                 if tax_profile.vat_rate is not None:
                     customer_vat_info["custom_vat_rate"] = tax_profile.vat_rate
             except (ObjectDoesNotExist, AttributeError):
@@ -495,6 +499,11 @@ class OrderService:
                             tax_profile = data.customer.tax_profile
                             customer_vat_info["is_vat_payer"] = tax_profile.is_vat_payer
                             customer_vat_info["reverse_charge_eligible"] = tax_profile.reverse_charge_eligible
+                            from apps.billing.vies_evidence import vies_verified_for  # noqa: PLC0415
+
+                            customer_vat_info["vies_verified"] = vies_verified_for(
+                                tax_profile, customer_vat_info.get("vat_number")
+                            )
                             if tax_profile.vat_rate is not None:
                                 customer_vat_info["custom_vat_rate"] = tax_profile.vat_rate
                         except (ObjectDoesNotExist, AttributeError):
