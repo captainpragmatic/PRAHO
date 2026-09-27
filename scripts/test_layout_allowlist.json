@@ -16,6 +16,9 @@
     "^EFacturaEnvironmentTestCase\\.test_oauth_base_url$",
     "^EnhancedWebAuthnCredentialTest\\.test_webauthn_credential_defaults$",
     "^TestCanBeDestroyedIncludesStopped\\.test_",
-    "^TestGDPRCompliantCartSession(Mocked)?\\.test_create_empty_cart$"
+    "^TestGDPRCompliantCartSession(Mocked)?\\.test_create_empty_cart$",
+    "^CounterStoreTests\\.test_",
+    "^CounterStoreConcurrencyTests\\.test_",
+    "^CounterClaimVisibilityTests\\.test_"
   ]
 }

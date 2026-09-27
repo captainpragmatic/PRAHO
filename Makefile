@@ -337,8 +337,12 @@ test-portal:
 test-integration:
 	@echo "🔄 [Integration] Testing services communication and cache functionality..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo "🧪 Running integration tests..."
-	@PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -m pytest tests/integration/ -v
+	@echo "🧪 Running counter store tests on the configured database..."
+	@$(PYTHON_PLATFORM) -m pytest tests/common/test_counters.py \
+		--ds="$${DJANGO_SETTINGS_MODULE:-config.settings.test}" -o addopts= -v
+	@echo "🧪 Running integration, parity and deploy tests..."
+	@PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -m pytest \
+		tests/integration/ tests/test_cross_service_parity.py -v
 	@echo "✅ Integration tests completed!"
 
 test-cache:
