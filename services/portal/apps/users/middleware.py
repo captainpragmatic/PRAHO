@@ -195,8 +195,8 @@ class PortalAuthenticationMiddleware:
         next_validate_at = self._get_session_datetime(request, "next_validate_at")
         session_created_at = self._get_session_datetime(request, "session_created_at", now)
 
-        # Initialize session metadata if missing
-        if not validated_at or not next_validate_at:
+        # Validate immediately when metadata or the credential binding is missing.
+        if not validated_at or not next_validate_at or "session_auth_hash" not in request.session:
             # Fresh session - validate immediately but set next validation with jitter
             request.session["session_created_at"] = (session_created_at or now).isoformat()
             next_validate_at = self._calculate_next_validation_time(now)
@@ -211,9 +211,9 @@ class PortalAuthenticationMiddleware:
         # Check if we're within soft grace period (stale-while-revalidate)
         soft_deadline = next_validate_at + timedelta(seconds=self.SOFT_TTL_GRACE)
         if now <= soft_deadline:
-            # Try to revalidate in background, but allow request through
+            # Propagate validation results when this request acquires the single-flight lock.
             if self._should_revalidate_async(user_id):
-                self._perform_validation(request, user_id, now)
+                return self._perform_validation(request, user_id, now)
             return True
 
         # Check if we're within hard grace period (force validation)
@@ -258,16 +258,24 @@ class PortalAuthenticationMiddleware:
         cache.set(lock_key, time.time() + self.VALIDATION_TIMEOUT, timeout=self.VALIDATION_TIMEOUT)
         return True
 
-    def _perform_validation(self, request: HttpRequest, user_id: str, now: datetime) -> bool:
+    def _perform_validation(  # noqa: C901, PLR0912 -- session refresh and explicit error policies
+        self, request: HttpRequest, user_id: str, now: datetime
+    ) -> bool:
         """
+
         Perform actual Platform API validation and update session metadata.
         """
         try:
             # Call secure Platform API validation (HMAC-signed, no ID enumeration)
-            validation_response = api_client.validate_session_secure(user_id)
+            validation_response = api_client.validate_session_secure(
+                user_id, session_auth_hash=request.session.get("session_auth_hash")
+            )
             is_valid = validation_response and validation_response.get("active", False)
 
             if is_valid:
+                if "session_auth_hash" in validation_response:
+                    request.session["session_auth_hash"] = validation_response["session_auth_hash"]
+
                 if "localisation_preferences" in validation_response:
                     store_localisation_preferences(request, validation_response["localisation_preferences"])
                 # Update session with successful validation
@@ -303,6 +311,9 @@ class PortalAuthenticationMiddleware:
                 return False
 
         except PlatformAPIError as e:
+            if e.status_code in (401, 403):
+                logger.warning("🚨 [Auth] Session rejected by Platform for user %s", user_id)
+                return False
             if e.is_rate_limited:
                 raise
             logger.error(f"🔥 [Auth] Platform API error during validation for {user_id}: {e}")

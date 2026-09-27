@@ -54,9 +54,14 @@ class AuthenticateCustomerContractTests(SimpleTestCase):
         response = Mock()
         response.status_code = 200
         response.headers = {"Content-Type": "application/json"}
-        response.json.return_value = {"success": True, "user": {"id": 7, "customer_id": 3}}
+        response.json.return_value = {
+            "success": True,
+            "user": {"id": 7, "customer_id": 3},
+            "session_auth_hash": "credential-hash",
+        }
 
         with patch("apps.api_client.services.portal_request", return_value=response):
+
             result = self.api_client.authenticate_customer("a@b.com", "pw")
 
         self.assertEqual(
@@ -67,5 +72,7 @@ class AuthenticateCustomerContractTests(SimpleTestCase):
                 "user_id": 7,
                 "customer_id": 3,
                 "customer_data": {"id": 7, "customer_id": 3},
+                "session_auth_hash": "credential-hash",
             },
+
         )

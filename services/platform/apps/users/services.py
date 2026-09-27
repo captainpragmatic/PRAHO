@@ -1133,6 +1133,11 @@ class SessionSecurityService:
         }
 
     @classmethod
+    def invalidate_all_sessions_for_user(cls, user_id: int) -> None:
+        """Invalidate every Platform session belonging to the user."""
+        cls._invalidate_other_user_sessions(user_id, keep_session_key="")
+
+    @classmethod
     def rotate_session_on_password_change(cls, request: HttpRequest, user: User | None = None) -> None:
         """🔒 Rotate session after password change and invalidate other sessions"""
         if not request.user.is_authenticated and not user:

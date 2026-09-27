@@ -261,8 +261,10 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
                     request.session["email"] = email
                     request.session["authenticated_at"] = timezone.now().isoformat()
                     request.session["remember_me"] = remember_me
+                    request.session["session_auth_hash"] = auth_response.get("session_auth_hash") or ""
 
                     # Fetch and cache user's customer memberships for role-based access
+
                     try:
                         memberships = _get_user_customer_memberships(request)
                         if memberships:
@@ -650,14 +652,16 @@ def change_password_view(request: HttpRequest) -> HttpResponse:
     form = ChangePasswordForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         try:
-            changed = api_client.update_customer_password(
+            result = api_client.update_customer_password(
                 int(request.session["user_id"]),
                 form.cleaned_data["new_password"],
                 form.cleaned_data["current_password"],
                 form.cleaned_data.get("token", ""),
             )
-            if changed:
+            if result and result.get("success"):
+                request.session["session_auth_hash"] = result.get("session_auth_hash") or ""
                 request.session.cycle_key()
+
                 messages.success(request, _("Password changed successfully!"))
                 return redirect("users:profile")
             form.add_error(None, _("Password change failed. Check your current password and authentication code."))

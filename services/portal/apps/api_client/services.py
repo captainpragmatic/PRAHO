@@ -593,6 +593,7 @@ class PlatformAPIClient:
                     "user_id": user_data.get("id"),
                     "customer_id": user_data.get("customer_id"),
                     "customer_data": data.get("user", {}),
+                    "session_auth_hash": data.get("session_auth_hash"),
                 }
             return None
 
@@ -610,8 +611,9 @@ class PlatformAPIClient:
                 while (time.perf_counter() - start_time) < min_duration:
                     pass
 
-    def validate_session_secure(self, user_id: str) -> dict[str, Any]:
+    def validate_session_secure(self, user_id: str, session_auth_hash: str | None = None) -> dict[str, Any]:
         """
+
         🔒 SECURE session validation using HMAC-signed context (No JWT, No ID enumeration)
 
         Sends customer context in request body, signed by HMAC headers.
@@ -619,9 +621,14 @@ class PlatformAPIClient:
         """
         # Create request body with user context
         current_timestamp = time.time()
-        request_data = {"user_id": user_id, "timestamp": current_timestamp}
+        request_data = {
+            "user_id": user_id,
+            "timestamp": current_timestamp,
+            "session_auth_hash": session_auth_hash or "",
+        }
 
         # Do not swallow PlatformAPIError here.
+
         # Middleware owns policy decisions (fail-open vs fail-closed) based on error type.
         return self._make_request(
             "POST",
@@ -705,8 +712,14 @@ class PlatformAPIClient:
             logger.warning(f"⚠️ [API Client] Failed to update customer profile: {e}")
             return False
 
-    def update_customer_password(self, user_id: int, new_password: str, current_password: str, token: str = "") -> bool:
-        """Update customer password (requires user_id in signed body for HMAC validation)."""
+    def update_customer_password(
+        self, user_id: int, new_password: str, current_password: str, token: str = ""
+    ) -> dict[str, Any] | None:
+        """Return the successful response, including session_auth_hash, or None on failure.
+
+        The signed body includes user_id; rate-limit errors propagate to the caller.
+        """
+
         try:
             data = self._make_request(
                 "PUT",
@@ -720,13 +733,13 @@ class PlatformAPIClient:
                 },
             )
 
-            return bool(data.get("success", False))
+            return data if data.get("success") else None
 
         except PlatformAPIError as e:
             if e.is_rate_limited:
                 raise
             logger.warning(f"⚠️ [API Client] Failed to update customer password: {e}")
-            return False
+            return None
 
     # ===============================================================================
     # MULTI-FACTOR AUTHENTICATION API ENDPOINTS

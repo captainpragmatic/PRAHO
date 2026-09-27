@@ -15,6 +15,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.http import HttpRequest, JsonResponse
+from django.utils.crypto import constant_time_compare
 from django.utils.translation import gettext as _
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_exempt
@@ -47,6 +48,7 @@ from apps.common.performance.rate_limiting import (
     forwarded_client_ip,
 )
 from apps.common.request_ip import get_safe_client_ip
+from apps.common.validators import log_security_event
 from apps.customers.models import Customer
 from apps.users.forms import UserRegistrationForm
 from apps.users.mfa import MFAService
@@ -164,7 +166,14 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911 -- 
             "localisation_preferences": user_localisation_preferences(user),
         }
 
-        return JsonResponse({"success": True, "user": user_data, "message": "Authentication successful"})
+        return JsonResponse(
+            {
+                "success": True,
+                "user": user_data,
+                "session_auth_hash": user.get_session_auth_hash(),
+                "message": "Authentication successful",
+            }
+        )
 
     except json.JSONDecodeError:
         return JsonResponse({"success": False, "error": "Invalid JSON in request body"}, status=400)
@@ -449,8 +458,9 @@ class SessionValidationThrottle(EndpointRateThrottle):
 @permission_classes([AllowAny])  # HMAC authentication via @require_portal_authentication below
 @throttle_classes([PortalHMACRateThrottle, PortalHMACBurstThrottle, SessionValidationThrottle])
 @require_portal_authentication
-def validate_session_secure(request: HttpRequest) -> Response:
+def validate_session_secure(request: HttpRequest) -> Response:  # noqa: PLR0911 -- distinct session rejection paths
     """
+
     🔒 SECURE Session Validation - HMAC-Signed Context (No JWT)
 
     Endpoint: POST /api/users/session/validate/
@@ -459,7 +469,9 @@ def validate_session_secure(request: HttpRequest) -> Response:
     Request Body:
     {
         "user_id": "2",
+        "session_auth_hash": "<session auth hash returned by login>",
         "timestamp": 1694022337
+
     }
 
     Headers:
@@ -468,9 +480,15 @@ def validate_session_secure(request: HttpRequest) -> Response:
         X-Timestamp: <unix timestamp>
         X-Signature: <HMAC signature covering body + headers>
 
-    Response: {"active": true, "membership_hash": "a1b2c3...", "revoke_before": "..."}
+    Response: {
+        "active": true,
+        "membership_hash": "a1b2c3...",
+        "session_auth_hash": "<current session auth hash>",
+        "revoke_before": "..."
+    }
 
     Security Features:
+
     - No user IDs in URL (prevents enumeration)
     - HMAC-signed request body (simpler than JWT)
     - Rate limiting (60/min per portal)
@@ -496,6 +514,7 @@ def validate_session_secure(request: HttpRequest) -> Response:
         try:
             request_data = request.data if hasattr(request, "data") else json.loads(request.body)
             user_id = request_data.get("user_id")
+            session_auth_hash = request_data.get("session_auth_hash")
             request_timestamp = request_data.get("timestamp")
 
             if not user_id:
@@ -516,8 +535,19 @@ def validate_session_secure(request: HttpRequest) -> Response:
         # Validate user exists and is active
         try:
             user = User.objects.get(id=user_id, is_active=True)
+            current_auth_hash = user.get_session_auth_hash()
+            if not isinstance(session_auth_hash, str) or not (
+                constant_time_compare(session_auth_hash, current_auth_hash)
+                or any(
+                    constant_time_compare(session_auth_hash, fallback_hash)
+                    for fallback_hash in user.get_session_auth_fallback_hash()
+                )
+            ):
+                logger.warning("🚨 [Security] Portal %s session credential rejected (jti: %s)", portal_id, jti)
+                return _uniform_session_error(security_headers)
 
             # Compute a stable hash of the user's active memberships so Portal
+
             # can detect changes (role grant/revoke) without polling.
             # Truncated to 64 bits — sufficient for change detection (not a security boundary).
             memberships = (
@@ -535,6 +565,7 @@ def validate_session_secure(request: HttpRequest) -> Response:
 
             response_data = {
                 "active": True,
+                "session_auth_hash": current_auth_hash,
                 "membership_hash": membership_hash,
                 "localisation_preferences": user_localisation_preferences(user),
                 "revoke_before": next_validation.isoformat(),
@@ -999,8 +1030,9 @@ def password_change_api(request: HttpRequest, user: User) -> Response:
             return Response({"success": False, "error": "Invalid authentication code"}, status=400)
         user.set_password(new_password)
         user.save(update_fields=["password"])
-        SessionSecurityService.rotate_session_on_password_change(request, user)
-    return Response({"success": True})
+        SessionSecurityService.invalidate_all_sessions_for_user(user.id)
+        log_security_event("portal_password_changed", {"user_id": user.id}, get_safe_client_ip(request))
+    return Response({"success": True, "session_auth_hash": user.get_session_auth_hash()})
 
 
 @api_view(["POST"])
