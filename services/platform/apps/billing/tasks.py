@@ -495,11 +495,25 @@ def validate_vat_number(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Explicit va
             }
         vies = VIESGateway.check_vat(country_code, vat_digits, **requester_kwargs)
 
+        from apps.billing.config import (  # noqa: PLC0415
+            get_vies_outage_grace_days,
+            reverse_charge_requires_consultation_reference,
+        )
+
         source: Literal["vies", "format_check", "manual", "cached"]
         if vies.api_available:
             source = "vies"
             is_valid = vies.is_valid
             status = "valid" if vies.is_valid else "invalid"
+            if (
+                vies.is_valid
+                and reverse_charge_requires_consultation_reference()
+                and not vies.request_identifier.strip()
+            ):
+                source = "format_check"
+                is_valid = False
+                status = "format_only"
+                logger.warning("🚨 [VAT] Valid VIES response lacks a consultation reference: %s", fmt.full_vat_number)
         else:
             # VIES down — record format-only result but do NOT grant reverse charge.
             # Naming note: "format_check" is VATValidation.validation_source (HOW it was validated);
@@ -519,7 +533,7 @@ def validate_vat_number(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Explicit va
                 logger.warning("⚠️ [VAT] Number changed during validation for profile %s", tax_profile_id)
                 return {"success": True, "skipped": "vat_number_changed"}
             now = timezone.now()
-            grace = timedelta(days=getattr(settings, "VIES_OUTAGE_GRACE_DAYS", 14))
+            grace = timedelta(days=get_vies_outage_grace_days())
             if (
                 not vies.api_available
                 and tax_profile.vies_verification_status == CustomerTaxProfile.VIESVerificationStatus.VALID
@@ -546,11 +560,14 @@ def validate_vat_number(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Explicit va
                 company_address=vies.company_address,
                 consultation_reference=vies.request_identifier,
                 response_data=vies.raw_response,
+                validated_at=now,
             )
             _update_tax_profile_vies(
                 tax_profile,
                 status=status,
                 company_name=vies.company_name if vies.api_available else "",
+                consultation_reference=vies.request_identifier if vies.api_available else "",
+                verified_at=now,
             )
 
         logger.info("[VAT] Validated %s: %s (source=%s)", fmt.full_vat_number, status, source)
@@ -601,8 +618,9 @@ def _store_validation(  # noqa: PLR0913
     consultation_reference: str = "",
     response_data: dict[str, Any] | None = None,
     never_expires: bool = False,
+    validated_at: datetime | None = None,
 ) -> None:
-    """Upsert a VATValidation record."""
+    """Upsert a VATValidation record from one response."""
     from apps.billing.tax_models import VATValidation  # noqa: PLC0415
 
     # never_expires marks terminal evidence (a structurally invalid number):
@@ -614,15 +632,12 @@ def _store_validation(  # noqa: PLR0913
         "is_active": is_valid,
         "company_name": company_name,
         "company_address": company_address,
-        "validation_date": timezone.now(),
+        "validation_date": validated_at or timezone.now(),
         "validation_source": source,
         "response_data": response_data or {},
         "expires_at": expires_at,
+        "consultation_reference": consultation_reference,
     }
-    # Proof-of-consultation is evidence, not state: a VIES outage yields an empty
-    # identifier and must not erase the reference from an earlier real check.
-    if consultation_reference:
-        defaults["consultation_reference"] = consultation_reference
     VATValidation.objects.update_or_create(
         country_code=country_code,
         vat_number=vat_number,
@@ -635,6 +650,8 @@ def _update_tax_profile_vies(
     *,
     status: str,
     company_name: str = "",
+    consultation_reference: str = "",
+    verified_at: datetime | None = None,
 ) -> None:
     """Update CustomerTaxProfile VIES verification fields.
 
@@ -647,9 +664,10 @@ def _update_tax_profile_vies(
     """
     tax_profile.vies_verification_status = status
     tax_profile.vies_verified_name = company_name
-    update_fields = ["vies_verification_status", "vies_verified_name", "updated_at"]
+    tax_profile.vies_consultation_reference = consultation_reference
+    update_fields = ["vies_verification_status", "vies_verified_name", "vies_consultation_reference", "updated_at"]
     if status == "valid":
-        tax_profile.vies_verified_at = timezone.now()
+        tax_profile.vies_verified_at = verified_at or timezone.now()
         tax_profile.reverse_charge_eligible = True
         update_fields.extend(["vies_verified_at", "reverse_charge_eligible"])
     else:
@@ -2221,8 +2239,10 @@ def reverify_expired_vat_validations() -> dict[str, Any]:
     )
     expired_found = expired.count()
 
+    from apps.billing.vies_evidence import profiles_needing_vies_evidence  # noqa: PLC0415
     from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415
 
+    queued_ids: set[str] = set()
     queued = 0
     unmatched = 0
     for validation_batch in batched(expired.iterator(chunk_size=500), 500, strict=False):
@@ -2262,6 +2282,13 @@ def reverify_expired_vat_validations() -> dict[str, Any]:
             ).update(expires_at=None)
         for profile_id, _vat_number in eligible_profiles:
             async_task("apps.billing.tasks.validate_vat_number", str(profile_id))
+            queued_ids.add(str(profile_id))
+            queued += 1
+
+    for profile_id in profiles_needing_vies_evidence().values_list("pk", flat=True).iterator(chunk_size=500):
+        if str(profile_id) not in queued_ids:
+            async_task("apps.billing.tasks.validate_vat_number", str(profile_id))
+            queued_ids.add(str(profile_id))
             queued += 1
 
     if unmatched:

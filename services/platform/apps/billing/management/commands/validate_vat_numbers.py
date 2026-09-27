@@ -15,10 +15,16 @@ class Command(BaseCommand):
         parser.add_argument("--blocked-orders", action="store_true", help=_("Report unpaid zero-tax EU orders."))
 
     def handle(self, *args: str, **options: object) -> None:
+        from django.db.models import Q  # noqa: PLC0415
         from django_q.tasks import async_task  # noqa: PLC0415
 
         from apps.billing.tasks import validate_vat_number  # noqa: PLC0415
-        from apps.common.eu_vat_validator import is_eu_country, parse_vat_number  # noqa: PLC0415
+        from apps.billing.vies_evidence import (  # noqa: PLC0415
+            profile_vat_identity,
+            profiles_needing_vies_evidence,
+            vies_refusal_reason,
+        )
+        from apps.common.eu_vat_validator import is_eu_country  # noqa: PLC0415
         from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415
 
         if options["blocked_orders"]:
@@ -26,12 +32,24 @@ class Command(BaseCommand):
 
         processed = 0
         failed = 0
-        profiles = CustomerTaxProfile.objects.exclude(vat_number="").exclude(
-            vies_verification_status=CustomerTaxProfile.VIESVerificationStatus.VALID
+        if options["blocked_orders"]:
+            valid_profiles = CustomerTaxProfile.objects.filter(vies_verification_status="valid").select_related(
+                "customer"
+            )
+            for profile in valid_profiles.iterator():
+                reason = vies_refusal_reason(profile, profile.vat_number)
+                if reason:
+                    self.stdout.write(
+                        _("Blocked profile %(profile)s: %(reason)s") % {"profile": profile.pk, "reason": reason}
+                    )
+
+        profiles = CustomerTaxProfile.objects.exclude(vat_number="").filter(
+            ~Q(vies_verification_status=CustomerTaxProfile.VIESVerificationStatus.VALID)
+            | Q(pk__in=profiles_needing_vies_evidence().values("pk"))
         )
         for profile in profiles.order_by("pk").iterator():
             try:
-                country = parse_vat_number(profile.vat_number)[0]
+                country = profile_vat_identity(profile)[0]
             except ValueError:
                 continue
             if not is_eu_country(country):
@@ -72,7 +90,11 @@ class Command(BaseCommand):
             evidenced = (
                 profile is not None
                 and profile.is_vat_payer is True
-                and vies_verified_for(profile, vat_number)
+                and vies_verified_for(
+                    profile,
+                    vat_number,
+                    billing_name=str(billing.get("company_name") or order.customer.get_billing_name()),
+                )
                 and vat_number_matches_country(vat_number, country)
             )
             if not evidenced:

@@ -127,6 +127,27 @@ def reverse_charge_requires_vies() -> bool:
         return True
 
 
+def get_vies_evidence_max_age_days() -> int:
+    """Return the entitlement lifetime; the recheck schedule is independent."""
+    return max(1, SettingsService.get_integer_setting("billing.vies_evidence_max_age_days", 30))
+
+
+def get_vies_outage_grace_days() -> int:
+    """Keep outage grace strictly inside the evidence lifetime."""
+    requested = max(0, SettingsService.get_integer_setting("billing.vies_outage_grace_days", 14))
+    return min(requested, get_vies_evidence_max_age_days() - 1)
+
+
+def reverse_charge_requires_consultation_reference() -> bool:
+    """Require proof of consultation by default."""
+    return SettingsService.get_boolean_setting("billing.reverse_charge_requires_consultation_reference", True)
+
+
+def reverse_charge_requires_name_match() -> bool:
+    """Require the invoiced legal identity to match available VIES names."""
+    return SettingsService.get_boolean_setting("billing.reverse_charge_requires_name_match", True)
+
+
 # Backward-compatible module-level (for code that reads it at import time)
 DEFAULT_PAYMENT_TERMS_DAYS = 14
 

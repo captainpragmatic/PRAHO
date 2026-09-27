@@ -34,6 +34,7 @@ class VIESGatePathTests(TestCase):
             customer=self.customer, vat_number="DE123456789", is_vat_payer=True,
             vies_verification_status="valid", reverse_charge_eligible=True,
             vies_verified_at=timezone.now(), vies_verified_name="Evidence GmbH",
+            vies_consultation_reference="test-reference",
         )
 
     def _order(self) -> Order:
@@ -80,23 +81,23 @@ class VIESGatePathTests(TestCase):
             OrderPreflightValidationService.assert_valid(order)
 
     def test_changing_to_dutch_vat_resets_evidence_and_queues_validation(self) -> None:
-        queued: list[tuple[str, str, bool, object, str]] = []
+        queued: list[tuple[str, str, bool, object, str, str]] = []
 
         def record(profile: CustomerTaxProfile) -> None:
             current = CustomerTaxProfile.objects.get(pk=profile.pk)
             queued.append((
                 current.vat_number, current.vies_verification_status, current.reverse_charge_eligible,
-                current.vies_verified_at, current.vies_verified_name,
+                current.vies_verified_at, current.vies_verified_name, current.vies_consultation_reference,
             ))
 
         with patch("apps.customers.signals._trigger_vat_validation", side_effect=record):
             self.profile.vat_number = "NL123456782"
             self.profile.save(update_fields=["vat_number"])
-        expected = ("NL123456782", "pending", False, None, "")
+        expected = ("NL123456782", "pending", False, None, "", "")
         self.assertEqual(queued, [expected])
         self.assertEqual(
             (self.profile.vat_number, self.profile.vies_verification_status, self.profile.reverse_charge_eligible,
-             self.profile.vies_verified_at, self.profile.vies_verified_name),
+             self.profile.vies_verified_at, self.profile.vies_verified_name, self.profile.vies_consultation_reference),
             expected,
         )
 
@@ -150,14 +151,14 @@ class VIESGatePathTests(TestCase):
             profile = CustomerTaxProfile.objects.create(
                 customer=customer, vat_number=number, vies_verification_status=status,
             )
-            if index == 0:
+            if index in {0, 1}:
                 pending_ids.append(str(profile.pk))
         output = StringIO()
         with patch("django_q.tasks.async_task") as enqueue:
             call_command("validate_vat_numbers", "--blocked-orders", stdout=output)
         self.assertIn("Blocked orders: 1", output.getvalue())
         self.assertIn(str(order.pk), output.getvalue())
-        self.assertIn("Enqueued: 2", output.getvalue())
+        self.assertIn("Enqueued: 3", output.getvalue())
         self.assertCountEqual(
             enqueue.call_args_list,
             [call("apps.billing.tasks.validate_vat_number", profile_id) for profile_id in pending_ids],

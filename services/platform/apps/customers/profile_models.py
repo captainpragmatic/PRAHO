@@ -6,7 +6,7 @@ Tax compliance and billing profile models for customer business data.
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from django.db import models
 from django.utils.translation import gettext_lazy as _
@@ -16,6 +16,9 @@ from apps.common.cui_validator import CUIValidator, validate_cui
 from apps.common.types import CurrencyCode
 
 from .customer_models import SoftDeleteModel
+
+if TYPE_CHECKING:
+    from apps.audit.models import AuditEvent
 
 
 class CustomerTaxProfile(SoftDeleteModel):
@@ -58,6 +61,18 @@ class CustomerTaxProfile(SoftDeleteModel):
         default=None,
         verbose_name=_("Cota TVA (%)"),
         help_text=_("Optional customer-specific override; leave blank to use TaxService country rules"),
+    )
+
+    class VATRateReason(models.TextChoices):
+        DIPLOMATIC = "diplomatic", _("Diplomatic exemption")
+        EXEMPT_BODY = "exempt_body", _("Exempt body")
+        OTHER = "other", _("Other exemption")
+
+    vat_rate_reason = models.CharField(
+        max_length=20, choices=VATRateReason.choices, blank=True, verbose_name=_("VAT exemption reason")
+    )
+    vies_consultation_reference = models.CharField(
+        max_length=255, blank=True, verbose_name=_("VIES consultation reference")
     )
 
     # Tax Reverse Charge (for B2B EU)
@@ -104,6 +119,20 @@ class CustomerTaxProfile(SoftDeleteModel):
             models.Index(fields=["vat_number"]),
             models.Index(fields=["vies_verification_status"], name="customer_tax_vies_status_idx"),
         )
+
+    @property
+    def vies_name_mismatch(self) -> bool:
+        from apps.billing.vies_evidence import vies_name_matches  # noqa: PLC0415
+
+        return not vies_name_matches(self.vies_verified_name, self.customer.get_billing_name())
+
+    @property
+    def recent_vies_refusals(self) -> models.QuerySet[AuditEvent]:
+        from apps.audit.models import AuditEvent  # noqa: PLC0415
+
+        return AuditEvent.objects.filter(
+            action="vies_evidence_refused", metadata__customer_id=str(self.customer_id)
+        ).order_by("-timestamp")[:10]
 
     def validate_cui(self) -> bool:
         """Validate Romanian CUI format (accepts both 'RO12345678' and '12345678')."""

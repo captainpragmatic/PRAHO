@@ -5,12 +5,14 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from django import forms
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import transaction
 from django.forms.models import ModelChoiceField  # For form field type checking
 from django.utils.translation import gettext_lazy as _
@@ -37,6 +39,7 @@ else:
 
 # Constants
 MAX_RO_PREFIXED_ID_LENGTH = 12  # 'RO' + up to 10 digits
+MAX_EU_VAT_NUMBER_LENGTH = 20  # longest EU format (country prefix included) with room for separators
 
 
 # ===============================================================================
@@ -144,10 +147,70 @@ class CustomerForm(forms.ModelForm):
 # ===============================================================================
 
 
+def _clean_staff_vat_number(vat_number: str | None, is_vat_payer: bool | None) -> str:
+    """🔒 Shared by both staff forms: Romanian numbers keep the check-digit rule, other EU numbers the format rule."""
+    if is_vat_payer and not vat_number:
+        raise ValidationError(_("VAT number is required for VAT payers"))
+    if not vat_number:
+        return ""
+    # Security: bound the input before any pattern work (ReDoS).
+    if len(vat_number) > MAX_EU_VAT_NUMBER_LENGTH:
+        raise ValidationError(_("VAT number too long"))
+    if not vat_number.startswith("RO"):
+        from apps.common.eu_vat_validator import parse_vat_number, validate_vat_format  # noqa: PLC0415
+
+        country, digits = parse_vat_number(vat_number)
+        format_result = validate_vat_format(country, digits)
+        if not format_result.is_valid:
+            raise ValidationError(_("Invalid EU VAT number."))
+        return format_result.full_vat_number
+    if len(vat_number) > MAX_RO_PREFIXED_ID_LENGTH:  # RO + max 10 digits
+        raise ValidationError(_("VAT number too long"))
+    # Security: [0-9] rather than \d so unicode digits cannot pass.
+    if not re.match(r"^RO[0-9]{6,10}$", vat_number):
+        raise ValidationError(_("VAT number must be in format RO followed by 6-10 digits"))
+    from apps.common.cui_validator import CUIValidator  # noqa: PLC0415
+
+    result = CUIValidator.validate_strict(vat_number)
+    if not result.is_valid:
+        raise ValidationError(_(result.error_message))
+    return vat_number
+
+
+def _requires_exemption_reason(data: Mapping[str, object], country: str) -> bool:
+    from apps.common.localisation import normalize_country_code  # noqa: PLC0415
+    from apps.common.tax_service import TaxService  # noqa: PLC0415
+
+    country = normalize_country_code(country) or TaxService.get_supplier_country()
+    return (
+        data.get("vat_rate") == Decimal(0)
+        and data.get("is_vat_payer") is True
+        and TaxService.is_eu_country(country)
+        and country != TaxService.get_supplier_country()
+        and not data.get("vat_rate_reason")
+    )
+
+
 class CustomerTaxProfileForm(forms.ModelForm):
     """
     Romanian tax compliance form - CUI, VAT, registration.
     """
+
+    vat_rate = forms.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        required=False,
+        label=_("VAT Rate Override (%)"),
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+        widget=forms.NumberInput(attrs={"step": "0.01", "min": "0", "max": "100"}),
+    )
+
+    def clean(self) -> dict[str, object]:
+        cleaned_data = super().clean() or {}
+        address = self.instance.customer.get_billing_address() if self.instance.customer_id else None
+        if _requires_exemption_reason(cleaned_data, address.country if address else ""):
+            self.add_error("vat_rate_reason", _("Select a reason for a zero VAT override for an EU business."))
+        return cleaned_data
 
     # Override fields to avoid default max_length errors masking our security messages
     cui = forms.CharField(required=False)
@@ -161,6 +224,7 @@ class CustomerTaxProfileForm(forms.ModelForm):
             "is_vat_payer",
             "vat_number",
             "vat_rate",
+            "vat_rate_reason",
         )
 
         widgets: ClassVar[dict[str, forms.Widget]] = {
@@ -211,28 +275,8 @@ class CustomerTaxProfileForm(forms.ModelForm):
         return cui or ""
 
     def clean_vat_number(self) -> str:
-        """🔒 Validate VAT number format with ReDoS protection and check digit validation"""
-        vat_number: str | None = self.cleaned_data.get("vat_number")
-        is_vat_payer: bool | None = self.cleaned_data.get("is_vat_payer")
-
-        if is_vat_payer and not vat_number:
-            raise ValidationError(_("VAT number is required for VAT payers"))
-
-        if vat_number:
-            # Security: Prevent ReDoS attacks with strict input length validation
-            if len(vat_number) > MAX_RO_PREFIXED_ID_LENGTH:  # RO + max 10 digits
-                raise ValidationError(_("VAT number too long"))
-            # Security: Use [0-9] instead of \d to prevent unicode digit bypass
-            if not re.match(r"^RO[0-9]{6,10}$", vat_number):  # Romanian VAT is typically 6-10 digits
-                raise ValidationError(_("VAT number must be in format RO followed by 6-10 digits"))
-            # Validate check digit for compliance
-            from apps.common.cui_validator import CUIValidator  # noqa: PLC0415
-
-            result = CUIValidator.validate_strict(vat_number)
-            if not result.is_valid:
-                raise ValidationError(_(result.error_message))
-
-        return vat_number or ""
+        """🔒 Validate the VAT number: Romanian check digits, or EU format for another member state."""
+        return _clean_staff_vat_number(self.cleaned_data.get("vat_number"), self.cleaned_data.get("is_vat_payer"))
 
 
 # ===============================================================================
@@ -905,6 +949,7 @@ class CustomerEditForm(CountryDefaultsMixin, forms.Form):
         decimal_places=2,
         required=False,
         label=_("VAT Rate Override (%)"),
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
         help_text=_("Leave blank to calculate VAT from the billing country and verified tax status"),
         widget=forms.NumberInput(
             attrs={
@@ -914,6 +959,12 @@ class CustomerEditForm(CountryDefaultsMixin, forms.Form):
                 "max": "100",
             }
         ),
+    )
+
+    vat_rate_reason = forms.ChoiceField(
+        choices=[("", _("No exemption reason")), *CustomerTaxProfile.VATRateReason.choices],
+        required=False,
+        label=_("VAT exemption reason"),
     )
 
     # Billing Profile Information
@@ -1153,6 +1204,7 @@ class CustomerEditForm(CountryDefaultsMixin, forms.Form):
                         "is_vat_payer": tax_profile.is_vat_payer,
                         "vat_number": tax_profile.vat_number,
                         "vat_rate": tax_profile.vat_rate,
+                        "vat_rate_reason": tax_profile.vat_rate_reason,
                     }
                 )
 
@@ -1248,28 +1300,8 @@ class CustomerEditForm(CountryDefaultsMixin, forms.Form):
         return cui or ""
 
     def clean_vat_number(self) -> str:
-        """🔒 Validate VAT number format with ReDoS protection and check digit validation"""
-        vat_number: str | None = self.cleaned_data.get("vat_number")
-        is_vat_payer: bool | None = self.cleaned_data.get("is_vat_payer")
-
-        if is_vat_payer and not vat_number:
-            raise ValidationError(_("VAT number is required for VAT payers"))
-
-        if vat_number:
-            # Security: Prevent ReDoS attacks with strict input length validation
-            if len(vat_number) > MAX_RO_PREFIXED_ID_LENGTH:  # RO + max 10 digits
-                raise ValidationError(_("VAT number too long"))
-            # Security: Use [0-9] instead of \d to prevent unicode digit bypass
-            if not re.match(r"^RO[0-9]{6,10}$", vat_number):  # Romanian VAT is typically 6-10 digits
-                raise ValidationError(_("VAT number must be in format RO followed by 6-10 digits"))
-            # Validate check digit for compliance
-            from apps.common.cui_validator import CUIValidator  # noqa: PLC0415
-
-            result = CUIValidator.validate_strict(vat_number)
-            if not result.is_valid:
-                raise ValidationError(_(result.error_message))
-
-        return vat_number or ""
+        """🔒 Validate the VAT number: Romanian check digits, or EU format for another member state."""
+        return _clean_staff_vat_number(self.cleaned_data.get("vat_number"), self.cleaned_data.get("is_vat_payer"))
 
     def clean_website(self) -> str:
         """Validate website URL for SSRF prevention"""
@@ -1283,6 +1315,9 @@ class CustomerEditForm(CountryDefaultsMixin, forms.Form):
         cleaned_data = super().clean()
 
         billing_same_as_primary: bool = cleaned_data.get("billing_same_as_primary", True)
+        country_field = "country" if billing_same_as_primary else "billing_country"
+        if _requires_exemption_reason(cleaned_data, str(cleaned_data.get(country_field) or "")):
+            self.add_error("vat_rate_reason", _("Select a reason for a zero VAT override for an EU business."))
 
         # If billing address is different from primary, validate billing fields
         if not billing_same_as_primary:
@@ -1336,6 +1371,7 @@ class CustomerEditForm(CountryDefaultsMixin, forms.Form):
             tax_profile.is_vat_payer = data["is_vat_payer"]
             tax_profile.vat_number = data["vat_number"]
             tax_profile.vat_rate = data["vat_rate"]
+            tax_profile.vat_rate_reason = data["vat_rate_reason"]
             tax_profile.save()
 
             # Update or create billing profile

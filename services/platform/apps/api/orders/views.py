@@ -63,13 +63,14 @@ IDEMPOTENCY_KEY_MIN_LENGTH = 16
 IDEMPOTENCY_KEY_MAX_LENGTH = 64
 
 
-def _customer_vat_info(
+def _customer_vat_info(  # noqa: PLR0913  # every input of the VAT identity is explicit
     customer: Customer,
     *,
     country: str,
     is_business: bool,
     vat_number: str,
     order_id: str,
+    billing_name: str,
 ) -> CustomerVATInfo:
     """Build the profile-aware VAT context used by persisted order paths."""
     try:
@@ -88,7 +89,8 @@ def _customer_vat_info(
         info["reverse_charge_eligible"] = tax_profile.reverse_charge_eligible
         from apps.billing.vies_evidence import vies_verified_for  # noqa: PLC0415
 
-        info["vies_verified"] = vies_verified_for(tax_profile, info.get("vat_number"))
+        info["vies_verified"] = vies_verified_for(tax_profile, info.get("vat_number"), billing_name=billing_name)
+        info["vat_rate_reason"] = tax_profile.vat_rate_reason
         if tax_profile.vat_rate is not None:
             info["custom_vat_rate"] = tax_profile.vat_rate
     return info
@@ -312,6 +314,7 @@ def calculate_cart_totals(  # noqa: PLR0915  # Complexity: multi-step business l
             is_business=is_business,
             vat_number=vat_number,
             order_id="cart-calculation",
+            billing_name=str(billing_address.get("company_name") or customer.get_billing_name()),
         )
         vat_result = OrderVATCalculator.calculate_vat(subtotal_cents=subtotal_cents, customer_info=customer_vat_info)
 
@@ -523,6 +526,7 @@ def preflight_order(  # noqa: PLR0911, PLR0915  # Complexity: multi-step busines
             is_business=is_business,
             vat_number=vat_number,
             order_id="preflight-preview",
+            billing_name=str(billing_address.get("company_name") or customer.get_billing_name()),
         )
         vat_result = OrderVATCalculator.calculate_vat(subtotal_cents=subtotal_cents, customer_info=customer_vat_info)
 

@@ -262,7 +262,20 @@ def _build_customer_vat_info(
     info["reverse_charge_eligible"] = bool(getattr(tax_profile, "reverse_charge_eligible", False))
     from apps.billing.vies_evidence import vies_verified_for  # noqa: PLC0415
 
-    info["vies_verified"] = vies_verified_for(tax_profile, info.get("vat_number"))
+    billing_name = customer.get_billing_name()
+    if order_id:
+        from apps.orders.models import Order  # noqa: PLC0415
+
+        snapshot = (
+            Order.objects.filter(pk=order_id, customer=customer).values_list("billing_address", flat=True).first()
+        )
+        if snapshot:
+            billing_name = str(snapshot.get("company_name") or billing_name)
+            info["vat_number"] = (
+                str(snapshot.get("vat_number") or snapshot.get("vat_id") or info.get("vat_number") or "") or None
+            )
+    info["vies_verified"] = vies_verified_for(tax_profile, info.get("vat_number"), billing_name=billing_name)
+    info["vat_rate_reason"] = tax_profile.vat_rate_reason
     vat_rate_override = getattr(tax_profile, "vat_rate", None)
 
     if vat_rate_override is not None:

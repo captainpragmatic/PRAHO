@@ -74,6 +74,7 @@ class VATValidationEvidencePersistenceTests(TestCase):
                 )
                 response = VIESResponse(
                     is_valid=True, country_code=expected[0], vat_number=expected[1], api_available=True,
+                    request_identifier="same-response-reference",
                 )
                 with patch(_GATEWAY, return_value=response) as gateway:
                     validate_vat_number(str(self.profile.pk))
@@ -168,7 +169,7 @@ class TestValidateVatNumberTask:
         )
         mock_gateway.return_value = VIESResponse(
             is_valid=True, country_code="RO", vat_number="12345678",
-            company_name="SC Test SRL", api_available=True,
+            company_name="SC Test SRL", api_available=True, request_identifier="same-response-reference",
         )
 
         result = validate_vat_number(str(_tax_profile.id))

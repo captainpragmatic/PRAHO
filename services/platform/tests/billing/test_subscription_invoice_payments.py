@@ -417,6 +417,7 @@ class SubscriptionInvoicePaymentTestCase(_SubscriptionInvoicePaymentFixture, Tes
     def test_recurring_proforma_records_and_preserves_reverse_charge_evidence(self) -> None:
         CustomerTaxProfile.objects.create(
             customer=self.customer, vat_number="DE136695976", is_vat_payer=True, vies_verification_status="valid",
+            vies_verified_at=timezone.now(), vies_consultation_reference="test-reference",
         )
 
         CustomerAddress.objects.create(customer=self.customer, is_billing=True, address_line1="Example 1",

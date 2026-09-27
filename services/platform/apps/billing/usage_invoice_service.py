@@ -329,7 +329,10 @@ class UsageInvoiceService:
             info["reverse_charge_eligible"] = bool(getattr(tax_profile, "reverse_charge_eligible", False))
             from apps.billing.vies_evidence import vies_verified_for  # noqa: PLC0415
 
-            info["vies_verified"] = vies_verified_for(tax_profile, info.get("vat_number"))
+            info["vies_verified"] = vies_verified_for(
+                tax_profile, info.get("vat_number"), billing_name=customer.get_billing_name()
+            )
+            info["vat_rate_reason"] = tax_profile.vat_rate_reason
             vat_rate_override = getattr(tax_profile, "vat_rate", None)
 
             if vat_rate_override is not None:

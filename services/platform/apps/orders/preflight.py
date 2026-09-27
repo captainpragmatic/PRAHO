@@ -135,8 +135,11 @@ class OrderPreflightValidationService:
                     from apps.billing.vies_evidence import vies_verified_for  # noqa: PLC0415
 
                     customer_vat_info["vies_verified"] = vies_verified_for(
-                        tax_profile, customer_vat_info.get("vat_number")
+                        tax_profile,
+                        customer_vat_info.get("vat_number"),
+                        billing_name=company_name or order.customer.get_billing_name(),
                     )
+                    customer_vat_info["vat_rate_reason"] = tax_profile.vat_rate_reason
                     if tax_profile.vat_rate is not None:
                         customer_vat_info["custom_vat_rate"] = tax_profile.vat_rate
                 vat_result = OrderVATCalculator.calculate_vat(

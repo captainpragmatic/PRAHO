@@ -173,6 +173,7 @@ class CreateInvoiceFromOrderTests(TestCase):
                         else CustomerTaxProfile.VIESVerificationStatus.NOT_APPLICABLE
                     ),
                     vies_verified_at=timezone.now() if reverse_charge else None,
+                    vies_consultation_reference="matrix-reference" if reverse_charge else "",
                 )
                 self.assertIsNone(tax_profile.vat_rate)
                 self.assertEqual(customer.get_tax_profile(), tax_profile)

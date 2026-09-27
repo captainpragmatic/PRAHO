@@ -109,6 +109,8 @@ class D390FixtureMixin:
         }
         data.update(overrides)
         if evidence:
+            # These August fixtures represent documents recorded before version 2.
+            data["vat_evidence"]["version"] = 1
             data["vat_evidence"]["calculated_at"] = (data["issued_at"] or timezone.now()).isoformat()
         invoice = Invoice.objects.create(**data)
         for amount in amounts:
@@ -157,6 +159,7 @@ class ECSalesAggregationTests(D390FixtureMixin, TestCase):
                 },
             )
         )
+        greek.vat_evidence["version"] = 1
         greek.vat_evidence["calculated_at"] = greek.issued_at.isoformat()
         greek.issue()
         greek.save()
