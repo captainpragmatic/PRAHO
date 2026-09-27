@@ -23,6 +23,7 @@ from apps.api.core.permissions import IsAuthenticatedAndAccessible
 from apps.api.core.throttling import AuthThrottle, BurstAPIThrottle
 from apps.api.secure_auth import (
     BILLING_ROLES,
+    _uniform_error_response,
     public_api_endpoint,
     require_customer_authentication,
     require_customer_role_in,
@@ -956,10 +957,7 @@ def _require_owner_role(user_id: int, customer: Customer) -> Response | None:
     """Return error response if user is not an owner of the customer."""
     membership = CustomerMembership.objects.filter(user_id=user_id, customer=customer, is_active=True).first()
     if not membership or membership.role != "owner":
-        return Response(
-            {"success": False, "error": "Owner role required for this action."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
+        return _uniform_error_response()
     return None
 
 
@@ -1323,10 +1321,7 @@ def customer_update(request: HttpRequest, customer: Customer) -> Response:
     # Owner or billing role required
     membership = CustomerMembership.objects.filter(user_id=user_id, customer=customer, is_active=True).first()
     if not membership or membership.role not in ("owner", "billing"):
-        return Response(
-            {"success": False, "error": "Owner or billing role required."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
+        return _uniform_error_response()
 
     updatable_fields = {"name", "company_name", "primary_email", "primary_phone", "website", "industry"}
     update_fields = []
@@ -1366,10 +1361,7 @@ def customer_tax_profile_update(  # noqa: C901, PLR0912  # Validate each permitt
 
     membership = CustomerMembership.objects.filter(user_id=user_id, customer=customer, is_active=True).first()
     if not membership or membership.role not in ("owner", "billing"):
-        return Response(
-            {"success": False, "error": "Owner or billing role required."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
+        return _uniform_error_response()
 
     tax_bool_fields = {"is_vat_payer"}
     tax_string_fields = {"cui", "vat_number", "registration_number"}

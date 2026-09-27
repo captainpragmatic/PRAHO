@@ -17,6 +17,7 @@ from rest_framework.response import Response
 
 from apps.api.secure_auth import (
     BILLING_ROLES,
+    _uniform_error_response,
     public_api_endpoint,
     require_customer_authentication,
     require_customer_role_in,
@@ -69,7 +70,7 @@ def _billing_actor(request: HttpRequest, customer: Customer) -> tuple[User | Non
         return None, _error("Authentication required", status.HTTP_401_UNAUTHORIZED)
     role = RecurringPaymentAuthorizationService.validate_customer_billing_principal(customer, actor)
     if role.is_err():
-        return None, _error(role.unwrap_err(), status.HTTP_403_FORBIDDEN)
+        return None, _uniform_error_response()
     return actor, None
 
 

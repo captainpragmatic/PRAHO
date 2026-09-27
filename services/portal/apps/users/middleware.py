@@ -6,7 +6,8 @@ Localisation policy is applied by apps.common.localisation_middleware.
 
 import logging
 import random
-import time
+import threading
+import uuid
 from datetime import datetime, timedelta
 from typing import Any, ClassVar, cast
 
@@ -25,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 # Circuit breaker: max consecutive fail-open validations before forced logout (#130/M1)
 _MAX_FAIL_OPEN_COUNT = 5
+_VALIDATION_LOCK = threading.Lock()
 
 
 class PortalAuthenticationMiddleware:
@@ -211,10 +213,7 @@ class PortalAuthenticationMiddleware:
         # Check if we're within soft grace period (stale-while-revalidate)
         soft_deadline = next_validate_at + timedelta(seconds=self.SOFT_TTL_GRACE)
         if now <= soft_deadline:
-            # Propagate validation results when this request acquires the single-flight lock.
-            if self._should_revalidate_async(user_id):
-                return self._perform_validation(request, user_id, now)
-            return True
+            return self._validate_once_per_session(request, user_id, now)
 
         # Check if we're within hard grace period (force validation)
         hard_deadline = next_validate_at + timedelta(seconds=self.HARD_TTL_GRACE)
@@ -241,22 +240,38 @@ class PortalAuthenticationMiddleware:
         jitter_seconds = random.randint(0, self.JITTER_MAX)  # noqa: S311
         return now + timedelta(seconds=self.REVALIDATE_EVERY + jitter_seconds)
 
-    def _should_revalidate_async(self, user_id: str) -> bool:
-        """
-        Check if we should perform async revalidation using single-flight lock.
-        Prevents multiple concurrent validations for the same user.
-        """
-        lock_key = f"validating:{user_id}"
-        validating_until = cache.get(lock_key)
+    def _validate_once_per_session(self, request: HttpRequest, user_id: str, now: datetime) -> bool:
+        """Revalidate inside the soft grace, coalescing concurrent requests of one session."""
+        session_key = request.session.session_key
+        if session_key is None:
+            # Nothing stored yet, so there is no second request to coalesce with.
+            return self._perform_validation(request, user_id, now)
+        lease = self._should_revalidate_async(session_key)
+        if lease is None:
+            # Another request of this session is validating; keep serving the soft grace.
+            return True
+        lock_key, token = lease
+        try:
+            return self._perform_validation(request, user_id, now)
+        finally:
+            with _VALIDATION_LOCK:
+                if cache.get(lock_key) == token:
+                    cache.delete(lock_key)
 
-        if validating_until and time.time() < validating_until:
-            # Another request is already validating, skip
-            logger.debug(f"🔄 [Auth] User {user_id} validation already in progress, skipping")
-            return False
+    def _should_revalidate_async(self, session_key: str) -> tuple[str, str] | None:
+        """Acquire a per-session validation lease within this process.
 
-        # Acquire single-flight lock
-        cache.set(lock_key, time.time() + self.VALIDATION_TIMEOUT, timeout=self.VALIDATION_TIMEOUT)
-        return True
+        The lease coalesces concurrent revalidations of one session; it is not a
+        security guard, so a per-process cache is acceptable. LocMemCache has no
+        compare-and-swap, so acquisition here and the ownership-checked release in
+        the caller both run under _VALIDATION_LOCK.
+        """
+        lock_key = f"validating:{session_key}"
+        token = uuid.uuid4().hex
+        with _VALIDATION_LOCK:
+            if not cache.add(lock_key, token, timeout=self.VALIDATION_TIMEOUT):
+                return None
+        return lock_key, token
 
     def _perform_validation(  # noqa: C901, PLR0912 -- session refresh and explicit error policies
         self, request: HttpRequest, user_id: str, now: datetime
@@ -320,8 +335,8 @@ class PortalAuthenticationMiddleware:
                 logger.warning("🚨 [Auth] Session rejected by Platform for user %s", user_id)
                 return False
             if e.is_rate_limited:
-                raise
-            if e.status_code in (401, 403):
+                logger.warning("⚠️ [Auth] Platform rate limited validation for user %s: %s", user_id, e)
+            elif e.status_code in (401, 403):
                 logger.error("🔥 [Auth] Platform authentication fault during validation for user %s: %s", user_id, e)
             else:
                 logger.error("🔥 [Auth] Platform API error during validation for user %s: %s", user_id, e)

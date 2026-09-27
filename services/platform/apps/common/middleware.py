@@ -358,7 +358,6 @@ class GDPRComplianceMiddleware:
 # /api/ view has an auth decorator or public marker; it does not compare exempt paths.
 _AUTH_EXEMPT_EXACT_PATHS_RAW: frozenset[str] = frozenset(
     {
-        "/api/users/register",
         "/api/users/health",
         "/api/orders/products",
     }
@@ -368,8 +367,8 @@ _AUTH_EXEMPT_EXACT_PATHS_RAW: frozenset[str] = frozenset(
 def _is_auth_exempt(path: str) -> bool:
     """Check if a request path is exempt from HMAC authentication.
 
-    Normalizes trailing slashes so both '/api/users/register' and
-    '/api/users/register/' match, regardless of Django's APPEND_SLASH setting.
+    Normalizes trailing slashes so both '/api/users/health' and
+    '/api/users/health/' match, regardless of Django's APPEND_SLASH setting.
     """
     return path.rstrip("/") in _AUTH_EXEMPT_EXACT_PATHS_RAW
 

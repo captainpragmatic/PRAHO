@@ -24,7 +24,6 @@ from rest_framework import status
 from rest_framework.decorators import api_view, authentication_classes, permission_classes, throttle_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.throttling import AnonRateThrottle
 
 from apps.api.core.throttling import AuthThrottle
 from apps.api.secure_auth import (
@@ -50,7 +49,6 @@ from apps.common.performance.rate_limiting import (
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.validators import log_security_event
 from apps.customers.models import Customer
-from apps.users.forms import UserRegistrationForm
 from apps.users.mfa import MFAService
 from apps.users.models import APIToken, CustomerMembership, User, UserProfile
 from apps.users.services import APITokenService, SessionSecurityService
@@ -773,77 +771,6 @@ def password_reset_confirm_api(request: HttpRequest) -> Response:
         return Response(
             {"success": False, "error": "Validation failed", "errors": serializer.errors},
             status=status.HTTP_400_BAD_REQUEST,
-        )
-
-
-# ===============================================================================
-# CUSTOMER REGISTRATION API
-# ===============================================================================
-
-
-@api_view(["POST"])
-@authentication_classes([])  # No DRF authentication - credential auth performed in the view
-@permission_classes([AllowAny])
-@throttle_classes([AnonRateThrottle])
-@public_api_endpoint
-def customer_registration_api(request: HttpRequest) -> Response:
-    """
-    Customer registration API endpoint for Portal service -- intentionally public.
-
-    New users register without existing auth; throttled by AnonRateThrottle.
-    Creates new customer account with business information via Platform API.
-    """
-    try:
-        # Use existing UserRegistrationService for consistency
-
-        # Create form from API data
-        form_data = {
-            "email": request.data.get("email", "").lower().strip(),
-            "first_name": request.data.get("first_name", ""),
-            "last_name": request.data.get("last_name", ""),
-            "phone": request.data.get("phone", ""),
-            "password1": request.data.get("password1", ""),
-            "password2": request.data.get("password2", ""),
-            "gdpr_consent": request.data.get("gdpr_consent", False),
-            "accepts_marketing": request.data.get("accepts_marketing", False),
-        }
-
-        form = UserRegistrationForm(data=form_data)
-
-        if form.is_valid():
-            try:
-                # Create user using existing service
-                user = form.save()
-
-                logger.info(f"✅ [Registration API] Customer account created: {user.email}")
-
-                return Response(
-                    {
-                        "success": True,
-                        "message": "Registration successful",
-                        "customer_id": user.id,
-                        "email": user.email,
-                        "requires_verification": False,  # Email verification can be added later
-                    },
-                    status=status.HTTP_201_CREATED,
-                )
-
-            except Exception as e:
-                logger.error(f"🔥 [Registration API] Registration failed: {e}")
-                return Response(
-                    {"success": False, "error": "Registration failed. Please try again."},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                )
-        else:
-            return Response(
-                {"success": False, "error": "Validation failed", "errors": form.errors},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-    except Exception as e:
-        logger.error(f"🔥 [Registration API] Unexpected error: {e}")
-        return Response(
-            {"success": False, "error": "Registration service unavailable"}, status=status.HTTP_503_SERVICE_UNAVAILABLE
         )
 
 

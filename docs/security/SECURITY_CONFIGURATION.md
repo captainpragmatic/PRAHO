@@ -308,8 +308,8 @@ TIMESTAMP
 - `HMAC_RATE_LIMIT_WINDOW` controls both windows; `HMAC_RATE_LIMIT_MAX_CALLS`
   controls the general cap. `HMAC_RATE_LIMIT_MAX_AUTH_CALLS` controls the auth cap
   as a Django setting (default 120; no environment-variable mapping).
-- Login and both password-reset endpoints require HMAC authentication;
-  registration remains exempt.
+- Login, both password-reset endpoints, and `/api/customers/register/` require
+  HMAC authentication. The duplicate `/api/users/register/` route has been removed.
 - Fixed-window counters include `window_index = int(now // window)` in their
   keys. Window rollover therefore works with DatabaseCache even when incrementing
   a counter changes its expiry. Retry-After reports the time until the next boundary.

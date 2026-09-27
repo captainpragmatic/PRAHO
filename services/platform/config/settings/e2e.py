@@ -32,7 +32,6 @@ DATABASES = {
         "TEST": {"NAME": ":memory:"},
     }
 }
-PORTAL_HMAC_BYPASS = False
 PLATFORM_API_SECRET = "local-e2e-shared-secret-do-not-use-in-production"  # noqa: S105 -- local public test key
 PORTAL_HMAC_MODE = "legacy"
 PORTAL_HMAC_CREDENTIALS = None

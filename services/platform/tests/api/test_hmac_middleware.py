@@ -278,7 +278,7 @@ class PortalHMACTests(TestCase):
 
     def test_password_reset_path_is_no_longer_exempt(self) -> None:
         self.assertFalse(_is_auth_exempt("/api/users/password/reset/"))
-        self.assertTrue(_is_auth_exempt("/api/users/register/"))
+        self.assertFalse(_is_auth_exempt("/api/users/register/"))
 
     @override_settings(PLATFORM_API_SECRET="unit-test-secret", CACHES=LOCMEM_TEST_CACHE)
     def test_nonce_replay_rejected(self):

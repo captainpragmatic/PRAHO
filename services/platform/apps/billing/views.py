@@ -17,12 +17,11 @@ if TYPE_CHECKING:
 
 from http import HTTPStatus
 
-from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import REDIRECT_FIELD_NAME
 from django.contrib.auth.decorators import login_required
 from django.contrib.contenttypes.models import ContentType
-from django.core.exceptions import ImproperlyConfigured, PermissionDenied, ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
 from django.db import DatabaseError, transaction
 from django.db.models import Count, Q, QuerySet, Sum
@@ -43,8 +42,9 @@ from django.utils.translation import gettext_lazy as _
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods, require_POST
 from django_fsm import TransitionNotAllowed
+from rest_framework.response import Response
 
-from apps.api.secure_auth import BILLING_ROLES, get_authenticated_customer
+from apps.api.secure_auth import BILLING_ROLES, _uniform_error_response, get_authenticated_customer
 from apps.billing.efactura.settings import ro_local_date
 from apps.billing.pdf_generators import RomanianProformaPDFGenerator
 from apps.common.constants import DEFAULT_PAGE_SIZE
@@ -161,29 +161,14 @@ def _require_customer_auth_for_portal_api(
 ) -> tuple[Customer | None, JsonResponse | None]:
     """Validate portal HMAC + customer membership and return JsonResponse on failure."""
 
-    # Test runner compatibility: PORTAL_HMAC_BYPASS=True is set only in test.py
-    # and e2e.py. Hard-fail if bypass is enabled outside a safe environment.
-    # Safe = TESTING=True (test runner) or DEBUG=True (local dev).
-    # Staging/prod have both False, so bypass cannot activate there.
-    _is_test_env = getattr(settings, "TESTING", False) or settings.DEBUG
-    if getattr(settings, "PORTAL_HMAC_BYPASS", False) and not _is_test_env:
-        raise ImproperlyConfigured(
-            "PORTAL_HMAC_BYPASS=True is not allowed outside test/e2e environments. "
-            "This setting must only be enabled in test.py or e2e.py settings."
-        )
-    if getattr(settings, "PORTAL_HMAC_BYPASS", False) and not getattr(request, "_portal_authenticated", False):
-        try:
-            data = json.JSONDecoder().decode(request.body.decode("utf-8"))
-            customer_id = int(data.get("customer_id"))
-            customer = Customer.objects.get(id=customer_id, status="active")
-            return customer, None
-        except (TypeError, ValueError, Customer.DoesNotExist, json.JSONDecodeError, UnicodeDecodeError):
-            return None, JsonResponse({"success": False, "error": "Invalid request format"}, status=400)
-
     customer, error_response = get_authenticated_customer(request, roles=roles)
     if error_response is None:
         return customer, None
+    return None, _json_denial(error_response)
 
+
+def _json_denial(error_response: Response) -> JsonResponse:
+    """Re-emit a DRF denial from the shared authentication layer as the JsonResponse these views return."""
     payload = getattr(error_response, "data", None)
     if not isinstance(payload, dict):
         payload = {"success": False, "error": "Access denied"}
@@ -195,7 +180,7 @@ def _require_customer_auth_for_portal_api(
         if header_name.lower() == "content-type":
             continue
         response[header_name] = header_value
-    return None, response
+    return response
 
 
 def _validate_financial_document_access(
@@ -2223,7 +2208,7 @@ def api_process_refund(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911  
 
         actor = _resolve_authorized_refund_actor(data.get("user_id"), customer)
         if actor is None:
-            return JsonResponse({"success": False, "error": "Refund requires an owner or billing role"}, status=403)
+            return _json_denial(_uniform_error_response())
 
         # Look up payment and validate it has a linked invoice
         try:

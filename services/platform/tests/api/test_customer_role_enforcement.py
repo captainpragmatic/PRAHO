@@ -5,6 +5,7 @@ import json
 import time
 from decimal import Decimal
 from typing import Any, cast
+from unittest.mock import patch
 
 from django.core.cache import cache
 from django.test import RequestFactory, TestCase, override_settings
@@ -264,6 +265,60 @@ class CustomerRoleEnforcementTests(HMACTestMixin, TestCase):
         self.assertEqual(response.status_code, 201, response.content)
         ticket = Ticket.objects.get(customer=self.customer, title="Owner ticket")
         self.assertEqual(ticket.created_by, self.users["owner"])
+
+    def test_owner_role_denial_has_uniform_body_and_headers(self) -> None:
+        self._assert_uniform_viewer_denial("/api/customers/users/add/")
+
+    def test_customer_update_denial_has_uniform_body_and_headers(self) -> None:
+        self._assert_uniform_viewer_denial("/api/customers/update/")
+        self.customer.refresh_from_db()
+        self.assertEqual(self.customer.name, "Role Customer SRL")
+
+    def test_tax_profile_denial_has_uniform_body_and_headers(self) -> None:
+        self._assert_uniform_viewer_denial("/api/customers/tax-profile/")
+        self.assertFalse(CustomerTaxProfile.objects.filter(customer=self.customer).exists())
+
+    def test_recurring_payment_denial_has_uniform_body_and_headers(self) -> None:
+        self._assert_uniform_viewer_denial("/api/billing/recurring-payments/")
+
+    def _assert_uniform_viewer_denial(self, path: str) -> None:
+        response = self.portal_post(path, self._payload("viewer", name="Unauthorized change"))
+        self.assertEqual(response.status_code, 403, response.content)
+        self.assertEqual(response.json(), {"success": False, "error": "Access denied"})
+        self.assertEqual(response["Cache-Control"], "no-store")
+        self.assertEqual(response["X-Content-Type-Options"], "nosniff")
+
+    def test_payment_routes_admit_owners_and_deny_viewers_and_cross_customer_requests(self) -> None:
+        other_customer = Customer.objects.create(
+            name="Other Customer", customer_type="company", status="active"
+        )
+        with (
+            patch(
+                "apps.billing.views.PaymentService.create_payment_intent_direct",
+                return_value={"success": True, "payment_intent_id": "pi_roles", "client_secret": "cs_roles"},
+            ),
+            patch(
+                "apps.billing.views.PaymentService.confirm_payment",
+                return_value={"success": True, "status": "succeeded"},
+            ),
+        ):
+            for path in ("/billing/create-payment-intent/", "/billing/confirm-payment/"):
+                with self.subTest(path=path):
+                    fields = {
+                        "order_id": "order-roles", "amount_cents": 1000,
+                        "payment_intent_id": "pi_roles", "gateway": "stripe",
+                    }
+                    owner = self.portal_post(path, self._payload("owner", **fields))
+                    self.assertEqual(owner.status_code, 200, owner.content)
+                    self.assertTrue(owner.json()["success"])
+                    for body in (
+                        self._payload("viewer", **fields),
+                        self._payload("owner", customer_id=other_customer.pk, **fields),
+                    ):
+                        denied = self.portal_post(path, body)
+                        self.assertEqual(denied.status_code, 403, denied.content)
+                        self.assertEqual(denied.json(), {"success": False, "error": "Access denied"})
+                        self.assertEqual(denied["Cache-Control"], "no-store")
 
     def test_payment_endpoints_reject_tech_before_payload_validation(self) -> None:
         for path in ("/billing/create-payment-intent/", "/billing/confirm-payment/"):
