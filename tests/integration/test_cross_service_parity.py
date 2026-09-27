@@ -9,7 +9,11 @@ from Platform (service isolation), but they must remain identical.
 from pathlib import Path
 from unittest import TestCase
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+# parents[2], not [1]: this file lives in tests/integration/ so that `make test-integration`
+# collects it. At tests/ root nothing collected it - every root pytest target is scoped to
+# tests/integration/, tests/e2e/orm/ or a named file - so all three parity guards had been
+# running nowhere since the file was added in #74.
+REPO_ROOT = Path(__file__).resolve().parents[2]
 PLATFORM_COMMON = REPO_ROOT / "services" / "platform" / "apps" / "common"
 PORTAL_COMMON = REPO_ROOT / "services" / "portal" / "apps" / "common"
 
@@ -86,15 +90,31 @@ class TestMaintenanceMarkerParity(TestCase):
             "PlatformAPIError must key is_maintenance on the marker rather than on the 503 status alone.",
         )
 
-    def test_the_portal_does_not_treat_a_bare_503_as_maintenance(self) -> None:
-        """Guards the specific regression: `is_maintenance` defaulting from the status code alone."""
+    def test_the_portal_derives_maintenance_from_the_marker_not_the_status(self) -> None:
+        """Guards the specific regression: `is_maintenance` defaulting from the status code alone.
+
+        Asserted over the whole assignment expression rather than line by line. The first version of
+        this test looked for a single line carrying both `SERVICE_UNAVAILABLE` and `is_maintenance`,
+        which is a property of ruff's line breaking and not of the code: collapsing the expression
+        onto one line would have failed it while the behaviour was correct, and spreading the bug
+        over two lines would have passed it.
+        """
         source = self.PORTAL_API_CLIENT.read_text()
-        marker_line = next(
-            (line for line in source.splitlines() if "SERVICE_UNAVAILABLE" in line and "is_maintenance" in line),
-            None,
-        )
-        self.assertIsNone(
-            marker_line,
-            "is_maintenance must not be derived from SERVICE_UNAVAILABLE on one line without the marker; "
-            f"found: {marker_line}",
+        start = source.index("self.is_maintenance = bool(")
+        end = depth = 0
+        for index, char in enumerate(source[start:], start):
+            depth += (char == "(") - (char == ")")
+            if depth == 0 and char == ")":
+                end = index
+                break
+        self.assertGreater(end, start, "could not find the end of the is_maintenance assignment")
+        assignment = source[start : end + 1]
+
+        self.assertIn(
+            f'"{self.MARKER}"',
+            assignment,
+            "is_maintenance must be derived from the marker the platform writes, not from the 503 "
+            f"status alone. `apps/api/billing/views.py` answers 503 for arbitrary document-list "
+            f"errors, so a status-only test tells the customer their data is safe during a real "
+            f"failure. Found: {assignment}",
         )
