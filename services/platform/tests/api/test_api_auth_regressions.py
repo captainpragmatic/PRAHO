@@ -17,6 +17,7 @@ If an endpoint is added without auth, this test fails with a clear message.
 from __future__ import annotations
 
 import inspect
+import types
 from typing import Any
 
 from django.test import SimpleTestCase
@@ -192,6 +193,55 @@ def _view_has_auth_coverage(func: Any) -> bool:
 
 class TestAPIAuthCoverage(SimpleTestCase):
     """Every API endpoint must have an explicit auth intent."""
+
+    def test_customer_auth_wrappers_expose_the_customer_parameter(self) -> None:
+        checked = 0
+        for path, view in _walk_url_patterns(get_resolver().url_patterns):
+            if not path.startswith("api/"):
+                continue
+            pending: list[object] = [view]
+            view_class = getattr(view, "cls", None)
+            if view_class is not None:
+                pending.extend(
+                    getattr(view_class, method)
+                    for method in ("get", "post", "put", "patch", "delete")
+                    if hasattr(view_class, method)
+                )
+            seen: set[int] = set()
+            while pending:
+                candidate = pending.pop()
+                if id(candidate) in seen:
+                    continue
+                seen.add(id(candidate))
+                qualname = getattr(candidate, "__qualname__", "")
+                if qualname in (
+                    "require_customer_authentication.<locals>.wrapper",
+                    "require_customer_role_in.<locals>.decorator.<locals>.wrapper",
+                ):
+                    with self.subTest(path=path, wrapper=qualname):
+                        original = getattr(candidate, "_praho_view", None)
+                        assert callable(original), "Customer auth wrapper must expose its view"
+                        parameters = list(inspect.signature(original).parameters.values())
+                        if parameters and parameters[0].name == "self":
+                            # Inspect the callable as Django binds an instance method.
+                            assert view_class is not None
+                            bound = types.MethodType(original, view_class())
+                            parameters = list(inspect.signature(bound).parameters.values())
+                        self.assertGreaterEqual(len(parameters), 2)
+                        self.assertEqual(parameters[1].name, "customer")
+                        self.assertEqual(parameters[1].kind, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+                        checked += 1
+                wrapped = getattr(candidate, "__wrapped__", None)
+                if callable(wrapped):
+                    pending.append(wrapped)
+                for cell in getattr(candidate, "__closure__", None) or ():
+                    try:
+                        value = cell.cell_contents
+                    except ValueError:
+                        continue
+                    if callable(value):
+                        pending.append(value)
+        self.assertGreater(checked, 0)
 
     def test_all_api_endpoints_have_auth_coverage(self) -> None:
         """Scan all /api/ URL patterns and verify auth decorator coverage."""

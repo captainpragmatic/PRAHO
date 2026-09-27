@@ -196,7 +196,7 @@ class PortalAuthenticationMiddleware:
         session_created_at = self._get_session_datetime(request, "session_created_at", now)
 
         # Validate immediately when metadata or the credential binding is missing.
-        if not validated_at or not next_validate_at or "session_auth_hash" not in request.session:
+        if not validated_at or not next_validate_at or not request.session.get("session_auth_hash"):
             # Fresh session - validate immediately but set next validation with jitter
             request.session["session_created_at"] = (session_created_at or now).isoformat()
             next_validate_at = self._calculate_next_validation_time(now)
@@ -311,12 +311,20 @@ class PortalAuthenticationMiddleware:
                 return False
 
         except PlatformAPIError as e:
-            if e.status_code in (401, 403):
+            # ADR-0017: only an explicit credential rejection bypasses the outage breaker.
+            if (
+                e.status_code in (401, 403)
+                and isinstance(e.response_data, dict)
+                and e.response_data.get("active") is False
+            ):
                 logger.warning("🚨 [Auth] Session rejected by Platform for user %s", user_id)
                 return False
             if e.is_rate_limited:
                 raise
-            logger.error(f"🔥 [Auth] Platform API error during validation for {user_id}: {e}")
+            if e.status_code in (401, 403):
+                logger.error("🔥 [Auth] Platform authentication fault during validation for user %s: %s", user_id, e)
+            else:
+                logger.error("🔥 [Auth] Platform API error during validation for user %s: %s", user_id, e)
 
             # Fail-open with circuit breaker (#130/M1): allow access during API outages
             # but force logout after too many consecutive fail-opens for same user.

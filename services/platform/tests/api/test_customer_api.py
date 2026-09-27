@@ -64,6 +64,70 @@ class TaxProfileEvidenceAPITests(HMACTestMixin, TestCase):
         self.assertFalse(self.profile.reverse_charge_eligible)
         self.assertEqual(self.profile.vies_verification_status, "pending")
 
+    def test_tax_profile_accepts_non_eu_and_legacy_greek_numbers(self) -> None:
+        for number in ("GB123456789", "GR123456789"):
+            with self.subTest(number=number):
+                response = self.portal_post(
+                    "/api/customers/tax-profile/",
+                    {"customer_id": self.customer.pk, "user_id": self.owner.pk, "vat_number": f" {number} "},
+                )
+                self.assertEqual(response.status_code, 200, response.content)
+                self.assertTrue(response.json()["success"])
+                self.profile.refresh_from_db()
+                self.assertEqual(self.profile.vat_number, number)
+
+    def test_tax_profile_uses_current_billing_country_for_unprefixed_number(self) -> None:
+        CustomerAddress.objects.create(
+            customer=self.customer, is_billing=True, is_current=True,
+            address_line1="Teststrasse 1", city="Berlin", country="DE",
+        )
+        response = self.portal_post(
+            "/api/customers/tax-profile/",
+            {"customer_id": self.customer.pk, "user_id": self.owner.pk, "vat_number": "136695976"},
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.profile.refresh_from_db()
+        self.assertEqual(self.profile.vat_number, "136695976")
+
+    def test_billing_address_rejects_invalid_eu_vat_before_writes(self) -> None:
+        original_name = self.customer.company_name
+        for number in ("DE12", "12"):
+            with self.subTest(number=number):
+                response = self.portal_post(
+                    "/api/customers/billing-address/",
+                    {
+                        "customer_id": self.customer.pk, "user_id": self.owner.pk,
+                        "company_name": "Must not persist", "country": "DE", "vat_number": number,
+                        "address_line1": "Teststrasse 1", "city": "Berlin",
+                    },
+                )
+                self.assertEqual(response.status_code, 400, response.content)
+                self.assertFalse(response.json()["success"])
+                self.assertTrue(response.json()["error"].startswith("Invalid VAT number: "))
+                self.customer.refresh_from_db()
+                self.profile.refresh_from_db()
+                self.assertEqual(self.customer.company_name, original_name)
+                self.assertEqual(self.profile.vat_number, "")
+                self.assertFalse(CustomerAddress.objects.filter(customer=self.customer).exists())
+
+    def test_billing_address_accepts_non_eu_vat_number(self) -> None:
+        response = self.portal_post(
+            "/api/customers/billing-address/",
+            {
+                "customer_id": self.customer.pk, "user_id": self.owner.pk,
+                "country": "GB", "vat_number": " GB123456789 ",
+                "address_line1": "1 Test Street", "city": "London",
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(response.json()["success"])
+        self.profile.refresh_from_db()
+        self.assertEqual(self.profile.vat_number, "GB123456789")
+        address = self.customer.get_billing_address()
+        self.assertIsNotNone(address)
+        assert address is not None
+        self.assertEqual(address.country, "GB")
+
     def test_tax_profile_update_rejects_malformed_vat_number(self) -> None:
         response = self.portal_post("/api/customers/tax-profile/", {
             "customer_id": self.customer.pk, "user_id": self.owner.pk, "vat_number": "DE12",

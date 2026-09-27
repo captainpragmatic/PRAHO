@@ -10,8 +10,22 @@ if TYPE_CHECKING:
 
 
 def normalize_vat_number(raw: object) -> str:
-    """Return uppercase ASCII letters and digits, or empty for a falsy value."""
-    return re.sub(r"[^A-Z0-9]", "", str(raw).upper()) if raw else ""
+    """Uppercase and remove spaces, dots and hyphens, or return empty for a falsy value."""
+    # Keep these separators aligned with the revalidation sweep's SQL.
+    return re.sub(r"[ .-]", "", str(raw).upper()) if raw else ""
+
+
+def vat_number_matches_country(vat_number: object, country_code: str) -> bool:
+    """Bind the issuing country to the billing country; GR and EL are equivalent."""
+    from apps.common.eu_vat_validator import parse_vat_number  # noqa: PLC0415
+
+    if not vat_number or not country_code.strip():
+        return False
+    country = country_code.strip().upper()
+    country = "EL" if country == "GR" else country
+    issuing_country, digits = parse_vat_number(str(vat_number), default_country=country)
+    issuing_country = "EL" if issuing_country == "GR" else issuing_country
+    return bool(digits) and issuing_country == country
 
 
 def vies_verified_for(tax_profile: CustomerTaxProfile | None, vat_number: object) -> bool:

@@ -209,14 +209,11 @@ def user_info_api(request: HttpRequest, customer: Customer) -> Response:
     Get current user information.
     Requires customer authentication via HMAC.
     """
-    # Get the user from the customer context (since this is a customer-authenticated endpoint)
-    membership = CustomerMembership.objects.filter(customer=customer).first()
-    if not membership:
+    user = getattr(request, "_customer_user", None)
+    if user is None:
         return Response(
             {"success": False, "error": "No user associated with this customer"}, status=status.HTTP_400_BAD_REQUEST
         )
-
-    user = membership.user
 
     user_data = {
         "id": user.id,

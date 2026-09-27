@@ -114,20 +114,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   payments, change the billing address that drives VAT, and toggle auto-renew, because the
   Platform verified membership and discarded the role. Billing data and every money-moving
   operation now require the owner or billing role; ticket creation, replies and
-  upgrade/downgrade requests need owner, billing or tech; viewers are read-only. The Portal
-  mirrors the matrix with a denial page (an HTMX partial for fragments) rather than a logout.
+  upgrade/downgrade requests need owner, billing or tech; viewers are read-only. Viewer and
+  tech members no longer receive the tax and billing profiles in the customer detail payload,
+  and the user-info endpoint returns the signed caller rather than an arbitrary member. The
+  Portal mirrors the matrix with a denial page (an HTMX partial for fragments) rather than a
+  logout.
 - **Portal sessions are bound to the password** — changing or resetting a customer's
   password, or disabling the account, did not end that customer's other Portal sessions, and
   a Platform rejection during session validation was treated as an outage and let the session
   continue. Login now issues a hash derived from the password that every validation must
-  present; a 401 or 403 from validation ends the session at once, while only transport
-  failures and 5xx keep the documented fail-open grace (ADR-0017 addendum). Every Portal
-  session re-logs in once after deploy.
+  present; the Platform's explicit rejection (`active: false`) ends the session at once,
+  while transport failures, 5xx and an inter-service authentication fault stay on the
+  documented bounded fail-open path (ADR-0017 addendum), so a secret rotation cannot sign
+  everyone out. A session without a real hash is validated immediately. Every Portal session
+  re-logs in once after deploy.
 - **Reverse charge requires VIES evidence** — an EU business customer was zero-rated on its
   own say-so: a company name, any VAT-number string and the VAT-payer flag, all editable in
   the Portal, and the customer endpoint even wrote the eligibility flag the VIES task was
   meant to own. Reverse charge now requires a valid VIES status for the exact VAT number
-  being invoiced (`billing.reverse_charge_requires_vies`). A changed number clears prior
+  being invoiced, issued by the billing-address country (`billing.reverse_charge_requires_vies`).
+  A changed number clears prior
   evidence and re-queues validation for any EU prefix, a VIES outage never downgrades a
   recently verified customer, and an unpaid order quoted at 0% without evidence fails
   preflight with an explicit message. A data migration clears legacy hand-set flags

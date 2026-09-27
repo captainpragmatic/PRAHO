@@ -57,6 +57,38 @@ class TaxServiceScenarioTests(TestCase):
         self.assertEqual(result.scenario, VATScenario.EU_B2B_REVERSE_CHARGE)
         self.assertEqual(result.vat_cents, 0)
 
+    def test_verified_number_must_match_the_billing_country(self) -> None:
+        info: CustomerVATInfo = {
+            "country": "DE", "is_business": True, "vat_number": "RO18189442",
+            "is_vat_payer": True, "vies_verified": True,
+        }
+        result = TaxService.calculate_vat_for_document(10000, info)
+        self.assertEqual(result.scenario, VATScenario.EU_B2C)
+        self.assertEqual(result.vat_rate, Decimal("19.0"))
+        self.assertEqual(result.vat_cents, 1900)
+        self.assertEqual(result.total_cents, 11900)
+        self.assertIn("issuing country does not match billing country", result.reasoning)
+
+        for country, number in (("DE", "DE136695976"), ("GR", "EL094259216"), ("NL", "123456789B01")):
+            with self.subTest(country=country, number=number):
+                info["country"] = country
+                info["vat_number"] = number
+                result = TaxService.calculate_vat_for_document(10000, info)
+                self.assertEqual(result.scenario, VATScenario.EU_B2B_REVERSE_CHARGE)
+                self.assertEqual(result.vat_cents, 0)
+                self.assertEqual(result.total_cents, 10000)
+
+    def test_policy_off_still_requires_matching_issuing_country(self) -> None:
+        with self.captureOnCommitCallbacks(execute=True):
+            setting = SettingsService.update_setting("billing.reverse_charge_requires_vies", False)
+        self.assertTrue(setting.is_ok(), setting)
+        info: CustomerVATInfo = {
+            "country": "DE", "is_business": True, "vat_number": "RO18189442", "is_vat_payer": True,
+        }
+        result = TaxService.calculate_vat_for_document(10000, info)
+        self.assertEqual(result.scenario, VATScenario.EU_B2C)
+        self.assertEqual(result.vat_cents, 1900)
+
     def test_policy_off_restores_number_only_reverse_charge(self) -> None:
         with self.captureOnCommitCallbacks(execute=True):
             setting = SettingsService.update_setting("billing.reverse_charge_requires_vies", False)

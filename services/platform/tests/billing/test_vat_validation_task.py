@@ -79,6 +79,24 @@ class VATValidationEvidencePersistenceTests(TestCase):
         self.assertEqual(validation.consultation_reference, "original-reference")
         self.assertGreater(validation.expires_at, timezone.now() + timedelta(hours=23))
 
+    def test_vies_outage_preserves_evidence_with_small_clock_skew(self) -> None:
+        verified_at = timezone.now() + timedelta(seconds=30)
+        self.profile.vies_verified_at = verified_at
+        self.profile.save(update_fields=["vies_verified_at"])
+        with patch(
+            _GATEWAY,
+            return_value=VIESResponse(
+                is_valid=False, country_code="DE", vat_number="136695976", api_available=False,
+            ),
+        ):
+            result = validate_vat_number(str(self.profile.pk))
+        self.assertEqual(result, {"success": True, "status": "vies_unavailable_grace"})
+        self.profile.refresh_from_db()
+        self.assertEqual(self.profile.vies_verification_status, "valid")
+        self.assertTrue(self.profile.reverse_charge_eligible)
+        self.assertEqual(self.profile.vies_verified_at, verified_at)
+        self.assertEqual(self.profile.vies_verified_name, "Original GmbH")
+
     def test_result_for_a_changed_number_is_not_persisted(self) -> None:
         def change_number(*args: object, **kwargs: object) -> VIESResponse:
             self.profile.vat_number = "FR40303265045"

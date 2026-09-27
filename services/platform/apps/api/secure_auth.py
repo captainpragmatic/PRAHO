@@ -284,6 +284,7 @@ def require_customer_authentication(view_func: Callable[..., Any]) -> Callable[.
         )
         return view_func(request, customer, *args, **kwargs)
 
+    wrapper._praho_view = view_func  # type: ignore[attr-defined]  # lets tests introspect the wrapped view's signature
     return wrapper
 
 

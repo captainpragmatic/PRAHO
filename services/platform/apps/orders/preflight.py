@@ -150,7 +150,8 @@ class OrderPreflightValidationService:
                 from apps.common.tax_service import TaxService, VATScenario  # noqa: PLC0415
 
                 if (
-                    vat_result.scenario != VATScenario.EU_B2B_REVERSE_CHARGE
+                    vat_result.scenario == VATScenario.EU_B2C
+                    and vat_number
                     and int(order.tax_cents) == 0
                     and TaxService.is_eu_country(country)
                     and country != TaxService.get_supplier_country()

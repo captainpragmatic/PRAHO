@@ -1,8 +1,10 @@
 """Role enforcement through signed customer API requests."""
 
 import inspect
+import json
 import time
 from decimal import Decimal
+from typing import Any, cast
 
 from django.core.cache import cache
 from django.test import RequestFactory, TestCase, override_settings
@@ -15,11 +17,11 @@ from apps.api.services import views as service_views
 from apps.api.tickets import views as ticket_views
 from apps.billing.models import Currency, Invoice
 from apps.customers.contact_models import CustomerAddress
-from apps.customers.models import Customer
+from apps.customers.models import Customer, CustomerBillingProfile, CustomerTaxProfile
 from apps.provisioning.service_models import Server, Service, ServicePlan
 from apps.tickets.models import Ticket
 from apps.users.models import CustomerMembership, User
-from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
+from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin, hmac_headers
 
 
 @override_settings(PLATFORM_API_SECRET=HMAC_TEST_SECRET, MIDDLEWARE=HMAC_TEST_MIDDLEWARE)
@@ -55,6 +57,47 @@ class CustomerRoleEnforcementTests(HMACTestMixin, TestCase):
 
     def _payload(self, role: str, **extra: object) -> dict[str, object]:
         return {"customer_id": self.customer.pk, "user_id": self.users[role].pk, **extra}
+
+    def test_detail_profiles_are_only_returned_to_billing_roles(self) -> None:
+        CustomerTaxProfile.objects.create(customer=self.customer, vat_number="DE136695976")
+        CustomerBillingProfile.objects.create(customer=self.customer, preferred_currency="EUR")
+        for role in ("viewer", "tech", "owner", "billing"):
+            with self.subTest(role=role):
+                response = self.portal_post(
+                    "/api/customers/details/",
+                    self._payload(role, include=["tax_profile", "billing_profile"]),
+                )
+                self.assertEqual(response.status_code, 200, response.content)
+                self.assertTrue(response.json()["success"])
+                customer = response.json()["customer"]
+                self.assertEqual(customer["id"], self.customer.pk)
+                if role in ("owner", "billing"):
+                    self.assertEqual(customer["tax_profile"]["vat_number"], "DE136695976")
+                    self.assertEqual(customer["billing_profile"]["preferred_currency"], "EUR")
+                else:
+                    self.assertNotIn("tax_profile", customer)
+                    self.assertNotIn("billing_profile", customer)
+
+    def test_user_info_returns_the_signed_member(self) -> None:
+        member = self.users["billing"]
+        member.first_name = "Second"
+        member.last_name = "Member"
+        member.save(update_fields=["first_name", "last_name"])
+        path = "/api/users/user/"
+        body = json.dumps(self._payload("billing", timestamp=time.time())).encode()
+        response = self.client.generic(
+            "GET",
+            path,
+            body,
+            content_type="application/json",
+            **cast("dict[str, Any]", hmac_headers("GET", path, body)),
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        user = response.json()["user"]
+        self.assertEqual(user["id"], member.pk)
+        self.assertEqual(user["email"], member.email)
+        self.assertEqual(user["first_name"], "Second")
+        self.assertEqual(user["last_name"], "Member")
 
     def test_viewer_is_denied_on_every_billing_read(self) -> None:
         for path in (
@@ -205,7 +248,7 @@ class CustomerRoleEnforcementTests(HMACTestMixin, TestCase):
             {"customer_id": self.customer.pk, "user_id": self.outsider.pk, "timestamp": time.time()},
             content_type="application/json",
         )
-        request._portal_authenticated = True  # type: ignore[attr-defined]  # middleware contract
+        request._portal_authenticated = True  # middleware contract
         customer, error = get_authenticated_customer(request, roles=BILLING_ROLES)
         self.assertIsNone(customer)
         self.assertIsNotNone(error)

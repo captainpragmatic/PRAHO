@@ -442,6 +442,7 @@ class TaxConfiguration:
         3. EU cross-border VAT payer with matching VIES evidence → reverse charge
         """
         from apps.billing.config import reverse_charge_requires_vies  # noqa: PLC0415
+        from apps.billing.vies_evidence import vat_number_matches_country  # noqa: PLC0415
 
         # Normalize and validate country code
         country_code = country_code.upper().strip() if country_code else cls.get_supplier_country()
@@ -476,6 +477,7 @@ class TaxConfiguration:
                     and vat_number
                     and country_code in cls.get_eu_countries()
                     and country_code != cls.get_supplier_country()
+                    and vat_number_matches_country(vat_number, country_code)
                     and (customer_info.get("vies_verified") is True or not reverse_charge_requires_vies())
                 ):
                     return VATScenario.EU_B2B_REVERSE_CHARGE, Decimal("0.0"), is_business, vat_number
@@ -553,6 +555,10 @@ class TaxConfiguration:
 
         if scenario == VATScenario.EU_B2C:
             if is_business:
+                from apps.billing.vies_evidence import vat_number_matches_country  # noqa: PLC0415
+
+                if vat_number and not vat_number_matches_country(vat_number, country_code):
+                    return "VAT issuing country does not match billing country → destination VAT"
                 return "EU business without VIES-verified VAT number → destination VAT"
             eu_rate = cls.get_vat_rate(country_code)
 

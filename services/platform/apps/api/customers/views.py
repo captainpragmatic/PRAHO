@@ -10,6 +10,7 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Q, QuerySet
 from django.http import HttpRequest
+from django.utils.translation import gettext as _
 from rest_framework import status
 from rest_framework.decorators import action, api_view, authentication_classes, permission_classes, throttle_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -59,6 +60,27 @@ logger = logging.getLogger(__name__)
 
 # Constants
 SEARCH_QUERY_MIN_LENGTH = 2
+
+
+def _vat_number_error(value: str, country: str | None) -> str | None:
+    """Validate EU numbers while preserving non-EU identifiers as entered."""
+    from apps.billing.tax_evidence import vat_country  # noqa: PLC0415
+    from apps.common.eu_vat_validator import is_eu_country, parse_vat_number, validate_vat_format  # noqa: PLC0415
+
+    country_code, digits = parse_vat_number(value, default_country=vat_country(country) if country else "RO")
+    if is_eu_country(country_code):
+        result = validate_vat_format(country_code, digits)
+        if not result.is_valid:
+            return result.error_message
+    return None
+
+
+def _customer_payload_for_role(customer_data: dict[str, object], role: str | None) -> dict[str, object]:
+    """Tax and billing profiles are billing data; only the owner and billing roles receive them."""
+    if role not in BILLING_ROLES:
+        customer_data.pop("tax_profile", None)
+        customer_data.pop("billing_profile", None)
+    return customer_data
 
 
 # ===============================================================================
@@ -632,7 +654,8 @@ def customer_detail_api(request: HttpRequest, customer: Customer) -> Response:
 
         # Serialize customer data
         serializer = CustomerDetailSerializer(customer_with_profiles)
-        response_data = {"success": True, "customer": serializer.data}
+        customer_data = _customer_payload_for_role(dict(serializer.data), getattr(request, "_customer_role", None))
+        response_data = {"success": True, "customer": customer_data}
 
         # Add optional expansions if requested
         if includes:
@@ -774,6 +797,13 @@ def update_customer_billing_address(  # noqa: C901, PLR0912, PLR0915  # Complexi
         )
 
     validated_data = serializer.validated_data
+    if validated_data.get("vat_number"):
+        vat_error = _vat_number_error(validated_data["vat_number"], validated_data.get("country") or existing_country)
+        if vat_error is not None:
+            return Response(
+                {"success": False, "error": _("Invalid VAT number: %(error)s") % {"error": vat_error}},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
     # Resolve the acting user from the HMAC-signed body (user_id is validated by the decorator)
     user_id = request.data.get("user_id")
@@ -1370,13 +1400,11 @@ def customer_tax_profile_update(  # noqa: C901, PLR0912  # Validate each permitt
                             status=status.HTTP_400_BAD_REQUEST,
                         )
                 if field == "vat_number" and value:
-                    from apps.common.eu_vat_validator import parse_vat_number, validate_vat_format  # noqa: PLC0415
-
-                    country_code, vat_digits = parse_vat_number(value)
-                    vat_result = validate_vat_format(country_code, vat_digits)
-                    if not vat_result.is_valid:
+                    billing_address = customer.get_billing_address()
+                    vat_error = _vat_number_error(value, billing_address.country if billing_address else None)
+                    if vat_error is not None:
                         return Response(
-                            {"success": False, "error": f"Invalid VAT number: {vat_result.error_message}"},
+                            {"success": False, "error": _("Invalid VAT number: %(error)s") % {"error": vat_error}},
                             status=status.HTTP_400_BAD_REQUEST,
                         )
             setattr(tax_profile, field, value)

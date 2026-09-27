@@ -16,6 +16,8 @@ The legacy amount calculator carried a second, profile-blind reverse-charge rule
 
 One pure evidence function checks VIES status and the exact normalized VAT number.
 A valid profile only supplies evidence for its own non-empty number.
+Evidence also requires the VAT number's issuing country to match the billing country used for the decision.
+Normalisation is aligned with the revalidation sweep so accepted evidence can always be refreshed.
 Every document context derives its evidence through this function.
 The tax decision ignores the legacy reverse-charge eligibility flag.
 The policy setting `billing.reverse_charge_requires_vies` defaults to on.

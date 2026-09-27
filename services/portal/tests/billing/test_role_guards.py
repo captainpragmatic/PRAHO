@@ -56,6 +56,15 @@ class PortalRoleGuardTests(SimpleTestCase):
         self.assertTemplateUsed(response, "billing/partials/invoices_table.html")
         self.assertEqual(response.context["invoices"], [])
 
+    def test_tax_profile_requires_billing_access_after_method_validation(self) -> None:
+        path = reverse("customers:tax_profile")
+        for role in ("viewer", "tech"):
+            with self.subTest(role=role):
+                self._set_role(role)
+                self.assertEqual(self.client.get(path).status_code, 403)
+                self.assertEqual(self.client.post(path, {"vat_number": "DE136695976"}).status_code, 403)
+                self.assertEqual(self.client.delete(path).status_code, 405)
+
     def test_viewer_cannot_open_ticket_or_reply(self) -> None:
         response = self.client.post(reverse("tickets:create"))
         self.assertEqual(response.status_code, 403)

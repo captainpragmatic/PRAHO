@@ -83,6 +83,42 @@ class SessionRevocationTests(SimpleTestCase):
                 self.assert_rejected(request, response, downstream)
                 self.assertIsNone(cache.get("auth:fail_open:42"))
 
+    @override_settings(PLATFORM_API_ALLOW_INSECURE_HTTP=True)
+    def test_authentication_faults_use_the_bounded_fail_open_breaker(self) -> None:
+        for status_code, message in ((401, "HMAC authentication failed"), (403, "Access denied")):
+            with self.subTest(status_code=status_code):
+                cache.clear()
+                request = self.authenticated_request()
+                session_key = request.session.session_key
+                validated_at = request.session["validated_at"]
+                fault = self.transport_response(status_code, {"error": message})
+                with patch("apps.api_client.services.portal_request", return_value=fault):
+                    response = PortalAuthenticationMiddleware(lambda request: HttpResponse("allowed"))(request)
+                self.assertEqual(response.content, b"allowed")
+                self.assertEqual(request.session.session_key, session_key)
+                self.assertEqual(request.session["user_id"], 42)
+                self.assertEqual(request.session["session_auth_hash"], "stored")
+                self.assertEqual(request.session["validated_at"], validated_at)
+                self.assertEqual(cache.get("auth:fail_open:42"), 1)
+
+                cache.set("auth:fail_open:42", 4)
+                with patch("apps.api_client.services.portal_request", return_value=fault):
+                    response = PortalAuthenticationMiddleware(lambda request: HttpResponse("allowed"))(request)
+                self.assertEqual(response.status_code, 302)
+                self.assertNotIn("user_id", request.session)
+                self.assertEqual(cache.get("auth:fail_open:42"), 5)
+
+    def test_empty_hash_forces_validation_before_future_deadline(self) -> None:
+        request = self.authenticated_request("")
+        request.session["next_validate_at"] = (timezone.now() + timedelta(minutes=10)).isoformat()
+        success = self.transport_response(200, {"active": True, "session_auth_hash": "current"})
+        with patch("apps.api_client.services.portal_request", return_value=success) as transport:
+            response = PortalAuthenticationMiddleware(lambda request: HttpResponse("allowed"))(request)
+        transport.assert_called_once()
+        self.assertEqual(json.loads(transport.call_args.kwargs["data"])["session_auth_hash"], "")
+        self.assertEqual(response.content, b"allowed")
+        self.assertEqual(request.session["session_auth_hash"], "current")
+
     def test_two_sessions_old_hash_is_revoked_while_new_survives(self) -> None:
         current = self.authenticated_request("new")
         revoked = self.authenticated_request("old")

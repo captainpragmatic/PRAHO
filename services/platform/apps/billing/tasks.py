@@ -524,7 +524,7 @@ def validate_vat_number(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Explicit va
                 not vies.api_available
                 and tax_profile.vies_verification_status == CustomerTaxProfile.VIESVerificationStatus.VALID
                 and tax_profile.vies_verified_at is not None
-                and now - grace <= tax_profile.vies_verified_at <= now
+                and tax_profile.vies_verified_at >= now - grace
             ):
                 validation = (
                     VATValidation.objects.select_for_update()
