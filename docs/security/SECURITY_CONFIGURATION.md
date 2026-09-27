@@ -525,6 +525,9 @@ Platform responses standardize `429` handling with parseable error payloads and 
 - [ ] Set secure database passwords with `DB_SSLMODE=require`
 - [ ] Configure email with TLS encryption
 - [ ] Set `HMAC_SECRET` for portal-platform communication
+- [ ] Set `PORTAL_TRUSTED_PROXY_CIDRS` on the Portal (production and staging refuse to start without it)
+- [ ] Set `portal.public_base_url` in Settings before customers use password reset
+- [ ] Run `python manage.py validate_vat_numbers --blocked-orders` right after `migrate` on the first deploy with the VIES gate (`billing.reverse_charge_requires_vies`)
 - [ ] Review [HTTPS Deployment Checklist](../deployment/HTTPS_DEPLOYMENT_CHECKLIST.md) for TLS rollout
 - [ ] Run `make lint-security` before deploy
 - [ ] Run `python manage.py check --deploy`

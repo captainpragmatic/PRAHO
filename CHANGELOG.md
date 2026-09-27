@@ -25,6 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rather than quietly resolving to the built-in issuer. Quietly resolving it meant a typo
   had PRAHO mint legal Romanian invoice numbers from its own sequence for an operator who
   was trying to hand exactly that responsibility to SmartBill.
+- `billing.reverse_charge_requires_vies` (on by default) and `portal.public_base_url` settings.
+- `validate_vat_numbers` management command (`--sync`, `--blocked-orders`) to backfill VIES
+  validation and report unpaid zero-tax orders that lack evidence.
+- `make lock-upgrade PKGS="..."` upgrades named packages in `uv.lock` and re-syncs the venv.
+- `PORTAL_TRUSTED_PROXY_CIDRS` environment variable for the Portal; production and staging
+  refuse to start without it.
 
 ### Fixed
 
@@ -65,6 +71,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hourly sweep now finds refunded provider invoices that have no credit note.
 - The issuance and reversal sweeps are actually scheduled. Both existed but were
   registered nowhere, so the recovery they provide never ran.
+- Portal password reset works end to end. The request page was a stub and the Platform
+  endpoint crashed for lack of email templates. The email now carries a confirm link built
+  from `portal.public_base_url`, token and password-policy failures return 400 instead of
+  500, and a completed reset clears the account lockout.
+- Service action requests create tickets. The Portal posted suspend, cancel, upgrade and
+  downgrade requests to a route the Platform never registered. They now open a support
+  ticket attributed to the requesting user; suspend and cancel need the owner or billing
+  role and a reason.
+- The refund-request views in orders and billing no longer fail to create their support
+  category: their defaults named SLA fields the category model does not have.
 
 ### Changed
 
@@ -90,6 +106,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and waits for an operator to confirm what exists at the provider.
 
 ---
+
+### Security
+
+- **Customer roles are enforced on the API** — a customer organisation's `viewer` and `tech`
+  members could read invoices and proformas, download PDFs, create and confirm orders, start
+  payments, change the billing address that drives VAT, and toggle auto-renew, because the
+  Platform verified membership and discarded the role. Billing data and every money-moving
+  operation now require the owner or billing role; ticket creation, replies and
+  upgrade/downgrade requests need owner, billing or tech; viewers are read-only. The Portal
+  mirrors the matrix with a denial page (an HTMX partial for fragments) rather than a logout.
+- **Portal sessions are bound to the password** — changing or resetting a customer's
+  password, or disabling the account, did not end that customer's other Portal sessions, and
+  a Platform rejection during session validation was treated as an outage and let the session
+  continue. Login now issues a hash derived from the password that every validation must
+  present; a 401 or 403 from validation ends the session at once, while only transport
+  failures and 5xx keep the documented fail-open grace (ADR-0017 addendum). Every Portal
+  session re-logs in once after deploy.
+- **Reverse charge requires VIES evidence** — an EU business customer was zero-rated on its
+  own say-so: a company name, any VAT-number string and the VAT-payer flag, all editable in
+  the Portal, and the customer endpoint even wrote the eligibility flag the VIES task was
+  meant to own. Reverse charge now requires a valid VIES status for the exact VAT number
+  being invoiced (`billing.reverse_charge_requires_vies`). A changed number clears prior
+  evidence and re-queues validation for any EU prefix, a VIES outage never downgrades a
+  recently verified customer, and an unpaid order quoted at 0% without evidence fails
+  preflight with an explicit message. A data migration clears legacy hand-set flags
+  (ADR-0049).
+- **The Portal login limiter now counts failures** — it decided by HTTP status, and every
+  failed login renders 200, so a run of wrong passwords cleared the counters instead of
+  filling them. Auth views now mark failure and success explicitly; the sixth failure in
+  15 minutes is refused, password-reset and registration traffic has its own volume bucket,
+  MFA re-authentication failures are budgeted per user, and a Platform outage is reported as
+  unavailable instead of being charged as a wrong password.
+- **An anonymous login flood can no longer take every customer down** — Platform login shared
+  one rate bucket with all other Portal traffic and knew nothing about the end-user address.
+  Login and reset traffic now charges its own per-portal bucket, the Portal forwards the
+  client IP inside the signed body, and the Platform applies 10 failed logins per minute per
+  client and 5 reset requests per minute. Account lockout starts at the fifth failure with a
+  5-minute lock and escalates from there, instead of locking on the first failure. Both
+  password-reset endpoints require Portal HMAC authentication.
+- **Rate-limit windows roll on the database cache** — the Platform's fixed windows keyed a
+  counter whose expiry the database cache reset on every increment, so a busy bucket never
+  reopened. Counters are keyed by window index, and successful logins never consume the
+  per-client failure budget.
+- **Trusted proxies are required in production** — the Portal shipped with an empty
+  trusted-proxy list in every topology, so every IP-keyed limiter saw one address and would
+  have throttled all customers together. `PORTAL_TRUSTED_PROXY_CIDRS` is required outside
+  DEBUG, and when clients cannot be told apart the IP-keyed limiters stand down rather than
+  collapse into one bucket.
+- **Test accommodation removed from the production auth path** — the Portal client accepted a
+  bare `{"success": true}` from login as a valid session when the HMAC headers merely looked
+  well-formed. Only a payload carrying the user is accepted.
+- **Ticket related-service scoping** — a customer could attach another customer's service to
+  a ticket by ID. The field is restricted to the customer's own services, foreign and
+  nonexistent IDs return the same error, and a data migration detaches legacy cross-customer
+  links.
+- **Django 5.2.17 and urllib3 2.8.0**, and Portal request bodies capped at 5MB at the
+  reverse proxy.
 
 ## [0.29.0] - 2026-09-21
 
