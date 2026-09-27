@@ -5,6 +5,7 @@ Customer-facing login/logout with Platform API validation using Django sessions.
 
 import logging
 import time
+from http import HTTPStatus
 
 from django.conf import settings
 from django.contrib import messages
@@ -37,6 +38,7 @@ from apps.users.forms import (
     CustomerProfileForm,
     CustomerRegistrationForm,
     MFAReauthenticationForm,
+    PasswordResetConfirmForm,
     PasswordResetRequestForm,
 )
 
@@ -621,17 +623,26 @@ def password_reset_view(request: HttpRequest) -> HttpResponse:
 
         if form.is_valid():
             email = form.cleaned_data["email"]
+            rate_limited = False
             try:
-                # TODO: Call Platform API to send password reset email
-                logger.info(f"✅ [Portal Password Reset] Reset requested for {email}")
+                api_client.request_password_reset(email, client_ip=get_safe_client_ip(request))
+                logger.info("✅ [Portal Password Reset] Reset requested")
+            except PlatformAPIError as exc:
+                rate_limited = is_rate_limited_error(exc)
+                if rate_limited:
+                    messages.warning(
+                        request,
+                        _("Too many attempts. Please try again in %(seconds)s seconds.")
+                        % {"seconds": exc.retry_after or 30},
+                    )
+                else:
+                    logger.error("🔥 [Portal Password Reset] Request failed (%s)", type(exc).__name__)
+
+            if not rate_limited:
                 messages.success(
                     request, _("If an account with that email exists, you will receive password reset instructions.")
                 )
-                return redirect("/login/")
-
-            except Exception as e:
-                logger.error(f"🔥 [Portal Password Reset] Error requesting reset: {e}")
-                messages.error(request, _("Error processing password reset request. Please try again."))
+                return redirect("users:login")
 
     context = {
         "form": form,
@@ -640,6 +651,53 @@ def password_reset_view(request: HttpRequest) -> HttpResponse:
     }
 
     return render(request, "users/password_reset.html", context)
+
+
+@never_cache
+@csrf_protect
+@require_http_methods(["GET", "POST"])
+def password_reset_confirm_view(request: HttpRequest, uidb64: str, token: str) -> HttpResponse:
+    """Redeem a reset link through the Platform password policy."""
+    form = PasswordResetConfirmForm(request.POST if request.method == "POST" else None)
+    if request.method == "POST" and form.is_valid():
+        try:
+            result = api_client.confirm_password_reset(
+                uidb64,
+                token,
+                form.cleaned_data["new_password"],
+                form.cleaned_data["confirm_password"],
+                client_ip=get_safe_client_ip(request),
+            )
+            if result.get("success"):
+                messages.success(request, _("Password reset successfully. You can now log in with your new password."))
+                return redirect("users:login")
+            form.add_error(None, _("Password reset failed. Please try again."))
+        except PlatformAPIError as exc:
+            if is_rate_limited_error(exc):
+                messages.warning(
+                    request,
+                    _("Too many attempts. Please try again in %(seconds)s seconds.")
+                    % {"seconds": exc.retry_after or 30},
+                )
+            elif exc.status_code == HTTPStatus.BAD_REQUEST:
+                mark_auth_failure(request)
+                form.add_error(None, _("This reset link is invalid or has expired, or the password was rejected."))
+                errors = (exc.response_data or {}).get("errors", {})
+                password_errors = errors.get("new_password") if isinstance(errors, dict) else None
+                if isinstance(password_errors, str):
+                    form.add_error("new_password", password_errors)
+                elif isinstance(password_errors, list):
+                    for error in password_errors:
+                        if isinstance(error, str):
+                            form.add_error("new_password", error)
+            else:
+                logger.error("🔥 [Portal Password Reset] Confirmation failed (%s)", type(exc).__name__)
+                form.add_error(None, _("Password reset failed. Please try again."))
+    return render(
+        request,
+        "users/password_reset_confirm.html",
+        {"form": form, "page_title": _("Reset Password"), "brand_name": "PRAHO Portal"},
+    )
 
 
 @never_cache

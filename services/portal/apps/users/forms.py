@@ -578,6 +578,34 @@ class PasswordResetRequestForm(forms.Form):
     )
 
 
+class PasswordResetConfirmForm(forms.Form):
+    """Collect and confirm a replacement password."""
+
+    new_password = forms.CharField(
+        label=_("New Password"),
+        widget=forms.PasswordInput(attrs={"autocomplete": "new-password"}),
+        help_text=_("Choose a strong password with at least 8 characters."),
+    )
+    confirm_password = forms.CharField(
+        label=_("Confirm New Password"),
+        widget=forms.PasswordInput(attrs={"autocomplete": "new-password"}),
+        help_text=_("Re-enter your new password to confirm."),
+    )
+
+    def clean(self) -> dict[str, Any]:
+        cleaned_data = super().clean() or {}
+        new_password = cleaned_data.get("new_password")
+        confirm_password = cleaned_data.get("confirm_password")
+
+        if new_password and confirm_password and new_password != confirm_password:
+            raise ValidationError(_("New password and confirmation don't match."))
+
+        if new_password and len(new_password) < CHANGE_PASSWORD_MIN_LENGTH:
+            raise ValidationError(_("Password must be at least 8 characters long."))
+
+        return cleaned_data
+
+
 class ChangePasswordForm(forms.Form):
     """Change password form for authenticated users"""
 

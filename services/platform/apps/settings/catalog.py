@@ -2695,6 +2695,19 @@ CATALOG: tuple[SettingDef, ...] = (
         validation={"min": 0},
     ),
     SettingDef(
+        key="portal.public_base_url",
+        data_type="string",
+        default="",
+        group="platform",
+        section=_("Customer portal"),
+        label=_("Customer portal URL"),
+        help_text=_(
+            "Public base URL of the customer portal, e.g. https://portal.example.com. "
+            "Used in customer-facing links such as password reset emails."
+        ),
+        critical=True,
+    ),
+    SettingDef(
         key="system.maintenance_mode",
         data_type="boolean",
         default=False,

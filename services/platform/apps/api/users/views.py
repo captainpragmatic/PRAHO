@@ -674,11 +674,10 @@ def mfa_status_api(request: HttpRequest, user: User) -> Response:
 @require_portal_authentication
 def password_reset_request_api(request: HttpRequest) -> Response:
     """
-    🔑 Request Password Reset through an HMAC-signed Portal call.
+    Request a customer password reset through an HMAC-signed Portal call.
 
-    The Portal signs requests for anonymous users. Valid requests keep a
-    neutral response whether or not the account exists.
-
+    Email links use the configured public Portal URL. Successful requests
+    keep a neutral response whether or not the account exists.
 
     POST /api/users/password/reset/
     {
@@ -703,7 +702,7 @@ def password_reset_request_api(request: HttpRequest) -> Response:
             return Response(result)
 
         except Exception as e:
-            logger.error(f"🔥 [Password Reset] Request failed: {e}")
+            logger.error("🔥 [Password Reset] Request failed (%s): %s", type(e).__name__, e)
             return Response(
                 {"success": False, "error": "Password reset service temporarily unavailable."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -724,11 +723,10 @@ def password_reset_request_api(request: HttpRequest) -> Response:
 @require_portal_authentication
 def password_reset_confirm_api(request: HttpRequest) -> Response:
     """
-    🔐 Confirm Password Reset through an HMAC-signed Portal call.
+    Confirm a customer password reset through an HMAC-signed Portal call.
 
-    The Portal signs the call; the reset token separately proves possession
-    of the email account.
-
+    The reset token proves possession of the email account. Invalid tokens
+    and rejected passwords return validation errors before any mutation.
 
     POST /api/users/password/reset/confirm/
     {
@@ -760,7 +758,7 @@ def password_reset_confirm_api(request: HttpRequest) -> Response:
             return Response(result)
 
         except Exception as e:
-            logger.error(f"🔥 [Password Reset] Confirm failed: {e}")
+            logger.error("🔥 [Password Reset] Confirm failed (%s): %s", type(e).__name__, e)
             return Response(
                 {"success": False, "error": "Password reset failed. Please try again."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,

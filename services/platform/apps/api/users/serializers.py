@@ -6,6 +6,7 @@ import io
 import logging
 import re
 from typing import TYPE_CHECKING, Any, cast
+from urllib.parse import urlsplit
 
 import pyotp
 import qrcode
@@ -14,6 +15,8 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth.tokens import default_token_generator
+from django.core.exceptions import ImproperlyConfigured
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.mail import send_mail
 from django.db import transaction
 from django.template.loader import render_to_string
@@ -255,13 +258,22 @@ class PasswordResetRequestSerializer(serializers.Serializer):
         token = default_token_generator.make_token(user)
         uid = urlsafe_base64_encode(force_bytes(user.pk))
 
-        # Prepare email context
+        from apps.settings.services import SettingsService  # noqa: PLC0415
+
+        base = str(SettingsService.get_setting("portal.public_base_url", "") or "").strip().rstrip("/")
+        try:
+            parsed_base = urlsplit(base)
+        except ValueError as exc:
+            raise ImproperlyConfigured("portal.public_base_url is not configured") from exc
+        if parsed_base.scheme not in {"http", "https"} or not parsed_base.netloc:
+            raise ImproperlyConfigured("portal.public_base_url is not configured")
+
+        reset_url = f"{base}/password-reset/confirm/{uid}/{token}/"
         context = {
             "user": user,
-            "domain": getattr(settings, "DOMAIN_NAME", "localhost:8700"),
             "uid": uid,
             "token": token,
-            "protocol": "https" if getattr(settings, "USE_HTTPS", False) else "http",
+            "reset_url": reset_url,
         }
 
         # Render email templates
@@ -300,12 +312,20 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
     new_password_confirm = serializers.CharField(min_length=12, write_only=True)
 
     def validate(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Validate passwords match"""
+        """Validate matching passwords, the reset token, and password policy."""
         if data["new_password"] != data["new_password_confirm"]:
             raise serializers.ValidationError(_("Passwords do not match."))
+
+        user = data["uid"]
+        if not default_token_generator.check_token(user, data["token"]):
+            raise serializers.ValidationError({"token": _("Invalid or expired reset link.")})
+        try:
+            validate_password(data["new_password"], user)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError({"new_password": exc.messages}) from exc
         return data
 
-    def validate_uid(self, value: str) -> Any:
+    def validate_uid(self, value: str) -> "User":
         """Validate UID and get user"""
         try:
             uid = force_str(urlsafe_base64_decode(value))
@@ -319,19 +339,11 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
         Reset user password with valid token.
         """
         user = validated_data["uid"]  # Already validated to be User object
-        token = validated_data["token"]
-        new_password = validated_data["new_password"]
-
-        # Verify token
-        if not default_token_generator.check_token(user, token):
-            raise serializers.ValidationError(_("Invalid or expired reset link."))
-
-        # Validate password strength
-        validate_password(new_password, user)
 
         # Reset password
-        user.set_password(new_password)
+        user.set_password(validated_data["new_password"])
         user.save()
+        user.reset_failed_login_attempts()
 
         # Clear any 2FA setup in progress (security measure)
         if not user.two_factor_enabled:

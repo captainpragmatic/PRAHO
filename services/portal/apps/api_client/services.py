@@ -49,6 +49,14 @@ logger = logging.getLogger(__name__)
 HMAC_TIMING_THRESHOLD = 0.002
 
 
+def _client_ip_payload(client_ip: str) -> dict[str, str]:
+    """Include only a valid, normalized client IP in the signed request."""
+    if client_ip:
+        with suppress(ValueError):
+            return {"client_ip": str(ipaddress.ip_address(client_ip))}
+    return {}
+
+
 def _resolve_portal_signing_secret() -> str:
     """Return the secret this portal signs Platform requests with (#277).
 
@@ -571,10 +579,12 @@ class PlatformAPIClient:
         min_duration = float(getattr(settings, "PLATFORM_API_AUTH_MIN_DURATION_SECONDS", 0.0))
         try:
             # Use existing platform login endpoint
-            request_body = {"email": email, "password": password, **({"mfa_token": mfa_token} if mfa_token else {})}
-            if client_ip:
-                with suppress(ValueError):
-                    request_body["client_ip"] = str(ipaddress.ip_address(client_ip))
+            request_body = {
+                "email": email,
+                "password": password,
+                **({"mfa_token": mfa_token} if mfa_token else {}),
+                **_client_ip_payload(client_ip),
+            }
             data = self._make_request(
                 "POST",
                 "/users/login/",
@@ -610,6 +620,33 @@ class PlatformAPIClient:
                     time.sleep(remaining - 0.001)
                 while (time.perf_counter() - start_time) < min_duration:
                     pass
+
+    def request_password_reset(self, email: str, client_ip: str = "") -> dict[str, Any]:
+        """Request a reset email; propagate Platform errors to the caller."""
+        return self._make_request(
+            "POST", "/users/password/reset/", data={"email": email, **_client_ip_payload(client_ip)}
+        )
+
+    def confirm_password_reset(
+        self,
+        uid: str,
+        token: str,
+        new_password: str,
+        new_password_confirm: str,
+        client_ip: str = "",
+    ) -> dict[str, Any]:
+        """Redeem a reset token; propagate Platform errors to the caller."""
+        return self._make_request(
+            "POST",
+            "/users/password/reset/confirm/",
+            data={
+                "uid": uid,
+                "token": token,
+                "new_password": new_password,
+                "new_password_confirm": new_password_confirm,
+                **_client_ip_payload(client_ip),
+            },
+        )
 
     def validate_session_secure(self, user_id: str, session_auth_hash: str | None = None) -> dict[str, Any]:
         """
