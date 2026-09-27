@@ -83,6 +83,7 @@ class PlatformAPIError(Exception):
         retry_after: int | None = None,
         is_rate_limited: bool | None = None,
         is_maintenance: bool | None = None,
+        is_unavailable: bool | None = None,
     ):
         self.message = message
         self.status_code = status_code
@@ -94,8 +95,26 @@ class PlatformAPIError(Exception):
         # The sibling `is_rate_limited` had for a long time, and its absence was the whole bug:
         # every consumer downstream could tell a throttle from a failure and had no way to tell an
         # outage from either, so a maintenance window rendered as "you have nothing yet".
+        #
+        # Two flags rather than one, because the customer messages are not interchangeable.
+        # `is_unavailable` is "the platform is not answering right now" and covers 502/503/504 - all
+        # three must be surfaced rather than rendered as an empty list, and the first version of this
+        # change covered only 503.
+        self.is_unavailable = bool(
+            is_unavailable
+            if is_unavailable is not None
+            else status_code in {HTTPStatus.BAD_GATEWAY, HTTPStatus.SERVICE_UNAVAILABLE, HTTPStatus.GATEWAY_TIMEOUT}
+        )
+        # `is_maintenance` is the narrower claim, and only the platform's own gate may make it.
+        # `MaintenanceModeMiddleware._json_response` marks its body `{"error": "maintenance"}`; a bare
+        # 503 is NOT enough, because `apps/api/billing/views.py:587` returns 503 for arbitrary
+        # document-list errors. Keying on the status alone told a customer "scheduled maintenance -
+        # your data is safe" in the middle of a real failure, and a false reassurance is worse than a
+        # generic one.
         self.is_maintenance = bool(
-            is_maintenance if is_maintenance is not None else status_code == HTTPStatus.SERVICE_UNAVAILABLE
+            is_maintenance
+            if is_maintenance is not None
+            else (status_code == HTTPStatus.SERVICE_UNAVAILABLE and (response_data or {}).get("error") == "maintenance")
         )
         super().__init__(message)
 
@@ -112,8 +131,12 @@ class PlatformAPIError(Exception):
 
         A genuine failure is deliberately NOT degraded: flattening that to an empty list is a
         different judgement, and not one this change is making.
+
+        Built from `is_unavailable` rather than `is_maintenance` so that a 502 or a 504 - and a 503
+        the platform did not mark as maintenance - are surfaced too. They get the generic
+        "temporarily unavailable" notice; only a marked 503 gets told it is planned.
         """
-        return self.is_rate_limited or self.is_maintenance
+        return self.is_rate_limited or self.is_unavailable
 
 
 class PlatformAPIClient:

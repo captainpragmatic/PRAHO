@@ -19,6 +19,7 @@ from unittest.mock import patch
 from django.contrib.messages import get_messages
 from django.contrib.messages.storage.fallback import FallbackStorage
 from django.contrib.sessions.middleware import SessionMiddleware
+from django.http import HttpResponse
 from django.test import Client, SimpleTestCase
 from django.test.client import RequestFactory
 
@@ -39,8 +40,22 @@ def _request(path: str = "/billing/invoices/"):
 
 
 class MaintenanceErrorClassificationTests(SimpleTestCase):
-    def test_a_503_is_maintenance(self) -> None:
-        self.assertTrue(PlatformAPIError("unavailable", status_code=503).is_maintenance)
+    def test_a_503_the_platform_marked_is_maintenance(self) -> None:
+        error = PlatformAPIError("unavailable", status_code=503, response_data={"error": "maintenance"})
+        self.assertTrue(error.is_maintenance)
+        self.assertTrue(error.is_degraded)
+
+    def test_a_bare_503_is_degraded_but_not_maintenance(self) -> None:
+        """Narrowed deliberately. This test asserted the opposite and was wrong.
+
+        `apps/api/billing/views.py` answers 503 for arbitrary document-list errors, so keying on the
+        status alone told a customer "scheduled maintenance - your data is safe" in the middle of a
+        real failure. Only the gate's own `{"error": "maintenance"}` marker may make that claim; an
+        unmarked 503 is still surfaced, just not described as planned.
+        """
+        error = PlatformAPIError("unavailable", status_code=503, response_data={"error": "boom"})
+        self.assertFalse(error.is_maintenance)
+        self.assertTrue(error.is_degraded)
 
     def test_a_429_is_not_maintenance(self) -> None:
         """The two signals must stay distinct; a throttle is not an outage."""
@@ -162,7 +177,9 @@ class LoginDuringMaintenanceTests(SimpleTestCase):
     def test_a_maintenance_window_is_not_reported_as_a_wrong_password(self) -> None:
         with patch(
             "apps.users.views.api_client.authenticate_customer",
-            side_effect=PlatformAPIError("unavailable", status_code=503, retry_after=600),
+            side_effect=PlatformAPIError(
+                "unavailable", status_code=503, response_data={"error": "maintenance"}, retry_after=600
+            ),
         ):
             response = Client().post("/login/", {"email": "someone@example.com", "password": "correct-horse"})
 
@@ -201,3 +218,45 @@ class LoginDuringMaintenanceTests(SimpleTestCase):
             response = Client().post("/login/", {"email": "someone@example.com", "password": "wrong"})
 
         self.assertContains(response, "Invalid email address or password")
+
+
+class LoginDuringAnUndeclaredOutageTests(SimpleTestCase):
+    """A 502, a 504, or a 503 the platform did not mark still cannot let anyone log in.
+
+    The view keyed on `is_maintenance`, so narrowing that flag would have sent every undeclared
+    outage back to the generic branch - which is the reported bug all over again, a real outage
+    reported as a wrong password. It keys on `is_unavailable` now, and the wording is the only thing
+    that differs between the two cases.
+    """
+
+    def _post_login_with(self, error: PlatformAPIError) -> HttpResponse:
+        with patch("apps.users.views.api_client.authenticate_customer", side_effect=error):
+            return Client().post("/login/", {"email": "someone@example.com", "password": "correct-horse"})
+
+    def test_an_unmarked_503_disables_the_form_without_claiming_maintenance(self) -> None:
+        response = self._post_login_with(
+            PlatformAPIError("boom", status_code=503, response_data={"error": "boom"}, retry_after=600)
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b" disabled>", response.content, "the submit button must still be disabled")
+        body = response.content.decode().lower()
+        self.assertIn("temporarily unavailable", body)
+        self.assertNotIn("your data is safe", body, "nobody knows that during an unexplained failure")
+
+    def test_a_gateway_error_is_treated_the_same_way(self) -> None:
+        for status in (502, 504):
+            with self.subTest(status=status):
+                response = self._post_login_with(PlatformAPIError("gateway", status_code=status))
+                self.assertEqual(response.status_code, 200)
+                self.assertIn(b" disabled>", response.content)
+
+    def test_a_declared_window_still_says_so(self) -> None:
+        """The positive control: the distinction is in the wording, not in whether it is surfaced."""
+        response = self._post_login_with(
+            PlatformAPIError("maint", status_code=503, response_data={"error": "maintenance"}, retry_after=600)
+        )
+
+        body = response.content.decode().lower()
+        self.assertIn("scheduled maintenance", body)
+        self.assertIn("your data is safe", body)

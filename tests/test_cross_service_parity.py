@@ -49,3 +49,52 @@ class TestLocalisationParity(TestCase):
         for name in ("localisation.py", "localisation_forms.py", "localisation_middleware.py"):
             with self.subTest(name=name):
                 self.assertEqual((PLATFORM_COMMON / name).read_text(), (PORTAL_COMMON / name).read_text())
+
+
+class TestMaintenanceMarkerParity(TestCase):
+    """The platform writes a machine-readable maintenance marker; the portal reads it.
+
+    This is a cross-service contract that no type checker or import can enforce, because the portal
+    cannot import platform code. It replaced keying on the bare 503 status, which was wrong:
+    `apps/api/billing/views.py` answers 503 for arbitrary document-list errors, so a real failure told
+    the customer "scheduled maintenance - your data is safe".
+
+    If the marker drifts on either side the portal silently stops recognising a real maintenance window
+    and reports every outage as an undeclared one. That degrades quietly, which is exactly the failure
+    mode worth a test. Asserted on source text because the two halves cannot be imported into one
+    process — the same reason this file exists at all.
+    """
+
+    MARKER = "maintenance"
+    PLATFORM_MIDDLEWARE = REPO_ROOT / "services" / "platform" / "apps" / "common" / "middleware.py"
+    PORTAL_API_CLIENT = REPO_ROOT / "services" / "portal" / "apps" / "api_client" / "services.py"
+
+    def test_the_platform_writes_the_marker(self) -> None:
+        source = self.PLATFORM_MIDDLEWARE.read_text()
+        self.assertIn(
+            f'"error": "{self.MARKER}"',
+            source,
+            "MaintenanceModeMiddleware must put the marker in its JSON body, or the portal cannot tell "
+            "a declared maintenance window from any other 503.",
+        )
+
+    def test_the_portal_reads_the_same_marker(self) -> None:
+        source = self.PORTAL_API_CLIENT.read_text()
+        self.assertIn(
+            f'== "{self.MARKER}"',
+            source,
+            "PlatformAPIError must key is_maintenance on the marker rather than on the 503 status alone.",
+        )
+
+    def test_the_portal_does_not_treat_a_bare_503_as_maintenance(self) -> None:
+        """Guards the specific regression: `is_maintenance` defaulting from the status code alone."""
+        source = self.PORTAL_API_CLIENT.read_text()
+        marker_line = next(
+            (line for line in source.splitlines() if "SERVICE_UNAVAILABLE" in line and "is_maintenance" in line),
+            None,
+        )
+        self.assertIsNone(
+            marker_line,
+            "is_maintenance must not be derived from SERVICE_UNAVAILABLE on one line without the marker; "
+            f"found: {marker_line}",
+        )

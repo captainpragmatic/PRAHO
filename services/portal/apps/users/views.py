@@ -27,6 +27,7 @@ from apps.common.decorators import (
 from apps.common.localisation_middleware import sync_language_selection
 from apps.common.localisation_services import store_localisation_preferences
 from apps.common.rate_limit_feedback import (
+    get_degraded_message,
     get_maintenance_message,
     get_retry_after_from_error,
     is_rate_limited_error,
@@ -319,10 +320,15 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
                     form.add_error(None, _("Invalid email address or password. Please try again."))
 
             except PlatformAPIError as e:  # degradation-aware — specific form error per state
-                if getattr(e, "is_maintenance", False):
-                    logger.warning(f"⚠️ [Portal Auth] Login attempted during maintenance for {email}")
+                if getattr(e, "is_unavailable", False):
+                    # `is_unavailable`, not `is_maintenance`: the customer cannot log in during an
+                    # UNDECLARED outage either, and keying on the narrower flag sent a 502, a 504 and
+                    # an unmarked 503 back to the generic branch - which is the original bug, a real
+                    # outage reported as a wrong password. `get_degraded_message` decides whether the
+                    # wording may call it planned.
+                    logger.warning(f"⚠️ [Portal Auth] Login attempted while the platform was unavailable for {email}")
                     maintenance = True
-                    form.add_error(None, get_maintenance_message(getattr(e, "retry_after", None)))
+                    form.add_error(None, get_degraded_message(e))
                 elif getattr(e, "is_rate_limited", False):
                     retry_after = getattr(e, "retry_after", None) or 30
                     logger.warning(f"⚠️ [Portal Auth] Login rate-limited for {email} (retry_after={retry_after}s)")

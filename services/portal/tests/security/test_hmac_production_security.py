@@ -423,17 +423,18 @@ class HMACProductionDeploymentTestCase(SimpleTestCase):
             # 503 now raises a recognisable error, asserted separately below.
             #
             # The rest stay, because the resilience this test was written to protect is real: the
-            # portal must not 500 because a socket closed. 502 and 504 have the same shape as 503
-            # and are knowingly left alone - the honest message for a crashed upstream is not
-            # "scheduled maintenance", and widening `authenticate_customer`'s contract that far is
-            # a larger change than this one.
+            # portal must not 500 because a socket closed.
+            #
+            # 502 and 504 have MOVED OUT of this list, and the reason is worth keeping. They were
+            # left here on the argument that "the honest message for a crashed upstream is not
+            # 'scheduled maintenance'" - which was true when a 503 and a maintenance window were the
+            # same thing. They are no longer: an undeclared outage now gets "temporarily unavailable"
+            # and promises nothing, so the objection to including gateway errors has been removed by
+            # the change that made the wording honest. They are asserted below instead.
             error_recovery_scenarios = [
-                # Network errors
+                # Network errors — no HTTP response at all, so nothing to classify
                 requests.exceptions.ConnectionError("Network unreachable"),
                 requests.exceptions.Timeout("Connection timeout"),
-
-                # HTTP errors
-                Mock(status_code=502, json=lambda: {'error': 'Bad gateway'}),
 
                 # SSL errors
                 requests.exceptions.SSLError("Certificate verification failed"),
@@ -463,6 +464,36 @@ class HMACProductionDeploymentTestCase(SimpleTestCase):
                     caught.exception.is_maintenance,
                     "A 503 must be recognisable as maintenance so login does not report bad credentials",
                 )
+
+            # A gateway error reaches the caller too, but must NOT claim to be planned work. Only two
+            # call sites exist for `authenticate_customer` and both sit inside `login_view`'s
+            # PlatformAPIError handler, so propagating here cannot produce an unhandled 500.
+            for gateway_status in (502, 504):
+                with (
+                    self.subTest(status=gateway_status),
+                    patch('apps.common.outbound_http._session.request') as mock_request,
+                ):
+                    mock_request.return_value = Mock(
+                        status_code=gateway_status, json=lambda: {'error': 'Bad gateway'}
+                    )
+                    with self.assertRaises(PlatformAPIError) as caught:
+                        client.authenticate_customer('test@example.com', 'password123')
+
+                    self.assertTrue(caught.exception.is_degraded, "the login form must be able to explain this")
+                    self.assertFalse(
+                        caught.exception.is_maintenance,
+                        "a crashed upstream is not scheduled maintenance, and must not be described as it",
+                    )
+
+            # And an unmarked 503 - the shape `apps/api/billing/views.py` produces for an arbitrary
+            # error - is degraded without being maintenance, for the same reason.
+            with patch('apps.common.outbound_http._session.request') as mock_request:
+                mock_request.return_value = Mock(status_code=503, json=lambda: {'error': 'Failed to list documents'})
+                with self.assertRaises(PlatformAPIError) as caught:
+                    client.authenticate_customer('test@example.com', 'password123')
+
+                self.assertTrue(caught.exception.is_degraded)
+                self.assertFalse(caught.exception.is_maintenance)
 
     def test_production_logging_does_not_expose_secrets(self):
         """🔐 Test production logging doesn't expose HMAC secrets"""

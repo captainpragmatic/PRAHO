@@ -1,16 +1,21 @@
 {% load i18n %}
 {% load ui_components %}
 
-{% comment %} Sibling of rate_limit_inline_alert.html. Blue rather than amber: maintenance is a planned
-   state and nothing is wrong with the customer's account, which is the distinction the previous
-   behaviour destroyed by rendering an empty list instead. {% endcomment %}
+{% comment %} Sibling of rate_limit_inline_alert.html. Blue rather than amber: the platform is not
+   answering, and nothing is wrong with the customer's account - which is the distinction the previous
+   behaviour destroyed by rendering an empty list instead.
+
+   The heading comes from the context because only a 503 the platform's own gate MARKED as maintenance
+   may claim to be planned work. An undeclared 502/503/504 gets "Temporarily unavailable" and a message
+   that promises nothing about the data, because during an unexplained failure nobody knows.
+{% endcomment %}
 <div class="bg-blue-900/30 border border-blue-500/50 rounded-lg p-6" role="alert" aria-live="polite">
   <div class="flex items-start gap-3">
     <div class="mt-0.5">
       {% icon "info" size="sm" css_class="text-blue-300" %}
     </div>
     <div>
-      <h3 class="text-blue-200 font-medium">{% trans "Scheduled maintenance" %}</h3>
+      <h3 class="text-blue-200 font-medium">{{ maintenance_heading|default:_("Temporarily unavailable") }}</h3>
       <p class="text-blue-100/90 mt-1">{{ maintenance_message }}</p>
       <a
         href="{{ maintenance_retry_url|default:request.get_full_path }}"
