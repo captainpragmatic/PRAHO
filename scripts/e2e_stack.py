@@ -149,18 +149,26 @@ def check(*, during_startup: bool = False) -> dict:
     return state
 
 
-def report_coverage() -> None:
+def report_coverage() -> bool:
     """Combine and report what each SERVER executed, one dataset per service.
 
     Each server wrote to its own `COVERAGE_FILE` base, so `combine` globs only that service's
     per-process files and the two codebases never mix. Reporting runs with the service directory
     as the working directory because the root config's `source = ["apps", "config", "ui"]` is
     relative - the same relative names have to resolve to the same tree they were measured in.
+
+    Returns whether every service produced usable data. This used to return None and every coverage
+    subprocess ran with `check=False`, so a run that produced nothing printed a line and the target
+    still passed - which is the whole point of the target failing to happen. The supervisor is a
+    DETACHED process, so its own exit code is never observed; the `E2E coverage: OK` marker in
+    `logs/e2e-supervisor.log` is the contract the Makefile checks instead.
     """
+    ok = True
     for service in SERVICES:
         produced = sorted(COVERAGE_DIR.glob(f".coverage.{service}.*"))
         if not produced:
-            print(f"E2E coverage: no data for {service}. Did its server start under coverage?")
+            print(f"E2E coverage: FAILED - no data for {service}. Did its server start under coverage?")
+            ok = False
             continue
         service_dir = ROOT / "services" / service
         env = {
@@ -169,8 +177,16 @@ def report_coverage() -> None:
             "COVERAGE_FILE": str(COVERAGE_DIR / f".coverage.{service}"),
         }
         run = partial(subprocess.run, cwd=service_dir, env=env, check=False)
-        run([sys.executable, "-m", "coverage", "combine", "--quiet"])
-        run([sys.executable, "-m", "coverage", "xml", "-o", str(COVERAGE_DIR / f"coverage-e2e-{service}.xml")])
+        # `check=False` plus an unread return code is how a failed combine became a silent
+        # half-measurement. Read them.
+        for step in (
+            ["combine", "--quiet"],
+            ["xml", "-o", str(COVERAGE_DIR / f"coverage-e2e-{service}.xml")],
+        ):
+            completed = run([sys.executable, "-m", "coverage", *step])
+            if completed.returncode != 0:
+                print(f"E2E coverage: FAILED - `coverage {step[0]}` exited {completed.returncode} for {service}")
+                ok = False
         summary = subprocess.run(
             [sys.executable, "-m", "coverage", "report"],
             cwd=service_dir,
@@ -181,8 +197,14 @@ def report_coverage() -> None:
         )
         # Only the TOTAL: the per-file table is hundreds of lines and the xml already holds it.
         total = next((line for line in summary.stdout.splitlines() if line.startswith("TOTAL")), None)
+        if total is None:
+            print(f"E2E coverage: FAILED - no TOTAL reported for {service}; the dataset measured nothing")
+            ok = False
         print(f"E2E coverage [{service}] from {len(produced)} process file(s): {total or 'no TOTAL reported'}")
     print(f"E2E coverage: xml written to {COVERAGE_DIR}")
+    # The marker the Makefile greps for. Printed last so a crash mid-report cannot produce it.
+    print("E2E coverage: OK" if ok else "E2E coverage: FAILED")
+    return ok
 
 
 def serve(instance: str) -> None:

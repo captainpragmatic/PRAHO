@@ -1,6 +1,8 @@
 """The manual runner must fail on missing prerequisites without killing other processes."""
 
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import shutil
@@ -284,3 +286,40 @@ class E2EStackContractTests(TestCase):
             self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
             if expected:
                 self.assertIn("Strict E2E", result.stdout)
+
+
+class CoverageReportingReportsFailureTests(TestCase):
+    """`report_coverage` must say when it produced nothing, not just print and return.
+
+    Every coverage subprocess ran with `check=False` and the return code was never read, and a service
+    with no data printed a line and continued. So a browser run that measured nothing still passed the
+    target whose entire purpose is measuring it. The supervisor is a detached process, so its exit code
+    is never observed — the `E2E coverage: OK` marker in the log is the contract the Makefile checks,
+    and these tests pin that the marker only appears when it should.
+    """
+
+    def test_no_data_for_a_service_is_a_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.object(stack, "COVERAGE_DIR", Path(tmp)):
+            self.assertFalse(stack.report_coverage())
+
+    def test_the_ok_marker_is_printed_only_on_success(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.object(stack, "COVERAGE_DIR", Path(tmp)):
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
+                ok = stack.report_coverage()
+        output = buffer.getvalue()
+        self.assertFalse(ok)
+        self.assertIn("E2E coverage: FAILED", output)
+        self.assertNotIn("E2E coverage: OK", output)
+
+    def test_a_failed_coverage_subprocess_is_a_failure(self) -> None:
+        """A non-zero `combine` or `xml` used to be discarded entirely."""
+        with tempfile.TemporaryDirectory() as tmp:
+            coverage_dir = Path(tmp)
+            for service in stack.SERVICES:
+                (coverage_dir / f".coverage.{service}.probe").write_text("placeholder")
+            with (
+                patch.object(stack, "COVERAGE_DIR", coverage_dir),
+                patch.object(stack.subprocess, "run", return_value=Mock(returncode=1, stdout="")),
+            ):
+                self.assertFalse(stack.report_coverage())

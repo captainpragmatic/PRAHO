@@ -407,14 +407,23 @@ coverage-portal-union:
 	echo "  unit data   $$(date -r "$$units" '+%Y-%m-%d %H:%M')"; \
 	echo "  browser data $$(date -r "$$e2e" '+%Y-%m-%d %H:%M')"; \
 	echo "  (both are reported so a stale half cannot pass unnoticed)"; \
+	echo "  (and each is reported ALONE first: existence is not usability)"; \
 	dir=$$(mktemp -d); trap 'rm -rf "$$dir"' EXIT; \
-	cp "$$units" "$$dir/.coverage.units"; cp "$$e2e" "$$dir/.coverage.browser"; \
-	cd services/portal && $(COVERAGE_RC) COVERAGE_FILE="$$dir/.coverage" $(COVERAGE_BIN) combine --quiet; \
-	$(COVERAGE_RC) COVERAGE_FILE="$$dir/.coverage" $(COVERAGE_BIN) xml -o coverage-portal-union.xml; \
+	cp "$$units" "$$dir/.coverage.units" || { echo "❌ Cannot read the unit dataset"; exit 1; }; \
+	cp "$$e2e" "$$dir/.coverage.browser" || { echo "❌ Cannot read the browser dataset"; exit 1; }; \
+	for half in units browser; do \
+		cp "$$dir/.coverage.$$half" "$$dir/.probe"; \
+		if ! (cd services/portal && $(COVERAGE_RC) COVERAGE_FILE="$$dir/.probe" $(COVERAGE_BIN) report > "$$dir/$$half.txt" 2>&1); then \
+			echo "❌ The $$half dataset is unreadable or empty, so the union would silently be the other half alone:"; \
+			sed 's/^/   /' "$$dir/$$half.txt" | tail -3; exit 1; \
+		fi; \
+	done; \
+	cd services/portal && $(COVERAGE_RC) COVERAGE_FILE="$$dir/.coverage" $(COVERAGE_BIN) combine --quiet || { echo "❌ coverage combine failed"; exit 1; }; \
+	$(COVERAGE_RC) COVERAGE_FILE="$$dir/.coverage" $(COVERAGE_BIN) xml -o coverage-portal-union.xml || { echo "❌ coverage xml failed"; exit 1; }; \
 	rc=0; $(COVERAGE_RC) COVERAGE_FILE="$$dir/.coverage" $(COVERAGE_BIN) report --fail-under=$(PORTAL_COVERAGE_FLOOR) > "$$dir/report.txt" || rc=$$?; \
 	tail -2 "$$dir/report.txt"; \
 	if [ "$$rc" -ne 0 ]; then echo "❌ Portal union below the $(PORTAL_COVERAGE_FLOOR)% floor."; exit "$$rc"; fi; \
-	echo "✅ Portal union at or above the $(PORTAL_COVERAGE_FLOOR)% floor."
+	echo "✅ Portal union at or above the $(PORTAL_COVERAGE_FLOOR)% floor, with both datasets verified present."
 
 coverage: coverage-platform coverage-platform-packages coverage-portal
 	@echo "✅ Coverage measured for both services."
@@ -481,9 +490,18 @@ test-e2e-coverage: check-venv-platform build-css
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@E2E_COVERAGE=1 $(PYTHON_SHARED) scripts/e2e_stack.py start
 	@rc=0; $(PYTHON_SHARED) scripts/e2e_stack.py test $(E2E_PATHS) || rc=$$?; \
-		$(PYTHON_SHARED) scripts/e2e_stack.py stop; \
+		if ! $(PYTHON_SHARED) scripts/e2e_stack.py stop; then \
+			echo "⚠️  [E2E] stack stop reported a failure"; \
+			if [ "$$rc" -eq 0 ]; then rc=1; fi; \
+		fi; \
 		echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"; \
-		grep "^E2E coverage" logs/e2e-supervisor.log || echo "⚠️  No coverage lines in logs/e2e-supervisor.log"; \
+		if grep -q "^E2E coverage: OK" logs/e2e-supervisor.log 2>/dev/null; then \
+			grep "^E2E coverage" logs/e2e-supervisor.log; \
+		else \
+			echo "❌ [E2E] no usable server-side coverage — which is the entire point of this target:"; \
+			grep "^E2E coverage" logs/e2e-supervisor.log 2>/dev/null || echo "   (no coverage lines at all)"; \
+			if [ "$$rc" -eq 0 ]; then rc=1; fi; \
+		fi; \
 		exit $$rc
 
 test-e2e-platform:
