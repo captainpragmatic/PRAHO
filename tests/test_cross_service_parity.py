@@ -66,3 +66,10 @@ class TestCounterStoreParity(TestCase):
             (REPO_ROOT / "services/platform" / relative_path).read_bytes(),
             (REPO_ROOT / "services/portal" / relative_path).read_bytes(),
         )
+
+    def test_counter_cull_command_matches(self) -> None:
+        relative_path = Path("management/commands/cull_counters.py")
+        self.assertEqual(
+            (PLATFORM_COMMON / relative_path).read_bytes(),
+            (PORTAL_COMMON / relative_path).read_bytes(),
+        )

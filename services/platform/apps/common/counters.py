@@ -52,8 +52,8 @@ def _write_connection() -> BaseDatabaseWrapper:
     return connections[router.db_for_write(Counter)]
 
 
-def _cull(connection: BaseDatabaseWrapper, now: int) -> None:
-    """Delete at most one batch, preserving expired rows within the grace period."""
+def _cull(connection: BaseDatabaseWrapper, now: int) -> int:
+    """Delete at most one batch, preserving expired rows within the grace period; return the rows removed."""
     with connection.cursor() as cursor:
         cursor.execute(
             "DELETE FROM common_counters WHERE id IN ("
@@ -61,6 +61,24 @@ def _cull(connection: BaseDatabaseWrapper, now: int) -> None:
             "ORDER BY expires_at, id LIMIT %s) AND expires_at < %s",
             [now - CULL_GRACE_SECONDS, CULL_BATCH_SIZE, now - CULL_GRACE_SECONDS],
         )
+        return int(cursor.rowcount)
+
+
+def cull_expired(*, batches: int = 1) -> int:
+    """Sweep expired rows past the grace period in bounded batches; return the rows removed.
+
+    Writes already cull one batch at random, which keeps a busy table small; this
+    scheduled sweep covers a table that has gone quiet with expired rows left behind.
+    """
+    connection = _write_connection()
+    now = int(time.time())
+    deleted = 0
+    for _batch in range(max(1, batches)):
+        removed = _cull(connection, now)
+        deleted += removed
+        if removed < CULL_BATCH_SIZE:
+            break
+    return deleted
 
 
 def increment(key: str, window_seconds: int, *, delta: int = 1) -> int:

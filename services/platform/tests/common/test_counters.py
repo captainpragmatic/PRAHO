@@ -5,10 +5,12 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from io import StringIO
 from threading import Barrier
 from unittest.mock import patch
 
 from django.core.checks import Tags, run_checks
+from django.core.management import call_command
 from django.db import IntegrityError, connection, connections, transaction
 from django.test import TestCase, TransactionTestCase, override_settings
 from django.test.utils import CaptureQueriesContext
@@ -126,6 +128,20 @@ class CounterStoreTests(TestCase):
                 self.assertTrue(counters.complete(key, "next", "order-1"))
                 self.assertEqual(counters.lookup(key), "order-1")
                 counters.reset(key)
+
+    def test_cull_counters_command_deletes_only_rows_past_grace(self) -> None:
+        Counter.objects.bulk_create(
+            [
+                Counter(key="stale", count=1, expires_at=10_000 - counters.CULL_GRACE_SECONDS - 1),
+                Counter(key="graced", count=1, expires_at=10_000 - 10),
+                Counter(key="live", count=1, expires_at=10_100),
+            ]
+        )
+        out = StringIO()
+        call_command("cull_counters", "--batches", "3", stdout=out)
+        self.assertEqual(set(Counter.objects.values_list("key", flat=True)), {"graced", "live"})
+        self.assertIn("Deleted 1 expired counter rows.", out.getvalue())
+        self.assertEqual(counters.cull_expired(batches=2), 0)
 
     def test_cull_is_one_bounded_delete_and_preserves_grace_and_live_claims(self) -> None:
         Counter.objects.bulk_create(

@@ -49,8 +49,9 @@ python manage.py migrate sessions --noinput
 python manage.py migrate common --noinput
 python manage.py check --deploy --fail-level ERROR
 
-echo "🧹 Clearing expired sessions..."
+echo "🧹 Clearing expired sessions and counters..."
 python manage.py clearsessions
+python manage.py cull_counters
 
 echo "📦 Collecting static files..."
 python manage.py collectstatic --noinput
