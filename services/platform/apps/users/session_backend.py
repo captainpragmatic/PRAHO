@@ -2,7 +2,9 @@
 
 from asgiref.sync import sync_to_async
 from django.contrib.sessions.backends.db import SessionStore as DatabaseSessionStore
+from django.contrib.sessions.models import Session
 from django.db import transaction
+from django.utils import timezone
 
 from .models import UserSession
 
@@ -33,6 +35,14 @@ class SessionStore(DatabaseSessionStore):
             # cycle_key() has already saved the new key when it deletes the old one.
             UserSession.objects.filter(session_key=key).delete()
             super().delete(session_key)
+
+    @classmethod
+    def clear_expired(cls) -> None:
+        """Remove expired sessions together with their index rows, so the index never outlives them."""
+        with transaction.atomic():
+            expired = Session.objects.filter(expire_date__lt=timezone.now())
+            UserSession.objects.filter(session_key__in=expired.values("session_key")).delete()
+            expired.delete()
 
     async def asave(self, must_create: bool = False) -> None:
         await sync_to_async(self.save, thread_sensitive=True)(must_create=must_create)

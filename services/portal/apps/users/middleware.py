@@ -39,7 +39,7 @@ class PortalAuthenticationMiddleware:
     - Tier 1: Fast session check (zero latency)
     - Tier 2: Jittered periodic validation with single-flight locks
     - Stale-while-revalidate: Soft/hard TTL boundaries
-    - Thundering herd protection: Single validation per customer at a time
+    - Thundering herd protection: one in-flight validation per session at a time (per process)
     - Fail-open windows: Graceful degradation when Platform is unavailable
     """
 

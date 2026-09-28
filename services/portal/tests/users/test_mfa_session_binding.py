@@ -81,6 +81,14 @@ class MFASessionBindingTests(SimpleTestCase):
         self.assert_rotated_binding("enabled")
         self.assertEqual(self.client.session["new_mfa_backup_codes"], ["12345678"])
 
+    def test_verify_without_returned_binding_keeps_the_current_one(self) -> None:
+        """An old Platform worker answers without the field; the binding it still accepts must survive."""
+        success = self.transport_response({"success": True, "backup_codes": ["12345678"]})
+        with patch("apps.api_client.services.portal_request", return_value=success):
+            response = self.client.post(reverse("users:mfa_setup_totp"), {"token": "123456"})
+        self.assertRedirects(response, reverse("users:mfa_backup_codes"), fetch_redirect_response=False)
+        self.assert_rotated_binding("original")
+
     def test_verify_tolerates_missing_backup_codes(self) -> None:
         success = self.transport_response({"success": True, "session_auth_hash": "enabled"})
         with patch("apps.api_client.services.portal_request", return_value=success):

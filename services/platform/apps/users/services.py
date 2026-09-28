@@ -1352,7 +1352,13 @@ class SessionSecurityService:
 
     @classmethod
     def _invalidate_all_user_sessions(cls, user_id: int, keep_session_key: str | None = None) -> None:
-        """Delete only the captured session keys and their matching index rows."""
+        """Delete only the captured session keys and their matching index rows.
+
+        Every caller also changes a credential (password or MFA version), so a session an old
+        worker left unindexed is inert on its next validation anyway; the index is the fast path,
+        the credential binding is the revocation boundary. A future "sign out everywhere" feature
+        that changes no credential must not rely on the index alone.
+        """
         try:
             with transaction.atomic():
                 index = UserSession.objects.filter(user_id=user_id)

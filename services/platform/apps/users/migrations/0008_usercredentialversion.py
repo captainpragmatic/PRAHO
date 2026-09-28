@@ -1,4 +1,11 @@
-"""Separate monotonic MFA session revocation state from ordinary user saves."""
+"""Separate monotonic MFA session revocation state from ordinary user saves.
+
+Deploy order: migrate, then drain every old Platform worker before treating MFA changes
+as revoking. Old workers hash the password alone, so during a mixed rollout a bump made
+on a new worker is a mismatch for them (the acting user re-logs in once) and a session
+they still accept is one a new worker already rejects. Untouched accounts keep their
+sessions: version zero reproduces Django's hash byte for byte.
+"""
 
 import django.db.models.deletion
 from django.conf import settings

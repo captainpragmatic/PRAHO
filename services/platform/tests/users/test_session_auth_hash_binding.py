@@ -14,7 +14,7 @@ from django.utils.crypto import salted_hmac
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
 
-from apps.users.mfa import MFAService, WebAuthnCredential
+from apps.users.mfa import MFAService, WebAuthnCredential, WebAuthnService
 from apps.users.models import User, UserSession
 from apps.users.services import SessionSecurityService
 from apps.users.session_backend import SessionStore
@@ -323,6 +323,21 @@ class SessionAuthHashBindingTests(HMACTestMixin, TestCase):
         self.assertEqual(self.user.credential_version.version, 2)
         self.assertEqual(self.validate_session(enabled_hash).status_code, 401)
         self.assertEqual(self.validate_session(disabled_hash).status_code, 200)
+
+    def test_webauthn_credential_removal_revokes_sessions(self) -> None:
+        credential = WebAuthnCredential.objects.create(
+            user=self.user, credential_id="rotate-test", public_key="public-key", name="Key"
+        )
+        old_hash = self.user.get_session_auth_hash()
+        self.assertEqual(self.validate_session(old_hash).status_code, 200)
+
+        self.assertTrue(WebAuthnService.delete_credential(self.user, credential.pk))
+
+        self.assertEqual(self.user.credential_version.version, 1)
+        self.assertNotEqual(self.user.get_session_auth_hash(), old_hash)
+        self.assertEqual(self.validate_session(old_hash).status_code, 401)
+        self.assertEqual(self.validate_session(self.user.get_session_auth_hash()).status_code, 200)
+        self.assertTrue(self.user.two_factor_enabled is False)
 
     def test_disable_all_and_recovery_each_revoke_sessions(self) -> None:
         for action in ("disable_all", "recover"):

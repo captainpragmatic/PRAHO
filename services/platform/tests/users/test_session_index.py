@@ -18,6 +18,7 @@ from django.db.migrations.loader import MigrationLoader
 from django.db.models.signals import post_delete
 from django.http import HttpRequest, HttpResponse
 from django.test import RequestFactory, TestCase, override_settings
+from django.utils import timezone
 
 from apps.users.models import User, UserSession
 from apps.users.services import SessionSecurityService
@@ -150,6 +151,18 @@ class SessionIndexTests(TestCase):
 
         self.assertTrue(Session.objects.filter(session_key=key).exists())
         self.assertFalse(UserSession.objects.exists())
+
+    def test_clear_expired_removes_index_rows_with_their_sessions(self) -> None:
+        expired_key = self.authenticated_request().session.session_key
+        Session.objects.filter(session_key=expired_key).update(expire_date=timezone.now() - timedelta(days=1))
+        live_key = self.authenticated_request().session.session_key
+
+        SessionStore.clear_expired()
+
+        self.assertFalse(Session.objects.filter(session_key=expired_key).exists())
+        self.assertFalse(UserSession.objects.filter(session_key=expired_key).exists())
+        assert live_key is not None
+        self.assert_only_index(live_key)
 
     def test_flush_removes_both_rows(self) -> None:
         request = self.authenticated_request()

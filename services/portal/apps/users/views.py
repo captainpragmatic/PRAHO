@@ -5,6 +5,7 @@ Customer-facing login/logout with Platform API validation using Django sessions.
 
 import logging
 import time
+from collections.abc import Mapping
 from http import HTTPStatus
 
 from django.conf import settings
@@ -158,6 +159,17 @@ def _handle_totp_setup_get(request: HttpRequest, customer_id: str, customer_emai
         return _handle_mfa_error_redirect(request, "users:mfa_management", _("An error occurred. Please try again."))
 
 
+def _store_returned_session_auth_hash(request: HttpRequest, result: Mapping[str, object]) -> None:
+    """Keep the Platform's new session binding; a response that omits it leaves the current one in place.
+
+    An empty binding is rejected by the Platform on the next validation, so writing one on a
+    response without the field (an old worker during a rolling deploy) would sign the user out.
+    """
+    returned = result.get("session_auth_hash")
+    if isinstance(returned, str) and returned:
+        request.session["session_auth_hash"] = returned
+
+
 def _handle_totp_setup_post(request: HttpRequest, customer_id: str, token: str) -> HttpResponse:
     """Handle POST request for TOTP setup verification"""
     if not token:
@@ -170,7 +182,7 @@ def _handle_totp_setup_post(request: HttpRequest, customer_id: str, token: str) 
         user_id = request.session.get("user_id")
         result = api_client.verify_totp_mfa(customer_id, token, user_id=user_id)
         if result and result.get("success"):
-            request.session["session_auth_hash"] = result.get("session_auth_hash") or ""
+            _store_returned_session_auth_hash(request, result)
             request.session.cycle_key()
             request.session["new_mfa_backup_codes"] = result.get("backup_codes", [])
             logger.info(f"✅ [Portal 2FA] TOTP enabled successfully for customer {customer_id}")
@@ -996,7 +1008,7 @@ def mfa_disable_view(request: HttpRequest) -> HttpResponse:
                 int(request.session["user_id"]), form.cleaned_data["password"], form.cleaned_data["token"]
             )
             if result and result.get("success"):
-                request.session["session_auth_hash"] = result.get("session_auth_hash") or ""
+                _store_returned_session_auth_hash(request, result)
                 request.session.cycle_key()
                 request.session.pop("new_mfa_backup_codes", None)
                 messages.success(request, _("Two-factor authentication has been disabled."))

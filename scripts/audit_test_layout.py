@@ -27,8 +27,8 @@ TEST_ROOTS = [
 ]
 
 SUSPICIOUS_NAME_RE = re.compile(
-    r"(?<![a-z0-9])(todo|fix(?:es|up|ups)?|hotfix(?:es)?|misc|coverage|remaining|round\d*|"
-    r"basic|focused|additional|codex)(?![a-z0-9])",
+    r"(?<![a-z0-9])(todos?|fix(?:es|up|ups)?|hotfix(?:es)?|miscs?|coverage|remaining|round\d*s?|"
+    r"basics?|focused|additional|codex)(?![a-z0-9])",
     re.IGNORECASE,
 )
 

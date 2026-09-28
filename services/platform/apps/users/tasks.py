@@ -35,33 +35,34 @@ TASK_TIME_LIMIT = 600  # 10 minutes
 
 
 def reconcile_session_index() -> dict[str, int]:
-    """Index sessions missed by old workers and prune rows whose session is gone."""
+    """Index live sessions missed by old workers and prune rows whose session is gone.
+
+    Only unexpired, unindexed sessions are decoded, in key order and in batches, without row
+    locks: the index insert ignores conflicts, so a session that a worker indexes meanwhile is
+    simply skipped. Anonymous sessions never enter the index and are re-read on each run; the
+    expiry filter keeps that set to live sessions.
+    """
     indexed = 0
     last_key = ""
     while True:
-        with transaction.atomic():
-            sessions = list(
-                Session.objects.select_for_update()
-                .exclude(session_key__in=UserSession.objects.values("session_key"))
-                .filter(session_key__gt=last_key)
-                .order_by("session_key")[:500]
-            )
-            if not sessions:
-                break
-            last_key = sessions[-1].session_key
-            for session in sessions:
-                user_id = session.get_decoded().get("_auth_user_id")
-                if user_id is None:
-                    continue
-                try:
-                    user_exists = User.objects.filter(pk=user_id).exists()
-                except (TypeError, ValueError, OverflowError):
-                    continue
-                if user_exists:
-                    _entry, created = UserSession.objects.get_or_create(
-                        session_key=session.session_key, defaults={"user_id": user_id}
-                    )
-                    indexed += int(created)
+        batch = list(
+            Session.objects.filter(expire_date__gt=timezone.now(), session_key__gt=last_key)
+            .exclude(session_key__in=UserSession.objects.values("session_key"))
+            .order_by("session_key")[:500]
+        )
+        if not batch:
+            break
+        last_key = batch[-1].session_key
+        owners: dict[str, int] = {}
+        for session in batch:
+            user_id = session.get_decoded().get("_auth_user_id")
+            # login() stores the primary key as a string of digits; anything else is not ours.
+            if isinstance(user_id, str) and user_id.isdigit():
+                owners[session.session_key] = int(user_id)
+        existing = set(User.objects.filter(pk__in=set(owners.values())).values_list("pk", flat=True))
+        rows = [UserSession(user_id=uid, session_key=key) for key, uid in owners.items() if uid in existing]
+        UserSession.objects.bulk_create(rows, ignore_conflicts=True)
+        indexed += len(rows)
 
     pruned, _deleted = UserSession.objects.exclude(session_key__in=Session.objects.values("session_key")).delete()
     logger.info("✅ [SessionSecurity] Reconciled %s sessions; pruned %s orphaned index rows", indexed, pruned)

@@ -28,6 +28,9 @@ class AuditTestLayoutNamesTests(TestCase):
             "test_misc_helpers.py": True,
             "test_coverage_report.py": True,
             "test_FIXUP.py": True,
+            "test_todos.py": True,
+            "test_basics.py": True,
+            "test_rounds.py": True,
         }
         for name, flagged in cases.items():
             with self.subTest(name=name):
