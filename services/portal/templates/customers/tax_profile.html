@@ -74,17 +74,13 @@
                 </label>
             </div>
 
-            <!-- Reverse Charge Eligible -->
             <div class="mb-6">
-                <label class="flex items-center space-x-3 cursor-pointer">
-                    <input type="checkbox" name="reverse_charge_eligible" id="reverse_charge_eligible"
-                           {% if tax_data.reverse_charge_eligible %}checked{% endif %}
-                           class="w-5 h-5 rounded border-slate-600 bg-slate-700 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-900">
-                    <div>
-                        <span class="text-sm font-medium text-slate-300">{% trans "Reverse Charge Eligible" %}</span>
-                        <p class="text-xs text-slate-500">{% trans "EU business eligible for VAT reverse charge mechanism" %}</p>
-                    </div>
-                </label>
+                <span class="text-sm font-medium text-slate-300">{% trans "Reverse charge (VIES)" %}</span>
+                <p class="text-sm text-slate-400">{{ tax_data.vies_verification_status }}</p>
+                {% if tax_data.vies_verification_status == "valid" %}
+                <p class="text-xs text-slate-500">{{ tax_data.vies_verified_at }}</p>
+                {% endif %}
+                <p class="text-xs text-slate-500">{% trans "Reverse charge requires VIES confirmation of the VAT number being invoiced." %}</p>
             </div>
 
             <!-- Submit -->
@@ -129,13 +125,13 @@
                 </dd>
             </div>
             <div>
-                <dt class="text-sm font-medium text-slate-400 mb-1">{% trans "Reverse Charge Eligible" %}</dt>
+                <dt class="text-sm font-medium text-slate-400 mb-1">{% trans "Reverse charge (VIES)" %}</dt>
                 <dd class="text-lg text-white">
-                    {% if tax_data.reverse_charge_eligible %}
-                        {% trans 'Yes' as yes_label %}{% badge yes_label variant="success" %}
-                    {% else %}
-                        {% trans 'No' as no_label %}{% badge no_label variant="default" %}
+                    {{ tax_data.vies_verification_status }}
+                    {% if tax_data.vies_verification_status == "valid" %}
+                    <span class="text-sm text-slate-400">{{ tax_data.vies_verified_at }}</span>
                     {% endif %}
+                    <p class="text-xs text-slate-500">{% trans "Reverse charge requires VIES confirmation of the VAT number being invoiced." %}</p>
                 </dd>
             </div>
         </dl>

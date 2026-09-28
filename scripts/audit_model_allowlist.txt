@@ -102,3 +102,6 @@ notifications.EmailCampaign     # campaign management (future: will get signals 
 notifications.UnsubscribeToken  # short-lived HMAC token for email unsubscribe (no business state, rotated frequently)
 promotions.LoyaltyTier          # tier definitions (changes audited via LoyaltyProgram parent)
 billing.SmartBillRateGate       # outbound call scheduler: one timestamp per API token, no business/financial/customer data. Issuance itself stays fully audited.
+common.Counter                  # infrastructure counters and claims: expiring rows with no business, financial or customer data
+users.UserSession               # session revocation index (key to user); the sessions it mirrors are not audited either
+users.UserCredentialVersion     # monotonic MFA binding version; every change is written by an audited MFA state change

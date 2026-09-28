@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 from django.contrib.sessions.backends.cache import SessionStore
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
-from django.test import Client, SimpleTestCase, override_settings
+from django.test import Client, SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 
 from apps.orders.services import (
@@ -20,7 +20,7 @@ from apps.orders.validators import OrderInputValidator
 
 
 @override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
-class TestBasicOrderFunctionality(SimpleTestCase):
+class TestBasicOrderFunctionality(TestCase):
     """Test basic order functionality"""
 
     def setUp(self):

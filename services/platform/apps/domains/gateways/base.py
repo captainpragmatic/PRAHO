@@ -17,7 +17,10 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from django.core.cache import cache
+from django.db import Error
+from django.utils.translation import gettext as _
 
+from apps.common import counters
 from apps.common.outbound_http import OutboundPolicy, safe_request
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 
@@ -878,13 +881,20 @@ class BaseRegistrarGateway(ABC):
         except Exception:
             self.logger.warning("Audit logging failed for %s:%s", event_type, domain_name, exc_info=True)
 
-    # -- Circuit breaker (Django cache-backed) -------------------------------
+    # -- Circuit breaker (shared database counters) --------------------------
 
     def _circuit_breaker_key(self) -> str:
         return f"cb:{self.cache_namespace}:failures"
 
     def _check_circuit_breaker(self) -> Err[RegistrarAPIError] | None:
-        failures = cache.get(self._circuit_breaker_key(), 0)
+        try:
+            failures = counters.peek(self._circuit_breaker_key())
+        except Error:
+            self.logger.error("🔥 [CircuitBreaker] Counter store unavailable", exc_info=True)
+            return Err(
+                RegistrarTransientError(self.registrar.name, _("Circuit breaker unavailable")),
+                retriability=Retriability.RETRIABLE,
+            )
         if failures >= CIRCUIT_BREAKER_THRESHOLD:
             self.logger.warning("Circuit breaker OPEN for %s (%d failures)", self.gateway_name, failures)
             return Err(
@@ -907,19 +917,11 @@ class BaseRegistrarGateway(ABC):
 
         key = self._circuit_breaker_key()
         try:
-            # Atomic first-failure seed: add() only succeeds if the key is absent, so two
-            # concurrent first failures can't both reset the counter to 1 (W3). incr on an
-            # existing key preserves the TTL set here, so the window doesn't slide and the
-            # breaker auto-closes CIRCUIT_BREAKER_RESET_SECONDS after it first opened.
-            if cache.add(key, 1, CIRCUIT_BREAKER_RESET_SECONDS):
-                return
-            try:
-                cache.incr(key)
-            except ValueError:
-                # The key expired between add() and incr() — reseed.
-                cache.set(key, 1, CIRCUIT_BREAKER_RESET_SECONDS)
+            # The window expires 300 seconds after the first failure, even if
+            # subsequent failures reach the threshold later in that window.
+            counters.increment(key, CIRCUIT_BREAKER_RESET_SECONDS)
         except Exception:
-            # A cache-backend outage here must not escape into the caller: this is
+            # A counter-store outage here must not escape into the caller: this is
             # bookkeeping for the NEXT call's circuit-breaker decision, not the current
             # one's outcome. Letting it raise would abort whatever cleanup the caller
             # still needs to run (releasing an idempotency claim, logging, auditing) —
@@ -929,7 +931,7 @@ class BaseRegistrarGateway(ABC):
 
     def _record_success(self) -> None:
         try:
-            cache.delete(self._circuit_breaker_key())
+            counters.reset(self._circuit_breaker_key())
         except Exception:
             # See _record_failure's identical guard: this must never abort a caller
             # that already has a successful result to return.

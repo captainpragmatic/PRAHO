@@ -20,7 +20,12 @@ from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from apps.api.secure_auth import public_api_endpoint, require_customer_authentication
+from apps.api.secure_auth import (
+    BILLING_ROLES,
+    public_api_endpoint,
+    require_customer_authentication,
+    require_customer_role_in,
+)
 from apps.billing.models import Currency
 from apps.common.localisation import normalize_country_code
 from apps.common.performance.rate_limiting import (
@@ -58,13 +63,14 @@ IDEMPOTENCY_KEY_MIN_LENGTH = 16
 IDEMPOTENCY_KEY_MAX_LENGTH = 64
 
 
-def _customer_vat_info(
+def _customer_vat_info(  # noqa: PLR0913  # every input of the VAT identity is explicit
     customer: Customer,
     *,
     country: str,
     is_business: bool,
     vat_number: str,
     order_id: str,
+    billing_name: str,
 ) -> CustomerVATInfo:
     """Build the profile-aware VAT context used by persisted order paths."""
     try:
@@ -81,6 +87,10 @@ def _customer_vat_info(
     if tax_profile is not None:
         info["is_vat_payer"] = tax_profile.is_vat_payer
         info["reverse_charge_eligible"] = tax_profile.reverse_charge_eligible
+        from apps.billing.vies_evidence import vies_verified_for  # noqa: PLC0415
+
+        info["vies_verified"] = vies_verified_for(tax_profile, info.get("vat_number"), billing_name=billing_name)
+        info["vat_rate_reason"] = tax_profile.vat_rate_reason
         if tax_profile.vat_rate is not None:
             info["custom_vat_rate"] = tax_profile.vat_rate
     return info
@@ -304,6 +314,7 @@ def calculate_cart_totals(  # noqa: PLR0915  # Complexity: multi-step business l
             is_business=is_business,
             vat_number=vat_number,
             order_id="cart-calculation",
+            billing_name=str(billing_address.get("company_name") or customer.get_billing_name()),
         )
         vat_result = OrderVATCalculator.calculate_vat(subtotal_cents=subtotal_cents, customer_info=customer_vat_info)
 
@@ -515,6 +526,7 @@ def preflight_order(  # noqa: PLR0911, PLR0915  # Complexity: multi-step busines
             is_business=is_business,
             vat_number=vat_number,
             order_id="preflight-preview",
+            billing_name=str(billing_address.get("company_name") or customer.get_billing_name()),
         )
         vat_result = OrderVATCalculator.calculate_vat(subtotal_cents=subtotal_cents, customer_info=customer_vat_info)
 
@@ -586,7 +598,7 @@ def preflight_order(  # noqa: PLR0911, PLR0915  # Complexity: multi-step busines
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # No permissions required (auth handled by secure_auth)
 @throttle_classes([PortalHMACRateThrottle, PortalHMACBurstThrottle, OrderCreateThrottle])
-@require_customer_authentication
+@require_customer_role_in(*BILLING_ROLES)
 def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-step business logic
     request: Request, customer: Customer
 ) -> Response:  # Complexity: order processing pipeline  # Complexity: multi-step business logic
@@ -861,7 +873,7 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # No permissions required (auth handled by secure_auth)
 @throttle_classes([PortalHMACRateThrottle, PortalHMACBurstThrottle, OrderListThrottle])
-@require_customer_authentication
+@require_customer_role_in(*BILLING_ROLES)
 def order_list(request: Request, customer: Customer) -> Response:
     """
     List orders for authenticated customer.
@@ -893,7 +905,7 @@ def order_list(request: Request, customer: Customer) -> Response:
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # No permissions required (auth handled by secure_auth)
 @throttle_classes([PortalHMACRateThrottle, PortalHMACBurstThrottle, OrderListThrottle])
-@require_customer_authentication
+@require_customer_role_in(*BILLING_ROLES)
 def order_detail(request: Request, customer: Customer, order_id: str) -> Response:
     """
     Get order details for authenticated customer.
@@ -988,7 +1000,7 @@ def _provision_confirmed_order_item(item: Any, customer: Any, order: Any) -> dic
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])
 @throttle_classes([PortalHMACRateThrottle, PortalHMACBurstThrottle, OrderListThrottle])
-@require_customer_authentication
+@require_customer_role_in(*BILLING_ROLES)
 def confirm_order(request: Request, customer: Customer, order_id: str) -> Response:  # noqa: PLR0911, PLR0912, PLR0915, C901
     """
     Confirm order after successful payment and trigger service provisioning.

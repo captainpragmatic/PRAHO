@@ -169,7 +169,9 @@ class TestPreflightOrderService(TestCase):
             vat_number='DE123456789',
             is_vat_payer=True,
             reverse_charge_eligible=True,
+            vies_verification_status="valid",
         )
+
         order = Order.objects.create(
             customer=customer,
             currency=self.currency,
@@ -289,6 +291,41 @@ class TestPreflightOrderService(TestCase):
         assert len(vat_errors) > 0, (
             "Preflight should detect incorrect VAT amount (1900¢ != expected 2100¢)"
         )
+
+    def test_custom_rate_mismatch_uses_generic_message(self) -> None:
+        profile = self.customer.tax_profile
+        for rate, stored_tax in ((Decimal("0.00"), 100), (Decimal("15.00"), 0)):
+            with self.subTest(rate=rate):
+                profile.vat_rate = rate
+                profile.save(update_fields=["vat_rate"])
+                order = self._make_order(
+                    billing_address=_billing_address(country="DE", vat_number="DE136695976"),
+                    tax_cents=stored_tax, total_cents=10000 + stored_tax,
+                )
+                order._preflight_subtotal_cents = 10000
+                errors, _warnings = OrderPreflightValidationService.validate(order)
+                self.assertTrue(any(error.startswith("VAT mismatch:") for error in errors), errors)
+                self.assertFalse(any("VAT evidence missing" in error for error in errors), errors)
+
+    def test_missing_vat_number_uses_generic_mismatch_message(self) -> None:
+        order = self._make_order(
+            billing_address=_billing_address(country="DE", vat_number=""),
+            tax_cents=0, total_cents=10000,
+        )
+        order._preflight_subtotal_cents = 10000
+        errors, _warnings = OrderPreflightValidationService.validate(order)
+        self.assertTrue(any(error.startswith("VAT mismatch:") for error in errors), errors)
+        self.assertFalse(any("VAT evidence missing" in error for error in errors), errors)
+
+    def test_unverified_eu_number_uses_evidence_message(self) -> None:
+        order = self._make_order(
+            billing_address=_billing_address(country="DE", vat_number="DE136695976"),
+            tax_cents=0, total_cents=10000,
+        )
+        order._preflight_subtotal_cents = 10000
+        errors, _warnings = OrderPreflightValidationService.validate(order)
+        self.assertTrue(any("VAT evidence missing for reverse charge" in error for error in errors), errors)
+        self.assertFalse(any(error.startswith("VAT mismatch:") for error in errors), errors)
 
     def test_preflight_taxes_discounted_order_on_the_net_base(self) -> None:
         """#203: a valid promoted order must pass payable-state preflight."""

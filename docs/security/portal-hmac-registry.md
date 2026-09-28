@@ -82,5 +82,5 @@ Generate secrets with ≥256 bits of randomness, e.g.
 
 - The billing-API HMAC endpoints (`/billing/create-payment-intent/`, …) share the same
   middleware validator, so they are covered automatically.
-- `PORTAL_HMAC_BYPASS` is a test/e2e-only view-layer flag, downstream of and independent from
-  this middleware.
+- Billing API tests and E2E requests use signed HMAC requests and active customer memberships;
+  the view layer has no authentication bypass setting.

@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from django.template.loader import render_to_string
-from django.test import Client, SimpleTestCase, override_settings
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils.translation import override
 
@@ -44,7 +44,7 @@ _CALCULATION_RESULT = {
 
 
 @override_settings(**_CACHE_SETTINGS)
-class TestCartFlowFixes(SimpleTestCase):
+class TestCartFlowFixes(TestCase):
     """Cart mutation responses must match the HTMX elements they replace."""
 
     def setUp(self) -> None:

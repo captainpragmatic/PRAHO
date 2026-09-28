@@ -44,8 +44,6 @@ INSTALLED_APPS: list[str] = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
 MIDDLEWARE: list[str] = [
     "django.middleware.security.SecurityMiddleware",
-    # 🔒 SECURITY: Auth rate limiting before sessions (IP-only, no session needed)
-    "apps.common.rate_limiting.AuthenticationRateLimitMiddleware",  # Auth rate limiting
     "django.contrib.sessions.middleware.SessionMiddleware",  # DB-backed sessions
     # 🔒 SECURITY: API rate limiting after sessions (cart limits need session key)
     "apps.common.rate_limiting.APIRateLimitMiddleware",  # API + cart session rate limiting
@@ -53,6 +51,8 @@ MIDDLEWARE: list[str] = [
     "django.middleware.common.CommonMiddleware",  # After locale
     "django.middleware.csrf.CsrfViewMiddleware",  # CSRF protection
     "django.contrib.messages.middleware.MessageMiddleware",  # Messages support
+    # 🔒 SECURITY: Run after messages so throttled browser POSTs can carry an error message.
+    "apps.common.rate_limiting.AuthenticationRateLimitMiddleware",  # Auth rate limiting
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     # 🔒 SECURITY: Session security after authentication
     "apps.common.middleware.SessionSecurityMiddleware",  # Session protection
@@ -351,5 +351,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # Aligned with platform setting name — both services use IPWARE_TRUSTED_PROXY_LIST
 # Trusted proxy CIDR list for get_safe_client_ip().
 # Set to your load balancer / CDN CIDR(s) in production.
-# Leave empty to use REMOTE_ADDR only (safe default for direct connections).
-IPWARE_TRUSTED_PROXY_LIST: list[str] = []
+# Production and staging require explicit proxy CIDRs.
+IPWARE_TRUSTED_PROXY_LIST: list[str] = [
+    cidr.strip() for cidr in os.environ.get("PORTAL_TRUSTED_PROXY_CIDRS", "").split(",") if cidr.strip()
+]

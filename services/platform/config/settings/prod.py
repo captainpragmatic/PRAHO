@@ -312,17 +312,6 @@ if REDIS_URL:
             "KEY_PREFIX": "praho_session",
             "TIMEOUT": 86400,  # 24 hours for sessions
         },
-        # Rate limiting cache (very short TTL)
-        "ratelimit": {
-            "BACKEND": "django.core.cache.backends.redis.RedisCache",
-            "LOCATION": REDIS_URL,
-            "OPTIONS": {
-                "CLIENT_CLASS": "django_redis.client.DefaultClient",
-                "db": 2,  # Separate Redis DB for rate limiting
-            },
-            "KEY_PREFIX": "praho_rate",
-            "TIMEOUT": 60,
-        },
     }
     # Use Redis for sessions
     SESSION_CACHE_ALIAS = "sessions"
@@ -337,10 +326,6 @@ else:
             "TIMEOUT": 3600,  # 1 hour timeout for production
         }
     )
-
-# Rate limiting cache alias
-RATE_LIMIT_CACHE = "ratelimit" if REDIS_URL else "default"
-
 
 # ===============================================================================
 # STATIC FILES (Production)

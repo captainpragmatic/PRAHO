@@ -7,14 +7,16 @@ import hashlib
 import json
 import logging
 from datetime import datetime, timedelta
+from secrets import token_hex
 from typing import Any, cast
 
-from django.core.cache import cache
 from django.core.exceptions import ValidationError
+from django.db import Error as DatabaseError
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
+from apps.common import counters
 
 from .validators import MAX_CART_ITEMS, OrderInputValidator
 
@@ -132,12 +134,15 @@ class HMACPriceSealer:
             logger.warning("🔒 [HMAC] Signature mismatch")
             return False
 
-        # Check nonce for replay protection — atomic check-and-set prevents race condition
         nonce_cache_key = f"hmac_nonce:{nonce}"
-        if not cache.add(nonce_cache_key, True, timeout=max_age_seconds * 2):
-            logger.warning("🔒 [HMAC] Replay detected - nonce already used")
+        try:
+            acquired = counters.claim(nonce_cache_key, max_age_seconds * 2 + 1, token_hex(16))
+        except DatabaseError:
+            logger.exception("🔥 [HMAC] Nonce store unavailable")
             return False
-
+        if not acquired:
+            logger.warning("🚨 [HMAC] Replay detected; nonce already used")
+            return False
         return True
 
     @staticmethod
@@ -184,7 +189,12 @@ class HMACPriceSealer:
             return False
 
         nonce_cache_key = f"hmac_nonce:{nonce}"
-        return cache.add(nonce_cache_key, True, timeout=max_age_seconds * 2)
+        try:
+            acquired = counters.claim(nonce_cache_key, max_age_seconds * 2 + 1, token_hex(16))
+        except DatabaseError:
+            logger.exception("🔥 [HMAC] Nonce store unavailable")
+            acquired = False
+        return acquired
 
 
 class GDPRCompliantCartSession:

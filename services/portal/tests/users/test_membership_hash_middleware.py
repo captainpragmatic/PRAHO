@@ -14,10 +14,12 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.sessions.middleware import SessionMiddleware
-from django.test import RequestFactory, SimpleTestCase, override_settings
+from django.http import HttpResponse
+from django.test import RequestFactory, TestCase, override_settings
 from django.utils import timezone as django_timezone
 
 from apps.api_client.services import PlatformAPIError
+from apps.common import counters
 from apps.users.middleware import _MAX_FAIL_OPEN_COUNT, PortalAuthenticationMiddleware
 
 
@@ -47,9 +49,10 @@ def _make_authenticated_request(session_data: dict | None = None) -> object:
 @override_settings(
     PLATFORM_API_BASE_URL="http://localhost:8700/api",
     PLATFORM_API_SECRET="test-secret",
+    SESSION_ENGINE="django.contrib.sessions.backends.cache",
     CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
 )
-class MembershipHashMiddlewareTest(SimpleTestCase):
+class MembershipHashMiddlewareTest(TestCase):
     """Test membership_hash cache invalidation in PortalAuthenticationMiddleware."""
 
     def _make_middleware(self) -> PortalAuthenticationMiddleware:
@@ -123,55 +126,46 @@ class MembershipHashMiddlewareTest(SimpleTestCase):
 @override_settings(
     PLATFORM_API_BASE_URL="http://localhost:8700/api",
     PLATFORM_API_SECRET="test-secret",
+    SESSION_ENGINE="django.contrib.sessions.backends.cache",
 )
-class CircuitBreakerMiddlewareTest(SimpleTestCase):
+class CircuitBreakerMiddlewareTest(TestCase):
     """Test fail-open circuit breaker in PortalAuthenticationMiddleware (#130/M1)."""
 
     def _make_middleware(self) -> PortalAuthenticationMiddleware:
         return PortalAuthenticationMiddleware(get_response=lambda r: None)
 
-    @patch("apps.users.middleware.cache")
-    def test_fail_open_below_threshold_returns_true(self, mock_cache: object) -> None:
-        """API errors below threshold allow access (fail-open)."""
-        mock_cache.incr.side_effect = ValueError("Key not found")  # First failure
-        request = _make_authenticated_request()
-        middleware = self._make_middleware()
-
+    def test_fail_open_below_threshold_returns_true(self) -> None:
+        request = _make_authenticated_request({"user_id": 42})
+        middleware = PortalAuthenticationMiddleware(lambda request: HttpResponse("allowed"))
         with patch(
             "apps.api_client.services.api_client.validate_session_secure",
             side_effect=PlatformAPIError("API down", status_code=503, is_rate_limited=False),
         ):
-            result = middleware._perform_validation(request, "42", django_timezone.now())
+            response = middleware(request)
+        self.assertEqual(response.content, b"allowed")
+        self.assertEqual(counters.peek("auth:fail_open:42"), 1)
 
-        assert result is True, "Should fail-open when below threshold"
-        mock_cache.set.assert_called_with("auth:fail_open:42", 1, timeout=3600)
-
-    @patch("apps.users.middleware.cache")
-    def test_circuit_breaker_trips_at_threshold(self, mock_cache: object) -> None:
-        """After _MAX_FAIL_OPEN_COUNT consecutive fail-opens, access is denied."""
-        mock_cache.incr.return_value = _MAX_FAIL_OPEN_COUNT  # At threshold
-        request = _make_authenticated_request()
-        middleware = self._make_middleware()
-
+    def test_circuit_breaker_trips_at_threshold(self) -> None:
+        counters.increment("auth:fail_open:42", 3600, delta=_MAX_FAIL_OPEN_COUNT - 1)
+        request = _make_authenticated_request({"user_id": 42})
+        middleware = PortalAuthenticationMiddleware(lambda request: HttpResponse("allowed"))
         with patch(
             "apps.api_client.services.api_client.validate_session_secure",
             side_effect=PlatformAPIError("API down", status_code=503, is_rate_limited=False),
         ):
-            result = middleware._perform_validation(request, "42", django_timezone.now())
+            response = middleware(request)
+        self.assertEqual(response.status_code, 302)
+        self.assertNotIn("user_id", request.session)
+        self.assertEqual(counters.peek("auth:fail_open:42"), _MAX_FAIL_OPEN_COUNT)
 
-        assert result is False, f"Should trip after {_MAX_FAIL_OPEN_COUNT} consecutive fail-opens"
-
-    @patch("apps.users.middleware.cache")
-    def test_successful_validation_resets_circuit_breaker(self, mock_cache: object) -> None:
-        """A successful validation clears the fail-open counter."""
-        request = _make_authenticated_request()
-        middleware = self._make_middleware()
-
+    def test_successful_validation_resets_circuit_breaker(self) -> None:
+        counters.increment("auth:fail_open:42", 3600, delta=3)
+        request = _make_authenticated_request({"user_id": 42})
+        middleware = PortalAuthenticationMiddleware(lambda request: HttpResponse("allowed"))
         with patch(
             "apps.api_client.services.api_client.validate_session_secure",
             return_value={"active": True},
         ):
-            result = middleware._perform_validation(request, "42", django_timezone.now())
-
-        assert result is True
-        mock_cache.delete.assert_called_with("auth:fail_open:42")
+            response = middleware(request)
+        self.assertEqual(response.content, b"allowed")
+        self.assertEqual(counters.peek("auth:fail_open:42"), 0)

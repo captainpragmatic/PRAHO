@@ -22,7 +22,10 @@ if TYPE_CHECKING:
     from apps.billing.proforma_models import ProformaInvoice
 
 REVERSE_CHARGE_LEGAL_BASIS = "Art. 196 Council Directive 2006/112/EC"
-EVIDENCE_VERSION = 1
+EVIDENCE_VERSION = 2
+SUPPORTED_EVIDENCE_VERSIONS = frozenset({1, 2})
+# Snapshots from this version on were written while the consultation-reference policy was enforceable.
+CONSULTATION_REFERENCE_EVIDENCE_VERSION = 2
 
 
 class TaxEvidenceError(ValueError):
@@ -54,6 +57,7 @@ def derive_tax_category(result: VATCalculationResult) -> str:
 
 def capture_vat_evidence(result: VATCalculationResult) -> dict[str, Any]:
     """Copy the decision and any contemporaneous cached validation, without I/O to VIES."""
+    from apps.billing.config import get_vies_evidence_max_age_days  # noqa: PLC0415
     from apps.billing.tax_models import VATValidation  # noqa: PLC0415  # Avoid a billing model import cycle.
 
     calculated_at = result.audit_data["calculated_at"]
@@ -69,6 +73,7 @@ def capture_vat_evidence(result: VATCalculationResult) -> dict[str, Any]:
         "tax_cents": result.vat_cents,
         "total_cents": result.total_cents,
         "calculated_at": calculated_at,
+        "evidence_max_age_days": get_vies_evidence_max_age_days(),
         "vies": None,
     }
     if result.vat_number:
@@ -128,7 +133,11 @@ def read_vat_evidence(document: Invoice | ProformaInvoice) -> VATDecision | None
     if data == {}:
         return None
     try:
-        if not isinstance(data, dict) or type(data["version"]) is not int or data["version"] != EVIDENCE_VERSION:
+        if (
+            not isinstance(data, dict)
+            or type(data["version"]) is not int
+            or data["version"] not in SUPPORTED_EVIDENCE_VERSIONS
+        ):
             raise ValueError("Unknown evidence version")
         _validate_snapshot_fields(data)
         rate = Decimal(data["vat_rate_percent"])

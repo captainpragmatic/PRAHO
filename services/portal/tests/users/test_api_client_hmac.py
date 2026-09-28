@@ -191,10 +191,10 @@ class HMACAuthenticationTestCase(unittest.TestCase):
         # Mock connection error
         mock_request.side_effect = requests.exceptions.ConnectionError("Connection refused")
 
-        result = self.client.authenticate_customer('test@example.com', 'password')
-
-        # Should return None for connection errors
-        self.assertIsNone(result)
+        with self.assertRaises(PlatformAPIError) as raised:
+            self.client.authenticate_customer("test@example.com", "password")
+        self.assertIsNone(raised.exception.status_code)
+        self.assertEqual(str(raised.exception), "Platform service unavailable")
 
     @patch('apps.common.outbound_http._session.request')
     def test_request_timeout_handling(self, mock_request):
@@ -202,9 +202,10 @@ class HMACAuthenticationTestCase(unittest.TestCase):
         # Mock timeout error
         mock_request.side_effect = requests.exceptions.Timeout("Request timed out")
 
-        result = self.client.authenticate_customer('test@example.com', 'password')
-
-        self.assertIsNone(result)
+        with self.assertRaises(PlatformAPIError) as raised:
+            self.client.authenticate_customer("test@example.com", "password")
+        self.assertIsNone(raised.exception.status_code)
+        self.assertEqual(str(raised.exception), "Platform service timeout")
 
     def test_empty_body_hmac_generation(self):
         """Test HMAC generation with empty request body"""

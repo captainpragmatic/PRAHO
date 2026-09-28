@@ -178,10 +178,10 @@ LOGOUT_REDIRECT_URL = "/"
 # Password reset settings
 PASSWORD_RESET_TIMEOUT = 7200  # 2 hours in seconds
 
-# Account lockout threshold: number of failed attempts before progressive lockout kicks in.
-# Default 1 means lockout starts on the first failed attempt (most secure).
-# Increase to allow N free attempts before lockout delays apply.
-ACCOUNT_LOCKOUT_THRESHOLD = 1
+# Lockout starts at the 5th consecutive failure.
+# The progressive ladder (5→15→30→60→120→240 min) starts AT the threshold.
+ACCOUNT_LOCKOUT_THRESHOLD = 5
+
 
 # ===============================================================================
 # INTERNATIONALIZATION & LOCALIZATION
@@ -240,8 +240,9 @@ CACHES = {
 # SESSION & COOKIE SETTINGS
 # ===============================================================================
 
-# Use DB-backed sessions across environments (simple and persistent)
-SESSION_ENGINE = "django.contrib.sessions.backends.db"
+# Persist sessions and their per-user revocation index in the same transaction.
+# Deploy: migrate, drain old workers, then run reconcile_session_index before trusting revocation.
+SESSION_ENGINE = "apps.users.session_backend"
 
 SESSION_COOKIE_AGE = 86400  # 24 hours
 SESSION_COOKIE_HTTPONLY = True
@@ -651,9 +652,6 @@ VIRTUALMIN_TIMEOUTS = {
 # RATE LIMITING CONFIGURATION 🔒
 # ===============================================================================
 
-# Cache backend for rate limiting (uses database cache)
-RATE_LIMIT_CACHE = "default"
-
 # Single source of truth for rate limiting — sets RATE_LIMITING_ENABLED
 from ._rate_limiting import configure_rate_limiting  # noqa: E402
 
@@ -732,6 +730,9 @@ THROTTLE_RATES = {
     "burst": "60/10s",
     # Per-view API throttles (apps.api.core.throttling)
     "auth": "10/minute",
+    # End-user IP from the Portal's signed body; no throttle key (None) when absent.
+    "auth_login_ip": "10/minute",
+    "auth_reset_ip": "5/minute",
     "sustained": "2000/hour",
     "api_burst": "120/min",
     # Built-in DRF classes used directly by decorators
@@ -895,12 +896,6 @@ PLATFORM_TO_PORTAL_WEBHOOK_SECRET: str = os.environ.get("PLATFORM_TO_PORTAL_WEBH
 
 # Outbound HTTP: allowed domains for INTERNAL_SERVICE policy (empty = unrestricted)
 INTERNAL_SERVICE_ALLOWED_DOMAINS: list[str] = ["localhost"]
-
-# Portal HMAC bypass for test runners only.
-# Setting this to True in any internet-reachable environment is a critical
-# security vulnerability — _require_customer_auth_for_portal_api will raise
-# ImproperlyConfigured if this is True when neither TESTING nor DEBUG is True.
-PORTAL_HMAC_BYPASS: bool = False
 
 # Per-portal HMAC credential registry (#277). Resolves the Portal→Platform verifying
 # secret by X-Portal-Id instead of a single shared PLATFORM_API_SECRET, so a shared-secret

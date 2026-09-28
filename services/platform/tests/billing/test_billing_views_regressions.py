@@ -8,7 +8,6 @@ edge cases, and API endpoints.
 
 from __future__ import annotations
 
-import json
 import uuid
 from datetime import timedelta
 from decimal import Decimal
@@ -32,6 +31,7 @@ from apps.billing.models import (
 from apps.common.types import Ok
 from apps.customers.models import Customer
 from apps.users.models import CustomerMembership
+from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin, hmac_headers
 
 User = get_user_model()
 
@@ -1354,11 +1354,25 @@ class InvoiceRefundRequestViewTest(BillingViewsTestBase):
 # ===============================================================================
 
 
-class ApiCreatePaymentIntentTest(BillingViewsTestBase):
-    """Tests for api_create_payment_intent."""
+@override_settings(PLATFORM_API_SECRET=HMAC_TEST_SECRET, MIDDLEWARE=HMAC_TEST_MIDDLEWARE)
+class SignedBillingViewsTestBase(HMACTestMixin, BillingViewsTestBase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.api_actor = User.objects.create_user(email="apiactor@test.ro", password="testpass123")
+        CustomerMembership.objects.create(user=self.api_actor, customer=self.customer, role="owner")
 
-    def _post_json(self, url, data):
-        return self.client.post(url, json.dumps(data), content_type="application/json")
+    def _post_json(self, url: str, data: dict[str, object]) -> HttpResponse:
+        return self.portal_post(url, {"user_id": self.api_actor.pk, **data})
+
+    def _post_invalid_json(self, url: str) -> HttpResponse:
+        body = b"not json"
+        return self.client.post(
+            url, body, content_type="application/json", **hmac_headers("POST", url, body)
+        )
+
+
+class ApiCreatePaymentIntentTest(SignedBillingViewsTestBase):
+    """Tests for api_create_payment_intent."""
 
     @patch("apps.billing.views.PaymentService.create_payment_intent_direct")
     def test_create_intent_success(self, mock_create):
@@ -1465,15 +1479,15 @@ class ApiCreatePaymentIntentTest(BillingViewsTestBase):
         mock_create.assert_not_called()
 
     def test_create_intent_invalid_json(self):
-        response = self.client.post(
-            "/billing/create-payment-intent/",
-            "not json",
-            content_type="application/json",
-        )
+        response = self._post_invalid_json("/billing/create-payment-intent/")
         self.assertEqual(response.status_code, 400)
 
     def test_create_intent_get_not_allowed(self):
-        response = self.client.get("/billing/create-payment-intent/")
+        path = "/billing/create-payment-intent/"
+        body = b"{}"
+        response = self.client.generic(
+            "GET", path, body, content_type="application/json", **hmac_headers("GET", path, body)
+        )
         self.assertEqual(response.status_code, 405)
 
     @patch("apps.billing.views.PaymentService.create_payment_intent_direct")
@@ -1521,11 +1535,8 @@ class ApiCreatePaymentIntentTest(BillingViewsTestBase):
         mock_create.assert_not_called()
 
 
-class ApiConfirmPaymentTest(BillingViewsTestBase):
+class ApiConfirmPaymentTest(SignedBillingViewsTestBase):
     """Tests for api_confirm_payment."""
-
-    def _post_json(self, url, data):
-        return self.client.post(url, json.dumps(data), content_type="application/json")
 
     @patch("apps.billing.views.PaymentService.confirm_payment")
     def test_confirm_success(self, mock_confirm):
@@ -1566,11 +1577,7 @@ class ApiConfirmPaymentTest(BillingViewsTestBase):
         self.assertEqual(response.status_code, 400)
 
     def test_confirm_invalid_json(self):
-        response = self.client.post(
-            "/billing/confirm-payment/",
-            "not json",
-            content_type="application/json",
-        )
+        response = self._post_invalid_json("/billing/confirm-payment/")
         self.assertEqual(response.status_code, 400)
 
     @patch("apps.billing.views.PaymentService.confirm_payment")
@@ -1590,18 +1597,8 @@ class ApiConfirmPaymentTest(BillingViewsTestBase):
         self.assertEqual(response.status_code, 400)
 
 
-class ApiProcessRefundTest(BillingViewsTestBase):
+class ApiProcessRefundTest(SignedBillingViewsTestBase):
     """Tests for api_process_refund."""
-
-    def setUp(self):
-        super().setUp()
-        # #104 [M11]: the endpoint now requires an owner/billing customer principal, so these
-        # payload-validation cases must supply one to reach the code they are exercising.
-        self.api_actor = User.objects.create_user(email="apiactor@test.ro", password="testpass123")
-        CustomerMembership.objects.create(user=self.api_actor, customer=self.customer, role="owner")
-
-    def _post_json(self, url, data):
-        return self.client.post(url, json.dumps(data), content_type="application/json")
 
     def test_process_refund_invalid_payment_id(self):
         """Refund with invalid payment ID format returns 400"""
@@ -1625,25 +1622,21 @@ class ApiProcessRefundTest(BillingViewsTestBase):
         self.assertEqual(response.status_code, 400)
 
     def test_process_refund_invalid_json(self):
-        response = self.client.post(
-            "/billing/process-refund/",
-            "not json",
-            content_type="application/json",
-        )
+        response = self._post_invalid_json("/billing/process-refund/")
         self.assertEqual(response.status_code, 400)
 
-    @patch("apps.billing.views.json.loads")
-    def test_process_refund_exception(self, mock_loads):
-        mock_loads.side_effect = Exception("Unexpected")
-        response = self.client.post(
+    @patch("apps.billing.views.Payment.objects.filter")
+    def test_process_refund_exception(self, mock_lookup: MagicMock) -> None:
+        mock_lookup.side_effect = Exception("Unexpected")
+        response = self._post_json(
             "/billing/process-refund/",
-            json.dumps({"payment_id": "pay_123"}),
-            content_type="application/json",
+            {"payment_id": str(uuid.uuid4()), "customer_id": self.customer.pk},
         )
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.json(), {"success": False, "error": "Internal server error"})
 
 
-class ApiProcessRefundRoleTests(BillingViewsTestBase):
+class ApiProcessRefundRoleTests(SignedBillingViewsTestBase):
     """#104 [M11]: customer membership is not authority to move money.
 
     ``api_process_refund`` reaches ``RefundService.refund_invoice`` after HMAC plus
@@ -1667,19 +1660,16 @@ class ApiProcessRefundRoleTests(BillingViewsTestBase):
         self.cust_billing_user = User.objects.create_user(email="custbilling@test.ro", password="testpass123")
         CustomerMembership.objects.create(user=self.cust_billing_user, customer=self.customer, role="billing")
 
-    def _post_refund(self, user):
-        return self.client.post(
+    def _post_refund(self, user: User) -> HttpResponse:
+        return self.portal_post(
             "/billing/process-refund/",
-            json.dumps(
-                {
-                    "payment_id": str(uuid.uuid4()),
-                    "customer_id": self.customer.pk,
-                    "user_id": user.pk,
-                    "amount_cents": 1000,
-                    "reason": "Test",
-                }
-            ),
-            content_type="application/json",
+            {
+                "payment_id": str(uuid.uuid4()),
+                "customer_id": self.customer.pk,
+                "user_id": user.pk,
+                "amount_cents": 1000,
+                "reason": "Test",
+            },
         )
 
     def test_read_only_members_cannot_process_a_refund(self):
@@ -1687,7 +1677,9 @@ class ApiProcessRefundRoleTests(BillingViewsTestBase):
             with self.subTest(role=user.customer_memberships.first().role), patch(self.REFUND_SERVICE) as refund:
                 response = self._post_refund(user)
                 self.assertEqual(response.status_code, 403)
-                self.assertFalse(response.json()["success"])
+                self.assertEqual(response.json(), {"success": False, "error": "Access denied"})
+                self.assertEqual(response["Cache-Control"], "no-store")
+                self.assertEqual(response["X-Content-Type-Options"], "nosniff")
                 refund.assert_not_called()
 
     def test_financial_members_pass_the_role_gate(self):
@@ -1695,7 +1687,8 @@ class ApiProcessRefundRoleTests(BillingViewsTestBase):
         for user in (self.owner_user, self.cust_billing_user):
             with self.subTest(role=user.customer_memberships.first().role):
                 response = self._post_refund(user)
-                self.assertNotEqual(response.status_code, 403)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("not found", response.json()["error"])
 
     def test_malformed_user_id_is_refused_not_a_server_error(self):
         """A non-integer actor id must deny, not raise through the view."""
@@ -1703,22 +1696,22 @@ class ApiProcessRefundRoleTests(BillingViewsTestBase):
         # reaches the ORM and raises OverflowError into the broad handler as a 500.
         for bad in ("not-an-int", {"nested": 1}, [1, 2], 10**20, 0, -5):
             with self.subTest(user_id=bad), patch(self.REFUND_SERVICE) as refund:
-                response = self.client.post(
+                response = self.portal_post(
                     "/billing/process-refund/",
-                    json.dumps({"payment_id": str(uuid.uuid4()), "customer_id": self.customer.pk, "user_id": bad}),
-                    content_type="application/json",
+                    {"payment_id": str(uuid.uuid4()), "customer_id": self.customer.pk, "user_id": bad},
                 )
-                self.assertEqual(response.status_code, 403)
+                self.assertEqual(response.status_code, 401)
+                self.assertEqual(response.json(), {"success": False, "error": "Authentication required"})
                 refund.assert_not_called()
 
     def test_absent_user_id_is_refused(self):
         with patch(self.REFUND_SERVICE) as refund:
-            response = self.client.post(
+            response = self.portal_post(
                 "/billing/process-refund/",
-                json.dumps({"payment_id": str(uuid.uuid4()), "customer_id": self.customer.pk}),
-                content_type="application/json",
+                {"payment_id": str(uuid.uuid4()), "customer_id": self.customer.pk},
             )
-            self.assertEqual(response.status_code, 403)
+            self.assertEqual(response.status_code, 400)
+            self.assertEqual(response.json(), {"success": False, "error": "Invalid request format"})
             refund.assert_not_called()
 
 

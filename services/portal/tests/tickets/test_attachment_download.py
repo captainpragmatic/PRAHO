@@ -1,5 +1,6 @@
 """Portal attachment proxy keeps identity server-side and preserves file bytes."""
 
+import time
 from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -54,7 +55,10 @@ class AttachmentDownloadContracts(SimpleTestCase):
         request = RequestFactory().post("/tickets/2/reply/", {"message": "Diagnostic", "attachments": file})
         authenticated = _authenticated_request()
         request.session = authenticated.session
+        request.session["user_memberships"] = [{"customer_id": "1", "role": "owner"}]
+        request.session["user_memberships_fetched_at"] = time.time()
         request._messages = authenticated._messages
+
         with patch("apps.tickets.views.tickets_api.add_ticket_reply") as reply:
             response = ticket_reply(request, 2)
         self.assertEqual(response.status_code, 302)

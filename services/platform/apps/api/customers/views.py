@@ -10,6 +10,7 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Q, QuerySet
 from django.http import HttpRequest
+from django.utils.translation import gettext as _
 from rest_framework import status
 from rest_framework.decorators import action, api_view, authentication_classes, permission_classes, throttle_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -20,7 +21,14 @@ from rest_framework.views import APIView
 from apps.api.core import ReadOnlyAPIViewSet
 from apps.api.core.permissions import IsAuthenticatedAndAccessible
 from apps.api.core.throttling import AuthThrottle, BurstAPIThrottle
-from apps.api.secure_auth import public_api_endpoint, require_customer_authentication, require_portal_authentication
+from apps.api.secure_auth import (
+    BILLING_ROLES,
+    _uniform_error_response,
+    public_api_endpoint,
+    require_customer_authentication,
+    require_customer_role_in,
+    require_portal_authentication,
+)
 from apps.common.localisation import country_name
 from apps.common.localisation_services import get_localisation_defaults
 from apps.common.performance.rate_limiting import (
@@ -53,6 +61,27 @@ logger = logging.getLogger(__name__)
 
 # Constants
 SEARCH_QUERY_MIN_LENGTH = 2
+
+
+def _vat_number_error(value: str, country: str | None) -> str | None:
+    """Validate EU numbers while preserving non-EU identifiers as entered."""
+    from apps.billing.tax_evidence import vat_country  # noqa: PLC0415
+    from apps.common.eu_vat_validator import is_eu_country, parse_vat_number, validate_vat_format  # noqa: PLC0415
+
+    country_code, digits = parse_vat_number(value, default_country=vat_country(country) if country else "RO")
+    if is_eu_country(country_code):
+        result = validate_vat_format(country_code, digits)
+        if not result.is_valid:
+            return result.error_message
+    return None
+
+
+def _customer_payload_for_role(customer_data: dict[str, object], role: str | None) -> dict[str, object]:
+    """Tax and billing profiles are billing data; only the owner and billing roles receive them."""
+    if role not in BILLING_ROLES:
+        customer_data.pop("tax_profile", None)
+        customer_data.pop("billing_profile", None)
+    return customer_data
 
 
 # ===============================================================================
@@ -626,7 +655,8 @@ def customer_detail_api(request: HttpRequest, customer: Customer) -> Response:
 
         # Serialize customer data
         serializer = CustomerDetailSerializer(customer_with_profiles)
-        response_data = {"success": True, "customer": serializer.data}
+        customer_data = _customer_payload_for_role(dict(serializer.data), getattr(request, "_customer_role", None))
+        response_data = {"success": True, "customer": customer_data}
 
         # Add optional expansions if requested
         if includes:
@@ -701,7 +731,7 @@ def customer_detail_api(request: HttpRequest, customer: Customer) -> Response:
 # request, so without them the pre-auth path is unthrottled. This restores the full
 # DEFAULT_THROTTLE_CLASSES set for this endpoint.
 @throttle_classes([PortalHMACRateThrottle, PortalHMACBurstThrottle, CustomerRateThrottle, BurstRateThrottle])
-@require_customer_authentication
+@require_customer_role_in(*BILLING_ROLES)
 def update_customer_billing_address(  # noqa: C901, PLR0912, PLR0915  # Complexity: multi-step business logic
     request: Request, customer: Customer
 ) -> Response:
@@ -768,6 +798,13 @@ def update_customer_billing_address(  # noqa: C901, PLR0912, PLR0915  # Complexi
         )
 
     validated_data = serializer.validated_data
+    if validated_data.get("vat_number"):
+        vat_error = _vat_number_error(validated_data["vat_number"], validated_data.get("country") or existing_country)
+        if vat_error is not None:
+            return Response(
+                {"success": False, "error": _("Invalid VAT number: %(error)s") % {"error": vat_error}},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
     # Resolve the acting user from the HMAC-signed body (user_id is validated by the decorator)
     user_id = request.data.get("user_id")
@@ -920,10 +957,7 @@ def _require_owner_role(user_id: int, customer: Customer) -> Response | None:
     """Return error response if user is not an owner of the customer."""
     membership = CustomerMembership.objects.filter(user_id=user_id, customer=customer, is_active=True).first()
     if not membership or membership.role != "owner":
-        return Response(
-            {"success": False, "error": "Owner role required for this action."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
+        return _uniform_error_response()
     return None
 
 
@@ -1287,10 +1321,7 @@ def customer_update(request: HttpRequest, customer: Customer) -> Response:
     # Owner or billing role required
     membership = CustomerMembership.objects.filter(user_id=user_id, customer=customer, is_active=True).first()
     if not membership or membership.role not in ("owner", "billing"):
-        return Response(
-            {"success": False, "error": "Owner or billing role required."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
+        return _uniform_error_response()
 
     updatable_fields = {"name", "company_name", "primary_email", "primary_phone", "website", "industry"}
     update_fields = []
@@ -1317,8 +1348,11 @@ def customer_update(request: HttpRequest, customer: Customer) -> Response:
 @authentication_classes([])
 @permission_classes([AllowAny])
 @require_customer_authentication
-def customer_tax_profile_update(request: HttpRequest, customer: Customer) -> Response:
+def customer_tax_profile_update(  # noqa: C901, PLR0912  # Validate each permitted field before saving the profile
+    request: HttpRequest, customer: Customer
+) -> Response:
     """Update customer tax profile (CUI, VAT number, etc.)."""
+
     data = _get_request_data(request)
     try:
         user_id = _extract_user_id(data)
@@ -1327,13 +1361,12 @@ def customer_tax_profile_update(request: HttpRequest, customer: Customer) -> Res
 
     membership = CustomerMembership.objects.filter(user_id=user_id, customer=customer, is_active=True).first()
     if not membership or membership.role not in ("owner", "billing"):
-        return Response(
-            {"success": False, "error": "Owner or billing role required."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
+        return _uniform_error_response()
 
-    tax_bool_fields = {"is_vat_payer", "reverse_charge_eligible"}
+    tax_bool_fields = {"is_vat_payer"}
     tax_string_fields = {"cui", "vat_number", "registration_number"}
+    if "reverse_charge_eligible" in data:
+        logger.info("✅ [Customer API] Ignored derived reverse-charge flag for customer %s", customer.id)
 
     tax_profile, _created = CustomerTaxProfile.objects.get_or_create(customer=customer)
     update_fields = []
@@ -1358,7 +1391,16 @@ def customer_tax_profile_update(request: HttpRequest, customer: Customer) -> Res
                             {"success": False, "error": f"Invalid CUI: {result.error_message}"},
                             status=status.HTTP_400_BAD_REQUEST,
                         )
+                if field == "vat_number" and value:
+                    billing_address = customer.get_billing_address()
+                    vat_error = _vat_number_error(value, billing_address.country if billing_address else None)
+                    if vat_error is not None:
+                        return Response(
+                            {"success": False, "error": _("Invalid VAT number: %(error)s") % {"error": vat_error}},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
             setattr(tax_profile, field, value)
+
             update_fields.append(field)
 
     if update_fields:

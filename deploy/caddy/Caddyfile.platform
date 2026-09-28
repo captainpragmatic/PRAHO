@@ -2,7 +2,7 @@
 # PRAHO - Caddy Configuration for Platform-Only Deployment
 # =============================================================================
 
-{$DOMAIN:localhost} {
+{$PLATFORM_DOMAIN} {
     tls {$ACME_EMAIL:admin@example.com}
 
     header {
@@ -16,29 +16,53 @@
 
     encode gzip zstd
 
-    handle_path /static/* {
-        root * /srv/static
-        file_server
-        header Cache-Control "public, max-age=31536000, immutable"
-    }
-
-    handle_path /media/* {
-        root * /srv/media
-        file_server
-        header Cache-Control "public, max-age=86400"
-    }
-
-    handle /health/* {
+    handle /api/users/health/* {
         reverse_proxy platform:8700
     }
 
-    handle {
-        reverse_proxy platform:8700 {
-            header_up X-Real-IP {remote_host}
-            header_up X-Forwarded-For {remote_host}
-            header_up X-Forwarded-Proto {scheme}
+    handle /integrations/webhooks/* {
+        reverse_proxy platform:8700
+    }
+
+    # Email provider bounce feeds and the recipient unsubscribe page are public too.
+    handle /notifications/webhooks/* {
+        reverse_proxy platform:8700
+    }
+
+    handle /notifications/unsubscribe/* {
+        reverse_proxy platform:8700
+    }
+
+    # Django enforces API authentication, including its explicit public exceptions.
+    handle /api/* {
+        reverse_proxy platform:8700
+    }
+
+    # Space-separated CIDRs; Caddy is the edge and matches the immediate peer.
+    @staff remote_ip {$PLATFORM_ALLOWED_CIDRS:127.0.0.1/32 ::1/128}
+    handle @staff {
+        handle_path /static/* {
+            root * /srv/static
+            file_server
+            header Cache-Control "public, max-age=31536000, immutable"
+        }
+
+        handle_path /media/* {
+            root * /srv/media
+            file_server
+            header Cache-Control "public, max-age=86400"
+        }
+
+        handle {
+            reverse_proxy platform:8700 {
+                header_up X-Real-IP {remote_host}
+                header_up X-Forwarded-For {remote_host}
+                header_up X-Forwarded-Proto {scheme}
+            }
         }
     }
+
+    respond "Access denied" 403
 
     log {
         output file /data/access.log {

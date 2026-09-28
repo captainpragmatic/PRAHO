@@ -216,7 +216,7 @@ class TransferIdempotencyClaimTests(TestCase):
     ) -> None:
         # slot free on first look, but the atomic add loses the race (another request
         # already claimed it) and the recheck finds no completed result yet.
-        mock_cache.get.side_effect = [0, None, None]
+        mock_cache.get.side_effect = [None, None]
         mock_cache.add.return_value = False  # claim lost
 
         result = self.gateway.initiate_transfer("example.com", "EPP")

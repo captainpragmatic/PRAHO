@@ -12,7 +12,7 @@ from unittest.mock import Mock, patch
 
 from django.contrib.sessions.backends.cache import SessionStore
 from django.core.cache import cache
-from django.test import Client, SimpleTestCase, override_settings
+from django.test import Client, TestCase, override_settings
 
 from apps.orders.services import GDPRCompliantCartSession, HMACPriceSealer
 
@@ -30,7 +30,7 @@ _IMPORTED_ORDER_SECURITY_CASES = (
 
 
 @override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
-class OrderHMACSecurityTestCase(SimpleTestCase):
+class OrderHMACSecurityTestCase(TestCase):
     """
     🔒 HMAC Security Tests
     Tests replay attack protection, timestamp validation, body verification
@@ -182,7 +182,7 @@ class OrderHMACSecurityTestCase(SimpleTestCase):
     SESSION_ENGINE='django.contrib.sessions.backends.cache',
     CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
 )
-class OrderIdempotencySecurityTestCase(SimpleTestCase):
+class OrderIdempotencySecurityTestCase(TestCase):
     """
     🔒 Order Idempotency and Race Condition Tests
     Tests server-authoritative pricing and idempotent order creation
@@ -196,7 +196,10 @@ class OrderIdempotencySecurityTestCase(SimpleTestCase):
         session = self.client.session
         session['customer_id'] = 123
         session['user_id'] = 456
+        session["user_memberships"] = [{"customer_id": session["customer_id"], "role": "owner"}]
+        session["user_memberships_fetched_at"] = time.time()
         session.save()
+
 
     @patch('apps.orders.views.OrderSecurityHardening.fail_closed_on_cache_failure', return_value=None)
     @patch('apps.orders.views.OrderSecurityHardening.validate_request_size', return_value=None)
@@ -289,7 +292,7 @@ class OrderIdempotencySecurityTestCase(SimpleTestCase):
 
 
 @override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
-class OrderSessionSecurityTestCase(SimpleTestCase):
+class OrderSessionSecurityTestCase(TestCase):
     """
     🔒 Session Security Tests
     Tests secure cookie settings, session fixation protection, CSRF
@@ -367,7 +370,7 @@ class OrderSessionSecurityTestCase(SimpleTestCase):
 
 
 @override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
-class OrderEnumerationSecurityTestCase(SimpleTestCase):
+class OrderEnumerationSecurityTestCase(TestCase):
     """
     🔒 Enumeration Attack Protection Tests
     Tests uniform denial of GET requests for customer data
@@ -423,7 +426,7 @@ class OrderEnumerationSecurityTestCase(SimpleTestCase):
 
 
 @override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
-class OrderDosHardeningTestCase(SimpleTestCase):
+class OrderDosHardeningTestCase(TestCase):
     """
     🔒 DoS Hardening Tests
     Tests rate limiting, request size limits, fail-closed behavior
@@ -611,7 +614,7 @@ class OrderDosHardeningTestCase(SimpleTestCase):
 
 
 @override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
-class OrderCartVersioningSecurityTestCase(SimpleTestCase):
+class OrderCartVersioningSecurityTestCase(TestCase):
     """
     🔒 Cart Versioning Security Tests
     Tests stale mutation detection and cart version validation
@@ -623,7 +626,10 @@ class OrderCartVersioningSecurityTestCase(SimpleTestCase):
         session = self.client.session
         session['customer_id'] = 123
         session['user_id'] = 456
+        session["user_memberships"] = [{"customer_id": session["customer_id"], "role": "owner"}]
+        session["user_memberships_fetched_at"] = time.time()
         session.save()
+
 
         # Mock Platform API so add_item() doesn't trigger M8 fallback.
         _mock_api_instance = Mock()
@@ -721,7 +727,7 @@ class OrderCartVersioningSecurityTestCase(SimpleTestCase):
 
 
 @override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
-class HMACPriceSealerUnitTestCase(SimpleTestCase):
+class HMACPriceSealerUnitTestCase(TestCase):
     """
     🔒 Direct unit tests for HMACPriceSealer.seal_price_data / verify_seal.
     Tests the seal/verify round-trip, tamper detection, and edge cases.

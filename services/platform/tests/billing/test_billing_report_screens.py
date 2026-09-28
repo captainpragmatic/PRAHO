@@ -23,6 +23,9 @@ missing-key assertion depends on.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from unittest.mock import patch
+
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -118,6 +121,23 @@ class VatReportScreenTests(BillingReportScreenTestCase):
 
         self.assertContains(response, TOTAL_NET)
         self.assertContains(response, TOTAL_GROSS)
+
+
+class VatReportPeriodTests(BillingReportScreenTestCase):
+    def test_the_default_period_follows_the_local_calendar(self) -> None:
+        """At 22:30 UTC on the 27th it is already the 28th in Bucharest.
+
+        `created_at__date` is evaluated in the configured time zone, so an invoice issued at
+        that instant belongs to the 28th. A default period that ends on the UTC date stops at
+        the 27th and the screen reports nothing for the current evening.
+        """
+        late_evening = datetime(2026, 9, 27, 22, 30, tzinfo=UTC)
+        with patch("django.utils.timezone.now", return_value=late_evening):
+            self._paid_invoices()
+            response = self.client.get(reverse("billing:vat_report"))
+
+        self.assertContains(response, TOTAL_VAT)
+        self.assertEqual(response.context["end_date"].isoformat(), "2026-09-28")
 
 
 class MixedCurrencyReportTests(TestCase):
