@@ -13,6 +13,7 @@ from typing import Any, ClassVar, cast
 
 from django.conf import settings
 from django.core.cache import cache
+from django.db import Error as DatabaseError
 from django.http import HttpRequest, HttpResponse
 from django.middleware.csrf import get_token
 from django.shortcuts import redirect
@@ -319,8 +320,12 @@ class PortalAuthenticationMiddleware:
                 request.session.modified = True
 
                 logger.debug(f"✅ [Auth] User {user_id} validated successfully")
-                # Reset fail-open circuit breaker on successful validation (#130/M1)
-                counters.reset(f"auth:fail_open:{user_id}")
+                # Reset fail-open circuit breaker on successful validation (#130/M1).
+                # Cleanup carries no authorisation meaning, so a store error here is logged, not enforced.
+                try:
+                    counters.reset(f"auth:fail_open:{user_id}")
+                except DatabaseError:
+                    logger.warning("⚠️ [Auth] Could not reset the fail-open counter for user %s", user_id)
                 return True
             else:
                 logger.warning(f"❌ [Auth] User {user_id} validation failed - account disabled/deleted")

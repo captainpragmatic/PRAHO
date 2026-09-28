@@ -78,6 +78,15 @@
         reverse_proxy platform:{{ platform_port }}
     }
 
+    # Email provider bounce feeds and the recipient unsubscribe page are public too.
+    handle /notifications/webhooks/* {
+        reverse_proxy platform:{{ platform_port }}
+    }
+
+    handle /notifications/unsubscribe/* {
+        reverse_proxy platform:{{ platform_port }}
+    }
+
     # Django enforces API authentication, including its explicit public exceptions.
     handle /api/* {
         reverse_proxy platform:{{ platform_port }}

@@ -273,6 +273,8 @@ class ANAFQuotaTracker:
         Returns:
             New usage count
         """
+        if count < 1:
+            raise ValueError("Quota increments must be positive")
         # Increment endpoint-specific counter
         cache_key = self._get_cache_key(endpoint, cui, message_id)
         timeout = self._seconds_until_midnight()

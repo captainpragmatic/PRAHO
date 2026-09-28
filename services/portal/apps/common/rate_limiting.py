@@ -119,6 +119,7 @@ class AuthenticationRateLimitMiddleware:
                         self._clear_rate_limits(request)
             except Exception:
                 logger.exception("🔥 [RateLimit] Counter store unavailable after authentication")
+                self._uniform_response_delay(start_time)
                 return self._rate_limit_response(
                     request, _("Service temporarily unavailable. Please try again later."), 300, 503
                 )

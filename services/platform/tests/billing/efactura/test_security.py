@@ -259,12 +259,10 @@ class RateLimitBypassTestCase(TestCase):
     def test_quota_negative_increment(self):
         """Test quota cannot be decreased with negative increment."""
         self.tracker.increment(QuotaEndpoint.STATUS, "12345678", "msg-123")
-        # Negative increment should still work (for rollbacks)
-        new_count = self.tracker.increment(
-            QuotaEndpoint.STATUS, "12345678", "msg-123", count=-1
-        )
-        # Depending on implementation, could be 0 or error
-        self.assertIsNotNone(new_count)
+        # The shared store only counts upward; a negative increment is a caller bug, not a rollback.
+        with self.assertRaises(ValueError):
+            self.tracker.increment(QuotaEndpoint.STATUS, "12345678", "msg-123", count=-1)
+        self.assertEqual(self.tracker.get_current_usage(QuotaEndpoint.STATUS, "12345678", "msg-123"), 1)
 
     def test_quota_overflow(self):
         """Test quota handles very large numbers."""

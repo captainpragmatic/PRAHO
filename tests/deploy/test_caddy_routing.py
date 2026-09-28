@@ -43,6 +43,8 @@ SHARED_PATHS = ("/dashboard/", "/billing/", "/tickets/", "/i18n/", "/cookie-poli
 PUBLIC_ROUTES = (
     ("GET", "/api/users/health/"),
     ("POST", "/integrations/webhooks/stripe/"),
+    ("POST", "/notifications/webhooks/mailgun/"),
+    ("GET", "/notifications/unsubscribe/00000000-0000-0000-0000-000000000000/"),
     ("POST", "/api/users/login/"),
     ("POST", "/api/users/password-reset/"),
     ("GET", "/api/customers/1/services/"),  # Staff-session GET exception remains inside the public API.
@@ -151,6 +153,8 @@ def _assert_contract(name: str, source: str, allowed: list[str] | None = None) -
         assert [node.words for node in handles] == [
             ("handle", "/api/users/health/*"),
             ("handle", "/integrations/webhooks/*"),
+            ("handle", "/notifications/webhooks/*"),
+            ("handle", "/notifications/unsubscribe/*"),
             ("handle", "/api/*"),
             ("handle", "@staff"),
         ]
@@ -158,7 +162,7 @@ def _assert_contract(name: str, source: str, allowed: list[str] | None = None) -
         denial = _one(platform, "respond", "Access denied", "403")
         assert platform.index(denial) > platform.index(handles[-1])
         assert all(target.endswith(":8700") for target in _proxy_targets(platform))
-        for public in handles[:3]:
+        for public in handles[:5]:
             assert len(_proxy_targets(public.children)) == 1
             assert not any(node.words[0].startswith("@") for node in _walk(public.children))
         assert not any(node.words[0] in {"handle_path", "reverse_proxy"} for node in platform)

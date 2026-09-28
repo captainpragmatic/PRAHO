@@ -1142,8 +1142,8 @@ class TestOrderCreationAtomicIdempotency(TestCase):
                 HTTP_X_FORWARDED_FOR="127.0.0.1",
             )
 
-        self.assertEqual(response.status_code, 409)
-        self.assertIn("being processed", response.json()["error"])
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/order/checkout/", response["Location"])
         self.assertFalse(counters.release("orders:idempotency:42:pending-checkout", "loser"))
 
     def test_cache_key_deleted_on_order_creation_failure(self) -> None:

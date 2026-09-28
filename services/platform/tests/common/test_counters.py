@@ -145,9 +145,12 @@ class CounterStoreTests(TestCase):
 
     def test_cull_is_one_bounded_delete_and_preserves_grace_and_live_claims(self) -> None:
         Counter.objects.bulk_create(
-            [Counter(key=f"old:{index}", count=1, expires_at=6399) for index in range(501)]
+            [
+                Counter(key=f"old:{index}", count=1, expires_at=10_000 - counters.CULL_GRACE_SECONDS - 1)
+                for index in range(501)
+            ]
         )
-        Counter.objects.create(key="grace-boundary", count=1, expires_at=6400)
+        Counter.objects.create(key="grace-boundary", count=1, expires_at=10_000 - counters.CULL_GRACE_SECONDS)
         Counter.objects.create(key="recent-expiry", count=1, expires_at=9999)
         self.assertTrue(counters.claim("live-claim", 60, "owner"))
         self.assertTrue(counters.claim("completed-claim", 60, "owner"))

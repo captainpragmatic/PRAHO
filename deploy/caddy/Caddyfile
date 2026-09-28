@@ -69,6 +69,15 @@
         reverse_proxy platform:8700
     }
 
+    # Email provider bounce feeds and the recipient unsubscribe page are public too.
+    handle /notifications/webhooks/* {
+        reverse_proxy platform:8700
+    }
+
+    handle /notifications/unsubscribe/* {
+        reverse_proxy platform:8700
+    }
+
     # Django enforces API authentication, including its explicit public exceptions.
     handle /api/* {
         reverse_proxy platform:8700

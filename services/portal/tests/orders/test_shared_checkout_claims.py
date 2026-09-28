@@ -74,7 +74,7 @@ class SharedCheckoutClaimTests(TransactionTestCase):
         return response
 
     def submit(self) -> HttpResponse:
-        return self.client.post("/order/create/", self.payload)
+        return self.client.post("/order/create/", self.payload, HTTP_HX_REQUEST="true")
 
     def test_second_connection_replays_completed_order_after_cart_is_cleared(self) -> None:
         first = self.submit()

@@ -170,6 +170,14 @@ class CheckoutContext:
     agree_terms: bool
 
 
+def _checkout_conflict(request: HttpRequest, message: str, status: int) -> HttpResponse:
+    """Answer a duplicate or blocked checkout: JSON for HTMX and XHR callers, a notice and redirect for browsers."""
+    if request.headers.get("HX-Request") or request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return JsonResponse({"error": message}, status=status)
+    messages.info(request, message)
+    return redirect("orders:checkout")
+
+
 def _validate_checkout_request(request: HttpRequest) -> "CheckoutContext | HttpResponse":  # noqa: PLR0911
     """Validate a checkout POST request.
 
@@ -194,12 +202,12 @@ def _validate_checkout_request(request: HttpRequest) -> "CheckoutContext | HttpR
             completed = counters.lookup(f"orders:idempotency:{customer_id}:{idempotency_key}")
         except DatabaseError:
             logger.exception("🔥 [Orders] Checkout replay store unavailable")
-            return JsonResponse({"error": _("Service temporarily unavailable")}, status=503)
+            return _checkout_conflict(request, _("Service temporarily unavailable"), 503)
         if completed:
             try:
                 order_id = uuid.UUID(completed)
             except ValueError:
-                return JsonResponse({"error": _("Your order is being processed.")}, status=409)
+                return _checkout_conflict(request, _("Your order is being processed."), 409)
             return redirect("orders:confirmation", order_id=order_id)
 
     if not cart.has_items():
@@ -300,11 +308,11 @@ def _create_and_process_order(request: HttpRequest, ctx: CheckoutContext) -> Htt
                 try:
                     uuid.UUID(completed_order_id)
                 except (ValueError, TypeError):
-                    return JsonResponse(
-                        {"error": _("Your order is being processed. Please check your orders list.")}, status=409
+                    return _checkout_conflict(
+                        request, _("Your order is being processed. Please check your orders list."), 409
                     )
                 return redirect("orders:confirmation", order_id=completed_order_id)
-            return JsonResponse({"error": _("Your order is being processed. Please wait a moment.")}, status=409)
+            return _checkout_conflict(request, _("Your order is being processed. Please wait a moment."), 409)
 
         # We hold the idempotency lock — track if order was created on Platform so the
         # finally block can clean up the lock on failure (but preserve it if order exists).
@@ -370,8 +378,8 @@ def _create_and_process_order(request: HttpRequest, ctx: CheckoutContext) -> Htt
             # when publishing the result fails. Platform also receives the same key.
             if not counters.complete(idem_cache_key, claim_token, str(order_id or "__processed__")):
                 logger.warning("🚨 [Orders] Checkout claim expired before completion: %s", idem_cache_key)
-                return JsonResponse(
-                    {"error": _("Your order is being processed. Please check your orders list.")}, status=409
+                return _checkout_conflict(
+                    request, _("Your order is being processed. Please check your orders list."), 409
                 )
 
             # Create Stripe PaymentIntent only for card payment method

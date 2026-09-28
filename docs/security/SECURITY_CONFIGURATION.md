@@ -174,7 +174,8 @@ Caddy does not replace these application authentication rules.
 
 ### Upgrade / PR deploy notes
 
-- Set DNS and certificates for both hostnames before switching the Caddy config.
+- Set DNS and certificates for both hostnames before switching the Caddy config. Caddy
+  refuses to start when either domain variable is unset; there is no fallback hostname.
   Pass both domain variables to both Django services and include each public
   hostname in that service's `ALLOWED_HOSTS`. Production settings derive CSRF
   trusted origins from those hosts and absolute URLs from the domain variables.

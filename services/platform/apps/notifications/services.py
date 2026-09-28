@@ -16,6 +16,7 @@ Features:
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import logging
 import re
@@ -297,6 +298,12 @@ class EmailRateLimiter:
         cache_key = f"{RATE_LIMIT_CACHE_PREFIX}{identifier}:{timezone.now().strftime('%Y%m%d%H%M')}"
 
         return counters.increment(cache_key, 120)
+
+    @staticmethod
+    def release_counter(identifier: str = "global") -> None:
+        """Give back a reservation whose delivery did not happen, so an outage cannot burn the budget."""
+        cache_key = f"{RATE_LIMIT_CACHE_PREFIX}{identifier}:{timezone.now().strftime('%Y%m%d%H%M')}"
+        counters.release(cache_key)
 
 
 # ===============================================================================
@@ -585,13 +592,16 @@ class EmailService:
                 # Standard Django EmailMessage doesn't support these
                 pass
 
+            reserved = False
             # Reserve before delivery so a failed store or exhausted budget
             # cannot send an uncounted email.
             count = EmailRateLimiter.increment_counter()
+            reserved = True
             maximum = getattr(settings, "EMAIL_RATE_LIMIT", {}).get("MAX_PER_MINUTE", 50)
             if count > maximum:
                 raise DjangoValidationError(_("Rate limit exceeded"))
             msg.send(fail_silently=False)
+            reserved = False
 
             # Update log with success
             email_log.status = "sent"
@@ -619,6 +629,10 @@ class EmailService:
             )
 
         except Exception as e:
+            if reserved:
+                # The reservation was taken but nothing was delivered.
+                with contextlib.suppress(Error):
+                    EmailRateLimiter.release_counter()
             # Update log with failure
             email_log.status = "failed"
             email_log.provider_response = {"error": str(e)}

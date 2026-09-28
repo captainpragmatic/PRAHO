@@ -7,6 +7,7 @@ from unittest.mock import patch
 from django.core import mail
 from django.db import OperationalError
 from django.test import TestCase, override_settings
+from django.utils import timezone
 
 from apps.billing.efactura.quota import ANAFQuotaTracker, QuotaEndpoint
 from apps.common import counters
@@ -70,6 +71,20 @@ class PlatformCounterSiteTests(TestCase):
             )
         self.assertFalse(result.success)
         self.assertEqual(len(mail.outbox), 0)
+
+    def test_failed_delivery_releases_the_email_reservation(self) -> None:
+        key = f"email_rate:global:{timezone.now().strftime('%Y%m%d%H%M')}"
+        with patch("django.core.mail.EmailMessage.send", side_effect=OSError("SMTP unavailable")):
+            result = EmailService.send_email(
+                to="recipient@example.test", subject="Counter test", body_text="Test", async_send=False
+            )
+        self.assertFalse(result.success)
+        self.assertEqual(counters.peek(key), 0)
+        result = EmailService.send_email(
+            to="recipient@example.test", subject="Counter test", body_text="Test", async_send=False
+        )
+        self.assertTrue(result.success, result)
+        self.assertEqual(counters.peek(key), 1)
 
     def test_email_read_failure_prevents_delivery(self) -> None:
         with patch("apps.common.counters.peek", side_effect=OperationalError("Store unavailable")):

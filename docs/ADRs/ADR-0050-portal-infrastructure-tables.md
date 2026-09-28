@@ -26,9 +26,12 @@ customers, orders, billing and services; Portal accesses them through signed HTT
 Counter keys can contain account or network identifiers and require the same
 access controls and retention discipline as session data.
 
-Request budgets reserve a count before admission. Authentication failure budgets
-are checked before authentication and recorded after a rejected attempt.
-Database errors deny admission. The caller owns the rate-limiting kill switch.
+Request budgets reserve a count before admission, so concurrent requests at the
+limit admit exactly the budget. Authentication failure budgets are checked before
+authentication and recorded after a rejected attempt; N concurrent attempts can all
+observe a count below the limit, so their ceiling is the limit plus the concurrency,
+never extra successes. Database errors deny admission. The caller owns the
+rate-limiting kill switch.
 
 Checkout reserves a claim, publishes the Platform order identifier on success,
 and releases only its own pending claim on failure. Completed results survive
@@ -55,7 +58,12 @@ available before those deployment hooks are enabled.
 
 ## Consequences
 
-Portal needs a persistent writable SQLite volume shared by its workers.
+Portal needs a persistent writable SQLite volume shared by its workers. Every
+request under a limited path now performs one or two small upserts on that file,
+next to the session write it already performed; SQLite serialises writers, so a
+sustained overload surfaces as latency and then as 503 from the limiter rather
+than as admitted traffic. Move the counter table to a shared database server
+before scaling the Portal horizontally.
 Horizontal deployments must share the same authoritative counter database;
 independent container volumes do not coordinate admission or replay protection.
 

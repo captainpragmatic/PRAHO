@@ -26,7 +26,9 @@ MAX_KEY_LENGTH = 200
 MAX_VALUE_LENGTH = 255
 CULL_CHANCE = 200
 CULL_BATCH_SIZE = 500
-CULL_GRACE_SECONDS = 3600
+# An expired row is already invisible to every read; the grace only keeps a delete from racing a
+# concurrent upsert of the same key, so it stays short and bounds how long dead keys occupy the table.
+CULL_GRACE_SECONDS = 60
 MIN_SQLITE_VERSION = (3, 35, 0)
 
 
