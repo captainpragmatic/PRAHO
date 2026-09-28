@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_No unreleased changes._
+
+---
+
+## [0.30.0] - 2026-09-28
+
 ### Added
 
 - Four VAT evidence settings: `billing.vies_evidence_max_age_days` (30), `billing.vies_outage_grace_days`
@@ -46,6 +52,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `make lock-upgrade PKGS="..."` upgrades named packages in `uv.lock` and re-syncs the venv.
 - `PORTAL_TRUSTED_PROXY_CIDRS` environment variable for the Portal; production and staging
   refuse to start without it.
+- A guardrail that asks whether a setting has any EFFECT, rather than whether its name appears
+  somewhere: it requires a real read call, and it requires a test that drives the setting through a
+  different module's behaviour. The previous check passed on a string literal in a class body.
 
 ### Fixed
 
@@ -108,6 +117,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   role and a reason.
 - The refund-request views in orders and billing no longer fail to create their support
   category: their defaults named SLA fields the category model does not have.
+- A Platform maintenance window or outage reached the customer Portal as missing data. Invoices,
+  tickets and services rendered as "you have none", a service page said it was not found, the
+  dashboard counted zero, the usage panel drew a chart of zeros, and a login attempt was reported as
+  a wrong password. Each of those now says the Platform is temporarily unavailable, and a window the
+  Platform itself declared is distinguished from an unexplained outage - only the former tells the
+  customer their data is safe, because during the latter nobody knows.
+- Coverage measured almost nothing it reported. Every parallel worker's data was discarded, so only
+  the parent process counted; test files counted as covered source; and the `apps/settings` app was
+  excluded outright by a pattern written for Django's own settings modules. Per-package floors now
+  gate the critical packages, and the browser suite reports the coverage it earns.
+- Five failures were swallowed rather than reported, among them `InterfaceError`, which is a sibling
+  of `DatabaseError` rather than a subclass and so escaped catches written for it. The scan that
+  finds them now blocks `make lint`, where it previously ran under three layers of suppression.
 
 ### Changed
 
@@ -131,8 +153,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   SmartBill Cloud.
 - An issuance whose outcome is unknown (a lost response) is never retried automatically
   and waits for an operator to confirm what exists at the provider.
-
----
+- 56 of the 262 runtime settings are editable in the staff interface but have no effect: each is read
+  only by a getter that nothing calls. They are baselined so the number cannot grow unnoticed, and
+  making any one of them work is a behaviour change that needs its own review.
 
 ### Security
 
