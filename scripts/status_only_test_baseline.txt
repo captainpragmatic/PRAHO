@@ -1,0 +1,67 @@
+# Tests that request a page and assert only that it returned 200.
+#
+# Such a test raises the coverage number without verifying anything: the page could
+# render none of what it computes and still pass. Two real examples from this repo -
+# `reports.html` returning 200 with none of four aggregates rendered, and `vat_report.html`
+# returning 200 with a 100x VAT error - were both invisible to status-only tests.
+#
+# Tests asserting 4xx or 3xx are NOT listed: for access control and redirects the status
+# code is the behaviour under test.
+#
+# A ratchet in both directions. A NEW status-only test fails this check; a listed one that
+# grows a real assertion fails until it is removed from the list.
+#
+# Fixing one means asserting a value the view computed - the figure on the page, the
+# template chosen, the row written - not adding `assertContains(response, '<html')`.
+# Recorded 51 entries.
+services/platform/tests/api/test_api_token_auth.py::test_expired_tokens_do_not_block_new_token
+services/platform/tests/api/test_api_token_auth.py::test_obtain_token_ignores_stray_bearer_header
+services/platform/tests/api/test_api_token_auth.py::test_raw_key_authenticates
+services/platform/tests/audit/test_audit_management.py::test_advanced_search_filters
+services/platform/tests/audit/test_audit_management.py::test_alerts_filtering
+services/platform/tests/audit/test_audit_management.py::test_export_size_limits
+services/platform/tests/audit/test_audit_management.py::test_search_suggestions_endpoint
+services/platform/tests/audit/test_audit_views_regressions.py::test_active_filter
+services/platform/tests/audit/test_audit_views_regressions.py::test_all_status_filter
+services/platform/tests/audit/test_audit_views_regressions.py::test_all_status_filter
+services/platform/tests/audit/test_audit_views_regressions.py::test_assigned_alerts_count
+services/platform/tests/audit/test_audit_views_regressions.py::test_csv_export_with_null_user
+services/platform/tests/audit/test_audit_views_regressions.py::test_empty_filter_values_stripped
+services/platform/tests/audit/test_audit_views_regressions.py::test_export_with_filters
+services/platform/tests/audit/test_audit_views_regressions.py::test_gdpr_dashboard_with_consent_date
+services/platform/tests/audit/test_audit_views_regressions.py::test_open_status_filter
+services/platform/tests/audit/test_audit_views_regressions.py::test_page_size_capped
+services/platform/tests/audit/test_audit_views_regressions.py::test_renders
+services/platform/tests/audit/test_audit_views_regressions.py::test_renders_default_filter
+services/platform/tests/audit/test_audit_views_regressions.py::test_renders_with_data
+services/platform/tests/audit/test_audit_views_regressions.py::test_renders_with_policies
+services/platform/tests/audit/test_audit_views_regressions.py::test_staff_can_access
+services/platform/tests/audit/test_audit_views_regressions.py::test_update_consent_htmx
+services/platform/tests/audit/test_audit_views_regressions.py::test_with_filters
+services/platform/tests/audit/test_audit_views_regressions.py::test_with_filters
+services/platform/tests/audit/test_audit_views_regressions.py::test_with_related_alerts
+services/platform/tests/audit/test_audit_views_regressions.py::test_with_type_and_severity_filters
+services/platform/tests/billing/test_billing_views_regressions.py::test_billing_list_filter_by_type_invoice
+services/platform/tests/billing/test_billing_views_regressions.py::test_billing_list_filter_by_type_proforma
+services/platform/tests/billing/test_billing_views_regressions.py::test_billing_list_pagination
+services/platform/tests/billing/test_billing_views_regressions.py::test_billing_list_with_search
+services/platform/tests/billing/test_billing_views_regressions.py::test_dashboard_with_status_filter
+services/platform/tests/billing/test_billing_views_regressions.py::test_detail_with_document
+services/platform/tests/billing/test_billing_views_regressions.py::test_htmx_documents_with_search
+services/platform/tests/billing/test_billing_views_regressions.py::test_htmx_documents_with_status_filter
+services/platform/tests/billing/test_billing_views_regressions.py::test_htmx_list_filter_by_type
+services/platform/tests/billing/test_billing_views_regressions.py::test_htmx_list_pagination
+services/platform/tests/billing/test_billing_views_regressions.py::test_htmx_list_with_search
+services/platform/tests/billing/test_billing_views_regressions.py::test_invoice_detail_with_access
+services/platform/tests/billing/test_billing_views_regressions.py::test_invoice_edit_get_draft
+services/platform/tests/billing/test_billing_views_regressions.py::test_payment_list_with_invoice_filter
+services/platform/tests/billing/test_billing_views_regressions.py::test_payment_list_with_status_filter
+services/platform/tests/billing/test_billing_views_regressions.py::test_proforma_detail_with_access
+services/platform/tests/billing/test_billing_views_regressions.py::test_proforma_edit_get
+services/platform/tests/billing/test_billing_views_regressions.py::test_proforma_list_with_search
+services/platform/tests/billing/test_billing_views_regressions.py::test_proforma_pdf_success
+services/platform/tests/billing/test_billing_views_regressions.py::test_refund_request_various_reasons
+services/platform/tests/billing/test_billing_views_regressions.py::test_vat_report_with_dates
+services/platform/tests/integrations/test_integrations_security.py::test_webhook_status_requires_staff_and_permissions
+services/platform/tests/users/test_authentication_views.py::test_two_factor_backup_codes_get
+services/platform/tests/users/test_authentication_views.py::test_user_list_search

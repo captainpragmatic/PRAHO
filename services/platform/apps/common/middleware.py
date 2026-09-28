@@ -4,7 +4,6 @@ Security headers, Romanian compliance, and audit logging.
 """
 
 import base64
-import contextlib
 import hashlib
 import hmac
 import json
@@ -23,6 +22,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import get_user_model, logout
 from django.core.cache import cache
+from django.db import DatabaseError, InterfaceError
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
 from django.utils import timezone
@@ -742,8 +742,25 @@ class SessionSecurityMiddleware:
             logger.critical(
                 "🔥 [SessionSecurityMiddleware] Session security check failed — invalidating session for safety: %s", e
             )
-            with contextlib.suppress(Exception):
+            try:
                 request.session.flush()
+            except (DatabaseError, InterfaceError) as flush_error:
+                # The line above promises the session was invalidated. If the flush itself failed it
+                # was NOT, and the request continues with a session a security check just rejected.
+                # An operator reading that CRITICAL has to be able to tell those two apart.
+                # BOTH names are required and neither is redundant. Django follows PEP 249, where
+                # `Error` has exactly two direct subclasses - `InterfaceError` and `DatabaseError` -
+                # so catching only the latter misses a broken connection, which is the likeliest
+                # database failure at the moment a security check has already gone wrong. Escaping
+                # here is a 500 from middleware on a request that previously always completed.
+                # `apps/billing/refund_service.py` names the pair in five places; this site did not.
+                # Still narrow rather than a defensive `Exception`: SESSION_ENGINE is the db backend
+                # and `flush()` is clear + delete with no save, so anything else is a bug.
+                logger.critical(
+                    "🔥 [SessionSecurityMiddleware] Session invalidation FAILED after a failed "
+                    "security check — the session is still valid: %s",
+                    flush_error,
+                )
 
     def _should_log_activity(self, request: HttpRequest) -> bool:
         """Determine if this request should be logged for activity tracking"""
