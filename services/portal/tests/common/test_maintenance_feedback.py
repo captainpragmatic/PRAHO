@@ -445,19 +445,31 @@ class TheServicesAppWasSkippedByTheWideningTests(SimpleTestCase):
         self.assertNotIn("Unable to load usage data", body)
 
     def test_an_ordinary_usage_failure_does_not_borrow_the_maintenance_wording(self) -> None:
-        """The other direction, so the new arm cannot fire for a failure nobody declared.
-
-        Written first as "still shows the generic error", which FAILED and was informative: a 500 is
-        flattened by the service layer into a zeros dict with no `error` key, so the view's `except`
-        never runs and the panel renders an empty chart. The view's "Unable to load usage data" arm is
-        therefore unreachable - it was already unreachable before this change, because the only thing
-        the service layer raised was a throttle and the view re-raises those. Pre-existing, the same
-        bug class as this branch (a platform failure shown as zeros), and outside its maintenance
-        scope; asserted here as what the code actually does rather than what the arm suggests.
-        """
+        """The other direction, so the new arm cannot fire for a failure nobody declared."""
         with self._platform_raising(self.ORDINARY):
             response = self._session_client().get("/services/3/usage/")
 
         body = response.content.decode()
         self.assertNotIn("Scheduled maintenance", body)
         self.assertNotIn("Temporarily unavailable", body)
+
+    def test_an_ordinary_failure_marks_the_usage_result_so_the_panel_can_say_so(self) -> None:
+        """`usage_chart.html` has always had an `{% if usage.error %}` arm, and it was unreachable.
+
+        `get_service_usage` returned its zero shape WITHOUT the one key that template branches on, so
+        a platform 500 rendered a chart of zeros indistinguishable from a service that genuinely used
+        nothing - the same "a failure shown as data" bug this branch exists to fix, one floor down.
+        Found while writing a test that asserted the arm fired: it did not, and that was the evidence.
+        """
+        with self._platform_raising(self.ORDINARY):
+            usage = ServicesAPIClient().get_service_usage(1, 2, 3)
+
+        self.assertTrue(usage.get("error"), "the fallback omitted the key its own template reads")
+        self.assertEqual(usage.get("bandwidth_used"), 0, "the zero shape must survive, for consumers that read it")
+
+    def test_the_usage_panel_says_it_could_not_load_on_an_ordinary_failure(self) -> None:
+        """The customer-visible half of the same defect."""
+        with self._platform_raising(self.ORDINARY):
+            response = self._session_client().get("/services/3/usage/")
+
+        self.assertIn("Unable to load usage data", response.content.decode())

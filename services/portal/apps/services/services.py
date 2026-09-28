@@ -42,6 +42,27 @@ def _raise_if_degraded(exc: Exception) -> None:
         raise exc
 
 
+def _unavailable_usage(period: str) -> dict[str, Any]:
+    """Canonical shape for a usage panel that could not be filled.
+
+    `error` is the key `services/partials/usage_chart.html` branches on, and BOTH fallback returns in
+    `get_service_usage` omitted it. Its error arm was therefore unreachable, and a platform failure
+    rendered a chart of zeros indistinguishable from a service that genuinely used nothing - the same
+    "a failure shown as data" defect as the maintenance bug, one floor down and for every 5xx.
+
+    The zeros stay, for any consumer that reads the numbers without asking whether they are real. One
+    function rather than two literals because the two had already diverged in exactly this key.
+    """
+    return {
+        "error": True,
+        "bandwidth_used": 0,
+        "bandwidth_limit": 0,
+        "storage_used": 0,
+        "storage_limit": 0,
+        "period": period,
+    }
+
+
 def _empty_services_summary() -> dict[str, Any]:
     """Canonical zero-shape for services summary fallback paths.
 
@@ -222,21 +243,15 @@ class ServicesAPIClient(PlatformAPIClient):
                 return cast(dict[str, Any], usage_data)
             else:
                 logger.warning(f"⚠️ [Services API] Unexpected usage response format: {response}")
-                return {
-                    "bandwidth_used": 0,
-                    "bandwidth_limit": 0,
-                    "storage_used": 0,
-                    "storage_limit": 0,
-                    "period": period,
-                }
+                return _unavailable_usage(period)
 
         except PlatformAPIError as e:
             logger.error(
                 f"🔥 [Services API] Error retrieving usage for service {service_id} for customer {customer_id}: {e}"
             )
             _raise_if_degraded(e)
-            # Return empty usage on error to avoid breaking UI
-            return {"bandwidth_used": 0, "bandwidth_limit": 0, "storage_used": 0, "storage_limit": 0, "period": period}
+            # Not raising keeps the page up; the marker is what stops it lying about the numbers.
+            return _unavailable_usage(period)
 
     def get_services_summary(self, customer_id: int, user_id: int) -> dict[str, Any]:
         """
