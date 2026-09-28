@@ -1770,9 +1770,17 @@ def vat_report(request: HttpRequest) -> HttpResponse:
 
     customer_ids = _get_accessible_customer_ids(request.user)
 
-    # VAT calculations for the selected period. The default period is the local calendar
-    # month: `created_at__date` below is evaluated in the configured time zone, and the UTC
-    # date lags it by a day every evening, which dropped today's invoices from the screen.
+    # VAT calculations for the selected period. The default period is the local calendar month.
+    #
+    # `localdate()`, not `now().date()`: the filter below is `created_at__date`, which Django resolves
+    # in the ACTIVE timezone (Europe/Bucharest), while `now()` is UTC. Between 21:00 and 24:00 UTC the
+    # two disagree by a day, so an invoice issued at 01:00 Bucharest fell outside a range that ended
+    # "today" in UTC - this compliance screen silently reported nothing for three hours every night and
+    # returned 200 throughout. `line 866` in this same file already used the right idiom.
+    #
+    # ONE `today` rather than two `localdate()` calls, which is master's improvement over the version
+    # this branch carried: two calls can straddle midnight and put start_date in the previous month -
+    # a narrower instance of the same boundary bug both changes were fixing.
     today = timezone.localdate()
     start_date = request.GET.get("start_date", today.replace(day=1))
     end_date = request.GET.get("end_date", today)
