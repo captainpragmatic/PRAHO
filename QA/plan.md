@@ -1,5 +1,30 @@
 # PRAHO Portal QA Walkthrough Plan
 
+> **Status: living spec, promoted from cycle 1 (2026-09-26).**
+>
+> This document is no longer a one-off walkthrough script. It is the checklist each cycle works
+> against, and the table below records which automated test now enforces each phase — because the
+> reason cycle 1 was never re-run is that its walkthrough stayed prose while only its *findings*
+> became tests. A phase with a test beside it does not need a human to re-walk it.
+>
+> | Phase | Enforced by `tests/e2e/portal/` |
+> |---|---|
+> | 1 — Authentication & public pages | `test_cookie_consent.py`, `test_navigation.py`, `test_maintenance_window.py` (the login surface under maintenance) |
+> | 2 — Dashboard | `test_dashboard.py` |
+> | 3 — Profile & account management | `test_customer_company.py`, `test_customer_users.py`, `test_customer_addresses.py` |
+> | 4 — Billing | `test_customer_billing.py`, `test_customer_invoices.py` |
+> | 5 — Orders / product catalog | `test_signup_order_flow.py`, `test_cart_flow_regression.py`, `test_order_flow_bugs.py`, `test_order_flow_compliance.py`, `test_order_flow_ux.py` |
+> | 6 — Hosting services | `test_customer_services.py`, `test_customer_provisioning.py` |
+> | 7 — Support tickets | `test_customer_tickets.py` |
+>
+> Those 22 files run nightly with server-side coverage as of `1c109951`. What they do **not** yet
+> assert is the check this cycle showed matters most: **no unexpected empty state**. A page that
+> renders "No Support Tickets Yet" when the platform is down passes every one of them. That is the
+> gap to close next, not the walkthrough.
+>
+> Cycle evidence: [`cycle-01-v0.21.0/`](cycle-01-v0.21.0/) (v0.21.0, executed) ·
+> [`cycle-02-v0.30.0/findings.md`](cycle-02-v0.30.0/findings.md) (current).
+
 ## Context
 
 We need a full manual QA walkthrough of the Portal service (localhost:8701) using Chrome browser automation (claude-in-chrome MCP). The portal is a stateless Django frontend that proxies to the Platform service via HMAC-signed requests. This walkthrough will visit every page, test every form, click every button, take screenshots, check server logs, and document all findings in a `QA/` folder.
