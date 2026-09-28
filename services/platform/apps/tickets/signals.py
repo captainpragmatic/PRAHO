@@ -71,6 +71,7 @@ def _log_ticket_opened(ticket: Ticket) -> None:
     try:
         TicketsAuditService.log_ticket_opened(
             ticket=ticket,
+            user=ticket.created_by,
             sla_metadata={},  # Empty SLA metadata since we removed SLA system
             should_escalate=False,  # Default escalation
             romanian_business_context={

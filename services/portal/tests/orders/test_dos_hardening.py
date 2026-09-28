@@ -5,14 +5,17 @@ Covers:
   H5: _create_and_process_order must run OrderSecurityHardening checks
   H6: confirm_payment must use cache.add() idempotency guard
 
-No database access — all tests use SimpleTestCase + locmem cache.
+Tests use Portal infrastructure tables and a local session cache.
 """
 
 import json
+import time
 from unittest.mock import MagicMock, patch
 
 from django.core.cache import cache
-from django.test import Client, SimpleTestCase, override_settings
+from django.test import Client, TestCase, override_settings
+
+from apps.common import counters
 
 _CACHE_SETTINGS = {
     "SESSION_ENGINE": "django.contrib.sessions.backends.cache",
@@ -36,7 +39,10 @@ def _auth_session_with_cart(client: Client) -> str:
     session = client.session
     session["customer_id"] = 42
     session["user_id"] = 7
+    session["user_memberships"] = [{"customer_id": session["customer_id"], "role": "owner"}]
+    session["user_memberships_fetched_at"] = time.time()
     session.save()
+
 
     from apps.orders.services import GDPRCompliantCartSession  # noqa: PLC0415
 
@@ -57,7 +63,7 @@ def _auth_session_with_cart(client: Client) -> str:
 
 
 @override_settings(**_CACHE_SETTINGS)
-class TestOrderCreationDoSHardening(SimpleTestCase):
+class TestOrderCreationDoSHardening(TestCase):
     """_create_and_process_order must run security checks before processing."""
 
     def setUp(self) -> None:
@@ -162,7 +168,7 @@ class TestOrderCreationDoSHardening(SimpleTestCase):
 
 
 @override_settings(**_CACHE_SETTINGS)
-class TestConfirmPaymentIdempotency(SimpleTestCase):
+class TestConfirmPaymentIdempotency(TestCase):
     """confirm_payment must use cache.add() to prevent double-processing."""
 
     def setUp(self) -> None:
@@ -174,14 +180,18 @@ class TestConfirmPaymentIdempotency(SimpleTestCase):
         for key, value in kwargs.items():
             if value is not None:
                 session[key] = value
+        if session.get("customer_id") and session.get("user_id"):
+            session["user_memberships"] = [{"customer_id": session["customer_id"], "role": "owner"}]
+            session["user_memberships_fetched_at"] = time.time()
         session.save()
+
 
     def test_duplicate_confirm_payment_returns_already_processing(self) -> None:
         """Second confirm_payment call with same PI returns idempotent response."""
         self._set_session(active_customer_id=42, customer_id=42, user_id=7)
 
         # Pre-populate the idempotency cache key
-        cache.set("confirm_payment:42:pi_test123test1234567890", "processing", timeout=300)
+        self.assertTrue(counters.claim("confirm_payment:42:pi_test123test1234567890", 300, "owner"))
 
         response = self.client.post(
             "/order/confirm-payment/",
@@ -220,14 +230,14 @@ class TestConfirmPaymentIdempotency(SimpleTestCase):
         data = json.loads(response.content)
         self.assertTrue(data["success"])
         # Verify the idempotency key was set in cache
-        self.assertEqual(cache.get("confirm_payment:42:pi_unique456test1234567890"), "processing")
+        self.assertFalse(counters.claim("confirm_payment:42:pi_unique456test1234567890", 300, "retry"))
 
     def test_different_payment_intents_not_blocked(self) -> None:
         """Different payment_intent_ids are processed independently."""
         self._set_session(active_customer_id=42, customer_id=42, user_id=7)
 
         # Pre-populate idempotency key for a different PI
-        cache.set("confirm_payment:42:pi_other0001234567890abc", "processing", timeout=300)
+        self.assertTrue(counters.claim("confirm_payment:42:pi_other0001234567890abc", 300, "owner"))
 
         with patch("apps.orders.views.PlatformAPIClient") as mock_api_class:
             mock_api = mock_api_class.return_value

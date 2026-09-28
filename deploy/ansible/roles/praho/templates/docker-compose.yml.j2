@@ -41,6 +41,8 @@ services:
       - DB_PASSWORD=${DB_PASSWORD}
       - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY}
       - DJANGO_SETTINGS_MODULE=config.settings.prod
+      - PLATFORM_DOMAIN={{ platform_domain }}
+      - PORTAL_DOMAIN={{ portal_domain }}
       - ALLOWED_HOSTS={{ platform_domain }},{{ portal_domain }},localhost
       - CSRF_TRUSTED_ORIGINS=https://{{ platform_domain }},https://{{ portal_domain }}
       - SERVICE_NAME=platform
@@ -86,9 +88,13 @@ services:
       - PLATFORM_API_SECRET=${PLATFORM_API_SECRET}
       # Per-portal signing secret (#277). Unset/empty => sign with PLATFORM_API_SECRET.
       - PORTAL_HMAC_SECRET=${PORTAL_HMAC_SECRET:-}
+      # Set to this project's proxy network subnet, e.g. 172.16.0.0/12; narrow to the actual subnet.
+      - PORTAL_TRUSTED_PROXY_CIDRS=${PORTAL_TRUSTED_PROXY_CIDRS:-}
       - PLATFORM_API_ALLOW_INSECURE_HTTP=true
       - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY}
       - DJANGO_SETTINGS_MODULE=config.settings.prod
+      - PLATFORM_DOMAIN={{ platform_domain }}
+      - PORTAL_DOMAIN={{ portal_domain }}
       - ALLOWED_HOSTS={{ portal_domain }},localhost
       - CSRF_TRUSTED_ORIGINS=https://{{ portal_domain }}
       - SERVICE_NAME=portal

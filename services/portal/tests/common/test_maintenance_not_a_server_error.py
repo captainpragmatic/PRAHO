@@ -1,10 +1,13 @@
 """Regression tests for the two 500s the widening introduced."""
 from __future__ import annotations
 
+import time
+from datetime import timedelta
 from unittest.mock import patch
 
 from django.core.cache import cache
 from django.test import Client, SimpleTestCase, override_settings
+from django.utils import timezone
 
 from apps.api_client.services import PlatformAPIError
 from apps.billing.services import RecurringPaymentsService
@@ -13,6 +16,32 @@ from apps.common.rate_limit_feedback import get_degraded_message
 
 def maintenance_error() -> PlatformAPIError:
     return PlatformAPIError("Service Unavailable", status_code=503, retry_after=600)
+
+
+def _authenticated_session(client: Client, *, user_id: int, customer_id: int) -> None:
+    """Seed the session shape the validation middleware requires.
+
+    `session_auth_hash`, `validated_at` and `next_validate_at` became mandatory when the session
+    validation middleware landed on master: without all three it calls `validate_session_secure`,
+    which these tests do not mock, and the response is a 302 to /login/ with an EMPTY body. An empty
+    body silently satisfies any assertNotIn, so the failure mode is a test that passes vacuously.
+    """
+    now = timezone.now()
+    session = client.session
+    session.update(
+        {
+            "user_id": user_id,
+            "customer_id": customer_id,
+            "active_customer_id": customer_id,
+            "selected_customer_id": customer_id,
+            "user_memberships": [{"customer_id": customer_id, "role": "owner"}],
+            "user_memberships_fetched_at": time.time(),
+            "session_auth_hash": "test-session",
+            "validated_at": now.isoformat(),
+            "next_validate_at": (now + timedelta(minutes=10)).isoformat(),
+        }
+    )
+    session.save()
 
 
 @override_settings(SESSION_ENGINE="django.contrib.sessions.backends.cache")
@@ -25,10 +54,7 @@ class MaintenanceMustNotBecomeAServerErrorTests(SimpleTestCase):
 
     def setUp(self) -> None:
         self.client = Client()
-        session = self.client.session
-        for key, value in {"user_id": 456, "customer_id": 123, "active_customer_id": 123}.items():
-            session[key] = value
-        session.save()
+        _authenticated_session(self.client, user_id=456, customer_id=123)
 
     @patch("apps.users.views.api_client.get_customer_profile", side_effect=maintenance_error())
     def test_the_backup_codes_page_redirects_during_maintenance_rather_than_500(self, _profile) -> None:
@@ -117,10 +143,7 @@ class DegradedJsonEndpointsAnswer503NotServerErrorTests(SimpleTestCase):
     def setUp(self) -> None:
         cache.clear()
         self.client = Client()
-        session = self.client.session
-        for key, value in {"active_customer_id": 123, "customer_id": 123, "user_id": 456}.items():
-            session[key] = value
-        session.save()
+        _authenticated_session(self.client, user_id=456, customer_id=123)
 
     @patch("apps.billing.views.InvoiceViewService")
     def test_the_dashboard_widget_answers_503(self, service_class) -> None:

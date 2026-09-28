@@ -26,6 +26,20 @@ Eligible lines require explicit `AE`, a zero rate/tax, matching EU country and V
 
 Gross line bases less the recorded document discount must equal the invoice's net subtotal; subtotal plus tax must equal the payable total. A discount over homogeneous supported service lines is allocated once in cents proportionally, with largest remainders resolved by line ID. Mixed-category discounts, metadata allowances/charges and line-level discounts are blocked. Foreign currencies use the frozen rate with date/source/reference. Converted decimal RON bases are summed first, then each partner total is rounded to whole lei with `ROUND_HALF_UP`. The report exposes `rounded − unrounded` per partner and overall.
 
+## Versioned VIES evidence
+
+New snapshots use version 2. An AE supply with version-2 evidence and no
+consultation reference is flagged as `missing_consultation_reference`.
+Version-1 supplies, including periods before consultation references were
+recorded, retain `not_recorded` when proof is absent; missing references alone
+do not block those periods.
+
+Version-2 freshness uses `validated_at + evidence_max_age_days >= calculated_at`
+(default 30 days when the optional lifetime is absent). The cache's 24-hour
+`expires_at` is only the recheck schedule. Thus proof 25 hours old can support
+a clean declaration, while proof 31 days old cannot under the default policy.
+The report uses the frozen lifetime, never today's settings or VIES response.
+
 ## Exceptions and deferred corrections
 
 Unpaid and overdue supplies remain candidates. A later refund or void does not silently remove a supply or subtract money from its tax base. Invoice/payment/source-order refund records and unresolved legacy invoice/source-order refund metadata block the affected XML until fiscal review; payment refunds are not fiscal credit notes. Refund events recorded in the selected month against an older supply are also shown as document exceptions, without assigning the refund a tax point or netting its amount. CSV remains available.

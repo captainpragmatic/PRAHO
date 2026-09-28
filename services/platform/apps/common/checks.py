@@ -11,6 +11,7 @@ from typing import Any
 from django.conf import settings
 from django.core.checks import Error, Tags, register
 from django.core.checks import Warning as DjangoWarning
+from django.db import DatabaseError, connections, router
 
 # Constants
 SSL_HEADER_TUPLE_LENGTH = 2
@@ -634,3 +635,24 @@ def check_api_token_configuration(app_configs: Any, **kwargs: Any) -> list[Error
         )
 
     return findings
+
+
+@register(Tags.database, deploy=True)
+def check_counter_table(app_configs: Any, **kwargs: Any) -> list[Any]:
+    """Refuse a deployment whose counter table is missing: every limiter would deny instead of count."""
+    from apps.common.models import Counter  # noqa: PLC0415  # Deferred: models are not ready at import
+
+    alias = router.db_for_write(Counter)
+    try:
+        with connections[alias].cursor() as cursor:
+            cursor.execute("SELECT 1 FROM common_counters LIMIT 1")
+    except DatabaseError:
+        return [
+            Error(
+                "The counter store table common_counters is missing.",
+                hint="Run manage.py migrate before starting the service.",
+                obj=alias,
+                id="common.E002",
+            )
+        ]
+    return []

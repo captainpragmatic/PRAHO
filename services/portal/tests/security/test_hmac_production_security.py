@@ -194,11 +194,13 @@ class HMACProductionSecurityTestCase(SimpleTestCase):
                     with patch('apps.common.outbound_http._session.request') as mock_request:
                         mock_request.side_effect = exception
 
-                        # Error handling should be safe
-                        result = client.authenticate_customer('test@example.com', 'password123')
-
-                        # Should fail safely without leaking information
-                        self.assertIsNone(result, "Production should fail safely on errors")
+                        with self.assertRaises(PlatformAPIError) as raised:
+                            client.authenticate_customer("test@example.com", "password123")
+                        self.assertIsNone(raised.exception.status_code)
+                        self.assertNotIn(str(exception), str(raised.exception))
+                        self.assertNotIn(
+                            "production-hmac-secret-key-for-error-testing", str(raised.exception)
+                        )
 
     def test_production_hmac_signature_constant_time_validation(self):
         """🔐 Test production uses constant-time HMAC signature comparison"""
@@ -237,7 +239,11 @@ class HMACProductionSecurityTestCase(SimpleTestCase):
             mock_response = Mock()
             if hmac.compare_digest(signature, expected_signature):
                 mock_response.status_code = 200
-                mock_response.json.return_value = {'success': True, 'authenticated': True}
+                mock_response.json.return_value = {
+                    'success': True,
+                    'user': {'id': 1, 'email': 'user@example.com', 'customer_id': 1},
+                }
+
             else:
                 mock_response.status_code = 401
                 mock_response.json.return_value = {'error': 'HMAC authentication failed'}
@@ -448,11 +454,11 @@ class HMACProductionDeploymentTestCase(SimpleTestCase):
                         else:
                             mock_request.return_value = error_scenario
 
-                        # Should handle error gracefully
-                        result = client.authenticate_customer('test@example.com', 'password123')
-
-                        # Should fail safely without exceptions
-                        self.assertIsNone(result, "Production should handle errors gracefully")
+                        with self.assertRaises(PlatformAPIError) as raised:
+                            client.authenticate_customer("test@example.com", "password123")
+                        expected_status = None if isinstance(error_scenario, Exception) else error_scenario.status_code
+                        self.assertEqual(raised.exception.status_code, expected_status)
+                        self.assertFalse(raised.exception.is_rate_limited)
 
             # The platform's maintenance signal must reach the caller, not be flattened.
             with patch('apps.common.outbound_http._session.request') as mock_request:

@@ -9,6 +9,7 @@ from .views import (
     customer_service_detail_api,
     customer_services_api,
     customer_services_summary_api,
+    request_service_action_api,
     service_usage_stats_api,
     update_service_auto_renew_api,
 )
@@ -24,4 +25,5 @@ urlpatterns = [
     path("<int:service_id>/", customer_service_detail_api, name="customer_service_detail"),
     path("<int:service_id>/auto-renew/", update_service_auto_renew_api, name="update_service_auto_renew"),
     path("<int:service_id>/usage/", service_usage_stats_api, name="service_usage_stats"),
+    path("<int:service_id>/actions/", request_service_action_api, name="request_service_action"),
 ]

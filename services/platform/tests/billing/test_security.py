@@ -7,9 +7,9 @@ from datetime import timedelta
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.core.exceptions import ImproperlyConfigured, PermissionDenied, ValidationError
-from django.http import HttpResponseForbidden, JsonResponse
-from django.test import Client, RequestFactory, TestCase
+from django.core.exceptions import PermissionDenied, ValidationError
+from django.http import HttpResponseForbidden
+from django.test import Client, RequestFactory, TestCase, override_settings
 from django.utils import timezone
 
 from apps.audit.models import AuditEvent
@@ -493,73 +493,31 @@ class BillingSecurityLoggingTests(TestCase):
         self.assertIn('amount', event.metadata)
         self.assertIn('user_email', event.metadata)
 
-class BillingPortalAuthBypassTests(TestCase):
-    """🔒 Tests for PORTAL_HMAC_BYPASS guard (issue #129)."""
-
-    def _make_request(self, body: bytes = b'{"customer_id": 1}') -> object:
-        rf = RequestFactory()
-        request = rf.post("/", data=body, content_type="application/json")
-        return request
-
-    @patch("apps.billing.views.settings")
-    def test_bypass_raises_outside_test_env(self, mock_settings: object) -> None:
-        """🔒 PORTAL_HMAC_BYPASS=True outside test/dev must raise ImproperlyConfigured."""
-        mock_settings.DEBUG = False
-        mock_settings.TESTING = False
-        mock_settings.PORTAL_HMAC_BYPASS = True
-        request = self._make_request()
-
-        with self.assertRaises(ImproperlyConfigured):
-            _require_customer_auth_for_portal_api(request)
-
-    @patch("apps.billing.views.settings")
-    def test_bypass_allowed_with_testing_true_debug_false(self, mock_settings: object) -> None:
-        """🔒 PORTAL_HMAC_BYPASS=True is safe when TESTING=True even if DEBUG=False."""
-        mock_settings.DEBUG = False
-        mock_settings.TESTING = True
-        mock_settings.PORTAL_HMAC_BYPASS = True
+class BillingPortalAuthenticationTests(TestCase):
+    @override_settings(PORTAL_HMAC_BYPASS=True, TESTING=True, DEBUG=False)
+    def test_legacy_bypass_setting_cannot_authenticate_an_unsigned_request(self) -> None:
         customer = Customer.objects.create(
-            name="Test", company_name="Test Co",
-            primary_email="t@t.com", customer_type="company", status="active",
+            name="Test", company_name="Test Co", primary_email="t@t.com",
+            customer_type="company", status="active",
         )
-        request = self._make_request(body=f'{{"customer_id": {customer.pk}}}'.encode())
-
-        result_customer, error = _require_customer_auth_for_portal_api(request)
-        self.assertIsNotNone(result_customer)
-        self.assertIsNone(error)
-
-    @patch("apps.billing.views.settings")
-    def test_bypass_allowed_with_debug_true_testing_false(self, mock_settings: object) -> None:
-        """🔒 PORTAL_HMAC_BYPASS=True is safe when DEBUG=True even if TESTING=False."""
-        mock_settings.DEBUG = True
-        mock_settings.TESTING = False
-        mock_settings.PORTAL_HMAC_BYPASS = True
-        customer = Customer.objects.create(
-            name="Test2", company_name="Test2 Co",
-            primary_email="t2@t.com", customer_type="company", status="active",
+        request = RequestFactory().post(
+            "/billing/create-payment-intent/",
+            data={"customer_id": customer.pk},
+            content_type="application/json",
         )
-        request = self._make_request(body=f'{{"customer_id": {customer.pk}}}'.encode())
-
-        result_customer, error = _require_customer_auth_for_portal_api(request)
-        self.assertIsNotNone(result_customer)
-        self.assertIsNone(error)
-
-    @patch("apps.billing.views.settings")
-    def test_bypass_inactive_when_flag_false(self, mock_settings: object) -> None:
-        """🔒 Bypass must not activate when PORTAL_HMAC_BYPASS=False."""
-        mock_settings.DEBUG = True
-        mock_settings.PORTAL_HMAC_BYPASS = False
-        request = self._make_request()
-
-        with patch("apps.billing.views.get_authenticated_customer") as mock_auth:
-            mock_auth.return_value = (None, JsonResponse({"error": "denied"}, status=403))
-            customer, error = _require_customer_auth_for_portal_api(request)
-
-        self.assertIsNone(customer)
+        resolved_customer, error = _require_customer_auth_for_portal_api(
+            request, roles=frozenset({"owner", "billing"})
+        )
+        self.assertIsNone(resolved_customer)
         self.assertIsNotNone(error)
-        self.assertEqual(error.status_code, 403)
+        assert error is not None
+        self.assertEqual(error.status_code, 401)
+        self.assertEqual(error.content, b'{"success": false, "error": "Authentication required"}')
+        self.assertEqual(error["Cache-Control"], "no-store")
+        self.assertEqual(error["X-Content-Type-Options"], "nosniff")
 
 
+class BillingModelSecurityLoggingTests(TestCase):
     @patch('apps.billing.proforma_models.log_security_event')
     def test_model_validation_triggers_logging(self, mock_log):
         """🔒 Test that model validation triggers security logging"""

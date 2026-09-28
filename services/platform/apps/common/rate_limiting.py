@@ -1,7 +1,7 @@
 """Custom rate limiting decorator replacing django-ratelimit.
 
 Drop-in replacement for ``django_ratelimit.decorators.ratelimit`` that uses
-Django's cache framework directly instead of pulling in the django-ratelimit
+the shared database counter store instead of pulling in the django-ratelimit
 library.  With ``block=False`` (default), it sets ``request.limited = True``
 when the rate is exceeded but still calls the wrapped view.  With
 ``block=True``, it short-circuits and returns an HTTP 429 response.
@@ -32,9 +32,10 @@ import re
 from typing import TYPE_CHECKING, Any, cast
 
 from django.conf import settings
-from django.core.cache import caches
 from django.http import HttpRequest, HttpResponse
+from django.utils.translation import gettext as _
 
+from apps.common import counters
 from apps.common.request_ip import get_safe_client_ip
 
 if TYPE_CHECKING:
@@ -119,11 +120,6 @@ def _resolve_key(key: str | Callable[..., str], group: str, request: HttpRequest
     raise ValueError(msg)
 
 
-def _get_cache_name() -> str:
-    """Return the cache alias to use for rate limiting."""
-    return getattr(settings, "RATE_LIMIT_CACHE", "default")
-
-
 def _log_rate_limit_audit(request: HttpRequest, endpoint: str, key_label: str, rate_str: str) -> None:
     """Log a rate-limit violation to the security audit trail."""
     try:
@@ -191,14 +187,7 @@ def rate_limit(
                 if len(cache_key) > _MAX_CACHE_KEY_LENGTH:
                     cache_key = f"rl:{hashlib.md5(cache_key.encode()).hexdigest()}"  # noqa: S324
 
-                cache = caches[_get_cache_name()]
-
-                # Atomic increment-first to avoid get/incr race under concurrency
-                try:
-                    new_count: int = cache.incr(cache_key)
-                except ValueError:
-                    # Key doesn't exist yet — atomically create it (or incr if another process won the race)
-                    new_count = 1 if cache.add(cache_key, 1, window_seconds) else cache.incr(cache_key)
+                new_count = counters.increment(cache_key, window_seconds)
 
                 if new_count > max_requests:
                     request.limited = True  # type: ignore[attr-defined]  # django-ratelimit compat
@@ -211,11 +200,11 @@ def rate_limit(
                     )
                     _log_rate_limit_audit(request, resolved_group, key_label, rate)
                     if block:
-                        return HttpResponse("Rate limit exceeded", status=429)
+                        return HttpResponse(_("Rate limit exceeded"), status=429)
 
             except Exception:
-                logger.critical("Rate limiting cache failure for %s — failing closed", fn.__qualname__)
-                return HttpResponse("Service temporarily unavailable", status=503, content_type="text/plain")
+                logger.error("🔥 [RateLimiter] Counter store failure for %s — denying request", fn.__qualname__)
+                return HttpResponse(_("Service temporarily unavailable"), status=503, content_type="text/plain")
 
             return cast(HttpResponse, fn(request, *args, **kwargs))
 

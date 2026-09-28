@@ -8,9 +8,12 @@ from typing import Any
 from django.contrib import messages
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
+from django.urls import reverse
+from django.utils.html import format_html
 from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy
 
+from apps.common.decorators import require_support_access
 from apps.common.pagination import PaginatorData, build_pagination_params
 from apps.common.rate_limit_feedback import (
     build_maintenance_context,
@@ -92,6 +95,24 @@ def _validated_status_filter(raw: str) -> str:
     fall back to the All tab instead of being reflected.
     """
     return raw if raw in _VALID_STATUS_FILTERS else ""
+
+
+def _report_platform_failure(request: HttpRequest, error: PlatformAPIError, *, subject: str, fallback: str) -> None:
+    """Say whether the platform is degraded, or the service genuinely is not the customer's.
+
+    Three handlers in this module asked that question and answered it identically. Folding them also
+    took `service_request_action` back under the branch limit, which merging master pushed it over -
+    the alternative was a `noqa` for duplication that did not need to exist.
+
+    A window is NOT "Service not found or access denied". That sentence is a claim about the
+    customer's own account, and during a window it is false.
+    """
+    if is_unavailable_error(error):
+        logger.warning(f"⚠️ [Services View] {subject} unavailable, platform degraded: {error}")
+        messages.warning(request, get_degraded_message(error))
+    else:
+        logger.error(f"🔥 [Services View] {subject} failed: {error}")
+        messages.error(request, fallback)
 
 
 def _get_session_identity(request: HttpRequest) -> tuple[int | None, int | None]:
@@ -303,17 +324,11 @@ def service_detail(request: HttpRequest, service_id: int) -> HttpResponse:
     except PlatformAPIError as e:
         if is_rate_limited_error(e):
             raise
-        if is_unavailable_error(e):
-            # NOT "Service not found or access denied". That sentence is a statement about the
-            # customer's own account, and during a maintenance window it is false - it tells them
-            # their service is gone or that they have lost access to it. This path already said it
-            # before the service layer was widened, because `get_service_detail` always re-raised.
-            # The list is where the maintenance alert lives, so that is where they are sent.
-            logger.warning(f"⚠️ [Services View] Service {service_id} unavailable, platform degraded: {e}")
-            messages.warning(request, get_degraded_message(e))
-            return redirect("services:list")
-        logger.error(f"🔥 [Services View] Error loading service {service_id} for customer {customer_id}: {e}")
-        messages.error(request, _("Service not found or access denied."))
+        # The list is where the maintenance alert lives, so a degraded platform sends them there
+        # with an explanation rather than a claim that their service is gone.
+        _report_platform_failure(
+            request, e, subject=f"Service {service_id}", fallback=_("Service not found or access denied.")
+        )
         return redirect("services:list")
 
     return render(request, "services/service_detail.html", context)
@@ -360,6 +375,7 @@ def service_usage(request: HttpRequest, service_id: int) -> HttpResponse:
         )
 
 
+@require_support_access()
 def service_request_action(request: HttpRequest, service_id: int) -> HttpResponse:
     """
     Customer service action request (upgrade, suspend request, etc.).
@@ -387,7 +403,7 @@ def service_request_action(request: HttpRequest, service_id: int) -> HttpRespons
         try:
             # Submit service request
             result = services_api.request_service_action(
-                customer_id=customer_id, service_id=service_id, action=action, reason=reason
+                customer_id=customer_id, user_id=user_id, service_id=service_id, action=action, reason=reason
             )
 
             action_labels = {
@@ -397,12 +413,19 @@ def service_request_action(request: HttpRequest, service_id: int) -> HttpRespons
                 "cancel_request": _("Cancellation Request"),
             }
 
-            messages.success(
-                request,
-                _("{} submitted successfully. Request ID: #{}").format(
-                    action_labels.get(action, action), result.get("request_id", "N/A")
-                ),
+            request_data = result.get("data", result)
+            success_message = _("{} submitted successfully. Request ID: #{}").format(
+                action_labels.get(action, action), request_data.get("request_id", "N/A")
             )
+            ticket_id = request_data.get("ticket_id")
+            if ticket_id is not None:
+                success_message = format_html(
+                    '{} <a href="{}">{}</a>',
+                    success_message,
+                    reverse("tickets:detail", kwargs={"ticket_id": ticket_id}),
+                    _("View ticket"),
+                )
+            messages.success(request, success_message)
 
             logger.info(
                 f"✅ [Services View] Submitted {action} request for service {service_id} by customer {customer_id}"
@@ -411,17 +434,14 @@ def service_request_action(request: HttpRequest, service_id: int) -> HttpRespons
         except PlatformAPIError as e:
             if is_rate_limited_error(e):
                 raise
-            if is_unavailable_error(e):
-                # The generic wording was not wrong here, only vague: it gave no reason and no
-                # sense of when to come back. This path already received a window, because
-                # `request_service_action` always re-raised.
-                logger.warning(f"⚠️ [Services View] {action} for {service_id} not submitted, platform degraded: {e}")
-                messages.warning(request, get_degraded_message(e))
-            else:
-                logger.error(
-                    f"🔥 [Services View] Error submitting {action} request for service {service_id} by customer {customer_id}: {e}"
-                )
-                messages.error(request, _("Unable to submit service request. Please try again later."))
+            # The generic wording was not wrong here, only vague: no reason, no sense of when to
+            # come back. This path already received a window, because the action call always re-raised.
+            _report_platform_failure(
+                request,
+                e,
+                subject=f"{action} for service {service_id}",
+                fallback=_("Unable to submit service request. Please try again later."),
+            )
 
         return redirect("services:detail", service_id=service_id)
 
@@ -449,13 +469,12 @@ def service_request_action(request: HttpRequest, service_id: int) -> HttpRespons
             raise
         # One exit for both, rather than a return per branch: the destination is the same and the
         # extra return tripped PLR0911 on this function, which already has six.
-        if is_unavailable_error(e):
-            # Same reasoning as `service_detail`: a window is not the customer losing access.
-            logger.warning(f"⚠️ [Services View] Action form for {service_id} unavailable, platform degraded: {e}")
-            messages.warning(request, get_degraded_message(e))
-        else:
-            logger.error(f"🔥 [Services View] Error loading service action form for service {service_id}: {e}")
-            messages.error(request, _("Service not found or access denied."))
+        _report_platform_failure(
+            request,
+            e,
+            subject=f"Action form for service {service_id}",
+            fallback=_("Service not found or access denied."),
+        )
         return redirect("services:list")
 
 

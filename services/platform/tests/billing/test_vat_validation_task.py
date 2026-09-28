@@ -1,14 +1,19 @@
 """Tests for validate_vat_number task (apps.billing.tasks)."""
 
+from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.test import TestCase, override_settings
+from django.utils import timezone
 
 from apps.billing.gateways.vies_gateway import VIESResponse
 from apps.billing.tasks import validate_vat_number
+from apps.billing.tax_models import VATValidation
 from apps.common.eu_vat_validator import VATFormatResult
+from apps.customers.contact_models import CustomerAddress
 from apps.customers.models import Customer, CustomerTaxProfile
 
 User = get_user_model()
@@ -42,8 +47,103 @@ _GATEWAY = "apps.billing.gateways.vies_gateway.VIESGateway.check_vat"
 _AUDIT = "apps.audit.services.AuditService.log_simple_event"
 
 
+@override_settings(COMPANY_CUI="RO1234567", VIES_OUTAGE_GRACE_DAYS=14)
+class VATValidationEvidencePersistenceTests(TestCase):
+    def setUp(self) -> None:
+        customer = Customer.objects.create(name="VIES Persistence", primary_email="vies-persistence@example.test")
+        self.verified_at = timezone.now() - timedelta(days=1)
+        self.profile = CustomerTaxProfile.objects.create(
+            customer=customer, vat_number="DE136695976", is_vat_payer=True,
+            vies_verification_status="valid", reverse_charge_eligible=True,
+            vies_verified_at=self.verified_at, vies_verified_name="Original GmbH",
+        )
+
+    def test_number_is_resolved_against_the_billing_country(self) -> None:
+        for country, number, expected in (
+            ("DE", "136695976", ("DE", "136695976")),
+            ("GR", "GR094259216", ("EL", "094259216")),
+        ):
+            with self.subTest(country=country, number=number):
+                CustomerAddress.objects.filter(customer=self.profile.customer).delete()
+                CustomerAddress.objects.create(
+                    customer=self.profile.customer, is_billing=True, is_current=True,
+                    address_line1="Teststrasse 1", city="Somewhere", country=country,
+                )
+                CustomerTaxProfile.objects.filter(pk=self.profile.pk).update(
+                    vat_number=number, vies_verification_status="pending"
+                )
+                response = VIESResponse(
+                    is_valid=True, country_code=expected[0], vat_number=expected[1], api_available=True,
+                    request_identifier="same-response-reference",
+                )
+                with patch(_GATEWAY, return_value=response) as gateway:
+                    validate_vat_number(str(self.profile.pk))
+                gateway.assert_called_once()
+                passed = tuple(gateway.call_args.args) + tuple(gateway.call_args.kwargs.values())
+                self.assertEqual(passed[:2], expected)
+                self.profile.refresh_from_db()
+                self.assertEqual(self.profile.vies_verification_status, "valid")
+
+    def test_vies_outage_keeps_recent_valid_profile(self) -> None:
+        validation = VATValidation.objects.create(
+            country_code="DE", vat_number="136695976", full_vat_number="DE136695976",
+            is_valid=True, is_active=True, validation_source="vies",
+            expires_at=timezone.now() - timedelta(hours=1), consultation_reference="original-reference",
+        )
+        with patch(_GATEWAY, return_value=VIESResponse(
+            is_valid=False, country_code="DE", vat_number="136695976", api_available=False,
+        )):
+            result = validate_vat_number(str(self.profile.pk))
+        self.assertEqual(result, {"success": True, "status": "vies_unavailable_grace"})
+        self.profile.refresh_from_db()
+        validation.refresh_from_db()
+        self.assertEqual(self.profile.vies_verification_status, "valid")
+        self.assertTrue(self.profile.reverse_charge_eligible)
+        self.assertEqual(self.profile.vies_verified_at, self.verified_at)
+        self.assertEqual(self.profile.vies_verified_name, "Original GmbH")
+        self.assertTrue(validation.is_valid)
+        self.assertTrue(validation.is_active)
+        self.assertEqual(validation.consultation_reference, "original-reference")
+        self.assertGreater(validation.expires_at, timezone.now() + timedelta(hours=23))
+
+    def test_vies_outage_preserves_evidence_with_small_clock_skew(self) -> None:
+        verified_at = timezone.now() + timedelta(seconds=30)
+        self.profile.vies_verified_at = verified_at
+        self.profile.save(update_fields=["vies_verified_at"])
+        with patch(
+            _GATEWAY,
+            return_value=VIESResponse(
+                is_valid=False, country_code="DE", vat_number="136695976", api_available=False,
+            ),
+        ):
+            result = validate_vat_number(str(self.profile.pk))
+        self.assertEqual(result, {"success": True, "status": "vies_unavailable_grace"})
+        self.profile.refresh_from_db()
+        self.assertEqual(self.profile.vies_verification_status, "valid")
+        self.assertTrue(self.profile.reverse_charge_eligible)
+        self.assertEqual(self.profile.vies_verified_at, verified_at)
+        self.assertEqual(self.profile.vies_verified_name, "Original GmbH")
+
+    def test_result_for_a_changed_number_is_not_persisted(self) -> None:
+        def change_number(*args: object, **kwargs: object) -> VIESResponse:
+            self.profile.vat_number = "FR40303265045"
+            self.profile.save(update_fields=["vat_number"])
+            return VIESResponse(is_valid=True, country_code="DE", vat_number="136695976", api_available=True)
+
+        with patch(_GATEWAY, side_effect=change_number):
+            result = validate_vat_number(str(self.profile.pk))
+        self.assertEqual(result, {"success": True, "skipped": "vat_number_changed"})
+        self.profile.refresh_from_db()
+        self.assertEqual(self.profile.vat_number, "FR40303265045")
+        self.assertEqual(self.profile.vies_verification_status, "pending")
+        self.assertFalse(self.profile.reverse_charge_eligible)
+        self.assertIsNone(self.profile.vies_verified_at)
+        self.assertFalse(VATValidation.objects.filter(country_code="DE", vat_number="136695976").exists())
+
+
 @pytest.mark.django_db
 class TestValidateVatNumberTask:
+
     """Test the rewritten validate_vat_number task."""
 
     def test_no_vat_number_skips(self, _tax_profile):
@@ -69,7 +169,7 @@ class TestValidateVatNumberTask:
         )
         mock_gateway.return_value = VIESResponse(
             is_valid=True, country_code="RO", vat_number="12345678",
-            company_name="SC Test SRL", api_available=True,
+            company_name="SC Test SRL", api_available=True, request_identifier="same-response-reference",
         )
 
         result = validate_vat_number(str(_tax_profile.id))

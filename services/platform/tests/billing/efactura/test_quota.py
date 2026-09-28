@@ -22,6 +22,7 @@ from apps.billing.efactura.quota import (
     QuotaExceededError,
     QuotaStatus,
 )
+from apps.common import counters
 from config.settings.test import LOCMEM_TEST_CACHE
 
 
@@ -270,7 +271,8 @@ class ANAFQuotaTrackerTestCase(TestCase):
         cache_key = self.tracker._get_cache_key(
             QuotaEndpoint.STATUS, "12345678", "msg-123"
         )
-        cache.set(cache_key, 100, version=self.tracker.CACHE_VERSION)
+        counters.increment(cache_key, self.tracker._seconds_until_midnight(), delta=100)
+        self.assertEqual(counters.peek(cache_key), 100)
 
         self.assertFalse(
             self.tracker.can_call(QuotaEndpoint.STATUS, "12345678", "msg-123")
@@ -310,7 +312,8 @@ class ANAFQuotaTrackerTestCase(TestCase):
         cache_key = self.tracker._get_cache_key(
             QuotaEndpoint.STATUS, "12345678", "msg-123"
         )
-        cache.set(cache_key, 100, version=self.tracker.CACHE_VERSION)
+        counters.increment(cache_key, self.tracker._seconds_until_midnight(), delta=100)
+        self.assertEqual(counters.peek(cache_key), 100)
 
         with self.assertRaises(QuotaExceededError) as context:
             self.tracker.check_and_increment(
@@ -375,7 +378,8 @@ class ANAFQuotaTrackerDecoratorTestCase(TestCase):
         cache_key = self.tracker._get_cache_key(
             QuotaEndpoint.STATUS, "12345678", "msg-123"
         )
-        cache.set(cache_key, 100, version=self.tracker.CACHE_VERSION)
+        counters.increment(cache_key, self.tracker._seconds_until_midnight(), delta=100)
+        self.assertEqual(counters.peek(cache_key), 100)
 
         @self.tracker.rate_limited(QuotaEndpoint.STATUS)
         def check_status(cui: str, message_id: str) -> str:
@@ -470,19 +474,14 @@ class ANAFQuotaTrackerEdgeCasesTestCase(TestCase):
         )
         self.assertEqual(usage, 10)
 
-    def test_cache_version_isolation(self):
-        """Test cache version provides isolation."""
-        # Set value with wrong version
-        cache_key = self.tracker._get_cache_key(
-            QuotaEndpoint.STATUS, "12345678", "msg-123"
-        )
-        cache.set(cache_key, 50, version=999)
+    def test_cache_version_isolation(self) -> None:
+        """Counter namespaces isolate both daily and global quota versions."""
+        with patch.object(self.tracker, "CACHE_VERSION", 999):
+            self.assertEqual(self.tracker.increment(QuotaEndpoint.STATUS, "12345678", "msg-123", count=50), 50)
+            self.assertEqual(counters.peek(self.tracker._get_global_minute_key()), 50)
 
-        # Should not see the value with our version
-        usage = self.tracker.get_current_usage(
-            QuotaEndpoint.STATUS, "12345678", "msg-123"
-        )
-        self.assertEqual(usage, 0)
+        self.assertEqual(self.tracker.get_current_usage(QuotaEndpoint.STATUS, "12345678", "msg-123"), 0)
+        self.assertEqual(counters.peek(self.tracker._get_global_minute_key()), 0)
 
 
 class ANAFQuotaTrackerCustomSettingsTestCase(TestCase):

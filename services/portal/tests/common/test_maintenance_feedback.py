@@ -14,6 +14,8 @@ the funnel.
 from __future__ import annotations
 
 import logging
+import time
+from datetime import timedelta
 from unittest.mock import patch
 
 from django.contrib.messages import get_messages
@@ -22,6 +24,7 @@ from django.contrib.sessions.middleware import SessionMiddleware
 from django.http import HttpResponse
 from django.test import Client, SimpleTestCase, override_settings
 from django.test.client import RequestFactory
+from django.utils import timezone
 
 from apps.api_client.services import PlatformAPIError
 from apps.billing.services import _raise_if_degraded as billing_raise_if_degraded
@@ -391,11 +394,27 @@ class TheServicesAppWasSkippedByTheWideningTests(SimpleTestCase):
     def _platform_raising(self, error: PlatformAPIError):
         return patch("apps.services.services.ServicesAPIClient._make_request", side_effect=error)
 
+    # `session_auth_hash`, `validated_at` and `next_validate_at` are required since the session
+    # validation middleware landed on master: without all three it calls `validate_session_secure`,
+    # which these tests do not mock, and the request is redirected to /login/ instead. The symptom is
+    # a 302 with an EMPTY body - which silently satisfies any assertNotIn, so a test can pass
+    # vacuously rather than fail. Same shape as `tests/tickets/test_ticket_detail_view.py`.
     def _session_client(self) -> Client:
         client = Client()
         session = client.session
-        session["customer_id"] = 1
-        session["user_id"] = 2
+        now = timezone.now()
+        session.update(
+            {
+                "customer_id": 1,
+                "user_id": 2,
+                "selected_customer_id": 1,
+                "user_memberships": [{"customer_id": 1, "role": "owner"}],
+                "user_memberships_fetched_at": time.time(),
+                "session_auth_hash": "test-session",
+                "validated_at": now.isoformat(),
+                "next_validate_at": (now + timedelta(minutes=10)).isoformat(),
+            }
+        )
         session.save()
         return client
 

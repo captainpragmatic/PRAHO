@@ -636,6 +636,60 @@ CATALOG: tuple[SettingDef, ...] = (
         critical=True,
     ),
     SettingDef(
+        key="billing.reverse_charge_requires_vies",
+        data_type="boolean",
+        default=True,
+        input_kind="toggle",
+        group="billing",
+        section=_("VAT"),
+        label=_("Reverse charge requires VIES evidence"),
+        help_text=_(
+            "When on, an EU business is zero-rated under reverse charge only after its VAT number "
+            "was confirmed in VIES. "
+            "When off, a VAT number on file is enough (not recommended)."
+        ),
+    ),
+    SettingDef(
+        key="billing.vies_evidence_max_age_days",
+        data_type="integer",
+        default=30,
+        input_kind="number",
+        group="billing",
+        section=_("VAT"),
+        label=_("VIES evidence maximum age"),
+        help_text=_("Days for which a successful verification can support reverse charge."),
+        validation={"min": 1},
+    ),
+    SettingDef(
+        key="billing.vies_outage_grace_days",
+        data_type="integer",
+        default=14,
+        input_kind="number",
+        group="billing",
+        section=_("VAT"),
+        label=_("VIES outage grace"),
+        help_text=_("Days to retain valid evidence during outages; capped below the evidence maximum age."),
+        validation={"min": 0},
+    ),
+    SettingDef(
+        key="billing.reverse_charge_requires_consultation_reference",
+        data_type="boolean",
+        default=True,
+        input_kind="toggle",
+        group="billing",
+        section=_("VAT"),
+        label=_("Reverse charge requires a consultation reference"),
+    ),
+    SettingDef(
+        key="billing.reverse_charge_requires_name_match",
+        data_type="boolean",
+        default=True,
+        input_kind="toggle",
+        group="billing",
+        section=_("VAT"),
+        label=_("Reverse charge requires a matching legal name"),
+    ),
+    SettingDef(
         key="billing.subscription_grace_period_days",
         data_type="integer",
         default=7,
@@ -2679,6 +2733,19 @@ CATALOG: tuple[SettingDef, ...] = (
         input_kind="number",
         advanced=True,
         validation={"min": 0},
+    ),
+    SettingDef(
+        key="portal.public_base_url",
+        data_type="string",
+        default="",
+        group="platform",
+        section=_("Customer portal"),
+        label=_("Customer portal URL"),
+        help_text=_(
+            "Public base URL of the customer portal, e.g. https://portal.example.com. "
+            "Used in customer-facing links such as password reset emails."
+        ),
+        critical=True,
     ),
     SettingDef(
         key="system.maintenance_mode",

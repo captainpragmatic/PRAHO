@@ -46,7 +46,9 @@ class MembershipHashValidationTest(HMACTestMixin, TestCase):
             "/api/users/session/validate/",
             {
                 "user_id": user_id,
+                "session_auth_hash": User.objects.get(pk=user_id).get_session_auth_hash(),
                 "jti": f"test-nonce-{timezone.now().timestamp()}",
+
             },
         )
         self.assertEqual(response.status_code, 200)

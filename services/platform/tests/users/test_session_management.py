@@ -8,12 +8,14 @@ from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.sessions.middleware import SessionMiddleware
+from django.contrib.sessions.models import Session
 from django.core.cache import cache
 from django.test import Client, RequestFactory, TestCase
 from django.utils import timezone
 
 from apps.common.middleware import SessionSecurityMiddleware
 from apps.common.request_ip import get_safe_client_ip
+from apps.users.models import UserSession
 from apps.users.services import SessionSecurityService
 
 User = get_user_model()
@@ -272,7 +274,6 @@ class SessionSecurityServiceTestCase(TestCase):
         request.META['REMOTE_ADDR'] = '127.0.0.1'
 
         # SessionSecurityService uses get_safe_client_ip from apps.common.request_ip
-        from apps.common.request_ip import get_safe_client_ip
         ip = get_safe_client_ip(request)
         # In development mode, X-Forwarded-For is ignored for security
         self.assertEqual(ip, '127.0.0.1')
@@ -283,16 +284,28 @@ class SessionSecurityServiceTestCase(TestCase):
         request.META['REMOTE_ADDR'] = '192.168.1.1'
 
         # SessionSecurityService uses get_safe_client_ip from apps.common.request_ip
-        from apps.common.request_ip import get_safe_client_ip
         ip = get_safe_client_ip(request)
         self.assertEqual(ip, '192.168.1.1')
 
-    def test_invalidate_other_user_sessions(self):
-        """Test invalidation of other user sessions"""
-        # Test that the method exists and can be called
-        # Session invalidation depends on Redis/DB backend which is complex to test
-        # Should not raise — method handles errors gracefully
-        SessionSecurityService._invalidate_other_user_sessions(self.user.id, 'test_session')
+    def test_invalidate_other_user_sessions(self) -> None:
+        first, second = Client(), Client()
+        first.force_login(self.user)
+        second.force_login(self.user)
+        old_keys = {first.session.session_key, second.session.session_key}
+        request = self.factory.get("/")
+        request.user = self.user
+        request.session = first.session
+
+        SessionSecurityService.rotate_session_on_2fa_change(request)
+
+        current_key = request.session.session_key
+        self.assertNotIn(current_key, old_keys)
+        self.assertFalse(Session.objects.filter(session_key__in=old_keys).exists())
+        self.assertTrue(Session.objects.filter(session_key=current_key).exists())
+        self.assertEqual(
+            list(UserSession.objects.filter(user=self.user).values_list("session_key", flat=True)),
+            [current_key],
+        )
 
 
 class SessionSecurityMiddlewareTestCase(TestCase):

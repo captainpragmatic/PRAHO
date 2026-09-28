@@ -685,8 +685,12 @@ class HMACStatisticalTimingAnalysisTestCase(SimpleTestCase):
 
             mock_response = Mock()
             mock_response.status_code = 200
-            mock_response.json.return_value = {'success': True, 'authenticated': True}
+            mock_response.json.return_value = {
+                'success': True,
+                'user': {'id': 1, 'email': 'user@example.com', 'customer_id': 1},
+            }
             return mock_response
+
 
         with override_settings(
             PLATFORM_API_SECRET="end-to-end-timing-analysis-key",

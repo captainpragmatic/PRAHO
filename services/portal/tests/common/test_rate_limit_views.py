@@ -8,14 +8,14 @@ from django.contrib.messages import get_messages
 from django.contrib.messages.storage.fallback import FallbackStorage
 from django.contrib.sessions.middleware import SessionMiddleware
 from django.http import HttpResponse
-from django.test import Client, RequestFactory, SimpleTestCase, override_settings
+from django.test import Client, RequestFactory, SimpleTestCase, TestCase, override_settings
 
 from apps.api_client.services import PlatformAPIError
 from apps.dashboard.views import dashboard_view
 
 
 @override_settings(ROOT_URLCONF="config.urls", SESSION_ENGINE="django.contrib.sessions.backends.cache")
-class ListViewsRateLimitTests(SimpleTestCase):
+class ListViewsRateLimitTests(TestCase):
     def setUp(self) -> None:
         self.client = Client()
 

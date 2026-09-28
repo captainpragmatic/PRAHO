@@ -19,15 +19,15 @@ Security guidelines for all requests:
 import base64
 import hashlib
 import hmac
+import ipaddress
 import json
 import logging
-import math
 import random
-import re
 import secrets
 import threading
 import time
 import urllib.parse
+from contextlib import suppress
 from http import HTTPStatus
 from typing import Any, cast
 
@@ -49,11 +49,19 @@ logger = logging.getLogger(__name__)
 HMAC_TIMING_THRESHOLD = 0.002
 
 
-_HMAC_SIGNATURE_RE = re.compile(r"^[0-9a-fA-F]{64}$")
-_HMAC_NONCE_RE = re.compile(r"^[A-Za-z0-9_-]{8,256}$")
-_HMAC_PORTAL_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
-# Int-only — platform validates with int(), floats would fail
-_HMAC_TIMESTAMP_RE = re.compile(r"^[0-9]+$")
+def _client_ip_payload(client_ip: str) -> dict[str, str]:
+    """Include a valid, normalized client IP in the signed request only when it means something.
+
+    Without trusted proxies outside DEBUG every client resolves to the proxy address, so the
+    IP is omitted and the Platform's per-client limiters stand down rather than keying every
+    customer on one address.
+    """
+    from apps.common.rate_limiting import _client_ip_is_distinguishable  # noqa: PLC0415
+
+    if client_ip and _client_ip_is_distinguishable():
+        with suppress(ValueError):
+            return {"client_ip": str(ipaddress.ip_address(client_ip))}
+    return {}
 
 
 def _resolve_portal_signing_secret() -> str:
@@ -301,37 +309,6 @@ class PlatformAPIClient:
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
-
-    def _get_header_case_insensitive(self, headers: dict[str, Any], name: str) -> Any:
-        for key, value in headers.items():
-            if isinstance(key, str) and key.lower() == name.lower():
-                return value
-        return None
-
-    def _headers_allow_success_fallback(self, headers: dict[str, Any]) -> bool:
-        """
-        Allow lenient fallback for mock Platform responses that only include
-        {"success": true}, while still rejecting obviously malformed auth headers.
-        """
-        portal_id = self._get_header_case_insensitive(headers, "X-Portal-Id")
-        signature = self._get_header_case_insensitive(headers, "X-Signature")
-        nonce = self._get_header_case_insensitive(headers, "X-Nonce")
-        timestamp = self._get_header_case_insensitive(headers, "X-Timestamp")
-
-        if not isinstance(portal_id, str) or not _HMAC_PORTAL_ID_RE.fullmatch(portal_id):
-            return False
-        if not isinstance(signature, str) or not _HMAC_SIGNATURE_RE.fullmatch(signature):
-            return False
-        if not isinstance(nonce, str) or not _HMAC_NONCE_RE.fullmatch(nonce):
-            return False
-        if not isinstance(timestamp, str) or not _HMAC_TIMESTAMP_RE.fullmatch(timestamp):
-            return False
-
-        try:
-            timestamp_value = float(timestamp)
-        except (TypeError, ValueError):
-            return False
-        return math.isfinite(timestamp_value) and timestamp_value > 0
 
     def _normalize_endpoint(self, endpoint: str) -> str:
         normalized = "/" + endpoint.strip().lstrip("/")
@@ -646,16 +623,25 @@ class PlatformAPIClient:
         """Read the explicit, non-sensitive portal display contract."""
         return self._make_request("POST", "/localisation/", data={})
 
-    def authenticate_customer(self, email: str, password: str, mfa_token: str = "") -> dict[str, Any] | None:
-        """Authenticate customer with email and password via platform API"""
+    def authenticate_customer(
+        self, email: str, password: str, mfa_token: str = "", client_ip: str = ""
+    ) -> dict[str, Any] | None:
+        """Authenticate a customer, propagating throttles and service failures to the caller."""
+
         start_time = time.perf_counter()
         min_duration = float(getattr(settings, "PLATFORM_API_AUTH_MIN_DURATION_SECONDS", 0.0))
         try:
             # Use existing platform login endpoint
+            request_body = {
+                "email": email,
+                "password": password,
+                **({"mfa_token": mfa_token} if mfa_token else {}),
+                **_client_ip_payload(client_ip),
+            }
             data = self._make_request(
                 "POST",
                 "/users/login/",
-                data={"email": email, "password": password, **({"mfa_token": mfa_token} if mfa_token else {})},
+                data=request_body,
                 retry_on_status={503},
                 max_retries=1,
             )
@@ -670,16 +656,19 @@ class PlatformAPIClient:
                     "user_id": user_data.get("id"),
                     "customer_id": user_data.get("customer_id"),
                     "customer_data": data.get("user", {}),
+                    "session_auth_hash": data.get("session_auth_hash"),
                 }
-            if data.get("success") and self._headers_allow_success_fallback(
-                getattr(self._thread_local, "last_request_headers", {})
-            ):
-                return {"valid": True}
             return None
 
         except PlatformAPIError as e:
-            if e.is_degraded:
-                raise  # Let caller handle rate-limit UX
+            # Master's predicate, kept over this branch's `is_degraded`, because it is strictly
+            # better rather than merely different. `is_degraded` covers 429/502/503/504 and let a
+            # 500 fall through to `None` - which the view reads as "invalid credentials", the
+            # reported bug surviving for one status code. Inverting it is the right shape: only an
+            # actual credential rejection may become None, and everything else is a failure to ASK
+            # rather than an answer. A `status_code` of None (transport failure) also raises.
+            if e.is_rate_limited or e.status_code not in {400, 401, 403}:
+                raise  # Throttles and outages are the caller's to report, not a wrong password
             logger.warning(f"⚠️ [API Client] Customer authentication failed for {email}: {e}")
             return None
         finally:
@@ -691,8 +680,36 @@ class PlatformAPIClient:
                 while (time.perf_counter() - start_time) < min_duration:
                     pass
 
-    def validate_session_secure(self, user_id: str) -> dict[str, Any]:
+    def request_password_reset(self, email: str, client_ip: str = "") -> dict[str, Any]:
+        """Request a reset email; propagate Platform errors to the caller."""
+        return self._make_request(
+            "POST", "/users/password/reset/", data={"email": email, **_client_ip_payload(client_ip)}
+        )
+
+    def confirm_password_reset(
+        self,
+        uid: str,
+        token: str,
+        new_password: str,
+        new_password_confirm: str,
+        client_ip: str = "",
+    ) -> dict[str, Any]:
+        """Redeem a reset token; propagate Platform errors to the caller."""
+        return self._make_request(
+            "POST",
+            "/users/password/reset/confirm/",
+            data={
+                "uid": uid,
+                "token": token,
+                "new_password": new_password,
+                "new_password_confirm": new_password_confirm,
+                **_client_ip_payload(client_ip),
+            },
+        )
+
+    def validate_session_secure(self, user_id: str, session_auth_hash: str | None = None) -> dict[str, Any]:
         """
+
         🔒 SECURE session validation using HMAC-signed context (No JWT, No ID enumeration)
 
         Sends customer context in request body, signed by HMAC headers.
@@ -700,9 +717,14 @@ class PlatformAPIClient:
         """
         # Create request body with user context
         current_timestamp = time.time()
-        request_data = {"user_id": user_id, "timestamp": current_timestamp}
+        request_data = {
+            "user_id": user_id,
+            "timestamp": current_timestamp,
+            "session_auth_hash": session_auth_hash or "",
+        }
 
         # Do not swallow PlatformAPIError here.
+
         # Middleware owns policy decisions (fail-open vs fail-closed) based on error type.
         return self._make_request(
             "POST",
@@ -786,8 +808,14 @@ class PlatformAPIClient:
             logger.warning(f"⚠️ [API Client] Failed to update customer profile: {e}")
             return False
 
-    def update_customer_password(self, user_id: int, new_password: str, current_password: str, token: str = "") -> bool:
-        """Update customer password (requires user_id in signed body for HMAC validation)."""
+    def update_customer_password(
+        self, user_id: int, new_password: str, current_password: str, token: str = ""
+    ) -> dict[str, Any] | None:
+        """Return the successful response, including session_auth_hash, or None on failure.
+
+        The signed body includes user_id; rate-limit errors propagate to the caller.
+        """
+
         try:
             data = self._make_request(
                 "PUT",
@@ -801,13 +829,13 @@ class PlatformAPIClient:
                 },
             )
 
-            return bool(data.get("success", False))
+            return data if data.get("success") else None
 
         except PlatformAPIError as e:
             if e.is_degraded:
                 raise
             logger.warning(f"⚠️ [API Client] Failed to update customer password: {e}")
-            return False
+            return None
 
     # ===============================================================================
     # MULTI-FACTOR AUTHENTICATION API ENDPOINTS
@@ -868,14 +896,14 @@ class PlatformAPIClient:
             data={"user_id": user_id, "password": password, "token": token},
         )
 
-    def disable_mfa(self, user_id: int, password: str, token: str) -> bool:
+    def disable_mfa(self, user_id: int, password: str, token: str) -> dict[str, object] | None:
         data = self._make_request(
             "POST",
             "/users/mfa/disable/",
             user_id=user_id,
             data={"user_id": user_id, "password": password, "token": token},
         )
-        return bool(data.get("success", False))
+        return data if data.get("success") else None
 
     # ===============================================================================
     # GENERIC HTTP METHODS
@@ -1102,17 +1130,6 @@ class PlatformAPIClient:
         """🔒 Get services summary - SECURE HMAC BODY"""
         request_data = {"customer_id": customer_id, "action": "get_services_summary", "timestamp": time.time()}
         return self._make_request("POST", "/api/services/summary/", data=request_data, idempotent=True)
-
-    def update_service_auto_renew_secure(self, customer_id: int, service_id: int, auto_renew: bool) -> dict[str, Any]:
-        """🔒 Update service auto-renew - SECURE HMAC BODY"""
-        request_data = {
-            "customer_id": customer_id,
-            "service_id": service_id,
-            "auto_renew": auto_renew,
-            "action": "update_auto_renew",
-            "timestamp": time.time(),
-        }
-        return self._make_request("POST", f"/api/services/{service_id}/auto-renew/", data=request_data)
 
     def download_ticket_attachment(
         self, customer_id: int, user_id: int, ticket_id: int, attachment_id: int

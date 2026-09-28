@@ -54,10 +54,13 @@ class StartupThrottleValidationTests(SimpleTestCase):
                 "product_catalog": "200/min",
                 "portal_hmac_create_user": "30/min",
                 "session_validation": "60/min",
+                "auth_login_ip": "10/minute",
+                "auth_reset_ip": "5/minute",
             },
         }
     )
     def test_startup_validation_allows_valid_rates(self) -> None:
+
         _validate_throttle_rates_at_startup()
 
     @override_settings(
@@ -106,10 +109,13 @@ class StartupThrottleValidationTests(SimpleTestCase):
                 "product_catalog": "200/min",
                 "portal_hmac_create_user": "30/min",
                 "session_validation": "60/min",
+                "auth_login_ip": "10/minute",
+                "auth_reset_ip": "5/minute",
             },
         }
     )
     def test_startup_validation_accepts_tuple_default_classes(self) -> None:
+
         _validate_throttle_rates_at_startup()
 
 

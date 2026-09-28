@@ -13,12 +13,18 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from apps.api.secure_auth import public_api_endpoint, require_customer_authentication
+from apps.api.secure_auth import (
+    SUPPORT_ROLES,
+    public_api_endpoint,
+    require_customer_authentication,
+    require_customer_role_in,
+)
 from apps.customers.models import Customer
 from apps.tickets.models import SupportCategory, Ticket, TicketAttachment, TicketComment
 from apps.tickets.services import TicketStatusService
 
 from .attachments import decode_attachments
+from .helpers import create_customer_ticket
 from .serializers import (
     CommentCreateSerializer,
     SupportCategorySerializer,
@@ -290,7 +296,7 @@ def customer_ticket_detail_api(request: HttpRequest, customer: Customer, ticket_
 @api_view(["POST"])
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
-@require_customer_authentication
+@require_customer_role_in(*SUPPORT_ROLES)
 def customer_ticket_create_api(request: HttpRequest, customer: Customer) -> Response:
     """
     ✉️ Customer Ticket Creation API
@@ -333,21 +339,19 @@ def customer_ticket_create_api(request: HttpRequest, customer: Customer) -> Resp
 
         # Validate request data
         logger.debug(f"🔍 [Tickets API] Validating ticket data: {ticket_data}")
-        serializer = TicketCreateSerializer(data=ticket_data)
+        serializer = TicketCreateSerializer(data=ticket_data, context={"customer": customer})
         if not serializer.is_valid():
             logger.error(f"🔥 [Tickets API] Validation failed: {serializer.errors}")
             return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Create ticket with customer email if not provided
-        validated_data = serializer.validated_data
-        if not validated_data.get("contact_email"):
-            validated_data["contact_email"] = customer.primary_email
-        if not validated_data.get("contact_person"):
-            validated_data["contact_person"] = customer.name
-
-        ticket = Ticket.objects.create(customer=customer, source="api", **validated_data)
+        ticket = create_customer_ticket(
+            customer=customer,
+            created_by=getattr(request, "_customer_user", None),
+            **serializer.validated_data,
+        )
 
         # Return created ticket details
+
         # Reload with the same prefetching to keep payload limited and efficient
         public_comments = Prefetch(
             "comments",
@@ -471,7 +475,7 @@ def _create_customer_ticket_reply(request: HttpRequest, customer: Customer, tick
 @api_view(["POST"])
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
-@require_customer_authentication
+@require_customer_role_in(*SUPPORT_ROLES)
 def customer_ticket_reply_api(request: HttpRequest, customer: Customer, ticket_id: int) -> Response:
     """
     💬 Customer Ticket Reply API

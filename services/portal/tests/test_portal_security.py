@@ -17,7 +17,7 @@ import time
 from typing import cast
 
 from django.http import HttpRequest
-from django.test import RequestFactory, SimpleTestCase, override_settings
+from django.test import RequestFactory, SimpleTestCase, TestCase, override_settings
 
 from apps.common.request_ip import get_safe_client_ip
 
@@ -36,7 +36,7 @@ def _build_valid_sig(body: bytes, ts: str, secret: str = _TEST_WEBHOOK_SECRET) -
     return hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()
 
 
-class WebhookAuthenticationTests(SimpleTestCase):
+class WebhookAuthenticationTests(TestCase):
     """Payment webhook must be rejected unless Platform's HMAC signature is valid."""
 
     def setUp(self) -> None:
@@ -123,7 +123,7 @@ class WebhookAuthenticationTests(SimpleTestCase):
 # ===============================================================================
 
 
-class WebhookHardeningTests(SimpleTestCase):
+class WebhookHardeningTests(TestCase):
     """Extended webhook security tests: format validation, replay dedup, future timestamps."""
 
     def setUp(self) -> None:

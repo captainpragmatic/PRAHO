@@ -12,6 +12,11 @@ User={{ project_user }}
 Group={{ project_group }}
 WorkingDirectory={{ project_root }}/src/services/portal
 EnvironmentFile={{ project_root }}/.env
+Environment="SESSION_DB_PATH={{ portal_django_env.SESSION_DB_PATH }}"
+Environment="PORTAL_TRUSTED_PROXY_CIDRS={{ portal_django_env.PORTAL_TRUSTED_PROXY_CIDRS }}"
+ExecStartPre={{ project_root }}/.venv-linux/bin/python manage.py migrate sessions --noinput
+ExecStartPre={{ project_root }}/.venv-linux/bin/python manage.py migrate common --noinput
+ExecStartPre={{ project_root }}/.venv-linux/bin/python manage.py check --deploy --fail-level ERROR
 ExecStart={{ project_root }}/.venv-linux/bin/gunicorn \
     --bind 127.0.0.1:{{ portal_port }} \
     --workers {{ gunicorn_workers_portal }} \
@@ -30,7 +35,7 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=yes
-ReadWritePaths={{ project_root }}/logs /var/log/praho/portal {{ project_root }}/src/services/portal
+ReadWritePaths={{ project_root }}/logs /var/log/praho/portal {{ project_root }}/src/services/portal "{{ portal_django_env.SESSION_DB_PATH | dirname }}"
 
 [Install]
 WantedBy=multi-user.target

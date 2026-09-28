@@ -3,9 +3,7 @@ Minimal working comprehensive test for users models to boost coverage.
 Handles the actual model structure properly.
 """
 
-from django.test import TestCase
-
-from apps.common.request_ip import get_safe_client_ip
+from django.test import TestCase, override_settings
 
 from apps.customers.models import Customer
 from apps.users.mfa import WebAuthnCredential
@@ -37,8 +35,10 @@ class MinimalUserModelTestCase(TestCase):
         self.assertFalse(user.is_customer_user)
         self.assertIsNone(user.primary_customer)
 
+    @override_settings(ACCOUNT_LOCKOUT_THRESHOLD=1)
     def test_account_lockout_functionality(self):
         """Test account lockout methods"""
+
         user = User.objects.create_user(
             email='test@example.com',
             password='testpass123'

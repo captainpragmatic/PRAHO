@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase
+from django.utils import timezone
 
 from apps.billing.currency_models import Currency
 from apps.customers.models import Customer, CustomerAddress, CustomerTaxProfile
@@ -168,7 +169,11 @@ class OrderCreateCustomerScopingTests(TestCase):
             vat_number="DE123456789",
             is_vat_payer=True,
             reverse_charge_eligible=True,
+            vies_verification_status="valid",
+            vies_verified_at=timezone.now(),
+            vies_consultation_reference="preview-reference",
         )
+
         product = Product.objects.create(
             slug="preview-reverse-charge-hosting",
             name="Preview reverse-charge hosting",

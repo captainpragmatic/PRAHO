@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import requests
 from django.core.cache import cache
-from django.test import SimpleTestCase, override_settings
+from django.test import TestCase, override_settings
 from requests.auth import HTTPDigestAuth
 
 from apps.common.outbound_http import PinnedIPAdapter
@@ -49,7 +49,7 @@ def response(data: object, status: int = 200, headers: dict[str, str] | None = N
 
 
 @override_settings(REGISTRAR_ADAPTERS_VERIFIED=True, CACHES=LOCMEM_TEST_CACHE)
-class RegistrarContractTests(SimpleTestCase):
+class RegistrarContractTests(TestCase):
     def setUp(self) -> None:
         cache.clear()
         self.gandi = GandiGateway(

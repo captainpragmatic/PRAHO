@@ -13,7 +13,7 @@ providing a historical record of why the system is built the way it is.
 ## How to Create a New ADR
 
 1. Create a new file: `ADR-XXXX-short-descriptive-title.md`
-2. Use the next available number (currently: **ADR-0049**)
+2. Use the next available number (currently: **ADR-0051**)
 3. Follow the standard format: Status, Date, Authors, Context, Decision, Consequences
 4. Set status to **Proposed** initially, then update to **Accepted** after team review
 
@@ -77,6 +77,8 @@ providing a historical record of why the system is built the way it is.
 | [ADR-0046](ADR-0046-automated-fx-ingestion.md) | Automated FX Ingestion, Freshness Surface, and Currency Admission | Accepted | 2026-09-14 |
 | [ADR-0047](ADR-0047-jurisdiction-tax-policy.md) | Jurisdiction-Parameterised Tax Policy and the Fiscal-Data Boundary | Accepted | 2026-09-15 |
 | [ADR-0048](ADR-0048-external-invoice-issuer.md) | External Invoice Issuer (SmartBill) | Accepted | 2026-09-22 |
+| [ADR-0049](ADR-0049-reverse-charge-requires-vies-evidence.md) | Reverse Charge Requires VIES Evidence | Accepted | 2026-09-27 |
+| [ADR-0050](ADR-0050-portal-infrastructure-tables.md) | Portal Infrastructure Tables | Accepted | 2026-09-28 |
 
 ### 🟡 Partially Superseded
 
@@ -193,8 +195,8 @@ Billing Ownership
 
 ## Statistics
 
-- **Total ADRs**: 48 (ADR-0001 through ADR-0048)
-- **Active**: 37 (Accepted + Implemented)
+- **Total ADRs**: 50 (ADR-0001 through ADR-0050)
+- **Active**: 39 (Accepted + Implemented)
 - **Partially Superseded**: 1
 - **Superseded / Historical**: 5
-- **Next available**: ADR-0049
+- **Next available**: ADR-0051

@@ -9,11 +9,11 @@ Security-focused testing following OWASP best practices.
 
 from __future__ import annotations
 
-import unittest
 from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser
+from django.contrib.sessions.models import Session
 from django.core.exceptions import ValidationError
 from django.http import HttpRequest
 from django.test import Client, RequestFactory, TestCase, override_settings
@@ -28,7 +28,7 @@ from apps.customers.models import (
     Customer,
     CustomerTaxProfile,
 )
-from apps.users.models import CustomerMembership
+from apps.users.models import CustomerMembership, UserSession
 from apps.users.services import (
     SecureCustomerUserService,
     SecureUserRegistrationService,
@@ -215,7 +215,6 @@ class SecureUserRegistrationServiceTest(BaseServiceTestCase):
     def test_find_customer_by_identifier_secure_by_name(self, mock_log: Mock) -> None:
         """Test secure customer lookup by company name"""
         # Test direct customer lookup instead of the service method
-        from apps.customers.models import Customer
         result = Customer.objects.filter(company_name='Test Customer').first()
 
         # Should find our test customer by company name
@@ -544,32 +543,41 @@ class SessionSecurityServiceTest(BaseServiceTestCase):
                 request, 'login_success', user_id=self.user.id
             )
 
-    @patch('apps.users.services.Session.objects.filter')
-    def test_invalidate_other_user_sessions(self, mock_filter: Mock) -> None:
-        """Test invalidating other user sessions"""
-        mock_sessions = Mock()
-        mock_filter.return_value.exclude.return_value.delete.return_value = (2, {})
-        # Verify mock sessions setup
-        self.assertIsNotNone(mock_sessions)
+    def test_invalidate_other_user_sessions(self) -> None:
+        first, second = Client(), Client()
+        first.force_login(self.user)
+        second.force_login(self.user)
+        old_keys = {first.session.session_key, second.session.session_key}
+        request = self.factory.get("/")
+        request.user = self.user
+        request.session = first.session
 
-        with patch('apps.users.services.SessionSecurityService._invalidate_other_user_sessions') as mock_invalidate:
-            mock_invalidate.return_value = None
+        SessionSecurityService.rotate_session_on_password_change(request)
 
-            SessionSecurityService._invalidate_other_user_sessions(self.user.id, 'keep_session')
+        current_key = request.session.session_key
+        self.assertNotIn(current_key, old_keys)
+        self.assertFalse(Session.objects.filter(session_key__in=old_keys).exists())
+        self.assertTrue(Session.objects.filter(session_key=current_key).exists())
+        self.assertEqual(
+            list(UserSession.objects.filter(user=self.user).values_list("session_key", flat=True)),
+            [current_key],
+        )
 
-            mock_invalidate.assert_called_once_with(self.user.id, 'keep_session')
+    def test_invalidate_all_user_sessions(self) -> None:
+        first, second, unrelated = Client(), Client(), Client()
+        first.force_login(self.user)
+        second.force_login(self.user)
+        unrelated.force_login(self.admin_user)
+        keys = {first.session.session_key, second.session.session_key}
+        self.assertEqual(UserSession.objects.filter(user=self.user).count(), 2)
 
-    @patch('apps.users.services.Session.objects.filter')
-    def test_invalidate_all_user_sessions(self, mock_filter: Mock) -> None:
-        """Test invalidating all user sessions"""
-        mock_filter.return_value.delete.return_value = (3, {})
+        SessionSecurityService.invalidate_all_sessions_for_user(self.user.pk)
 
-        with patch('apps.users.services.SessionSecurityService._invalidate_all_user_sessions') as mock_invalidate:
-            mock_invalidate.return_value = None
+        self.assertFalse(Session.objects.filter(session_key__in=keys).exists())
+        self.assertFalse(UserSession.objects.filter(user=self.user).exists())
+        self.assertTrue(Session.objects.filter(session_key=unrelated.session.session_key).exists())
+        self.assertTrue(UserSession.objects.filter(user=self.admin_user).exists())
 
-            SessionSecurityService._invalidate_all_user_sessions(self.user.id)
-
-            mock_invalidate.assert_called_once_with(self.user.id)
 
     def test_clear_sensitive_session_data(self) -> None:
         """Test clearing sensitive session data"""
@@ -591,7 +599,6 @@ class SessionSecurityServiceTest(BaseServiceTestCase):
         request.META['REMOTE_ADDR'] = '127.0.0.1'
 
         # SessionSecurityService uses get_safe_client_ip from apps.common.request_ip
-        from apps.common.request_ip import get_safe_client_ip
         ip = get_safe_client_ip(request)
 
         # In development mode, X-Forwarded-For is ignored for security
@@ -603,7 +610,6 @@ class SessionSecurityServiceTest(BaseServiceTestCase):
         request.META['REMOTE_ADDR'] = '192.168.1.1'
 
         # SessionSecurityService uses get_safe_client_ip from apps.common.request_ip
-        from apps.common.request_ip import get_safe_client_ip
         ip = get_safe_client_ip(request)
 
         self.assertEqual(ip, '192.168.1.1')
@@ -768,7 +774,7 @@ class SecurityTest(BaseServiceTestCase):
             mock_create_user.return_value = self.user
             with patch('apps.users.services.Customer.objects.create') as mock_create_customer:
                 mock_create_customer.return_value = self.customer
-                with patch('apps.users.services.CustomerMembership.objects.create') as mock_create_membership:
+                with patch('apps.users.services.CustomerMembership.objects.create'):
 
                     SecureUserRegistrationService.register_new_customer_owner(
                         user_data=user_data,

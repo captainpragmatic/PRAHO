@@ -118,3 +118,33 @@ class TestMaintenanceMarkerParity(TestCase):
             f"errors, so a status-only test tells the customer their data is safe during a real "
             f"failure. Found: {assignment}",
         )
+
+
+class TestCounterStoreParity(TestCase):
+    """Counter behavior and its tests must remain byte-identical.
+
+    Carried over from master in the merge that moved this file. It arrived as a modify/delete
+    conflict - master added this class while this branch moved the file into tests/integration/ -
+    and accepting either side alone would have dropped it silently. Moving it here is also the
+    first time it RUNS: at the tests/ root nothing collected it, which is why the file was moved.
+    """
+
+    def test_counter_implementations_match(self) -> None:
+        self.assertEqual(
+            (PLATFORM_COMMON / "counters.py").read_bytes(),
+            (PORTAL_COMMON / "counters.py").read_bytes(),
+        )
+
+    def test_counter_tests_match(self) -> None:
+        relative_path = Path("tests/common/test_counters.py")
+        self.assertEqual(
+            (REPO_ROOT / "services/platform" / relative_path).read_bytes(),
+            (REPO_ROOT / "services/portal" / relative_path).read_bytes(),
+        )
+
+    def test_counter_cull_command_matches(self) -> None:
+        relative_path = Path("management/commands/cull_counters.py")
+        self.assertEqual(
+            (PLATFORM_COMMON / relative_path).read_bytes(),
+            (PORTAL_COMMON / relative_path).read_bytes(),
+        )

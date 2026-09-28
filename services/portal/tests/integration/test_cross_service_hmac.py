@@ -135,11 +135,10 @@ class CrossServiceHMACIntegrationTestCase(SimpleTestCase):
             # Simulate network timeout
             mock_request.side_effect = requests.exceptions.Timeout("Request timed out after 10s")
 
-            # Should handle timeout gracefully
-            result = client.authenticate_customer('test@example.com', 'password123')
-
-            # Should return None for timeout (fail-safe)
-            self.assertIsNone(result)
+            with self.assertRaises(PlatformAPIError) as raised:
+                client.authenticate_customer("test@example.com", "password123")
+            self.assertIsNone(raised.exception.status_code)
+            self.assertEqual(str(raised.exception), "Platform service timeout")
 
             # Verify HMAC headers were generated (even though request failed)
             mock_request.assert_called_once()
@@ -160,11 +159,10 @@ class CrossServiceHMACIntegrationTestCase(SimpleTestCase):
             # Simulate connection refused (Platform service down)
             mock_request.side_effect = requests.exceptions.ConnectionError("Connection refused")
 
-            # Should handle connection error gracefully
-            result = client.authenticate_customer('test@example.com', 'password123')
-
-            # Should return None for connection error (fail-safe)
-            self.assertIsNone(result)
+            with self.assertRaises(PlatformAPIError) as raised:
+                client.authenticate_customer("test@example.com", "password123")
+            self.assertIsNone(raised.exception.status_code)
+            self.assertEqual(str(raised.exception), "Platform service unavailable")
 
     @override_settings(
         PLATFORM_API_SECRET="integration-test-hmac-secret-key-2024",

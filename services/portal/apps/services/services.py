@@ -320,7 +320,7 @@ class ServicesAPIClient(PlatformAPIClient):
             return []
 
     def request_service_action(
-        self, customer_id: int, service_id: int, action: str, reason: str = ""
+        self, customer_id: int, user_id: int, service_id: int, action: str, reason: str = ""
     ) -> dict[str, Any]:
         """
         Request service action (customer-available actions only).
@@ -328,6 +328,7 @@ class ServicesAPIClient(PlatformAPIClient):
 
         Args:
             customer_id: Customer ID for authorization
+            user_id: User ID for HMAC authentication
             service_id: Service ID to perform action on
             action: Action type (upgrade, downgrade, suspend_request, cancel_request)
             reason: Optional reason for the request
@@ -343,7 +344,7 @@ class ServicesAPIClient(PlatformAPIClient):
 
             data = {"customer_id": customer_id, "action": action, "reason": reason, "requested_by_customer": True}
 
-            response = self._make_request("POST", f"/services/{service_id}/actions/", data=data)
+            response = self._make_request("POST", f"/services/{service_id}/actions/", user_id=user_id, data=data)
 
             logger.info(
                 f"✅ [Services API] Requested action '{action}' for service {service_id} by customer {customer_id}"

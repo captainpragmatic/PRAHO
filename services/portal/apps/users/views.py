@@ -5,6 +5,8 @@ Customer-facing login/logout with Platform API validation using Django sessions.
 
 import logging
 import time
+from collections.abc import Mapping
+from http import HTTPStatus
 
 from django.conf import settings
 from django.contrib import messages
@@ -18,6 +20,7 @@ from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_http_methods
 
 from apps.api_client.services import PlatformAPIError, api_client
+from apps.common.constants import BACKUP_CODE_LENGTH
 from apps.common.decorators import (
     log_access_attempt,
     require_any_role,
@@ -31,6 +34,8 @@ from apps.common.rate_limit_feedback import (
     get_degraded_message,
     is_rate_limited_error,
 )
+from apps.common.rate_limiting import mark_auth_failure, mark_auth_success
+from apps.common.request_ip import get_safe_client_ip
 from apps.users.forms import (
     ChangePasswordForm,
     CompanyCreationForm,
@@ -39,6 +44,7 @@ from apps.users.forms import (
     CustomerProfileForm,
     CustomerRegistrationForm,
     MFAReauthenticationForm,
+    PasswordResetConfirmForm,
     PasswordResetRequestForm,
 )
 
@@ -157,22 +163,38 @@ def _handle_totp_setup_get(request: HttpRequest, customer_id: str, customer_emai
         return _handle_mfa_error_redirect(request, "users:mfa_management", _("An error occurred. Please try again."))
 
 
+def _store_returned_session_auth_hash(request: HttpRequest, result: Mapping[str, object]) -> None:
+    """Keep the Platform's new session binding; a response that omits it leaves the current one in place.
+
+    An empty binding is rejected by the Platform on the next validation, so writing one on a
+    response without the field (an old worker during a rolling deploy) would sign the user out.
+    """
+    returned = result.get("session_auth_hash")
+    if isinstance(returned, str) and returned:
+        request.session["session_auth_hash"] = returned
+
+
 def _handle_totp_setup_post(request: HttpRequest, customer_id: str, token: str) -> HttpResponse:
     """Handle POST request for TOTP setup verification"""
     if not token:
         return _handle_mfa_error_redirect(request, "users:mfa_setup_totp", _("Please enter the verification code."))
+    if len(token) == BACKUP_CODE_LENGTH:
+        mark_auth_failure(request, bucket="reauth")
+        return _handle_mfa_error_redirect(request, "users:mfa_setup_totp", _("Finish setup with the 6-digit code."))
 
     try:
         user_id = request.session.get("user_id")
         result = api_client.verify_totp_mfa(customer_id, token, user_id=user_id)
-        if result:
+        if result and result.get("success"):
+            _store_returned_session_auth_hash(request, result)
             request.session.cycle_key()
-            request.session["new_mfa_backup_codes"] = result["backup_codes"]
+            request.session["new_mfa_backup_codes"] = result.get("backup_codes", [])
             logger.info(f"✅ [Portal 2FA] TOTP enabled successfully for customer {customer_id}")
             return _handle_mfa_success_redirect(
                 request, "users:mfa_backup_codes", _("Two-factor authentication has been enabled successfully!")
             )
         else:
+            mark_auth_failure(request, bucket="reauth")
             return _handle_mfa_error_redirect(
                 request, "users:mfa_setup_totp", _("Invalid verification code. Please try again.")
             )
@@ -243,9 +265,11 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
                 # Validate credentials via Platform API
                 mfa_token = form.cleaned_data.get("mfa_token", "")
                 auth_response = (
-                    api_client.authenticate_customer(email, password, mfa_token=mfa_token)
+                    api_client.authenticate_customer(
+                        email, password, mfa_token=mfa_token, client_ip=get_safe_client_ip(request)
+                    )
                     if mfa_token
-                    else api_client.authenticate_customer(email, password)
+                    else api_client.authenticate_customer(email, password, client_ip=get_safe_client_ip(request))
                 )
 
                 if auth_response and auth_response.get("valid"):
@@ -271,8 +295,10 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
                     request.session["email"] = email
                     request.session["authenticated_at"] = timezone.now().isoformat()
                     request.session["remember_me"] = remember_me
+                    request.session["session_auth_hash"] = auth_response.get("session_auth_hash") or ""
 
                     # Fetch and cache user's customer memberships for role-based access
+
                     try:
                         memberships = _get_user_customer_memberships(request)
                         if memberships:
@@ -317,13 +343,15 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
                         messages.success(request, _("Sign in confirmed!"))
 
                     next_url = _get_safe_redirect_target(request, fallback="/dashboard/")
+                    mark_auth_success(request)
                     return redirect(next_url)
 
                 else:
                     logger.warning(f"⚠️ [Portal Auth] Invalid credentials for {email}")
+                    mark_auth_failure(request)
                     form.add_error(None, _("Invalid email address or password. Please try again."))
 
-            except PlatformAPIError as e:  # degradation-aware — specific form error per state
+            except PlatformAPIError as e:  # degradation- and rate-limit-aware, per state
                 if getattr(e, "is_unavailable", False):
                     # `is_unavailable`, not `is_maintenance`: the customer cannot log in during an
                     # UNDECLARED outage either, and keying on the narrower flag sent a 502, a 504 and
@@ -332,11 +360,25 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
                     # wording may call it planned.
                     logger.warning(f"⚠️ [Portal Auth] Login attempted while the platform was unavailable for {email}")
                     degraded_context = build_maintenance_context(request, e)
-                    # Also inline on the form: the alert explains the state, the form error explains
-                    # why this particular submission went nowhere.
-                    form.add_error(None, get_degraded_message(e))
+                    # The ALERT explains the platform's state; this form error explains why THIS
+                    # submission went nowhere. Master's login-specific wording rather than
+                    # `get_degraded_message`, which says "This information is temporarily
+                    # unavailable" - the wrong register on a login form, and for a declared window
+                    # merely a second copy of the sentence already in the alert above it.
+                    form.add_error(
+                        None, _("Authentication service is temporarily unavailable. Please try again later.")
+                    )
+                    # Deliberately NO `mark_auth_failure` here, unlike the throttle branch below.
+                    # `authenticate_customer` raised, so no credential was ever verified - there is no
+                    # guess to rate-limit. Counting it would spend the customer's attempt budget on an
+                    # outage they did not cause and could lock them out of the form after the platform
+                    # recovered. Nor is the omission exploitable: reaching it means making the platform
+                    # answer 5xx at will, which is a denial of service, and during one no credential
+                    # can be checked anyway.
                 elif getattr(e, "is_rate_limited", False):
+                    mark_auth_failure(request)
                     retry_after = getattr(e, "retry_after", None) or 30
+
                     logger.warning(f"⚠️ [Portal Auth] Login rate-limited for {email} (retry_after={retry_after}s)")
                     form.add_error(
                         None,
@@ -637,17 +679,26 @@ def password_reset_view(request: HttpRequest) -> HttpResponse:
 
         if form.is_valid():
             email = form.cleaned_data["email"]
+            rate_limited = False
             try:
-                # TODO: Call Platform API to send password reset email
-                logger.info(f"✅ [Portal Password Reset] Reset requested for {email}")
+                api_client.request_password_reset(email, client_ip=get_safe_client_ip(request))
+                logger.info("✅ [Portal Password Reset] Reset requested")
+            except PlatformAPIError as exc:
+                rate_limited = is_rate_limited_error(exc)
+                if rate_limited:
+                    messages.warning(
+                        request,
+                        _("Too many attempts. Please try again in %(seconds)s seconds.")
+                        % {"seconds": exc.retry_after or 30},
+                    )
+                else:
+                    logger.error("🔥 [Portal Password Reset] Request failed (%s)", type(exc).__name__)
+
+            if not rate_limited:
                 messages.success(
                     request, _("If an account with that email exists, you will receive password reset instructions.")
                 )
-                return redirect("/login/")
-
-            except Exception as e:
-                logger.error(f"🔥 [Portal Password Reset] Error requesting reset: {e}")
-                messages.error(request, _("Error processing password reset request. Please try again."))
+                return redirect("users:login")
 
     context = {
         "form": form,
@@ -661,6 +712,53 @@ def password_reset_view(request: HttpRequest) -> HttpResponse:
 @never_cache
 @csrf_protect
 @require_http_methods(["GET", "POST"])
+def password_reset_confirm_view(request: HttpRequest, uidb64: str, token: str) -> HttpResponse:
+    """Redeem a reset link through the Platform password policy."""
+    form = PasswordResetConfirmForm(request.POST if request.method == "POST" else None)
+    if request.method == "POST" and form.is_valid():
+        try:
+            result = api_client.confirm_password_reset(
+                uidb64,
+                token,
+                form.cleaned_data["new_password"],
+                form.cleaned_data["confirm_password"],
+                client_ip=get_safe_client_ip(request),
+            )
+            if result.get("success"):
+                messages.success(request, _("Password reset successfully. You can now log in with your new password."))
+                return redirect("users:login")
+            form.add_error(None, _("Password reset failed. Please try again."))
+        except PlatformAPIError as exc:
+            if is_rate_limited_error(exc):
+                messages.warning(
+                    request,
+                    _("Too many attempts. Please try again in %(seconds)s seconds.")
+                    % {"seconds": exc.retry_after or 30},
+                )
+            elif exc.status_code == HTTPStatus.BAD_REQUEST:
+                mark_auth_failure(request)
+                form.add_error(None, _("This reset link is invalid or has expired, or the password was rejected."))
+                errors = (exc.response_data or {}).get("errors", {})
+                password_errors = errors.get("new_password") if isinstance(errors, dict) else None
+                if isinstance(password_errors, str):
+                    form.add_error("new_password", password_errors)
+                elif isinstance(password_errors, list):
+                    for error in password_errors:
+                        if isinstance(error, str):
+                            form.add_error("new_password", error)
+            else:
+                logger.error("🔥 [Portal Password Reset] Confirmation failed (%s)", type(exc).__name__)
+                form.add_error(None, _("Password reset failed. Please try again."))
+    return render(
+        request,
+        "users/password_reset_confirm.html",
+        {"form": form, "page_title": _("Reset Password"), "brand_name": "PRAHO Portal"},
+    )
+
+
+@never_cache
+@csrf_protect
+@require_http_methods(["GET", "POST"])
 def change_password_view(request: HttpRequest) -> HttpResponse:
     """The Platform validates the old password and second factor before mutation."""
     if not request.session.get("user_id"):
@@ -668,14 +766,16 @@ def change_password_view(request: HttpRequest) -> HttpResponse:
     form = ChangePasswordForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         try:
-            changed = api_client.update_customer_password(
+            result = api_client.update_customer_password(
                 int(request.session["user_id"]),
                 form.cleaned_data["new_password"],
                 form.cleaned_data["current_password"],
                 form.cleaned_data.get("token", ""),
             )
-            if changed:
+            if result and result.get("success"):
+                request.session["session_auth_hash"] = result.get("session_auth_hash") or ""
                 request.session.cycle_key()
+
                 messages.success(request, _("Password changed successfully!"))
                 return redirect("users:profile")
             form.add_error(None, _("Password change failed. Check your current password and authentication code."))
@@ -933,7 +1033,9 @@ def mfa_backup_codes_view(request: HttpRequest) -> HttpResponse:
             request.session["new_mfa_backup_codes"] = result["backup_codes"]
             return redirect("users:mfa_backup_codes")
         except PlatformAPIError:
+            mark_auth_failure(request, bucket="reauth")
             form.add_error(None, _("Could not regenerate codes. Check your password and authentication code."))
+
     return render(
         request,
         "users/mfa_backup_codes.html",
@@ -954,15 +1056,21 @@ def mfa_disable_view(request: HttpRequest) -> HttpResponse:
     form = MFAReauthenticationForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         try:
-            if api_client.disable_mfa(
+            result = api_client.disable_mfa(
                 int(request.session["user_id"]), form.cleaned_data["password"], form.cleaned_data["token"]
-            ):
+            )
+            if result and result.get("success"):
+                _store_returned_session_auth_hash(request, result)
                 request.session.cycle_key()
                 request.session.pop("new_mfa_backup_codes", None)
                 messages.success(request, _("Two-factor authentication has been disabled."))
                 return redirect("users:mfa_management")
-        except PlatformAPIError:
+            mark_auth_failure(request, bucket="reauth")
             form.add_error(None, _("Could not disable MFA. Check your password and authentication code."))
+        except PlatformAPIError:
+            mark_auth_failure(request, bucket="reauth")
+            form.add_error(None, _("Could not disable MFA. Check your password and authentication code."))
+
     return render(request, "users/mfa_disable.html", {"form": form})
 
 
@@ -1261,6 +1369,7 @@ def switch_customer_view(request: HttpRequest) -> HttpResponse:
             logger.warning(
                 f"🚨 [Security] Platform API rejected customer switch: user {user_id} -> customer {customer_id}"
             )
+
             messages.error(request, _("Customer access verification failed. Please try again."))
             return redirect("/profile/")
 

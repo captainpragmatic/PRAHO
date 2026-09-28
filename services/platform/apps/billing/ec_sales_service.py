@@ -23,7 +23,14 @@ from apps.billing.document_adjustments import UnsupportedDocumentAdjustmentError
 from apps.billing.efactura.settings import ro_local_date
 from apps.billing.invoice_models import DOCUMENT_KIND_CREDIT_NOTE, Invoice, InvoiceLine
 from apps.billing.refund_models import Refund
-from apps.billing.tax_evidence import TaxEvidenceError, VATDecision, read_vat_evidence, vat_country, vat_identity
+from apps.billing.tax_evidence import (
+    CONSULTATION_REFERENCE_EVIDENCE_VERSION,
+    TaxEvidenceError,
+    VATDecision,
+    read_vat_evidence,
+    vat_country,
+    vat_identity,
+)
 from apps.common.eu_vat_validator import EU_COUNTRIES, validate_vat_format
 from apps.common.financial_arithmetic import calculate_line_totals
 
@@ -181,6 +188,18 @@ def _identity_problems(invoice: Invoice, decision: VATDecision | None) -> list[s
     if not decision or decision.category != "AE":
         problems.append("missing_reverse_charge_decision: A recorded reverse-charge decision is required.")
     if decision:
+        proof = invoice.vat_evidence.get("vies")
+        # An absent snapshot is the version-1 "not recorded" shape whatever the version; only a
+        # recorded consultation that lacks its reference is a policy failure.
+        if (
+            decision.category == "AE"
+            and invoice.vat_evidence.get("version", 0) >= CONSULTATION_REFERENCE_EVIDENCE_VERSION
+            and isinstance(proof, dict)
+            and (
+                not isinstance(proof.get("consultation_reference"), str) or not proof["consultation_reference"].strip()
+            )
+        ):
+            problems.append("missing_consultation_reference: A version-2 reverse-charge supply requires a reference.")
         if decision.country != vat_country(invoice.bill_to_country) or not decision.is_business:
             problems.append("identity_mismatch: Invoice country or business identity disagrees with the decision.")
         try:
@@ -288,9 +307,15 @@ def _vies_problems(invoice: Invoice) -> list[str]:
             raise ValueError("Captured VAT validation refers to a different identity")
         checked_at = parse_datetime(proof["validated_at"])
         calculated_at = parse_datetime(invoice.vat_evidence["calculated_at"])
-        expires_at = parse_datetime(proof["expires_at"]) if proof.get("expires_at") else None
-        if proof.get("expires_at") and expires_at is None:
-            raise ValueError("Malformed validation expiry")
+        if invoice.vat_evidence.get("version", 0) >= CONSULTATION_REFERENCE_EVIDENCE_VERSION:
+            max_age = invoice.vat_evidence.get("evidence_max_age_days", 30)
+            if type(max_age) is not int or max_age < 1:
+                raise ValueError("Malformed evidence maximum age")
+            expires_at = checked_at + timedelta(days=max_age) if checked_at else None
+        else:
+            expires_at = parse_datetime(proof["expires_at"]) if proof.get("expires_at") else None
+            if proof.get("expires_at") and expires_at is None:
+                raise ValueError("Malformed validation expiry")
         if (
             not checked_at
             or not calculated_at
@@ -298,7 +323,7 @@ def _vies_problems(invoice: Invoice) -> list[str]:
             or (expires_at and expires_at < calculated_at)
         ):
             raise ValueError("Captured VAT validation was not current at calculation time")
-    except (KeyError, TypeError, ValueError) as exc:
+    except (KeyError, TypeError, ValueError, OverflowError) as exc:
         return [f"conflicting_vat_validation: {exc}."]
     return []
 

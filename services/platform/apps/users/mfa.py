@@ -19,7 +19,7 @@ import io
 import logging
 import secrets
 import string
-from typing import TYPE_CHECKING, Any, ClassVar, Union, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Union, cast
 
 import pyotp
 import qrcode
@@ -27,7 +27,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import check_password, make_password
 from django.core.cache import cache
-from django.db import models
+from django.db import models, transaction
 from django.http import HttpRequest
 from django.utils import timezone
 
@@ -444,21 +444,23 @@ class WebAuthnService:
                 logger.warning(f"📱 [WebAuthn] Credential {credential_id[:20]}... already registered for {user.email}")
                 return False
 
-            # Store the credential
-            WebAuthnCredential.objects.create(
-                user=user,
-                credential_id=credential_id,
-                public_key=public_key or "unknown",
-                credential_type=credential_data.get("type", "public-key"),
-                name=credential_data.get("name", "WebAuthn Credential"),
-                device_type=credential_data.get("authenticatorAttachment", ""),
-                aaguid=credential_data.get("aaguid", ""),
-                sign_count=credential_data.get("signCount", 0),
-                backup_eligible=credential_data.get("backupEligible", False),
-                backup_state=credential_data.get("backupState", False),
-                user_verified=credential_data.get("userVerified", False),
-                is_active=True,
-            )
+            # Store the credential; the binding rotates because the account now accepts a new factor.
+            with transaction.atomic():
+                MFAService.apply_state_change(user, action="rotate")
+                WebAuthnCredential.objects.create(
+                    user=user,
+                    credential_id=credential_id,
+                    public_key=public_key or "unknown",
+                    credential_type=credential_data.get("type", "public-key"),
+                    name=credential_data.get("name", "WebAuthn Credential"),
+                    device_type=credential_data.get("authenticatorAttachment", ""),
+                    aaguid=credential_data.get("aaguid", ""),
+                    sign_count=credential_data.get("signCount", 0),
+                    backup_eligible=credential_data.get("backupEligible", False),
+                    backup_state=credential_data.get("backupState", False),
+                    user_verified=credential_data.get("userVerified", False),
+                    is_active=True,
+                )
 
             logger.info(f"✅ [WebAuthn] Credential registered for {user.email}")
             return True
@@ -566,7 +568,9 @@ class WebAuthnService:
                 cred = WebAuthnCredential.objects.get(pk=credential_identifier, user=user)
             else:
                 cred = WebAuthnCredential.objects.get(credential_id=credential_identifier, user=user)
-            cred.delete()
+            with transaction.atomic():
+                cred.delete()
+                MFAService.apply_state_change(user, action="rotate")
             return True
         except WebAuthnCredential.DoesNotExist:
             return False
@@ -600,14 +604,16 @@ class WebAuthnService:
             if isinstance(public_key_b64, bytes):
                 public_key_b64 = base64.b64encode(public_key_b64).decode()
 
-            cred = WebAuthnCredential.objects.create(
-                user=request.user,  # type: ignore[misc]
-                credential_id=credential_id or "",
-                public_key=public_key_b64 or "unknown",
-                name=device_name,
-                sign_count=int((result or {}).get("sign_count") or 0),
-                is_active=True,
-            )
+            with transaction.atomic():
+                cred = WebAuthnCredential.objects.create(
+                    user=cast("User", request.user),
+                    credential_id=credential_id or "",
+                    public_key=public_key_b64 or "unknown",
+                    name=device_name,
+                    sign_count=int((result or {}).get("sign_count") or 0),
+                    is_active=True,
+                )
+                MFAService.apply_state_change(cred.user, action="rotate")
             return {"success": True, "credential": cred}
         except Exception as e:  # pragma: no cover
             logger.error(f"🔥 [WebAuthn] Registration response verification error: {e}")
@@ -633,7 +639,54 @@ class MFAService:
     """
 
     @staticmethod
-    def enable_totp(user: "User", request: HttpRequest | None = None) -> tuple[str, list[str]]:
+    def apply_state_change(
+        user: "User",
+        *,
+        action: Literal["enable", "disable", "recover", "rotate"],
+        audit_event: TwoFactorAuditRequest | None = None,
+    ) -> None:
+        """Persist MFA state and its revocation version in one transaction.
+
+        "rotate" bumps the version without touching the TOTP fields: a WebAuthn credential was
+        added or removed, which changes what the account accepts as a second factor.
+        """
+        from .models import UserCredentialVersion  # noqa: PLC0415
+
+        if action not in {"enable", "disable", "recover", "rotate"}:
+            raise ValueError("Unsupported MFA state change")
+        with transaction.atomic():
+            # Serialize first-row creation and coordinate with enrollment API locks.
+            locked_user = User.objects.select_for_update().get(pk=user.pk)
+            if action == "enable" and locked_user.two_factor_enabled:
+                raise ValueError("TOTP/2FA is already enabled for this user")
+            credential_version, _created = UserCredentialVersion.objects.select_for_update().get_or_create(
+                user_id=user.pk
+            )
+            if action != "rotate":
+                user.two_factor_enabled = action == "enable"
+                if action != "enable":
+                    user.two_factor_secret = ""
+                    user.backup_tokens = []
+                if audit_event is None:
+                    user.save(update_fields=["two_factor_enabled", "_two_factor_secret", "backup_tokens"])
+                else:
+                    # A detailed service event replaces the model signal's generic event.
+                    User.objects.filter(pk=user.pk).update(
+                        two_factor_enabled=user.two_factor_enabled,
+                        _two_factor_secret=user._two_factor_secret,
+                        backup_tokens=user.backup_tokens,
+                    )
+            UserCredentialVersion.objects.filter(pk=credential_version.pk).update(version=models.F("version") + 1)
+            credential_version.refresh_from_db(fields=["version"])
+            if audit_event is not None:
+                AuditService.log_2fa_event(audit_event)
+        # Replace a previously cached version (including a cached missing row).
+        user.credential_version = credential_version
+
+    @staticmethod
+    def enable_totp(
+        user: "User", request: HttpRequest | None = None, *, secret: str | None = None
+    ) -> tuple[str, list[str]]:
         """
         🔐 Enable TOTP/2FA for user with audit logging
 
@@ -644,16 +697,11 @@ class MFAService:
             if user.two_factor_enabled:
                 raise ValueError("TOTP/2FA is already enabled for this user")
 
-            # Generate TOTP secret
-            secret = TOTPService.generate_secret()
+            # Preserve the verified enrollment secret when supplied by a web view.
+            secret = secret or TOTPService.generate_secret()
+            user.two_factor_secret = secret
 
-            # Enable 2FA
-            user.two_factor_enabled = True
-            user.two_factor_secret = secret  # This uses the encrypted setter
-
-            # Generate backup codes
             backup_codes = BackupCodeService.generate_codes(user)
-            user.save()
 
             # 📊 Audit log the enablement
             metadata = {
@@ -670,8 +718,10 @@ class MFAService:
                     }
                 )
 
-            AuditService.log_2fa_event(
-                TwoFactorAuditRequest(
+            MFAService.apply_state_change(
+                user,
+                action="enable",
+                audit_event=TwoFactorAuditRequest(
                     event_type="2fa_enabled",
                     user=user,
                     context=AuditContext(
@@ -680,7 +730,7 @@ class MFAService:
                         metadata=metadata,
                     ),
                     description=f"TOTP/2FA enabled for user {user.email}",
-                )
+                ),
             )
 
             logger.info(f"✅ [MFA] TOTP enabled for user {user.email}")
@@ -710,12 +760,6 @@ class MFAService:
             if not user.two_factor_enabled:
                 raise ValueError("TOTP/2FA is not enabled for this user")
 
-            # Clear 2FA data
-            user.two_factor_enabled = False
-            user.two_factor_secret = ""  # nosec B105
-            user.backup_tokens = []
-            user.save()
-
             # 📊 Audit log the disablement
             metadata = {
                 "timestamp": timezone.now().isoformat(),
@@ -735,8 +779,10 @@ class MFAService:
                 event_type = "2fa_admin_reset"
                 description = f"TOTP/2FA disabled by admin {admin_user.email} for user {user.email}"
 
-            AuditService.log_2fa_event(
-                TwoFactorAuditRequest(
+            MFAService.apply_state_change(
+                user,
+                action="disable",
+                audit_event=TwoFactorAuditRequest(
                     event_type=event_type,
                     user=user,
                     context=AuditContext(
@@ -745,7 +791,7 @@ class MFAService:
                         metadata=metadata,
                     ),
                     description=description,
-                )
+                ),
             )
 
             logger.warning(
@@ -986,11 +1032,9 @@ class MFAService:
     def disable_all_mfa_methods(request: HttpRequest, user: "User") -> dict[str, Any]:
         """Disable TOTP, clear backup codes, and remove WebAuthn credentials."""
         try:
-            user.two_factor_enabled = False
-            user.two_factor_secret = ""  # nosec B105
-            user.backup_tokens = []
-            user.save(update_fields=["two_factor_enabled", "_two_factor_secret", "backup_tokens"])
-            WebAuthnCredential.objects.filter(user=user).delete()
+            with transaction.atomic():
+                MFAService.apply_state_change(user, action="disable")
+                WebAuthnCredential.objects.filter(user=user).delete()
             AuditService.log_simple_event(
                 event_type="mfa_disabled", user=user, metadata={"by": getattr(request.user, "email", None)}
             )
