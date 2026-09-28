@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Four VAT evidence settings: `billing.vies_evidence_max_age_days` (30), `billing.vies_outage_grace_days`
+  (14, kept below the maximum age), `billing.reverse_charge_requires_consultation_reference` and
+  `billing.reverse_charge_requires_name_match` (both on). The tax profile records the VIES
+  consultation reference and an explicit exemption reason for a zero VAT override; the staff pages
+  show the VIES status, verified name, reference, timestamp and recent refusals.
+- `reconcile_session_index` management command, to run once after draining old Platform workers, and
+  `cull_counters` in both services, which sweeps expired counter rows in bounded batches (run at
+  Portal start, nightly on native deployments, and daily on the Platform task queue).
+- `PLATFORM_DOMAIN`, `PORTAL_DOMAIN` and `PLATFORM_ALLOWED_CIDRS` (space-separated) for every Compose
+  deployment, `platform_allowed_ips` defaults for both Ansible roles, and a `tests/deploy/` suite that
+  checks Caddy route ownership, validates every configuration with the official image where Docker is
+  available, and starts the Portal against empty and sessions-only databases.
+- ADR-0050: the Portal database may hold named infrastructure tables (sessions and counters), never
+  business data.
+
 - SmartBill can now be selected as the invoice issuer, from Settings → Integrations. It
   numbers the invoice, supplies the PDF customers receive, and files e-Factura with ANAF
   in PRAHO's place. Proformas, payments, refunds, dunning, recurring billing, VAT
@@ -33,6 +48,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refuse to start without it.
 
 ### Fixed
+
+- The VAT report's default period ended on the UTC date while its filter works in local time, so
+  between midnight and three in Bucharest the day's invoices vanished from the screen.
+- The Portal's single-flight session validation lock was keyed per user, acquired with a racy
+  read-then-write, never released, and a Platform throttle during revalidation leaked it and
+  returned a server error. It is now a per-session lease released only by its owner, and a throttled
+  revalidation counts toward the bounded fail-open breaker.
+- Staff forms rejected every non-Romanian VAT number, so EU customers could not be set up by staff.
+- Staff MFA enrolment generated a fresh secret after the user had verified another one, so the
+  authenticator app never matched.
+- The test-layout audit flagged the substring "fix" inside words such as "fixed" and "round" inside
+  "rounding"; it now matches whole tokens and has its own tests.
 
 - A SmartBill reply that refuses without saying why no longer lets PRAHO resend the
   same invoice. A timeout or a throttle carries no refusal envelope, so it cannot
@@ -108,6 +135,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 ### Security
+
+- **MFA changes revoke sessions** — enabling or disabling two-factor authentication left every
+  existing session valid. Each user now carries a credential version, bumped in the same transaction
+  as every MFA state change (enrolment, disable, disable-all, recovery cleanup, the staff web view);
+  the session binding hashes the password together with that version, so no earlier binding is ever
+  accepted again, while untouched accounts keep their sessions across the deployment. The MFA API
+  returns the new binding, the Portal stores it before rotating its session, and an eight-digit
+  backup code can no longer complete enrolment.
+- **Session revocation reads an index instead of decoding every session** — revoking a user's other
+  sessions decoded the whole session table. A session store subclass indexes every authenticated
+  session by user on save and removes it on delete, covering both branches of Django's `login()`,
+  every key rotation and sessions created outside login; a data migration backfills the index and a
+  scheduled reconcile covers sessions written by old workers during a rolling deploy.
+- **Counters and claims are atomic and shared** — every rate limit, quota, circuit breaker,
+  idempotency claim and replay guard in both services used the cache's add-then-increment shape,
+  which loses updates under concurrency and, on the Portal's in-memory cache, was private to each
+  worker. Both services now share one counter store backed by their own database: a single upsert
+  per hit, fixed windows from the first hit, token-owned claims that only their owner can complete
+  or release. Request budgets reserve before deciding, so concurrent requests at the limit admit
+  exactly the budget; store failures deny; the kill switch leaves the store untouched. A completed
+  Portal checkout is replayed on any worker even after the cart is cleared, and a lost claim can no
+  longer be released by a request that never held it. The Portal now migrates its sessions and
+  counter tables at start and refuses to serve without them.
+- **The Platform is served on its own hostname behind a staff allowlist** — the shipped Caddy
+  configurations split one hostname by path between two services that both own `/dashboard/`,
+  `/billing/`, `/tickets/` and `/api/`, routed Platform webhooks to the Portal, pointed both health
+  handles at routes that do not exist, and served the whole Platform publicly by default. Each
+  service now has its own hostname; on the Platform hostname the health endpoint, the webhook
+  receivers and the API are public and everything else requires the client address to be in
+  `PLATFORM_ALLOWED_CIDRS`, which defaults to loopback. Forwarded-for headers from an untrusted peer
+  do not open the gate.
+- **Reverse-charge evidence must be fresh, referenced and name-matched** — a valid VIES status and an
+  exact number were enough. Evidence now has to be at most 30 days old, carry the consultation
+  reference of the response that produced it, and name a legal entity whose distinctive tokens
+  appear in the invoiced identity; a valid response without a reference is stored as format-only,
+  every refusal is logged and written as an audit event the staff tax page lists, and new evidence
+  snapshots are version 2 so the D390 report judges age from the snapshot. A staff zero-rate override
+  for an EU cross-border VAT payer without evidence is refused unless the profile states an exemption
+  reason, which the staff forms now require. Run `validate_vat_numbers --blocked-orders` before the
+  gates take effect to list name mismatches and incomplete profiles.
+- **Test-only bypass and unauthenticated duplicate removed** — the payment endpoints' authentication
+  helper honoured a `PORTAL_HMAC_BYPASS` flag that skipped the role check, and `/api/users/register`
+  was an HMAC-exempt duplicate of the signed registration route. Both are gone, and the sibling 403
+  guards now return the uniform denial body and headers instead of naming the required role.
 
 - **Customer roles are enforced on the API** — a customer organisation's `viewer` and `tech`
   members could read invoices and proformas, download PDFs, create and confirm orders, start
