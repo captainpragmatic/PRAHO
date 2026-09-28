@@ -462,22 +462,24 @@ class TestPortalIsolation:
 
     @pytest.mark.integration
     @pytest.mark.security
-    def test_portal_apps_have_no_models(self):
-        """Portal apps must not define ORM models (no DB access)."""
+    def test_portal_apps_define_only_the_infrastructure_models(self):
+        """Portal apps define no business models.
+
+        ADR-0050: the Portal database holds sessions and the counter store, never business data,
+        so the one model a Portal app may expose is the re-exported ``Counter``.
+        """
         portal_apps = PORTAL_DIR / "apps"
-        model_files = list(portal_apps.glob("*/models.py"))
-        for model_file in model_files:
+        allowed = {portal_apps / "common" / "models.py": {'__all__ = ["Counter"]'}}
+        for model_file in portal_apps.glob("*/models.py"):
             content = model_file.read_text().strip()
-            # Allow empty files or files with only imports/comments
+            # Imports, comments and a one-line docstring carry no model definition.
             non_trivial_lines = [
-                line for line in content.splitlines()
-                if line.strip() and not line.strip().startswith("#")
-                and not line.strip().startswith("from ")
-                and not line.strip().startswith("import ")
+                line.strip()
+                for line in content.splitlines()
+                if line.strip() and not line.strip().startswith(("#", "from ", "import ", '"""'))
             ]
-            assert len(non_trivial_lines) == 0, (
-                f"Portal app {model_file} defines models — portal must be stateless: "
-                f"{non_trivial_lines[:3]}"
+            assert set(non_trivial_lines) == allowed.get(model_file, set()), (
+                f"Portal app {model_file} defines models beyond the ADR-0050 inventory: {non_trivial_lines[:3]}"
             )
 
 
