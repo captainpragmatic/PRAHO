@@ -246,8 +246,8 @@ def company_team_remove_view(request: HttpRequest, target_user_id: int) -> HttpR
 # ---------------------------------------------------------------------------
 
 
-@require_billing_access()
 @require_http_methods(["GET", "POST"])
+@require_billing_access()
 def company_tax_profile_view(request: HttpRequest) -> HttpResponse:
     """View and edit the customer's tax profile (CUI, VAT, reverse charge)."""
     customer_id, user_id = _get_customer_context(request)
@@ -264,7 +264,6 @@ def company_tax_profile_view(request: HttpRequest) -> HttpResponse:
             "vat_number": request.POST.get("vat_number", "").strip(),
             "registration_number": request.POST.get("trade_registry_number", "").strip(),
             "is_vat_payer": request.POST.get("is_vat_payer") == "on",
-            "reverse_charge_eligible": request.POST.get("reverse_charge_eligible") == "on",
         }
         try:
             response = api_client.update_customer_tax_profile(

@@ -11,7 +11,7 @@ from typing import Any, cast
 import pyotp
 from django.conf import settings
 from django.contrib import messages
-from django.contrib.auth import authenticate, login, logout
+from django.contrib.auth import authenticate, login, logout, update_session_auth_hash
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib.auth.views import (
@@ -511,10 +511,11 @@ def mfa_setup_totp(request: HttpRequest) -> HttpResponse:
                 if totp.verify(token):
                     try:
                         # Enable TOTP using MFA service
-                        secret, backup_codes = MFAService.enable_totp(user, request)
+                        secret, backup_codes = MFAService.enable_totp(user, request, secret=secret)
 
                         # 🔒 Rotate session for security after enabling 2FA
                         SessionSecurityService.rotate_session_on_2fa_change(request)
+                        update_session_auth_hash(request, user)
 
                         messages.success(request, _("2FA has been enabled successfully!"))
 
@@ -726,14 +727,11 @@ def mfa_disable(request: HttpRequest) -> HttpResponse:
             messages.error(request, _("Invalid password."))
             return render(request, "users/mfa_disable.html")
 
-        # Disable 2FA
-        user.two_factor_enabled = False
-        user.two_factor_secret = ""  # nosec B105
-        user.backup_tokens = []
-        user.save(update_fields=["two_factor_enabled", "_two_factor_secret", "backup_tokens"])
+        MFAService.disable_totp(user, request=request)
 
         # 🔒 Rotate session for security after disabling 2FA
         SessionSecurityService.rotate_session_on_2fa_change(request)
+        update_session_auth_hash(request, user)
 
         # Log the action
         UserLoginLog.objects.create(

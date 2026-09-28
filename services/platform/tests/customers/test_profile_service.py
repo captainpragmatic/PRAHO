@@ -10,11 +10,13 @@ Regression guard: these tests capture chaos-monkey findings around:
 
 import contextlib
 import time
+from typing import cast
 from unittest.mock import patch
 
 from django.test import TestCase
 
 from apps.customers.profile_service import ProfileService
+from apps.users.models import User
 from tests.factories.core_factories import CustomerCreationRequest, create_admin_user, create_full_customer
 
 
@@ -90,6 +92,13 @@ class TestProfileServiceTaxProfileAllowlist(TestCase):
         )
         self.tax_profile.refresh_from_db()
         self.assertEqual(self.tax_profile.customer_id, original_customer_id)
+
+    def test_reverse_charge_eligibility_is_not_customer_updatable(self) -> None:
+        self.assertNotIn("reverse_charge_eligible", ProfileService.TAX_PROFILE_UPDATABLE_FIELDS)
+        self.assertFalse(self.tax_profile.reverse_charge_eligible)
+        ProfileService.update_tax_profile(self.tax_profile, cast("User", self.user), reverse_charge_eligible=True)
+        self.tax_profile.refresh_from_db()
+        self.assertFalse(self.tax_profile.reverse_charge_eligible)
 
     def test_updatable_fields_constant_does_not_contain_id(self) -> None:
         """Class-level constant must not accidentally include 'id'."""

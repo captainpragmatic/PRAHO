@@ -241,6 +241,7 @@ def invoices_list_view(request: HttpRequest) -> HttpResponse:
 
 
 @require_http_methods(["GET"])
+@require_billing_access()
 def invoices_search_api(request: HttpRequest) -> HttpResponse:
     """
     HTMX search endpoint for live invoice filtering.
@@ -310,6 +311,7 @@ def invoices_search_api(request: HttpRequest) -> HttpResponse:
 
 
 @require_http_methods(["GET"])
+@require_billing_access()
 def invoice_detail_view(request: HttpRequest, invoice_number: str) -> HttpResponse:
     """
     📄 Customer Invoice Detail View
@@ -369,6 +371,7 @@ def invoice_detail_view(request: HttpRequest, invoice_number: str) -> HttpRespon
 
 
 @require_http_methods(["GET"])
+@require_billing_access()
 def billing_dashboard_widget(request: HttpRequest) -> JsonResponse:
     """
     📊 Billing Dashboard Widget API
@@ -422,6 +425,7 @@ def billing_dashboard_widget(request: HttpRequest) -> JsonResponse:
 
 
 @require_http_methods(["POST"])
+@require_billing_access()
 def sync_invoices_action(request: HttpRequest) -> JsonResponse:
     """
     🔄 Sync Invoices Action
@@ -465,6 +469,7 @@ def sync_invoices_action(request: HttpRequest) -> JsonResponse:
 
 
 @require_http_methods(["GET"])
+@require_billing_access()
 def invoice_pdf_export(request: HttpRequest, invoice_number: str) -> HttpResponse:
     """
     📄 Invoice PDF Export
@@ -498,6 +503,7 @@ def invoice_pdf_export(request: HttpRequest, invoice_number: str) -> HttpRespons
 
 
 @require_http_methods(["GET"])
+@require_billing_access()
 def proforma_pdf_export(request: HttpRequest, proforma_number: str) -> HttpResponse:
     """
     📄 Proforma PDF Export
@@ -536,6 +542,7 @@ def proforma_pdf_export(request: HttpRequest, proforma_number: str) -> HttpRespo
 
 
 @require_http_methods(["GET"])
+@require_billing_access()
 def proforma_detail_view(request: HttpRequest, proforma_number: str) -> HttpResponse:
     """
     📄 Customer Proforma Detail View
@@ -763,6 +770,7 @@ def subscription_auto_payment(request: HttpRequest) -> JsonResponse:
 
 
 @require_http_methods(["POST"])
+@require_billing_access()
 def request_refund_view(request: HttpRequest, invoice_number: str) -> JsonResponse:
     """
     🔄 Request Invoice Refund

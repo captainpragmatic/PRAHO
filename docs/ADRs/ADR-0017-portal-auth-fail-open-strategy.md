@@ -160,3 +160,13 @@ when the session backend is switched.
    after login and that `SessionSecurityMiddleware` activates for authenticated sessions —
    testing the control's *activation*, not just its correctness, which is what this class of
    defect requires.
+
+## Addendum 2026-09
+
+Portal sessions are bound to the Platform user's Django session auth hash.
+Login stores the hash separately from profile data; signed validation requests must supply it.
+Password changes and resets revoke older hashes at the next Platform validation.
+Django secret-key fallback hashes are accepted and upgraded to the current hash in Portal.
+Session-validation HTTP 401/403 responses are authoritative denials and fail closed, including during soft grace.
+Only transport errors and HTTP 5xx responses retain the bounded fail-open breaker; rate limits still propagate.
+A Portal password change updates the initiating session's hash and revokes the user's Platform sessions.

@@ -21,8 +21,10 @@ from decimal import Decimal
 from django.core.cache import cache
 from django.test import TestCase, override_settings
 
+from apps.audit.models import AuditEvent
 from apps.billing.tax_models import TaxRule
 from apps.common.tax_service import CustomerVATInfo, TaxService, VATCalculationResult, VATScenario
+from apps.settings.services import SettingsService
 
 LOCMEM_TEST_CACHE = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
 
@@ -34,9 +36,80 @@ class TaxServiceScenarioTests(TestCase):
     def setUp(self) -> None:
         cache.clear()
 
+    def test_eu_business_without_vies_evidence_pays_destination_vat(self) -> None:
+        info: CustomerVATInfo = {
+            "country": "DE", "is_business": True, "vat_number": "DE123456789", "is_vat_payer": True,
+        }
+        result = TaxService.calculate_vat_for_document(10000, info)
+        self.assertEqual(result.scenario, VATScenario.EU_B2C)
+        self.assertEqual(result.vat_rate, Decimal("19.0"))
+        self.assertEqual(result.vat_cents, 1900)
+        self.assertEqual(result.reasoning, "EU business without VIES-verified VAT number → destination VAT")
+
+    def test_eu_business_with_vies_evidence_is_reverse_charged(self) -> None:
+        info: CustomerVATInfo = {
+            "country": "DE", "is_business": True, "vat_number": "DE123456789",
+            "is_vat_payer": True,
+        }
+        self.assertEqual(TaxService.calculate_vat_for_document(10000, info).vat_cents, 1900)
+        info["vies_verified"] = True
+        result = TaxService.calculate_vat_for_document(10000, info)
+        self.assertEqual(result.scenario, VATScenario.EU_B2B_REVERSE_CHARGE)
+        self.assertEqual(result.vat_cents, 0)
+
+    def test_verified_number_must_match_the_billing_country(self) -> None:
+        info: CustomerVATInfo = {
+            "country": "DE", "is_business": True, "vat_number": "RO18189442",
+            "is_vat_payer": True, "vies_verified": True,
+        }
+        result = TaxService.calculate_vat_for_document(10000, info)
+        self.assertEqual(result.scenario, VATScenario.EU_B2C)
+        self.assertEqual(result.vat_rate, Decimal("19.0"))
+        self.assertEqual(result.vat_cents, 1900)
+        self.assertEqual(result.total_cents, 11900)
+        self.assertIn("issuing country does not match billing country", result.reasoning)
+
+        for country, number in (("DE", "DE136695976"), ("GR", "EL094259216"), ("NL", "123456789B01")):
+            with self.subTest(country=country, number=number):
+                info["country"] = country
+                info["vat_number"] = number
+                result = TaxService.calculate_vat_for_document(10000, info)
+                self.assertEqual(result.scenario, VATScenario.EU_B2B_REVERSE_CHARGE)
+                self.assertEqual(result.vat_cents, 0)
+                self.assertEqual(result.total_cents, 10000)
+
+    def test_policy_off_still_requires_matching_issuing_country(self) -> None:
+        with self.captureOnCommitCallbacks(execute=True):
+            setting = SettingsService.update_setting("billing.reverse_charge_requires_vies", False)
+        self.assertTrue(setting.is_ok(), setting)
+        info: CustomerVATInfo = {
+            "country": "DE", "is_business": True, "vat_number": "RO18189442", "is_vat_payer": True,
+        }
+        result = TaxService.calculate_vat_for_document(10000, info)
+        self.assertEqual(result.scenario, VATScenario.EU_B2C)
+        self.assertEqual(result.vat_cents, 1900)
+
+    def test_policy_off_restores_number_only_reverse_charge(self) -> None:
+        with self.captureOnCommitCallbacks(execute=True):
+            setting = SettingsService.update_setting("billing.reverse_charge_requires_vies", False)
+        self.assertTrue(setting.is_ok(), setting)
+        info: CustomerVATInfo = {
+            "country": "DE", "is_business": True, "vat_number": "DE123456789", "is_vat_payer": True,
+        }
+        result = TaxService.calculate_vat_for_document(10000, info)
+        self.assertEqual(result.scenario, VATScenario.EU_B2B_REVERSE_CHARGE)
+        self.assertEqual(result.vat_cents, 0)
+
+    def test_calculate_vat_adapter_writes_no_audit_event(self) -> None:
+        before = AuditEvent.objects.count()
+        result = TaxService.calculate_vat(10000, "DE", is_business=True, vat_number="DE123456789")
+        self.assertEqual(result["vat_cents"], 1900)
+        self.assertEqual(AuditEvent.objects.count(), before)
+
     # ── Scenario 1: Romania B2C ──────────────────────────────────────────────
 
     def test_romania_b2c_applies_romanian_vat(self) -> None:
+
         """Romanian consumer: standard 21% VAT applied."""
         info: CustomerVATInfo = {"country": "RO", "is_business": False}
         result = TaxService.calculate_vat_for_document(10000, info)
@@ -127,7 +200,9 @@ class TaxServiceScenarioTests(TestCase):
             "is_business": True,
             "vat_number": "DE123456789",
             "is_vat_payer": True,
+            "vies_verified": True,
         }
+
         result = TaxService.calculate_vat_for_document(10000, info)
 
         self.assertEqual(result.scenario, VATScenario.EU_B2B_REVERSE_CHARGE)
@@ -142,7 +217,9 @@ class TaxServiceScenarioTests(TestCase):
             "is_business": True,
             "vat_number": "FR12345678901",
             "is_vat_payer": True,
+            "vies_verified": True,
         }
+
         result = TaxService.calculate_vat_for_document(5000, info)
 
         self.assertEqual(result.scenario, VATScenario.EU_B2B_REVERSE_CHARGE)
@@ -174,7 +251,9 @@ class TaxServiceScenarioTests(TestCase):
                     # Explicit under the fail-closed contract: missing VAT-payer
                     # evidence now routes to EU_B2C, so the verified case states it.
                     "is_vat_payer": True,
+                    "vies_verified": True,
                     "reverse_charge_eligible": True,
+
                 },
                 VATScenario.EU_B2B_REVERSE_CHARGE,
                 "0.0",
@@ -339,8 +418,8 @@ class TaxServiceScenarioTests(TestCase):
         self.assertEqual(result.scenario, VATScenario.EU_B2C)
         self.assertEqual(result.vat_rate, Decimal("19.0"))
 
-    def test_reverse_charge_eligible_flag_forces_reverse_charge(self) -> None:
-        """reverse_charge_eligible=True forces EU B2B reverse charge."""
+    def test_reverse_charge_eligible_flag_without_evidence_is_ignored(self) -> None:
+        """A customer-controlled flag cannot replace VIES evidence."""
         info: CustomerVATInfo = {
             "country": "DE",
             "is_business": True,
@@ -350,8 +429,9 @@ class TaxServiceScenarioTests(TestCase):
         }
         result = TaxService.calculate_vat_for_document(10000, info)
 
-        self.assertEqual(result.scenario, VATScenario.EU_B2B_REVERSE_CHARGE)
-        self.assertEqual(result.vat_cents, 0)
+        self.assertEqual(result.scenario, VATScenario.EU_B2C)
+        self.assertEqual(result.vat_cents, 1900)
+
 
     def test_reverse_charge_not_applied_for_romania(self) -> None:
         """reverse_charge_eligible does NOT apply to Romania (home country)."""
@@ -407,7 +487,9 @@ class SupplierCountryParameterisationTests(TestCase):
             "is_business": True,
             "vat_number": "RO12345678",
             "is_vat_payer": True,
+            "vies_verified": True,
         }
+
         result = TaxService.calculate_vat_for_document(10000, info)
 
         self.assertEqual(result.scenario, VATScenario.EU_B2B_REVERSE_CHARGE)
@@ -457,12 +539,14 @@ class SupplierCountryParameterisationTests(TestCase):
         self.assertEqual(result["vat_cents"], 1900)
         self.assertEqual(result["total_cents"], 11900)
 
-    def test_calculate_vat_entry_point_still_reverse_charges_abroad(self) -> None:
-        """The mirror, so the fix is not just 'never reverse charge'."""
-        result = TaxService.calculate_vat(10000, country_code="FR", is_business=True, vat_number="FR12345678901")
+    @override_settings(COMPANY_COUNTRY_CODE="RO")
+    def test_calculate_vat_entry_point_charges_vat_without_evidence(self) -> None:
+        """The adapter has no profile evidence for a foreign business."""
+        result = TaxService.calculate_vat(10000, country_code="DE", is_business=True, vat_number="DE123456789")
 
-        self.assertEqual(result["vat_cents"], 0)
-        self.assertEqual(result["vat_rate_percent"], Decimal("0.0"))
+        self.assertEqual(result["vat_cents"], 1900)
+        self.assertEqual(result["vat_rate_percent"], Decimal("19.0"))
+
 
     def test_supplier_fallback_is_not_cached_under_the_customer_code(self) -> None:
         """A rate borrowed from the supplier must not be cached under the customer's

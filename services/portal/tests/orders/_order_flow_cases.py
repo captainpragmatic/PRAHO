@@ -10,16 +10,17 @@ Covers:
   UX-5:      calculate_cart_totals API response includes per-item array
   ENH-3:     checkout sidebar reactive Next Steps via Alpine.js
 
-No database access — all tests use SimpleTestCase + locmem cache.
+Tests use Portal infrastructure tables and a local session cache.
 """
 
 import json
+import time
 from pathlib import Path
 from typing import ClassVar
 from unittest.mock import MagicMock, patch
 
 from django.contrib.sessions.backends.cache import SessionStore
-from django.test import Client, SimpleTestCase, override_settings
+from django.test import Client, TestCase, override_settings
 
 _CACHE_SETTINGS = {
     "SESSION_ENGINE": "django.contrib.sessions.backends.cache",
@@ -64,7 +65,7 @@ def _make_cart_session(session: SessionStore, product_slug: str = "shared-hostin
 # ---------------------------------------------------------------------------
 
 @override_settings(**_CACHE_SETTINGS)
-class TestAgreeTermsValidation(SimpleTestCase):
+class TestAgreeTermsValidation(TestCase):
     """BACKEND-2: create_order must reject submissions missing agree_terms=on."""
 
     def setUp(self) -> None:
@@ -75,7 +76,10 @@ class TestAgreeTermsValidation(SimpleTestCase):
         session = self.client.session
         session["customer_id"] = 42
         session["user_id"] = 7
+        session["user_memberships"] = [{"customer_id": session["customer_id"], "role": "owner"}]
+        session["user_memberships_fetched_at"] = time.time()
         session.save()
+
 
         # Build a cart directly using SessionStore mapped to client session key
         from apps.orders.services import GDPRCompliantCartSession  # noqa: PLC0415
@@ -154,7 +158,7 @@ class TestAgreeTermsValidation(SimpleTestCase):
 # ---------------------------------------------------------------------------
 
 @override_settings(**_CACHE_SETTINGS)
-class TestCartVersionMismatch(SimpleTestCase):
+class TestCartVersionMismatch(TestCase):
     """BACKEND-3: stale cart_version → 400 JSON for AJAX, 302 for non-AJAX."""
 
     def setUp(self) -> None:
@@ -163,7 +167,10 @@ class TestCartVersionMismatch(SimpleTestCase):
         session = self.client.session
         session["customer_id"] = 42
         session["user_id"] = 7
+        session["user_memberships"] = [{"customer_id": session["customer_id"], "role": "owner"}]
+        session["user_memberships_fetched_at"] = time.time()
         session.save()
+
 
         from apps.orders.services import GDPRCompliantCartSession  # noqa: PLC0415
 
@@ -262,7 +269,7 @@ class TestCartVersionMismatch(SimpleTestCase):
 # ---------------------------------------------------------------------------
 
 @override_settings(**_CACHE_SETTINGS)
-class TestCardPaymentRouting(SimpleTestCase):
+class TestCardPaymentRouting(TestCase):
     """BACKEND-4: payment_method=card must use the shared order creation path."""
 
     def setUp(self) -> None:
@@ -273,7 +280,10 @@ class TestCardPaymentRouting(SimpleTestCase):
         session = self.client.session
         session["customer_id"] = 42
         session["user_id"] = 7
+        session["user_memberships"] = [{"customer_id": session["customer_id"], "role": "owner"}]
+        session["user_memberships_fetched_at"] = time.time()
         session.save()
+
 
         from apps.orders.services import GDPRCompliantCartSession  # noqa: PLC0415
 
@@ -383,7 +393,7 @@ class TestCardPaymentRouting(SimpleTestCase):
 # ---------------------------------------------------------------------------
 
 @override_settings(**_CACHE_SETTINGS)
-class TestProductTypeInCartItem(SimpleTestCase):
+class TestProductTypeInCartItem(TestCase):
     """BUG-2: add_item must persist product_type from platform API into the cart item."""
 
     def setUp(self) -> None:
@@ -470,7 +480,7 @@ class TestProductTypeInCartItem(SimpleTestCase):
 # ---------------------------------------------------------------------------
 
 @override_settings(**_CACHE_SETTINGS)
-class TestCartTotalsVatRatePercent(SimpleTestCase):
+class TestCartTotalsVatRatePercent(TestCase):
     """DS-1: platform API response for calculate_cart_totals must include vat_rate_percent."""
 
     def setUp(self) -> None:
@@ -528,7 +538,7 @@ class TestCartTotalsVatRatePercent(SimpleTestCase):
 # ---------------------------------------------------------------------------
 
 @override_settings(**_CACHE_SETTINGS)
-class TestCartTotalsPerItemArray(SimpleTestCase):
+class TestCartTotalsPerItemArray(TestCase):
     """UX-5: platform API response must include items array with per-item pricing fields."""
 
     def setUp(self) -> None:
@@ -678,7 +688,7 @@ class TestCartTotalsPerItemArray(SimpleTestCase):
 # ---------------------------------------------------------------------------
 
 
-class TestCentsConversionNoFloatingPoint(SimpleTestCase):
+class TestCentsConversionNoFloatingPoint(TestCase):
     """Decimal-based price conversion must produce exact integer cents without float drift."""
 
     def test_twenty_nine_ninety_nine_converts_to_2999_cents(self) -> None:
@@ -719,7 +729,7 @@ class TestCentsConversionNoFloatingPoint(SimpleTestCase):
 # ---------------------------------------------------------------------------
 
 
-class TestParseOrderTimestamp(SimpleTestCase):
+class TestParseOrderTimestamp(TestCase):
     """_parse_order_timestamp must convert ISO strings to TZ-aware datetimes."""
 
     def test_iso_string_with_timezone_parses_to_datetime(self) -> None:
@@ -779,7 +789,7 @@ class TestParseOrderTimestamp(SimpleTestCase):
     COMPANY_BANK_NAME="Test Bank",
     COMPANY_BANK_BENEFICIARY="PragmaticHost SRL",
 )
-class TestBankTransferSkipsStripeIntent(SimpleTestCase):
+class TestBankTransferSkipsStripeIntent(TestCase):
     """order_confirmation must NOT fetch Stripe config when payment_method=bank_transfer."""
 
     def setUp(self) -> None:
@@ -823,7 +833,7 @@ class TestBankTransferSkipsStripeIntent(SimpleTestCase):
     COMPANY_BANK_NAME="Test Bank",
     COMPANY_BANK_BENEFICIARY="PragmaticHost SRL",
 )
-class TestStripeFailureRedirectsToConfirmation(SimpleTestCase):
+class TestStripeFailureRedirectsToConfirmation(TestCase):
     """When Stripe config fetch raises, order_confirmation must still render (no 500)."""
 
     def setUp(self) -> None:
@@ -865,7 +875,7 @@ class TestStripeFailureRedirectsToConfirmation(SimpleTestCase):
 
 
 @override_settings(**_CACHE_SETTINGS, SECRET_KEY="test-secret-key-for-hmac-seal")
-class TestPriceSealingRequiredKeys(SimpleTestCase):
+class TestPriceSealingRequiredKeys(TestCase):
     """seal_price_data must return all required fields and produce deterministic signatures."""
 
     REQUIRED_SEAL_KEYS: ClassVar[set[str]] = {"signature", "body_hash", "timestamp", "nonce", "portal_id", "ip_hash"}
@@ -929,7 +939,7 @@ class TestPriceSealingRequiredKeys(SimpleTestCase):
 
 
 @override_settings(**_CACHE_SETTINGS)
-class TestSinglePreflightProducesOneVatAuditEvent(SimpleTestCase):
+class TestSinglePreflightProducesOneVatAuditEvent(TestCase):
     """OrderCreationService.preflight_order must call platform_api.post() exactly once."""
 
     def setUp(self) -> None:
@@ -985,7 +995,7 @@ class TestSinglePreflightProducesOneVatAuditEvent(SimpleTestCase):
 # ---------------------------------------------------------------------------
 
 
-class TestNoHardcodedRomanianInOrderTemplates(SimpleTestCase):
+class TestNoHardcodedRomanianInOrderTemplates(TestCase):
     """Order templates must not contain bare Romanian text outside translation tags."""
 
     # Known Romanian words that must always appear inside {% trans %} or {% blocktrans %}
@@ -1044,7 +1054,7 @@ class TestNoHardcodedRomanianInOrderTemplates(SimpleTestCase):
 # ---------------------------------------------------------------------------
 
 
-class TestNoFloatformatOnMonetaryValues(SimpleTestCase):
+class TestNoFloatformatOnMonetaryValues(TestCase):
     """Order templates must use |romanian_currency / |cents_to_currency, not |floatformat."""
 
     # Template variables that carry monetary meaning
@@ -1126,7 +1136,7 @@ def _make_bank_transfer_order(status: str = "pending") -> dict:
 
 
 @override_settings(**_BANK_SETTINGS)
-class TestBankTransferConfirmationHeader(SimpleTestCase):
+class TestBankTransferConfirmationHeader(TestCase):
     """ENH-2: order_confirmation header must differ for bank_transfer vs other payment methods."""
 
     def setUp(self) -> None:
@@ -1134,7 +1144,10 @@ class TestBankTransferConfirmationHeader(SimpleTestCase):
         session = self.client.session
         session["customer_id"] = 42
         session["user_id"] = 7
+        session["user_memberships"] = [{"customer_id": session["customer_id"], "role": "owner"}]
+        session["user_memberships_fetched_at"] = time.time()
         session.save()
+
 
     def _get_confirmation(self, order_data: dict) -> "HttpResponse":  # noqa: F821
         with patch("apps.orders.views.PlatformAPIClient") as mock_cls:
@@ -1165,7 +1178,7 @@ class TestBankTransferConfirmationHeader(SimpleTestCase):
 
 
 @override_settings(**_BANK_SETTINGS)
-class TestBankTransferInstructionsCard(SimpleTestCase):
+class TestBankTransferInstructionsCard(TestCase):
     """ENH-2: Bank Transfer Instructions card renders correctly on confirmation page."""
 
     def setUp(self) -> None:
@@ -1173,7 +1186,10 @@ class TestBankTransferInstructionsCard(SimpleTestCase):
         session = self.client.session
         session["customer_id"] = 42
         session["user_id"] = 7
+        session["user_memberships"] = [{"customer_id": session["customer_id"], "role": "owner"}]
+        session["user_memberships_fetched_at"] = time.time()
         session.save()
+
 
     def _get_confirmation(self, order_data: dict) -> "HttpResponse":  # noqa: F821
         with patch("apps.orders.views.PlatformAPIClient") as mock_cls:
@@ -1232,7 +1248,7 @@ class TestBankTransferInstructionsCard(SimpleTestCase):
 
 
 @override_settings(**_BANK_SETTINGS)
-class TestBankTransferContextPassthrough(SimpleTestCase):
+class TestBankTransferContextPassthrough(TestCase):
     """ENH-2: order_confirmation view must pass bank_details to template context."""
 
     def setUp(self) -> None:
@@ -1240,7 +1256,10 @@ class TestBankTransferContextPassthrough(SimpleTestCase):
         session = self.client.session
         session["customer_id"] = 42
         session["user_id"] = 7
+        session["user_memberships"] = [{"customer_id": session["customer_id"], "role": "owner"}]
+        session["user_memberships_fetched_at"] = time.time()
         session.save()
+
 
     def test_bank_details_in_context_for_bank_transfer(self) -> None:
         """bank_details context variable must contain iban, bank_name, beneficiary."""
@@ -1276,7 +1295,7 @@ class TestBankTransferContextPassthrough(SimpleTestCase):
 # ---------------------------------------------------------------------------
 
 
-class TestCheckoutReactiveSidebar(SimpleTestCase):
+class TestCheckoutReactiveSidebar(TestCase):
     """ENH-3: The checkout sidebar must contain Alpine.js reactive Next Steps content.
 
     These tests verify the *template source* — the presence of Alpine.js

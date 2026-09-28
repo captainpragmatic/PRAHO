@@ -37,8 +37,11 @@ class TaxEvidenceLifecycleTests(TestCase):
             status="active",
         )
         self.profile = CustomerTaxProfile.objects.create(
-            customer=self.customer, vat_number="DE136695976", is_vat_payer=True, reverse_charge_eligible=True
+            customer=self.customer, vat_number="DE136695976", is_vat_payer=True, reverse_charge_eligible=True,
+            vies_verification_status="valid", vies_verified_at=timezone.now(),
+            vies_consultation_reference="consultation-original",
         )
+
         self.validation = VATValidation.objects.create(
             country_code="DE",
             vat_number="136695976",
@@ -237,6 +240,7 @@ class TaxEvidenceLifecycleTests(TestCase):
                     "vat_number": "DE136695976",
                     "is_vat_payer": True,
                     "custom_vat_rate": Decimal(0),
+                    "vies_verified": True,
                 },
             )
         )

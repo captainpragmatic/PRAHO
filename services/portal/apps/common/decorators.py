@@ -11,6 +11,7 @@ from typing import Any, cast
 
 from django.http import HttpRequest, HttpResponse, HttpResponseForbidden, JsonResponse
 from django.shortcuts import redirect
+from django.template.loader import render_to_string
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
@@ -170,7 +171,8 @@ def require_customer_role(  # noqa: C901
 
     def decorator(view_func: Callable[..., Any]) -> Callable[..., Any]:  # noqa: C901
         @wraps(view_func)
-        def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:  # noqa: PLR0911
+        def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:  # noqa: C901, PLR0911, PLR0912
+
             # Check basic authentication first
             if not request.session.get("customer_id") or not request.session.get("user_id"):
                 if request.headers.get("Accept") == "application/json":
@@ -182,6 +184,14 @@ def require_customer_role(  # noqa: C901
                 logger.warning(f"🚨 [Security] No customer selected for user {request.session.get('user_id')}")
                 if request.headers.get("Accept") == "application/json":
                     return JsonResponse({"error": _("No customer selected")}, status=403)
+                if request.headers.get("HX-Request") == "true":
+                    return HttpResponseForbidden(
+                        render_to_string(
+                            "components/permission_denied_partial.html",
+                            {"message": _("No customer selected")},
+                            request=request,
+                        ),
+                    )
                 return HttpResponseForbidden(_("No customer selected"), content_type="text/plain")
 
             # Real-time verification if requested
@@ -194,6 +204,14 @@ def require_customer_role(  # noqa: C901
                     )
                     if request.headers.get("Accept") == "application/json":
                         return JsonResponse({"error": _("Access denied")}, status=403)
+                    if request.headers.get("HX-Request") == "true":
+                        return HttpResponseForbidden(
+                            render_to_string(
+                                "components/permission_denied_partial.html",
+                                {"message": _("Access denied")},
+                                request=request,
+                            ),
+                        )
                     return HttpResponseForbidden(_("Access denied"), content_type="text/plain")
 
                 user_role = verification.get("role", "viewer")
@@ -207,6 +225,14 @@ def require_customer_role(  # noqa: C901
                 )
                 if request.headers.get("Accept") == "application/json":
                     return JsonResponse({"error": _("Role not found")}, status=403)
+                if request.headers.get("HX-Request") == "true":
+                    return HttpResponseForbidden(
+                        render_to_string(
+                            "components/permission_denied_partial.html",
+                            {"message": _("Role not found")},
+                            request=request,
+                        ),
+                    )
                 return HttpResponseForbidden(_("Role not found"), content_type="text/plain")
 
             # Check role permissions
@@ -217,6 +243,14 @@ def require_customer_role(  # noqa: C901
                 )
                 if request.headers.get("Accept") == "application/json":
                     return JsonResponse({"error": _("Insufficient permissions")}, status=403)
+                if request.headers.get("HX-Request") == "true":
+                    return HttpResponseForbidden(
+                        render_to_string(
+                            "components/permission_denied_partial.html",
+                            {"message": _("Insufficient permissions")},
+                            request=request,
+                        ),
+                    )
                 return HttpResponseForbidden(_("Insufficient permissions"), content_type="text/plain")
 
             # Store current role in request for use in view
@@ -235,8 +269,19 @@ def require_billing_access(realtime_verification: bool = False) -> Callable[...,
     return require_customer_role(["owner", "billing"], realtime_verification)
 
 
+def require_support_access(
+    realtime_verification: bool = False,
+) -> Callable[[Callable[..., HttpResponse]], Callable[..., HttpResponse]]:
+    """Require support access for owner, billing or technical members."""
+    return cast(
+        Callable[[Callable[..., HttpResponse]], Callable[..., HttpResponse]],
+        require_customer_role(["owner", "billing", "tech"], realtime_verification),
+    )
+
+
 def require_technical_access(realtime_verification: bool = False) -> Callable[..., Any]:
     """🔒 Require technical access - owner or tech role"""
+
     return require_customer_role(["owner", "tech"], realtime_verification)
 
 

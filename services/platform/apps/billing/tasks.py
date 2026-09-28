@@ -401,8 +401,11 @@ def start_dunning_process(invoice_id: str) -> dict[str, Any]:  # noqa: PLR0912  
         return {"success": False, "error": str(e)}
 
 
-def validate_vat_number(tax_profile_id: str) -> dict[str, Any]:
+def validate_vat_number(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Explicit validation and locked persistence stages
+    tax_profile_id: str,
+) -> dict[str, Any]:
     """Validate a customer's VAT number with format check and VIES verification.
+
 
     Routing logic:
     - Detects country from VAT prefix (defaults to RO if no prefix).
@@ -422,6 +425,8 @@ def validate_vat_number(tax_profile_id: str) -> dict[str, Any]:
     logger.info("[VAT] Validating VAT number for tax profile %s", tax_profile_id)
 
     from apps.billing.gateways.vies_gateway import VIESGateway  # noqa: PLC0415
+    from apps.billing.tax_models import VATValidation  # noqa: PLC0415
+    from apps.billing.vies_evidence import normalize_vat_number, profile_vat_identity  # noqa: PLC0415
     from apps.common.eu_vat_validator import (  # noqa: PLC0415
         is_eu_country,
         parse_vat_number,
@@ -431,16 +436,23 @@ def validate_vat_number(tax_profile_id: str) -> dict[str, Any]:
 
     try:
         tax_profile = CustomerTaxProfile.objects.select_related("customer").get(id=tax_profile_id)
+        validated_number = normalize_vat_number(tax_profile.vat_number)
 
         if not tax_profile.vat_number:
             logger.info("[VAT] No VAT number for tax profile %s", tax_profile_id)
             return {"success": True, "tax_profile_id": str(tax_profile.id), "message": "No VAT number to validate"}
 
-        # Step 1: Parse country + digits
-        country_code, vat_digits = parse_vat_number(tax_profile.vat_number)
+        # Step 1: Parse country + digits against the billing country (EL for Greece)
+        country_code, vat_digits = profile_vat_identity(tax_profile)
 
         if not is_eu_country(country_code):
-            _update_tax_profile_vies(tax_profile, status="not_applicable")
+            with transaction.atomic():
+                tax_profile = CustomerTaxProfile.objects.select_for_update().get(pk=tax_profile_id)
+                if normalize_vat_number(tax_profile.vat_number) != validated_number:
+                    logger.warning("⚠️ [VAT] Number changed during validation for profile %s", tax_profile_id)
+                    return {"success": True, "skipped": "vat_number_changed"}
+                _update_tax_profile_vies(tax_profile, status="not_applicable")
+
             return {
                 "success": True,
                 "tax_profile_id": str(tax_profile.id),
@@ -451,6 +463,10 @@ def validate_vat_number(tax_profile_id: str) -> dict[str, Any]:
         fmt = validate_vat_format(country_code, vat_digits)
         if not fmt.is_valid:
             with transaction.atomic():
+                tax_profile = CustomerTaxProfile.objects.select_for_update().get(pk=tax_profile_id)
+                if normalize_vat_number(tax_profile.vat_number) != validated_number:
+                    logger.warning("⚠️ [VAT] Number changed during validation for profile %s", tax_profile_id)
+                    return {"success": True, "skipped": "vat_number_changed"}
                 _store_validation(
                     fmt.country_code,
                     vat_digits,
@@ -479,11 +495,29 @@ def validate_vat_number(tax_profile_id: str) -> dict[str, Any]:
             }
         vies = VIESGateway.check_vat(country_code, vat_digits, **requester_kwargs)
 
+        from apps.billing.config import (  # noqa: PLC0415
+            get_vies_outage_grace_days,
+            reverse_charge_requires_consultation_reference,
+        )
+
         source: Literal["vies", "format_check", "manual", "cached"]
+        keep_evidence = False
         if vies.api_available:
             source = "vies"
             is_valid = vies.is_valid
             status = "valid" if vies.is_valid else "invalid"
+            if (
+                vies.is_valid
+                and reverse_charge_requires_consultation_reference()
+                and not vies.request_identifier.strip()
+            ):
+                # The number is confirmed but the proof is incomplete: the status alone is downgraded,
+                # so an earlier referenced proof stays on record for the audit trail.
+                source = "format_check"
+                is_valid = False
+                status = "format_only"
+                keep_evidence = True
+                logger.warning("🚨 [VAT] Valid VIES response lacks a consultation reference: %s", fmt.full_vat_number)
         else:
             # VIES down — record format-only result but do NOT grant reverse charge.
             # Naming note: "format_check" is VATValidation.validation_source (HOW it was validated);
@@ -492,12 +526,34 @@ def validate_vat_number(tax_profile_id: str) -> dict[str, Any]:
             is_valid = False  # Format passed but VIES not confirmed — not valid for reverse charge
             status = "format_only"
             logger.warning(
-                "[VAT] VIES unavailable for %s, format-only recorded (not eligible for reverse charge)",
+                "⚠️ [VAT] VIES unavailable for %s; checking existing evidence before persistence",
                 fmt.full_vat_number,
             )
 
-        # Step 4: Store results — atomic to keep VATValidation + TaxProfile in sync
+        # Step 4: Bind persistence and outage handling to the current locked profile.
         with transaction.atomic():
+            tax_profile = CustomerTaxProfile.objects.select_for_update().get(pk=tax_profile_id)
+            if normalize_vat_number(tax_profile.vat_number) != validated_number:
+                logger.warning("⚠️ [VAT] Number changed during validation for profile %s", tax_profile_id)
+                return {"success": True, "skipped": "vat_number_changed"}
+            now = timezone.now()
+            grace = timedelta(days=get_vies_outage_grace_days())
+            if (
+                not vies.api_available
+                and tax_profile.vies_verification_status == CustomerTaxProfile.VIESVerificationStatus.VALID
+                and tax_profile.vies_verified_at is not None
+                and tax_profile.vies_verified_at >= now - grace
+            ):
+                validation = (
+                    VATValidation.objects.select_for_update()
+                    .filter(country_code=country_code, vat_number=vat_digits, is_valid=True)
+                    .first()
+                )
+                if validation is not None:
+                    validation.expires_at = max(validation.expires_at or now, now) + timedelta(hours=24)
+                    validation.save(update_fields=["expires_at"])
+                logger.warning("⚠️ [VAT] VIES unavailable; preserving recent evidence for %s", validated_number)
+                return {"success": True, "status": "vies_unavailable_grace"}
             _store_validation(
                 country_code,
                 vat_digits,
@@ -508,11 +564,15 @@ def validate_vat_number(tax_profile_id: str) -> dict[str, Any]:
                 company_address=vies.company_address,
                 consultation_reference=vies.request_identifier,
                 response_data=vies.raw_response,
+                validated_at=now,
             )
             _update_tax_profile_vies(
                 tax_profile,
                 status=status,
                 company_name=vies.company_name if vies.api_available else "",
+                consultation_reference=vies.request_identifier if vies.api_available else "",
+                verified_at=now,
+                keep_evidence=keep_evidence,
             )
 
         logger.info("[VAT] Validated %s: %s (source=%s)", fmt.full_vat_number, status, source)
@@ -563,8 +623,9 @@ def _store_validation(  # noqa: PLR0913
     consultation_reference: str = "",
     response_data: dict[str, Any] | None = None,
     never_expires: bool = False,
+    validated_at: datetime | None = None,
 ) -> None:
-    """Upsert a VATValidation record."""
+    """Upsert a VATValidation record from one response."""
     from apps.billing.tax_models import VATValidation  # noqa: PLC0415
 
     # never_expires marks terminal evidence (a structurally invalid number):
@@ -576,15 +637,12 @@ def _store_validation(  # noqa: PLR0913
         "is_active": is_valid,
         "company_name": company_name,
         "company_address": company_address,
-        "validation_date": timezone.now(),
+        "validation_date": validated_at or timezone.now(),
         "validation_source": source,
         "response_data": response_data or {},
         "expires_at": expires_at,
+        "consultation_reference": consultation_reference,
     }
-    # Proof-of-consultation is evidence, not state: a VIES outage yields an empty
-    # identifier and must not erase the reference from an earlier real check.
-    if consultation_reference:
-        defaults["consultation_reference"] = consultation_reference
     VATValidation.objects.update_or_create(
         country_code=country_code,
         vat_number=vat_number,
@@ -592,11 +650,17 @@ def _store_validation(  # noqa: PLR0913
     )
 
 
-def _update_tax_profile_vies(
+VIES_EVIDENCE_SWEEP_BATCH = 200
+
+
+def _update_tax_profile_vies(  # noqa: PLR0913  # every VIES evidence field is written from one response
     tax_profile: CustomerTaxProfile,
     *,
     status: str,
     company_name: str = "",
+    consultation_reference: str = "",
+    verified_at: datetime | None = None,
+    keep_evidence: bool = False,
 ) -> None:
     """Update CustomerTaxProfile VIES verification fields.
 
@@ -608,18 +672,23 @@ def _update_tax_profile_vies(
       - any other: unknown → eligible = False (fail-closed), vies_verified_at cleared
     """
     tax_profile.vies_verification_status = status
-    tax_profile.vies_verified_name = company_name
-    update_fields = ["vies_verification_status", "vies_verified_name", "updated_at"]
+    update_fields = ["vies_verification_status", "updated_at"]
+    if not keep_evidence:
+        tax_profile.vies_verified_name = company_name
+        tax_profile.vies_consultation_reference = consultation_reference
+        update_fields.extend(["vies_verified_name", "vies_consultation_reference"])
     if status == "valid":
-        tax_profile.vies_verified_at = timezone.now()
+        tax_profile.vies_verified_at = verified_at or timezone.now()
         tax_profile.reverse_charge_eligible = True
         update_fields.extend(["vies_verified_at", "reverse_charge_eligible"])
     else:
-        # All non-"valid" statuses revoke reverse charge eligibility (fail-closed)
-        # Clear vies_verified_at so stale timestamps don't imply current validity
+        # All non-"valid" statuses revoke reverse charge eligibility (fail-closed).
         tax_profile.reverse_charge_eligible = False
-        tax_profile.vies_verified_at = None
-        update_fields.extend(["reverse_charge_eligible", "vies_verified_at"])
+        update_fields.append("reverse_charge_eligible")
+        if not keep_evidence:
+            # Clear vies_verified_at so stale timestamps don't imply current validity.
+            tax_profile.vies_verified_at = None
+            update_fields.append("vies_verified_at")
     tax_profile.save(update_fields=update_fields)
 
 
@@ -2183,8 +2252,10 @@ def reverify_expired_vat_validations() -> dict[str, Any]:
     )
     expired_found = expired.count()
 
+    from apps.billing.vies_evidence import profiles_needing_vies_evidence  # noqa: PLC0415
     from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415
 
+    queued_ids: set[str] = set()
     queued = 0
     unmatched = 0
     for validation_batch in batched(expired.iterator(chunk_size=500), 500, strict=False):
@@ -2224,6 +2295,16 @@ def reverify_expired_vat_validations() -> dict[str, Any]:
             ).update(expires_at=None)
         for profile_id, _vat_number in eligible_profiles:
             async_task("apps.billing.tasks.validate_vat_number", str(profile_id))
+            queued_ids.add(str(profile_id))
+            queued += 1
+
+    # Bounded: the first sweep after deploy would otherwise re-check every valid profile at once,
+    # and a throttled VIES answers each of them with an outage.
+    incomplete = profiles_needing_vies_evidence().order_by("vies_verified_at", "pk")[:VIES_EVIDENCE_SWEEP_BATCH]
+    for profile_id in incomplete.values_list("pk", flat=True):
+        if str(profile_id) not in queued_ids:
+            async_task("apps.billing.tasks.validate_vat_number", str(profile_id))
+            queued_ids.add(str(profile_id))
             queued += 1
 
     if unmatched:

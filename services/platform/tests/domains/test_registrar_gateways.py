@@ -14,6 +14,8 @@ from unittest.mock import MagicMock, patch
 import requests
 from django.test import TestCase, override_settings
 
+from apps.common import counters
+from apps.common.models import Counter
 from apps.common.types import Err, Ok, Retriability
 from apps.domains.gateways import (
     RegistrarGatewayFactory,
@@ -22,7 +24,6 @@ from apps.domains.gateways.base import (
     _IDEMPOTENCY_IN_PROGRESS,
     CIRCUIT_BREAKER_THRESHOLD,
     MAX_RESPONSE_SIZE_BYTES,
-    DomainAvailabilityResult,
     DomainRegistrationResult,
     DomainRenewalResult,
 )
@@ -161,8 +162,8 @@ class GandiGatewayRegisterTests(TestCase):
     @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
     @patch("apps.domains.gateways.base.cache")
     def test_successful_registration(self, mock_cache: MagicMock, mock_request: MagicMock) -> None:
-        # First get: circuit breaker (returns 0 = OK), second get: idempotency (None = cache miss)
-        mock_cache.get.side_effect = [0, None]
+        # The breaker uses the database; the cache read checks idempotency.
+        mock_cache.get.side_effect = [None]
         mock_request.return_value = _mock_response(
             202,
             {
@@ -187,7 +188,7 @@ class GandiGatewayRegisterTests(TestCase):
     @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
     @patch("apps.domains.gateways.base.cache")
     def test_auth_failure_returns_err(self, mock_cache: MagicMock, mock_request: MagicMock) -> None:
-        mock_cache.get.side_effect = [0, None]
+        mock_cache.get.side_effect = [None]
         mock_request.return_value = _mock_response(401, {"message": "Invalid token"})
 
         result = self.gateway.register_domain("example.com", 1, self.registrant)
@@ -198,7 +199,7 @@ class GandiGatewayRegisterTests(TestCase):
     @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
     @patch("apps.domains.gateways.base.cache")
     def test_conflict_returns_err(self, mock_cache: MagicMock, mock_request: MagicMock) -> None:
-        mock_cache.get.side_effect = [0, None]
+        mock_cache.get.side_effect = [None]
         mock_request.return_value = _mock_response(409, {"message": "Domain already registered"})
 
         result = self.gateway.register_domain("example.com", 1, self.registrant)
@@ -212,7 +213,7 @@ class GandiGatewayRegisterTests(TestCase):
         self, mock_cache: MagicMock, mock_request: MagicMock
     ) -> None:
         """M3: typed not-found/conflict errors must carry the domain, not 'register <domain>'."""
-        mock_cache.get.side_effect = [0, None]
+        mock_cache.get.side_effect = [None]
         mock_request.return_value = _mock_response(409, {"message": "Domain already registered"})
 
         result = self.gateway.register_domain("example.com", 1, self.registrant)
@@ -224,7 +225,7 @@ class GandiGatewayRegisterTests(TestCase):
     @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
     @patch("apps.domains.gateways.base.cache")
     def test_rate_limit_returns_retriable_err(self, mock_cache: MagicMock, mock_request: MagicMock) -> None:
-        mock_cache.get.side_effect = [0, None]
+        mock_cache.get.side_effect = [None]
         resp = _mock_response(429, {"message": "Too many requests"})
         resp.headers = {"Retry-After": "30"}
         mock_request.return_value = resp
@@ -248,7 +249,7 @@ class GandiGatewayRenewTests(TestCase):
     def test_renewal_sends_sharing_id_when_configured(
         self, mock_cache: MagicMock, mock_request: MagicMock
     ) -> None:
-        mock_cache.get.side_effect = [0, None]
+        mock_cache.get.side_effect = [None]
         mock_cache.add.return_value = True
         self.registrar.api_username = "reseller-org-id"
         mock_request.return_value = _mock_response(202, {"message": "Accepted"})
@@ -263,7 +264,7 @@ class GandiGatewayRenewTests(TestCase):
     def test_renewal_omits_sharing_id_when_not_configured(
         self, mock_cache: MagicMock, mock_request: MagicMock
     ) -> None:
-        mock_cache.get.side_effect = [0, None]
+        mock_cache.get.side_effect = [None]
         mock_cache.add.return_value = True
         mock_request.return_value = _mock_response(202, {"message": "Accepted"})
 
@@ -277,7 +278,7 @@ class GandiGatewayRenewTests(TestCase):
     def test_accepted_renewal_without_expiry_is_pending(
         self, mock_cache: MagicMock, mock_request: MagicMock
     ) -> None:
-        mock_cache.get.side_effect = [0, None]
+        mock_cache.get.side_effect = [None]
         mock_cache.add.return_value = True
         operation_url = "https://api.gandi.net/v5/domain/domains/example.com/renew/operations/42"
         mock_request.return_value = _mock_response(
@@ -299,7 +300,7 @@ class GandiGatewayRenewTests(TestCase):
     def test_completed_renewal_without_expiry_is_invalid_response(
         self, mock_cache: MagicMock, mock_request: MagicMock
     ) -> None:
-        mock_cache.get.side_effect = [0, None]
+        mock_cache.get.side_effect = [None]
         mock_cache.add.return_value = True
         mock_request.return_value = _mock_response(200, {"message": "Renewed"})
 
@@ -405,7 +406,7 @@ class ROTLDGatewayRegisterTests(TestCase):
     @patch("apps.domains.gateways.rotld.ROTLDGateway._api_request")
     @patch("apps.domains.gateways.base.cache")
     def test_successful_registration(self, mock_cache: MagicMock, mock_request: MagicMock) -> None:
-        mock_cache.get.side_effect = [0, None]
+        mock_cache.get.side_effect = [None]
         mock_request.return_value = _mock_response(
             200,
             {"error": 0, "result_code": "00200", "data": {
@@ -423,7 +424,7 @@ class ROTLDGatewayRegisterTests(TestCase):
     @patch("apps.domains.gateways.rotld.ROTLDGateway._api_request")
     @patch("apps.domains.gateways.base.cache")
     def test_server_error_returns_transient(self, mock_cache: MagicMock, mock_request: MagicMock) -> None:
-        mock_cache.get.side_effect = [0, None]
+        mock_cache.get.side_effect = [None]
         mock_request.return_value = _mock_response(503, {"error": "Service unavailable"})
 
         result = self.gateway.register_domain("exemplu.ro", 1, self.registrant)
@@ -481,25 +482,39 @@ class CircuitBreakerTests(TestCase):
         self.registrar = _make_registrar("gandi")
         self.gateway = GandiGateway(self.registrar)
 
-    @patch("apps.domains.gateways.base.cache")
-    def test_open_circuit_blocks_calls(self, mock_cache: MagicMock) -> None:
-        mock_cache.get.return_value = CIRCUIT_BREAKER_THRESHOLD
+    def test_open_circuit_blocks_calls(self) -> None:
+        with (
+            patch("apps.domains.gateways.base.safe_request", side_effect=requests.ConnectionError("Unavailable")),
+            patch("apps.domains.gateways.base.time.sleep"),
+        ):
+            for _ in range(CIRCUIT_BREAKER_THRESHOLD):
+                self.assertTrue(self.gateway.check_availability("example.com").is_err())
 
-        result = self.gateway.check_availability("example.com")
+        with patch("apps.domains.gateways.base.safe_request", side_effect=AssertionError("Open breaker called registrar")):
+            result = self.gateway.check_availability("example.com")
 
         self.assertTrue(result.is_err())
-        err = result.unwrap_err()
-        self.assertIsInstance(err, RegistrarTransientError)
-        self.assertIn("Circuit breaker", str(err))
+        self.assertIsInstance(result.unwrap_err(), RegistrarTransientError)
+        self.assertIn("Circuit breaker", str(result.unwrap_err()))
+        self.assertEqual(counters.peek(f"cb:{self.gateway.cache_namespace}:failures"), CIRCUIT_BREAKER_THRESHOLD)
 
-    @patch("apps.domains.gateways.base.cache")
-    def test_below_threshold_allows_calls(self, mock_cache: MagicMock) -> None:
-        mock_cache.get.return_value = CIRCUIT_BREAKER_THRESHOLD - 1
-        with patch.object(self.gateway, "_do_check_availability") as mock_do:
-            mock_do.return_value = Ok(DomainAvailabilityResult("example.com", True))
+    def test_below_threshold_allows_calls(self) -> None:
+        with (
+            patch("apps.domains.gateways.base.safe_request", side_effect=requests.ConnectionError("Unavailable")),
+            patch("apps.domains.gateways.base.time.sleep"),
+        ):
+            for _ in range(CIRCUIT_BREAKER_THRESHOLD - 1):
+                self.assertTrue(self.gateway.check_availability("example.com").is_err())
+        self.assertEqual(counters.peek(f"cb:{self.gateway.cache_namespace}:failures"), CIRCUIT_BREAKER_THRESHOLD - 1)
+
+        with patch(
+            "apps.domains.gateways.base.safe_request",
+            return_value=_mock_response(200, {"products": [{"status": "available", "prices": []}]}),
+        ):
             result = self.gateway.check_availability("example.com")
 
         self.assertTrue(result.is_ok())
+        self.assertFalse(Counter.objects.filter(key=f"cb:{self.gateway.cache_namespace}:failures").exists())
 
 
 # ===============================================================================
@@ -523,8 +538,8 @@ class IdempotencyTests(TestCase):
             nameservers=["ns1.example.com"],
             epp_code="CACHED-EPP",
         )
-        # First call returns None (circuit breaker), second returns cached result
-        mock_cache.get.side_effect = [0, cached_result]
+        # The idempotency read returns the completed result.
+        mock_cache.get.side_effect = [cached_result]
 
         result = self.gateway.register_domain("example.com", 1, {})
 
@@ -540,10 +555,8 @@ class IdempotencyTests(TestCase):
         finding only the in-progress sentinel (no real result yet), must return a
         RegistrarConflictError rather than issuing a second chargeable registration.
         """
-        # get(): circuit-breaker check -> 0 (OK); idempotency read -> the in-progress
-        # sentinel (so the "cached real result" fast-path is skipped); after the lost
-        # add() race, the re-read -> sentinel again (no real result landed yet).
-        mock_cache.get.side_effect = [0, _IDEMPOTENCY_IN_PROGRESS, _IDEMPOTENCY_IN_PROGRESS]
+        # Both idempotency reads find the in-progress sentinel.
+        mock_cache.get.side_effect = [_IDEMPOTENCY_IN_PROGRESS, _IDEMPOTENCY_IN_PROGRESS]
         mock_cache.add.return_value = False  # slot already claimed by the in-flight request
 
         result = self.gateway.register_domain("example.com", 1, {})
@@ -651,8 +664,8 @@ class IdempotencyClaimTests(TestCase):
 
     @patch("apps.domains.gateways.base.cache")
     def test_concurrent_in_progress_call_is_rejected(self, mock_cache: MagicMock) -> None:
-        # breaker OK, idempotency miss, then add() loses the race, then re-read shows in-progress.
-        mock_cache.get.side_effect = [0, None, _IDEMPOTENCY_IN_PROGRESS]
+        # Idempotency misses, then add() loses the race and the re-read finds an active claim.
+        mock_cache.get.side_effect = [None, _IDEMPOTENCY_IN_PROGRESS]
         mock_cache.add.return_value = False
 
         with patch.object(self.gateway, "_do_register") as mock_do:
@@ -676,7 +689,7 @@ class IdempotencyClaimTests(TestCase):
         that half. This test is narrowed to what it always meant to prove: a PROVEN
         non-application still releases the claim right away.
         """
-        mock_cache.get.side_effect = [0, None]
+        mock_cache.get.side_effect = [None]
         mock_cache.add.return_value = True
 
         with patch.object(self.gateway, "_do_register") as mock_do:
@@ -697,31 +710,38 @@ class IdempotencyClaimTests(TestCase):
 
 
 class CircuitBreakerRecoveryTests(TestCase):
-    """_record_failure keeps a fixed TTL window so the breaker auto-recovers (H2)."""
+    """Failures preserve the first failure's expiry; successful calls reset it."""
 
     def setUp(self) -> None:
         self.registrar = _make_registrar("gandi")
         self.gateway = GandiGateway(self.registrar)
+        self.key = f"cb:{self.gateway.cache_namespace}:failures"
+        self.clock = self.enterContext(patch("apps.common.counters.time.time", return_value=10_000))
+        self.enterContext(patch("apps.domains.gateways.base.time.sleep"))
+        self.enterContext(
+            patch("apps.domains.gateways.base.safe_request", side_effect=requests.ConnectionError("Unavailable"))
+        )
 
-    @patch("apps.domains.gateways.base.cache")
-    def test_subsequent_failure_does_not_reset_ttl(self, mock_cache: MagicMock) -> None:
-        # Counter already exists → add() fails, incr() bumps it; the sliding-window
-        # touch() must be gone and set() must not reseed the TTL.
-        mock_cache.add.return_value = False
-        mock_cache.incr.return_value = 2
-        self.gateway._record_failure(RegistrarTransientError("gandi", "boom"))
-        mock_cache.touch.assert_not_called()
-        mock_cache.set.assert_not_called()
+    def test_subsequent_failure_does_not_reset_ttl(self) -> None:
+        self.assertTrue(self.gateway.check_availability("example.com").is_err())
+        self.clock.return_value = 10_299
+        with patch("apps.common.counters.increment", wraps=counters.increment) as increment:
+            self.assertTrue(self.gateway.check_availability("example.com").is_err())
+        increment.assert_called_once_with(self.key, 300)
+        self.assertEqual(counters.peek(self.key), 2)
+        self.assertEqual(Counter.objects.get(key=self.key).expires_at, 10_300)
 
-    @patch("apps.domains.gateways.base.cache")
-    def test_first_failure_seeds_fixed_ttl_atomically(self, mock_cache: MagicMock) -> None:
-        from apps.domains.gateways.base import CIRCUIT_BREAKER_RESET_SECONDS  # noqa: PLC0415
+        self.clock.return_value = 10_300
+        self.assertTrue(self.gateway.check_availability("example.com").is_err())
+        self.assertEqual(counters.peek(self.key), 1)
+        self.assertEqual(Counter.objects.get(key=self.key).expires_at, 10_600)
 
-        # add() atomically seeds the counter + TTL on the first failure (no incr/set race).
-        mock_cache.add.return_value = True
-        self.gateway._record_failure(RegistrarTransientError("gandi", "boom"))
-        mock_cache.add.assert_called_once_with(f"cb:{self.gateway.cache_namespace}:failures", 1, CIRCUIT_BREAKER_RESET_SECONDS)
-        mock_cache.incr.assert_not_called()
+    def test_first_failure_seeds_fixed_ttl_atomically(self) -> None:
+        with patch("apps.common.counters.increment", wraps=counters.increment) as increment:
+            self.assertTrue(self.gateway.check_availability("example.com").is_err())
+        increment.assert_called_once_with(self.key, 300)
+        self.assertEqual(counters.peek(self.key), 1)
+        self.assertEqual(Counter.objects.get(key=self.key).expires_at, 10_300)
 
 
 # ===============================================================================
@@ -742,7 +762,7 @@ class GandiInvalidResponseTests(TestCase):
     def test_registration_without_inline_expiry_is_pending(
         self, mock_cache: MagicMock, mock_request: MagicMock
     ) -> None:
-        mock_cache.get.side_effect = [0, None]
+        mock_cache.get.side_effect = [None]
         mock_cache.add.return_value = True
         operation_url = "https://api.gandi.net/v5/domain/domains/example.com/operations/42"
         mock_request.return_value = _mock_response(
@@ -832,7 +852,7 @@ class RetryHonorsRetriabilityTests(TestCase):
     @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
     @patch("apps.domains.gateways.base.cache")
     def test_registration_network_error_is_not_retried(self, mock_cache: MagicMock, mock_request: MagicMock) -> None:
-        mock_cache.get.side_effect = [0, None]
+        mock_cache.get.side_effect = [None]
         mock_cache.add.return_value = True
         mock_request.side_effect = requests.RequestException("connection reset")
 
@@ -877,7 +897,7 @@ class IdempotencyCacheSecretRedactionTests(TestCase):
     @patch("apps.domains.gateways.gandi.GandiGateway._do_register")
     @patch("apps.domains.gateways.base.cache")
     def test_epp_code_is_not_written_to_cache(self, mock_cache: MagicMock, mock_do_register: MagicMock) -> None:
-        mock_cache.get.side_effect = [0, None]  # breaker OK, idempotency miss
+        mock_cache.get.side_effect = [None]  # idempotency miss
         mock_cache.add.return_value = True
         mock_do_register.return_value = Ok(
             DomainRegistrationResult(
@@ -987,7 +1007,7 @@ class GatewayHardeningTests(TestCase):
         see test_claim_is_released_on_failure above for the definite-rejection case, which
         still releases immediately.
         """
-        mock_cache.get.side_effect = [0, None]
+        mock_cache.get.side_effect = [None]
         mock_cache.add.return_value = True
         mock_do.side_effect = RegistrarAPIError("boom", code=RegistrarErrorCode.INVALID_RESPONSE)
 
@@ -996,23 +1016,29 @@ class GatewayHardeningTests(TestCase):
         self.assertTrue(result.is_err())
         mock_cache.delete.assert_not_called()  # claim retained — outcome is ambiguous, not proven
 
-    @patch("apps.domains.gateways.base.cache")
-    def test_breaker_ignores_non_systemic_errors(self, mock_cache: MagicMock) -> None:
-        """A domain conflict / auth error is not a registrar-wide outage — it must
-        not count toward tripping the circuit breaker; a transient one does."""
-        self.gateway._record_failure(RegistrarConflictError("example.com", self.registrar.name))
-        mock_cache.add.assert_not_called()
-        mock_cache.incr.assert_not_called()
+    def test_breaker_ignores_non_systemic_errors(self) -> None:
+        key = f"cb:{self.gateway.cache_namespace}:failures"
+        with patch(
+            "apps.domains.gateways.base.safe_request",
+            return_value=_mock_response(401, {"message": "Invalid token"}),
+        ):
+            result = self.gateway.check_availability("example.com")
+        self.assertTrue(result.is_err())
+        self.assertIsInstance(result.unwrap_err(), RegistrarAuthError)
+        self.assertEqual(counters.peek(key), 0)
 
-        mock_cache.add.return_value = True
-        self.gateway._record_failure(RegistrarTransientError(self.registrar.name, "5xx"))
-        mock_cache.add.assert_called_once()
+        with (
+            patch("apps.domains.gateways.base.safe_request", side_effect=requests.ConnectionError("Unavailable")),
+            patch("apps.domains.gateways.base.time.sleep"),
+        ):
+            self.assertTrue(self.gateway.check_availability("example.com").is_err())
+        self.assertEqual(counters.peek(key), 1)
 
     @patch("apps.domains.gateways.gandi.GandiGateway._do_register")
     @patch("apps.domains.gateways.base.cache")
     def test_audit_records_error_code_not_raw_registrar_body(self, mock_cache: MagicMock, mock_do: MagicMock) -> None:
         """A registrar error echoing registrant PII must not reach the audit trail."""
-        mock_cache.get.side_effect = [0, None]
+        mock_cache.get.side_effect = [None]
         mock_cache.add.return_value = True
         mock_do.return_value = Err(
             RegistrarAPIError(

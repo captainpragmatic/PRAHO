@@ -12,8 +12,9 @@ from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
+
 
 from apps.common.request_ip import get_safe_client_ip
 
@@ -271,8 +272,10 @@ class EnhancedUserModelTest(TestCase):
         self.assertGreater(self.user.get_lockout_remaining_time(), 0)
         self.assertLessEqual(self.user.get_lockout_remaining_time(), 30)
 
+    @override_settings(ACCOUNT_LOCKOUT_THRESHOLD=1)
     def test_increment_failed_login_attempts_progression(self) -> None:
         """Test progressive lockout delays"""
+
         # Expected delays: [5, 15, 30, 60, 120, 240] minutes
         expected_delays = [5, 15, 30, 60, 120, 240]
 

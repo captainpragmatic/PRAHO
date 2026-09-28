@@ -20,6 +20,12 @@ from .base import *  # noqa: F403
 
 # Security - similar to production but with debug info
 DEBUG = False
+
+if not IPWARE_TRUSTED_PROXY_LIST:
+    from django.core.exceptions import ImproperlyConfigured
+
+    raise ImproperlyConfigured("PORTAL_TRUSTED_PROXY_CIDRS must contain the trusted reverse proxy CIDRs in staging.")
+
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY")
 if not SECRET_KEY:
     from django.core.exceptions import ImproperlyConfigured
