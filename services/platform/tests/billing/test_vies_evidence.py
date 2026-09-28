@@ -189,6 +189,12 @@ class VATEvidenceHardeningTests(TestCase):
             ("Acme SRL", "Zeta", False),
             ("Services GmbH", "Zeta", True),
             ("Évidence GmbH", "Evidence", True),
+            ("A & B Consulting SRL", "A and B Consulting SRL", True),
+            ("A and B Consulting SRL", "A & B Consulting SRL", True),
+            ("ACME SRL", "Acme S. R. L.", True),
+            ("Novak s.r.o.", "NOVAK S.R.O.", True),
+            ("Firma d.o.o.", "Firma", True),
+            ("Balti UAB", "Balti", True),
         )
         for verified, invoiced, allowed in cases:
             with self.subTest(verified=verified, invoiced=invoiced):
@@ -233,6 +239,16 @@ class VATEvidenceHardeningTests(TestCase):
         self.assertFalse(report.can_export)
         self.assertTrue(any("conflicting_vat_validation" in item.codes for item in report.exceptions))
 
+    def test_d390_absent_snapshot_is_not_a_missing_reference(self) -> None:
+        """No cache row at capture time is the version-1 'not recorded' shape, not a policy failure."""
+        invoice = self._invoice()
+        invoice.vat_evidence["vies"] = None
+        invoice.issue()
+        invoice.save()
+        report = aggregate_ec_services(ReportingPeriod(invoice.tax_point_date.year, invoice.tax_point_date.month))
+        codes = {code for item in report.exceptions for code in item.codes}
+        self.assertNotIn("missing_consultation_reference", codes)
+
     def test_d390_requires_reference_only_for_version_two_ae(self) -> None:
         for version, blocked in ((1, False), (2, True)):
             with self.subTest(version=version):
@@ -264,7 +280,8 @@ class VATEvidenceHardeningTests(TestCase):
         self.assertEqual(self.profile.vies_verified_name, "New Evidence GmbH")
         self.assertEqual(self.profile.vies_verified_at, self.validation.validation_date)
 
-    def test_valid_response_without_identifier_is_format_only_and_clears_old_reference(self) -> None:
+    def test_valid_response_without_identifier_is_format_only_and_keeps_prior_proof(self) -> None:
+        verified_at = self.profile.vies_verified_at
         response = VIESResponse(is_valid=True, country_code="DE", vat_number="136695976", company_name="New GmbH")
         with patch("apps.billing.gateways.vies_gateway.VIESGateway.check_vat", return_value=response):
             result = validate_vat_number(str(self.profile.pk))
@@ -272,10 +289,13 @@ class VATEvidenceHardeningTests(TestCase):
         self.profile.refresh_from_db()
         self.validation.refresh_from_db()
         self.assertEqual(self.profile.vies_verification_status, "format_only")
-        self.assertIsNone(self.profile.vies_verified_at)
-        self.assertEqual(self.profile.vies_consultation_reference, "")
+        self.assertFalse(self.profile.reverse_charge_eligible)
+        self.assertEqual(self.profile.vies_verified_at, verified_at)
+        self.assertEqual(self.profile.vies_consultation_reference, "original-reference")
+        self.assertEqual(self.profile.vies_verified_name, "Evidence GmbH")
         self.assertEqual(self.validation.consultation_reference, "")
         self.assertFalse(self.validation.is_valid)
+        self.assertEqual(self._invoice().vat_evidence["category"], "S")
 
     def test_configured_outage_grace_revokes_evidence_outside_the_window(self) -> None:
         self._setting("billing.vies_outage_grace_days", 2)
@@ -345,6 +365,16 @@ class VATEvidenceHardeningTests(TestCase):
                 with patch("django_q.tasks.async_task", return_value="queued"):
                     call_command("validate_vat_numbers", "--blocked-orders", stdout=output)
                 self.assertIn(f"Blocked profile {self.profile.pk}: {reason}", output.getvalue())
+
+    def test_command_lists_zero_overrides_without_a_reason_and_records_nothing(self) -> None:
+        CustomerTaxProfile.objects.filter(pk=self.profile.pk).update(
+            vat_rate=0, vat_rate_reason="", vies_verification_status="pending", vies_consultation_reference=""
+        )
+        output = StringIO()
+        with patch("django_q.tasks.async_task", return_value="queued"):
+            call_command("validate_vat_numbers", "--blocked-orders", stdout=output)
+        self.assertIn(f"Zero override without a reason: profile {self.profile.pk} (DE)", output.getvalue())
+        self.assertFalse(AuditEvent.objects.filter(action="vies_evidence_refused").exists())
 
     def test_exemption_reason_reaches_resolver_from_profile(self) -> None:
         CustomerTaxProfile.objects.filter(pk=self.profile.pk).update(

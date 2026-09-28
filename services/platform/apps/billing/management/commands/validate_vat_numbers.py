@@ -22,27 +22,16 @@ class Command(BaseCommand):
         from apps.billing.vies_evidence import (  # noqa: PLC0415
             profile_vat_identity,
             profiles_needing_vies_evidence,
-            vies_refusal_reason,
         )
         from apps.common.eu_vat_validator import is_eu_country  # noqa: PLC0415
         from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415
 
         if options["blocked_orders"]:
             self._report_blocked_orders()
+            self._report_incomplete_profiles()
 
         processed = 0
         failed = 0
-        if options["blocked_orders"]:
-            valid_profiles = CustomerTaxProfile.objects.filter(vies_verification_status="valid").select_related(
-                "customer"
-            )
-            for profile in valid_profiles.iterator():
-                reason = vies_refusal_reason(profile, profile.vat_number)
-                if reason:
-                    self.stdout.write(
-                        _("Blocked profile %(profile)s: %(reason)s") % {"profile": profile.pk, "reason": reason}
-                    )
-
         profiles = CustomerTaxProfile.objects.exclude(vat_number="").filter(
             ~Q(vies_verification_status=CustomerTaxProfile.VIESVerificationStatus.VALID)
             | Q(pk__in=profiles_needing_vies_evidence().values("pk"))
@@ -66,7 +55,7 @@ class Command(BaseCommand):
         self.stdout.write(message % {"count": processed, "failed": failed})
 
     def _report_blocked_orders(self) -> None:
-        from apps.billing.vies_evidence import vat_number_matches_country, vies_verified_for  # noqa: PLC0415
+        from apps.billing.vies_evidence import vat_number_matches_country, vies_refusal_reason  # noqa: PLC0415
         from apps.common.localisation import normalize_country_code  # noqa: PLC0415
         from apps.common.tax_service import TaxService  # noqa: PLC0415
         from apps.orders.models import Order  # noqa: PLC0415
@@ -87,10 +76,11 @@ class Command(BaseCommand):
             vat_number = billing.get("vat_number") or billing.get("vat_id")
             # Mirror the resolver: evidence counts only for a VAT payer whose verified number
             # is the invoiced one and was issued by the billing country.
+            # The pure decision: a report must not record refusals as if invoices were issued.
             evidenced = (
                 profile is not None
                 and profile.is_vat_payer is True
-                and vies_verified_for(
+                and not vies_refusal_reason(
                     profile,
                     vat_number,
                     billing_name=str(billing.get("company_name") or order.customer.get_billing_name()),
@@ -102,3 +92,36 @@ class Command(BaseCommand):
         self.stdout.write(_("Blocked orders: %(count)d") % {"count": len(blocked)})
         for order_id in blocked:
             self.stdout.write(order_id)
+
+    def _report_incomplete_profiles(self) -> None:
+        """List valid profiles the evidence policy would refuse, and zero overrides that now need a reason."""
+        from apps.billing.vies_evidence import vies_refusal_reason  # noqa: PLC0415
+        from apps.common.tax_service import TaxService  # noqa: PLC0415
+        from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415
+
+        valid_profiles = (
+            CustomerTaxProfile.objects.filter(vies_verification_status="valid")
+            .exclude(vat_number="")
+            .select_related("customer")
+            .order_by("pk")
+        )
+        for profile in valid_profiles.iterator():
+            reason = vies_refusal_reason(profile, profile.vat_number)
+            if reason:
+                self.stdout.write(
+                    _("Blocked profile %(profile)s: %(reason)s") % {"profile": profile.pk, "reason": reason}
+                )
+        overrides = (
+            CustomerTaxProfile.objects.filter(vat_rate=0, vat_rate_reason="", is_vat_payer=True)
+            .exclude(vat_number="")
+            .select_related("customer")
+            .order_by("pk")
+        )
+        for profile in overrides.iterator():
+            address = profile.customer.get_billing_address()
+            country = (address.country if address else "").upper()
+            if TaxService.is_eu_country(country) and country != TaxService.get_supplier_country():
+                self.stdout.write(
+                    _("Zero override without a reason: profile %(profile)s (%(country)s)")
+                    % {"profile": profile.pk, "country": country}
+                )

@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
 REVERSE_CHARGE_LEGAL_BASIS = "Art. 196 Council Directive 2006/112/EC"
 EVIDENCE_VERSION = 2
+SUPPORTED_EVIDENCE_VERSIONS = frozenset({1, 2})
 # Snapshots from this version on were written while the consultation-reference policy was enforceable.
 CONSULTATION_REFERENCE_EVIDENCE_VERSION = 2
 
@@ -132,7 +133,11 @@ def read_vat_evidence(document: Invoice | ProformaInvoice) -> VATDecision | None
     if data == {}:
         return None
     try:
-        if not isinstance(data, dict) or type(data["version"]) is not int or data["version"] not in {1, 2}:
+        if (
+            not isinstance(data, dict)
+            or type(data["version"]) is not int
+            or data["version"] not in SUPPORTED_EVIDENCE_VERSIONS
+        ):
             raise ValueError("Unknown evidence version")
         _validate_snapshot_fields(data)
         rate = Decimal(data["vat_rate_percent"])

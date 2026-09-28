@@ -501,6 +501,7 @@ def validate_vat_number(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Explicit va
         )
 
         source: Literal["vies", "format_check", "manual", "cached"]
+        keep_evidence = False
         if vies.api_available:
             source = "vies"
             is_valid = vies.is_valid
@@ -510,9 +511,12 @@ def validate_vat_number(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Explicit va
                 and reverse_charge_requires_consultation_reference()
                 and not vies.request_identifier.strip()
             ):
+                # The number is confirmed but the proof is incomplete: the status alone is downgraded,
+                # so an earlier referenced proof stays on record for the audit trail.
                 source = "format_check"
                 is_valid = False
                 status = "format_only"
+                keep_evidence = True
                 logger.warning("🚨 [VAT] Valid VIES response lacks a consultation reference: %s", fmt.full_vat_number)
         else:
             # VIES down — record format-only result but do NOT grant reverse charge.
@@ -568,6 +572,7 @@ def validate_vat_number(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Explicit va
                 company_name=vies.company_name if vies.api_available else "",
                 consultation_reference=vies.request_identifier if vies.api_available else "",
                 verified_at=now,
+                keep_evidence=keep_evidence,
             )
 
         logger.info("[VAT] Validated %s: %s (source=%s)", fmt.full_vat_number, status, source)
@@ -645,13 +650,17 @@ def _store_validation(  # noqa: PLR0913
     )
 
 
-def _update_tax_profile_vies(
+VIES_EVIDENCE_SWEEP_BATCH = 200
+
+
+def _update_tax_profile_vies(  # noqa: PLR0913  # every VIES evidence field is written from one response
     tax_profile: CustomerTaxProfile,
     *,
     status: str,
     company_name: str = "",
     consultation_reference: str = "",
     verified_at: datetime | None = None,
+    keep_evidence: bool = False,
 ) -> None:
     """Update CustomerTaxProfile VIES verification fields.
 
@@ -663,19 +672,23 @@ def _update_tax_profile_vies(
       - any other: unknown → eligible = False (fail-closed), vies_verified_at cleared
     """
     tax_profile.vies_verification_status = status
-    tax_profile.vies_verified_name = company_name
-    tax_profile.vies_consultation_reference = consultation_reference
-    update_fields = ["vies_verification_status", "vies_verified_name", "vies_consultation_reference", "updated_at"]
+    update_fields = ["vies_verification_status", "updated_at"]
+    if not keep_evidence:
+        tax_profile.vies_verified_name = company_name
+        tax_profile.vies_consultation_reference = consultation_reference
+        update_fields.extend(["vies_verified_name", "vies_consultation_reference"])
     if status == "valid":
         tax_profile.vies_verified_at = verified_at or timezone.now()
         tax_profile.reverse_charge_eligible = True
         update_fields.extend(["vies_verified_at", "reverse_charge_eligible"])
     else:
-        # All non-"valid" statuses revoke reverse charge eligibility (fail-closed)
-        # Clear vies_verified_at so stale timestamps don't imply current validity
+        # All non-"valid" statuses revoke reverse charge eligibility (fail-closed).
         tax_profile.reverse_charge_eligible = False
-        tax_profile.vies_verified_at = None
-        update_fields.extend(["reverse_charge_eligible", "vies_verified_at"])
+        update_fields.append("reverse_charge_eligible")
+        if not keep_evidence:
+            # Clear vies_verified_at so stale timestamps don't imply current validity.
+            tax_profile.vies_verified_at = None
+            update_fields.append("vies_verified_at")
     tax_profile.save(update_fields=update_fields)
 
 
@@ -2285,7 +2298,10 @@ def reverify_expired_vat_validations() -> dict[str, Any]:
             queued_ids.add(str(profile_id))
             queued += 1
 
-    for profile_id in profiles_needing_vies_evidence().values_list("pk", flat=True).iterator(chunk_size=500):
+    # Bounded: the first sweep after deploy would otherwise re-check every valid profile at once,
+    # and a throttled VIES answers each of them with an outage.
+    incomplete = profiles_needing_vies_evidence().order_by("vies_verified_at", "pk")[:VIES_EVIDENCE_SWEEP_BATCH]
+    for profile_id in incomplete.values_list("pk", flat=True):
         if str(profile_id) not in queued_ids:
             async_task("apps.billing.tasks.validate_vat_number", str(profile_id))
             queued_ids.add(str(profile_id))

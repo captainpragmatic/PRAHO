@@ -189,13 +189,14 @@ def _identity_problems(invoice: Invoice, decision: VATDecision | None) -> list[s
         problems.append("missing_reverse_charge_decision: A recorded reverse-charge decision is required.")
     if decision:
         proof = invoice.vat_evidence.get("vies")
+        # An absent snapshot is the version-1 "not recorded" shape whatever the version; only a
+        # recorded consultation that lacks its reference is a policy failure.
         if (
             decision.category == "AE"
             and invoice.vat_evidence.get("version", 0) >= CONSULTATION_REFERENCE_EVIDENCE_VERSION
+            and isinstance(proof, dict)
             and (
-                not isinstance(proof, dict)
-                or not isinstance(proof.get("consultation_reference"), str)
-                or not proof["consultation_reference"].strip()
+                not isinstance(proof.get("consultation_reference"), str) or not proof["consultation_reference"].strip()
             )
         ):
             problems.append("missing_consultation_reference: A version-2 reverse-charge supply requires a reference.")

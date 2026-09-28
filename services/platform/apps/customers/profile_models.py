@@ -122,9 +122,12 @@ class CustomerTaxProfile(SoftDeleteModel):
 
     @property
     def vies_name_mismatch(self) -> bool:
+        from apps.billing.config import reverse_charge_requires_name_match  # noqa: PLC0415
         from apps.billing.vies_evidence import vies_name_matches  # noqa: PLC0415
 
-        return not vies_name_matches(self.vies_verified_name, self.customer.get_billing_name())
+        return reverse_charge_requires_name_match() and not vies_name_matches(
+            self.vies_verified_name, self.customer.get_billing_name()
+        )
 
     @property
     def recent_vies_refusals(self) -> models.QuerySet[AuditEvent]:

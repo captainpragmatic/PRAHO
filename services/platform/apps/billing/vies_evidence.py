@@ -15,34 +15,54 @@ from django.utils.translation import gettext as _
 
 logger = logging.getLogger(__name__)
 
+# Legal forms, connectors and generic trade words carry no identity. Tokens shorter than
+# three characters are dropped as well, which also absorbs spaced abbreviations (S. R. L.)
+# and the two-letter forms (SA, AG, BV, NV, AB, OY, SL, SP, KG, UG, CO, AS).
 _NAME_STOPWORDS = frozenset(
     [
         "srl",
-        "sa",
+        "sarl",
+        "sas",
+        "sasu",
+        "spa",
+        "spol",
+        "sro",
+        "zoo",
+        "kft",
+        "lda",
+        "ohg",
         "gmbh",
-        "ag",
+        "mbh",
+        "gesellschaft",
         "ltd",
         "limited",
         "llc",
-        "bv",
-        "nv",
-        "sarl",
-        "sas",
-        "spa",
-        "sp",
-        "zoo",
-        "oy",
-        "ab",
-        "kft",
-        "sl",
-        "lda",
-        "ug",
-        "kg",
-        "ohg",
+        "llp",
         "plc",
         "inc",
-        "co",
         "company",
+        "uab",
+        "sia",
+        "aps",
+        "ood",
+        "eood",
+        "doo",
+        "bvba",
+        "cvba",
+        "sprl",
+        "snc",
+        "scs",
+        "sca",
+        "oyj",
+        "zrt",
+        "kkt",
+        "eurl",
+        "and",
+        "und",
+        "et",
+        "si",
+        "si",
+        "e",
         "europe",
         "international",
         "trading",
@@ -54,6 +74,7 @@ _NAME_STOPWORDS = frozenset(
         "enterprises",
     ]
 )
+MIN_DISTINCTIVE_TOKEN_LENGTH = 3
 
 if TYPE_CHECKING:
     from apps.customers.models import CustomerTaxProfile
@@ -94,9 +115,10 @@ def vat_number_matches_country(vat_number: object, country_code: str) -> bool:
 def _name_tokens(name: str) -> set[str]:
     decomposed = unicodedata.normalize("NFKD", name.casefold())
     unaccented = "".join(character for character in decomposed if not unicodedata.combining(character))
-    # Joining dotted abbreviations makes G.m.b.H. and GmbH equivalent.
+    # Joining dotted abbreviations makes G.m.b.H. and GmbH equivalent; every other symbol,
+    # including "&", is a separator so it can never be a distinctive token on one side only.
     words = re.sub(r"[^\w\s]", " ", unaccented.replace(".", ""), flags=re.UNICODE).replace("_", " ").split()
-    return set(words) - _NAME_STOPWORDS
+    return {word for word in words if len(word) >= MIN_DISTINCTIVE_TOKEN_LENGTH} - _NAME_STOPWORDS
 
 
 def vies_name_matches(vies_name: str, billing_name: str) -> bool:
@@ -164,13 +186,17 @@ def vies_verified_for(
         metadata__vat_number=number,
     ).exists()
     if not recently_recorded:
-        AuditService.log_simple_event(
-            event_type="vies_evidence_refused",
-            content_object=tax_profile if tax_profile is not None and tax_profile.pk else None,
-            actor_type="system",
-            description=_("VIES evidence refused: %(reason)s") % {"reason": reason},
-            metadata={"reason": reason, "customer_id": customer_id, "vat_number": number},
-        )
+        try:
+            AuditService.log_simple_event(
+                event_type="vies_evidence_refused",
+                content_object=tax_profile if tax_profile is not None and tax_profile.pk else None,
+                actor_type="system",
+                description=_("VIES evidence refused: %(reason)s") % {"reason": reason},
+                metadata={"reason": reason, "customer_id": customer_id, "vat_number": number},
+            )
+        except Exception:
+            # The decision stands whether or not it could be recorded; a calculation must not fail on it.
+            logger.exception("🔥 [VAT] Could not record the VIES refusal for customer %s", customer_id)
     return False
 
 
