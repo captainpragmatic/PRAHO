@@ -9,11 +9,14 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
+from django.conf import settings
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.http import HttpRequest, JsonResponse
+from django.utils.crypto import constant_time_compare
+from django.utils.translation import gettext as _
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
@@ -21,7 +24,6 @@ from rest_framework import status
 from rest_framework.decorators import api_view, authentication_classes, permission_classes, throttle_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.throttling import AnonRateThrottle
 
 from apps.api.core.throttling import AuthThrottle
 from apps.api.secure_auth import (
@@ -40,10 +42,13 @@ from apps.common.performance.rate_limiting import (
     EndpointRateThrottle,
     PortalHMACBurstThrottle,
     PortalHMACRateThrottle,
+    ResetClientIPThrottle,
+    fixed_window_limited,
+    forwarded_client_ip,
 )
 from apps.common.request_ip import get_safe_client_ip
+from apps.common.validators import log_security_event
 from apps.customers.models import Customer
-from apps.users.forms import UserRegistrationForm
 from apps.users.mfa import MFAService
 from apps.users.models import APIToken, CustomerMembership, User, UserProfile
 from apps.users.services import APITokenService, SessionSecurityService
@@ -77,6 +82,12 @@ def _mask_email(email: str) -> str:
     return f"{masked_local}@{domain}"
 
 
+def _charge_login_failure(forwarded_ip: str | None) -> None:
+    """Charge the per-client login failure budget; successful logins never count."""
+    if forwarded_ip is not None:
+        fixed_window_limited(f"login_ip:{forwarded_ip}", settings.THROTTLE_RATES["auth_login_ip"])
+
+
 @csrf_exempt  # nosemgrep: no-csrf-exempt — HMAC-authenticated inter-service endpoint
 @require_http_methods(["POST"])
 @require_portal_authentication
@@ -85,9 +96,10 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911 -- 
     Authentication endpoint for portal service.
     Validates user credentials and returns user data for session creation.
 
-    Rate limiting: No DRF throttle here — PortalServiceHMACMiddleware enforces
-    300 req/min per portal+IP before this view is reached.  Account lockout
-    (below) provides per-account brute-force protection on top of that.
+    Rate limiting: PortalServiceHMACMiddleware applies the per-portal auth
+    bucket before this view. A per-forwarded-IP limit runs before credential
+    checks, followed by per-account lockout at ACCOUNT_LOCKOUT_THRESHOLD.
+
     """
     try:
         # Parse request body
@@ -99,11 +111,20 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911 -- 
             return JsonResponse({"success": False, "error": "Email and password are required"}, status=400)
 
         client_ip = get_safe_client_ip(request)
+        forwarded_ip = forwarded_client_ip(request)
+        if forwarded_ip is not None:
+            limited, retry_after = fixed_window_limited(
+                f"login_ip:{forwarded_ip}", settings.THROTTLE_RATES["auth_login_ip"], charge=False
+            )
+            if limited:
+                response = JsonResponse(
+                    {"success": False, "error": _("Too many login attempts"), "retry_after": retry_after},
+                    status=429,
+                )
+                response["Retry-After"] = str(retry_after)
+                return response
 
-        # Authenticate user.
-        # Timing: Argon2 hashing dominates (~100-200ms); DB writes add <5ms.
-        # HMAC middleware rate-limits at 300/min; Portal pads via
-        # PLATFORM_API_AUTH_MIN_DURATION_SECONDS.  Accepted risk.
+        # Apply the forwarded-IP limit before expensive credential checks.
         user = authenticate(request, username=email, password=password)
 
         if user is None:
@@ -111,13 +132,15 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911 -- 
             with contextlib.suppress(User.DoesNotExist):
                 failed_user = User.objects.get(email=email)
                 failed_user.increment_failed_login_attempts()
-            logger.warning("[Portal API Auth] Failed login — ip=%s", client_ip)
+            logger.warning("⚠️ [Portal API Auth] Failed login — ip=%s", forwarded_ip or client_ip)
+            _charge_login_failure(forwarded_ip)
             return JsonResponse({"success": False, "error": "Invalid email or password"}, status=401)
 
         # Same generic error for locked/inactive — attacker cannot distinguish
         if user.is_account_locked() or not user.is_active:
             reason = "locked" if user.is_account_locked() else "inactive"
-            logger.warning("[Portal API Auth] Login rejected (%s) — ip=%s", reason, client_ip)
+            logger.warning("⚠️ [Portal API Auth] Login rejected (%s) — ip=%s", reason, forwarded_ip or client_ip)
+            _charge_login_failure(forwarded_ip)
             return JsonResponse({"success": False, "error": "Invalid email or password"}, status=401)
 
         # A password alone must never establish a session for an enrolled user.
@@ -127,6 +150,7 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911 -- 
                 token = str(data.get("mfa_token", ""))
                 if not token or not MFAService.verify_mfa_code(user, token, request)["success"]:
                     user.increment_failed_login_attempts()
+                    _charge_login_failure(forwarded_ip)
                     return JsonResponse({"success": False, "error": "Invalid authentication code"}, status=401)
 
         # Success: reset lockout counter
@@ -134,9 +158,10 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911 -- 
         user.account_locked_until = None
         user.save(update_fields=["failed_login_attempts", "account_locked_until"])
 
-        logger.info("[Portal API Auth] User authenticated successfully — ip=%s", client_ip)
+        logger.info("✅ [Portal API Auth] User authenticated successfully — ip=%s", forwarded_ip or client_ip)
 
         # Return user data for portal service
+
         user_data = {
             "id": user.id,
             "email": user.email,
@@ -148,7 +173,14 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911 -- 
             "localisation_preferences": user_localisation_preferences(user),
         }
 
-        return JsonResponse({"success": True, "user": user_data, "message": "Authentication successful"})
+        return JsonResponse(
+            {
+                "success": True,
+                "user": user_data,
+                "session_auth_hash": user.get_session_auth_hash(),
+                "message": "Authentication successful",
+            }
+        )
 
     except json.JSONDecodeError:
         return JsonResponse({"success": False, "error": "Invalid JSON in request body"}, status=400)
@@ -175,14 +207,11 @@ def user_info_api(request: HttpRequest, customer: Customer) -> Response:
     Get current user information.
     Requires customer authentication via HMAC.
     """
-    # Get the user from the customer context (since this is a customer-authenticated endpoint)
-    membership = CustomerMembership.objects.filter(customer=customer).first()
-    if not membership:
+    user = getattr(request, "_customer_user", None)
+    if user is None:
         return Response(
             {"success": False, "error": "No user associated with this customer"}, status=status.HTTP_400_BAD_REQUEST
         )
-
-    user = membership.user
 
     user_data = {
         "id": user.id,
@@ -433,8 +462,9 @@ class SessionValidationThrottle(EndpointRateThrottle):
 @permission_classes([AllowAny])  # HMAC authentication via @require_portal_authentication below
 @throttle_classes([PortalHMACRateThrottle, PortalHMACBurstThrottle, SessionValidationThrottle])
 @require_portal_authentication
-def validate_session_secure(request: HttpRequest) -> Response:
+def validate_session_secure(request: HttpRequest) -> Response:  # noqa: PLR0911 -- distinct session rejection paths
     """
+
     🔒 SECURE Session Validation - HMAC-Signed Context (No JWT)
 
     Endpoint: POST /api/users/session/validate/
@@ -443,7 +473,9 @@ def validate_session_secure(request: HttpRequest) -> Response:
     Request Body:
     {
         "user_id": "2",
+        "session_auth_hash": "<session auth hash returned by login>",
         "timestamp": 1694022337
+
     }
 
     Headers:
@@ -452,9 +484,15 @@ def validate_session_secure(request: HttpRequest) -> Response:
         X-Timestamp: <unix timestamp>
         X-Signature: <HMAC signature covering body + headers>
 
-    Response: {"active": true, "membership_hash": "a1b2c3...", "revoke_before": "..."}
+    Response: {
+        "active": true,
+        "membership_hash": "a1b2c3...",
+        "session_auth_hash": "<current session auth hash>",
+        "revoke_before": "..."
+    }
 
     Security Features:
+
     - No user IDs in URL (prevents enumeration)
     - HMAC-signed request body (simpler than JWT)
     - Rate limiting (60/min per portal)
@@ -480,6 +518,7 @@ def validate_session_secure(request: HttpRequest) -> Response:
         try:
             request_data = request.data if hasattr(request, "data") else json.loads(request.body)
             user_id = request_data.get("user_id")
+            session_auth_hash = request_data.get("session_auth_hash")
             request_timestamp = request_data.get("timestamp")
 
             if not user_id:
@@ -500,8 +539,19 @@ def validate_session_secure(request: HttpRequest) -> Response:
         # Validate user exists and is active
         try:
             user = User.objects.get(id=user_id, is_active=True)
+            current_auth_hash = user.get_session_auth_hash()
+            if not isinstance(session_auth_hash, str) or not (
+                constant_time_compare(session_auth_hash, current_auth_hash)
+                or any(
+                    constant_time_compare(session_auth_hash, fallback_hash)
+                    for fallback_hash in user.get_session_auth_fallback_hash()
+                )
+            ):
+                logger.warning("🚨 [Security] Portal %s session credential rejected (jti: %s)", portal_id, jti)
+                return _uniform_session_error(security_headers)
 
             # Compute a stable hash of the user's active memberships so Portal
+
             # can detect changes (role grant/revoke) without polling.
             # Truncated to 64 bits — sufficient for change detection (not a security boundary).
             memberships = (
@@ -519,6 +569,7 @@ def validate_session_secure(request: HttpRequest) -> Response:
 
             response_data = {
                 "active": True,
+                "session_auth_hash": current_auth_hash,
                 "membership_hash": membership_hash,
                 "localisation_preferences": user_localisation_preferences(user),
                 "revoke_before": next_validation.isoformat(),
@@ -582,6 +633,7 @@ def mfa_verify_api(request: HttpRequest, user: User) -> Response:
         serializer = MFAVerifySerializer(data=request.data, context={"request": request, "user": user})
         serializer.is_valid(raise_exception=True)
         result = serializer.save()
+        result["session_auth_hash"] = user.get_session_auth_hash()
     return Response(result)
 
 
@@ -595,7 +647,9 @@ def mfa_disable_api(request: HttpRequest, user: User) -> Response:
         user = User.objects.select_for_update().get(pk=user.pk)
         serializer = MFADisableSerializer(data=request.data, context={"request": request, "user": user})
         serializer.is_valid(raise_exception=True)
-        return Response(serializer.save())
+        result = serializer.save()
+        result["session_auth_hash"] = user.get_session_auth_hash()
+        return Response(result)
 
 
 @api_view(["POST"])
@@ -619,15 +673,18 @@ def mfa_status_api(request: HttpRequest, user: User) -> Response:
 
 
 @api_view(["POST"])
-@authentication_classes([])  # No DRF authentication - credential auth performed in the view
+@authentication_classes([])  # HMAC authentication is handled by middleware and the decorator.
 @permission_classes([AllowAny])
-@throttle_classes([AuthThrottle])
-@public_api_endpoint
+@throttle_classes(
+    [PortalHMACRateThrottle, PortalHMACBurstThrottle, ResetClientIPThrottle, CustomerRateThrottle, BurstRateThrottle]
+)
+@require_portal_authentication
 def password_reset_request_api(request: HttpRequest) -> Response:
     """
-    🔑 Request Password Reset -- intentionally public.
+    Request a customer password reset through an HMAC-signed Portal call.
 
-    Anonymous users must be able to request password resets.
+    Email links use the configured public Portal URL. Successful requests
+    keep a neutral response whether or not the account exists.
 
     POST /api/users/password/reset/
     {
@@ -652,7 +709,7 @@ def password_reset_request_api(request: HttpRequest) -> Response:
             return Response(result)
 
         except Exception as e:
-            logger.error(f"🔥 [Password Reset] Request failed: {e}")
+            logger.error("🔥 [Password Reset] Request failed (%s): %s", type(e).__name__, e)
             return Response(
                 {"success": False, "error": "Password reset service temporarily unavailable."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -665,16 +722,18 @@ def password_reset_request_api(request: HttpRequest) -> Response:
 
 
 @api_view(["POST"])
-@authentication_classes([])  # No DRF authentication - credential auth performed in the view
+@authentication_classes([])  # HMAC authentication is handled by middleware and the decorator.
 @permission_classes([AllowAny])
-@throttle_classes([AuthThrottle])
-@public_api_endpoint
+@throttle_classes(
+    [PortalHMACRateThrottle, PortalHMACBurstThrottle, ResetClientIPThrottle, CustomerRateThrottle, BurstRateThrottle]
+)
+@require_portal_authentication
 def password_reset_confirm_api(request: HttpRequest) -> Response:
     """
-    🔐 Confirm Password Reset -- intentionally public.
+    Confirm a customer password reset through an HMAC-signed Portal call.
 
-    Token-validated endpoint; no HMAC needed since the reset token
-    itself proves possession of the email account.
+    The reset token proves possession of the email account. Invalid tokens
+    and rejected passwords return validation errors before any mutation.
 
     POST /api/users/password/reset/confirm/
     {
@@ -706,7 +765,7 @@ def password_reset_confirm_api(request: HttpRequest) -> Response:
             return Response(result)
 
         except Exception as e:
-            logger.error(f"🔥 [Password Reset] Confirm failed: {e}")
+            logger.error("🔥 [Password Reset] Confirm failed (%s): %s", type(e).__name__, e)
             return Response(
                 {"success": False, "error": "Password reset failed. Please try again."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -715,77 +774,6 @@ def password_reset_confirm_api(request: HttpRequest) -> Response:
         return Response(
             {"success": False, "error": "Validation failed", "errors": serializer.errors},
             status=status.HTTP_400_BAD_REQUEST,
-        )
-
-
-# ===============================================================================
-# CUSTOMER REGISTRATION API
-# ===============================================================================
-
-
-@api_view(["POST"])
-@authentication_classes([])  # No DRF authentication - credential auth performed in the view
-@permission_classes([AllowAny])
-@throttle_classes([AnonRateThrottle])
-@public_api_endpoint
-def customer_registration_api(request: HttpRequest) -> Response:
-    """
-    Customer registration API endpoint for Portal service -- intentionally public.
-
-    New users register without existing auth; throttled by AnonRateThrottle.
-    Creates new customer account with business information via Platform API.
-    """
-    try:
-        # Use existing UserRegistrationService for consistency
-
-        # Create form from API data
-        form_data = {
-            "email": request.data.get("email", "").lower().strip(),
-            "first_name": request.data.get("first_name", ""),
-            "last_name": request.data.get("last_name", ""),
-            "phone": request.data.get("phone", ""),
-            "password1": request.data.get("password1", ""),
-            "password2": request.data.get("password2", ""),
-            "gdpr_consent": request.data.get("gdpr_consent", False),
-            "accepts_marketing": request.data.get("accepts_marketing", False),
-        }
-
-        form = UserRegistrationForm(data=form_data)
-
-        if form.is_valid():
-            try:
-                # Create user using existing service
-                user = form.save()
-
-                logger.info(f"✅ [Registration API] Customer account created: {user.email}")
-
-                return Response(
-                    {
-                        "success": True,
-                        "message": "Registration successful",
-                        "customer_id": user.id,
-                        "email": user.email,
-                        "requires_verification": False,  # Email verification can be added later
-                    },
-                    status=status.HTTP_201_CREATED,
-                )
-
-            except Exception as e:
-                logger.error(f"🔥 [Registration API] Registration failed: {e}")
-                return Response(
-                    {"success": False, "error": "Registration failed. Please try again."},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                )
-        else:
-            return Response(
-                {"success": False, "error": "Validation failed", "errors": form.errors},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-    except Exception as e:
-        logger.error(f"🔥 [Registration API] Unexpected error: {e}")
-        return Response(
-            {"success": False, "error": "Registration service unavailable"}, status=status.HTTP_503_SERVICE_UNAVAILABLE
         )
 
 
@@ -976,8 +964,9 @@ def password_change_api(request: HttpRequest, user: User) -> Response:
             return Response({"success": False, "error": "Invalid authentication code"}, status=400)
         user.set_password(new_password)
         user.save(update_fields=["password"])
-        SessionSecurityService.rotate_session_on_password_change(request, user)
-    return Response({"success": True})
+        SessionSecurityService.invalidate_all_sessions_for_user(user.id)
+        log_security_event("portal_password_changed", {"user_id": user.id}, get_safe_client_ip(request))
+    return Response({"success": True, "session_auth_hash": user.get_session_auth_hash()})
 
 
 @api_view(["POST"])

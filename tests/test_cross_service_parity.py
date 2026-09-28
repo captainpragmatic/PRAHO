@@ -49,3 +49,27 @@ class TestLocalisationParity(TestCase):
         for name in ("localisation.py", "localisation_forms.py", "localisation_middleware.py"):
             with self.subTest(name=name):
                 self.assertEqual((PLATFORM_COMMON / name).read_text(), (PORTAL_COMMON / name).read_text())
+
+
+class TestCounterStoreParity(TestCase):
+    """Counter behavior and its tests must remain byte-identical."""
+
+    def test_counter_implementations_match(self) -> None:
+        self.assertEqual(
+            (PLATFORM_COMMON / "counters.py").read_bytes(),
+            (PORTAL_COMMON / "counters.py").read_bytes(),
+        )
+
+    def test_counter_tests_match(self) -> None:
+        relative_path = Path("tests/common/test_counters.py")
+        self.assertEqual(
+            (REPO_ROOT / "services/platform" / relative_path).read_bytes(),
+            (REPO_ROOT / "services/portal" / relative_path).read_bytes(),
+        )
+
+    def test_counter_cull_command_matches(self) -> None:
+        relative_path = Path("management/commands/cull_counters.py")
+        self.assertEqual(
+            (PLATFORM_COMMON / relative_path).read_bytes(),
+            (PORTAL_COMMON / relative_path).read_bytes(),
+        )

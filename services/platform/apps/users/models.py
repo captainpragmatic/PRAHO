@@ -15,6 +15,7 @@ from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.db import models
 from django.db.models import QuerySet
 from django.utils import timezone
+from django.utils.crypto import salted_hmac
 from django.utils.translation import gettext_lazy as _
 
 from apps.common.localisation import DATE_FORMAT_CHOICES, validate_timezone
@@ -164,6 +165,17 @@ class User(AbstractUser):
     def __str__(self) -> str:
         return f"{self.get_full_name()} ({self.email})"
 
+    def _get_session_auth_hash(self, secret: str | None = None) -> str:
+        """Bind sessions to a monotonically increasing MFA credential version."""
+        try:
+            # Django caches this indexed reverse one-to-one lookup per instance.
+            version = self.credential_version.version
+        except UserCredentialVersion.DoesNotExist:
+            version = 0
+        value = self.password if version == 0 else f"{self.password}|v{version}"
+        key_salt = "django.contrib.auth.models.AbstractBaseUser.get_session_auth_hash"
+        return salted_hmac(key_salt, value, secret=secret, algorithm="sha256").hexdigest()
+
     def get_full_name(self) -> str:
         """Get user's full name or email if name not available"""
         full_name = super().get_full_name()
@@ -272,14 +284,18 @@ class User(AbstractUser):
     def increment_failed_login_attempts(self) -> None:
         """Increment failed login attempts and apply progressive lockout.
 
-        Design: Lockout starts on FIRST failed attempt (no threshold).
-        This is intentional — progressive delays (5->15->30->60->120->240 min)
-        make brute-force impractical while keeping the implementation simple.
-        Combined with rate limiting (10/min per IP, 5/min per email), this
-        provides defense-in-depth.
+        Account lockout begins at ACCOUNT_LOCKOUT_THRESHOLD consecutive failures
+        (default 5) for both Portal and staff web logins. The staff web path
+        calls this method from _handle_failed_login and is protected by
+        rate_limit(key="ip", rate="15/m") and rate_limit(key="post:email", rate="8/m").
+        Portal login has separate Portal IP/account limits, a Platform forwarded-IP
+        failure budget and a per-portal authentication request budget.
+        The progressive delays (5->15->30->60->120->240 min) start at the threshold
+        and remain capped at four hours.
 
         The deprecated MAX_LOGIN_ATTEMPTS constant in constants.py is NOT used.
-        To adjust lockout behavior, modify lockout_delays below.
+        Configure ACCOUNT_LOCKOUT_THRESHOLD and lockout_delays to adjust lockout.
+
 
         Uses F() expression for atomic increment to prevent lost updates
         under concurrent requests.
@@ -306,11 +322,7 @@ class User(AbstractUser):
         # Progressive lockout delays: 5min → 15min → 30min → 1hr → 2hr → 4hr
         lockout_delays = [5, 15, 30, 60, 120, 240]  # minutes
 
-        if self.failed_login_attempts >= len(lockout_delays):
-            # Cap at maximum lockout (4 hours)
-            lockout_minutes = lockout_delays[-1]
-        else:
-            lockout_minutes = lockout_delays[self.failed_login_attempts - 1]
+        lockout_minutes = lockout_delays[min(self.failed_login_attempts - threshold, len(lockout_delays) - 1)]
 
         self.account_locked_until = timezone.now() + timedelta(minutes=lockout_minutes)
         self.save(update_fields=["account_locked_until"])
@@ -397,6 +409,13 @@ class User(AbstractUser):
     def mfa_enabled(self) -> bool:
         """Alias for two_factor_enabled - for MFA API compatibility"""
         return self.two_factor_enabled
+
+
+class UserCredentialVersion(models.Model):
+    """Keep session revocation state outside ordinary user saves."""
+
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="credential_version")
+    version = models.PositiveIntegerField(default=0)
 
 
 class CustomerMembership(models.Model):
@@ -693,6 +712,22 @@ class APIToken(models.Model):
     def hash_key(raw_key: str) -> str:
         """Return the SHA-256 hex digest of a raw token key."""
         return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
+
+
+class UserSession(models.Model):
+    """Map persisted authenticated sessions to their owner for revocation.
+
+    The session store writes a row on every save of an authenticated session. A session
+    outlives a hard-deleted user (Django only anonymises the request), so the reference
+    carries no database constraint: with one, that browser's next request would fail at
+    commit instead of being redirected to login. The ORM still cascades on user deletion.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="session_index", db_constraint=False
+    )
+    session_key = models.CharField(max_length=40, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
 
 
 # Import MFA models to ensure they're recognized by Django

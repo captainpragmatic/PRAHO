@@ -19,6 +19,11 @@ urlpatterns = [
     path("company/create/", views.create_company_view, name="create_company"),
     path("switch-customer/", views.switch_customer_view, name="switch_customer"),
     path("password-reset/", views.password_reset_view, name="password_reset"),
+    path(
+        "password-reset/confirm/<str:uidb64>/<str:token>/",
+        views.password_reset_confirm_view,
+        name="password_reset_confirm",
+    ),
     path("change-password/", views.change_password_view, name="change_password"),
     path("mfa/", views.mfa_management_view, name="mfa_management"),
     path("mfa/setup/totp/", views.mfa_setup_totp_view, name="mfa_setup_totp"),

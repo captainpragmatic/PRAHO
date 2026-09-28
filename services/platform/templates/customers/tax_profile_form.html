@@ -51,6 +51,26 @@
             {% endif %}
           </div>
           {% endfor %}
+          <div>
+            <span class="block text-sm font-medium text-slate-300">{% trans "Reverse charge (VIES)" %}</span>
+            <p class="text-sm text-slate-400">{{ form.instance.get_vies_verification_status_display }}</p>
+            <dl class="text-sm text-slate-300">
+              <dt>{% trans "Verified name" %}</dt><dd>{{ form.instance.vies_verified_name|default:"—" }}</dd>
+              <dt>{% trans "Consultation reference" %}</dt><dd>{{ form.instance.vies_consultation_reference|default:"—" }}</dd>
+              <dt>{% trans "Verified at" %}</dt><dd>{{ form.instance.vies_verified_at|default:"—" }}</dd>
+            </dl>
+            {% if form.instance.vies_name_mismatch %}
+            <p class="text-amber-300">{% trans "Name differs from company name" %}</p>
+            {% endif %}
+            <h4 class="mt-4 text-slate-300">{% trans "Recent VIES refusals" %}</h4>
+            <ul class="text-sm text-slate-400">
+              {% for refusal in form.instance.recent_vies_refusals %}
+              <li>{{ refusal.timestamp }} — {{ refusal.metadata.vat_number }} — {{ refusal.metadata.reason }}</li>
+              {% empty %}
+              <li>{% trans "No recorded refusals." %}</li>
+              {% endfor %}
+            </ul>
+          </div>
         </div>
 
         <!-- Form Actions -->

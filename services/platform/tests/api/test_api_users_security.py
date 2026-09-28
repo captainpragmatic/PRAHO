@@ -15,10 +15,11 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
-from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
 
 from apps.common.middleware import _is_auth_exempt
-from apps.users.models import APIToken
+from apps.customers.models import Customer
+from apps.users.models import APIToken, CustomerMembership
+from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
 
 User = get_user_model()
 
@@ -297,13 +298,13 @@ class AuthEmailMaskingTests(TestCase):
 class HMACExemptPathsExactMatchTests(TestCase):
     """Exempt path list must use exact equality, not startswith.
 
-    A path like /api/users/register/extra/ must NOT bypass HMAC validation
-    even though it starts with /api/users/register/ (which IS exempt).
+    A path like /api/users/health/extra/ must NOT bypass HMAC validation
+    even though it starts with /api/users/health/ (which IS exempt).
     """
 
     def test_hmac_middleware_exempt_paths_exact_match(self) -> None:
         """Path that starts-with but is not an exact match must NOT be exempt."""
-        extended_path = "/api/users/register/extra"
+        extended_path = "/api/users/health/extra"
         self.assertFalse(
             _is_auth_exempt(extended_path),
             msg=(
@@ -313,18 +314,79 @@ class HMACExemptPathsExactMatchTests(TestCase):
         )
 
     def test_hmac_middleware_exempt_exact_path_is_present(self) -> None:
-        """The canonical exempt path /api/users/register/ must be recognized as exempt."""
-        self.assertTrue(_is_auth_exempt("/api/users/register/"))
+        """The public health endpoint remains exempt."""
+        self.assertTrue(_is_auth_exempt("/api/users/health/"))
+        self.assertFalse(_is_auth_exempt("/api/users/register/"))
 
     def test_hmac_middleware_exempt_path_without_trailing_slash(self) -> None:
         """Exempt check normalizes trailing slashes — both forms must match."""
-        self.assertTrue(_is_auth_exempt("/api/users/register"))
-        self.assertTrue(_is_auth_exempt("/api/users/register/"))
+        self.assertTrue(_is_auth_exempt("/api/users/health"))
+        self.assertTrue(_is_auth_exempt("/api/users/health/"))
+        self.assertFalse(_is_auth_exempt("/api/users/register"))
+        self.assertFalse(_is_auth_exempt("/api/users/register/"))
 
     def test_hmac_middleware_non_api_path_not_in_exempt(self) -> None:
         """Non-API paths should not be exempt from HMAC validation."""
         self.assertFalse(_is_auth_exempt("/users/register/"))
         self.assertFalse(_is_auth_exempt("/register/"))
+
+
+@override_settings(PLATFORM_API_SECRET=HMAC_TEST_SECRET, MIDDLEWARE=HMAC_TEST_MIDDLEWARE)
+class RegistrationRouteTests(HMACTestMixin, TestCase):
+    def test_unsigned_registration_is_denied_without_creating_accounts(self) -> None:
+        users_before = User.objects.count()
+        customers_before = Customer.objects.count()
+        response = self.client.post(
+            "/api/users/register/",
+            {
+                "email": "unsigned-registration@example.test",
+                "first_name": "Ana",
+                "last_name": "Pop",
+                "password1": "Copper!Valley92-Forest",
+                "password2": "Copper!Valley92-Forest",
+                "gdpr_consent": True,
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 401, response.content)
+        self.assertEqual(User.objects.count(), users_before)
+        self.assertEqual(Customer.objects.count(), customers_before)
+
+    def test_signed_registration_uses_only_the_customer_route(self) -> None:
+        payload = {
+            "user_data": {
+                "email": "signed-registration@example.test",
+                "password": "Copper!Valley92-Forest",
+                "first_name": "Ana",
+                "last_name": "Pop",
+                "phone": "+40722123456",
+            },
+            "customer_data": {
+                "customer_type": "company",
+                "company_name": "Registration SRL",
+                "address_line1": "Str. Victoriei 10",
+                "city": "București",
+                "county": "București",
+                "postal_code": "010061",
+                "country": "România",
+                "data_processing_consent": True,
+            },
+        }
+        users_before = User.objects.count()
+        customers_before = Customer.objects.count()
+        removed = self.portal_post("/api/users/register/", payload)
+        self.assertEqual(removed.status_code, 404, removed.content)
+        self.assertEqual(User.objects.count(), users_before)
+        self.assertEqual(Customer.objects.count(), customers_before)
+
+        registered = self.portal_post("/api/customers/register/", payload)
+        self.assertEqual(registered.status_code, 201, registered.content)
+        self.assertTrue(registered.json()["success"])
+        self.assertEqual(User.objects.count(), users_before + 1)
+        self.assertEqual(Customer.objects.count(), customers_before + 1)
+        user = User.objects.get(email="signed-registration@example.test")
+        self.assertTrue(user.check_password("Copper!Valley92-Forest"))
+        self.assertTrue(CustomerMembership.objects.filter(user=user, role="owner", is_active=True).exists())
 
 
 # ===============================================================================

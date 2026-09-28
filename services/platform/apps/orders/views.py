@@ -216,6 +216,14 @@ def _get_vat_rate_for_order(order: Order) -> Decimal:
             tax_profile = customer.tax_profile
             info["is_vat_payer"] = tax_profile.is_vat_payer
             info["reverse_charge_eligible"] = tax_profile.reverse_charge_eligible
+            from apps.billing.vies_evidence import vies_verified_for  # noqa: PLC0415
+
+            info["vies_verified"] = vies_verified_for(
+                tax_profile,
+                info.get("vat_number"),
+                billing_name=str(billing_address.get("company_name") or customer.get_billing_name()),
+            )
+            info["vat_rate_reason"] = tax_profile.vat_rate_reason
             if tax_profile.vat_rate is not None:
                 info["custom_vat_rate"] = tax_profile.vat_rate
         except Exception:  # noqa: S110
@@ -673,6 +681,12 @@ def order_create_preview(request: HttpRequest) -> HttpResponse:
         if tax_profile is not None:
             customer_vat_info["is_vat_payer"] = tax_profile.is_vat_payer
             customer_vat_info["reverse_charge_eligible"] = tax_profile.reverse_charge_eligible
+            from apps.billing.vies_evidence import vies_verified_for  # noqa: PLC0415
+
+            customer_vat_info["vies_verified"] = vies_verified_for(
+                tax_profile, customer_vat_info.get("vat_number"), billing_name=customer.get_billing_name()
+            )
+            customer_vat_info["vat_rate_reason"] = tax_profile.vat_rate_reason
             if tax_profile.vat_rate is not None:
                 customer_vat_info["custom_vat_rate"] = tax_profile.vat_rate
         vat_result = OrderVATCalculator.calculate_vat(subtotal_cents=subtotal_cents, customer_info=customer_vat_info)
@@ -1084,8 +1098,6 @@ def order_refund_request(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
                 "description": "Billing and refund related issues",
                 "icon": "credit-card",
                 "color": "#10B981",
-                "sla_response_hours": 24,
-                "sla_resolution_hours": 48,
             },
         )
 

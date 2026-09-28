@@ -74,8 +74,10 @@ services:
       - PORTAL_HMAC_MODE=${PORTAL_HMAC_MODE:-legacy}
       - PORTAL_HMAC_CREDENTIALS=${PORTAL_HMAC_CREDENTIALS:-}
       - PLATFORM_TO_PORTAL_WEBHOOK_SECRET=${PLATFORM_TO_PORTAL_WEBHOOK_SECRET:?PLATFORM_TO_PORTAL_WEBHOOK_SECRET required}
-      - ALLOWED_HOSTS=${DOMAIN:-localhost},localhost,platform
-      - CSRF_TRUSTED_ORIGINS=https://${DOMAIN:-localhost}
+      - PLATFORM_DOMAIN=${PLATFORM_DOMAIN:-${DOMAIN:-platform.localhost}}
+      - PORTAL_DOMAIN=${PORTAL_DOMAIN:-${DOMAIN:-localhost}}
+      - ALLOWED_HOSTS=${PLATFORM_DOMAIN:-${DOMAIN:-platform.localhost}},localhost,platform
+      - CSRF_TRUSTED_ORIGINS=https://${PLATFORM_DOMAIN:-${DOMAIN:-platform.localhost}}
       - DJANGO_SECURE_SSL_REDIRECT=false
       - SERVICE_NAME=platform
     volumes:
@@ -111,7 +113,10 @@ services:
       - "80:80"
       - "443:443"
     environment:
-      - DOMAIN=${DOMAIN:-localhost}
+      - PORTAL_DOMAIN=${PORTAL_DOMAIN:-${DOMAIN:-localhost}}
+      - PLATFORM_DOMAIN=${PLATFORM_DOMAIN:-${DOMAIN:-platform.localhost}}
+      # Space-separated CIDRs, never commas. Applies only to the Platform staff site.
+      - PLATFORM_ALLOWED_CIDRS=${PLATFORM_ALLOWED_CIDRS:-127.0.0.1/32 ::1/128}
       - ACME_EMAIL=${ACME_EMAIL:-admin@example.com}
     volumes:
       - ./caddy/Caddyfile.platform:/etc/caddy/Caddyfile:ro

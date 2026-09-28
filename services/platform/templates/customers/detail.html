@@ -418,6 +418,21 @@
     </div>
     {% endif %}
 
+    {% if tax_profile %}
+    <section class="bg-slate-800 rounded-lg p-6 mb-6 text-slate-300">
+        <h2>{% trans "VIES evidence" %}</h2>
+        <dl>
+            <dt>{% trans "Status" %}</dt><dd>{{ tax_profile.get_vies_verification_status_display }}</dd>
+            <dt>{% trans "Verified name" %}</dt><dd>{{ tax_profile.vies_verified_name|default:"—" }}</dd>
+            <dt>{% trans "Consultation reference" %}</dt><dd>{{ tax_profile.vies_consultation_reference|default:"—" }}</dd>
+            <dt>{% trans "Verified at" %}</dt><dd>{{ tax_profile.vies_verified_at|default:"—" }}</dd>
+        </dl>
+        {% if tax_profile.vies_name_mismatch %}
+        <p class="text-amber-300">{% trans "Name differs from company name" %}</p>
+        {% endif %}
+    </section>
+    {% endif %}
+
     <!-- Addresses -->
     {% if customer.addresses.exists %}
     <div class="bg-slate-800 rounded-lg border border-slate-700 mb-6">

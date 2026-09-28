@@ -8,10 +8,11 @@ instead of converting them to ValidationError.
 
 from __future__ import annotations
 
+import time
 from unittest.mock import MagicMock, patch
 
 from django.contrib.messages import get_messages
-from django.test import SimpleTestCase, override_settings
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from apps.api_client.services import PlatformAPIError
@@ -63,13 +64,16 @@ def _rate_limited_error(retry_after: int = 30) -> PlatformAPIError:
     SESSION_ENGINE="django.contrib.sessions.backends.cache",
     CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
 )
-class OrdersRateLimitViewTests(SimpleTestCase):
+class OrdersRateLimitViewTests(TestCase):
     def _login_session(self) -> None:
         session = self.client.session
         session["customer_id"] = 1
         session["user_id"] = 1
         session["email"] = "test@example.com"
+        session["user_memberships"] = [{"customer_id": session["customer_id"], "role": "owner"}]
+        session["user_memberships_fetched_at"] = time.time()
         session.save()
+
 
     def test_catalog_rate_limited_shows_warning_not_error(self) -> None:
         self._login_session()
@@ -109,7 +113,7 @@ class OrdersRateLimitViewTests(SimpleTestCase):
         self.assertEqual(data["retry_after"], 45)
 
 
-class OrdersServicesRateLimitTests(SimpleTestCase):
+class OrdersServicesRateLimitTests(TestCase):
     def test_calculate_re_raises_rate_limited_error(self) -> None:
         cart = MagicMock()
         cart.has_items.return_value = True

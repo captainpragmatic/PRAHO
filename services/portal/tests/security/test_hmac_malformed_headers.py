@@ -78,7 +78,11 @@ class HMACMalformedHeaderTestCase(SimpleTestCase):
             elif expected_behavior == 'accept_all':
                 # Accept everything (for testing client behavior)
                 mock_response.status_code = 200
-                mock_response.json.return_value = {'success': True}
+                mock_response.json.return_value = {
+                    'success': True,
+                    'user': {'id': 1, 'email': 'user@example.com', 'customer_id': 1},
+                }
+
 
             return mock_response
 
@@ -544,8 +548,12 @@ class HMACMalformedHeaderTestCase(SimpleTestCase):
                     # Platform would receive final merged/chosen header value
                     mock_response = Mock()
                     mock_response.status_code = 200
-                    mock_response.json.return_value = {'success': True}
+                    mock_response.json.return_value = {
+                        'success': True,
+                        'user': {'id': 1, 'email': 'user@example.com', 'customer_id': 1},
+                    }
                     return mock_response
+
 
                 with patch('apps.common.outbound_http._session.request', side_effect=mock_duplicate_detection):
                     result = client.authenticate_customer('test@example.com', 'password123')

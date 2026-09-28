@@ -19,9 +19,9 @@ from django.core.exceptions import ImproperlyConfigured
 from django.http import JsonResponse
 from django.test import SimpleTestCase, override_settings
 from django.urls import path
-from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, hmac_headers
 
 from apps.common import portal_hmac
+from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, hmac_headers
 
 SHARED = "shared-platform-secret-value-01234567"
 PORTAL_A_SECRET = "portal-a-distinct-secret-abcdefghij"
@@ -51,7 +51,6 @@ def _signed(portal_id: str, secret: str, nonce: str | None = None) -> tuple[dict
     ROOT_URLCONF=_URLCONF,
     MIDDLEWARE=HMAC_TEST_MIDDLEWARE,
     PLATFORM_API_SECRET=SHARED,
-    PORTAL_HMAC_BYPASS=False,
     RATE_LIMITING_ENABLED=False,
 )
 class PortalRegistryEnforceModeTests(SimpleTestCase):
@@ -105,7 +104,6 @@ class PortalRegistryEnforceModeTests(SimpleTestCase):
     ROOT_URLCONF=_URLCONF,
     MIDDLEWARE=HMAC_TEST_MIDDLEWARE,
     PLATFORM_API_SECRET=SHARED,
-    PORTAL_HMAC_BYPASS=False,
     RATE_LIMITING_ENABLED=False,
 )
 class PortalRegistryLegacyAndAuditTests(SimpleTestCase):

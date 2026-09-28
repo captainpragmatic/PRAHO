@@ -22,8 +22,9 @@ from enum import StrEnum
 from functools import wraps
 from typing import TYPE_CHECKING, Any
 
-from django.core.cache import cache
 from django.utils import timezone
+
+from apps.common import counters
 
 from .settings import efactura_settings
 
@@ -110,7 +111,7 @@ class ANAFQuotaTracker:
     """
     Track ANAF API quotas per CUI and message.
 
-    Uses Redis/Django cache for distributed tracking.
+    Uses the shared database counter store for distributed tracking.
     All limits are read from EFacturaSettings.
 
     Usage:
@@ -162,15 +163,15 @@ class ANAFQuotaTracker:
 
         if message_id and endpoint in (QuotaEndpoint.STATUS, QuotaEndpoint.DOWNLOAD):
             # Per-message quotas
-            return f"{self.CACHE_PREFIX}:{endpoint.value}:{cui}:{message_id}:{date_str}"
+            return f"{self.CACHE_PREFIX}:v{self.CACHE_VERSION}:{endpoint.value}:{cui}:{message_id}:{date_str}"
         else:
             # Per-CUI quotas
-            return f"{self.CACHE_PREFIX}:{endpoint.value}:{cui}:{date_str}"
+            return f"{self.CACHE_PREFIX}:v{self.CACHE_VERSION}:{endpoint.value}:{cui}:{date_str}"
 
     def _get_global_minute_key(self) -> str:
         """Get cache key for global minute rate limit."""
         minute = int(time.time() // 60)
-        return f"{self.CACHE_PREFIX}:global:minute:{minute}"
+        return f"{self.CACHE_PREFIX}:v{self.CACHE_VERSION}:global:minute:{minute}"
 
     def _get_reset_time(self) -> str:
         """Get next reset time (midnight Romanian time)."""
@@ -186,7 +187,7 @@ class ANAFQuotaTracker:
     ) -> int:
         """Get current usage count for endpoint."""
         cache_key = self._get_cache_key(endpoint, cui, message_id)
-        return int(cache.get(cache_key, 0, version=self.CACHE_VERSION))
+        return counters.peek(cache_key)
 
     def get_limit(self, endpoint: QuotaEndpoint) -> int:
         """Get limit for endpoint from settings."""
@@ -250,7 +251,7 @@ class ANAFQuotaTracker:
             return True
 
         key = self._get_global_minute_key()
-        current: int = cache.get(key, 0, version=self.CACHE_VERSION)
+        current = counters.peek(key)
         return current < global_limit
 
     def increment(
@@ -272,23 +273,17 @@ class ANAFQuotaTracker:
         Returns:
             New usage count
         """
+        if count < 1:
+            raise ValueError("Quota increments must be positive")
         # Increment endpoint-specific counter
         cache_key = self._get_cache_key(endpoint, cui, message_id)
         timeout = self._seconds_until_midnight()
 
-        try:
-            new_value = cache.incr(cache_key, count, version=self.CACHE_VERSION)
-        except ValueError:
-            # Key doesn't exist, create it
-            cache.set(cache_key, count, timeout=timeout, version=self.CACHE_VERSION)
-            new_value = count
+        new_value = counters.increment(cache_key, timeout, delta=count)
 
-        # Increment global minute counter
+        # Increment global minute counter.
         global_key = self._get_global_minute_key()
-        try:
-            cache.incr(global_key, count, version=self.CACHE_VERSION)
-        except ValueError:
-            cache.set(global_key, count, timeout=self.MINUTE_WINDOW_SECONDS, version=self.CACHE_VERSION)
+        counters.increment(global_key, self.MINUTE_WINDOW_SECONDS, delta=count)
 
         logger.debug(f"Quota increment: {endpoint.value} for {cui} (message: {message_id}) = {new_value}")
 
@@ -338,8 +333,8 @@ class ANAFQuotaTracker:
     ) -> None:
         """Reset quota counter (for testing or admin use)."""
         cache_key = self._get_cache_key(endpoint, cui, message_id)
-        cache.delete(cache_key, version=self.CACHE_VERSION)
-        logger.info(f"Reset quota: {endpoint.value} for {cui}")
+        counters.reset(cache_key)
+        logger.info("✅ [ANAFQuota] Reset quota: %s for %s", endpoint.value, cui)
 
     def rate_limited(
         self,

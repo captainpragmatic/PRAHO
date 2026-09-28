@@ -1,6 +1,6 @@
 """Unit tests for the custom @rate_limit decorator (apps.common.rate_limiting).
 
-Tests use Django's LocMemCache to avoid external dependencies.
+Tests exercise the shared database counters.
 """
 
 from __future__ import annotations
@@ -9,8 +9,9 @@ from unittest.mock import MagicMock
 
 from django.core.cache import caches
 from django.http import HttpRequest, HttpResponse
-from django.test import SimpleTestCase, override_settings
+from django.test import TestCase, override_settings
 
+from apps.common.models import Counter
 from apps.common.rate_limiting import ALL, rate_limit
 
 LOCMEM_TEST_CACHE = {
@@ -46,7 +47,7 @@ def _dummy_view(request: HttpRequest) -> HttpResponse:
 
 
 @override_settings(CACHES=LOCMEM_TEST_CACHE, RATE_LIMITING_ENABLED=True)
-class TestRateLimitDecorator(SimpleTestCase):
+class TestRateLimitDecorator(TestCase):
     """Core decorator behaviour."""
 
     def setUp(self) -> None:
@@ -96,6 +97,8 @@ class TestRateLimitDecorator(SimpleTestCase):
             response = wrapped(request)
             self.assertEqual(response.status_code, 200)
             self.assertFalse(getattr(request, "limited", False))
+
+        self.assertEqual(Counter.objects.count(), 0)
 
     def test_user_key_authenticated(self) -> None:
         """Authenticated users are keyed by user PK, not IP."""

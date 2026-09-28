@@ -149,6 +149,90 @@ sudo systemctl enable --now certbot-renew.timer
 
 ---
 
+## Caddy hostname routing and staff access
+
+Caddy requires two distinct bare hostnames: `PORTAL_DOMAIN` and `PLATFORM_DOMAIN`.
+Both services own `/dashboard/`, `/billing/`, `/tickets/`, `/i18n/`,
+`/cookie-policy/` and `/api/`. One hostname cannot serve both sets of routes.
+The former path split never made the complete staff and customer UIs reachable together.
+
+| Hostname | Path | Edge policy and owner |
+|----------|------|-----------------------|
+| Portal | `/static/*` | Portal static files |
+| Portal | `/status/` | Public Portal health |
+| Portal | All other paths, including `/api/*` | Portal, with a 5 MB request body cap |
+| Platform | `/api/users/health/*` | Public Platform health |
+| Platform | `/integrations/webhooks/*` | Platform; provider authentication remains in Django |
+| Platform | `/api/*` | Platform; application authentication remains in Django |
+| Platform | All other paths, including static/media and staff login | Staff CIDR allowlist, otherwise 403 |
+
+The API is intentionally reachable independently of the staff CIDR gate.
+`PortalServiceHMACMiddleware._AUTH_EXEMPT_EXACT_PATHS_RAW` currently exempts
+`/api/users/health` and `/api/orders/products` (with trailing-slash normalization). Its authenticated staff-session GET exception
+under `/api/customers/` also remains reachable through the public API handle.
+Caddy does not replace these application authentication rules.
+
+### Upgrade / PR deploy notes
+
+- Set DNS and certificates for both hostnames before switching the Caddy config. Caddy
+  refuses to start when either domain variable is unset; there is no fallback hostname.
+  Pass both domain variables to both Django services and include each public
+  hostname in that service's `ALLOWED_HOSTS`. Production settings derive CSRF
+  trusted origins from those hosts and absolute URLs from the domain variables.
+- Standalone Compose accepts `PLATFORM_ALLOWED_CIDRS="127.0.0.1/32 ::1/128"`.
+  CIDRs are **space-separated**; commas make Caddy validation fail.
+  Replace/add the actual staff or VPN networks before deploying.
+  `PORTAL_TRUSTED_PROXY_CIDRS` is a separate, comma-separated Django setting.
+- Existing Ansible installations must set `platform_allowed_ips` in inventory
+  host_vars/group_vars at upgrade. Both roles now default to
+  `["127.0.0.1/32", "::1/128"]`; an empty list also falls back to loopback.
+  The standalone Compose environment variable does not configure Ansible.
+- `DOMAIN` remains a legacy fallback for the Portal in combined/Portal-only
+  Compose and for the Platform in Platform-only Compose. Set both explicit domain
+  variables when deploying; the combined Platform default is `platform.localhost`.
+- Update external monitors to Portal `/status/` and Platform
+  `/api/users/health/`. Remove the old `/health/` and `/portal-health/` URLs.
+  Update bookmarks and integrations that relied on the former shared hostname.
+- Caddy must be the edge. Its [remote_ip matcher](https://caddyserver.com/docs/caddyfile/matchers#remote-ip)
+  uses the immediate peer; client-supplied `X-Forwarded-For` and `X-Real-IP`
+  do not grant staff access. [Sibling handles](https://caddyserver.com/docs/caddyfile/directives/handle)
+  keep the public routes outside the staff gate.
+- Verify the peer observed through Docker's published port before trusting the
+  allowlist. If distinct clients appear as the same bridge/proxy address, allowing
+  that address admits all of them. Fix ingress source preservation or enforce the
+  staff boundary at the preceding ingress; do not allow a shared gateway blindly.
+- Prevent direct access to Django from bypassing Caddy. Platform-only Compose
+  still publishes port 8700; restrict it with the deployment firewall/private
+  network. Portal-only also publishes 8701.
+
+### Routing acceptance
+
+Run `pytest -o addopts='' tests/deploy/test_caddy_routing.py -m 'not docker'`
+for template, defaults, host propagation and route structure contracts.
+Run `pytest -o addopts='' tests/deploy/test_caddy_routing.py -m docker -s`
+with a working Docker daemon and the official `caddy:2-alpine` image.
+These checks validate all three static configs and both rendered templates,
+reject comma-separated CIDRs, and exercise the actual Caddy proxy and allowlist.
+The HTTP routing fixture substitutes observable upstreams; it retains the
+production matchers, sibling handles and gate. It checks an allowed loopback
+peer, a separate container peer and traffic through the published Docker port,
+including spoofed forwarding headers. Record the reported peer addresses.
+
+Container routing probes do not establish Django login or CSRF correctness.
+Before rollout, start real Platform and Portal services behind a local Caddy
+container using the two hostnames and trusted local HTTPS certificates. Set
+`DEBUG=False`, the domains, host lists, Portal proxy trust and shared HMAC secrets.
+From a non-loopback customer connection, log in at the Portal hostname, open
+the dashboard, and submit a real form such as a language change at
+`/i18n/setlang/` with its CSRF token; verify the resulting saved/session state.
+From an explicitly allowed staff connection, log in at the Platform hostname
+and open the staff dashboard. From an untrusted connection, verify staff login
+and dashboard return 403 even with spoofed forwarding headers, while both
+health endpoints and a correctly signed API request remain reachable.
+Record these results in the deployment/PR evidence before approval.
+
+---
+
 ## 4. Security Headers
 
 ### Django SecurityHeadersMiddleware
@@ -212,9 +296,15 @@ Source: `config/settings/base.py` — `PASSWORD_HASHERS`
 
 ### Account Lockout
 
-- `ACCOUNT_LOCKOUT_THRESHOLD = 1` — progressive lockout starts on first failed attempt
-- Lockout escalation: 5 min -> 15 min -> 30 min -> 60 min -> 120 min -> 240 min
+- `ACCOUNT_LOCKOUT_THRESHOLD = 5` — lockout starts at the fifth consecutive failure for Portal and staff web logins
+- The ladder starts at the threshold: failures 5/6/7/8/9/10+ lock for 5/15/30/60/120/240 minutes
+- Staff web login calls `increment_failed_login_attempts` through `_handle_failed_login`; its POST decorators enforce `rate_limit(key="ip", rate="15/m")` and `rate_limit(key="post:email", rate="8/m")`
+- Platform Portal-login limit: 10 failures/minute per valid forwarded client IP in an HMAC-signed body; the budget is checked before password verification and charged only for rejected credentials, locked/inactive accounts or failed MFA
+- Platform password reset request and confirmation limit: 5 requests/minute shared per valid forwarded client IP
+- Missing or malformed forwarded IPs skip only the per-client limit; the per-portal auth bucket still applies
+- Both password reset endpoints require Portal HMAC authentication
 - Tracked via `failed_login_attempts` and `account_locked_until` fields on User model
+
 
 ### Session Security
 
@@ -230,8 +320,32 @@ Source: `config/settings/prod.py`
 
 ### Login Rate Limiting
 
-- 10 requests/minute global on login endpoint
-- 5 requests/minute per email address
+- Portal login: 5 failures per IP per 15 minutes and 5 failures per email per 30 minutes; successful login clears these counters
+- Portal MFA reauthentication: 5 failures per session user per 15 minutes, checked only for POSTs under `/mfa/`
+- Denied customer switches do not consume authentication budgets
+- Registration and password reset requests use a separate Portal IP volume budget of 10 POSTs per 15 minutes
+- Platform outages and transport failures do not consume Portal login failure budgets
+- Staff web login: 15 POSTs/minute per IP and 8 POSTs/minute per submitted email, plus the account lockout above
+
+### Portal Proxy Trust
+
+Set `PORTAL_TRUSTED_PROXY_CIDRS` to a comma-separated list of trusted reverse
+proxy CIDRs. Production and staging refuse to start with an empty list.
+The deployment check reports `portal.E001` outside DEBUG and `portal.W001` in DEBUG.
+
+For native Caddy on the same host, use `127.0.0.1/32,::1/128`. For Docker,
+use the Compose network subnet containing the proxy; `172.16.0.0/12` is an
+example range and should be narrowed to the actual project subnet. Managed
+container deployments must use their ingress proxy's CIDRs. Docker Ansible
+deployments supply the `portal_trusted_proxy_cidrs` variable; native deployments
+copy the operator env file documented by the root `.env.example.*` files.
+
+If custom settings run outside DEBUG without proxy trust, Portal authentication
+IP and volume buckets are disabled and a security warning is logged once per
+process. The email and MFA user budgets remain active. Login requests omit
+`client_ip` from their signed body, so Platform also skips its forwarded-IP
+login budget. With configured trust, only headers from trusted proxy addresses
+are used to resolve the client IP.
 
 > For MFA setup and key management details, see [MFA Setup and Key Management](MFA-SETUP-AND-KEY-MANAGEMENT.md).
 
@@ -268,9 +382,31 @@ TIMESTAMP
 
 ### HMAC Rate Limiting
 
-- Key: `hmac_rl:{portal_id}:{client_ip}`
-- Default: 300 calls per 60 seconds
-- Configurable via `HMAC_RATE_LIMIT_WINDOW` and `HMAC_RATE_LIMIT_MAX_CALLS`
+- General bucket: `hmac_rl:{portal_id}:{client_ip}:{window_index}`, default 300 calls per 60 seconds.
+- Login, password reset, and reset confirmation share a separate
+  `hmac_rl:{portal_id}:{client_ip}:auth:{window_index}` bucket, default 120 calls per 60 seconds.
+  Paths match with or without trailing slashes. Exhausting this bucket does not
+  consume the general bucket.
+- `client_ip` in these middleware keys is the transport/proxy-resolved IP, usually
+  the Portal container's IP, rather than the end-user IP.
+- `HMAC_RATE_LIMIT_WINDOW` controls both windows; `HMAC_RATE_LIMIT_MAX_CALLS`
+  controls the general cap. `HMAC_RATE_LIMIT_MAX_AUTH_CALLS` controls the auth cap
+  as a Django setting (default 120; no environment-variable mapping).
+- Login, both password-reset endpoints, and `/api/customers/register/` require
+  HMAC authentication. The duplicate `/api/users/register/` route has been removed.
+- Fixed-window counters include `window_index = int(now // window)` in their
+  keys. Window rollover therefore works with DatabaseCache even when incrementing
+  a counter changes its expiry. Retry-After reports the time until the next boundary.
+- `LoginClientIPThrottle` carries `auth_login_ip` (`10/minute`) through startup
+  validation. The plain Django `portal_login_api` view uses `fixed_window_limited`
+  with `login_ip:{client_ip}:{window_index}`, peeking before authentication and
+  charging only failures.
+- `ResetClientIPThrottle` (`auth_reset_ip`, `5/minute`) is attached to both password
+  reset endpoints. Its per-client budget becomes active when Portal forwards
+  `client_ip` on those calls; that forwarding is scheduled for a later package.
+- Forwarded-IP limits accept only a valid IP string in an HMAC-authenticated body.
+  Missing or malformed IPs skip that limit without falling back to the transport IP.
+
 
 ### CSRF and Host Validation
 
@@ -468,11 +604,19 @@ Platform responses standardize `429` handling with parseable error payloads and 
 
 - [ ] Set secure `DJANGO_SECRET_KEY` (50+ characters, not `django-insecure-` prefix)
 - [ ] Set `DJANGO_ENCRYPTION_KEY` and `CREDENTIAL_VAULT_MASTER_KEY`
-- [ ] Configure `ALLOWED_HOSTS` for your domain (no wildcards)
+- [ ] Configure distinct `PORTAL_DOMAIN` and `PLATFORM_DOMAIN`, pass both to both services, and include each public hostname in its service's `ALLOWED_HOSTS` (no wildcards)
+- [ ] Set staff/VPN CIDRs before upgrade: space-separated `PLATFORM_ALLOWED_CIDRS` for Compose or `platform_allowed_ips` for Ansible; empty Ansible lists no longer allow public staff access
+- [ ] Validate all five Caddy configurations and confirm comma-separated staff CIDRs fail validation
+- [ ] Record non-loopback peer addresses through Docker's published port and verify spoofed forwarding headers cannot grant staff access
+- [ ] Verify real Portal login/form submission and allowed staff login through local Caddy with `DEBUG=False`
+- [ ] Restrict direct Django ports and update monitors/bookmarks for the two hostnames and actual health URLs
 - [ ] Enable SSL/TLS with valid certificate
 - [ ] Set secure database passwords with `DB_SSLMODE=require`
 - [ ] Configure email with TLS encryption
 - [ ] Set `HMAC_SECRET` for portal-platform communication
+- [ ] Set `PORTAL_TRUSTED_PROXY_CIDRS` on the Portal (production and staging refuse to start without it)
+- [ ] Set `portal.public_base_url` in Settings before customers use password reset
+- [ ] Run `python manage.py validate_vat_numbers --blocked-orders` right after `migrate` on the first deploy with the VIES gate (`billing.reverse_charge_requires_vies`)
 - [ ] Review [HTTPS Deployment Checklist](../deployment/HTTPS_DEPLOYMENT_CHECKLIST.md) for TLS rollout
 - [ ] Run `make lint-security` before deploy
 - [ ] Run `python manage.py check --deploy`
