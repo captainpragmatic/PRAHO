@@ -81,20 +81,30 @@ def system_status_check() -> None:
     )
 
 
+def cull_counters() -> dict[str, int]:
+    """Sweep expired counter rows that the random cull on writes did not reach."""
+    from apps.common import counters  # noqa: PLC0415  # Deferred: models are not ready when tasks import
+
+    deleted = counters.cull_expired(batches=20)
+    logger.info("🧹 [Counters] Culled %s expired counter rows", deleted)
+    return {"deleted": deleted}
+
+
 def setup_system_status_scheduled_tasks() -> dict[str, str]:
     """
-    Register the system_status_check task with Django-Q2.
+    Register the system_status_check and counter_cull tasks with Django-Q2.
 
     Returns dict of task_name -> result ('created' or 'already_exists').
     """
     results: dict[str, str] = {}
 
-    task_name = "system_status_check"
-    func_path = "apps.common.tasks.system_status_check"
-
-    if Schedule.objects.filter(name=task_name).exists():
-        results[task_name] = "already_exists"
-    else:
+    for task_name, func_path in (
+        ("system_status_check", "apps.common.tasks.system_status_check"),
+        ("counter_cull", "apps.common.tasks.cull_counters"),
+    ):
+        if Schedule.objects.filter(name=task_name).exists():
+            results[task_name] = "already_exists"
+            continue
         Schedule.objects.create(
             name=task_name,
             func=func_path,

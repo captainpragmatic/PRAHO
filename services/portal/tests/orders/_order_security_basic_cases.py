@@ -7,7 +7,7 @@ from typing import Any
 from unittest.mock import Mock, patch
 
 from django.contrib.sessions.backends.cache import SessionStore
-from django.test import Client, SimpleTestCase, override_settings
+from django.test import Client, TestCase, override_settings
 from django.utils import timezone
 
 from apps.orders.services import GDPRCompliantCartSession
@@ -19,7 +19,7 @@ except ImportError:
 
 
 @override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
-class OrderDoSHardeningTestCase(SimpleTestCase):
+class OrderDoSHardeningTestCase(TestCase):
     """
     🔒 DoS Hardening Security Tests
     Tests request validation and fail-closed behavior
@@ -97,7 +97,7 @@ class OrderDoSHardeningTestCase(SimpleTestCase):
 
 
 @override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
-class OrderCartVersioningTestCase(SimpleTestCase):
+class OrderCartVersioningTestCase(TestCase):
     """
     🔒 Cart Versioning Security Tests
     Tests cart version generation and stale mutation detection
@@ -158,7 +158,7 @@ class OrderCartVersioningTestCase(SimpleTestCase):
 
 
 @override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
-class OrderEnumerationProtectionTestCase(SimpleTestCase):
+class OrderEnumerationProtectionTestCase(TestCase):
     """
     🔒 Enumeration Attack Protection Tests
     Tests that customer data endpoints are properly protected
@@ -211,7 +211,7 @@ class OrderEnumerationProtectionTestCase(SimpleTestCase):
 
 
 @override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
-class OrderSessionSecurityTestCase(SimpleTestCase):
+class OrderSessionSecurityTestCase(TestCase):
     """
     🔒 Session Security Tests
     Tests CSRF protection and session isolation

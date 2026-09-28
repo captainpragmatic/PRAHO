@@ -12,22 +12,26 @@ Tests cover:
 """
 
 import hashlib
-import hmac
 import json
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
+from threading import Barrier
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 from django.conf import settings
 from django.core.cache import cache
+from django.db import connections
 from django.http import HttpRequest
-from django.test import TestCase, override_settings
+from django.test import TestCase, TransactionTestCase, override_settings
 
+from apps.common import counters
 from apps.common.outbound_http import OutboundSecurityError
 from apps.customers.models import Customer
 from apps.notifications.models import UnsubscribeToken
 from apps.notifications.services import EmailPreferenceService, EmailService, EmailSuppressionService
 from config.settings.test import LOCMEM_TEST_CACHE
+from tests.helpers.counter_concurrency import counter_database
 
 
 class UnsubscribeTokenSecurityTests(TestCase):
@@ -116,15 +120,15 @@ class SSRFProtectionTests(TestCase):
 
 
 @override_settings(CACHES=LOCMEM_TEST_CACHE)
-class RateLimiterAtomicTests(TestCase):
-    """Test rate limiter atomic operations — needs real cache for atomic increment testing."""
+class RateLimiterAtomicTests(TransactionTestCase):
+    """Exercise email counters across independent database connections."""
 
     def setUp(self):
         """Clear cache before each test."""
         cache.clear()
 
     def test_increment_counter_atomic(self):
-        """Test counter increment is atomic using cache.add()."""
+        """The service returns each operation's new count."""
         from apps.notifications.services import EmailRateLimiter
 
         # Increment multiple times
@@ -136,32 +140,32 @@ class RateLimiterAtomicTests(TestCase):
         # Should be sequential: 1, 2, 3, 4, 5
         self.assertEqual(counts, [1, 2, 3, 4, 5])
 
-    def test_concurrent_increments(self):
-        """Test concurrent increments don't lose counts."""
-        from apps.notifications.services import EmailRateLimiter
+    def test_concurrent_increments(self) -> None:
+        """Concurrent service calls retain every hit in the shared store."""
+        from apps.notifications.services import EmailRateLimiter  # noqa: PLC0415
 
-        cache.clear()
-        num_threads = 5
-        increments_per_thread = 5
+        barrier = Barrier(8)
 
-        def do_increments():
-            for _ in range(increments_per_thread):
-                EmailRateLimiter.increment_counter("concurrent_test")
+        def do_increments() -> list[int]:
+            try:
+                barrier.wait(timeout=30)
+                return [EmailRateLimiter.increment_counter("concurrent_test") for _ in range(50)]
+            finally:
+                connections.close_all()
 
-        with ThreadPoolExecutor(max_workers=num_threads) as executor:
-            futures = [executor.submit(do_increments) for _ in range(num_threads)]
-            for f in futures:
-                f.result()
-
-        # Check final count - verify we didn't lose any increments
-        total_increments = num_threads * increments_per_thread  # 25
-        max_per_minute = getattr(settings, "EMAIL_RATE_LIMIT", {}).get("MAX_PER_MINUTE", 50)
-        _, remaining = EmailRateLimiter.check_rate_limit("concurrent_test")
-
-        # The remaining count should be max - increments
-        # But if increments > max, remaining should be 0
-        expected_remaining = max(0, max_per_minute - total_increments)
-        self.assertEqual(remaining, expected_remaining)
+        with (
+            counter_database(),
+            patch("apps.notifications.services.timezone.now", return_value=datetime(2027, 1, 1, tzinfo=UTC)),
+            patch("apps.common.counters.time.time", return_value=1_800_000_001),
+            patch("apps.common.counters.randbelow", return_value=1),
+            override_settings(EMAIL_RATE_LIMIT={"MAX_PER_MINUTE": 500}),
+        ):
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                futures = [executor.submit(do_increments) for _ in range(8)]
+                counts = [count for future in futures for count in future.result(timeout=120)]
+            self.assertEqual(sorted(counts), list(range(1, 401)))
+            self.assertEqual(counters.peek("email_rate:concurrent_test:202701010000"), 400)
+            self.assertEqual(EmailRateLimiter.check_rate_limit("concurrent_test"), (True, 100))
 
 
 class SuppressionTOCTOURaceTests(TestCase):
@@ -211,7 +215,7 @@ class CampaignFilterSQLInjectionTests(TestCase):
 
     def test_whitelist_allows_safe_fields(self):
         """Test whitelisted fields are allowed."""
-        from apps.notifications.tasks import _apply_safe_customer_filter, ALLOWED_CAMPAIGN_FILTER_FIELDS
+        from apps.notifications.tasks import _apply_safe_customer_filter
 
         # Mock queryset
         mock_qs = MagicMock()
@@ -339,8 +343,8 @@ class SuppressionCacheIntegrationTests(TestCase):
 
     def test_suppression_syncs_to_cache(self):
         """Test that database suppression is cached for read-through."""
-        from apps.notifications.services import EmailSuppressionService
         from apps.notifications.models import EmailSuppression
+        from apps.notifications.services import EmailSuppressionService
 
         email = "cache-test@example.com"
 
@@ -355,8 +359,8 @@ class SuppressionCacheIntegrationTests(TestCase):
 
     def test_cache_miss_falls_back_to_database(self):
         """Test that cache miss falls back to database lookup."""
-        from apps.notifications.services import EmailSuppressionService
         from apps.notifications.models import EmailSuppression
+        from apps.notifications.services import EmailSuppressionService
 
         email = "fallback-test@example.com"
 

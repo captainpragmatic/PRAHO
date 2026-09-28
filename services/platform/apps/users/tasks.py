@@ -23,7 +23,7 @@ from apps.audit.models import AuditEvent
 from apps.audit.services import AuditService
 from apps.settings.services import SettingsService
 from apps.users.mfa import WebAuthnCredential
-from apps.users.models import APIToken, User, UserLoginLog
+from apps.users.models import APIToken, User, UserLoginLog, UserSession
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,41 @@ TASK_RETRY_DELAY = 300  # 5 minutes
 TASK_MAX_RETRIES = 2
 TASK_SOFT_TIME_LIMIT = 300  # 5 minutes
 TASK_TIME_LIMIT = 600  # 10 minutes
+
+
+def reconcile_session_index() -> dict[str, int]:
+    """Index live sessions missed by old workers and prune rows whose session is gone.
+
+    Only unexpired, unindexed sessions are decoded, in key order and in batches, without row
+    locks: the index insert ignores conflicts, so a session that a worker indexes meanwhile is
+    simply skipped. Anonymous sessions never enter the index and are re-read on each run; the
+    expiry filter keeps that set to live sessions.
+    """
+    indexed = 0
+    last_key = ""
+    while True:
+        batch = list(
+            Session.objects.filter(expire_date__gt=timezone.now(), session_key__gt=last_key)
+            .exclude(session_key__in=UserSession.objects.values("session_key"))
+            .order_by("session_key")[:500]
+        )
+        if not batch:
+            break
+        last_key = batch[-1].session_key
+        owners: dict[str, int] = {}
+        for session in batch:
+            user_id = session.get_decoded().get("_auth_user_id")
+            # login() stores the primary key as a string of digits; anything else is not ours.
+            if isinstance(user_id, str) and user_id.isdigit():
+                owners[session.session_key] = int(user_id)
+        existing = set(User.objects.filter(pk__in=set(owners.values())).values_list("pk", flat=True))
+        rows = [UserSession(user_id=uid, session_key=key) for key, uid in owners.items() if uid in existing]
+        UserSession.objects.bulk_create(rows, ignore_conflicts=True)
+        indexed += len(rows)
+
+    pruned, _deleted = UserSession.objects.exclude(session_key__in=Session.objects.values("session_key")).delete()
+    logger.info("✅ [SessionSecurity] Reconciled %s sessions; pruned %s orphaned index rows", indexed, pruned)
+    return {"indexed": indexed, "pruned": pruned}
 
 
 def cleanup_expired_2fa_sessions() -> dict[str, Any]:
@@ -79,6 +114,10 @@ def cleanup_expired_2fa_sessions() -> dict[str, Any]:
                 deleted_count = Session.objects.filter(session_key__in=expired_sessions).delete()[0]
                 results["cleaned_sessions"] = deleted_count
                 logger.info(f"🧹 [UserSecurity] Cleaned {deleted_count} expired 2FA sessions")
+
+            index_result = reconcile_session_index()
+            results["indexed_sessions"] = index_result["indexed"]
+            results["pruned_session_index"] = index_result["pruned"]
 
             # Clean up cache-based 2FA challenges (pattern-based cleanup)
             cache_patterns = ["webauthn_challenge_*", "2fa_challenge_*", "mfa_challenge_*", "totp_challenge_*"]
@@ -404,6 +443,10 @@ def cleanup_expired_password_reset_tokens() -> dict[str, Any]:
             deleted_count = Session.objects.filter(session_key__in=reset_sessions).delete()[0]
             results["cleaned_sessions"] = deleted_count
             logger.info(f"🔑 [UserSecurity] Cleaned {deleted_count} expired password reset sessions")
+
+        index_result = reconcile_session_index()
+        results["indexed_sessions"] = index_result["indexed"]
+        results["pruned_session_index"] = index_result["pruned"]
 
         # Clean up old password reset related audit events (keep last 30 days)
         audit_cutoff = timezone.now() - timedelta(days=30)

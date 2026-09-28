@@ -13,7 +13,7 @@ No database access — all tests use SimpleTestCase + locmem cache.
 import json
 from unittest.mock import MagicMock, patch
 
-from django.test import Client, SimpleTestCase, override_settings
+from django.test import Client, TestCase, override_settings
 
 _CACHE_SETTINGS = {
     "SESSION_ENGINE": "django.contrib.sessions.backends.cache",
@@ -60,7 +60,7 @@ def _auth_client_with_product_mocked(client: Client, slug: str = "shared-hosting
 
 
 @override_settings(**_CACHE_SETTINGS)
-class TestAddToCartResponse(SimpleTestCase):
+class TestAddToCartResponse(TestCase):
     """ENH-1-A/B: Successful add_to_cart uses server-rendered state and includes product_slug."""
 
     def setUp(self) -> None:
@@ -133,7 +133,7 @@ class TestAddToCartResponse(SimpleTestCase):
 
 
 @override_settings(**_CACHE_SETTINGS)
-class TestMiniCartJustAdded(SimpleTestCase):
+class TestMiniCartJustAdded(TestCase):
     """ENH-1-C/D: mini_cart_content marks the just-added item when ?just_added=<slug> is passed."""
 
     def setUp(self) -> None:
@@ -197,7 +197,7 @@ class TestMiniCartJustAdded(SimpleTestCase):
 
 
 @override_settings(**_CACHE_SETTINGS)
-class TestCartUpdatedToastViewCartLink(SimpleTestCase):
+class TestCartUpdatedToastViewCartLink(TestCase):
     """ENH-1 + #102: after add-to-cart the View-Cart affordance is reachable via the
     auto-opening mini-cart dropdown (the inline toast 'View Cart' link was removed when
     the success notice was consolidated into showToast; the dropdown's cart link is the
@@ -246,7 +246,7 @@ class TestCartUpdatedToastViewCartLink(SimpleTestCase):
 
 
 @override_settings(**_CACHE_SETTINGS)
-class TestCartToastConsolidation(SimpleTestCase):
+class TestCartToastConsolidation(TestCase):
     """#102: the add-to-cart success notice routes through the single showToast()
     system instead of the old bespoke inline Alpine '#cart-success-message' box,
     so exactly one toast renders (in the shared #toast-container)."""

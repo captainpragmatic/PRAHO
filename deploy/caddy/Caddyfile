@@ -1,14 +1,11 @@
 # =============================================================================
 # PRAHO - Caddy Reverse Proxy Configuration
 # =============================================================================
-# Automatic HTTPS with Let's Encrypt
-# Routes: /admin, /api, /dashboard -> Platform | / -> Portal
+# Two distinct hostnames are required because the services share URL paths.
 
-{$DOMAIN:localhost} {
-    # TLS configuration
+{$PORTAL_DOMAIN} {
     tls {$ACME_EMAIL:admin@example.com}
 
-    # Security headers
     header {
         X-Frame-Options "DENY"
         X-Content-Type-Options "nosniff"
@@ -18,64 +15,23 @@
         -Server
     }
 
-    # Compression
     encode gzip zstd
 
-    # Static files (cached)
     handle_path /static/* {
-        root * /srv/static
-        file_server
-        header Cache-Control "public, max-age=31536000, immutable"
-    }
-
-    handle_path /media/* {
-        root * /srv/media
-        file_server
-        header Cache-Control "public, max-age=86400"
-    }
-
-    handle_path /portal-static/* {
         root * /srv/portal-static
         file_server
         header Cache-Control "public, max-age=31536000, immutable"
     }
 
-    # Platform routes (admin, API, dashboard)
-    handle /admin/* {
-        reverse_proxy platform:8700 {
-            header_up X-Real-IP {remote_host}
-            header_up X-Forwarded-For {remote_host}
-            header_up X-Forwarded-Proto {scheme}
-        }
-    }
-
-    handle /api/* {
-        reverse_proxy platform:8700 {
-            header_up X-Real-IP {remote_host}
-            header_up X-Forwarded-For {remote_host}
-            header_up X-Forwarded-Proto {scheme}
-        }
-    }
-
-    handle /dashboard/* {
-        reverse_proxy platform:8700 {
-            header_up X-Real-IP {remote_host}
-            header_up X-Forwarded-For {remote_host}
-            header_up X-Forwarded-Proto {scheme}
-        }
-    }
-
-    # Health checks
-    handle /health/* {
-        reverse_proxy platform:8700
-    }
-
-    handle /portal-health/* {
+    handle /status/ {
         reverse_proxy portal:8701
     }
 
-    # Portal handles everything else (customer-facing)
     handle {
+        # Leave multipart headroom above the 1 MiB ticket attachment limit.
+        request_body {
+            max_size 5MB
+        }
         reverse_proxy portal:8701 {
             header_up X-Real-IP {remote_host}
             header_up X-Forwarded-For {remote_host}
@@ -83,9 +39,78 @@
         }
     }
 
-    # Logging
     log {
-        output file /data/access.log {
+        output file /data/portal-access.log {
+            roll_size 100mb
+            roll_keep 5
+        }
+    }
+}
+
+{$PLATFORM_DOMAIN} {
+    tls {$ACME_EMAIL:admin@example.com}
+
+    header {
+        X-Frame-Options "DENY"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+        -Server
+    }
+
+    encode gzip zstd
+
+    handle /api/users/health/* {
+        reverse_proxy platform:8700
+    }
+
+    handle /integrations/webhooks/* {
+        reverse_proxy platform:8700
+    }
+
+    # Email provider bounce feeds and the recipient unsubscribe page are public too.
+    handle /notifications/webhooks/* {
+        reverse_proxy platform:8700
+    }
+
+    handle /notifications/unsubscribe/* {
+        reverse_proxy platform:8700
+    }
+
+    # Django enforces API authentication, including its explicit public exceptions.
+    handle /api/* {
+        reverse_proxy platform:8700
+    }
+
+    # Space-separated CIDRs; Caddy is the edge and matches the immediate peer.
+    @staff remote_ip {$PLATFORM_ALLOWED_CIDRS:127.0.0.1/32 ::1/128}
+    handle @staff {
+        handle_path /static/* {
+            root * /srv/static
+            file_server
+            header Cache-Control "public, max-age=31536000, immutable"
+        }
+
+        handle_path /media/* {
+            root * /srv/media
+            file_server
+            header Cache-Control "public, max-age=86400"
+        }
+
+        handle {
+            reverse_proxy platform:8700 {
+                header_up X-Real-IP {remote_host}
+                header_up X-Forwarded-For {remote_host}
+                header_up X-Forwarded-Proto {scheme}
+            }
+        }
+    }
+
+    respond "Access denied" 403
+
+    log {
+        output file /data/platform-access.log {
             roll_size 100mb
             roll_keep 5
         }

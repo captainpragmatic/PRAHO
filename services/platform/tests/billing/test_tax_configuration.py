@@ -663,7 +663,9 @@ class OrderVATCalculatorTests(TestCase):
             "is_business": True,
             "vat_number": "DE123456789",
             "is_vat_payer": True,
+            "vies_verified": True,
         }
+
         result = OrderVATCalculator.calculate_vat(10000, info)
 
         self.assertEqual(result.scenario, VATScenario.EU_B2B_REVERSE_CHARGE)
@@ -1080,14 +1082,16 @@ class PerCustomerVATOverrideTests(TestCase):
         self.assertEqual(result.total_cents, 11500)
 
     def test_reverse_charge_via_profile(self) -> None:
-        """reverse_charge_eligible=True + EU country + VAT number → 0%."""
+        """Matching profile VIES evidence permits EU cross-border reverse charge."""
         info: CustomerVATInfo = {
             "country": "DE",
             "is_business": True,
             "vat_number": "DE123456789",
             "is_vat_payer": True,
+            "vies_verified": True,
             "reverse_charge_eligible": True,
         }
+
         result = OrderVATCalculator.calculate_vat(10000, info)
 
         self.assertEqual(result.scenario, VATScenario.EU_B2B_REVERSE_CHARGE)
@@ -1123,13 +1127,14 @@ class PerCustomerVATOverrideTests(TestCase):
         self.assertEqual(result.vat_cents, 2100)
 
     def test_calculate_vat_respects_business_flag(self) -> None:
-        """TaxService.calculate_vat with is_business + EU VAT number → 0%."""
+        """TaxService.calculate_vat without profile evidence charges destination VAT."""
         result = TaxService.calculate_vat(
             10000, "DE", is_business=True, vat_number="DE123456789"
         )
-        self.assertEqual(result["vat_cents"], 0)
-        self.assertEqual(result["total_cents"], 10000)
-        self.assertEqual(result["vat_rate_percent"], Decimal("0.0"))
+        self.assertEqual(result["vat_cents"], 1900)
+        self.assertEqual(result["total_cents"], 11900)
+        self.assertEqual(result["vat_rate_percent"], Decimal("19.0"))
+
 
     def test_calculate_vat_romanian_business_still_charged(self) -> None:
         """TaxService.calculate_vat: Romanian business still pays 21%."""
@@ -1181,7 +1186,7 @@ class CrossCalculatorConsistencyTests(TestCase):
         self.assertEqual(ts_result["total_cents"], ov_result.total_cents)
 
     def test_eu_b2b_reverse_charge_consistency(self) -> None:
-        """Both calculators return 0% for EU B2B reverse charge."""
+        """Both calculators charge destination VAT without VIES evidence."""
         amount = 10000
         ts_result = TaxService.calculate_vat(
             amount, "DE", is_business=True, vat_number="DE123456789"
@@ -1194,8 +1199,9 @@ class CrossCalculatorConsistencyTests(TestCase):
                 "is_vat_payer": True,
             }
         )
-        self.assertEqual(ts_result["vat_cents"], 0)
-        self.assertEqual(ov_result.vat_cents, 0)
+        self.assertEqual(ts_result["vat_cents"], 1900)
+        self.assertEqual(ov_result.vat_cents, 1900)
+
 
 
 # ===============================================================================
@@ -1373,7 +1379,9 @@ class BusinessDetectionConsistencyTests(TestCase):
             "is_business": True,  # Set by: bool(company_name) or bool(vat_number)
             "vat_number": "DE123456789",
             "is_vat_payer": True,
+            "vies_verified": True,
         }
+
         result = OrderVATCalculator.calculate_vat(10000, info)
 
         # Must get reverse charge, not B2C rate

@@ -10,6 +10,11 @@ from .base import *  # noqa: F403
 # Security
 DEBUG = False
 
+if not IPWARE_TRUSTED_PROXY_LIST:
+    from django.core.exceptions import ImproperlyConfigured
+
+    raise ImproperlyConfigured("PORTAL_TRUSTED_PROXY_CIDRS must contain the trusted reverse proxy CIDRs in production.")
+
 # 🔒 SECURITY: Strict secret validation for production
 from apps.common.security_validation import validate_all_secrets  # noqa: E402
 

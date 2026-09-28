@@ -3,7 +3,7 @@
 # ===============================================================================
 # Enhanced for Platform/Portal separation with scoped PYTHONPATH security
 
-.PHONY: help install check-env check-venv-platform dev dev-e2e dev-e2e-bg dev-e2e-csp dev-platform dev-portal dev-all test test-fast test-file test-platform test-platform-fast test-ci test-ci-focused test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-file test-e2e-csp test-e2e-orm test-security test-cache show-test-deps install-frontend build-css watch-css check-css-tooling migrate check-migrations fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-error-handling lint-health lint-credentials lint-audit lint-fsm lint-imports lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict
+.PHONY: help install lock-upgrade check-env check-venv-platform dev dev-e2e dev-e2e-bg dev-e2e-csp dev-platform dev-portal dev-all test test-fast test-file test-platform test-platform-fast test-ci test-ci-focused test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-file test-e2e-csp test-e2e-orm test-security test-cache show-test-deps install-frontend build-css watch-css check-css-tooling migrate check-migrations fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-imports lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict lint-error-handling
 
 # ===============================================================================
 # SCOPED PYTHON ENVIRONMENTS 🔒
@@ -138,6 +138,7 @@ help:
 	@echo ""
 	@echo "⚙️  SETUP & MAINTENANCE:"
 	@echo "  make install         - Set up development environment"
+	@echo "  make lock-upgrade    - Upgrade packages in uv.lock (PKGS=\"django urllib3\")"
 	@echo "  make clean           - Clean build artifacts"
 
 # ===============================================================================
@@ -169,6 +170,21 @@ install:
 		echo "   Then edit .env with your credentials."; \
 	fi
 	@echo "✅ Environment ready! 🐍 $(VENV_DIR)/ | 🔒 Portal cannot import platform code"
+
+# Upgrade named packages in uv.lock without editing the constraints in
+# pyproject.toml, then re-sync the venv so the tree matches the lockfile.
+# Uses make's foreach (no shell loop) to build one --upgrade-package per name.
+# Usage: make lock-upgrade PKGS="django urllib3"
+lock-upgrade:
+	@if [ -z "$(PKGS)" ]; then \
+		echo "🚨 Usage: make lock-upgrade PKGS=\"django urllib3\""; \
+		exit 1; \
+	fi
+	@echo "🔒 Upgrading in uv.lock: $(PKGS)"
+	uv lock $(foreach pkg,$(PKGS),--upgrade-package $(pkg))
+	@echo "📦 Re-syncing $(VENV_DIR)/ to the new lockfile..."
+	uv sync --all-groups
+	@echo "✅ Lockfile upgraded. Review with: git diff --stat uv.lock"
 
 check-env:
 	@if [ ! -f .env ]; then \
@@ -321,8 +337,12 @@ test-portal:
 test-integration:
 	@echo "🔄 [Integration] Testing services communication and cache functionality..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo "🧪 Running integration tests..."
-	@PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -m pytest tests/integration/ -v
+	@echo "🧪 Running counter store tests on the configured database..."
+	@$(PYTHON_PLATFORM) -m pytest tests/common/test_counters.py \
+		--ds="$${DJANGO_SETTINGS_MODULE:-config.settings.test}" -o addopts= -v
+	@echo "🧪 Running integration, parity and deploy tests..."
+	@PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -m pytest \
+		tests/integration/ tests/test_cross_service_parity.py tests/deploy/ -v
 	@echo "✅ Integration tests completed!"
 
 test-cache:
@@ -352,7 +372,7 @@ test-security:
 	@echo "🧪 Testing platform uses database cache (base settings, not dev override)..."
 	@cd services/platform && DJANGO_SETTINGS_MODULE=config.settings.base PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -c "import django; django.setup(); from django.conf import settings; cache_backend = settings.CACHES['default']['BACKEND']; assert 'DatabaseCache' in cache_backend, f'Should use database cache, got: {cache_backend}'; print('✅ Platform base settings use database cache')"
 	@echo "🧪 Testing portal has no business database access..."
-	@cd services/portal && DJANGO_SETTINGS_MODULE=config.settings.dev PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/$(VENV_DIR)/bin/python -c "import django; django.setup(); from django.conf import settings; db = settings.DATABASES.get('default', {}); is_sqlite = 'sqlite3' in db.get('ENGINE', ''); print('✅ Portal uses SQLite for sessions only (no PostgreSQL):', is_sqlite)"
+	@cd services/portal && DJANGO_SETTINGS_MODULE=config.settings.dev PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/$(VENV_DIR)/bin/python -c "import django; django.setup(); from django.conf import settings; db = settings.DATABASES.get('default', {}); is_sqlite = 'sqlite3' in db.get('ENGINE', ''); assert is_sqlite, f'Portal must use SQLite, got: {db}'; from django.apps import apps; assert {model._meta.label for model in apps.get_models()} == {'sessions.Session', 'common.Counter'}; print('✅ Portal database contains only session and counter models')"
 	@echo "🧪 Running portal database access prevention test..."
 	@cd services/portal && DJANGO_SETTINGS_MODULE=config.settings.dev PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/$(VENV_DIR)/bin/python -m pytest tests/security/test_import_isolation_guard.py::test_db_access_blocked -v
 	@echo "🎉 All security isolation tests passed!"
@@ -473,8 +493,9 @@ migrate:
 	@echo "🗄️ [Platform] Running database migrations..."
 	@$(PYTHON_PLATFORM_MANAGE) makemigrations --settings=config.settings.dev
 	@$(PYTHON_PLATFORM_MANAGE) migrate --settings=config.settings.dev
-	@echo "🗄️ [Portal] Running session table migration..."
-	@$(PYTHON_PORTAL_MANAGE) migrate sessions --settings=config.settings.dev
+	@echo "🗄️ [Portal] Migrating sessions and infrastructure tables..."
+	@$(PYTHON_PORTAL_MANAGE) migrate sessions --noinput --settings=config.settings.dev
+	@$(PYTHON_PORTAL_MANAGE) migrate common --noinput --settings=config.settings.dev
 
 check-migrations:
 	@echo "🔎 [Platform] Checking model and migration state..."

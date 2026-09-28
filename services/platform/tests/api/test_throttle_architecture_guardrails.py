@@ -14,7 +14,6 @@ from rest_framework.decorators import api_view, authentication_classes, throttle
 from rest_framework.test import APIRequestFactory
 from rest_framework.throttling import AnonRateThrottle, ScopedRateThrottle, SimpleRateThrottle, UserRateThrottle
 from rest_framework.views import APIView
-from tests.api.test_api_auth_regressions import _has_public_marker
 
 from apps.api.core import throttling as core_throttling
 from apps.api.core.throttling import AuthThrottle, BurstAPIThrottle, StandardAPIThrottle
@@ -40,6 +39,7 @@ from apps.api.users.views import SessionValidationThrottle, validate_session_sec
 from apps.common.apps import _validate_throttle_rates_at_startup
 from apps.common.performance import rate_limiting
 from config.settings.test import LOCMEM_TEST_CACHE
+from tests.api.test_api_auth_regressions import _has_public_marker
 
 
 class ThrottleArchitectureGuardrailTests(SimpleTestCase):
@@ -65,7 +65,10 @@ class ThrottleArchitectureGuardrailTests(SimpleTestCase):
             SessionValidationThrottle,
             AnonRateThrottle,
             rate_limiting.PortalHMACCreateUserThrottle,
+            rate_limiting.LoginClientIPThrottle,
+            rate_limiting.ResetClientIPThrottle,
         ]
+
         for throttle_cls in classes:
             scope = getattr(throttle_cls, "scope", None)
             self.assertIsNotNone(scope, f"{throttle_cls.__name__} must declare a scope")
@@ -80,7 +83,10 @@ class ThrottleArchitectureGuardrailTests(SimpleTestCase):
             "customer",
             "burst",
             "auth",
+            "auth_login_ip",
+            "auth_reset_ip",
             "sustained",
+
             "api_burst",
             "anon",
             "order_create",

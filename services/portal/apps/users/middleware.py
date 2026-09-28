@@ -6,12 +6,14 @@ Localisation policy is applied by apps.common.localisation_middleware.
 
 import logging
 import random
-import time
+import threading
+import uuid
 from datetime import datetime, timedelta
 from typing import Any, ClassVar, cast
 
 from django.conf import settings
 from django.core.cache import cache
+from django.db import Error as DatabaseError
 from django.http import HttpRequest, HttpResponse
 from django.middleware.csrf import get_token
 from django.shortcuts import redirect
@@ -19,12 +21,14 @@ from django.utils import timezone as django_timezone
 from django.utils.http import urlencode
 
 from apps.api_client.services import PlatformAPIError, api_client
+from apps.common import counters
 from apps.common.localisation_services import store_localisation_preferences
 
 logger = logging.getLogger(__name__)
 
 # Circuit breaker: max consecutive fail-open validations before forced logout (#130/M1)
 _MAX_FAIL_OPEN_COUNT = 5
+_VALIDATION_LOCK = threading.Lock()
 
 
 class PortalAuthenticationMiddleware:
@@ -35,7 +39,7 @@ class PortalAuthenticationMiddleware:
     - Tier 1: Fast session check (zero latency)
     - Tier 2: Jittered periodic validation with single-flight locks
     - Stale-while-revalidate: Soft/hard TTL boundaries
-    - Thundering herd protection: Single validation per customer at a time
+    - Thundering herd protection: one in-flight validation per session at a time (per process)
     - Fail-open windows: Graceful degradation when Platform is unavailable
     """
 
@@ -195,8 +199,8 @@ class PortalAuthenticationMiddleware:
         next_validate_at = self._get_session_datetime(request, "next_validate_at")
         session_created_at = self._get_session_datetime(request, "session_created_at", now)
 
-        # Initialize session metadata if missing
-        if not validated_at or not next_validate_at:
+        # Validate immediately when metadata or the credential binding is missing.
+        if not validated_at or not next_validate_at or not request.session.get("session_auth_hash"):
             # Fresh session - validate immediately but set next validation with jitter
             request.session["session_created_at"] = (session_created_at or now).isoformat()
             next_validate_at = self._calculate_next_validation_time(now)
@@ -211,10 +215,7 @@ class PortalAuthenticationMiddleware:
         # Check if we're within soft grace period (stale-while-revalidate)
         soft_deadline = next_validate_at + timedelta(seconds=self.SOFT_TTL_GRACE)
         if now <= soft_deadline:
-            # Try to revalidate in background, but allow request through
-            if self._should_revalidate_async(user_id):
-                self._perform_validation(request, user_id, now)
-            return True
+            return self._validate_once_per_session(request, user_id, now)
 
         # Check if we're within hard grace period (force validation)
         hard_deadline = next_validate_at + timedelta(seconds=self.HARD_TTL_GRACE)
@@ -241,33 +242,57 @@ class PortalAuthenticationMiddleware:
         jitter_seconds = random.randint(0, self.JITTER_MAX)  # noqa: S311
         return now + timedelta(seconds=self.REVALIDATE_EVERY + jitter_seconds)
 
-    def _should_revalidate_async(self, user_id: str) -> bool:
-        """
-        Check if we should perform async revalidation using single-flight lock.
-        Prevents multiple concurrent validations for the same user.
-        """
-        lock_key = f"validating:{user_id}"
-        validating_until = cache.get(lock_key)
+    def _validate_once_per_session(self, request: HttpRequest, user_id: str, now: datetime) -> bool:
+        """Revalidate inside the soft grace, coalescing concurrent requests of one session."""
+        session_key = request.session.session_key
+        if session_key is None:
+            # Nothing stored yet, so there is no second request to coalesce with.
+            return self._perform_validation(request, user_id, now)
+        lease = self._should_revalidate_async(session_key)
+        if lease is None:
+            # Another request of this session is validating; keep serving the soft grace.
+            return True
+        lock_key, token = lease
+        try:
+            return self._perform_validation(request, user_id, now)
+        finally:
+            with _VALIDATION_LOCK:
+                if cache.get(lock_key) == token:
+                    cache.delete(lock_key)
 
-        if validating_until and time.time() < validating_until:
-            # Another request is already validating, skip
-            logger.debug(f"🔄 [Auth] User {user_id} validation already in progress, skipping")
-            return False
+    def _should_revalidate_async(self, session_key: str) -> tuple[str, str] | None:
+        """Acquire a per-session validation lease within this process.
 
-        # Acquire single-flight lock
-        cache.set(lock_key, time.time() + self.VALIDATION_TIMEOUT, timeout=self.VALIDATION_TIMEOUT)
-        return True
-
-    def _perform_validation(self, request: HttpRequest, user_id: str, now: datetime) -> bool:
+        The lease coalesces concurrent revalidations of one session; it is not a
+        security guard, so a per-process cache is acceptable. LocMemCache has no
+        compare-and-swap, so acquisition here and the ownership-checked release in
+        the caller both run under _VALIDATION_LOCK.
         """
+        lock_key = f"validating:{session_key}"
+        token = uuid.uuid4().hex
+        with _VALIDATION_LOCK:
+            if not cache.add(lock_key, token, timeout=self.VALIDATION_TIMEOUT):
+                return None
+        return lock_key, token
+
+    def _perform_validation(  # noqa: C901, PLR0911, PLR0912 -- session refresh and explicit error policies
+        self, request: HttpRequest, user_id: str, now: datetime
+    ) -> bool:
+        """
+
         Perform actual Platform API validation and update session metadata.
         """
         try:
             # Call secure Platform API validation (HMAC-signed, no ID enumeration)
-            validation_response = api_client.validate_session_secure(user_id)
+            validation_response = api_client.validate_session_secure(
+                user_id, session_auth_hash=request.session.get("session_auth_hash")
+            )
             is_valid = validation_response and validation_response.get("active", False)
 
             if is_valid:
+                if "session_auth_hash" in validation_response:
+                    request.session["session_auth_hash"] = validation_response["session_auth_hash"]
+
                 if "localisation_preferences" in validation_response:
                     store_localisation_preferences(request, validation_response["localisation_preferences"])
                 # Update session with successful validation
@@ -295,26 +320,41 @@ class PortalAuthenticationMiddleware:
                 request.session.modified = True
 
                 logger.debug(f"✅ [Auth] User {user_id} validated successfully")
-                # Reset fail-open circuit breaker on successful validation (#130/M1)
-                cache.delete(f"auth:fail_open:{user_id}")
+                # Reset fail-open circuit breaker on successful validation (#130/M1).
+                # Cleanup carries no authorisation meaning, so a store error here is logged, not enforced.
+                try:
+                    counters.reset(f"auth:fail_open:{user_id}")
+                except DatabaseError:
+                    logger.warning("⚠️ [Auth] Could not reset the fail-open counter for user %s", user_id)
                 return True
             else:
                 logger.warning(f"❌ [Auth] User {user_id} validation failed - account disabled/deleted")
                 return False
 
         except PlatformAPIError as e:
+            # ADR-0017: only an explicit credential rejection bypasses the outage breaker.
+            if (
+                e.status_code in (401, 403)
+                and isinstance(e.response_data, dict)
+                and e.response_data.get("active") is False
+            ):
+                logger.warning("🚨 [Auth] Session rejected by Platform for user %s", user_id)
+                return False
             if e.is_rate_limited:
-                raise
-            logger.error(f"🔥 [Auth] Platform API error during validation for {user_id}: {e}")
+                logger.warning("⚠️ [Auth] Platform rate limited validation for user %s: %s", user_id, e)
+            elif e.status_code in (401, 403):
+                logger.error("🔥 [Auth] Platform authentication fault during validation for user %s: %s", user_id, e)
+            else:
+                logger.error("🔥 [Auth] Platform API error during validation for user %s: %s", user_id, e)
 
             # Fail-open with circuit breaker (#130/M1): allow access during API outages
             # but force logout after too many consecutive fail-opens for same user.
             fail_open_key = f"auth:fail_open:{user_id}"
             try:
-                fail_count = cache.incr(fail_open_key)
-            except ValueError:
-                cache.set(fail_open_key, 1, timeout=3600)  # 1h window
-                fail_count = 1
+                fail_count = counters.increment(fail_open_key, 3600)
+            except Exception:
+                logger.exception("🔥 [Auth] Counter store unavailable; denying access for user %s", user_id)
+                return False
 
             if fail_count >= _MAX_FAIL_OPEN_COUNT:
                 logger.warning(

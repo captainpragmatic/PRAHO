@@ -358,7 +358,10 @@ class CustomerTaxProfileSerializer(serializers.Serializer):
     cui = serializers.CharField(max_length=20, allow_blank=True)
     registration_number = serializers.CharField(max_length=50, allow_blank=True)
     is_vat_payer = serializers.BooleanField()
-    reverse_charge_eligible = serializers.BooleanField()
+    reverse_charge_eligible = serializers.BooleanField(read_only=True)
+    vies_verification_status = serializers.CharField(read_only=True)
+    vies_verified_at = serializers.DateTimeField(read_only=True, allow_null=True)
+    vies_verified_name = serializers.CharField(read_only=True)
 
 
 class CustomerBillingProfileSerializer(serializers.Serializer):

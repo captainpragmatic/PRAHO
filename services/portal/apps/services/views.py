@@ -8,9 +8,12 @@ from typing import Any
 from django.contrib import messages
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
+from django.urls import reverse
+from django.utils.html import format_html
 from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy
 
+from apps.common.decorators import require_support_access
 from apps.common.pagination import PaginatorData, build_pagination_params
 from apps.common.rate_limit_feedback import handle_platform_error, is_rate_limited_error
 
@@ -335,6 +338,7 @@ def service_usage(request: HttpRequest, service_id: int) -> HttpResponse:
         )
 
 
+@require_support_access()
 def service_request_action(request: HttpRequest, service_id: int) -> HttpResponse:
     """
     Customer service action request (upgrade, suspend request, etc.).
@@ -362,7 +366,7 @@ def service_request_action(request: HttpRequest, service_id: int) -> HttpRespons
         try:
             # Submit service request
             result = services_api.request_service_action(
-                customer_id=customer_id, service_id=service_id, action=action, reason=reason
+                customer_id=customer_id, user_id=user_id, service_id=service_id, action=action, reason=reason
             )
 
             action_labels = {
@@ -372,12 +376,19 @@ def service_request_action(request: HttpRequest, service_id: int) -> HttpRespons
                 "cancel_request": _("Cancellation Request"),
             }
 
-            messages.success(
-                request,
-                _("{} submitted successfully. Request ID: #{}").format(
-                    action_labels.get(action, action), result.get("request_id", "N/A")
-                ),
+            request_data = result.get("data", result)
+            success_message = _("{} submitted successfully. Request ID: #{}").format(
+                action_labels.get(action, action), request_data.get("request_id", "N/A")
             )
+            ticket_id = request_data.get("ticket_id")
+            if ticket_id is not None:
+                success_message = format_html(
+                    '{} <a href="{}">{}</a>',
+                    success_message,
+                    reverse("tickets:detail", kwargs={"ticket_id": ticket_id}),
+                    _("View ticket"),
+                )
+            messages.success(request, success_message)
 
             logger.info(
                 f"✅ [Services View] Submitted {action} request for service {service_id} by customer {customer_id}"

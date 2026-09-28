@@ -233,8 +233,7 @@ if os.environ.get("USE_REDIS") != "true":
             "LOCATION": "praho-cache",
         }
     }
-    # Use database sessions when Redis is disabled
-    SESSION_ENGINE = "django.contrib.sessions.backends.db"
+    # The indexed database session backend is inherited from base settings.
 
 # ===============================================================================
 # LOGGING CONFIGURATION - Enhanced with Request ID Tracing

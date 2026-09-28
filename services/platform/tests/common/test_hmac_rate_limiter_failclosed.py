@@ -1,23 +1,25 @@
-"""H9: HMAC rate limiter must deny requests when cache is unreachable."""
-from unittest.mock import MagicMock, patch
+"""HMAC requests are denied when the shared counter store is unavailable."""
 
-from django.test import SimpleTestCase
+from unittest.mock import patch
 
-from apps.common.middleware import PortalServiceHMACMiddleware
+from django.db import OperationalError
+from django.test import TestCase, override_settings
+
+from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
 
 
-class HMACRateLimiterFailClosedTests(SimpleTestCase):
-    """H9: _rate_limited must return True (blocked) when cache is unreachable."""
-
-    @patch("apps.common.middleware.cache")
-    def test_cache_unreachable_denies_request(self, mock_cache):
-        mock_cache.add.side_effect = ConnectionError("Redis down")
-        mock_cache.incr.side_effect = ConnectionError("Redis down")
-        mock_cache.get.side_effect = ConnectionError("Redis down")
-        mock_cache.set.side_effect = ConnectionError("Redis down")
-
-        mw = PortalServiceHMACMiddleware(lambda r: MagicMock(status_code=200))
-
-        is_limited, wait_seconds = mw._rate_limited("portal-123", "10.0.0.1")
-        self.assertTrue(is_limited, "Request must be rate-limited when cache is unreachable")
-        self.assertGreater(wait_seconds, 0)
+@override_settings(
+    PLATFORM_API_SECRET=HMAC_TEST_SECRET,
+    MIDDLEWARE=HMAC_TEST_MIDDLEWARE,
+    PORTAL_HMAC_MODE="legacy",
+    RATE_LIMITING_ENABLED=True,
+    HMAC_RATE_LIMIT_WINDOW=60,
+    CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache", "LOCATION": "hmac-store-error"}},
+)
+class HMACRateLimiterFailClosedTests(HMACTestMixin, TestCase):
+    def test_cache_unreachable_denies_request(self) -> None:
+        with patch("apps.common.counters.increment", side_effect=OperationalError("Counter store unavailable")):
+            response = self.portal_post("/api/window-probe/", {})
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response["Retry-After"], "60")
+        self.assertEqual(response.json()["error"], "Too many requests")

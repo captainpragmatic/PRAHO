@@ -21,6 +21,7 @@ _PROD_ENV = {
     "ALLOWED_HOSTS": "portal.pragmatichost.com",
     "PORTAL_DOMAIN": "portal.pragmatichost.com",
     "PLATFORM_TO_PORTAL_WEBHOOK_SECRET": "test-webhook-secret-for-logging-config-tests",
+    "PORTAL_TRUSTED_PROXY_CIDRS": "127.0.0.1/32",
 }
 
 
@@ -30,7 +31,10 @@ def _get_logging(module_path: str) -> dict[str, Any]:
     Prod/staging modules validate SECRET_KEY / PLATFORM_API_SECRET at import
     time, so we inject dummy env vars for the import only.
     """
-    with patch.dict(os.environ, _PROD_ENV):
+    with (
+        patch.dict(os.environ, _PROD_ENV),
+        patch("config.settings.base.IPWARE_TRUSTED_PROXY_LIST", ["127.0.0.1/32"]),
+    ):
         mod = importlib.import_module(module_path)
     return mod.LOGGING
 

@@ -8,7 +8,7 @@ for invalid credentials vs rate-limiting scenarios.
 from unittest.mock import patch
 
 from django.contrib.messages import get_messages
-from django.test import SimpleTestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 
 from apps.api_client.services import PlatformAPIError
@@ -165,7 +165,7 @@ class LoginErrorsTestCase(SimpleTestCase):
     SESSION_ENGINE="django.contrib.sessions.backends.cache",
     CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
 )
-class ChangePasswordRateLimitTestCase(SimpleTestCase):
+class ChangePasswordRateLimitTestCase(TestCase):
     """Test that password-change distinguishes 429 from wrong-password."""
 
     def _login_session(self):

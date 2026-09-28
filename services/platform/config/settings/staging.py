@@ -346,7 +346,6 @@ CACHES["default"].update(
 # ===============================================================================
 
 configure_rate_limiting(globals(), enabled=True)
-RATE_LIMIT_CACHE = "default"
 
 # ===============================================================================
 # ROMANIAN COMPLIANCE (Staging)

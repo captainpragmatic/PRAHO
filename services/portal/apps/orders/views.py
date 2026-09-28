@@ -21,8 +21,8 @@ from urllib.parse import quote as _url_quote
 
 from django.conf import settings
 from django.contrib import messages
-from django.core.cache import cache
 from django.core.exceptions import ValidationError
+from django.db import Error as DatabaseError
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse_lazy
@@ -32,6 +32,8 @@ from django.utils.translation import gettext_lazy as _l
 from django.views.decorators.http import require_http_methods
 
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
+from apps.common import counters
+from apps.common.decorators import require_billing_access
 from apps.common.rate_limit_feedback import get_rate_limit_message, is_rate_limited_error
 from apps.common.request_ip import get_safe_client_ip
 
@@ -168,6 +170,14 @@ class CheckoutContext:
     agree_terms: bool
 
 
+def _checkout_conflict(request: HttpRequest, message: str, status: int) -> HttpResponse:
+    """Answer a duplicate or blocked checkout: JSON for HTMX and XHR callers, a notice and redirect for browsers."""
+    if request.headers.get("HX-Request") or request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return JsonResponse({"error": message}, status=status)
+    messages.info(request, message)
+    return redirect("orders:checkout")
+
+
 def _validate_checkout_request(request: HttpRequest) -> "CheckoutContext | HttpResponse":  # noqa: PLR0911
     """Validate a checkout POST request.
 
@@ -176,6 +186,29 @@ def _validate_checkout_request(request: HttpRequest) -> "CheckoutContext | HttpR
     customer_id, user_id = _get_customer_context(request)
 
     cart = GDPRCompliantCartSession(request.session)
+
+    # Order creation clears the cart. A retry must still find the completed
+    # result using the original submitted version and customer-scoped key.
+    submitted_version = request.POST.get("cart_version", "")
+    if customer_id and user_id and (not cart.has_items() or submitted_version != cart.get_cart_version()):
+        idempotency_key = request.POST.get("idempotency_key", "").strip()
+        if not idempotency_key:
+            session_user = str(request.session.get("user_id", ""))
+            session_key = request.session.session_key or ""
+            idempotency_key = hashlib.sha256(
+                f"{customer_id}:{submitted_version}:{session_user}:{session_key}".encode()
+            ).hexdigest()[:64]
+        try:
+            completed = counters.lookup(f"orders:idempotency:{customer_id}:{idempotency_key}")
+        except DatabaseError:
+            logger.exception("🔥 [Orders] Checkout replay store unavailable")
+            return _checkout_conflict(request, _("Service temporarily unavailable"), 503)
+        if completed:
+            try:
+                order_id = uuid.UUID(completed)
+            except ValueError:
+                return _checkout_conflict(request, _("Your order is being processed."), 409)
+            return redirect("orders:confirmation", order_id=order_id)
 
     if not cart.has_items():
         messages.error(request, _("Cannot create order with empty cart."))
@@ -268,22 +301,18 @@ def _create_and_process_order(request: HttpRequest, ctx: CheckoutContext) -> Htt
 
         idem_cache_key = f"orders:idempotency:{ctx.customer_id}:{ctx.idempotency_key}"
 
-        # 🔒 SECURITY: Atomic idempotency acquire — prevents TOCTOU race where two concurrent
-        # requests both pass a non-atomic cache.get() check and create duplicate orders.
-        # cache.add() is atomic: returns False if the key already exists, True if acquired.
-        if not cache.add(idem_cache_key, "__in_progress__", timeout=300):
-            # Key already held — check if it carries a real order_id or an in-progress marker
-            cached_order_id = cache.get(idem_cache_key)
-            if cached_order_id and cached_order_id != "__in_progress__":
+        claim_token = uuid.uuid4().hex
+        if not counters.claim(idem_cache_key, 300, claim_token):
+            completed_order_id = counters.lookup(idem_cache_key)
+            if completed_order_id:
                 try:
-                    uuid.UUID(str(cached_order_id))
-                    return redirect("orders:confirmation", order_id=cached_order_id)
+                    uuid.UUID(completed_order_id)
                 except (ValueError, TypeError):
-                    # Sentinel value like "__processed__" — order was created but ID missing.
-                    messages.info(request, _("Your order is being processed. Please check your orders list."))
-            elif cached_order_id == "__in_progress__":
-                messages.info(request, _("Your order is being processed. Please wait a moment."))
-            return redirect("orders:checkout")
+                    return _checkout_conflict(
+                        request, _("Your order is being processed. Please check your orders list."), 409
+                    )
+                return redirect("orders:confirmation", order_id=completed_order_id)
+            return _checkout_conflict(request, _("Your order is being processed. Please wait a moment."), 409)
 
         # We hold the idempotency lock — track if order was created on Platform so the
         # finally block can clean up the lock on failure (but preserve it if order exists).
@@ -345,21 +374,13 @@ def _create_and_process_order(request: HttpRequest, ctx: CheckoutContext) -> Htt
             order_number = order_data.get("order_number")
             order_status = order_data.get("status", "draft")
 
-            # Promote the in-progress marker to the real order_id immediately after
-            # extracting order data.  This must happen BEFORE any early-return path
-            # (e.g. total_cents <= 0) so the lock always carries the real order_id.
-            # Wrap in try/except: if cache.set() fails, the lock stays as "__processing__"
-            # which would block retries until TTL expiry.  On failure, delete the lock
-            # so the customer can retry (the order already exists on platform, and the
-            # idempotency key on the platform side will return the existing order).
-            try:
-                cache.set(idem_cache_key, order_id or "__processed__", timeout=300)
-            except Exception:
-                logger.warning("⚠️ [Orders] cache.set failed promoting idempotency lock: %s", idem_cache_key)
-                try:
-                    cache.delete(idem_cache_key)
-                except Exception:
-                    logger.error("🔥 [Orders] cache.delete also failed for idempotency lock: %s", idem_cache_key)
+            # Retain the reservation once Platform has created the order, including
+            # when publishing the result fails. Platform also receives the same key.
+            if not counters.complete(idem_cache_key, claim_token, str(order_id or "__processed__")):
+                logger.warning("🚨 [Orders] Checkout claim expired before completion: %s", idem_cache_key)
+                return _checkout_conflict(
+                    request, _("Your order is being processed. Please check your orders list."), 409
+                )
 
             # Create Stripe PaymentIntent only for card payment method
             payment_intent_result = None
@@ -441,9 +462,9 @@ def _create_and_process_order(request: HttpRequest, ctx: CheckoutContext) -> Htt
             # On success the lock now holds the real order_id — do not delete it.
             if not order_created_on_platform:
                 try:
-                    cache.delete(idem_cache_key)
-                except Exception:
-                    logger.warning("⚠️ [Orders] Failed to release idempotency lock: %s", idem_cache_key)
+                    counters.release(idem_cache_key, claim_token)
+                except DatabaseError:
+                    logger.exception("🔥 [Orders] Failed to release idempotency claim: %s", idem_cache_key)
 
     except Exception as e:
         logger.error("🔥 [Orders] Unexpected error creating order: %s", e)
@@ -911,6 +932,7 @@ def calculate_totals_htmx(request: HttpRequest) -> HttpResponse:  # noqa: PLR091
 
 
 @require_customer_authentication
+@require_billing_access()
 def checkout(request: HttpRequest) -> HttpResponse:
     """
     Checkout page with preflight validation before order creation.
@@ -990,6 +1012,7 @@ def checkout(request: HttpRequest) -> HttpResponse:
 
 @require_customer_authentication
 @require_http_methods(["POST"])
+@require_billing_access()
 def create_order(request: HttpRequest) -> HttpResponse:
     """Create order — handles bank transfer and no-JS Stripe fallback.
 
@@ -1003,6 +1026,7 @@ def create_order(request: HttpRequest) -> HttpResponse:
 
 @require_customer_authentication
 @require_http_methods(["POST"])
+@require_billing_access()
 def process_payment(request: HttpRequest) -> HttpResponse:
     """Process Stripe payment — delegates to shared order creation logic."""
     result = _validate_checkout_request(request)
@@ -1023,6 +1047,7 @@ def _parse_order_timestamp(order_data: dict[str, Any]) -> None:
 
 
 @require_customer_authentication
+@require_billing_access()
 def order_confirmation(request: HttpRequest, order_id: str) -> HttpResponse:
     """
     Order confirmation page showing order details.
@@ -1146,7 +1171,7 @@ _WEBHOOK_NTP_SKEW_SECONDS: int = 2  # Forward clock skew tolerance for NTP jitte
 _HMAC_SHA256_HEX_LENGTH: int = 64  # HMAC-SHA256 produces 64 lowercase hex chars
 
 
-def _verify_platform_webhook(request: HttpRequest) -> bool:
+def _verify_platform_webhook(request: HttpRequest, token: str) -> bool:
     """Verify HMAC-SHA256 signature from Platform on webhook calls.
 
     Protocol
@@ -1160,16 +1185,9 @@ def _verify_platform_webhook(request: HttpRequest) -> bool:
 
     Replay prevention
     -----------------
-    After verifying the signature, the full 64-char hex signature is stored
-    via ``cache.add()`` with a TTL equal to the replay-window (5 minutes).
-    ``cache.add()`` is atomic and returns ``False`` when the key already
-    exists, which rejects duplicate deliveries.
-
-    **Limitation:** replay markers live only in the Django cache backend.
-    If the cache is restarted (or the Portal pod is recycled with a
-    non-persistent cache), previously-seen signatures will be accepted
-    again.  This is an accepted risk for a stateless portal service;
-    idempotency on the Platform side is the primary defense.
+    Verified signatures are reserved in the shared counter store for the full
+    acceptance window. Only the owning delivery may release a failed attempt.
+    Successful deliveries retain their reservation until expiry.
 
     Body serialization contract
     ---------------------------
@@ -1200,9 +1218,9 @@ def _verify_platform_webhook(request: HttpRequest) -> bool:
     expected: str = _hmac_module.new(secret.encode(), payload, hashlib.sha256).hexdigest()
     if not _hmac_module.compare_digest(sig, expected):
         return False
-    # Full 64-char hex signature — no truncation needed, cache key length is not a constraint
     cache_key = f"webhook:sig:{sig}"
-    if not cache.add(cache_key, 1, timeout=_WEBHOOK_REPLAY_WINDOW_SECONDS):
+    ttl = _WEBHOOK_REPLAY_WINDOW_SECONDS + _WEBHOOK_NTP_SKEW_SECONDS + 1
+    if not counters.claim(cache_key, ttl, token):
         logger.warning("[Webhook] Replay detected — signature already seen")
         return False
     return True
@@ -1217,10 +1235,17 @@ def payment_success_webhook(request: HttpRequest) -> JsonResponse:
     This endpoint is called by the Platform service when a payment succeeds
     to clean up Portal session data and update UI state.
     """
-    if not _verify_platform_webhook(request):
-        logger.warning("[Webhook] Invalid platform signature — request rejected")
-        return JsonResponse({"error": "Unauthorized"}, status=401)
+    token = uuid.uuid4().hex
+    try:
+        verified = _verify_platform_webhook(request, token)
+    except DatabaseError:
+        logger.exception("🔥 [Webhook] Replay store unavailable")
+        return JsonResponse({"error": _("Service temporarily unavailable")}, status=503)
+    if not verified:
+        logger.warning("🚨 [Webhook] Invalid platform signature or replay; request rejected")
+        return JsonResponse({"error": _("Unauthorized")}, status=401)
 
+    processed = False
     try:
         data = json.loads(request.body)
         order_id = data.get("order_id")
@@ -1239,15 +1264,24 @@ def payment_success_webhook(request: HttpRequest) -> JsonResponse:
 
             logger.info(f"✅ Payment succeeded for order {order_id}")
 
+        processed = True
         return JsonResponse({"success": True})
 
     except Exception:
         logger.exception("🔥 [Webhook] Error processing payment webhook")
-        return JsonResponse({"error": "Webhook processing failed"}, status=500)
+        return JsonResponse({"error": _("Webhook processing failed")}, status=500)
+    finally:
+        if not processed:
+            key = f"webhook:sig:{request.headers.get('X-Platform-Signature', '')}"
+            try:
+                counters.release(key, token)
+            except DatabaseError:
+                logger.exception("🔥 [Webhook] Failed to release delivery claim")
 
 
 @require_customer_authentication
 @require_http_methods(["POST"])
+@require_billing_access()
 def confirm_payment(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911, PLR0912, PLR0915, C901
     """
     Confirm payment and trigger service creation.
@@ -1289,7 +1323,8 @@ def confirm_payment(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911, PLR
 
         # 🔒 SECURITY: Idempotency guard — prevent double-processing of same payment
         idem_key = f"confirm_payment:{customer_id}:{payment_intent_id}"
-        if not cache.add(idem_key, "processing", timeout=300):
+        claim_token = uuid.uuid4().hex
+        if not counters.claim(idem_key, 300, claim_token):
             logger.warning("⚠️ [Orders] Duplicate confirm_payment blocked: %s", idem_key)
             # Return 200 with success:true — from the customer's perspective the payment
             # IS being processed.  A 409 would trigger the error path in the frontend JS
@@ -1385,21 +1420,9 @@ def confirm_payment(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911, PLR
             # Keep it on success to prevent double-charging.
             if not payment_confirmed:
                 try:
-                    cache.delete(idem_key)
-                except Exception as cache_error:
-                    # Broad deliberately, and logged rather than suppressed. This runs in a
-                    # `finally`, so it must never raise and mask the JsonResponse above - but the
-                    # consequence of failing quietly is that the key survives and the customer
-                    # CANNOT retry a payment that just failed, which is exactly the kind of thing
-                    # nobody discovers until they are on the phone about it. The breadth is honest:
-                    # the cache backend is pluggable (LocMem today, Redis anticipated) and Django's
-                    # cache API defines no common exception, so there is no accurate narrow set.
-                    logger.warning(
-                        "⚠️ [Orders] Could not clear idempotency key %s after a failed payment — "
-                        "the customer may be unable to retry: %s",
-                        idem_key,
-                        cache_error,
-                    )
+                    counters.release(idem_key, claim_token)
+                except DatabaseError:
+                    logger.exception("🔥 [Orders] Failed to release payment claim: %s", idem_key)
 
     except json.JSONDecodeError:
         return JsonResponse({"success": False, "error": "Invalid request data"}, status=400)

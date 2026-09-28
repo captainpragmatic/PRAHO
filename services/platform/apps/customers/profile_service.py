@@ -74,7 +74,6 @@ class ProfileService:
             "is_vat_payer",
             "vat_number",
             "vat_rate",
-            "reverse_charge_eligible",
         }
     )
 

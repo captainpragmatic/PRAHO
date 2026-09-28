@@ -13,16 +13,19 @@ from __future__ import annotations
 
 import inspect
 import json
+import time
 from unittest.mock import patch
 
 from django.core.cache import cache
-from django.test import Client, SimpleTestCase, override_settings
+from django.db import InterfaceError
+from django.test import Client, TestCase, override_settings
 
+from apps.common import counters
 from apps.orders.views import confirm_payment
 
 
 @override_settings(SESSION_ENGINE="django.contrib.sessions.backends.cache")
-class ConfirmPaymentUserIdValidationTests(SimpleTestCase):
+class ConfirmPaymentUserIdValidationTests(TestCase):
     """Verify confirm_payment handles user_id edge cases gracefully."""
 
     def setUp(self) -> None:
@@ -35,7 +38,11 @@ class ConfirmPaymentUserIdValidationTests(SimpleTestCase):
         for key, value in kwargs.items():
             if value is not None:
                 session[key] = value
+        if session.get("customer_id") and session.get("user_id"):
+            session["user_memberships"] = [{"customer_id": session["customer_id"], "role": "owner"}]
+            session["user_memberships_fetched_at"] = time.time()
         session.save()
+
 
     def test_fully_missing_auth_redirects_to_login(self) -> None:
         """When no auth context at all, decorator redirects to login."""
@@ -152,21 +159,41 @@ class ConfirmPaymentUserIdValidationTests(SimpleTestCase):
 
 
 @override_settings(SESSION_ENGINE="django.contrib.sessions.backends.cache")
-class ConfirmPaymentIdempotencyKeyCleanupTests(SimpleTestCase):
-    """A surviving idempotency key means the customer cannot retry a payment that just failed.
+class ConfirmPaymentIdempotencyKeyCleanupTests(TestCase):
+    """A surviving idempotency claim means the customer cannot retry a payment that just failed.
 
-    The key is cleared in a `finally` so a retry is possible, and the delete used to run under
-    `contextlib.suppress(Exception)` — correctly preventing a cache error from masking the response,
-    but silently. A key that outlives its failed payment blocks the customer for the full 300-second
-    timeout with nothing in the logs to explain it.
+    Retargeted at the mechanism master introduced. The claim used to be a cache key cleared with
+    `cache.delete` under `contextlib.suppress(Exception)`, and this class existed to prove that a
+    failure is LOGGED rather than silently stranding the customer for the full 300-second timeout.
+    Master replaced the cache with the DB-backed counter store, so the original subject is gone - the
+    property is not, and it is asserted against `counters.release` here.
+
+    `TestCase`, not `SimpleTestCase`: the counter store is a real table. The merge left
+    `SimpleTestCase` with no import for it, so this module did not even collect - which is how the
+    obsolescence was noticed rather than quietly passing against code that no longer runs.
+
+    The injected failure is deliberately an `InterfaceError`, which pins something easy to break:
+    `apps/orders/views.py` imports `from django.db import Error as DatabaseError`, so its
+    `except DatabaseError` is really `except django.db.Error` and DOES cover `InterfaceError`.
+    `django.db.Error` has exactly two direct subclasses and `InterfaceError` is NOT one of
+    `DatabaseError`'s, so "tidying" that import to the real `DatabaseError` would let a dropped
+    connection escape from a `finally` and mask the view's response. This test fails if anyone does.
     """
 
     def setUp(self) -> None:
-        cache.clear()
         self.client = Client()
         session = self.client.session
-        for key, value in {"active_customer_id": 123, "customer_id": 123, "user_id": 456}.items():
-            session[key] = value
+        session.update({
+            "active_customer_id": 123,
+            "customer_id": 123,
+            "user_id": 456,
+            # Memberships too, or the role guard answers 403 before the view runs: `common/decorators.py`
+            # returns "Role not found" on a cold membership cache. Without these the POST never reaches
+            # the `finally` under test, and the first symptom is "no ERROR logs triggered" - a failure
+            # that looks like the logging is broken rather than the request being rejected.
+            "user_memberships": [{"customer_id": 123, "role": "owner"}],
+            "user_memberships_fetched_at": time.time(),
+        })
         session.save()
 
     def _payload(self, intent: str) -> str:
@@ -176,52 +203,47 @@ class ConfirmPaymentIdempotencyKeyCleanupTests(SimpleTestCase):
             "gateway": "stripe",
         })
 
-    @patch("apps.orders.views.PlatformAPIClient")
-    def test_a_failed_cleanup_is_logged_rather_than_swallowed(self, mock_api_class: object) -> None:
-        """Revert the fix and this fails: the suppression left no trace of a stuck customer."""
+    def _failed_payment(self, mock_api_class: object) -> None:
+        """A payment that did not complete: the view answers 400 and the `finally` releases."""
         mock_api = mock_api_class.return_value
-        # A payment that did not complete: the view returns 400 and the `finally` clears the key.
         mock_api.post_billing.return_value = {"success": True, "status": "requires_payment_method"}
         mock_api.post.return_value = {"success": True}
 
-        # Selective on purpose. This suite runs with the CACHE session backend, so a blanket patch of
-        # `cache.delete` also breaks `session.flush()` in `apps/users/middleware.py` and the error
-        # escapes from there instead of from the site under test.
-        real_delete = cache.delete
-
-        def fail_only_for_the_idempotency_key(key: str, *args: object, **kwargs: object) -> bool:
-            if str(key).startswith("confirm_payment:"):
-                raise RuntimeError("cache backend gone")
-            return real_delete(key, *args, **kwargs)
+    @patch("apps.orders.views.PlatformAPIClient")
+    def test_a_failed_release_is_logged_and_does_not_mask_the_response(self, mock_api_class: object) -> None:
+        """Both halves matter: the log, so a stuck customer is explainable, and the 400, because this
+        runs in a `finally` and an escaping error would replace the view's own answer."""
+        self._failed_payment(mock_api_class)
 
         with (
-            patch("apps.orders.views.cache.delete", side_effect=fail_only_for_the_idempotency_key),
-            self.assertLogs("apps.orders.views", level="WARNING") as logs,
+            patch("apps.orders.views.counters.release", side_effect=InterfaceError("connection already closed")),
+            self.assertLogs("apps.orders.views", level="ERROR") as logs,
         ):
             response = self.client.post(
-                "/order/confirm-payment/", data=self._payload("pi_cleanupfail12345678"),
+                "/order/confirm-payment/", data=self._payload("pi_relfail1234567890"),
                 content_type="application/json",
             )
 
         self.assertTrue(
-            any("Could not clear idempotency key" in line for line in logs.output),
-            f"a failed cleanup must say the customer may be unable to retry; got {logs.output}",
+            any("Failed to release payment claim" in line for line in logs.output),
+            f"a failed release must say so; got {logs.output}",
         )
-        # And the cache error must not have replaced the view's own answer.
         self.assertEqual(response.status_code, 400)
 
     @patch("apps.orders.views.PlatformAPIClient")
-    def test_a_successful_cleanup_logs_no_warning_about_the_key(self, mock_api_class: object) -> None:
+    def test_a_successful_release_frees_the_claim_for_a_retry(self, mock_api_class: object) -> None:
         """The other direction, so the assertion above cannot pass by always logging."""
-        mock_api = mock_api_class.return_value
-        mock_api.post_billing.return_value = {"success": True, "status": "requires_payment_method"}
-        mock_api.post.return_value = {"success": True}
+        self._failed_payment(mock_api_class)
 
-        response = self.client.post(
-            "/order/confirm-payment/", data=self._payload("pi_cleanupok123456789"),
-            content_type="application/json",
-        )
+        with self.assertNoLogs("apps.orders.views", level="ERROR"):
+            response = self.client.post(
+                "/order/confirm-payment/", data=self._payload("pi_relok12345678901"),
+                content_type="application/json",
+            )
 
         self.assertEqual(response.status_code, 400)
-        # The key is gone, so an immediate retry is not blocked as a duplicate.
-        self.assertIsNone(cache.get("confirm_payment:123:pi_cleanupok123456789"))
+        # The claim is gone, so an immediate retry is not rejected as a duplicate.
+        self.assertTrue(
+            counters.claim("confirm_payment:123:pi_relok12345678901", 300, "retry"),
+            "a failed payment must leave the claim free for a retry",
+        )
