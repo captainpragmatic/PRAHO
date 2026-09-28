@@ -23,10 +23,44 @@ from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 logger = logging.getLogger(__name__)
 
 
-def _raise_if_rate_limited(exc: Exception) -> None:
-    """Re-raise rate-limited errors so views can show appropriate feedback."""
-    if isinstance(exc, PlatformAPIError) and exc.is_rate_limited:
+def _raise_if_degraded(exc: Exception) -> None:
+    """Re-raise a degraded-platform error so the view can say what happened.
+
+    Renamed from the throttle-only version, which re-raised a 429 and let a maintenance 503 fall
+    through to the graceful returns below. During a window the dashboard badge therefore read
+    "0 active services", the plans list was empty and the usage panel showed zeros - the reported
+    bug exactly, in the one app the widening skipped. `services_table.html` already carried an
+    `{% elif maintenance %}` arm that could never fire for these paths.
+
+    The callers were checked one at a time rather than widened mechanically, because that mistake
+    on this branch turned five uncaught callers into 500s. Each of the four sites below has a
+    handler that renders the maintenance state; `get_customer_services`, `get_service_detail` and
+    `request_service_action` already re-raised everything, which is why the services LIST page
+    worked and hid the rest.
+    """
+    if isinstance(exc, PlatformAPIError) and exc.is_degraded:
         raise exc
+
+
+def _unavailable_usage(period: str) -> dict[str, Any]:
+    """Canonical shape for a usage panel that could not be filled.
+
+    `error` is the key `services/partials/usage_chart.html` branches on, and BOTH fallback returns in
+    `get_service_usage` omitted it. Its error arm was therefore unreachable, and a platform failure
+    rendered a chart of zeros indistinguishable from a service that genuinely used nothing - the same
+    "a failure shown as data" defect as the maintenance bug, one floor down and for every 5xx.
+
+    The zeros stay, for any consumer that reads the numbers without asking whether they are real. One
+    function rather than two literals because the two had already diverged in exactly this key.
+    """
+    return {
+        "error": True,
+        "bandwidth_used": 0,
+        "bandwidth_limit": 0,
+        "storage_used": 0,
+        "storage_limit": 0,
+        "period": period,
+    }
 
 
 def _empty_services_summary() -> dict[str, Any]:
@@ -209,21 +243,15 @@ class ServicesAPIClient(PlatformAPIClient):
                 return cast(dict[str, Any], usage_data)
             else:
                 logger.warning(f"⚠️ [Services API] Unexpected usage response format: {response}")
-                return {
-                    "bandwidth_used": 0,
-                    "bandwidth_limit": 0,
-                    "storage_used": 0,
-                    "storage_limit": 0,
-                    "period": period,
-                }
+                return _unavailable_usage(period)
 
         except PlatformAPIError as e:
             logger.error(
                 f"🔥 [Services API] Error retrieving usage for service {service_id} for customer {customer_id}: {e}"
             )
-            _raise_if_rate_limited(e)
-            # Return empty usage on error to avoid breaking UI
-            return {"bandwidth_used": 0, "bandwidth_limit": 0, "storage_used": 0, "storage_limit": 0, "period": period}
+            _raise_if_degraded(e)
+            # Not raising keeps the page up; the marker is what stops it lying about the numbers.
+            return _unavailable_usage(period)
 
     def get_services_summary(self, customer_id: int, user_id: int) -> dict[str, Any]:
         """
@@ -258,7 +286,7 @@ class ServicesAPIClient(PlatformAPIClient):
 
         except PlatformAPIError as e:
             logger.error(f"🔥 [Services API] Error retrieving services summary for customer {customer_id}: {e}")
-            _raise_if_rate_limited(e)
+            _raise_if_degraded(e)
             # Return empty summary on error
             return _empty_services_summary()
 
@@ -281,8 +309,7 @@ class ServicesAPIClient(PlatformAPIClient):
             return cast(list[dict[str, Any]], response.get("domains", []))
 
         except PlatformAPIError as e:
-            if e.is_rate_limited:
-                raise
+            _raise_if_degraded(e)
             # Domains API endpoint not yet implemented on platform (returns 404).
             # Gracefully degrade — log as warning, not error.
             http_not_found = 404
@@ -353,8 +380,7 @@ class ServicesAPIClient(PlatformAPIClient):
             return cast(list[dict[str, Any]], response.get("data", {}).get("plans", []))
 
         except PlatformAPIError as e:
-            if e.is_rate_limited:
-                raise
+            _raise_if_degraded(e)
             logger.error(f"🔥 [Services API] Error retrieving plans for customer {customer_id}: {e}")
             return []
 

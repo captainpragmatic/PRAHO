@@ -13,9 +13,14 @@ from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 logger = logging.getLogger(__name__)
 
 
-def _raise_if_rate_limited(exc: Exception) -> None:
-    """Re-raise rate-limited errors so views can show appropriate feedback."""
-    if isinstance(exc, PlatformAPIError) and exc.is_rate_limited:
+def _raise_if_degraded(exc: Exception) -> None:
+    """Re-raise a degraded-platform error so the view can say what happened.
+
+    Renamed from `_raise_if_rate_limited`, because it only ever re-raised throttles: a
+    maintenance 503 fell through and this module returned an empty page instead, which rendered
+    as "you have no documents" with nothing to explain it. The name would now be a lie.
+    """
+    if isinstance(exc, PlatformAPIError) and exc.is_degraded:
         raise exc
 
 
@@ -296,7 +301,7 @@ class TicketsAPIClient(PlatformAPIClient):
 
         except PlatformAPIError as e:
             logger.error(f"🔥 [Tickets API] Error retrieving ticket summary for customer {customer_id}: {e}")
-            _raise_if_rate_limited(e)
+            _raise_if_degraded(e)
             # Return empty summary on error to avoid breaking dashboard
             return _empty_tickets_summary()
 

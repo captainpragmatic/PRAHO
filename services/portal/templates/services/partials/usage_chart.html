@@ -2,7 +2,13 @@
 
 <!-- Usage Chart Partial for HTMX Loading -->
 <div class="space-y-6">
-  {% if usage.error %}
+  {% if maintenance %}
+    {% comment %} The same component the tickets, services and invoices tables use, for the same
+       reason: the generic arm below says "Unable to load usage data" in red, which gives no cause
+       and reads as a fault of ours. A declared window is neither. Reusing the component also keeps
+       this partial free of new raw colour classes - it already carries 20 TMPL005 warnings. {% endcomment %}
+    {% include "components/maintenance_inline_alert.html" %}
+  {% elif usage.error %}
     <!-- Error State -->
     <div class="text-center py-8">
       <div class="text-red-400 mb-2">

@@ -5,6 +5,7 @@
 import json
 import logging
 import uuid
+from http import HTTPStatus
 from typing import Any
 
 from django.contrib import messages
@@ -17,7 +18,7 @@ from django.views.decorators.http import require_http_methods
 from apps.api_client.services import PlatformAPIError
 from apps.common.decorators import log_access_attempt, require_billing_access
 from apps.common.pagination import PaginatorData, build_pagination_params
-from apps.common.rate_limit_feedback import handle_platform_error
+from apps.common.rate_limit_feedback import get_degraded_message, handle_platform_error
 
 from .services import BillingDataSyncService, InvoiceViewService, RecurringPaymentsService
 
@@ -414,6 +415,18 @@ def billing_dashboard_widget(request: HttpRequest) -> JsonResponse:
         logger.info(f"✅ [Portal Billing] Dashboard widget data for customer {customer_id}")
         return JsonResponse(widget_data)
 
+    except PlatformAPIError as e:
+        if not e.is_degraded:
+            raise
+        # 503, not 500. Before the degraded errors propagated, this widget returned empty data; the
+        # widening turned a maintenance window into a server fault, which tells the customer something
+        # is broken. The status stays non-ok so the existing client handling is unchanged, but it no
+        # longer claims the fault is ours.
+        logger.warning(f"⚠️ [Portal Billing] Dashboard widget unavailable for customer {customer_id}: {e}")
+        return JsonResponse(
+            {"success": False, "error": get_degraded_message(e)},
+            status=HTTPStatus.SERVICE_UNAVAILABLE,
+        )
     except Exception as e:
         logger.error(f"🔥 [Portal Billing] Dashboard widget error for customer {customer_id}: {e}")
         return JsonResponse({"success": False, "error": "Unable to load billing data"}, status=500)
@@ -812,6 +825,16 @@ def request_refund_view(request: HttpRequest, invoice_number: str) -> JsonRespon
         logger.warning(f"⚠️ [Portal Billing] Refund request failed for {invoice_number}: {error_msg}")
         return JsonResponse({"success": False, "error": error_msg}, status=400)
 
+    except PlatformAPIError as e:
+        if not e.is_degraded:
+            raise
+        # A refund is a money request, so the customer has to know it did NOT happen rather than
+        # being shown a 500 that could mean anything. 503 says "not now", which is the truth.
+        logger.warning(f"⚠️ [Portal Billing] Refund request unavailable for {invoice_number}: {e}")
+        return JsonResponse(
+            {"success": False, "error": get_degraded_message(e)},
+            status=HTTPStatus.SERVICE_UNAVAILABLE,
+        )
     except Exception as e:
         logger.error(f"🔥 [Portal Billing] Refund request error for {invoice_number}: {e}")
         return JsonResponse(

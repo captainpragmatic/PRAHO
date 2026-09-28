@@ -463,8 +463,13 @@ test-integration:
 	@$(PYTHON_PLATFORM) -m pytest tests/common/test_counters.py \
 		--ds="$${DJANGO_SETTINGS_MODULE:-config.settings.test}" -o addopts= -v
 	@echo "🧪 Running integration, parity and deploy tests..."
+	# The parity file is no longer named here: it moved into tests/integration/, which this glob
+	# already covers. Master reached the same "nothing collects it" conclusion and fixed it by adding
+	# the explicit path; keeping both would be a hardcoded path that breaks on the next move - and it
+	# DID break here, silently. The Makefile auto-merged with no conflict, so git gave no warning and
+	# only running the suite on the merged tree found the target pointing at a deleted file.
 	@PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -m pytest \
-		tests/integration/ tests/test_cross_service_parity.py tests/deploy/ -v
+		tests/integration/ tests/deploy/ -v
 	@echo "✅ Integration tests completed!"
 
 test-cache:
