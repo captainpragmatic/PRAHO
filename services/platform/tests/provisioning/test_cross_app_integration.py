@@ -264,9 +264,12 @@ class DomainsProvisioningIntegrationTest(TestCase):
         """Test that domain status change suspends Virtualmin account via post_save signal"""
         mock_suspend.return_value = Ok(True)
 
-        # Change domain status via FSM — post_save signal triggers sync_domain_to_virtualmin
-        self.domain.suspend()
-        self.domain.save()
+        # Change domain status via FSM — post_save defers the sync to post-commit, so a
+        # rollback cannot leave the panel disabled while the database says active.
+        # The guarantee under test is unchanged; only its timing moved.
+        with self.captureOnCommitCallbacks(execute=True):
+            self.domain.suspend()
+            self.domain.save()
 
         # Verify suspension was called (by the signal, not manually)
         mock_suspend.assert_called_once_with(
@@ -287,9 +290,11 @@ class DomainsProvisioningIntegrationTest(TestCase):
         force_status(self.domain, "suspended")
         self.domain.refresh_from_db()
 
-        # Change domain status back to active via FSM — post_save signal triggers sync
-        self.domain.activate()
-        self.domain.save()
+        # Change domain status back to active via FSM — the sync is deferred to
+        # post-commit, so the callbacks must be drained for it to run.
+        with self.captureOnCommitCallbacks(execute=True):
+            self.domain.activate()
+            self.domain.save()
 
         # Verify unsuspension was called (by the signal, not manually)
         mock_unsuspend.assert_called_once_with(self.virtualmin_account)

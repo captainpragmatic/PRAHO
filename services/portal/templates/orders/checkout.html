@@ -63,7 +63,9 @@
                       {% trans "Order cannot be processed for the following reasons:" %}
                     </p>
                     <ul class="text-red-300 text-sm space-y-1 mb-4">
-                      {% for error in preflight.errors %}
+                      {# Degrade to the untranslated originals rather than to an empty
+                         list: showing English beats showing no reason at all. #}
+                      {% for error in preflight.display_errors|default:preflight.errors %}
                       <li class="flex items-start">
                         <span class="mr-2 mt-0.5">•</span>
                         {{ error }}

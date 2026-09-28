@@ -6506,3 +6506,61 @@ msgstr "DD/MM/YYYY — 23/11/2026"
 
 msgid "MM/DD/YYYY — 11/23/2026"
 msgstr "MM/DD/YYYY — 11/23/2026"
+
+
+
+
+
+
+
+
+# Platform preflight messages. The platform wraps these in gettext but renders them
+# while serving an HMAC request, where no customer language is active, so they arrive
+# in English. The portal looks each one up as a msgid to finish the translation.
+#: apps/orders/preflight.py (platform)
+msgid "Please provide a contact name for your order"
+msgstr "Vă rugăm să indicați o persoană de contact pentru comandă"
+
+#: apps/orders/preflight.py (platform)
+msgid "Please provide a contact email address"
+msgstr "Vă rugăm să indicați o adresă de e-mail de contact"
+
+#: apps/orders/preflight.py (platform)
+msgid "Please provide your street address"
+msgstr "Vă rugăm să indicați adresa dumneavoastră"
+
+#: apps/orders/preflight.py (platform)
+msgid "Please provide your city"
+msgstr "Vă rugăm să indicați localitatea"
+
+#: apps/orders/preflight.py (platform)
+msgid "Please provide your county/state"
+msgstr "Vă rugăm să indicați județul"
+
+#: apps/orders/preflight.py (platform)
+msgid "Please provide your postal/ZIP code"
+msgstr "Vă rugăm să indicați codul poștal"
+
+#: apps/orders/preflight.py (platform)
+msgid "Please provide your country"
+msgstr "Vă rugăm să indicați țara"
+
+#: apps/orders/preflight.py (platform)
+msgid "Order currency not set"
+msgstr "Moneda comenzii nu este setată"
+
+#: apps/orders/preflight.py (platform)
+msgid "Failed to validate VAT and totals"
+msgstr "Validarea TVA și a totalurilor a eșuat"
+
+#: apps/orders/preflight.py (platform)
+msgid ""
+"VAT evidence missing for reverse charge; this order cannot be confirmed until "
+"the customer's VAT number is confirmed in VIES"
+msgstr ""
+"Lipsesc dovezile privind TVA pentru taxare inversă. Comanda nu poate fi "
+"confirmată până când codul de TVA al clientului nu este confirmat în VIES"
+
+#: apps/orders/preflight.py (platform)
+msgid "Romanian business without VAT number - verify tax profile"
+msgstr "Firmă din România fără număr de TVA - verificați profilul fiscal"

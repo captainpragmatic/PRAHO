@@ -747,6 +747,11 @@ def _handle_customer_status_change(customer: Customer, old_status: str, new_stat
             _handle_customer_activation(customer)
         elif new_status == Customer.CustomerStatus.SUSPENDED:
             _handle_customer_suspension(customer, old_status)
+        elif new_status == Customer.CustomerStatus.ACTIVE and old_status == Customer.CustomerStatus.SUSPENDED:
+            # Nothing handled this transition before. The suspension cascade was inert,
+            # so its missing counterpart cost nothing; now that suspending works, an
+            # unsuspend with no handler leaves every cascade-suspended service down.
+            _handle_customer_unsuspension(customer)
         elif new_status == Customer.CustomerStatus.INACTIVE and old_status == Customer.CustomerStatus.ACTIVE:
             _handle_customer_deactivation(customer)
 
@@ -1195,6 +1200,12 @@ def _trigger_customer_onboarding(customer: Customer) -> None:
         logger.info(f"🚀 [Customer] Would start onboarding (task runner not available): {customer.get_display_name()}")
 
 
+# The suspension_reason written by the customer cascade, and the exact value its
+# reactivation half matches on. A machine token, not prose, matching the convention set
+# by "payment_overdue" and "manual_stop" elsewhere: these values are compared, not read.
+CUSTOMER_SUSPENSION_REASON = "customer_suspended"
+
+
 def _activate_customer_services(customer: Customer) -> None:
     """Activate customer services when customer becomes active"""
     try:
@@ -1213,6 +1224,43 @@ def _activate_customer_services(customer: Customer) -> None:
         logger.exception(f"🔥 [Customer] Service activation failed: {e}")
 
 
+def _handle_customer_unsuspension(customer: Customer) -> None:
+    """Handle a customer returning from suspended to active."""
+    try:
+        logger.info(f"⚡ [Customer] Customer unsuspended: {customer.get_display_name()}")
+
+        transaction.on_commit(lambda inst=customer: _resume_cascade_suspended_services(inst))
+
+    except Exception as e:
+        logger.exception(f"🔥 [Customer Signal] Customer unsuspension failed: {e}")
+
+
+def _resume_cascade_suspended_services(customer: Customer) -> None:
+    """Resume exactly what suspending this customer stopped, and nothing else.
+
+    Matching on the reason token is the whole design. Resuming on status alone would
+    restore service to an account suspended for non-payment or shut off by hand for
+    abuse; payment_convergence narrows its own resume the same way, on "payment_overdue".
+    """
+    try:
+        from apps.provisioning.models import Service
+        from apps.provisioning.services import ServiceManagementService
+
+        cascade_suspended = Service.objects.filter(
+            customer=customer, status="suspended", suspension_reason=CUSTOMER_SUSPENSION_REASON
+        )
+
+        for service in cascade_suspended:
+            result = ServiceManagementService.manage_service(str(service.id), "resume")
+            if result.is_ok():
+                logger.info(f"⚡ [Customer] Service resumed: {service.id}")
+            else:
+                logger.error(f"🔥 [Customer] Service resume failed for {service.id}: {result.unwrap_err()}")
+
+    except Exception as e:
+        logger.exception(f"🔥 [Customer] Service resume failed: {e}")
+
+
 def _suspend_customer_services(customer: Customer) -> None:
     """Suspend customer services when customer is suspended"""
     try:
@@ -1223,10 +1271,13 @@ def _suspend_customer_services(customer: Customer) -> None:
         active_services = Service.objects.filter(customer=customer, status="active")
 
         for service in active_services:
-            service_management = ServiceManagementService()
-            result = service_management.suspend_service(service, reason="Customer suspended", suspend_immediately=True)
+            result = ServiceManagementService.manage_service(
+                str(service.id), "suspend", reason=CUSTOMER_SUSPENSION_REASON
+            )
             if result.is_ok():
                 logger.info(f"⏸️ [Customer] Service suspended: {service.id}")
+            else:
+                logger.error(f"🔥 [Customer] Service suspension failed for {service.id}: {result.unwrap_err()}")
 
     except Exception as e:
         logger.exception(f"🔥 [Customer] Service suspension failed: {e}")

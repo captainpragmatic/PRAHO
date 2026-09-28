@@ -12,7 +12,8 @@ import logging
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase, override_settings
+from django.http import HttpRequest
+from django.test import RequestFactory, TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -296,39 +297,46 @@ class AuthEmailMaskingTests(TestCase):
 
 
 class HMACExemptPathsExactMatchTests(TestCase):
-    """Exempt path list must use exact equality, not startswith.
+    """Exemption must be exact, not prefix-based.
 
-    A path like /api/users/health/extra/ must NOT bypass HMAC validation
-    even though it starts with /api/users/health/ (which IS exempt).
+    A path like /api/users/health/extra/ must NOT bypass HMAC validation even though it
+    starts with /api/users/health/ (which IS exempt).
+
+    The guarantees are unchanged; only the argument is. Exemption is now derived from
+    the resolved view's @public_api_endpoint marker rather than a hand-kept path list,
+    so the helper takes the request.
     """
+
+    def _request(self, path: str) -> HttpRequest:
+        return RequestFactory().get(path)
 
     def test_hmac_middleware_exempt_paths_exact_match(self) -> None:
         """Path that starts-with but is not an exact match must NOT be exempt."""
         extended_path = "/api/users/health/extra"
         self.assertFalse(
-            _is_auth_exempt(extended_path),
+            _is_auth_exempt(self._request(extended_path)),
             msg=(
                 f"{extended_path!r} should NOT be exempt. "
-                "The exempt check uses exact match (with trailing-slash normalization) to prevent bypass attacks."
+                "Exemption resolves the exact route; a prefix must never grant a bypass."
             ),
         )
 
     def test_hmac_middleware_exempt_exact_path_is_present(self) -> None:
         """The public health endpoint remains exempt."""
-        self.assertTrue(_is_auth_exempt("/api/users/health/"))
-        self.assertFalse(_is_auth_exempt("/api/users/register/"))
+        self.assertTrue(_is_auth_exempt(self._request("/api/users/health/")))
+        self.assertFalse(_is_auth_exempt(self._request("/api/users/register/")))
 
     def test_hmac_middleware_exempt_path_without_trailing_slash(self) -> None:
         """Exempt check normalizes trailing slashes — both forms must match."""
-        self.assertTrue(_is_auth_exempt("/api/users/health"))
-        self.assertTrue(_is_auth_exempt("/api/users/health/"))
-        self.assertFalse(_is_auth_exempt("/api/users/register"))
-        self.assertFalse(_is_auth_exempt("/api/users/register/"))
+        self.assertTrue(_is_auth_exempt(self._request("/api/users/health")))
+        self.assertTrue(_is_auth_exempt(self._request("/api/users/health/")))
+        self.assertFalse(_is_auth_exempt(self._request("/api/users/register")))
+        self.assertFalse(_is_auth_exempt(self._request("/api/users/register/")))
 
     def test_hmac_middleware_non_api_path_not_in_exempt(self) -> None:
         """Non-API paths should not be exempt from HMAC validation."""
-        self.assertFalse(_is_auth_exempt("/users/register/"))
-        self.assertFalse(_is_auth_exempt("/register/"))
+        self.assertFalse(_is_auth_exempt(self._request("/users/register/")))
+        self.assertFalse(_is_auth_exempt(self._request("/register/")))
 
 
 @override_settings(PLATFORM_API_SECRET=HMAC_TEST_SECRET, MIDDLEWARE=HMAC_TEST_MIDDLEWARE)
