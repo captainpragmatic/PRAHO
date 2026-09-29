@@ -139,6 +139,61 @@ class SubscriptionCurrencyTransitionTests(_CurrencyRenewalWorkflowFixture, TestC
         cycle.refresh_from_db()
         self.assertEqual((cycle.currency_id, cycle.unit_price_cents), ("EUR", 2200))
 
+    def test_multi_unit_renewal_preserves_per_unit_service_price(self) -> None:
+        from apps.api.services.serializers import ServiceListSerializer  # noqa: PLC0415
+        from apps.billing.currency_transitions import activate_due_currency_terms  # noqa: PLC0415
+
+        self.subscription.quantity = 3
+        self.subscription.save(update_fields=["quantity"])
+        self.offer(accepted_days=30)
+        cycle = self.prepare()
+        self.assertEqual((cycle.unit_price_cents, cycle.quantity), (2200, 3))
+        self.assertEqual(cycle.proforma.subtotal_cents, 6600)
+        self.assertEqual(activate_due_currency_terms(as_of=cycle.period_start - timedelta(microseconds=1)), 0)
+        self.service.refresh_from_db()
+        self.assertEqual((self.service.currency_id, self.service.price), ("RON", Decimal("100")))
+
+        self.assertEqual(activate_due_currency_terms(as_of=cycle.period_start), 1)
+
+        self.subscription.refresh_from_db()
+        self.service.refresh_from_db()
+        self.assertEqual((self.subscription.currency_id, self.subscription.total_price_cents), ("EUR", 6600))
+        self.assertEqual((self.service.currency_id, self.service.price), ("EUR", Decimal("22")))
+        self.assertEqual(ServiceListSerializer(self.service).data["monthly_price"], Decimal("22"))
+        self.assertEqual(activate_due_currency_terms(as_of=cycle.period_start), 0)
+        cycle.refresh_from_db()
+        self.assertEqual((cycle.currency_id, cycle.unit_price_cents, cycle.quantity), ("EUR", 2200, 3))
+        self.assertEqual(cycle.proforma.subtotal_cents, 6600)
+
+    def test_ineligible_service_cannot_commit_or_activate_a_notified_renewal(self) -> None:
+        from apps.billing.currency_transitions import activate_due_currency_terms  # noqa: PLC0415
+        from apps.provisioning.models import Service  # noqa: PLC0415
+
+        offer = self.offer(accepted_days=30)
+        for status in ("pending", "provisioning", "failed", "terminated", "expired"):
+            with self.subTest(status=status):
+                # Seed each eligibility case; this is not a service FSM transition.
+                Service.objects.filter(pk=self.service.pk).update(status=status)
+                result = RecurringBillingOrchestrator.prepare_due_proformas(as_of=self.subscription.next_proforma_at)
+                self.assertEqual(result["errors"], [], result)
+                self.assertEqual((result["subscriptions_checked"], result["cycles_prepared"]), (0, 0))
+                self.assertFalse(self.subscription.billing_cycles.filter(proforma__isnull=False).exists())
+                offer.refresh_from_db()
+                self.assertEqual(offer.status, "notified")
+                self.assertIsNone(offer.committed_cycle_id)
+                self.assertEqual(activate_due_currency_terms(as_of=self.subscription.current_period_end), 0)
+                self.subscription.refresh_from_db()
+                self.service.refresh_from_db()
+                self.assertEqual((self.subscription.currency_id, self.service.currency_id), ("RON", "RON"))
+                self.assertIsNone(self.subscription.effective_terms_at)
+
+        # The same accepted offer can proceed once the service is eligible.
+        Service.objects.filter(pk=self.service.pk).update(status="active")
+        cycle = self.prepare()
+        self.assertEqual(activate_due_currency_terms(as_of=cycle.period_start), 1)
+        self.service.refresh_from_db()
+        self.assertEqual((self.service.currency_id, self.service.price), ("EUR", Decimal("22")))
+
     def test_existing_automatic_mandate_collects_notified_document_in_its_recorded_currency(self) -> None:
         self.offer(accepted_days=30)
         cycle = self.prepare()

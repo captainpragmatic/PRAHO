@@ -252,7 +252,7 @@ def activate_locked_currency_terms(subscription: Subscription, *, as_of: datetim
         service = Service.objects.select_for_update().get(pk=subscription.service_id)
         if service.status in {"active", "suspended"}:
             service.currency = terms.currency
-            service.price = Decimal(terms.subtotal_cents) / 100
+            service.price = Decimal(terms.unit_price_cents) / 100
             service.save(update_fields=["currency", "price", "updated_at"])
     return True
 

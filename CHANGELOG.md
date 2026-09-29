@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Multi-unit currency renewals retain the service's per-unit price while billing the full subscription quantity.
 - Password recovery keeps reset tokens out of form URLs, preserves password whitespace,
   rechecks one-time use under a database lock, and uses separate recovery rate limits.
 - Recovery email failures keep a neutral public acknowledgement and private diagnostics;
