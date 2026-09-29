@@ -4,6 +4,7 @@
 
 from typing import Any, ClassVar
 
+from django.db.models import Q, QuerySet, Sum
 from django.utils import timezone
 from rest_framework import serializers
 
@@ -193,6 +194,38 @@ class InvoiceDetailSerializer(serializers.ModelSerializer):
 # ===============================================================================
 
 
+def _invoice_remaining_amounts(invoices: QuerySet[Invoice]) -> dict[int, int]:
+    """Batch the invoice ledger calculation without changing its per-invoice clamps."""
+    from apps.billing.models import Payment, Refund  # noqa: PLC0415  # ADR-0007
+
+    totals = {invoice.pk: invoice.total_cents for invoice in invoices}
+    if not totals:
+        return {}
+    collected = {
+        row["invoice_id"]: row["total"] or 0
+        for row in Payment.objects.filter(
+            invoice__in=invoices, status__in=["succeeded", "partially_refunded", "refunded"]
+        )
+        .values("invoice_id")
+        .annotate(total=Sum("amount_cents"))
+    }
+    # Separate aggregates avoid multiplying payment/refund rows. A refund reached
+    # through both links counts once for each invoice, matching get_remaining_amount.
+    refunded: dict[int, int] = {}
+    refunds = (
+        Refund.objects.filter(Q(invoice__in=invoices) | Q(payment__invoice__in=invoices), status="completed")
+        .values("invoice_id", "payment__invoice_id")
+        .annotate(total=Sum("amount_cents"))
+    )
+    for row in refunds:
+        for invoice_id in {row["invoice_id"], row["payment__invoice_id"]} & totals.keys():
+            refunded[invoice_id] = refunded.get(invoice_id, 0) + row["total"]
+    return {
+        invoice_id: max(0, total - max(0, collected.get(invoice_id, 0) - refunded.get(invoice_id, 0)))
+        for invoice_id, total in totals.items()
+    }
+
+
 class InvoiceSummarySerializer(serializers.Serializer):
     """Serializer for customer invoice summary/dashboard widget"""
 
@@ -213,11 +246,10 @@ class InvoiceSummarySerializer(serializers.Serializer):
         # The document owns its currency; partial cash and gift payments reduce its
         # authoritative remaining amount. Closed documents and credits are not debts.
         pending_invoices = invoices_qs.filter(status__in=["issued", "overdue"], document_kind="invoice")
-        remaining_by_id = {}
+        remaining_by_id = _invoice_remaining_amounts(pending_invoices)
         amount_due_by_currency: dict[str, int] = {}
         for invoice in pending_invoices:
-            remaining = invoice.amount_due
-            remaining_by_id[invoice.pk] = remaining
+            remaining = remaining_by_id[invoice.pk]
             if remaining:
                 amount_due_by_currency[invoice.currency_id] = (
                     amount_due_by_currency.get(invoice.currency_id, 0) + remaining

@@ -90,8 +90,11 @@ freeze spending. Both apps show recorded, reserved, refund-held and available va
 
 ## Configuration and rollout
 
-1. Apply the additive Platform migrations before updated workers start. RON stays
-   the upgrade default; an old environment variable cannot silently switch sales.
+1. Stop old Platform web processes, scheduled jobs, and workers before applying
+   these migrations. Apply migrations, then start the updated Platform and compatible
+   Portal. Old code cannot continue writing after the new currency constraints are
+   installed. RON stays the upgrade default; an old environment variable cannot
+   silently switch sales.
 2. Configure explicit target prices and matching `billing.bank_accounts`. The
    legacy company bank account applies to RON only.
 3. Configure provenance-bearing tax exchange rates. They support reporting and
