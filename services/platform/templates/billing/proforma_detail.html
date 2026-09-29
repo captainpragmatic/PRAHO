@@ -460,13 +460,14 @@ function sendProforma(proformaId) {
     <div class="inline-block bg-slate-800 rounded-lg text-left overflow-hidden shadow-xl transform sm:max-w-lg sm:w-full relative z-10" data-action="stop">
       <form method="post" action="{% url 'billing:process_proforma_payment' pk=proforma.pk %}">
         {% csrf_token %}
+        <input type="hidden" name="cash_due_cents" value="{{ cash_due_cents }}">
         <div class="px-6 pt-6 pb-4">
           <h3 class="text-lg font-medium text-white mb-4">{% icon "currency" %} {% trans "Record Payment" %}</h3>
 
           <div class="bg-slate-700/50 rounded-lg p-4 mb-4">
             <div class="flex justify-between text-sm">
-              <span class="text-slate-400">{% trans "Amount:" %}</span>
-              <span class="text-white font-semibold">{{ proforma.total_cents|floatformat:0 }} {% trans "cents" %} ({{ proforma.total_display }})</span>
+              <span class="text-slate-400">{% trans "Remaining payment:" %}</span>
+              <span class="text-white font-semibold">{{ cash_due_cents|cents_to_currency|romanian_currency:proforma.currency.code }}</span>
             </div>
             <div class="flex justify-between text-sm mt-1">
               <span class="text-slate-400">{% trans "Proforma:" %}</span>
@@ -492,9 +493,9 @@ function sendProforma(proformaId) {
           <div class="bg-yellow-900/30 border border-yellow-700/50 rounded-lg p-3 text-sm text-yellow-300">
             {% icon "warning" %}
             {% if proforma.meta.order_id %}
-              {% trans "This will record full payment, issue an invoice, and advance the linked order to provisioning or staff review." %}
+              {% trans "This will record the remaining payment, apply any reserved gift-card balance, issue an invoice, and advance the linked order to provisioning or staff review." %}
             {% else %}
-              {% trans "This will record full payment and automatically convert this proforma into an invoice." %}
+              {% trans "This will record the remaining payment, apply any reserved gift-card balance, and convert this proforma into an invoice." %}
             {% endif %}
           </div>
         </div>

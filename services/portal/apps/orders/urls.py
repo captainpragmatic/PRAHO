@@ -20,6 +20,7 @@ urlpatterns = [
     path("cart/add/", views.add_to_cart, name="add_to_cart"),
     path("cart/update/", views.update_cart_item, name="update_cart_item"),
     path("cart/remove/", views.remove_from_cart, name="remove_from_cart"),
+    path("cart/promotions/", views.set_promotion_codes, name="set_promotion_codes"),
     path("cart/calculate/", views.calculate_totals_htmx, name="calculate_totals"),
     # Order creation (POST)
     path("create/", views.create_order, name="create_order"),

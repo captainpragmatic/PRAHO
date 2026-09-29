@@ -1,0 +1,10 @@
+{% load i18n %}
+<ul class="divide-y divide-slate-700 rounded-lg border border-slate-700 bg-slate-800">
+  {% for redemption in redemptions %}
+    <li class="flex flex-wrap justify-between gap-3 p-4 text-sm text-slate-300">
+      <a class="text-blue-300 hover:text-white" href="{% url 'promotions:coupon_detail' pk=redemption.coupon_id %}">{{ redemption.coupon.code }}</a>
+      <span>{{ redemption.customer|default:'—' }}</span><span>{{ redemption.get_status_display }}</span><span>{{ redemption.applied_at }}</span>
+      <a class="text-blue-300 hover:text-white" href="{% url 'orders:order_detail' pk=redemption.order_id %}">{{ redemption.order.order_number }}</a>
+    </li>
+  {% empty %}<li class="p-6 text-slate-400">{% trans "No redemptions yet." %}</li>{% endfor %}
+</ul>

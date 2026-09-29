@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any, TypedDict
 
 from django.contrib.auth import get_user_model
-from django.core.exceptions import ObjectDoesNotExist
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import IntegrityError, NotSupportedError, models, transaction
 from django.utils import timezone
 from django_fsm import ConcurrentTransition, TransitionNotAllowed
@@ -170,6 +170,9 @@ class OrderCreateData:
     meta: dict[str, Any] = field(default_factory=dict)
     idempotency_key: str = ""
     payment_method: str = ""
+    coupon_codes: list[str] = field(default_factory=list)
+    promotion_quote: str = ""
+    gift_code: str = ""
 
 
 @dataclass
@@ -417,7 +420,7 @@ class OrderService:
 
     @staticmethod
     @transaction.atomic
-    def create_order(data: OrderCreateData, created_by: User | None = None) -> Result[Order, str]:  # noqa: PLR0915
+    def create_order(data: OrderCreateData, created_by: User | None = None) -> Result[Order, str]:  # noqa: C901, PLR0915  # Atomic order and quote reservation
         """Create new order with validation and audit trail"""
         logger.warning(f"🧮 [OrderService] Starting order creation for customer {data.customer.id}")
         try:
@@ -588,6 +591,10 @@ class OrderService:
                 logger.warning("⚠️ [Orders] Failed to recalc totals after item creation; using precomputed totals")
 
             # Create status history entry
+            from apps.promotions.engine import freeze_order  # noqa: PLC0415
+
+            freeze_order(order, data.coupon_codes, data.promotion_quote, gift_code=data.gift_code)
+
             OrderService._create_status_history(order, None, "draft", "Order created", created_by)
 
             # Log audit event
@@ -605,6 +612,9 @@ class OrderService:
 
             return Ok(order)
 
+        except ValidationError as e:
+            transaction.set_rollback(True)
+            return Err("; ".join(e.messages))
         except IntegrityError:
             # Let IntegrityError propagate — idempotency race conditions must be
             # handled at the view level where the existing order can be returned.
@@ -1034,6 +1044,11 @@ class OrderServiceCreationService:
                                 f"Cannot enroll service {service.id} for recurring billing: "
                                 f"{subscription_result.unwrap_err()}"
                             )
+                        from apps.promotions.models import RenewalBenefit  # noqa: PLC0415
+
+                        RenewalBenefit.objects.filter(order_item=item, subscription__isnull=True).update(
+                            subscription=subscription_result.unwrap()
+                        )
 
                     if service.status == "pending":
                         service.start_provisioning()
@@ -1119,6 +1134,10 @@ class OrderPaymentConfirmationService:
             # Link invoice if provided
             if invoice:
                 order.invoice = invoice
+
+            from apps.promotions.engine import settle_order  # noqa: PLC0415
+
+            settle_order(order)
 
             # Transition: awaiting_payment → paid (audit checkpoint)
             order.mark_paid()

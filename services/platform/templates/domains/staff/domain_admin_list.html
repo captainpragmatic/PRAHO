@@ -135,7 +135,7 @@
                 <button type="submit" class="inline-flex items-center px-4 py-2 rounded-md bg-slate-900 text-white text-sm hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600">
                     {% icon "search" %} {% trans "Filter" %}
                 </button>
-                <a href="{% url 'domains:domain_admin_list' %}" class="inline-flex items-center px-4 py-2 rounded-md border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 text-sm hover:bg-slate-50 dark:hover:bg-slate-700">
+                <a href="{% url 'domains:admin_list' %}" class="inline-flex items-center px-4 py-2 rounded-md border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 text-sm hover:bg-slate-50 dark:hover:bg-slate-700">
                     {% trans "Clear" %}
                 </a>
             </div>
@@ -144,7 +144,7 @@
 
     <!-- Domains Table -->
     {% if domains %}
-        {% table_enhanced table_data.columns table_data.rows page_obj=domains pagination_enabled=True %}
+        {% table_enhanced table_data.columns table_data.rows page_obj=domains pagination_enabled=True extra_params=extra_params %}
     {% else %}
         <!-- Empty State -->
         <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 text-center py-12">
@@ -161,7 +161,7 @@
             </p>
             {% if search_query or status_filter or registrar_filter or expiry_filter %}
                 <div class="mt-6">
-                    <a href="{% url 'domains:domain_admin_list' %}" class="inline-flex items-center px-4 py-2 rounded-md bg-slate-900 text-white text-sm hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600">
+                    <a href="{% url 'domains:admin_list' %}" class="inline-flex items-center px-4 py-2 rounded-md bg-slate-900 text-white text-sm hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600">
                         {% trans "Clear Filters" %}
                     </a>
                 </div>

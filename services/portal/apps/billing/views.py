@@ -14,11 +14,12 @@ from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy
 from django.views.decorators.http import require_http_methods
 
-from apps.api_client.services import PlatformAPIError
+from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 from apps.common.decorators import log_access_attempt, require_billing_access
 from apps.common.pagination import PaginatorData, build_pagination_params
 from apps.common.rate_limit_feedback import handle_platform_error
 
+from .forms import GiftCardPaymentForm
 from .services import BillingDataSyncService, InvoiceViewService, RecurringPaymentsService
 
 logger = logging.getLogger(__name__)
@@ -354,6 +355,9 @@ def invoice_detail_view(request: HttpRequest, invoice_number: str) -> HttpRespon
             "invoice": invoice,
             "invoice_number": invoice_number,
             "status_variant": INVOICE_STATUS_VARIANT_MAP.get(invoice.status, "secondary"),
+            "gift_card_form": _gift_payment_form(request, "invoice", invoice_number)
+            if invoice.status in {"issued", "overdue"}
+            else None,
         }
 
         logger.info(f"✅ [Portal Billing] Invoice detail displayed: {invoice_number} for customer {customer_id}")
@@ -580,6 +584,9 @@ def proforma_detail_view(request: HttpRequest, proforma_number: str) -> HttpResp
             "can_convert": False,  # Portal customers cannot convert proformas
             "status_variant": PROFORMA_STATUS_VARIANT_MAP.get(proforma.status, "secondary"),
             "status_icon": PROFORMA_STATUS_ICON_MAP.get(proforma.status, ""),
+            "gift_card_form": _gift_payment_form(request, "proforma", proforma_number)
+            if proforma.status in {"draft", "sent", "accepted"} and not proforma.is_expired
+            else None,
         }
 
         logger.info(f"✅ [Portal Billing] Proforma detail displayed: {proforma_number} for customer {customer_id}")
@@ -596,6 +603,18 @@ def proforma_detail_view(request: HttpRequest, proforma_number: str) -> HttpResp
 # ===============================================================================
 
 
+def _gift_payment_form(request: HttpRequest, kind: str, number: str) -> GiftCardPaymentForm:
+    key = f"{request.session.get('customer_id')}:{kind}:{number}"
+    pending = dict(request.session.get("gift_payment_requests", {}))
+    if key not in pending:
+        pending = dict(list(pending.items())[-19:])
+        pending[key] = str(uuid.uuid4())
+        request.session["gift_payment_requests"] = pending
+    return GiftCardPaymentForm(
+        initial={"document_type": kind, "document_number": number, "operation_key": pending[key]}
+    )
+
+
 def _positive_int(value: Any) -> int | None:
     """Parse an external identifier without accepting booleans as integers."""
     if value is None or isinstance(value, bool):
@@ -605,6 +624,44 @@ def _positive_int(value: Any) -> int | None:
     except (TypeError, ValueError):
         return None
     return parsed if parsed > 0 else None
+
+
+@require_http_methods(["POST"])
+@require_billing_access()
+def gift_card_payment(request: HttpRequest) -> HttpResponse:
+    identity = _recurring_session_ids(request)
+    if identity is None:
+        return redirect("/login/")
+    form = GiftCardPaymentForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, _("Enter a valid gift-card code and billing document."))
+        return redirect("billing:invoices_list")
+    data = form.cleaned_data
+    try:
+        result = PlatformAPIClient().post(
+            "/billing/gift-card-payment/",
+            data={
+                "customer_id": identity[0],
+                "action": "gift_card_payment",
+                "document_type": data["document_type"],
+                "document_number": data["document_number"],
+                "code": data["code"],
+                "operation_key": str(data["operation_key"]),
+            },
+            user_id=identity[1],
+        )
+        if result.get("success"):
+            pending = dict(request.session.get("gift_payment_requests", {}))
+            pending.pop(f"{identity[0]}:{data['document_type']}:{data['document_number']}", None)
+            request.session["gift_payment_requests"] = pending
+            messages.success(request, _("Gift-card balance applied. Your billing document shows the remaining amount."))
+        else:
+            messages.error(request, _("The gift card could not be applied. Check its balance, currency, and expiry."))
+    except PlatformAPIError:
+        messages.error(request, _("The payment could not be confirmed. Refresh this document before trying again."))
+    if data["document_type"] == "invoice":
+        return redirect("billing:invoice_detail", invoice_number=str(data["document_number"]))
+    return redirect("billing:proforma_detail", proforma_number=str(data["document_number"]))
 
 
 def _recurring_session_ids(request: HttpRequest) -> tuple[int, int] | None:

@@ -728,6 +728,9 @@ def invoice_detail(request: HttpRequest, pk: int) -> HttpResponse:
         "items": items,
         "payments": payments,
         "can_edit": invoice.status == "draft",
+        "can_refund": invoice.status in {"paid", "partially_refunded"},
+        "refund_request_key": str(uuid.uuid4()),
+        "unfinished_refund": invoice.tender_refund_commands.exclude(status="completed").first(),
     }
 
     return render(request, "billing/invoice_detail.html", context)
@@ -910,6 +913,8 @@ def proforma_detail(request: HttpRequest, pk: int) -> HttpResponse:
     """
     📋 Display detailed proforma information
     """
+    from apps.promotions.gift_cards import cash_due  # noqa: PLC0415
+
     proforma = get_object_or_404(ProformaInvoice, pk=pk)
 
     access_denied = _validate_financial_document_access_with_redirect(request, proforma, action="view")
@@ -929,6 +934,7 @@ def proforma_detail(request: HttpRequest, pk: int) -> HttpResponse:
         "payment_block_reason": payment_block_reason if can_manage_payments else None,
         "is_staff_user": getattr(request.user, "is_staff_user", False),
         "document_type": "proforma",
+        "cash_due_cents": cash_due(proforma),
     }
 
     return render(request, "billing/proforma_detail.html", context)
@@ -958,7 +964,7 @@ def proforma_to_invoice(request: HttpRequest, pk: int) -> HttpResponse:
 
 
 @billing_staff_required
-def process_proforma_payment(request: HttpRequest, pk: int) -> HttpResponse:
+def process_proforma_payment(request: HttpRequest, pk: int) -> HttpResponse:  # noqa: PLR0911  # Explicit financial guard outcomes
     """
     💳 Process payment for proforma (automatically converts to invoice)
     """
@@ -973,6 +979,7 @@ def process_proforma_payment(request: HttpRequest, pk: int) -> HttpResponse:
         # This replaces the old inline conversion+payment logic that was a security bypass
         # (created Payment(status=succeeded) directly, duplicated conversion, accepted arbitrary amounts).
         from apps.billing.proforma_service import ProformaPaymentService, _normalize_payment_method  # noqa: PLC0415
+        from apps.promotions.gift_cards import cash_due  # noqa: PLC0415
 
         raw_method = request.POST.get("payment_method", "bank")
         reference = request.POST.get("reference", "")
@@ -991,9 +998,16 @@ def process_proforma_payment(request: HttpRequest, pk: int) -> HttpResponse:
                 status=400,
             )
 
+        remaining = cash_due(proforma)
+        displayed_amount = request.POST.get("cash_due_cents")
+        # A retry of a converted document returns its invoice without taking another payment.
+        if proforma.status != "converted" and displayed_amount != str(remaining):
+            messages.error(request, _("The remaining payment changed. Review the amount before recording payment."))
+            return redirect("billing:proforma_detail", pk=pk)
+
         result = ProformaPaymentService.record_payment_and_convert(
             proforma_id=str(proforma.id),
-            amount_cents=proforma.total_cents,  # Full amount only, not from POST
+            amount_cents=remaining,  # Authoritative cash amount; service rechecks it under the document lock.
             payment_method=_normalize_payment_method(raw_method),
             reference=reference,
             created_by=request.user,
@@ -1837,7 +1851,25 @@ def vat_report(request: HttpRequest) -> HttpResponse:
 
 @billing_staff_api_required
 @require_POST
-def invoice_refund(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
+def invoice_refund_retry(request: HttpRequest, pk: int, command_id: uuid.UUID) -> HttpResponse:
+    from apps.promotions.models import TenderRefundCommand  # noqa: PLC0415
+    from apps.promotions.tender_refunds import resume_refund  # noqa: PLC0415
+
+    invoice = get_object_or_404(Invoice, pk=pk)
+    if not isinstance(request.user, User) or not request.user.can_access_customer(invoice.customer):
+        return json_error("Access denied")
+    get_object_or_404(TenderRefundCommand, pk=command_id, invoice=invoice)
+    result = resume_refund(invoice.pk, str(command_id), actor=request.user)
+    if result.status == "completed":
+        messages.success(request, _("Refund completed."))
+    else:
+        messages.warning(request, _("The refund still needs processing. Completed parts will not be repeated."))
+    return redirect("billing:invoice_detail", pk=invoice.pk)
+
+
+@billing_staff_api_required
+@require_POST
+def invoice_refund(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:  # noqa: PLR0911  # Distinct staff input and settlement failures
     """
     💰 Refund an invoice (bidirectional with order refunds)
     """
@@ -1878,6 +1910,7 @@ def invoice_refund(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
         amount_cents = int(Decimal(refund_amount_str) * 100) if refund_type_str == "partial" else invoice.total_cents
         refund_data: RefundData = {
             "refund_type": refund_type_str,
+            "idempotency_key": request.POST.get("idempotency_key", ""),
             "amount_cents": amount_cents,
             "reason": refund_reason_str,
             "notes": refund_notes,
@@ -1888,6 +1921,8 @@ def invoice_refund(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
         result = RefundService.refund_invoice(invoice.id, refund_data, actor=request.user)
         if result.is_ok():
             refund_result = result.unwrap()
+            if refund_result.get("refund_status") == "failed":
+                return json_error("Part of the refund still needs processing. Retry this request to finish it safely.")
             refund_id = refund_result.get("refund_id")
             return JsonResponse({"success": True, "refund_id": str(refund_id)})
         return json_error(result.unwrap_err())
@@ -2240,6 +2275,7 @@ def api_process_refund(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911  
 
         refund_data: RefundData = {
             "refund_type": "partial" if amount_cents else "full",
+            "idempotency_key": data.get("idempotency_key", ""),
             "amount_cents": amount_cents or payment.amount_cents,
             "reason": reason,
             "notes": f"API refund for payment {payment_id}",
@@ -2250,7 +2286,11 @@ def api_process_refund(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911  
             refund_result = result.unwrap()
             logger.info(f"✅ API: Refund processed for payment {payment_id}")
             refund_id = refund_result.get("refund_id")
-            return JsonResponse({"success": True, "refund_id": str(refund_id)})
+            outcome = refund_result.get("refund_status", "completed")
+            return JsonResponse(
+                {"success": outcome != "failed", "refund_id": str(refund_id), "status": outcome},
+                status=409 if outcome == "failed" else 202 if outcome != "completed" else 200,
+            )
         logger.warning(f"⚠️ API: Refund failed for payment {payment_id}: {result.unwrap_err()}")
         return JsonResponse({"success": False, "error": result.unwrap_err()}, status=400)
 

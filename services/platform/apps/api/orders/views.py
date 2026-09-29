@@ -10,7 +10,7 @@ from decimal import Decimal
 from typing import Any
 
 from django.core.cache import cache
-from django.core.exceptions import ObjectDoesNotExist
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
@@ -41,6 +41,7 @@ from apps.orders.price_sealing import PriceSealingService
 from apps.orders.services import OrderCreateData, OrderService, StatusChangeData
 from apps.orders.vat_rules import CustomerVATInfo, OrderVATCalculator
 from apps.products.models import Product, ProductPrice
+from apps.promotions.engine import preview_cart
 from apps.provisioning.models import Service
 from apps.provisioning.service_models import Server
 from apps.provisioning.tasks import queue_service_provisioning
@@ -54,6 +55,7 @@ from .serializers import (
     OrderListSerializer,
     ProductDetailSerializer,
     ProductListSerializer,
+    PromotionInputSerializer,
 )
 
 logger = logging.getLogger(__name__)
@@ -197,7 +199,7 @@ def calculate_cart_totals(  # noqa: PLR0915  # Complexity: multi-step business l
     """
 
     logger.info(f"🛒 [Orders API] Cart calculation request from customer {customer.id}")
-    logger.debug(f"🛒 [Orders API] Request data: {request.data}")
+    logger.debug("🛒 [Orders API] Cart calculation requested")
 
     # Validate input
     input_serializer = CartCalculationInputSerializer(data=request.data)
@@ -324,8 +326,24 @@ def calculate_cart_totals(  # noqa: PLR0915  # Complexity: multi-step business l
             "total_cents": vat_result.total_cents,
         }
 
+        promotion = preview_cart(
+            customer,
+            currency,
+            order_items,
+            validated_data.get("coupon_codes", []),
+            Decimal(str(vat_result.vat_rate)) / 100,
+            gift_code=validated_data.get("gift_code", ""),
+        )
+        totals["tax_cents"] = promotion["tax_cents"]
+        totals["total_cents"] = promotion["total_cents"]
+
         # Prepare response
         response_data = {
+            "promotion_quote": promotion["quote_token"],
+            "gift_applied_cents": promotion["gift"]["amount_cents"],
+            "cash_due_cents": promotion["cash_due_cents"],
+            "offers": promotion["offers"],
+            "discount_cents": promotion["discount_cents"],
             "subtotal_cents": totals["subtotal_cents"],
             "tax_cents": totals["tax_cents"],
             "total_cents": totals["total_cents"],
@@ -357,6 +375,8 @@ def calculate_cart_totals(  # noqa: PLR0915  # Complexity: multi-step business l
             logger.error(f"🔥 [API] Output serializer error: {output_serializer.errors}")
             return Response({"error": "Calculation error"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    except ValidationError as e:
+        return Response({"error": "; ".join(e.messages)}, status=status.HTTP_400_BAD_REQUEST)
     except Exception as e:
         logger.exception(f"🔥 [API] Cart calculation failed: {e}")
         return Response({"error": "Calculation failed"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -429,6 +449,9 @@ def preflight_order(  # noqa: PLR0911, PLR0915  # Complexity: multi-step busines
                 status=status.HTTP_400_BAD_REQUEST,
             )
         cart_items = item_serializer.validated_data
+        promotion_input = PromotionInputSerializer(data=request.data)
+        if not promotion_input.is_valid():
+            return Response({"success": False, "errors": [str(promotion_input.errors)], "warnings": []}, status=400)
 
         # Create a preview order data structure (without saving to DB)
         currency, error_response = _resolve_currency(request.data.get("currency", "RON"))
@@ -490,6 +513,8 @@ def preflight_order(  # noqa: PLR0911, PLR0915  # Complexity: multi-step busines
 
                 preview_items.append(
                     {
+                        "product_type": product.product_type,
+                        "domain_name": cart_item.get("domain_name", ""),
                         "product_name": product.name,
                         "product_id": product.id,
                         "billing_period": cart_item["billing_period"],
@@ -567,21 +592,36 @@ def preflight_order(  # noqa: PLR0911, PLR0915  # Complexity: multi-step busines
             f"🔎 [API] Preflight validation complete: success={success}, errors={len(error_messages)}, warnings={len(warning_messages)}"
         )
 
+        promotion = preview_cart(
+            customer,
+            currency,
+            preview_items,
+            promotion_input.validated_data.get("coupon_codes", []),
+            Decimal(str(vat_result.vat_rate)) / 100,
+            gift_code=promotion_input.validated_data.get("gift_code", ""),
+        )
         return Response(
             {
+                "promotion_quote": promotion["quote_token"],
+                "gift_applied_cents": promotion["gift"]["amount_cents"],
+                "cash_due_cents": promotion["cash_due_cents"],
+                "offers": promotion["offers"],
                 "success": success,
                 "errors": error_messages,
                 "warnings": warning_messages,
                 "preview": {
                     "currency": currency.code,
                     "subtotal_cents": subtotal_cents,
-                    "vat_cents": int(vat_result.vat_cents),
-                    "total_cents": int(vat_result.total_cents),
+                    "discount_cents": promotion["discount_cents"],
+                    "vat_cents": promotion["tax_cents"],
+                    "total_cents": promotion["total_cents"],
                     "vat_reasoning": vat_result.reasoning,
                 },
             }
         )
 
+    except ValidationError as e:
+        return Response({"success": False, "errors": e.messages, "warnings": []}, status=400)
     except Exception:
         logger.exception("🔥 [API] Preflight validation failed for customer %s", customer.id)
         return Response(
@@ -790,6 +830,9 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
             meta=validated_data.get("meta", {}),
             idempotency_key=idempotency_key,
             payment_method=validated_data.get("payment_method", ""),
+            coupon_codes=validated_data.get("coupon_codes", []),
+            promotion_quote=validated_data.get("promotion_quote", ""),
+            gift_code=validated_data.get("gift_code", ""),
         )
 
         # Create order using platform service (idempotency_key set atomically in create_order)
@@ -834,6 +877,31 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
                     if promote_result.is_ok():
                         order.refresh_from_db()
                         promoted = True
+                        if order.proforma_id:
+                            from apps.billing.proforma_service import ProformaPaymentService  # noqa: PLC0415
+                            from apps.promotions.gift_cards import cash_due  # noqa: PLC0415
+
+                            if cash_due(order.proforma) == 0:
+                                converted = ProformaPaymentService.record_payment_and_convert(
+                                    str(order.proforma_id), 0, "other", reference="Checkout gift-card payment"
+                                )
+                                if converted.is_err():
+                                    raise ValueError(converted.unwrap_err())
+                                from apps.orders.services import OrderPaymentConfirmationService  # noqa: PLC0415
+
+                                confirmed = OrderPaymentConfirmationService.confirm_order(
+                                    order, invoice=converted.unwrap()
+                                )
+                                if confirmed.is_err():
+                                    raise ValueError(confirmed.unwrap_err())
+                                order = confirmed.unwrap()
+                        if order.total_cents == 0:
+                            from apps.orders.services import OrderPaymentConfirmationService  # noqa: PLC0415
+
+                            free_result = OrderPaymentConfirmationService.confirm_order(order)
+                            if free_result.is_err():
+                                raise ValueError(free_result.unwrap_err())
+                            order = free_result.unwrap()
                         serializer = OrderDetailSerializer(order)
                     else:
                         # Collect preflight errors for client visibility
@@ -862,7 +930,11 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
             )
         else:
             logger.error(f"🔥 [API] Order creation failed: {result.error}")
-            return Response({"error": result.error}, status=status.HTTP_400_BAD_REQUEST)
+            changed_quote = "PROMOTION_QUOTE_CHANGED" in result.error
+            return Response(
+                {"error": result.error, "code": "PROMOTION_QUOTE_CHANGED" if changed_quote else "INVALID_ORDER"},
+                status=status.HTTP_409_CONFLICT if changed_quote else status.HTTP_400_BAD_REQUEST,
+            )
 
     except Exception as e:
         logger.exception(f"🔥 [API] Order creation exception: {e}")
@@ -1077,7 +1149,9 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
             order_payment_method = order.payment_method
             order_number_for_log = order.order_number
             payable_proforma_id = order.proforma_id
-            payable_total_cents = order.proforma.total_cents if order.proforma is not None else order.total_cents
+            from apps.promotions.gift_cards import cash_due  # noqa: PLC0415
+
+            payable_total_cents = cash_due(order.proforma) if order.proforma is not None else order.total_cents
         # Phase 1 transaction ends here — DB lock released before any network call.
         # C2: The gap between Phase 1 and Phase 3 is safe because Phase 3 re-acquires
         # the lock and OrderPaymentConfirmationService.confirm_order() is idempotent.
@@ -1240,7 +1314,7 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
                 )
 
             if order.proforma_id != payable_proforma_id or (
-                order.proforma is not None and order.proforma.total_cents != payable_total_cents
+                order.proforma is not None and cash_due(order.proforma) != payable_total_cents
             ):
                 logger.critical(
                     "🔥 [API] Billing document changed after payment verification for order %s",

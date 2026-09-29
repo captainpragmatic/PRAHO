@@ -9,6 +9,7 @@ from . import views
 app_name = "billing"
 
 urlpatterns = [
+    path("gift-card-payment/", views.gift_card_payment, name="gift_card_payment"),
     # Invoice list, search, and detail views
     path("invoices/", views.invoices_list_view, name="invoices_list"),
     path("invoices/search/", views.invoices_search_api, name="invoices_search_api"),

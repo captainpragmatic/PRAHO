@@ -10,6 +10,15 @@ from rest_framework import serializers
 from apps.billing.models import Currency, Invoice, InvoiceLine
 from apps.billing.proforma_models import ProformaInvoice, ProformaLine
 
+
+class GiftCardTenderSerializer(serializers.Serializer):
+    document_type = serializers.ChoiceField(choices=("invoice", "proforma"))
+    document_number = serializers.CharField(max_length=100)
+    code = serializers.CharField(max_length=50)
+    operation_key = serializers.UUIDField()
+    amount_cents = serializers.IntegerField(min_value=1, max_value=100_000_000, required=False)
+
+
 # ===============================================================================
 # CURRENCY SERIALIZERS 💱
 # ===============================================================================
@@ -308,6 +317,18 @@ class ProformaDetailSerializer(serializers.ModelSerializer):
     is_expired = serializers.SerializerMethodField()
     bill_to = serializers.SerializerMethodField()
     pdf_url = serializers.SerializerMethodField()
+    gift_reserved_cents = serializers.SerializerMethodField()
+    cash_due_cents = serializers.SerializerMethodField()
+
+    def get_gift_reserved_cents(self, obj: ProformaInvoice) -> int:
+        from apps.promotions.gift_cards import reserved_value  # noqa: PLC0415
+
+        return reserved_value(obj)
+
+    def get_cash_due_cents(self, obj: ProformaInvoice) -> int:
+        from apps.promotions.gift_cards import cash_due  # noqa: PLC0415
+
+        return cash_due(obj)
 
     class Meta:
         model = ProformaInvoice
@@ -330,6 +351,8 @@ class ProformaDetailSerializer(serializers.ModelSerializer):
             "pdf_url",
             "notes",
             "meta",
+            "gift_reserved_cents",
+            "cash_due_cents",
         ]
 
     def get_subtotal(self, obj: ProformaInvoice) -> str:

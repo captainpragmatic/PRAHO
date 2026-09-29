@@ -190,6 +190,7 @@ def navigation_dropdowns(request: HttpRequest) -> dict[str, Any]:
             {"text": "Customers", "url": "/customers/", "icon": "users"},
             {"text": "Products", "url": "/products/", "icon": "orders"},
             {"text": "Orders", "url": "/orders/", "icon": "clipboard"},
+            {"text": "Promotions", "url": "/promotions/admin/", "icon": "gift"},
             {"divider": True},
             {"text": "Invoices", "url": "/billing/invoices/", "icon": "receipt"},
             {"text": "Services", "url": "/provisioning/services/", "icon": "services"},

@@ -230,8 +230,7 @@ def domain_list(request: HttpRequest) -> HttpResponse:
         domains = domains.filter(
             Q(name__icontains=search_query)
             | Q(customer__company_name__icontains=search_query)
-            | Q(customer__first_name__icontains=search_query)
-            | Q(customer__last_name__icontains=search_query)
+            | Q(customer__name__icontains=search_query)
         )
 
     # Status filter
@@ -787,8 +786,7 @@ def domain_admin_list(request: HttpRequest) -> HttpResponse:
         domains = domains.filter(
             Q(name__icontains=search_query)
             | Q(customer__company_name__icontains=search_query)
-            | Q(customer__first_name__icontains=search_query)
-            | Q(customer__last_name__icontains=search_query)
+            | Q(customer__name__icontains=search_query)
         )
 
     # Status filter
@@ -804,9 +802,9 @@ def domain_admin_list(request: HttpRequest) -> HttpResponse:
     # Expiry filter for staff management
     expiry_filter = request.GET.get("expiry")
     if expiry_filter == "expiring":
-        domains = DomainRepository.get_expiring_domains(30)
+        domains = domains.filter(pk__in=DomainRepository.get_expiring_domains(30).values("pk"))
     elif expiry_filter == "auto_renew":
-        domains = DomainRepository.get_auto_renewal_candidates()
+        domains = domains.filter(pk__in=DomainRepository.get_auto_renewal_candidates().values("pk"))
 
     # Pagination
     paginator = Paginator(domains, 50)  # More items per page for staff
@@ -824,6 +822,8 @@ def domain_admin_list(request: HttpRequest) -> HttpResponse:
 
     # Build table data
     table_data = _build_domain_table_data(cast(list[Domain], domains_page.object_list), user)
+    filter_params = request.GET.copy()
+    filter_params.pop("page", None)
 
     context = {
         "domains": domains_page,
@@ -837,6 +837,7 @@ def domain_admin_list(request: HttpRequest) -> HttpResponse:
         "expiring_count": expiring_count,
         "auto_renew_count": auto_renew_count,
         "registrars": registrars,
+        "extra_params": "&" + filter_params.urlencode(),
     }
 
     return render(request, "domains/staff/domain_admin_list.html", context)

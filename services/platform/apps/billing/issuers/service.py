@@ -484,6 +484,21 @@ def _split_correction_refusal(original: Invoice) -> str | None:
     settled = list(original.refunds.filter(status="completed"))
     expected_cents = abs(original.total_cents)
 
+    # One full customer instruction can have several payment legs. Those legs
+    # are one correction; independent earlier partial refunds remain excluded.
+    from apps.promotions.models import TenderRefundCommand  # noqa: PLC0415
+
+    command = TenderRefundCommand.objects.filter(
+        invoice=original, status="completed", amount_cents=expected_cents
+    ).first()
+    if command is not None and settled:
+        completed_ids = set(command.legs.filter(status="completed").values_list("refund_id", flat=True))
+        if (
+            completed_ids == {refund.pk for refund in settled}
+            and sum(refund.amount_cents for refund in settled) == expected_cents
+        ):
+            return None
+
     if len(settled) != 1:
         return (
             f"This invoice reached 'refunded' through {len(settled)} settled refunds. "

@@ -1,0 +1,11 @@
+{% extends "promotions/admin/base.html" %}
+{% load i18n ui_components formatting %}
+{% block promotion_content %}
+  <div class="flex flex-wrap justify-between gap-3"><h1 class="text-2xl font-semibold text-white">{{ campaign.name }}</h1>{% if request.user.can_manage_financial_data %}{% url 'promotions:campaign_update' pk=campaign.pk as edit_url %}{% button _("Edit campaign") href=edit_url %}{% endif %}</div>
+  <section class="space-y-3 rounded-lg border border-slate-700 bg-slate-800 p-6 text-slate-300">
+    <p>{{ campaign.description|linebreaksbr }}</p><p>{{ campaign.get_status_display }} · {{ campaign.start_date }} — {{ campaign.end_date|default:'—' }}</p>
+    <dl class="grid gap-4 sm:grid-cols-3"><div><dt>{% trans "Coupons" %}</dt><dd class="text-xl text-white">{{ stats.total_coupons }}</dd></div><div><dt>{% trans "Redemptions" %}</dt><dd class="text-xl text-white">{{ stats.total_redemptions }}</dd></div><div><dt>{% trans "Budget used" %}</dt><dd class="text-xl text-white">{{ stats.budget_utilization|floatformat:1 }}%</dd></div></dl>
+  </section>
+  <section class="space-y-3"><h2 class="text-xl text-white">{% trans "Coupons" %}</h2><ul class="space-y-2">{% for coupon in coupons %}<li><a class="text-blue-300 hover:text-white" href="{% url 'promotions:coupon_detail' pk=coupon.pk %}">{{ coupon.code }} · {{ coupon.name }}</a></li>{% empty %}<li class="text-slate-400">{% trans "No coupons yet." %}</li>{% endfor %}</ul></section>
+  <section class="space-y-3"><h2 class="text-xl text-white">{% trans "Recent redemptions" %}</h2>{% include 'promotions/admin/redemptions.html' with redemptions=recent_redemptions %}</section>
+{% endblock %}

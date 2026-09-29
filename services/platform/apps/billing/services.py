@@ -378,7 +378,13 @@ class ProformaConversionService:
                     bill_to_region=getattr(proforma, "bill_to_region", "") or "",
                     bill_to_postal=getattr(proforma, "bill_to_postal", "") or "",
                     bill_to_country=billing_country_code(getattr(proforma, "bill_to_country", "")),
-                    meta={"proforma_id": str(proforma.id), "proforma_number": proforma.number},
+                    meta={
+                        "proforma_id": str(proforma.id),
+                        "proforma_number": proforma.number,
+                        # The full frozen quote stays on the linked proforma/order.
+                        # Invoice metadata accepts financial fields, not quote signing/line identifiers.
+                        "promotion_cycle_discounts": proforma.meta.get("promotion_cycle_discounts"),
+                    },
                 )
                 # Copy line items — copy ALL fields including EN16931 and financial fields
                 for line in proforma.lines.all():

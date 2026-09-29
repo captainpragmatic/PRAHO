@@ -44,6 +44,11 @@ urlpatterns = [
     path("admin/gift-cards/", views.GiftCardListView.as_view(), name="gift_card_list"),
     path("admin/gift-cards/create/", views.GiftCardCreateView.as_view(), name="gift_card_create"),
     path("admin/gift-cards/<uuid:pk>/", views.GiftCardDetailView.as_view(), name="gift_card_detail"),
+    path(
+        "admin/gift-cards/<uuid:pk>/record-payment/",
+        views.GiftCardRecordBankPaymentView.as_view(),
+        name="gift_card_record_payment",
+    ),
     # =========================================================================
     # Staff Admin - Referrals
     # =========================================================================

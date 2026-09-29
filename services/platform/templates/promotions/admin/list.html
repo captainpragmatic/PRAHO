@@ -1,0 +1,21 @@
+{% extends "promotions/admin/base.html" %}
+{% load i18n ui_components %}
+{% block promotion_content %}
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <h1 class="text-2xl font-semibold text-white">{{ page_title }}</h1>
+    <div class="flex gap-2">
+      {% if create_url and request.user.can_manage_financial_data %}{% trans "Create" as create_label %}{% button create_label href=create_url %}{% endif %}
+      {% if coupons != None and request.user.can_manage_financial_data %}{% url 'promotions:coupon_batch_create' as batch_url %}{% trans "Generate batch" as batch_label %}{% button batch_label href=batch_url variant="secondary" %}{% endif %}
+    </div>
+  </div>
+  <form method="get" class="flex flex-wrap items-end gap-3 rounded-lg border border-slate-700 bg-slate-800 p-4">
+    {% input_field "search" label=_("Search") value=request.GET.search %}
+    {% if statuses %}{% input_field "status" input_type="select" label=_("Status") options=statuses value=request.GET.status placeholder=_("All statuses") %}{% endif %}
+    {% if campaign_types %}{% input_field "type" input_type="select" label=_("Campaign type") options=campaign_types value=request.GET.type placeholder=_("All types") %}{% endif %}
+    {% if campaign_options %}{% input_field "campaign" input_type="select" label=_("Campaign") options=campaign_options value=request.GET.campaign placeholder=_("All campaigns") %}{% endif %}
+    {% if discount_types %}{% input_field "discount_type" input_type="select" label=_("Discount type") options=discount_types value=request.GET.discount_type placeholder=_("All types") %}{% endif %}
+    {% trans "Apply filters" as filter_label %}{% button filter_label type="submit" variant="secondary" %}
+    <a href="{{ request.path }}" class="px-3 py-2 text-sm text-blue-300 hover:text-white">{% trans "Clear" %}</a>
+  </form>
+  {% table_enhanced columns=columns rows=rows page_obj=page_obj pagination_enabled=True extra_params=extra_params empty_title=_("No records found") %}
+{% endblock %}

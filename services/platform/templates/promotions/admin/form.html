@@ -1,0 +1,18 @@
+{% extends "promotions/admin/base.html" %}
+{% load i18n ui_components %}
+{% block promotion_content %}
+  <div class="mx-auto max-w-3xl space-y-4">
+    <h1 class="text-2xl font-semibold text-white">{% block form_title %}{% trans "Promotion settings" %}{% endblock %}</h1>
+    {% block form_help %}{% endblock %}
+    <form method="post" class="space-y-5 rounded-lg border border-slate-700 bg-slate-800 p-6">
+      {% csrf_token %}
+      {% form_error_summary form %}
+      {% for field in form %}
+        {% if field.field.widget.input_type == "checkbox" %}{% form_checkbox field %}{% else %}{% form_field field %}{% endif %}
+      {% endfor %}
+      {% trans "Save" as save_label %}
+      {% url 'promotions:dashboard' as back_url %}
+      {% form_actions submit_label=save_label cancel_url=back_url %}
+    </form>
+  </div>
+{% endblock %}

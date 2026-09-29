@@ -72,6 +72,7 @@ class Invoice:
     sent_at: datetime | None
     paid_at: datetime | None
     document_type: str = "invoice"
+    amount_due: int | None = None
 
     # Billing information
     bill_to_name: str = ""
@@ -192,6 +193,8 @@ class Proforma:
     valid_until: datetime
     created_at: datetime
     document_type: str = "proforma"
+    gift_reserved_cents: int = 0
+    cash_due_cents: int | None = None
     notes: str = ""
     bill_to_name: str = ""
     bill_to_email: str = ""

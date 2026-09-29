@@ -1,0 +1,23 @@
+{% extends "promotions/admin/base.html" %}
+{% load i18n formatting ui_components %}
+{% block promotion_content %}
+  <h1 class="text-2xl font-semibold text-white">{% trans "Gift card" %} {{ gift_card.code }}</h1>
+  <section class="space-y-3 rounded-lg border border-slate-700 bg-slate-800 p-6 text-slate-300">
+    <p>{{ gift_card.get_status_display }}</p>
+    <dl class="grid gap-4 sm:grid-cols-3"><div><dt>{% trans "Face value" %}</dt><dd class="text-xl text-white">{{ gift_card.initial_value_cents|cents_to_currency }} {{ gift_card.currency.code }}</dd></div><div><dt>{% trans "Spendable balance" %}</dt><dd class="text-xl text-white">{{ gift_card.current_balance_cents|cents_to_currency }} {{ gift_card.currency.code }}</dd></div><div><dt>{% trans "Recipient" %}</dt><dd class="text-white">{{ gift_card.recipient_name }} {{ gift_card.recipient_email }}</dd></div></dl>
+    {% if gift_card.status == 'pending' %}<p>{% trans "Awaiting verified purchase payment." %}</p>{% endif %}
+    {% if gift_card.ledger_version == 2 %}
+      <p>{% trans "Funding receipt" %}: {{ gift_card.purchase.receipt_number }}</p>
+      {% if gift_card.status == 'pending' and gift_card.purchase.funding_payment.payment_method == 'bank' and request.user.can_manage_financial_data %}
+        <form method="post" action="{% url 'promotions:gift_card_record_payment' pk=gift_card.pk %}" class="space-y-3">
+          {% csrf_token %}
+          {% input_field "reference" label=_("Received bank transfer reference") required=True maxlength="100" %}
+          {% button _("Record received payment and activate") type="submit" %}
+        </form>
+      {% endif %}
+    {% endif %}
+  </section>
+  <section class="space-y-3"><h2 class="text-xl text-white">{% trans "Transactions" %}</h2><ul class="divide-y divide-slate-700 rounded-lg border border-slate-700 bg-slate-800">
+    {% for entry in transactions %}<li class="flex flex-wrap justify-between gap-3 p-4 text-sm text-slate-300"><span>{{ entry.created_at }}</span><span>{{ entry.get_transaction_type_display }}</span><span>{{ entry.amount_cents|cents_to_currency }} {{ gift_card.currency.code }}</span><span>{{ entry.customer|default:'—' }}</span></li>{% empty %}<li class="p-6 text-slate-400">{% trans "No transactions yet." %}</li>{% endfor %}
+  </ul></section>
+{% endblock %}

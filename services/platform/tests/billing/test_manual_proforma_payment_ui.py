@@ -88,8 +88,14 @@ class ManualProformaPaymentTests(TestCase):
     def test_payment_post_is_idempotent_and_keeps_invoice_locked(self) -> None:
         document = self.document("accepted")
         url = reverse("billing:process_proforma_payment", args=[document.pk])
-        first = self.client.post(url, {"payment_method": "bank_transfer", "reference": "BANK-UI"})
-        second = self.client.post(url, {"payment_method": "bank_transfer", "reference": "BANK-UI"})
+        detail = self.client.get(reverse("billing:proforma_detail", args=[document.pk]))
+        self.assertEqual(detail.context["cash_due_cents"], 12100)
+        payload = {
+            "payment_method": "bank_transfer", "reference": "BANK-UI",
+            "cash_due_cents": detail.context["cash_due_cents"],
+        }
+        first = self.client.post(url, payload)
+        second = self.client.post(url, payload)
         self.assertEqual(first.status_code, 302)
         self.assertEqual(first.url, second.url)
         invoice = Invoice.objects.get(converted_from_proforma=document)

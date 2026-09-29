@@ -38,4 +38,8 @@ def restore_to_leaf(app_label: str) -> None:
     Call this from a migration test's ``tearDown``, in place of migrating to a
     hardcoded target, so adding a migration can never strand the schema again.
     """
-    MigrationExecutor(connection).migrate([leaf_migration(app_label)])
+    leaf_migration(app_label)  # Validate the caller's app label before restoring the graph.
+    executor = MigrationExecutor(connection)
+    # Rewinding billing also unapplies dependent promotion migrations. Restoring
+    # billing alone leaves unrelated later tests without those tables.
+    executor.migrate(executor.loader.graph.leaf_nodes())

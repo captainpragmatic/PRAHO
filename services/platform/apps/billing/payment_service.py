@@ -18,6 +18,7 @@ from apps.customers.models import (
     CustomerPaymentMethod,
 )
 from apps.orders.models import Order
+from apps.promotions.gift_cards import cash_due
 
 from .currency_models import Currency
 from .gateways import PaymentGatewayFactory
@@ -224,8 +225,8 @@ def _revalidate_order_payment_reservation(
     from .proforma_models import ProformaInvoice  # noqa: PLC0415
 
     with transaction.atomic():
-        order = Order.objects.select_for_update(of=("self",)).get(id=order_id)
         proforma = ProformaInvoice.objects.select_for_update(of=("self",)).get(id=proforma_id)
+        order = Order.objects.select_for_update(of=("self",)).get(id=order_id)
         payment = Payment.objects.select_for_update(of=("self",)).get(id=payment_id)
 
         if (
@@ -236,7 +237,7 @@ def _revalidate_order_payment_reservation(
             or proforma.status not in {"draft", "sent", "accepted"}
             or proforma.is_expired
             or proforma.currency_id != expected_currency_id
-            or proforma.total_cents != expected_amount_cents
+            or cash_due(proforma) != expected_amount_cents
         ):
             reason = "Order billing document changed before gateway collection"
             _abandon_unbound_payment_reservation(payment, reason)
@@ -276,7 +277,7 @@ def _revalidate_proforma_payment_reservation(
         if (
             proforma.status not in {"draft", "sent", "accepted"}
             or proforma.is_expired
-            or proforma.total_cents != expected_amount_cents
+            or cash_due(proforma) != expected_amount_cents
             or proforma.currency_id != expected_currency_id
         ):
             reason = "Proforma document changed before gateway collection"
@@ -516,7 +517,7 @@ class PaymentService:
                     error="Order billing snapshot does not match its payable proforma",
                 )
 
-            expected_amount_cents = int(proforma.total_cents)
+            expected_amount_cents = cash_due(proforma)
             if amount_cents is not None and int(amount_cents) != expected_amount_cents:
                 return PaymentIntentResult(
                     success=False,
@@ -1171,7 +1172,7 @@ class PaymentService:
                 )
 
             if existing is not None:
-                if existing.amount_cents != proforma.total_cents or existing.currency_id != proforma.currency_id:
+                if existing.amount_cents != cash_due(proforma) or existing.currency_id != proforma.currency_id:
                     return PaymentIntentResult(
                         success=False,
                         payment_intent_id=existing.gateway_txn_id or "",
@@ -1224,7 +1225,7 @@ class PaymentService:
                             "proforma": proforma,
                             "customer": proforma.customer,
                             "payment_method": gateway,
-                            "amount_cents": proforma.total_cents,
+                            "amount_cents": cash_due(proforma),
                             "currency": proforma.currency,
                             "status": "pending",
                             "gateway_txn_id": None,
@@ -1247,7 +1248,7 @@ class PaymentService:
                     or payment.invoice_id is not None
                     or payment.customer_id != proforma.customer_id
                     or payment.payment_method != gateway
-                    or payment.amount_cents != proforma.total_cents
+                    or payment.amount_cents != cash_due(proforma)
                     or payment.currency_id != proforma.currency_id
                     or payment.status != "pending"
                     or payment.meta.get("source") != "recurring_billing"
@@ -1303,14 +1304,14 @@ class PaymentService:
                 revalidate=lambda: _revalidate_proforma_payment_reservation(
                     proforma_id=proforma.id,
                     payment_id=payment_id,
-                    expected_amount_cents=proforma.total_cents,
+                    expected_amount_cents=cash_due(proforma),
                     expected_currency_id=proforma.currency_id,
                     expected_saved_method_id=saved_method.id,
                 ),
                 submit=lambda: payment_gateway.create_off_session_payment_intent(
                     document_id=str(proforma.id),
                     document_type="proforma",
-                    amount_cents=proforma.total_cents,
+                    amount_cents=cash_due(proforma),
                     currency=proforma.currency.code,
                     customer_id=saved_method.stripe_customer_id,
                     payment_method_id=saved_method.stripe_payment_method_id,

@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Staff promotion screens with validated campaign, coupon, batch and automatic-offer forms.
+- Signed checkout promotion quotes, explicit offer stacking, BOGO and tiered discounts,
+  and credits that retain their original value across subscription renewals.
+- Customer-initiated spending of existing gift-card balances at checkout and on billing
+  documents, with proportional split refunds and a staff action to resume unfinished refunds.
+
 - Four VAT evidence settings: `billing.vies_evidence_max_age_days` (30), `billing.vies_outage_grace_days`
   (14, kept below the maximum age), `billing.reverse_charge_requires_consultation_reference` and
   `billing.reverse_charge_requires_name_match` (both on). The tax profile records the VIES
@@ -48,6 +54,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refuse to start without it.
 
 ### Fixed
+
+- Staff domain filters and pagination, Audit Apply Filters, and shared button attribute rendering.
+- Staff settlement now confirms only the cash remaining after gift-card reservations.
+- Invoice line totals render correctly on desktop and mobile, and refund dialogs remain clickable.
+- Delayed local split refunds can resume without a gateway deadline; ledger transitions and
+  customer-authorized gift spending retain audit entries.
 
 - The VAT report's default period ended on the UTC date while its filter works in local time, so
   between midnight and three in Bucharest the day's invoices vanished from the screen.

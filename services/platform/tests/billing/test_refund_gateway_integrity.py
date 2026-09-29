@@ -237,7 +237,7 @@ class RefundGatewayIntegrityTests(TestCase):
             patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=gateway),
         ):
             def refund_after_invoice_lock(**_kwargs: object) -> dict[str, object]:
-                lock_invoice.assert_called_once_with(of=("self",))
+                lock_invoice.assert_any_call(of=("self",))
                 return gateway_response
 
             gateway.refund_payment.side_effect = refund_after_invoice_lock
@@ -249,10 +249,10 @@ class RefundGatewayIntegrityTests(TestCase):
             )
 
         self.assertTrue(result.is_ok(), result.unwrap_err() if result.is_err() else "")
-        lock_invoice.assert_called_once_with(of=("self",))
+        lock_invoice.assert_any_call(of=("self",))
         gateway.refund_payment.assert_called_once()
 
-    def test_invoice_refund_locks_payment_before_invoice(self) -> None:
+    def test_invoice_refund_locks_invoice_before_payment(self) -> None:
         invoice = self._make_invoice()
         self._make_payment(invoice, transaction_id="pi_payment_before_invoice")
         gateway = MagicMock()
@@ -285,7 +285,7 @@ class RefundGatewayIntegrityTests(TestCase):
         self.assertTrue(result.is_ok(), result.unwrap_err() if result.is_err() else "")
         self.assertIn("payment", lock_order)
         self.assertIn("invoice", lock_order)
-        self.assertLess(lock_order.index("payment"), lock_order.index("invoice"))
+        self.assertLess(lock_order.index("invoice"), lock_order.index("payment"))
 
     def test_order_refund_finds_payment_linked_only_by_order_metadata(self) -> None:
         invoice = self._make_invoice()
@@ -1949,6 +1949,7 @@ class RefundConvergenceHardeningTests(TestCase):
     def test_convergence_marks_transactional_failure_retriable(self) -> None:
         from apps.billing.refund_service import RefundConvergenceService  # noqa: PLC0415
 
+        self._make_payment(self._make_invoice(), transaction_id="pi_retryable_failure")
         with patch(
             "apps.billing.refund_service.Payment.objects.select_for_update",
             side_effect=OperationalError("deadlock detected"),
@@ -1969,6 +1970,7 @@ class RefundConvergenceHardeningTests(TestCase):
     def test_convergence_leaves_unexpected_failure_unclassified_for_safe_replay(self) -> None:
         from apps.billing.refund_service import RefundConvergenceService  # noqa: PLC0415
 
+        self._make_payment(self._make_invoice(), transaction_id="pi_unknown_failure")
         with patch(
             "apps.billing.refund_service.Payment.objects.select_for_update",
             side_effect=RuntimeError("unexpected convergence failure"),

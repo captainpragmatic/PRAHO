@@ -1,0 +1,22 @@
+{% load i18n ui_components formatting %}
+{% if invoice.amount_due is not None or proforma.cash_due_cents is not None %}
+<section class="mt-6 rounded-lg border border-slate-700 bg-slate-800 p-6" data-testid="payment-balance">
+  {% if proforma.gift_reserved_cents %}<p>{% trans "Reserved gift-card payment" %}: {{ proforma.gift_reserved_cents|cents_to_currency|floatformat:2 }} {{ proforma.currency.code }}</p>{% endif %}
+  <p class="font-semibold">{% trans "Remaining to pay" %}:
+    {% if invoice %}{{ invoice.amount_due|cents_to_currency|floatformat:2 }} {{ invoice.currency.code }}{% else %}{{ proforma.cash_due_cents|cents_to_currency|floatformat:2 }} {{ proforma.currency.code }}{% endif %}
+  </p>
+</section>
+{% endif %}
+{% if gift_card_form %}
+<section class="mt-6 rounded-lg border border-slate-700 bg-slate-800 p-6">
+  <h2 class="mb-3 text-lg font-semibold text-white">{% trans "Pay with a gift card" %}</h2>
+  <p class="mb-4 text-sm text-slate-400">{% trans "Use the available balance toward this document. Any remaining amount is payable using your usual payment method." %}</p>
+  <form method="post" action="{% url 'billing:gift_card_payment' %}" class="space-y-4">
+    {% csrf_token %}
+    {% for field in gift_card_form.hidden_fields %}{{ field }}{% endfor %}
+    {% form_field gift_card_form.code %}
+    {% trans "Apply gift-card balance" as submit_text %}
+    {% button submit_text type="submit" variant="primary" %}
+  </form>
+</section>
+{% endif %}

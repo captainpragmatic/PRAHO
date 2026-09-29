@@ -159,6 +159,10 @@ class PromotionCampaign(models.Model):
         validators=[MinValueValidator(0)],
         help_text=_("Total discounts given so far"),
     )
+    budget_currency = models.ForeignKey("billing.Currency", on_delete=models.PROTECT, null=True, blank=True)
+    reserved_cents = models.PositiveBigIntegerField(
+        default=0, help_text=_("Discounts promised by unsettled orders and future renewals")
+    )
 
     # Status
     STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
@@ -346,6 +350,7 @@ class Coupon(models.Model):
         validators=[MinValueValidator(1), MaxValueValidator(36)],
         help_text=_("Number of free months for subscription discounts"),
     )
+    tiers = models.JSONField(default=list, blank=True, help_text=_("Validated discount tiers"))
 
     # Cap on discount
     max_discount_cents = models.BigIntegerField(
@@ -605,7 +610,11 @@ class Coupon(models.Model):
 
     def get_customer_uses(self, customer: Customer) -> int:
         """Get number of times customer has used this coupon."""
-        return self.redemptions.filter(customer=customer, status="applied").count()
+        legacy = self.redemptions.filter(customer=customer, status="applied").count()
+        current = PromotionApplication.objects.filter(
+            coupon=self, order__customer=customer, status__in=["reserved", "settled"]
+        ).count()
+        return legacy + current
 
     def can_customer_use(  # noqa: C901, PLR0911  # Complexity: multi-step business logic
         self, customer: Customer | None
@@ -1057,6 +1066,7 @@ class PromotionRule(models.Model):
 
     # Status
     is_active = models.BooleanField(default=True)
+    published_at = models.DateTimeField(null=True, blank=True, editable=False)
 
     # Display
     display_name = models.CharField(max_length=200, blank=True, help_text=_("Name shown to customers"))
@@ -1305,6 +1315,8 @@ class GiftCard(models.Model):
     Supports both physical and digital gift cards.
     """
 
+    _audit_actor: Any = None
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
     # Code
@@ -1324,6 +1336,8 @@ class GiftCard(models.Model):
         validators=[MinValueValidator(0)],
         help_text=_("Current remaining balance in cents"),
     )
+    reserved_cents = models.PositiveBigIntegerField(default=0)
+    ledger_version = models.PositiveSmallIntegerField(default=1, editable=False)
     currency = models.ForeignKey(
         "billing.Currency",
         on_delete=models.PROTECT,
@@ -1468,6 +1482,11 @@ class GiftCardTransaction(models.Model):
 
     amount_cents = models.BigIntegerField(help_text=_("Transaction amount in cents"))
     balance_after_cents = models.BigIntegerField(help_text=_("Balance after transaction"))
+    ledger_version = models.PositiveSmallIntegerField(default=1, editable=False)
+    payment = models.ForeignKey(
+        "billing.Payment", on_delete=models.PROTECT, null=True, blank=True, related_name="gift_card_entries"
+    )
+    operation_key = models.CharField(max_length=100, unique=True, null=True, blank=True)
 
     # Related objects
     # release_for_order() needs these ledger rows to restore the card balance;
@@ -1791,3 +1810,191 @@ class LoyaltyTransaction(models.Model):
 
     def __str__(self) -> str:
         return f"{self.transaction_type}: {self.points:+d} points"
+
+
+class PromotionApplication(models.Model):
+    """Version-two offer promise, retained independently of later configuration edits."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    order = models.ForeignKey("orders.Order", on_delete=models.PROTECT, related_name="promotion_applications")
+    coupon = models.ForeignKey(Coupon, on_delete=models.PROTECT, null=True, blank=True)
+    rule = models.ForeignKey(PromotionRule, on_delete=models.PROTECT, null=True, blank=True)
+    campaign = models.ForeignKey(PromotionCampaign, on_delete=models.PROTECT, null=True, blank=True)
+    status = models.CharField(
+        max_length=12,
+        default="reserved",
+        choices=(("reserved", "Reserved"), ("settled", "Settled"), ("released", "Released")),
+    )
+    discount_cents = models.PositiveBigIntegerField()
+    future_cents = models.PositiveBigIntegerField(default=0)
+    allocations = models.JSONField(default=dict)
+    snapshot = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=(Q(coupon__isnull=False, rule__isnull=True) | Q(coupon__isnull=True, rule__isnull=False)),
+                name="offer_application_one_source",
+            ),
+            models.UniqueConstraint(fields=["order", "coupon"], name="offer_once_per_coupon_order"),
+            models.UniqueConstraint(fields=["order", "rule"], name="offer_once_per_rule_order"),
+        ]
+
+
+class RenewalBenefit(models.Model):
+    """An original-value promise, never a change to subscription base pricing."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    application = models.ForeignKey(PromotionApplication, on_delete=models.PROTECT, related_name="benefits")
+    order_item = models.ForeignKey("orders.OrderItem", on_delete=models.PROTECT)
+    subscription = models.ForeignKey(
+        "billing.Subscription", on_delete=models.PROTECT, null=True, blank=True, related_name="promotion_benefits"
+    )
+    remaining_cents = models.PositiveBigIntegerField()
+    remaining_months = models.PositiveSmallIntegerField()
+    monthly_cents = models.DecimalField(max_digits=24, decimal_places=10)
+    ended_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["application", "order_item"], name="one_benefit_per_offer_item")]
+
+
+class RenewalBenefitUse(models.Model):
+    """One reservation and consumption per billing cycle, including zero-cash cycles."""
+
+    benefit = models.ForeignKey(RenewalBenefit, on_delete=models.PROTECT, related_name="uses")
+    cycle = models.ForeignKey("billing.BillingCycle", on_delete=models.PROTECT, related_name="promotion_uses")
+    amount_cents = models.PositiveBigIntegerField()
+    months = models.PositiveSmallIntegerField()
+    status = models.CharField(
+        max_length=12,
+        default="reserved",
+        choices=(("reserved", "Reserved"), ("settled", "Settled"), ("released", "Released")),
+    )
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["benefit", "cycle"], name="one_benefit_use_per_cycle")]
+
+
+class GiftCardPurchase(models.Model):
+    """A voucher funding receipt; never a service invoice or taxable service sale."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    gift_card = models.OneToOneField(GiftCard, on_delete=models.PROTECT, related_name="purchase")
+    customer = models.ForeignKey("customers.Customer", on_delete=models.PROTECT, related_name="gift_card_purchases")
+    funding_payment = models.OneToOneField(
+        "billing.Payment", on_delete=models.PROTECT, related_name="gift_card_purchase"
+    )
+    status = models.CharField(
+        max_length=20,
+        default="pending",
+        choices=(
+            ("pending", "Awaiting payment"),
+            ("funded", "Funded"),
+            ("partially_refunded", "Partially refunded"),
+            ("refunded", "Refunded"),
+            ("disputed", "Disputed"),
+        ),
+    )
+    receipt_number = models.CharField(max_length=60, unique=True)
+    funded_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class GiftCardReservation(models.Model):
+    """Gift-card tender held for a frozen document, separate from its discounts/VAT."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    gift_card = models.ForeignKey(GiftCard, on_delete=models.PROTECT, related_name="reservations")
+    customer = models.ForeignKey("customers.Customer", on_delete=models.PROTECT)
+    proforma = models.ForeignKey(
+        "billing.ProformaInvoice",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="gift_card_reservations",
+    )
+    invoice = models.ForeignKey(
+        "billing.Invoice", on_delete=models.PROTECT, null=True, blank=True, related_name="gift_card_reservations"
+    )
+    payment = models.OneToOneField(
+        "billing.Payment", on_delete=models.PROTECT, null=True, blank=True, related_name="gift_card_reservation"
+    )
+    amount_cents = models.PositiveBigIntegerField()
+    status = models.CharField(
+        max_length=12,
+        default="reserved",
+        choices=(("reserved", "Reserved"), ("captured", "Captured"), ("released", "Released")),
+    )
+    operation_key = models.CharField(max_length=100, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(proforma__isnull=False) | Q(invoice__isnull=False), name="gift_reservation_has_document"
+            ),
+            models.CheckConstraint(condition=Q(amount_cents__gt=0), name="gift_reservation_positive"),
+        ]
+
+
+class TenderRefundCommand(models.Model):
+    """One customer-requested refund, with a durable leg for each original tender."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    invoice = models.ForeignKey(
+        "billing.Invoice", on_delete=models.PROTECT, null=True, blank=True, related_name="tender_refund_commands"
+    )
+    purchase = models.ForeignKey(
+        GiftCardPurchase, on_delete=models.PROTECT, null=True, blank=True, related_name="refund_commands"
+    )
+    customer = models.ForeignKey("customers.Customer", on_delete=models.PROTECT)
+    amount_cents = models.PositiveBigIntegerField()
+    operation_key = models.CharField(max_length=100, unique=True)
+    status = models.CharField(
+        max_length=12,
+        default="pending",
+        choices=(
+            ("pending", "Pending"),
+            ("processing", "Processing"),
+            ("completed", "Completed"),
+            ("failed", "Needs retry"),
+        ),
+    )
+    reason = models.TextField()
+    created_by = models.ForeignKey("users.User", on_delete=models.PROTECT, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    Q(invoice__isnull=False, purchase__isnull=True) | Q(invoice__isnull=True, purchase__isnull=False)
+                ),
+                name="tender_refund_one_document",
+            )
+        ]
+
+
+class TenderRefundLeg(models.Model):
+    command = models.ForeignKey(TenderRefundCommand, on_delete=models.PROTECT, related_name="legs")
+    payment = models.ForeignKey("billing.Payment", on_delete=models.PROTECT)
+    refund = models.OneToOneField(
+        "billing.Refund", on_delete=models.PROTECT, null=True, blank=True, related_name="tender_leg"
+    )
+    amount_cents = models.PositiveBigIntegerField()
+    status = models.CharField(
+        max_length=12,
+        default="pending",
+        choices=(
+            ("pending", "Pending"),
+            ("processing", "Processing"),
+            ("completed", "Completed"),
+            ("failed", "Needs retry"),
+        ),
+    )
+    error = models.TextField(blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["command", "payment"], name="one_refund_leg_per_tender")]
