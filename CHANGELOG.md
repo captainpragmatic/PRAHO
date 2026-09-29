@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Password recovery keeps reset tokens out of form URLs, preserves password whitespace,
   rechecks one-time use under a database lock, and uses separate recovery rate limits.
+- Recovery email failures keep a neutral public acknowledgement and private diagnostics;
+  accepted service-request retries keep their identity, and staff review dates follow local preferences.
 - Staff domain filters and pagination, Audit Apply Filters, and shared button attribute rendering.
 - Staff settlement now confirms only the cash remaining after gift-card reservations.
 - Closed invoices and expired or closed proformas no longer display a request to pay again.

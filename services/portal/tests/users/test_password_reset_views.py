@@ -24,7 +24,10 @@ from apps.users.forms import PasswordResetConfirmForm
 )
 class PasswordResetViewTests(SimpleTestCase):
     password = "Recovered-River-947!Quartz"
-    neutral_message = "If an account with that email exists, you will receive password reset instructions."
+    neutral_message = (
+        "If an eligible account exists and email delivery is available, "
+        "you will receive password reset instructions."
+    )
 
     def setUp(self) -> None:
         cache.clear()

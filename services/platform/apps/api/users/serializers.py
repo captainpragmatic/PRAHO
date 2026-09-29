@@ -234,6 +234,19 @@ class PasswordResetRequestSerializer(serializers.Serializer):
 
     email = serializers.EmailField()
 
+    @staticmethod
+    def accepted_response() -> dict[str, Any]:
+        """Acknowledge the request without exposing account or delivery status."""
+        return {
+            "success": True,
+            "message": str(
+                _(
+                    "If an eligible account exists and email delivery is available, "
+                    "you will receive password reset instructions."
+                )
+            ),
+        }
+
     def validate_email(self, value: str) -> str:
         """Normalize email"""
         return value.lower().strip()
@@ -249,7 +262,7 @@ class PasswordResetRequestSerializer(serializers.Serializer):
         except User.DoesNotExist:
             # Don't reveal if user exists or not for security
             logger.warning(f"🚨 [Password Reset] Reset requested for non-existent email: {email}")
-            return {"success": True, "message": "If the email exists, a reset link has been sent."}
+            return self.accepted_response()
 
         # Generate reset token
         token = default_token_generator.make_token(user)
@@ -306,7 +319,7 @@ class PasswordResetRequestSerializer(serializers.Serializer):
             logger.error(f"🔥 [Password Reset] Failed to send email to {user.email}: {e}")
             raise serializers.ValidationError(_("Failed to send reset email. Please try again later.")) from e
 
-        return {"success": True, "message": "If the email exists, a reset link has been sent."}
+        return self.accepted_response()
 
 
 class InvalidPasswordResetLink(serializers.ValidationError):

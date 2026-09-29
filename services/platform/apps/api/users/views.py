@@ -685,8 +685,8 @@ def password_reset_request_api(request: HttpRequest) -> Response:
     """
     Request a customer password reset through an HMAC-signed Portal call.
 
-    Email links use the configured public Portal URL. Successful requests
-    keep a neutral response whether or not the account exists.
+    Email links use the configured public Portal URL. Accepted requests
+    keep a neutral response whether or not the account exists or email is delivered.
 
     POST /api/users/password/reset/
     {
@@ -694,13 +694,13 @@ def password_reset_request_api(request: HttpRequest) -> Response:
     }
 
     Sends password reset email if account exists.
-    Successful responses do not disclose whether the account exists.
-    Delivery failures return a temporary service error.
+    Responses do not disclose account or delivery status. Delivery and configuration
+    failures remain in private error logs.
 
     Response:
     {
         "success": true,
-        "message": "If the email exists, a reset link has been sent."
+        "message": "If an eligible account exists and email delivery is available, ..."
     }
     """
 
@@ -713,10 +713,8 @@ def password_reset_request_api(request: HttpRequest) -> Response:
 
         except Exception as e:
             logger.error("🔥 [Password Reset] Request failed (%s): %s", type(e).__name__, e)
-            return Response(
-                {"success": False, "error": "Password reset service temporarily unavailable."},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
+            # Failures after the account lookup must not reveal whether it exists.
+            return Response(PasswordResetRequestSerializer.accepted_response())
     else:
         return Response(
             {"success": False, "error": "Invalid email address", "errors": serializer.errors},

@@ -69,6 +69,25 @@ class PasswordRecoveryAPITests(HMACTestMixin, TestCase):
                 self.assertEqual(result.json(), known.json())
         self.assertEqual(len(mail.outbox), 1)
 
+    def test_delivery_failure_has_the_same_public_response_for_every_account(self):
+        inactive = User.objects.create_user(email="inactive@example.test", is_active=False)
+        for failure in (OSError("SMTP unavailable"), 0):
+            with self.subTest(failure=str(failure)):
+                cache.clear()
+                options = {"side_effect": failure} if isinstance(failure, OSError) else {"return_value": failure}
+                with patch("apps.api.users.serializers.send_mail", **options), self.assertLogs(
+                    "apps.api.users", level="ERROR"
+                ) as diagnostics:
+                    responses = [self.portal_post("/api/users/password/reset/", {"email": email}) for email in (
+                        self.user.email, inactive.email, "unknown@example.test",
+                    )]
+                for response in responses:
+                    self.assertEqual(response.status_code, 200, response.content)
+                    self.assertEqual(response.json(), responses[0].json())
+                    self.assertIn("email delivery is available", response.json()["message"])
+                self.assertTrue(any("Failed to send email" in entry for entry in diagnostics.output))
+                self.assertEqual(len(mail.outbox), 0)
+
     def test_password_is_changed_exactly_and_token_cannot_be_reused(self):
         response = self.confirm()
         self.assertEqual(response.status_code, 200, response.content)
@@ -150,16 +169,20 @@ class PasswordRecoveryAPITests(HMACTestMixin, TestCase):
         self.user.refresh_from_db()
         self.assertTrue(self.user.check_password("Already-recovered-password-29!"))
 
-    def test_delivery_failure_returns_unavailable(self):
-        with patch("apps.api.users.serializers.send_mail", side_effect=OSError("SMTP unavailable")):
+    def test_delivery_failure_keeps_private_diagnostics(self):
+        with patch("apps.api.users.serializers.send_mail", side_effect=OSError("SMTP unavailable")), self.assertLogs(
+            "apps.api.users", level="ERROR"
+        ) as diagnostics:
             response = self.portal_post("/api/users/password/reset/", {"email": self.user.email})
-        self.assertEqual(response.status_code, 503, response.content)
-        self.assertFalse(response.json()["success"])
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(response.json()["success"])
+        self.assertTrue(any("SMTP unavailable" in entry for entry in diagnostics.output))
 
-    def test_zero_messages_sent_is_not_reported_as_success(self):
+    def test_zero_messages_sent_does_not_claim_delivery(self):
         with patch("apps.api.users.serializers.send_mail", return_value=0):
             response = self.portal_post("/api/users/password/reset/", {"email": self.user.email})
-        self.assertEqual(response.status_code, 503, response.content)
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertIn("email delivery is available", response.json()["message"])
         self.assertEqual(len(mail.outbox), 0)
     def test_malformed_portal_origin_is_rejected_without_sending(self):
         SystemSetting.objects.filter(key="portal.public_base_url").update(
@@ -167,7 +190,7 @@ class PasswordRecoveryAPITests(HMACTestMixin, TestCase):
         )
         cache.clear()
         response = self.portal_post("/api/users/password/reset/", {"email": self.user.email})
-        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.status_code, 200)
         self.assertEqual(len(mail.outbox), 0)
 
 

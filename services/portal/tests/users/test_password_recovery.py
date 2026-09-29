@@ -3,6 +3,7 @@
 import time
 from unittest.mock import patch
 
+from django.contrib.messages import get_messages
 from django.core.cache import cache
 from django.test import Client, SimpleTestCase, TestCase, override_settings
 
@@ -29,6 +30,14 @@ class PasswordRecoveryViewTests(TestCase):
             response = self.client.post("/password-reset/", {"email": "owner@example.test"})
         self.assertEqual(response.status_code, 302)
         api.request_password_reset.assert_called_once_with("owner@example.test", client_ip="127.0.0.1")
+
+    def test_accepted_request_does_not_promise_email_delivery(self):
+        with patch("apps.users.views.api_client") as api:
+            api.request_password_reset.return_value = {"success": True}
+            response = self.client.post("/password-reset/", {"email": "owner@example.test"})
+        self.assertEqual(response.status_code, 302)
+        messages = [str(message) for message in get_messages(response.wsgi_request)]
+        self.assertTrue(any("email delivery is available" in message for message in messages))
 
     def test_login_preserves_recovered_password_whitespace(self):
         password = " Replacement-password-529! "

@@ -171,6 +171,36 @@ class ServiceRequestViewTests(SimpleTestCase):
                 next_id, _ = self._open_form()
                 self.assertNotEqual(next_id, submission_id)
 
+    def test_accepted_post_retry_recovers_the_same_ticket_before_a_fresh_get(self) -> None:
+        submission_id, _ = self._open_form()
+        first, _ = self._post(submission_id)
+        self.assertEqual(first.status_code, 302)
+        # The redirect was lost after the server persisted the session.
+        second, _ = self._post(submission_id)
+        self.assertEqual(second.status_code, 302)
+        self.assertEqual(second.url, first.url)
+        self.assertEqual(
+            [call.kwargs["submission_id"] for call in self.api.request_service_action.call_args_list],
+            [submission_id, submission_id],
+        )
+        next_id, _ = self._open_form()
+        self.assertNotEqual(next_id, submission_id)
+        stale, _ = self._post(submission_id)
+        self.assertEqual(stale.status_code, 409)
+        self.assertEqual(self.api.request_service_action.call_count, 2)
+        fresh, _ = self._post(next_id)
+        self.assertEqual(fresh.status_code, 302)
+        self.assertEqual(self.api.request_service_action.call_args.kwargs["submission_id"], next_id)
+
+    def test_changed_accepted_retry_keeps_original_identity_and_platform_conflict(self) -> None:
+        submission_id, _ = self._open_form()
+        self._post(submission_id)
+        self.api.request_service_action.side_effect = PlatformAPIError("Different details", status_code=409)
+        response, _ = self._post(submission_id, reason="A different request")
+        self.assertContains(response, "different details", status_code=409)
+        self.assertEqual(self.api.request_service_action.call_count, 2)
+        self.assertEqual(self.api.request_service_action.call_args.kwargs["submission_id"], submission_id)
+
     def test_timeout_retains_form_values_and_retry_uses_original_submission_id(self) -> None:
         submission_id, _ = self._open_form()
         self.api.request_service_action.side_effect = [PlatformAPIError("timeout", status_code=504), self.receipt]

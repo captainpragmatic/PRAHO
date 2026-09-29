@@ -90,22 +90,28 @@ class PasswordResetAPITests(HMACTestMixin, TestCase):
         response = self.portal_post(self.request_path, {"email": "unknown@example.com"})
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(
-            response.json(), {"success": True, "message": "If the email exists, a reset link has been sent."}
+            response.json(), {"success": True, "message":
+                "If an eligible account exists and email delivery is available, "
+                "you will receive password reset instructions."}
         )
         self.assertEqual(len(mail.outbox), 0)
 
-    def test_unconfigured_portal_url_is_a_server_error(self) -> None:
-        response = self.portal_post(self.request_path, {"email": self.user.email})
-        self.assertEqual(response.status_code, 503, response.content)
-        self.assertEqual(response.json()["error"], "Password reset service temporarily unavailable.")
+    def test_unconfigured_portal_url_is_private_and_account_independent(self) -> None:
+        with self.assertLogs("apps.api.users.views", level="ERROR") as diagnostics:
+            known = self.portal_post(self.request_path, {"email": self.user.email})
+        unknown = self.portal_post(self.request_path, {"email": "unknown@example.com"})
+        self.assertEqual(known.status_code, 200, known.content)
+        self.assertEqual((known.status_code, known.json()), (unknown.status_code, unknown.json()))
+        self.assertTrue(any("portal.public_base_url" in entry for entry in diagnostics.output))
         self.assertEqual(len(mail.outbox), 0)
 
-    def test_invalid_portal_url_is_a_server_error(self) -> None:
+    def test_invalid_portal_url_is_private_and_never_sends(self) -> None:
         for base in ("portal.example.com", "ftp://portal.example.com", "https://", "https://[invalid"):
             with self.subTest(base=base):
                 self.configure_portal_url(base)
                 response = self.portal_post(self.request_path, {"email": self.user.email})
-                self.assertEqual(response.status_code, 503, response.content)
+                self.assertEqual(response.status_code, 200, response.content)
+                self.assertIn("email delivery is available", response.json()["message"])
                 self.assertEqual(len(mail.outbox), 0)
 
     def test_confirm_with_valid_token_sets_password_and_clears_lockout(self) -> None:

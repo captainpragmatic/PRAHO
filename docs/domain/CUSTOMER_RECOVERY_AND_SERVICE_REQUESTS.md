@@ -5,6 +5,10 @@
 Customers request recovery at Portal `/password-reset/`. Portal sends a signed
 request to Platform, which generates the token and sends the email through its
 configured Django email backend. This path is synchronous and needs no queue worker.
+Public acknowledgements do not confirm account existence or email delivery. Delivery,
+template and configuration failures remain in Platform error logs for staff to diagnose.
+Portal transport outages and unavailable rate-limit infrastructure still show a
+temporary service error, independently of the submitted account.
 
 Set Platform's existing `portal.public_base_url` setting to the public Portal
 origin, with no path. HTTP is accepted only for loopback hosts. Host headers and
@@ -41,6 +45,8 @@ action, reason, and a submission UUID. Platform creates the ticket and its
 the same receipt. Changing its payload returns a conflict instead of creating a
 second ticket. The original customer, service, and requester remain on the request
 even if someone edits the ticket's related-service field.
+Portal retains an accepted submission UUID for POST retries after a lost redirect;
+opening a fresh request form rotates it for the next request.
 
 ### Staff workflow
 

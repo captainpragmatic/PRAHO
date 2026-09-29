@@ -679,7 +679,11 @@ def password_reset_view(request: HttpRequest) -> HttpResponse:
             if not result.get("success"):
                 raise PlatformAPIError("Password reset was not accepted")
             messages.success(
-                request, _("If an account with that email exists, you will receive password reset instructions.")
+                request,
+                _(
+                    "If an eligible account exists and email delivery is available, "
+                    "you will receive password reset instructions."
+                ),
             )
             return redirect("users:login")
         except PlatformAPIError as exc:

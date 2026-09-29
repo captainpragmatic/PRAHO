@@ -1,6 +1,6 @@
 """Customer submissions become tickets with private, staff-controlled review."""
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -12,10 +12,12 @@ from apps.audit.models import AuditEvent
 from apps.billing.models import Currency
 from apps.customers.models import Customer
 from apps.provisioning.models import Service, ServicePlan
+from apps.provisioning.service_request_models import ServiceRequest
+from apps.provisioning.service_request_service import review_service_request
 from apps.tickets.models import Ticket
 from apps.tickets.services import TicketStatusService
 from apps.tickets.tasks import auto_close_inactive_tickets
-from apps.users.models import CustomerMembership, User
+from apps.users.models import CustomerMembership, User, UserProfile
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
 
 
@@ -164,6 +166,31 @@ class ServiceRequestTests(HMACTestMixin, TestCase):
             TicketStatusService.handle_agent_reply(ticket, self.staff, "close_with_resolution", "fixed")
         ticket.refresh_from_db()
         self.assertEqual(ticket.status, "open")
+
+    def test_private_review_dates_follow_staff_preferences_across_midnight(self):
+        receipt = self.submit()
+        ticket_id = receipt["ticket_id"]
+        review_service_request(ticket_id=ticket_id, staff=self.staff, decision="approve", expected_status="pending")
+        review_service_request(
+            ticket_id=ticket_id, staff=self.staff, decision="complete", expected_status="approved", note="Verified",
+        )
+        instant = datetime(2025, 12, 31, 22, 30, tzinfo=UTC)
+        ServiceRequest.objects.filter(ticket_id=ticket_id).update(
+            reviewed_at=instant, completed_at=instant + timedelta(hours=1, minutes=15),
+        )
+        profile, _ = UserProfile.objects.get_or_create(user=self.staff)
+        self.client.force_login(self.staff)
+        for zone, pattern, reviewed, completed in (
+            ("Europe/Bucharest", "%Y-%m-%d", "2026-01-01 00:30", "2026-01-01 01:45"),
+            ("America/New_York", "%m/%d/%Y", "12/31/2025 17:30", "12/31/2025 18:45"),
+        ):
+            with self.subTest(zone=zone), timezone.override("UTC"):
+                profile.timezone, profile.date_format = zone, pattern
+                profile.save(update_fields=["timezone", "date_format"])
+                response = self.client.get(f"/tickets/{ticket_id}/")
+                self.assertContains(response, reviewed, count=1)
+                self.assertContains(response, completed, count=1)
+                self.assertEqual(timezone.get_current_timezone_name(), "UTC")
 
     def test_review_uses_original_service_after_ticket_reassignment(self):
         receipt = self.submit()

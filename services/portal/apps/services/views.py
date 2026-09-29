@@ -388,13 +388,18 @@ def service_usage(request: HttpRequest, service_id: int) -> HttpResponse:
 
 
 def _service_submission_id(request: HttpRequest, customer_id: int, user_id: int, service_id: int) -> tuple[str, str]:
-    """Retain a server-issued UUID for this user, customer, and service until accepted."""
+    """Keep accepted POSTs replayable; only a fresh GET starts the next request."""
     key = f"{customer_id}:{user_id}:{service_id}"
     submissions = dict(request.session.get(SERVICE_REQUEST_SUBMISSIONS_KEY, {}))
-    if key not in submissions:
-        submissions[key] = str(uuid4())
+    submission = submissions.get(key)
+    if isinstance(submission, str):
+        submission = {"id": submission, "accepted": False}  # Existing pending sessions.
+    if not isinstance(submission, dict) or (request.method == "GET" and submission.get("accepted")):
+        submission = {"id": str(uuid4()), "accepted": False}
+    if submissions.get(key) != submission:
+        submissions[key] = submission
         request.session[SERVICE_REQUEST_SUBMISSIONS_KEY] = submissions
-    return key, str(submissions[key])
+    return key, str(submission["id"])
 
 
 def _service_request_form_error(request: HttpRequest, context: dict[str, Any]) -> tuple[str, int]:
@@ -445,7 +450,7 @@ def _submit_service_request(
         return None
 
     submissions = dict(request.session.get(SERVICE_REQUEST_SUBMISSIONS_KEY, {}))
-    submissions.pop(submission_key, None)
+    submissions[submission_key] = {"id": context["submission_id"], "accepted": True}
     request.session[SERVICE_REQUEST_SUBMISSIONS_KEY] = submissions
     messages.success(
         request, _("Service request submitted. Ticket #%(number)s.") % {"number": receipt["ticket_number"]}
