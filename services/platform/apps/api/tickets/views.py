@@ -630,9 +630,9 @@ def customer_tickets_summary_api(request: HttpRequest, customer: Customer) -> Re
 # ===============================================================================
 
 
+@public_api_endpoint
 @api_view(["GET"])
 @permission_classes([AllowAny])
-@public_api_endpoint
 def support_categories_api(request: HttpRequest) -> Response:
     """
     📂 Support Categories API -- intentionally public.

@@ -56,8 +56,9 @@ refunds use version 2 tender records and immutable operation identifiers. Issued
 documents are never repriced to adopt a newer promotion.
 
 Customer gift-card purchase and Stripe initiation endpoints are not exposed by this
-change. Their scope remains pending clarification; funding service/staff scaffolding
-must not be treated as a completed public purchase flow.
+change. Customer purchases and the configurable selling-currency policy belong to a
+separate follow-up. The funding service/staff scaffolding here is not a completed
+public purchase flow.
 
 ## Refunds and recovery
 

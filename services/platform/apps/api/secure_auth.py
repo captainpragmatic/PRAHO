@@ -431,13 +431,23 @@ def require_portal_authentication(view_func: Callable[..., Any]) -> Callable[...
 
 
 def public_api_endpoint(view_func: Callable[..., Any]) -> Callable[..., Any]:
-    """
-    Marker decorator: this endpoint is intentionally public (no auth required).
+    """Grant this endpoint exemption from HMAC authentication.
 
-    ``tests/api/test_api_auth_regressions.py::TestAPIAuthCoverage`` enforces
-    that every /api/ view has this marker or an auth decorator. It does not
-    check middleware exempt-path consistency. Adding this decorator asserts
-    that the endpoint was reviewed and deemed safe to expose without authentication.
+    This is no longer only an annotation. ``PortalServiceHMACMiddleware`` resolves each
+    unsigned /api/ request and reads this marker off the view, so applying it REMOVES
+    authentication from the endpoint rather than merely recording that someone reviewed
+    it. Treat adding it as a security change.
+
+    Position matters. It must sit OUTERMOST, above ``@api_view``: the decorator sets an
+    attribute on the callable it is handed, and DRF returns the callable from
+    ``as_view()`` without copying ``__dict__``, so a marker applied underneath is
+    invisible to the middleware and the endpoint answers 401 while reading as public.
+    ``tests/api/test_public_endpoint_exemption.py`` asserts both the ordering and the
+    exact set of exempt routes; ``tests/deploy/test_caddy_routing.py`` re-checks the
+    ordering against the edge routing contract.
+
+    ``tests/api/test_api_auth_regressions.py::TestAPIAuthCoverage`` separately requires
+    every /api/ view to carry either this marker or an auth decorator.
     """
     view_func._is_public_api_endpoint = True  # type: ignore[attr-defined]  # marker for CI auth coverage test
     return view_func

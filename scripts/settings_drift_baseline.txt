@@ -1,0 +1,34 @@
+# Known fallback/catalog default drifts — check 4 of scripts/lint_settings_coverage.py
+#
+# For each key below, the inline fallback passed to `SettingsService.get_*_setting()` disagrees with
+# the catalog default. That is a live behavioural difference, not a documentation nit: the typed
+# getters return the CALLER's number when the stored value will not coerce - `get_integer_setting`
+# on ValueError/TypeError, `get_decimal_setting` likewise, `get_list_setting` for a non-list - so a
+# cached `None` or a malformed row picks up the drifting value at exactly the moment something has
+# already gone slightly wrong.
+#
+# Baselined rather than fixed in bulk, because in this codebase the drifting `_DEFAULT_*` constant
+# is nearly always ALSO read directly by the enforcing code through a public alias. Aligning it to
+# the catalog therefore changes what the system accepts: `products.max_price_cents` would raise a
+# price ceiling 100x, `provisioning.max_username_uniqueness_attempts` would cut collision retries
+# from 1000 to 10, `notifications.max_name_length` would start rejecting names it accepts today.
+# Catalog membership alone does not establish which number is intended.
+#
+# Fixing one means: decide the intended value, write a test that observes the consumer at that
+# value, change both places, remove the key from this file. A NEW drift fails the check at medium.
+#
+# Recorded 2026-09-26 at 12 keys. Almost all of them also appear in settings_inert_baseline.txt,
+# which is the tell - the two numbers drifted apart because no live path ever made them agree.
+
+notifications.max_name_length
+notifications.max_template_size
+orders.max_price_override_cents
+orders.max_search_query_length
+products.max_json_content_size
+products.max_price_cents
+provisioning.health_check_timeout_seconds
+provisioning.max_concurrent_health_checks
+provisioning.max_error_display
+provisioning.max_username_uniqueness_attempts
+provisioning.overall_health_check_timeout
+provisioning.task_time_limit

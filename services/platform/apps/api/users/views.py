@@ -189,10 +189,10 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911 -- 
         return JsonResponse({"success": False, "error": "Authentication service error"}, status=500)
 
 
+@public_api_endpoint
 @api_view(["GET"])
 @authentication_classes([])  # No DRF authentication - public endpoint
 @permission_classes([AllowAny])
-@public_api_endpoint
 def health_check(request: HttpRequest) -> Response:
     """Health check for load balancer probes -- intentionally public."""
     return Response({"status": "healthy", "service": "platform-api", "version": "1.0.0"})
@@ -279,11 +279,11 @@ def _authenticate_token_request(request: HttpRequest) -> User | Response:
     return user
 
 
+@public_api_endpoint
 @api_view(["POST"])
 @authentication_classes([])  # No DRF authentication - credential auth performed in the view
 @permission_classes([AllowAny])
 @throttle_classes([AuthThrottle])
-@public_api_endpoint
 def obtain_token(request: HttpRequest) -> Response:
     """
     🔐 Obtain authentication token for API access -- intentionally public.

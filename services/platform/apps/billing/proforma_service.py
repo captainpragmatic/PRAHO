@@ -331,8 +331,11 @@ class ProformaService:
             logger.warning("⚠️ [Proforma] Currency admission rejected order %s: %s", order.id, e)
             return Err(str(e))
         except Exception as e:
-            logger.exception("🔥 [Proforma] Failed to create proforma from order: %s", e)
+            # Same trap as the handler above: an Err return is a normal return, so
+            # @transaction.atomic has no reason to roll back and the allocated
+            # sequence number would commit against a proforma that does not exist.
             transaction.set_rollback(True)
+            logger.exception("🔥 [Proforma] Failed to create proforma from order: %s", e)
             return Err(f"Failed to create proforma from order: {e}")
 
 

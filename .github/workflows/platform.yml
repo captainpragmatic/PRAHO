@@ -89,7 +89,15 @@ jobs:
       if: github.event_name != 'pull_request' || steps.affected.outputs.modules == 'FULL' || steps.affected.outputs.modules == ''
       run: |
         cd services/platform
+        # Coverage does not walk up for its config, so run from here it previously found
+        # none: `source`, the omit of tests/migrations, and branch coverage were all
+        # inactive and test files counted as covered source. And `--parallel` forks workers
+        # whose data is discarded without `concurrency = multiprocessing`, leaving only the
+        # parent - which imports everything and runs almost nothing. That pair reported 28%.
+        export COVERAGE_RCFILE="$GITHUB_WORKSPACE/pyproject.toml"
         PYTHONPATH=$(pwd) "$UV_PROJECT_ENVIRONMENT/bin/coverage" run manage.py test tests --verbosity=2 --parallel
+        # Required: with parallel data enabled, each process writes its own file.
+        "$UV_PROJECT_ENVIRONMENT/bin/coverage" combine
         "$UV_PROJECT_ENVIRONMENT/bin/coverage" xml -o coverage-platform.xml
         "$UV_PROJECT_ENVIRONMENT/bin/coverage" report --show-missing
 

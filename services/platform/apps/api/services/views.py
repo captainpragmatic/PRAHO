@@ -377,9 +377,9 @@ def customer_services_summary_api(request: HttpRequest, customer: Customer) -> R
         return Response({"success": False, "error": "Unable to fetch services summary"}, status=500)
 
 
+@public_api_endpoint
 @api_view(["GET"])
 @permission_classes([AllowAny])
-@public_api_endpoint
 def available_service_plans_api(request: HttpRequest) -> Response:
     """
     📦 Available Service Plans API -- intentionally public.

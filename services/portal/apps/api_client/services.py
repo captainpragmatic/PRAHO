@@ -83,13 +83,15 @@ def _resolve_portal_signing_secret() -> str:
 class PlatformAPIError(Exception):
     """Exception raised when platform API calls fail"""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # Error metadata, not behaviour: each field is one fact about the response
         self,
         message: str,
         status_code: int | None = None,
         response_data: dict[str, Any] | None = None,
         retry_after: int | None = None,
         is_rate_limited: bool | None = None,
+        is_maintenance: bool | None = None,
+        is_unavailable: bool | None = None,
     ):
         self.message = message
         self.status_code = status_code
@@ -98,7 +100,51 @@ class PlatformAPIError(Exception):
         self.is_rate_limited = bool(
             is_rate_limited if is_rate_limited is not None else status_code == HTTPStatus.TOO_MANY_REQUESTS
         )
+        # The sibling `is_rate_limited` had for a long time, and its absence was the whole bug:
+        # every consumer downstream could tell a throttle from a failure and had no way to tell an
+        # outage from either, so a maintenance window rendered as "you have nothing yet".
+        #
+        # Two flags rather than one, because the customer messages are not interchangeable.
+        # `is_unavailable` is "the platform is not answering right now" and covers 502/503/504 - all
+        # three must be surfaced rather than rendered as an empty list, and the first version of this
+        # change covered only 503.
+        self.is_unavailable = bool(
+            is_unavailable
+            if is_unavailable is not None
+            else status_code in {HTTPStatus.BAD_GATEWAY, HTTPStatus.SERVICE_UNAVAILABLE, HTTPStatus.GATEWAY_TIMEOUT}
+        )
+        # `is_maintenance` is the narrower claim, and only the platform's own gate may make it.
+        # `MaintenanceModeMiddleware._json_response` marks its body `{"error": "maintenance"}`; a bare
+        # 503 is NOT enough, because `apps/api/billing/views.py:587` returns 503 for arbitrary
+        # document-list errors. Keying on the status alone told a customer "scheduled maintenance -
+        # your data is safe" in the middle of a real failure, and a false reassurance is worse than a
+        # generic one.
+        self.is_maintenance = bool(
+            is_maintenance
+            if is_maintenance is not None
+            else (status_code == HTTPStatus.SERVICE_UNAVAILABLE and (response_data or {}).get("error") == "maintenance")
+        )
         super().__init__(message)
+
+    @property
+    def is_degraded(self) -> bool:
+        """The platform is up but not answering right now, so the caller must SURFACE this.
+
+        Ten places asked `is_rate_limited` to decide whether to propagate or flatten to `None` or
+        an empty collection - two duplicated helpers in the billing and tickets services, and
+        eight inline checks here. Every one of them reported a maintenance window as missing data,
+        and fixing any one alone would have left the rest doing it. This property is the single
+        thing they now share; it lives on the exception because a helper in
+        `common/rate_limit_feedback` cannot be imported here without a cycle.
+
+        A genuine failure is deliberately NOT degraded: flattening that to an empty list is a
+        different judgement, and not one this change is making.
+
+        Built from `is_unavailable` rather than `is_maintenance` so that a 502 or a 504 - and a 503
+        the platform did not mark as maintenance - are surfaced too. They get the generic
+        "temporarily unavailable" notice; only a marked 503 gets told it is planned.
+        """
+        return self.is_rate_limited or self.is_unavailable
 
 
 class PlatformAPIClient:
@@ -615,6 +661,12 @@ class PlatformAPIClient:
             return None
 
         except PlatformAPIError as e:
+            # Master's predicate, kept over this branch's `is_degraded`, because it is strictly
+            # better rather than merely different. `is_degraded` covers 429/502/503/504 and let a
+            # 500 fall through to `None` - which the view reads as "invalid credentials", the
+            # reported bug surviving for one status code. Inverting it is the right shape: only an
+            # actual credential rejection may become None, and everything else is a failure to ASK
+            # rather than an answer. A `status_code` of None (transport failure) also raises.
             if e.is_rate_limited or e.status_code not in {400, 401, 403}:
                 raise  # Throttles and outages are the caller's to report, not a wrong password
             logger.warning(f"⚠️ [API Client] Customer authentication failed for {email}: {e}")
@@ -730,7 +782,7 @@ class PlatformAPIClient:
             return None
 
         except PlatformAPIError as e:
-            if e.is_rate_limited:
+            if e.is_degraded:
                 raise
             logger.warning(f"⚠️ [API Client] Failed to get customer profile: {e}")
             return None
@@ -751,7 +803,7 @@ class PlatformAPIClient:
             return bool(data.get("success", False))
 
         except PlatformAPIError as e:
-            if e.is_rate_limited:
+            if e.is_degraded:
                 raise
             logger.warning(f"⚠️ [API Client] Failed to update customer profile: {e}")
             return False
@@ -780,7 +832,7 @@ class PlatformAPIClient:
             return data if data.get("success") else None
 
         except PlatformAPIError as e:
-            if e.is_rate_limited:
+            if e.is_degraded:
                 raise
             logger.warning(f"⚠️ [API Client] Failed to update customer password: {e}")
             return None
@@ -807,7 +859,7 @@ class PlatformAPIClient:
                 }
             return None
         except PlatformAPIError as e:
-            if e.is_rate_limited:
+            if e.is_degraded:
                 raise
             logger.warning(f"⚠️ [API Client] Failed to setup TOTP MFA: {e}")
             return None
@@ -820,7 +872,7 @@ class PlatformAPIClient:
             )
             return data if data.get("success") else None
         except PlatformAPIError as e:
-            if e.is_rate_limited:
+            if e.is_degraded:
                 raise
             logger.warning(f"⚠️ [API Client] Failed to verify TOTP: {e}")
             return None
@@ -831,7 +883,7 @@ class PlatformAPIClient:
             data = self._make_request("POST", "/users/mfa/setup/webauthn/", data={"customer_id": customer_id})
             return data if data.get("success") else None
         except PlatformAPIError as e:
-            if e.is_rate_limited:
+            if e.is_degraded:
                 raise
             logger.warning(f"⚠️ [API Client] Failed to setup WebAuthn MFA: {e}")
             return None

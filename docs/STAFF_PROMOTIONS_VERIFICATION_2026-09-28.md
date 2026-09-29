@@ -105,6 +105,12 @@ The refund POST returned 200 and the page reloaded to Refunded. An initial harne
 attempt to read that response body after navigation failed; the follow-up browser
 and database checks verified the completed operation without submitting it again.
 
+Screenshots from the 2026-09-28 local browser run (before integrating the later
+master release footer):
+
+- [Staff promotions dashboard](screenshots/promotions/staff-dashboard.png)
+- [Portal checkout with coupon and existing gift balance](screenshots/promotions/portal-checkout.png)
+
 ### Accounting checks
 
 The browser-created order produced:
@@ -132,10 +138,10 @@ Evidence: `browser-document-evidence.log`, `browser-refund-evidence.log`,
 
 ## Scope and limits
 
-Customer gift-card purchases and their public Stripe initiation endpoints remain
-unimplemented pending scope clarification. Automatic approval review rejected adding
-them because it found an earlier instruction excluding gift-card buying. Existing
-funding service/staff scaffolding is not a completed public purchase flow.
+Customer gift-card purchases and their public Stripe initiation endpoints are outside
+this change. They are approved for a separate follow-up alongside the configurable
+selling-currency policy. Existing funding service/staff scaffolding is not a completed
+public purchase flow.
 
 The online Semgrep rule fetch was rejected by automatic approval review because it
 could send repository metadata to `semgrep.dev`. An offline scan used seven explicit
@@ -153,4 +159,17 @@ completion used a local fixture transition, without a provider call.
 
 Both QA servers were stopped, the temporary PostgreSQL container was removed, and
 the four QA settings modules were archived outside the service source directories.
-The working changes remain on the separate worktree; no commit, push, or merge was made.
+At the end of that verification session, the changes remained uncommitted in the
+separate worktree. The subsequent PR preparation is recorded below.
+
+## PR preparation: 2026-09-29
+
+All 111 code, template, configuration and test files matched the recorded source
+manifest before the local checkpoint. The commit hooks normalized formatting and two
+test lint findings. Signed commit `9e4dceda` preserves that checkpoint.
+
+Current master (`9df033f5`) was integrated using an ordinary three-way merge. The only
+conflict was the parity test moved to `tests/integration/` on master; the new button
+attribute parity assertion was moved with it so the integration runner collects it.
+The later public API markers, proforma rollback fix, billing signal fixes, Portal
+maintenance handling and checkout error translations remain in the combined tree.

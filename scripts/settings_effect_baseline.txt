@@ -1,0 +1,88 @@
+# Settings whose EFFECT a test asserts — written, then observed through the code that reads them.
+#
+# The criterion is per TEST CLASS, not per file:
+#
+#   1. the class writes the key, and
+#   2. the class uses a symbol imported from a module that READS that key, or reaches one within two
+#      import hops — or, for a key whose only consumer is a template, the class requests a page.
+#
+# **This number went DOWN, from 77 to 56, and that is the correction rather than a regression.**
+# The previous criterion combined "writes the key" and "reaches another app" across a whole FILE,
+# never tying them to the same test. An independent review traced eight credits earned that way,
+# including `virtualmin.rate_limit_qps`, qualified by an unrelated dashboard request elsewhere in a
+# settings-permissions test file, and `audit.compliant_score_threshold`, whose qualifying test only
+# checks that validation rejects a negative score and never touches compliance classification. Those
+# tests do not exercise the setting's consumer at all, so "77 effect-tested" was not a supportable
+# claim. 21 keys lost credit; none of them had a test that drove the setting anywhere.
+#
+# Scope is the class because that is how real tests are organised: the write often sits in `setUp` or a
+# helper while each test observes. Reader reachability allows two hops because
+# `test_localisation_api.py` drives `system.customer_date_format` through
+# `apps.api.localisation.views`, which calls into `apps.common.localisation_services` — the module that
+# actually reads it. Requiring the test to import the reader itself would reject a genuine effect test
+# for using the front door.
+#
+# What the check still cannot do is inspect assertions: a qualifying class with every `assert` stripped
+# keeps its credit. It measures that a test drove the setting INTO its consumer, which is far stronger
+# than "the file mentions both", and still not a proof of coverage. Reading the test is what settles it.
+#
+# A ratchet. Removing a key requires saying why, in the same commit — which is how the eight false
+# credits were found rather than quietly dropped.
+#
+# Recorded 2026-09-26 at 56 of 262 keys.
+backup.s3_bucket_name
+billing.efactura_deadline_warning_hours
+billing.efactura_submission_deadline_days
+billing.invoice_generation_lead_days
+billing.invoice_issuer
+billing.invoice_payment_terms_days
+billing.large_refund_notification_threshold_cents
+billing.max_payment_amount_cents
+billing.recurring_auto_collection_enabled
+company.address
+company.email_contact
+company.email_dpo
+company.email_finance
+company.email_noreply
+company.email_privacy
+company.email_support
+company.legal_name
+company.phone
+company.registration_number
+customers.base_credit_score
+customers.engagement_activity_weight
+customers.engagement_order_weight
+customers.engagement_recency_weight
+domains.renewal_notice_schedule_days
+infrastructure.auto_drain_enabled
+infrastructure.drain_enabled
+integrations.smartbill_invoice_series
+integrations.smartbill_measuring_unit
+integrations.smartbill_tax_names
+integrations.stripe_enabled
+integrations.stripe_publishable_key
+integrations.stripe_secret_key
+integrations.stripe_webhook_secret
+node_deployment.dns_default_zone
+orders.bank_transfer_timeout_hours
+orders.card_timeout_hours
+orders.max_paid_order_confirmation_failures
+orders.review_threshold_cents
+promotions.max_discount_percent
+provisioning.migration_enabled
+provisioning.migration_spool_dir
+security.join_request_notification_limit_per_customer_per_hour
+security.max_session_age_seconds
+security.welcome_invite_limit_per_target_per_hour
+system.customer_date_format
+system.default_country
+system.default_language
+system.maintenance_mode
+system.staff_date_format
+system.timezone
+tickets.allowed_file_extensions
+tickets.auto_close_inactive_hours
+tickets.max_file_size_bytes
+tickets.security_alert_threshold
+users.admin_session_timeout_minutes
+users.shared_device_timeout_minutes

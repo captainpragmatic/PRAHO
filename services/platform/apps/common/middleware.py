@@ -4,7 +4,6 @@ Security headers, Romanian compliance, and audit logging.
 """
 
 import base64
-import contextlib
 import hashlib
 import hmac
 import json
@@ -23,8 +22,10 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import get_user_model, logout
 from django.core.cache import cache
+from django.db import DatabaseError, InterfaceError
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
+from django.urls import Resolver404, resolve
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
@@ -343,34 +344,51 @@ class GDPRComplianceMiddleware:
 # ===============================================================================
 
 
-# Exempt paths: endpoints accessible WITHOUT HMAC authentication.
-# These are for truly public/unauthenticated external callers only.
-# The Portal's PlatformAPIClient always signs ALL requests with HMAC,
-# so portal calls never rely on this exempt list.
-# The startswith->exact-match change (commit 2577b41d) was intentional:
-# it prevents unintended sub-path exemptions (e.g., /api/users/register/extra/).
-# Login and both password-reset endpoints require HMAC authentication.
-# Exempt paths stored without trailing slash; matching normalizes both sides.
+# Endpoints reachable WITHOUT HMAC authentication, for genuinely public external
+# callers only. The Portal's PlatformAPIClient signs every request, so portal traffic
+# never depends on this. There is no longer a list of literal paths here: the exemption
+# is read off the view, below.
+
 
 #
-# Each exempt path must have @public_api_endpoint on the corresponding view.
-# tests/api/test_api_auth_regressions.py::TestAPIAuthCoverage checks that every
-# /api/ view has an auth decorator or public marker; it does not compare exempt paths.
-_AUTH_EXEMPT_EXACT_PATHS_RAW: frozenset[str] = frozenset(
-    {
-        "/api/users/health",
-        "/api/orders/products",
-    }
-)
+# Exemption is derived from the view itself, not from a parallel list. The previous
+# hand-kept list of literal paths had drifted: six of the eight views carrying
+# @public_api_endpoint were absent from it and answered 401 to every caller,
+# including /api/users/token/, whose whole purpose is to be reachable without a
+# token. A second source of truth for one fact will drift again, so there is only
+# one now. As a bonus this expresses parameterised routes such as
+# /api/orders/products/<slug>/, which exact string matching structurally cannot.
+def _is_auth_exempt(request: HttpRequest) -> bool:
+    """Return True when the resolved view is explicitly marked public.
 
+    The marker must sit OUTERMOST in the view's decorator stack. DRF's ``api_view``
+    returns the callable from ``as_view()`` and does not copy ``__dict__``, so a
+    marker applied beneath it is invisible here. ``tests/api/test_api_auth_regressions.py``
+    pins that ordering for every marked view.
 
-def _is_auth_exempt(path: str) -> bool:
-    """Check if a request path is exempt from HMAC authentication.
-
-    Normalizes trailing slashes so both '/api/users/health' and
-    '/api/users/health/' match, regardless of Django's APPEND_SLASH setting.
+    An unresolvable path is never exempt — failing closed keeps a 404 probe from
+    becoming an authentication bypass. A slash-less form of an exempt route is still
+    exempt, because this middleware runs before Django can issue its APPEND_SLASH
+    redirect; without that retry, '/api/users/health' would start answering 401 where
+    it used to answer 301 then 200.
     """
-    return path.rstrip("/") in _AUTH_EXEMPT_EXACT_PATHS_RAW
+    path = request.path_info
+    # Keep the reach of the marker where it was. The deleted list held only /api/ paths,
+    # so a stray @public_api_endpoint could not previously exempt anything else. Reading
+    # the resolved view widened that to the entire ROOT_URLCONF, including the billing
+    # prefixes gated below, where a marker on a staff view would silently drop HMAC.
+    if not path.startswith("/api/"):
+        return False
+
+    urlconf = getattr(request, "urlconf", None)
+    candidates = [path] if path.endswith("/") else [path, f"{path}/"]
+    for candidate in candidates:
+        try:
+            match = resolve(candidate, urlconf=urlconf)
+        except Resolver404:
+            continue
+        return bool(getattr(match.func, "_is_public_api_endpoint", False))
+    return False
 
 
 class PortalServiceHMACMiddleware:
@@ -606,7 +624,7 @@ class PortalServiceHMACMiddleware:
             # Login and both password-reset endpoints require signed Portal requests
             # to prevent direct credential brute-force and reset-mail abuse.
 
-            if _is_auth_exempt(request.path):
+            if _is_auth_exempt(request):
                 logger.debug("🔓 [HMAC Auth] Skipping HMAC validation for auth endpoint: %s", request.path)
                 return self.get_response(request)
 
@@ -742,8 +760,25 @@ class SessionSecurityMiddleware:
             logger.critical(
                 "🔥 [SessionSecurityMiddleware] Session security check failed — invalidating session for safety: %s", e
             )
-            with contextlib.suppress(Exception):
+            try:
                 request.session.flush()
+            except (DatabaseError, InterfaceError) as flush_error:
+                # The line above promises the session was invalidated. If the flush itself failed it
+                # was NOT, and the request continues with a session a security check just rejected.
+                # An operator reading that CRITICAL has to be able to tell those two apart.
+                # BOTH names are required and neither is redundant. Django follows PEP 249, where
+                # `Error` has exactly two direct subclasses - `InterfaceError` and `DatabaseError` -
+                # so catching only the latter misses a broken connection, which is the likeliest
+                # database failure at the moment a security check has already gone wrong. Escaping
+                # here is a 500 from middleware on a request that previously always completed.
+                # `apps/billing/refund_service.py` names the pair in five places; this site did not.
+                # Still narrow rather than a defensive `Exception`: SESSION_ENGINE is the db backend
+                # and `flush()` is clear + delete with no save, so anything else is a bug.
+                logger.critical(
+                    "🔥 [SessionSecurityMiddleware] Session invalidation FAILED after a failed "
+                    "security check — the session is still valid: %s",
+                    flush_error,
+                )
 
     def _should_log_activity(self, request: HttpRequest) -> bool:
         """Determine if this request should be logged for activity tracking"""
@@ -869,6 +904,14 @@ class MaintenanceModeMiddleware:
         "/settings/api/health/",
     )
 
+    # Machine surfaces, which get a parseable body rather than a page. These are NOT exempt -
+    # gating them is the point, since they are every request the customer portal makes - but
+    # answering them in HTML meant the portal's client called `response.json()`, raised
+    # ValueError, and replaced the reason with "Invalid response format". A maintenance window
+    # then looked identical to any other failure: empty invoice lists, and a login response
+    # indistinguishable from a wrong password.
+    API_PREFIXES = ("/api/",)
+
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
         self.get_response = get_response
 
@@ -876,7 +919,7 @@ class MaintenanceModeMiddleware:
         if self._maintenance_active() and not self._is_exempt(request):
             user = getattr(request, "user", None)
             if user is None or not getattr(user, "is_staff_user", False):
-                return self._maintenance_response()
+                return self._maintenance_response(request)
         return self.get_response(request)
 
     @staticmethod
@@ -892,9 +935,42 @@ class MaintenanceModeMiddleware:
     def _is_exempt(cls, request: HttpRequest) -> bool:
         return request.path.startswith(cls.EXEMPT_PREFIXES)
 
+    @classmethod
+    def _wants_json(cls, request: HttpRequest) -> bool:
+        """Path first, Accept as a courtesy: the portal's client does not set Accept."""
+        return request.path.startswith(cls.API_PREFIXES) or "application/json" in request.headers.get("Accept", "")
+
+    @classmethod
+    def _maintenance_response(cls, request: HttpRequest) -> HttpResponse:
+        response = cls._json_response() if cls._wants_json(request) else cls._html_response()
+        response["Retry-After"] = "600"
+        return response
+
     @staticmethod
-    def _maintenance_response() -> HttpResponse:
-        response = HttpResponse(
+    def _json_response() -> HttpResponse:
+        # `error` is the stable machine-readable marker; `detail` is for a human reading a log.
+        # Deliberately hand-built rather than rendered: a maintenance response must not depend on
+        # template loading, context processors or the database, all of which may be exactly what
+        # is being maintained.
+        return HttpResponse(
+            json.dumps(
+                {
+                    "error": "maintenance",
+                    "detail": str(_("The platform is temporarily unavailable for scheduled maintenance.")),
+                    "retry_after": 600,
+                }
+            ),
+            status=503,
+            content_type="application/json",
+        )
+
+    @staticmethod
+    def _html_response() -> HttpResponse:
+        # Inline for the same reason: `templates/503.html` exists but is deliberately left unwired,
+        # because it extends `base.html` and would drag context processors and queries into the one
+        # response that has to work when those are degraded. A render failure here would turn a
+        # clean 503 into a 500.
+        return HttpResponse(
             '<!doctype html><html><head><title>503</title></head><body style="font-family:system-ui;'
             "background:#0f172a;color:#e2e8f0;display:flex;align-items:center;justify-content:center;"
             'height:100vh;margin:0"><div style="text-align:center"><h1>🚧 '
@@ -905,5 +981,3 @@ class MaintenanceModeMiddleware:
             status=503,
             content_type="text/html",
         )
-        response["Retry-After"] = "600"
-        return response

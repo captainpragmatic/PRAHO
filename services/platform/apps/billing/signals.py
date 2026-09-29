@@ -1040,10 +1040,6 @@ def _sync_orders_on_invoice_status_change(invoice: Invoice, old_status: str, new
                             result.unwrap_err() if result.is_err() else "unknown",
                         )
 
-        elif new_status == "overdue" and old_status != "overdue":
-            # Invoice overdue - may suspend related services
-            _handle_overdue_order_services(invoice)
-
     except Exception as e:
         logger.exception(f"🔥 [Invoice] Order sync failed: {e}")
 
@@ -1426,7 +1422,21 @@ def _handle_invoice_overdue(invoice: Invoice) -> None:
         _send_invoice_overdue_email(invoice)
         _trigger_dunning_process(invoice)
         _update_customer_payment_history(invoice.customer, "negative")
-        _handle_overdue_service_suspension(invoice)
+        # Service suspension is NOT done here, and no longer attempted at all. The code
+        # that used to live here called ServiceManagementService.suspend_service, which
+        # does not exist, so it never once suspended anything.
+        #
+        # For SUBSCRIPTION-BACKED services the capability already exists and works:
+        # recurring_billing sets grace_period_ends_at from Subscription.grace_period_days
+        # on payment failure, the daily "billing-grace-expirations" schedule runs
+        # handle_grace_period_expirations which suspends with reason="payment_overdue"
+        # and audits it, and payment_convergence clears the grace once paid.
+        #
+        # A service with NO subscription has no automatic non-payment suspension. That
+        # was equally true before this code was removed, because the code was inert —
+        # so this is a pre-existing gap, not a regression. Closing it belongs in the
+        # subscription grace policy that already owns the concept, not in a second
+        # parallel mechanism here.
 
         logger.warning(f"⚠️ [Invoice] Invoice {invoice.number} is overdue")
 
@@ -1887,41 +1897,6 @@ def _activate_pending_services(invoice: Invoice) -> None:
 
     except Exception as e:
         logger.exception(f"🔥 [Invoice] Failed to activate pending services: {e}")
-
-
-def _handle_overdue_service_suspension(invoice: Invoice) -> None:
-    """Handle service suspension for overdue invoices"""
-    try:
-        from apps.provisioning.services import ServiceManagementService
-
-        # Find all services related to overdue invoice orders
-        services = [
-            item.service
-            for order in invoice.orders.all()
-            for item in order.items.filter(service__isnull=False)
-            if item.service and item.service.status == "active"
-        ]
-
-        # Suspend services for overdue invoices (configurable business rule)
-        for service in services:
-            result = ServiceManagementService.suspend_service(
-                service=service,
-                reason=f"Invoice {invoice.number} overdue",
-                suspend_immediately=False,  # Grace period
-                grace_period_days=7,
-            )
-
-            if result.is_ok():
-                logger.info(f"⏸️ [Service] Scheduled suspension for {service.id} (overdue invoice)")
-
-    except Exception as e:
-        logger.exception(f"🔥 [Invoice] Service suspension failed: {e}")
-
-
-def _handle_overdue_order_services(invoice: Invoice) -> None:
-    """Handle services when invoice becomes overdue"""
-    # Alias for consistency
-    _handle_overdue_service_suspension(invoice)
 
 
 def _invalidate_tax_cache(country_code: str, tax_type: str) -> None:

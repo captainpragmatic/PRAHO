@@ -24,6 +24,14 @@
     </div>
 
     <!-- Login Form -->
+    {% if maintenance %}
+    {% comment %} The form is disabled rather than hidden: a customer who sees the fields knows they are in
+       the right place and that nothing is wrong with their account or their password. {% endcomment %}
+    <div class="mt-8">
+      {% include "components/maintenance_inline_alert.html" %}
+    </div>
+    {% endif %}
+
     <form id="login-form" class="mt-8 space-y-6" method="post" action="{% url 'users:login' %}{% if request.GET.next %}?next={{ request.GET.next|urlencode }}{% endif %}">
       {% csrf_token %}
       {% if request.GET.next %}
@@ -57,7 +65,7 @@
         <!-- Submit Button -->
         <div>
           {% trans "Sign In" as sign_in_label %}
-          {% button sign_in_label variant="info" type="submit" class_="w-full" %}
+          {% button sign_in_label variant="info" type="submit" class_="w-full" disabled=maintenance %}
         </div>
 
         <!-- Register Link -->

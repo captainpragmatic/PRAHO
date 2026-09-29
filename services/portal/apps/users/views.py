@@ -29,7 +29,11 @@ from apps.common.decorators import (
 )
 from apps.common.localisation_middleware import sync_language_selection
 from apps.common.localisation_services import store_localisation_preferences
-from apps.common.rate_limit_feedback import is_rate_limited_error
+from apps.common.rate_limit_feedback import (
+    build_maintenance_context,
+    get_degraded_message,
+    is_rate_limited_error,
+)
 from apps.common.rate_limiting import mark_auth_failure, mark_auth_success
 from apps.common.request_ip import get_safe_client_ip
 from apps.users.forms import (
@@ -236,6 +240,17 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
         next_url = _get_safe_redirect_target(request, fallback="/dashboard/")
         return redirect(next_url)
 
+    # Drives the maintenance notice and the disabled submit below. Until `authenticate_customer`
+    # stopped swallowing a 503 into `None`, this state was unreachable: a maintenance window
+    # produced "Invalid email address or password", so the customer retyped a correct password
+    # and was told it was wrong again.
+    # Not just a boolean: `components/maintenance_inline_alert.html` renders a heading and a message
+    # from the context, and this view supplied neither. The heading was hardcoded in the template until
+    # the declared/undeclared distinction made it dynamic, so a real window here silently degraded to
+    # "Temporarily unavailable" - and `maintenance_message` was never set at ALL, so the alert had been
+    # rendering with an empty body. Found by running the browser test rather than by reading it.
+    degraded_context: dict[str, object] = {}
+
     if request.method == "GET":
         form = CustomerLoginForm()
     else:  # POST
@@ -336,8 +351,31 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
                     mark_auth_failure(request)
                     form.add_error(None, _("Invalid email address or password. Please try again."))
 
-            except PlatformAPIError as e:  # rate-limit-aware — custom form error with retry_after countdown
-                if getattr(e, "is_rate_limited", False):
+            except PlatformAPIError as e:  # degradation- and rate-limit-aware, per state
+                if getattr(e, "is_unavailable", False):
+                    # `is_unavailable`, not `is_maintenance`: the customer cannot log in during an
+                    # UNDECLARED outage either, and keying on the narrower flag sent a 502, a 504 and
+                    # an unmarked 503 back to the generic branch - which is the original bug, a real
+                    # outage reported as a wrong password. `get_degraded_message` decides whether the
+                    # wording may call it planned.
+                    logger.warning(f"⚠️ [Portal Auth] Login attempted while the platform was unavailable for {email}")
+                    degraded_context = build_maintenance_context(request, e)
+                    # The ALERT explains the platform's state; this form error explains why THIS
+                    # submission went nowhere. Master's login-specific wording rather than
+                    # `get_degraded_message`, which says "This information is temporarily
+                    # unavailable" - the wrong register on a login form, and for a declared window
+                    # merely a second copy of the sentence already in the alert above it.
+                    form.add_error(
+                        None, _("Authentication service is temporarily unavailable. Please try again later.")
+                    )
+                    # Deliberately NO `mark_auth_failure` here, unlike the throttle branch below.
+                    # `authenticate_customer` raised, so no credential was ever verified - there is no
+                    # guess to rate-limit. Counting it would spend the customer's attempt budget on an
+                    # outage they did not cause and could lock them out of the form after the platform
+                    # recovered. Nor is the omission exploitable: reaching it means making the platform
+                    # answer 5xx at will, which is a denial of service, and during one no credential
+                    # can be checked anyway.
+                elif getattr(e, "is_rate_limited", False):
                     mark_auth_failure(request)
                     retry_after = getattr(e, "retry_after", None) or 30
 
@@ -361,6 +399,7 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
         "form": form,
         "page_title": _("Customer Login"),
         "brand_name": "PRAHO Portal",
+        **degraded_context,
     }
 
     return render(request, "users/login.html", context)
@@ -967,7 +1006,20 @@ def mfa_backup_codes_view(request: HttpRequest) -> HttpResponse:
     if not request.session.get("user_id"):
         return redirect("users:login")
     user_id = int(request.session["user_id"])
-    profile = api_client.get_customer_profile(user_id) or {}
+    try:
+        profile = api_client.get_customer_profile(user_id) or {}
+    except PlatformAPIError as exc:
+        # `get_customer_profile` now propagates a degraded platform instead of returning None, so
+        # this view needs a handler: without one a maintenance window turned the backup-code page
+        # into a 500, where before it redirected with a warning. Redirecting on an unknown MFA state
+        # is the safe answer - "enable 2FA first" would be a guess, and the codes themselves are
+        # never re-displayable.
+        if not exc.is_degraded:
+            raise
+        # `get_degraded_message`, not the maintenance wording: an undeclared 502/503/504 here would
+        # otherwise tell the customer their data is safe during a failure nobody has explained.
+        messages.warning(request, get_degraded_message(exc))
+        return redirect("users:mfa_management")
     if not profile.get("mfa_enabled"):
         messages.warning(request, _("You need to enable 2FA first before accessing backup codes."))
         return redirect("users:mfa_management")

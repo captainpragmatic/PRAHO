@@ -3,7 +3,7 @@
 # ===============================================================================
 # Enhanced for Platform/Portal separation with scoped PYTHONPATH security
 
-.PHONY: help install lock-upgrade check-env check-venv-platform dev dev-e2e dev-e2e-bg dev-e2e-csp dev-platform dev-portal dev-all test test-fast test-file test-platform test-platform-fast test-ci test-ci-focused test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-file test-e2e-csp test-e2e-orm test-security test-cache show-test-deps install-frontend build-css watch-css check-css-tooling migrate check-migrations fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-imports lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict
+.PHONY: help install lock-upgrade check-env check-venv-platform dev dev-e2e dev-e2e-bg dev-e2e-csp dev-platform dev-portal dev-all test test-fast test-file test-platform test-platform-fast test-ci test-ci-focused test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-file test-e2e-csp test-e2e-orm test-security test-cache show-test-deps install-frontend build-css watch-css check-css-tooling migrate check-migrations fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-imports lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict lint-error-handling
 
 # ===============================================================================
 # SCOPED PYTHON ENVIRONMENTS 🔒
@@ -334,6 +334,128 @@ test-portal:
 	@$(PYTHON_PORTAL) -m pytest -v
 	@echo "✅ Portal tests completed - database access properly blocked!"
 
+# ===============================================================================
+# TEST COVERAGE 📊
+# ===============================================================================
+# The invocation lives here and nowhere else, because two things were wrong in CI and
+# both are easy to get wrong again.
+#
+# 1. Coverage does NOT walk up for its config. Run from `services/platform`, it found no
+#    `[tool.coverage.*]` at all - so `source`, the `omit` of tests and migrations, and
+#    `branch` were all silently inactive, and test files were counted as covered source.
+#    `COVERAGE_RCFILE` is what points it at the repo-root config.
+# 2. Django's `--parallel` forks workers through multiprocessing. Without
+#    `concurrency = multiprocessing` their data is discarded and only the parent is
+#    measured - which imports everything and executes almost no test code. Per-process
+#    files must then be merged with `combine` before any report.
+#
+# Together those produced a reported 28% on every PR. Portal is deliberately NOT routed
+# through here: its `--cov=apps` flag in `services/portal/pytest.ini` already scopes it
+# correctly, pytest-cov does its own combining, and forcing this config on it would risk
+# a number that is currently right.
+COVERAGE_BIN = $(PWD)/$(VENV_DIR)/bin/coverage
+COVERAGE_RC = COVERAGE_RCFILE=$(PWD)/pyproject.toml
+# Global floor. 50 was the agreed minimum, but the measured number is 72.39%, and a gate 22
+# points below reality would let coverage rot silently. Set just under the real figure so it
+# ratchets. Raise it as the number climbs; never lower it to make a run pass.
+PLATFORM_COVERAGE_FLOOR ?= 70
+# Packages that carry money, provisioning and access decisions get their own floor, because
+# a healthy global average can hide a weak one.
+# Measured 2026-09-26: billing 88.44, settings 78.50, users 74.57, provisioning 55.50.
+# Floors sit just under those so they ratchet and cannot silently slip. The AGREED TARGET is
+# 80% for every one of these; provisioning is the real gap. Raise a floor when the number
+# rises; never lower one to make a run pass.
+PLATFORM_PACKAGE_FLOORS = billing:85 settings:75 users:70 provisioning:55
+
+coverage-platform:
+	@echo "📊 [Platform] Coverage over apps/ and config/ — tests and migrations excluded..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@cd services/platform && rm -f .coverage .coverage.*
+	@cd services/platform && $(COVERAGE_RC) PYTHONPATH=$(PWD)/services/platform $(COVERAGE_BIN) run manage.py test tests --settings=$(PLATFORM_TEST_SETTINGS) --verbosity=2 --parallel
+	@cd services/platform && $(COVERAGE_RC) $(COVERAGE_BIN) combine
+	@cd services/platform && $(COVERAGE_RC) $(COVERAGE_BIN) xml -o coverage-platform.xml
+	@cd services/platform && $(COVERAGE_RC) $(COVERAGE_BIN) report --show-missing --fail-under=$(PLATFORM_COVERAGE_FLOOR)
+	@echo "✅ Platform coverage complete (floor $(PLATFORM_COVERAGE_FLOOR)%)."
+
+coverage-platform-packages:
+	@echo "📊 [Platform] Per-package floors for the packages that carry money and access..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@cd services/platform && failed=""; \
+	for pair in $(PLATFORM_PACKAGE_FLOORS); do \
+		pkg="$${pair%%:*}"; floor="$${pair##*:}"; \
+		pct=$$($(COVERAGE_RC) $(COVERAGE_BIN) report --include="*/apps/$$pkg/*" 2>/dev/null \
+			| awk '/^TOTAL/ { gsub("%","",$$NF); print $$NF; exit }'); \
+		if [ -z "$$pct" ]; then \
+			printf "  %-14s %8s   floor %3s%%   NO DATA\n" "$$pkg" "-" "$$floor"; \
+			failed="$$failed $$pkg(no-data)"; \
+		elif awk -v p="$$pct" -v f="$$floor" 'BEGIN { exit !(p+0 < f+0) }'; then \
+			printf "  %-14s %7.2f%%   floor %3s%%   BELOW\n" "$$pkg" "$$pct" "$$floor"; \
+			failed="$$failed $$pkg"; \
+		else \
+			printf "  %-14s %7.2f%%   floor %3s%%   ok\n" "$$pkg" "$$pct" "$$floor"; \
+		fi; \
+	done; \
+	if [ -n "$$failed" ]; then echo "❌ Below floor:$$failed"; echo "   (reads the combined data — run 'make coverage-platform' first)"; exit 1; fi; \
+	echo "✅ Every critical package is at or above its floor."
+
+coverage-portal:
+	@echo "📊 [Portal] Coverage over apps/ — already scoped by pytest.ini --cov=apps..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@$(PYTHON_PORTAL) -m pytest -q
+	@echo "✅ Portal coverage complete — see services/portal/htmlcov/."
+
+# Portal's real figure is the UNION of two datasets that cover different code: the unit suite
+# (no database, platform unimportable, most files mocked) and the browser suite (a live portal
+# against a live platform over real HMAC). Measured 2026-09-26: units 63%, browser 57.31%,
+# union 72.02% - so neither dataset alone is the answer, and reporting either as "portal
+# coverage" understates it by ~9 to ~15 points.
+PORTAL_COVERAGE_FLOOR ?= 70
+# Each half of the union must have measured SOMETHING. `coverage report` exits 0 on a dataset whose
+# files are all at 0%, so "the dataset is readable" was never evidence that the suite ran under the
+# tracer: a browser half that measured nothing passed, and the union silently became the unit half
+# alone - the exact failure this target exists to prevent. Reproduced with a dataset reporting 0.00%.
+# 1% is deliberately far below either half's real figure (units ~63%, browser ~39% from ONE test
+# file), so this can only fire when a half genuinely measured next to nothing.
+COVERAGE_HALF_MIN ?= 1
+# Overridable so the gate itself can be tested with synthetic halves. A gate whose ability to FAIL
+# is never exercised is the same problem as no gate: this target runs only in nightly, so without
+# this its failure path had never been executed anywhere.
+PORTAL_UNIT_COVERAGE ?= services/portal/.coverage
+PORTAL_E2E_COVERAGE ?= output/playwright/coverage/.coverage.portal
+
+.PHONY: coverage-portal-union
+coverage-portal-union:
+	@echo "📊 [Portal] Union of the unit and browser suites — the honest figure..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@units="$(PORTAL_UNIT_COVERAGE)"; e2e="$(PORTAL_E2E_COVERAGE)"; \
+	missing=""; \
+	[ -f "$$units" ] || missing="$$missing unit-data(run make coverage-portal)"; \
+	[ -f "$$e2e" ]   || missing="$$missing browser-data(run make test-e2e-coverage)"; \
+	if [ -n "$$missing" ]; then echo "❌ Missing:$$missing"; exit 1; fi; \
+	echo "  unit data   $$(date -r "$$units" '+%Y-%m-%d %H:%M')"; \
+	echo "  browser data $$(date -r "$$e2e" '+%Y-%m-%d %H:%M')"; \
+	echo "  (both are reported so a stale half cannot pass unnoticed)"; \
+	echo "  (and each is reported ALONE first: existence is not usability)"; \
+	dir=$$(mktemp -d); trap 'rm -rf "$$dir"' EXIT; \
+	cp "$$units" "$$dir/.coverage.units" || { echo "❌ Cannot read the unit dataset"; exit 1; }; \
+	cp "$$e2e" "$$dir/.coverage.browser" || { echo "❌ Cannot read the browser dataset"; exit 1; }; \
+	for half in units browser; do \
+		cp "$$dir/.coverage.$$half" "$$dir/.probe"; \
+		if ! (cd services/portal && $(COVERAGE_RC) COVERAGE_FILE="$$dir/.probe" $(COVERAGE_BIN) report --fail-under=$(COVERAGE_HALF_MIN) > "$$dir/$$half.txt" 2>&1); then \
+			echo "❌ The $$half dataset is unreadable, empty, or measured under $(COVERAGE_HALF_MIN)%, so the union would silently be the other half alone:"; \
+			sed 's/^/   /' "$$dir/$$half.txt" | tail -3; exit 1; \
+		fi; \
+	done; \
+	cd services/portal && $(COVERAGE_RC) COVERAGE_FILE="$$dir/.coverage" $(COVERAGE_BIN) combine --quiet || { echo "❌ coverage combine failed"; exit 1; }; \
+	$(COVERAGE_RC) COVERAGE_FILE="$$dir/.coverage" $(COVERAGE_BIN) xml -o coverage-portal-union.xml || { echo "❌ coverage xml failed"; exit 1; }; \
+	rc=0; $(COVERAGE_RC) COVERAGE_FILE="$$dir/.coverage" $(COVERAGE_BIN) report --fail-under=$(PORTAL_COVERAGE_FLOOR) > "$$dir/report.txt" || rc=$$?; \
+	tail -2 "$$dir/report.txt"; \
+	if [ "$$rc" -ne 0 ]; then echo "❌ Portal union below the $(PORTAL_COVERAGE_FLOOR)% floor."; exit "$$rc"; fi; \
+	echo "✅ Portal union at or above the $(PORTAL_COVERAGE_FLOOR)% floor, with both datasets verified present."
+
+coverage: coverage-platform coverage-platform-packages coverage-portal
+	@echo "✅ Coverage measured for both services."
+
 test-integration:
 	@echo "🔄 [Integration] Testing services communication and cache functionality..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -341,8 +463,13 @@ test-integration:
 	@$(PYTHON_PLATFORM) -m pytest tests/common/test_counters.py \
 		--ds="$${DJANGO_SETTINGS_MODULE:-config.settings.test}" -o addopts= -v
 	@echo "🧪 Running integration, parity and deploy tests..."
+	# The parity file is no longer named here: it moved into tests/integration/, which this glob
+	# already covers. Master reached the same "nothing collects it" conclusion and fixed it by adding
+	# the explicit path; keeping both would be a hardcoded path that breaks on the next move - and it
+	# DID break here, silently. The Makefile auto-merged with no conflict, so git gave no warning and
+	# only running the suite on the merged tree found the target pointing at a deleted file.
 	@PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -m pytest \
-		tests/integration/ tests/test_cross_service_parity.py tests/deploy/ -v
+		tests/integration/ tests/deploy/ -v
 	@echo "✅ Integration tests completed!"
 
 test-cache:
@@ -381,6 +508,38 @@ test-e2e:
 	@$(PYTHON_SHARED) scripts/e2e_stack.py test
 
 test-with-e2e: test-e2e
+
+# The browser suite is where the portal's real behaviour lives - 179 unmocked tests driving a
+# live portal against a live platform over real HMAC - and it earned no coverage credit at all,
+# because the app executes inside the `runserver` subprocesses rather than the pytest process.
+# Portal unit tests are structurally capped (no database, platform unimportable, most files
+# mocked), so this is the only route to the portal target.
+#
+# Opt-in rather than folded into `test-e2e`: coverage tracing slows every request and these
+# tests have timeouts, so a default-on tracer would trade suite stability for a number.
+#
+# E2E_PATHS scopes it, e.g. make test-e2e-coverage E2E_PATHS=tests/e2e/portal/
+E2E_PATHS ?=
+
+.PHONY: test-e2e-coverage
+test-e2e-coverage: check-venv-platform build-css
+	@echo "🎭 [E2E] Browser suite with server-side coverage..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@E2E_COVERAGE=1 $(PYTHON_SHARED) scripts/e2e_stack.py start
+	@rc=0; $(PYTHON_SHARED) scripts/e2e_stack.py test $(E2E_PATHS) || rc=$$?; \
+		if ! $(PYTHON_SHARED) scripts/e2e_stack.py stop; then \
+			echo "⚠️  [E2E] stack stop reported a failure"; \
+			if [ "$$rc" -eq 0 ]; then rc=1; fi; \
+		fi; \
+		echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"; \
+		if grep -q "^E2E coverage: OK" logs/e2e-supervisor.log 2>/dev/null; then \
+			grep "^E2E coverage" logs/e2e-supervisor.log; \
+		else \
+			echo "❌ [E2E] no usable server-side coverage — which is the entire point of this target:"; \
+			grep "^E2E coverage" logs/e2e-supervisor.log 2>/dev/null || echo "   (no coverage lines at all)"; \
+			if [ "$$rc" -eq 0 ]; then rc=1; fi; \
+		fi; \
+		exit $$rc
 
 test-e2e-platform:
 	@$(PYTHON_SHARED) scripts/e2e_stack.py test tests/e2e/platform/
@@ -595,11 +754,13 @@ else
 	@echo "📋 Phase 5: i18n coverage scan"
 	@$(PYTHON_SHARED) scripts/lint_i18n_coverage.py --fail-on high --allowlist scripts/i18n_coverage_allowlist.txt services/platform/apps services/portal/apps services/platform/templates services/portal/templates
 	@echo "📋 Phase 6: Code health scan"
-	@$(VENV_DIR)/bin/python scripts/code_health_scan.py --min-severity=high --exclude-tests --allowlist=scripts/code_health_allowlist.txt services/platform/apps || true
+	@$(VENV_DIR)/bin/python scripts/code_health_scan.py --min-severity=high --exclude-tests --allowlist=scripts/code_health_allowlist.txt services/platform/apps
 	@echo "📋 Phase 7: FSM guardrail lint (ADR-0034)"
 	@$(MAKE) lint-fsm
 	@echo "📋 Phase 8: Cross-app model import lint (ADR-0007)"
 	@$(MAKE) lint-imports
+	@echo "📋 Phase 9: Error handling risk scan"
+	@$(MAKE) lint-error-handling
 	@echo "🎉 All services linting complete!"
 endif
 
@@ -691,8 +852,18 @@ lint-security:
 	@echo "🔒 [Security] PRAHO architectural security scan..."
 	@$(VENV_DIR)/bin/python scripts/security_scanner.py services/ --min-severity HIGH || true
 	@echo "🔒 [Security] Error handling risk scan..."
-	@$(VENV_DIR)/bin/python scripts/error_handling_scan.py services/ --exclude-tests --min-severity high || true
+	@$(MAKE) lint-error-handling
 	@echo "✅ Security linting complete!"
+
+# Blocking on purpose, and it is the point of the target. This scan previously ran with `|| true`
+# inside lint-security, which itself runs with `continue-on-error: true` in both workflows that call
+# it - three layers of suppression over a scanner that was reporting five HIGH findings. A gate that
+# cannot fail is a getter nobody calls. `lint-security` keeps its allowance because semgrep is still
+# an unstable dependency there; this scan does not need it, so it goes into `make lint` where CI
+# actually blocks on the result.
+lint-error-handling:
+	@echo "🧯 [Error Handling] Scanning for swallowed failures..."
+	@$(VENV_DIR)/bin/python scripts/error_handling_scan.py services/ --exclude-tests --min-severity high
 
 lint-credentials:
 	@echo "🔑 [Credentials] Hardcoded credentials security check..."

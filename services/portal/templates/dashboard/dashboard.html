@@ -29,6 +29,13 @@
       </a>
     </div>
   </div>
+  {% elif maintenance %}
+  {% comment %} The same component the tickets, services and invoices tables include. Blue rather than
+     the amber above: a throttle is about how much the customer asked for, a window is about us, and
+     the wording is already decided by `build_maintenance_context`. {% endcomment %}
+  <div class="mb-6">
+    {% include "components/maintenance_inline_alert.html" %}
+  </div>
   {% endif %}
 
   <!-- Header -->
@@ -104,6 +111,9 @@
           <p class="text-slate-400 text-center py-4">
             {% if "billing" in sections_rate_limited %}
               {% trans 'Billing data is temporarily rate limited. Please try again shortly.' %}
+            {% elif "billing" in sections_unavailable %}
+              {# Not the empty state: "No recent documents found" is a claim about what the customer HAS. #}
+              {% trans 'Billing data is temporarily unavailable.' %}
             {% else %}
               {% trans 'No recent documents found' %}
             {% endif %}
@@ -158,6 +168,9 @@
           <p class="text-slate-400 text-center py-4">
             {% if "tickets" in sections_rate_limited %}
               {% trans 'Ticket data is temporarily rate limited. Please try again shortly.' %}
+            {% elif "tickets" in sections_unavailable %}
+              {# Not the empty state: "No recent support tickets" is a claim about what the customer HAS. #}
+              {% trans 'Ticket data is temporarily unavailable.' %}
             {% else %}
               {% trans 'No recent support tickets' %}
             {% endif %}
