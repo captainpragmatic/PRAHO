@@ -180,3 +180,22 @@ the panel now follows the same payable-document decision. New view tests failed 
 all eight closed/expired cases before the template fix. Afterward the focused Portal
 module passed all five tests and ten subtests, including issued/overdue balances and
 retry-key preservation (`pr-closed-balance-red.log`, `pr-closed-balance-green.log`).
+
+Fresh checks on the integrated branch:
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Full Platform suite | 9,783 tests run, 35 skipped; the only 16 errors were sandbox denials of loopback socket binding | `pr-full-suite.log` |
+| All 16 affected TLS tests, with loopback access | Passed, exit 0 | `pr-tls-rerun.log` |
+| Full Portal suite | 1,324 passed, 3 skipped, 271 subtests passed; exit 0 | `pr-portal-suite.log` |
+| Counter store | 18 passed, 3 skipped, 8 subtests passed | `pr-remaining-suites.log` |
+| Integration, parity and deployment | 135 passed, 11 skipped, 3 subtests passed | `pr-remaining-suites.log` |
+| Database cache and service isolation | 9 passed / 1 skipped for cache, 1 passed for isolation; combined Make command exit 0 | `pr-remaining-suites.log` |
+| Lint, types, migration state | Passed, exit 0; 491 Platform / 86 Portal files; no migration drift | `pr-quality.log` |
+| Templates | Same 90 blockers and 553 warnings as current master; normalized findings match exactly | `pr-templates.log` |
+
+The initial `make test` command exited 2 at the Platform phase because of the sandbox
+socket restriction. Its passing cases were retained as evidence; all affected tests
+were rerun successfully without changing their code or assertions. The remaining
+Make suite targets were run separately. This is not a claim that the initial command
+exited successfully.
