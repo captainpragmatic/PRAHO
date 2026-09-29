@@ -8,7 +8,8 @@ from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 
 from apps.api_client.services import PlatformAPIError
-from apps.billing.serializers import create_proforma_from_api
+from apps.billing.forms import GiftCardPaymentForm
+from apps.billing.serializers import create_invoice_from_api, create_proforma_from_api
 
 
 def proforma_data():
@@ -30,7 +31,10 @@ def proforma_data():
 class GiftPaymentDisplayTests(SimpleTestCase):
     def test_remaining_payment_comes_from_api_without_changing_document_total(self):
         proforma = create_proforma_from_api(proforma_data())
-        html = render_to_string("billing/partials/gift_card_payment.html", {"proforma": proforma})
+        html = render_to_string(
+            "billing/partials/gift_card_payment.html",
+            {"proforma": proforma, "gift_card_form": GiftCardPaymentForm()},
+        )
         self.assertEqual(proforma.total_cents, 12100)
         self.assertIn("50.00", html)
         self.assertIn("71.00", html)
@@ -50,6 +54,46 @@ class GiftPaymentFlowTests(TestCase):
             }
         )
         session.save()
+
+    @patch("apps.billing.views.InvoiceViewService.get_invoice_detail")
+    def test_closed_invoices_do_not_ask_the_customer_to_pay_again(self, fetch):
+        for status in ("paid", "refunded", "partially_refunded", "void"):
+            with self.subTest(status=status):
+                fetch.return_value = create_invoice_from_api(
+                    {**proforma_data(), "number": "INV-GIFT", "status": status, "amount_due": 7100}
+                )
+                response = self.client.get(reverse("billing:invoice_detail", args=["INV-GIFT"]))
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, "INV-GIFT")
+                self.assertNotContains(response, 'data-testid="payment-balance"')
+                self.assertNotContains(response, "Apply gift-card balance")
+
+    @patch("apps.billing.views.InvoiceViewService.get_invoice_detail")
+    def test_payable_invoices_keep_their_authoritative_balance(self, fetch):
+        for status in ("issued", "overdue"):
+            with self.subTest(status=status):
+                fetch.return_value = create_invoice_from_api(
+                    {**proforma_data(), "number": "INV-GIFT", "status": status, "amount_due": 7100}
+                )
+                response = self.client.get(reverse("billing:invoice_detail", args=["INV-GIFT"]))
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, 'data-testid="payment-balance"')
+                self.assertContains(response, "71.00 RON")
+                self.assertContains(response, "Apply gift-card balance")
+
+    @patch("apps.billing.views.InvoiceViewService.get_proforma_detail")
+    def test_closed_or_expired_proformas_do_not_request_payment(self, fetch):
+        for status in ("converted", "cancelled", "expired", "sent"):
+            with self.subTest(status=status):
+                data = {**proforma_data(), "status": status}
+                if status == "sent":
+                    data["valid_until"] = "2000-01-01T00:00:00Z"
+                fetch.return_value = create_proforma_from_api(data)
+                response = self.client.get(reverse("billing:proforma_detail", args=["PRO-GIFT"]))
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, "PRO-GIFT")
+                self.assertNotContains(response, 'data-testid="payment-balance"')
+                self.assertNotContains(response, "Apply gift-card balance")
 
     @patch("apps.billing.views.InvoiceViewService.get_proforma_detail")
     @patch("apps.billing.views.PlatformAPIClient.post")

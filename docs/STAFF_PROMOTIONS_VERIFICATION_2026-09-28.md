@@ -173,3 +173,10 @@ conflict was the parity test moved to `tests/integration/` on master; the new bu
 attribute parity assertion was moved with it so the integration runner collects it.
 The later public API markers, proforma rollback fix, billing signal fixes, Portal
 maintenance handling and checkout error translations remain in the combined tree.
+
+Reviewing the browser evidence identified a misleading payment-balance panel on
+refunded invoices and closed/expired proformas. Payment actions were already blocked;
+the panel now follows the same payable-document decision. New view tests failed for
+all eight closed/expired cases before the template fix. Afterward the focused Portal
+module passed all five tests and ten subtests, including issued/overdue balances and
+retry-key preservation (`pr-closed-balance-red.log`, `pr-closed-balance-green.log`).

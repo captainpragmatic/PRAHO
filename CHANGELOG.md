@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Staff domain filters and pagination, Audit Apply Filters, and shared button attribute rendering.
 - Staff settlement now confirms only the cash remaining after gift-card reservations.
+- Closed invoices and expired or closed proformas no longer display a request to pay again.
 - Invoice line totals render correctly on desktop and mobile, and refund dialogs remain clickable.
 - Delayed local split refunds can resume without a gateway deadline; ledger transitions and
   customer-authorized gift spending retain audit entries.
