@@ -67,6 +67,11 @@ rounding reconciled across partial refunds. A durable command records each leg b
 provider I/O. Confirmed provider facts commit before local projection, so a retry
 reuses the original operation and skips completed legs.
 
+Partial split-refund requests must include an `idempotency_key`. Reuse the same key
+when retrying one request, and use a new key for a separate partial refund, even if
+its amount and reason are identical. Staff forms supply this key. Legacy full-refund
+requests can still resume their original command without an explicit key.
+
 On the staff invoice or order page, **Resume refund** retries the stored unfinished
 command. The API reports completed, processing or failed status explicitly. Customers
 cannot invoke the staff recovery action. An old uncertain provider attempt requires

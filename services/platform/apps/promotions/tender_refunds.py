@@ -329,7 +329,12 @@ def refund_from_existing_flow(
     raw_reason = data.get("reason") or "customer_request"
     reason = raw_reason.value if isinstance(raw_reason, RefundReason) else str(raw_reason)
     requested = data.get("amount_cents", data.get("amount", 0))
-    key = data.get("idempotency_key") or f"legacy:{invoice_id}:{'full' if full else requested}:{reason}"
+    key = data.get("idempotency_key")
+    if not full and (not isinstance(key, str) or not key.strip()):
+        return Err(_("An idempotency_key is required for partial refunds."))
+    # Only a whole-document refund has a unique legacy identity. Equal partial
+    # amounts and reasons can describe independent requests, so they need a caller key.
+    key = key or f"legacy:{invoice_id}:full:{reason}"
     existing = TenderRefundCommand.objects.filter(
         operation_key=_operation_key(invoice.customer_id, "tender-refund", key)
     ).first()

@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Invoice line totals render correctly on desktop and mobile, and refund dialogs remain clickable.
 - Delayed local split refunds can resume without a gateway deadline; ledger transitions and
   customer-authorized gift spending retain audit entries.
+- Partial split refunds require a request identifier so separate refunds of the same amount
+  are not mistaken for retries.
+- The coupon campaign filter is populated, staff offer links respect permissions, and promotion
+  dates follow staff timezone and date format preferences.
 - Suspending a customer now suspends their services. The cascade called a method that does not
   exist, so the failure was swallowed and every service kept running while the account read as
   suspended. Returning the customer to active resumes exactly the services that cascade stopped,

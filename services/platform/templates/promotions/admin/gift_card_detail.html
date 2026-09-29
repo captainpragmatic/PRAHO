@@ -1,5 +1,5 @@
 {% extends "promotions/admin/base.html" %}
-{% load i18n formatting ui_components %}
+{% load i18n formatting ui_components localisation_tags %}
 {% block promotion_content %}
   <h1 class="text-2xl font-semibold text-white">{% trans "Gift card" %} {{ gift_card.code }}</h1>
   <section class="space-y-3 rounded-lg border border-slate-700 bg-slate-800 p-6 text-slate-300">
@@ -18,6 +18,6 @@
     {% endif %}
   </section>
   <section class="space-y-3"><h2 class="text-xl text-white">{% trans "Transactions" %}</h2><ul class="divide-y divide-slate-700 rounded-lg border border-slate-700 bg-slate-800">
-    {% for entry in transactions %}<li class="flex flex-wrap justify-between gap-3 p-4 text-sm text-slate-300"><span>{{ entry.created_at }}</span><span>{{ entry.get_transaction_type_display }}</span><span>{{ entry.amount_cents|cents_to_currency }} {{ gift_card.currency.code }}</span><span>{{ entry.customer|default:'—' }}</span></li>{% empty %}<li class="p-6 text-slate-400">{% trans "No transactions yet." %}</li>{% endfor %}
+    {% for entry in transactions %}<li class="flex flex-wrap justify-between gap-3 p-4 text-sm text-slate-300"><span>{% localised_date entry.created_at "datetime" %}</span><span>{{ entry.get_transaction_type_display }}</span><span>{{ entry.amount_cents|cents_to_currency }} {{ gift_card.currency.code }}</span><span>{{ entry.customer|default:'—' }}</span></li>{% empty %}<li class="p-6 text-slate-400">{% trans "No transactions yet." %}</li>{% endfor %}
   </ul></section>
 {% endblock %}

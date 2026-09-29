@@ -119,6 +119,49 @@ class PromotionStaffWorkflowTests(TestCase):
         self.assertEqual(self.client.get(reverse("promotions:dashboard")).status_code, 403)
         self.assertEqual(self.client.post(reverse("promotions:coupon_batch_create"), {"count": 2}).status_code, 403)
 
+    def test_support_can_read_offers_without_an_unusable_edit_link(self) -> None:
+        support = get_user_model().objects.create_user(email="promo-support@example.test", staff_role="support")
+        self.client.force_login(support)
+        edit_url = reverse("promotions:rule_update", kwargs={"pk": self.rule.pk})
+        response = self.client.get(reverse("promotions:rule_list"))
+        self.assertContains(response, self.rule.name)
+        self.assertNotContains(response, edit_url)
+        self.assertEqual(self.client.get(edit_url).status_code, 403)
+        self.assertEqual(self.client.post(edit_url, {"name": "Forbidden change"}).status_code, 403)
+        self.rule.refresh_from_db()
+        self.assertEqual(self.rule.name, "Spring rule")
+
+    def test_financial_staff_keep_the_offer_edit_link(self) -> None:
+        for role in ("admin", "billing"):
+            with self.subTest(role=role):
+                user = get_user_model().objects.create_user(email=f"promo-{role}@example.test", staff_role=role)
+                self.client.force_login(user)
+                edit_url = reverse("promotions:rule_update", kwargs={"pk": self.rule.pk})
+                response = self.client.get(reverse("promotions:rule_list"))
+                self.assertContains(response, edit_url)
+                self.assertContains(self.client.get(edit_url), 'name="minimum_subtotal"')
+
+    def test_coupon_campaign_filter_has_options_and_filters_records(self) -> None:
+        self.coupon.campaign = self.campaign
+        self.coupon.save(update_fields=["campaign"])
+        Coupon.objects.create(code="UNRELATED", name="Unrelated coupon", discount_type="percent", discount_percent=5)
+        inactive = PromotionCampaign.objects.create(
+            name="Inactive campaign", slug="inactive-campaign", start_date=timezone.now(), is_active=False
+        )
+        response = self.client.get(reverse("promotions:coupon_list"), {"campaign": self.campaign.pk})
+        self.assertContains(response, 'name="campaign"')
+        self.assertContains(response, f'value="{self.campaign.pk}" selected')
+        self.assertContains(response, self.campaign.name)
+        self.assertNotContains(response, str(inactive.pk))
+        self.assertContains(response, self.coupon.code)
+        self.assertNotContains(response, "UNRELATED")
+
+    def test_coupon_campaign_filter_rejects_a_malformed_identifier(self) -> None:
+        response = self.client.get(reverse("promotions:coupon_list"), {"campaign": "not-a-uuid"})
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, self.coupon.code)
+        self.assertContains(response, "No records found")
+
     def test_offer_edit_preserves_all_supported_product_restrictions(self) -> None:
         for model, form_class in ((self.coupon, CouponForm), (self.rule, PromotionRuleForm)):
             with self.subTest(model=model):

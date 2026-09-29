@@ -199,3 +199,31 @@ socket restriction. Its passing cases were retained as evidence; all affected te
 were rerun successfully without changing their code or assertions. The remaining
 Make suite targets were run separately. This is not a claim that the initial command
 exited successfully.
+
+## Review fixes: 2026-09-29
+
+Partial split refunds now require an explicit request identifier. Previously, two
+separate requests with the same amount and reason could resolve to one fallback
+command. The regression tests reproduced missing-key requests returning success and
+calling the gateway. They now return an error before creating refund instructions.
+Separate keys create separate partial refunds; replaying a key and resuming a legacy
+full refund reuse the original command and restore each gift balance once.
+
+The coupon list now supplies campaigns before building its filter. Support staff
+can read automatic offers without receiving a link to an edit page they cannot use;
+financial staff retain that link. Campaign, referral, coupon, gift-card, loyalty and
+redemption timestamps use the request's date format and timezone. Tests cross a year
+boundary using both Bucharest and New York preferences and preserve missing-date
+placeholders. Before the fixes, the filter, support link and all 14 timestamp cases
+failed their regression assertions (`pr561-review-red.log`, `pr561-refund-red.log`).
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Promotions, billing views, order refunds and authorization, localisation helpers and settings consumers | 433 tests run, 6 existing PostgreSQL-only race tests skipped; exit 0 | `pr561-review-green.log` |
+| Full lint | Passed, exit 0 | `pr561-lint-green.log` |
+| Types and migration state | Passed, exit 0; 491 Platform / 86 Portal files; no migration drift | `pr561-types-migrations-green.log` |
+| Templates | Byte-for-byte match with the pre-fix scan: 90 existing blockers, 553 warnings | `pr561-templates-before.log`, `pr561-templates-after.log` |
+
+These refund requests exercise the real HMAC middleware and refund services through
+Django's test client, with the payment gateway mocked at its external boundary. The
+full suites and browser checks above were not repeated for these review fixes.

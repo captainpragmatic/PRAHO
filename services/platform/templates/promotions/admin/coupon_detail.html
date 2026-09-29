@@ -1,10 +1,11 @@
 {% extends "promotions/admin/base.html" %}
-{% load i18n ui_components formatting %}
+{% load i18n ui_components formatting localisation_tags %}
 {% block promotion_content %}
   <div class="flex flex-wrap justify-between gap-3"><h1 class="text-2xl font-semibold text-white">{{ coupon.code }} · {{ coupon.name }}</h1>{% if request.user.can_manage_financial_data %}{% url 'promotions:coupon_update' pk=coupon.pk as edit_url %}{% button _("Edit coupon") href=edit_url %}{% endif %}</div>
   <section class="space-y-3 rounded-lg border border-slate-700 bg-slate-800 p-6 text-slate-300">
     <p>{{ coupon.description|linebreaksbr }}</p><p>{{ coupon.get_status_display }} · {{ coupon.get_discount_type_display }}</p>
-    <dl class="grid gap-4 sm:grid-cols-3"><div><dt>{% trans "Redemptions" %}</dt><dd class="text-xl text-white">{{ stats.total_redemptions }}</dd></div><div><dt>{% trans "Customers" %}</dt><dd class="text-xl text-white">{{ stats.unique_customers }}</dd></div><div><dt>{% trans "Valid until" %}</dt><dd class="text-white">{{ coupon.valid_until|default:'—' }}</dd></div></dl>
+    {% localised_date coupon.valid_until "datetime" as valid_until %}
+    <dl class="grid gap-4 sm:grid-cols-3"><div><dt>{% trans "Redemptions" %}</dt><dd class="text-xl text-white">{{ stats.total_redemptions }}</dd></div><div><dt>{% trans "Customers" %}</dt><dd class="text-xl text-white">{{ stats.unique_customers }}</dd></div><div><dt>{% trans "Valid until" %}</dt><dd class="text-white">{{ valid_until|default:'—' }}</dd></div></dl>
     {% if coupon.internal_notes %}<h2 class="font-semibold text-white">{% trans "Staff notes" %}</h2><p>{{ coupon.internal_notes|linebreaksbr }}</p>{% endif %}
   </section>
   <section class="space-y-3"><h2 class="text-xl text-white">{% trans "Redemption history" %}</h2>{% include 'promotions/admin/redemptions.html' %}</section>

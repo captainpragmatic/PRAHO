@@ -795,10 +795,11 @@ class CouponListView(StaffRequiredMixin, ListView):
         return queryset
 
     def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
+        # StaffRequiredMixin builds filter options while preparing the shared context.
+        kwargs["campaigns"] = PromotionCampaign.objects.filter(is_active=True)
         context = super().get_context_data(**kwargs)
         context["statuses"] = [{"value": value, "label": label} for value, label in Coupon.STATUS_CHOICES]
         context["discount_types"] = [{"value": value, "label": label} for value, label in Coupon.DISCOUNT_TYPES]
-        context["campaigns"] = PromotionCampaign.objects.filter(is_active=True)
         return context
 
 

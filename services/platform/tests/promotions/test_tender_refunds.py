@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -14,16 +14,19 @@ from apps.billing.issuers.service import _split_correction_refusal
 from apps.billing.models import Currency, Payment, Refund
 from apps.billing.refund_service import RefundReason, RefundService, RefundType
 from apps.customers.models import Customer
+from apps.orders.models import Order
 from apps.promotions import tender_refunds
 from apps.promotions.gift_cards import pay_document
 from apps.promotions.models import GiftCard, GiftCardTransaction
 from apps.promotions.tender_refunds import refund_document
+from apps.users.models import CustomerMembership
+from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
 
 
-class TenderRefundTests(TestCase):
+class TenderRefundTests(HMACTestMixin, TestCase):
     def setUp(self) -> None:
         self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"name": "Leu", "symbol": "lei"})
-        self.customer = Customer.objects.create(name="Split buyer", customer_type="individual")
+        self.customer = Customer.objects.create(name="Split buyer", customer_type="individual", status="active")
         self.card = GiftCard.objects.create(
             code="EXISTING-BALANCE",
             currency=self.currency,
@@ -73,6 +76,97 @@ class TenderRefundTests(TestCase):
         self.assertTrue(result.is_ok(), result)
         self.invoice.refresh_from_db()
         self.assertEqual(self.invoice.status, "refunded")
+
+    def _refund_api_payload(self) -> dict:
+        user, _ = get_user_model().objects.get_or_create(email="split-refund-owner@example.test")
+        CustomerMembership.objects.get_or_create(user=user, customer=self.customer, defaults={"role": "owner"})
+        return {
+            "payment_id": str(self.cash.pk),
+            "customer_id": self.customer.pk,
+            "user_id": user.pk,
+            "amount_cents": 6050,
+            "reason": "customer_request",
+        }
+
+    @override_settings(PLATFORM_API_SECRET=HMAC_TEST_SECRET, MIDDLEWARE=HMAC_TEST_MIDDLEWARE)
+    def test_partial_refund_api_requires_an_explicit_identifier_before_moving_money(self) -> None:
+        payload = self._refund_api_payload()
+        with patch("apps.promotions.tender_refunds.PaymentGatewayFactory.create_gateway") as factory:
+            factory.return_value.refund_payment.return_value = self.gateway_result(3550)
+            for key in (None, "", "   "):
+                with self.subTest(key=key):
+                    data = dict(payload)
+                    if key is not None:
+                        data["idempotency_key"] = key
+                    response = self.portal_post(reverse("billing:api_process_refund"), data)
+                    self.assertEqual(response.status_code, 400)
+                    self.assertIn("idempotency_key", response.json()["error"])
+            factory.assert_not_called()
+        self.assertFalse(self.invoice.tender_refund_commands.exists())
+        self.assertFalse(Refund.objects.filter(invoice=self.invoice).exists())
+        self.card.refresh_from_db()
+        self.assertEqual(self.card.current_balance_cents, 0)
+
+    @override_settings(PLATFORM_API_SECRET=HMAC_TEST_SECRET, MIDDLEWARE=HMAC_TEST_MIDDLEWARE)
+    def test_partial_refund_api_distinguishes_new_requests_from_retries(self) -> None:
+        payload = {**self._refund_api_payload(), "idempotency_key": "first-half"}
+        with patch("apps.promotions.tender_refunds.PaymentGatewayFactory.create_gateway") as factory:
+            factory.return_value.refund_payment.return_value = self.gateway_result(3550, "re_first_half")
+            first = self.portal_post(reverse("billing:api_process_refund"), dict(payload))
+            retry = self.portal_post(reverse("billing:api_process_refund"), dict(payload))
+            self.assertEqual(first.status_code, 200)
+            self.assertEqual(retry.status_code, 200)
+            self.assertEqual(first.json()["refund_id"], retry.json()["refund_id"])
+            factory.return_value.refund_payment.assert_called_once()
+            factory.return_value.refund_payment.return_value = self.gateway_result(3550, "re_second_half")
+            second = self.portal_post(
+                reverse("billing:api_process_refund"), {**payload, "idempotency_key": "second-half"}
+            )
+            self.assertEqual(second.status_code, 200)
+            self.assertNotEqual(first.json()["refund_id"], second.json()["refund_id"])
+            self.assertEqual(factory.return_value.refund_payment.call_count, 2)
+        self.card.refresh_from_db()
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.card.current_balance_cents, 5000)
+        self.assertEqual(self.invoice.status, "refunded")
+        self.assertEqual(self.invoice.tender_refund_commands.count(), 2)
+
+    def test_keyless_full_refund_can_resume_and_replay_the_original_command(self) -> None:
+        data = {"refund_type": RefundType.FULL, "reason": RefundReason.CUSTOMER_REQUEST}
+        with patch("apps.promotions.tender_refunds.PaymentGatewayFactory.create_gateway") as factory:
+            factory.return_value.refund_payment.side_effect = TimeoutError("lost response")
+            first = RefundService.refund_invoice(self.invoice.pk, dict(data))
+            self.assertTrue(first.is_ok(), first)
+            self.assertEqual(first.unwrap()["refund_status"], "failed")
+            provider_key = factory.return_value.refund_payment.call_args.kwargs["idempotency_key"]
+            factory.return_value.refund_payment.side_effect = None
+            factory.return_value.refund_payment.return_value = self.gateway_result(7100)
+            retry = RefundService.refund_invoice(self.invoice.pk, dict(data))
+            replay = RefundService.refund_invoice(self.invoice.pk, dict(data))
+            self.assertTrue(retry.is_ok(), retry)
+            self.assertTrue(replay.is_ok(), replay)
+            self.assertEqual(first.unwrap()["refund_id"], retry.unwrap()["refund_id"])
+            self.assertEqual(retry.unwrap()["refund_id"], replay.unwrap()["refund_id"])
+            self.assertEqual(replay.unwrap()["refund_status"], "completed")
+            self.assertEqual(factory.return_value.refund_payment.call_args.kwargs["idempotency_key"], provider_key)
+            self.assertEqual(factory.return_value.refund_payment.call_count, 2)
+        self.card.refresh_from_db()
+        self.assertEqual(self.card.current_balance_cents, 5000)
+        self.assertEqual(GiftCardTransaction.objects.filter(gift_card=self.card, transaction_type="refund").count(), 1)
+
+    def test_order_partial_refund_also_requires_a_request_identifier(self) -> None:
+        order = Order.objects.create(
+            customer=self.customer, currency=self.currency, invoice=self.invoice,
+            order_number="ORD-SPLIT-REFUND", status="paid", total_cents=self.invoice.total_cents,
+        )
+        with patch("apps.promotions.tender_refunds.PaymentGatewayFactory.create_gateway") as factory:
+            result = RefundService.refund_order(
+                order.pk, {"refund_type": RefundType.PARTIAL, "amount_cents": 6050, "reason": "customer_request"}
+            )
+            self.assertTrue(result.is_err(), result)
+            self.assertIn("idempotency_key", result.unwrap_err())
+            factory.assert_not_called()
+        self.assertFalse(self.invoice.tender_refund_commands.exists())
 
     def test_partial_and_final_refunds_reconcile_original_tenders_and_preserve_vat(self) -> None:
         with patch("apps.promotions.tender_refunds.PaymentGatewayFactory.create_gateway") as factory:

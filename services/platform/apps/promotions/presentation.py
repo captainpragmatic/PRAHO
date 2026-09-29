@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime
 from typing import Any
 
 from django.http import HttpRequest
 from django.urls import reverse
 from django.utils.translation import gettext as _
+
+from apps.common.localisation import DisplayLocalisation, format_localised_date
+from apps.common.localisation_services import get_request_localisation
 
 from .models import GiftCard, Referral
 
@@ -21,7 +25,7 @@ SECTIONS = (
 )
 
 
-def _value(record: Any, path: str) -> Any:
+def _value(record: Any, path: str, localisation: DisplayLocalisation) -> Any:
     value = record
     for part in path.split("."):
         value = getattr(value, part, None)
@@ -29,13 +33,18 @@ def _value(record: Any, path: str) -> Any:
             value = value()
         if value is None:
             return "—"
+    if isinstance(value, (date, datetime)):
+        return format_localised_date(value, localisation, "datetime" if isinstance(value, datetime) else "date")
     return value
 
 
-def record_table(records: Any, fields: tuple[tuple[str, str], ...], route: str = "") -> dict[str, Any]:
+def record_table(
+    request: HttpRequest, records: Any, fields: tuple[tuple[str, str], ...], route: str = ""
+) -> dict[str, Any]:
+    localisation = get_request_localisation(request)
     rows = []
     for record in records:
-        row = {"cells": [{"text": _value(record, path)} for _, path in fields], "actions": []}
+        row = {"cells": [{"text": _value(record, path, localisation)} for _, path in fields], "actions": []}
         if route:
             row["actions"] = [
                 {
@@ -129,7 +138,9 @@ def staff_context(request: HttpRequest, context: dict[str, Any]) -> dict[str, An
         ]
     if route in LISTS:
         title, key, fields, detail, create = LISTS[route]
-        context.update(record_table(context.get(key, []), fields, detail))
+        if route == "rule_list" and not getattr(request.user, "can_manage_financial_data", False):
+            detail = ""
+        context.update(record_table(request, context.get(key, []), fields, detail))
         context["page_title"] = _(title)
         context["create_url"] = reverse(f"promotions:{create}") if create else ""
     return context
