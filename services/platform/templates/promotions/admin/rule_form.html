@@ -1,0 +1,4 @@
+{% extends "promotions/admin/form.html" %}
+{% load i18n %}
+{% block form_title %}{% trans "Automatic offer" %}{% endblock %}
+{% block form_help %}<p class="text-sm text-slate-300">{% trans "Only matching, active offers apply. Offers stack only when both allow stacking." %}</p>{% endblock %}

@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% load i18n ui_components %}
+{% block title %}{% trans "Promotions" %} - PRAHO Platform{% endblock %}
+{% block content %}
+<div class="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6">
+  <nav aria-label="{% trans 'Promotion management' %}" class="flex flex-wrap gap-2">
+    {% for item in promotion_navigation %}
+      <a href="{{ item.url }}" class="rounded-lg px-3 py-2 text-sm {% if item.active %}bg-blue-600 text-white{% else %}bg-slate-800 text-slate-200 hover:bg-slate-700{% endif %}" {% if item.active %}aria-current="page"{% endif %}>{{ item.label }}</a>
+    {% endfor %}
+  </nav>
+  {% block promotion_content %}{% endblock %}
+</div>
+{% endblock %}

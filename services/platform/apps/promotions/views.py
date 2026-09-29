@@ -6,13 +6,15 @@ Handles coupon validation, application, and promotion management.
 from __future__ import annotations
 
 import logging
-from typing import Any, ClassVar
+from typing import Any, cast
 
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
 from django.db.models import Count, Q, QuerySet, Sum
 from django.http import HttpRequest, HttpResponse, JsonResponse
-from django.shortcuts import redirect
+from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
 from django.utils.decorators import method_decorator
@@ -21,6 +23,7 @@ from django.views import View
 from django.views.generic import (
     CreateView,
     DetailView,
+    FormView,
     ListView,
     TemplateView,
     UpdateView,
@@ -28,6 +31,7 @@ from django.views.generic import (
 
 from apps.common.rate_limiting import rate_limit
 
+from .forms import CampaignForm, CouponBatchForm, CouponForm, GiftCardForm, PromotionRuleForm
 from .models import (
     Coupon,
     CouponRedemption,
@@ -39,6 +43,7 @@ from .models import (
     PromotionRule,
     Referral,
 )
+from .presentation import staff_context
 from .services import (
     CouponService,
     GiftCardService,
@@ -57,6 +62,9 @@ class StaffRequiredMixin(LoginRequiredMixin, UserPassesTestMixin):
 
     def test_func(self) -> bool:
         return bool(getattr(self.request.user, "is_staff_user", False))
+
+    def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
+        return staff_context(self.request, super().get_context_data(**kwargs))
 
 
 # ===============================================================================
@@ -640,8 +648,10 @@ class CampaignListView(StaffRequiredMixin, ListView):
 
     def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         context = super().get_context_data(**kwargs)
-        context["statuses"] = PromotionCampaign.STATUS_CHOICES
-        context["campaign_types"] = PromotionCampaign.CAMPAIGN_TYPES
+        context["statuses"] = [{"value": value, "label": label} for value, label in PromotionCampaign.STATUS_CHOICES]
+        context["campaign_types"] = [
+            {"value": value, "label": label} for value, label in PromotionCampaign.CAMPAIGN_TYPES
+        ]
         return context
 
 
@@ -685,23 +695,34 @@ class CampaignDetailView(StaffRequiredMixin, DetailView):
         return context
 
 
-class CampaignCreateView(StaffRequiredMixin, CreateView):
+class FinancialStaffRequiredMixin(StaffRequiredMixin):
+    def test_func(self) -> bool:
+        return bool(self.request.user.can_manage_financial_data)
+
+
+class LockedPromotionUpdateMixin:
+    """Rebind editable fields after locking so staff saves cannot overwrite counters."""
+
+    object: Any
+
+    def form_valid(self, form: Any) -> HttpResponse:
+        with transaction.atomic():
+            locked = self.model.objects.select_for_update().get(pk=self.object.pk)
+            current = self.form_class(self.request.POST, instance=locked)
+            if not current.is_valid():
+                return cast(HttpResponse, self.form_invalid(current))
+            current.instance._audit_actor = self.request.user
+            self.object = current.save()
+        messages.success(self.request, _("Promotion updated successfully."))
+        return redirect(self.get_success_url())
+
+
+class CampaignCreateView(FinancialStaffRequiredMixin, CreateView):
     """Create a new campaign."""
 
     model = PromotionCampaign
     template_name = "promotions/admin/campaign_form.html"
-    fields: ClassVar[list[str]] = [
-        "name",
-        "slug",
-        "description",
-        "campaign_type",
-        "start_date",
-        "end_date",
-        "budget_cents",
-        "utm_source",
-        "utm_medium",
-        "utm_campaign",
-    ]
+    form_class = CampaignForm
     success_url = reverse_lazy("promotions:campaign_list")
 
     def form_valid(self, form: Any) -> HttpResponse:
@@ -710,32 +731,26 @@ class CampaignCreateView(StaffRequiredMixin, CreateView):
         return super().form_valid(form)
 
 
-class CampaignUpdateView(StaffRequiredMixin, UpdateView):
+class CampaignUpdateView(FinancialStaffRequiredMixin, UpdateView):
     """Update a campaign."""
 
     model = PromotionCampaign
     template_name = "promotions/admin/campaign_form.html"
-    fields: ClassVar[list[str]] = [
-        "name",
-        "slug",
-        "description",
-        "campaign_type",
-        "start_date",
-        "end_date",
-        "budget_cents",
-        "status",
-        "is_active",
-        "utm_source",
-        "utm_medium",
-        "utm_campaign",
-    ]
+    form_class = CampaignForm
 
     def get_success_url(self) -> str:
         return reverse("promotions:campaign_detail", kwargs={"pk": self.object.pk})
 
-    def form_valid(self, form: Any) -> HttpResponse:
-        messages.success(self.request, f"Campaign '{form.instance.name}' updated successfully.")
-        return super().form_valid(form)
+    def form_valid(self, form: CampaignForm) -> HttpResponse:
+        with transaction.atomic():
+            locked = PromotionCampaign.objects.select_for_update().get(pk=self.object.pk)
+            current = CampaignForm(self.request.POST, instance=locked)
+            if not current.is_valid():
+                return self.form_invalid(current)
+            current.instance._audit_actor = self.request.user
+            self.object = current.save()
+        messages.success(self.request, _("Campaign updated successfully."))
+        return redirect(self.get_success_url())
 
 
 # ===============================================================================
@@ -767,7 +782,10 @@ class CouponListView(StaffRequiredMixin, ListView):
         # Filter by campaign
         campaign = self.request.GET.get("campaign")
         if campaign:
-            queryset = queryset.filter(campaign_id=campaign)
+            try:
+                queryset = queryset.filter(campaign_id=campaign)
+            except ValidationError:
+                queryset = queryset.none()
 
         # Search
         search = self.request.GET.get("search")
@@ -777,10 +795,11 @@ class CouponListView(StaffRequiredMixin, ListView):
         return queryset
 
     def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
+        # StaffRequiredMixin builds filter options while preparing the shared context.
+        kwargs["campaigns"] = PromotionCampaign.objects.filter(is_active=True)
         context = super().get_context_data(**kwargs)
-        context["statuses"] = Coupon.STATUS_CHOICES
-        context["discount_types"] = Coupon.DISCOUNT_TYPES
-        context["campaigns"] = PromotionCampaign.objects.filter(is_active=True)
+        context["statuses"] = [{"value": value, "label": label} for value, label in Coupon.STATUS_CHOICES]
+        context["discount_types"] = [{"value": value, "label": label} for value, label in Coupon.DISCOUNT_TYPES]
         return context
 
 
@@ -812,36 +831,12 @@ class CouponDetailView(StaffRequiredMixin, DetailView):
         return context
 
 
-class CouponCreateView(StaffRequiredMixin, CreateView):
+class CouponCreateView(FinancialStaffRequiredMixin, CreateView):
     """Create a new coupon."""
 
     model = Coupon
     template_name = "promotions/admin/coupon_form.html"
-    fields: ClassVar[list[str]] = [
-        "code",
-        "name",
-        "description",
-        "campaign",
-        "discount_type",
-        "discount_percent",
-        "discount_amount_cents",
-        "max_discount_cents",
-        "min_order_cents",
-        "min_order_items",
-        "valid_from",
-        "valid_until",
-        "usage_limit_type",
-        "max_total_uses",
-        "max_uses_per_customer",
-        "customer_target",
-        "first_order_only",
-        "is_stackable",
-        "is_exclusive",
-        "stacking_priority",
-        "is_active",
-        "is_public",
-        "currency",
-    ]
+    form_class = CouponForm
     success_url = reverse_lazy("promotions:coupon_list")
 
     def get_form(self, form_class: Any = None) -> Any:
@@ -857,107 +852,56 @@ class CouponCreateView(StaffRequiredMixin, CreateView):
         return super().form_valid(form)
 
 
-class CouponUpdateView(StaffRequiredMixin, UpdateView):
+class CouponUpdateView(LockedPromotionUpdateMixin, FinancialStaffRequiredMixin, UpdateView):
     """Update a coupon."""
 
     model = Coupon
     template_name = "promotions/admin/coupon_form.html"
-    fields: ClassVar[list[str]] = [
-        "name",
-        "description",
-        "campaign",
-        "discount_type",
-        "discount_percent",
-        "discount_amount_cents",
-        "max_discount_cents",
-        "min_order_cents",
-        "min_order_items",
-        "valid_from",
-        "valid_until",
-        "usage_limit_type",
-        "max_total_uses",
-        "max_uses_per_customer",
-        "customer_target",
-        "first_order_only",
-        "is_stackable",
-        "is_exclusive",
-        "stacking_priority",
-        "status",
-        "is_active",
-        "is_public",
-    ]
+    form_class = CouponForm
 
     def get_success_url(self) -> str:
         return reverse("promotions:coupon_detail", kwargs={"pk": self.object.pk})
 
-    def form_valid(self, form: Any) -> HttpResponse:
-        messages.success(self.request, f"Coupon '{form.instance.code}' updated successfully.")
-        return super().form_valid(form)
 
-
-class CouponBatchCreateView(StaffRequiredMixin, TemplateView):
-    """Create a batch of coupons."""
+class CouponBatchCreateView(FinancialStaffRequiredMixin, FormView):
+    """Validate the complete batch before atomically creating and auditing it."""
 
     template_name = "promotions/admin/coupon_batch_form.html"
-    _DEFAULT_MAX_BATCH_SIZE = 1000  # Fallback; runtime value from SettingsService
+    form_class = CouponBatchForm
+    success_url = reverse_lazy("promotions:coupon_list")
 
-    def _get_max_batch_size(self) -> int:
-        """Get max batch size from SettingsService at runtime."""
-        from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
-            SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
-        )
+    def form_valid(self, form: CouponBatchForm) -> HttpResponse:
+        from apps.audit.services import AuditService  # noqa: PLC0415
 
-        return SettingsService.get_integer_setting("promotions.max_coupon_batch_size", self._DEFAULT_MAX_BATCH_SIZE)
-
-    def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
-        max_batch_size = self._get_max_batch_size()
-
-        # Validate and sanitize count input
+        data = form.cleaned_data
         try:
-            count = int(request.POST.get("count", 10))
-        except (ValueError, TypeError):
-            messages.error(request, _("Invalid count value. Please enter a number."))
-            return redirect("promotions:coupon_batch_create")
-
-        # Enforce limits
-        if count < 1:
-            messages.error(request, _("Count must be at least 1."))
-            return redirect("promotions:coupon_batch_create")
-        if count > max_batch_size:
-            messages.error(
-                request,
-                f"Count exceeds maximum batch size of {max_batch_size}. "
-                "Please create multiple batches for larger quantities.",
-            )
-            return redirect("promotions:coupon_batch_create")
-
-        # Validate and sanitize prefix (alphanumeric only, limited length)
-        prefix = request.POST.get("prefix", "")
-        if prefix:
-            prefix = "".join(c for c in prefix if c.isalnum())[:10]
-
-        # Get common coupon settings from form
-        coupon_defaults = {
-            "name": request.POST.get("name", f"Batch {timezone.now().strftime('%Y%m%d')}"),
-            "discount_type": request.POST.get("discount_type", "percent"),
-            "discount_percent": request.POST.get("discount_percent"),
-            "discount_amount_cents": request.POST.get("discount_amount_cents"),
-            "usage_limit_type": "single_use",
-            "created_by": request.user,
-        }
-
-        # Clean up None values
-        coupon_defaults = {k: v for k, v in coupon_defaults.items() if v is not None}
-
-        # Generate batch
-        coupons = Coupon.generate_batch(
-            count=count,
-            prefix=prefix,
-            **coupon_defaults,  # type: ignore[arg-type]
-        )
-
-        messages.success(request, f"Created {len(coupons)} coupons successfully.")
-        return redirect("promotions:coupon_list")
+            with transaction.atomic():
+                coupons = Coupon.generate_batch(
+                    count=data["count"],
+                    prefix=data["prefix"].upper(),
+                    name=data["name"],
+                    discount_type=data["discount_type"],
+                    discount_percent=data["discount_percent"],
+                    discount_amount_cents=data["discount_amount_cents"],
+                    currency=data["currency"],
+                    usage_limit_type="single_use",
+                    created_by=self.request.user,
+                )
+                AuditService.log_simple_event(
+                    "coupon_batch_created",
+                    user=self.request.user,
+                    description=_("Created %(count)s coupons.") % {"count": len(coupons)},
+                    metadata={"coupon_ids": [str(coupon.pk) for coupon in coupons], "count": len(coupons)},
+                )
+        except ValidationError as exc:
+            form.add_error(None, exc)
+            return self.form_invalid(form)
+        except IntegrityError:
+            logger.exception("Coupon batch could not be saved")
+            form.add_error(None, _("The batch could not be saved. No coupons were created; please try again."))
+            return self.form_invalid(form)
+        messages.success(self.request, _("Created %(count)s coupons.") % {"count": len(coupons)})
+        return super().form_valid(form)
 
 
 # ===============================================================================
@@ -1002,28 +946,53 @@ class GiftCardDetailView(StaffRequiredMixin, DetailView):
         return context
 
 
-class GiftCardCreateView(StaffRequiredMixin, CreateView):
+class GiftCardCreateView(FinancialStaffRequiredMixin, CreateView):
     """Create a new gift card."""
 
     model = GiftCard
     template_name = "promotions/admin/gift_card_form.html"
-    fields: ClassVar[list[str]] = [
-        "initial_value_cents",
-        "currency",
-        "card_type",
-        "recipient_email",
-        "recipient_name",
-        "personal_message",
-        "valid_until",
-    ]
+    form_class = GiftCardForm
     success_url = reverse_lazy("promotions:gift_card_list")
 
     def form_valid(self, form: Any) -> HttpResponse:
-        form.instance.code = GiftCard.generate_code()
-        form.instance.current_balance_cents = form.instance.initial_value_cents
-        form.instance.status = "pending"  # fsm-bypass: GiftCard uses CharField, not FSMField
-        messages.success(self.request, f"Gift card created with code: {form.instance.code}")
-        return super().form_valid(form)
+        import uuid  # noqa: PLC0415
+
+        from .gift_cards import create_purchase  # noqa: PLC0415
+
+        data = form.cleaned_data
+        purchase = create_purchase(
+            data["purchased_by"],
+            data["currency"],
+            data["initial_value_cents"],
+            uuid.uuid4().hex,
+            method=data["payment_method"],
+            recipient={
+                "email": data["recipient_email"],
+                "name": data["recipient_name"],
+                "message": data["personal_message"],
+            },
+            actor=self.request.user,
+        )
+        self.object = purchase.gift_card
+        self.object.card_type = data["card_type"]
+        self.object.valid_until = data["valid_until"]
+        self.object.save(update_fields=["card_type", "valid_until", "updated_at"])
+        messages.success(self.request, _("Gift-card purchase created. Payment is required before activation."))
+        return redirect("promotions:gift_card_detail", pk=self.object.pk)
+
+
+class GiftCardRecordBankPaymentView(FinancialStaffRequiredMixin, View):
+    def post(self, request: HttpRequest, pk: Any) -> HttpResponse:
+        from .gift_cards import record_bank_funding  # noqa: PLC0415
+
+        card = get_object_or_404(GiftCard, pk=pk, ledger_version=2)
+        try:
+            record_bank_funding(card.purchase.pk, reference=request.POST.get("reference", ""), actor=request.user)
+        except ValidationError as exc:
+            messages.error(request, "; ".join(exc.messages))
+        else:
+            messages.success(request, _("Bank payment recorded and gift card activated."))
+        return redirect("promotions:gift_card_detail", pk=pk)
 
 
 # ===============================================================================
@@ -1050,6 +1019,11 @@ class ReferralListView(StaffRequiredMixin, ListView):
         if status:
             queryset = queryset.filter(status=status)
 
+        search = self.request.GET.get("search", "").strip()
+        if search:
+            queryset = queryset.filter(
+                Q(referral_code__code__icontains=search) | Q(referred_customer__name__icontains=search)
+            )
         return queryset
 
 
@@ -1107,31 +1081,17 @@ class PromotionRuleListView(StaffRequiredMixin, ListView):
     paginate_by = 25
 
     def get_queryset(self) -> QuerySet[PromotionRule]:
-        return super().get_queryset().select_related("campaign").order_by("priority", "-created_at")
+        queryset = super().get_queryset().select_related("campaign").order_by("priority", "-created_at")
+        search = self.request.GET.get("search", "").strip()
+        return queryset.filter(name__icontains=search) if search else queryset
 
 
-class PromotionRuleCreateView(StaffRequiredMixin, CreateView):
+class PromotionRuleCreateView(FinancialStaffRequiredMixin, CreateView):
     """Create a new promotion rule."""
 
     model = PromotionRule
     template_name = "promotions/admin/rule_form.html"
-    fields: ClassVar[list[str]] = [
-        "name",
-        "description",
-        "campaign",
-        "rule_type",
-        "discount_type",
-        "discount_percent",
-        "discount_amount_cents",
-        "max_discount_cents",
-        "valid_from",
-        "valid_until",
-        "is_stackable",
-        "priority",
-        "is_active",
-        "display_name",
-        "display_badge",
-    ]
+    form_class = PromotionRuleForm
     success_url = reverse_lazy("promotions:rule_list")
 
     def form_valid(self, form: Any) -> HttpResponse:
@@ -1140,28 +1100,12 @@ class PromotionRuleCreateView(StaffRequiredMixin, CreateView):
         return super().form_valid(form)
 
 
-class PromotionRuleUpdateView(StaffRequiredMixin, UpdateView):
+class PromotionRuleUpdateView(LockedPromotionUpdateMixin, FinancialStaffRequiredMixin, UpdateView):
     """Update a promotion rule."""
 
     model = PromotionRule
     template_name = "promotions/admin/rule_form.html"
-    fields: ClassVar[list[str]] = [
-        "name",
-        "description",
-        "campaign",
-        "rule_type",
-        "discount_type",
-        "discount_percent",
-        "discount_amount_cents",
-        "max_discount_cents",
-        "valid_from",
-        "valid_until",
-        "is_stackable",
-        "priority",
-        "is_active",
-        "display_name",
-        "display_badge",
-    ]
+    form_class = PromotionRuleForm
     success_url = reverse_lazy("promotions:rule_list")
 
 

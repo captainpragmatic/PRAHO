@@ -53,6 +53,7 @@ def create_invoice_from_api(data: dict[str, Any], lines: list[dict[str, Any]] | 
 
     # Create invoice - only use fields available from platform API
     invoice = Invoice(
+        amount_due=data.get("amount_due"),
         id=data["id"],
         number=data["number"],
         status=data["status"],
@@ -140,6 +141,8 @@ def create_proforma_from_api(data: dict[str, Any], lines: list[dict[str, Any]] |
 
     # Create proforma - only use fields available from platform API
     proforma = Proforma(
+        gift_reserved_cents=data.get("gift_reserved_cents", 0),
+        cash_due_cents=data.get("cash_due_cents"),
         id=data["id"],
         number=data["number"],
         status=data["status"],

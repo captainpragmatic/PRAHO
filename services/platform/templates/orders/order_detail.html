@@ -6,6 +6,7 @@
 {% block title %}{% trans "Order" %} {{ order.order_number }} - PRAHO Platform{% endblock %}
 
 {% block content %}
+{% include "billing/partials/refund_retry.html" %}
 <div class="px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
   <!-- Header -->
   <div class="sm:flex sm:items-center mb-6">
@@ -609,9 +610,10 @@ document.addEventListener('DOMContentLoaded', function() {
       <div class="absolute inset-0 bg-slate-900 opacity-75" data-action="invoke" data-invoke="hideRefundModal"></div>
     </div>
 
-    <div class="inline-block align-bottom bg-slate-800 rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+    <div class="inline-block align-bottom bg-slate-800 rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full relative z-10">
       <form id="refundForm" method="post" action="{% url 'orders:order_refund' pk=order.id %}">
         {% csrf_token %}
+        <input type="hidden" name="idempotency_key" value="{{ refund_request_key }}">
         <div class="px-6 pt-6 pb-4">
           <h3 class="text-lg font-medium text-white mb-4">{% icon "currency" %} {% trans "Refund Order" %}</h3>
 
@@ -787,7 +789,7 @@ document.getElementById('refundForm').addEventListener('submit', function(e) {
       <div class="absolute inset-0 bg-slate-900 opacity-75" data-action="invoke" data-invoke="hideOrderRefundRequestModal"></div>
     </div>
 
-    <div class="inline-block align-bottom bg-slate-800 rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+    <div class="inline-block align-bottom bg-slate-800 rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full relative z-10">
       <form id="orderRefundRequestForm" method="post" action="{% url 'orders:order_refund_request' pk=order.id %}">
         {% csrf_token %}
         <div class="px-6 pt-6 pb-4">

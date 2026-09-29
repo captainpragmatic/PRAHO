@@ -7,8 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Staff promotion screens with validated campaign, coupon, batch and automatic-offer forms.
+- Signed checkout promotion quotes, explicit offer stacking, BOGO and tiered discounts,
+  and credits that retain their original value across subscription renewals.
+- Customer-initiated spending of existing gift-card balances at checkout and on billing
+  documents, with proportional split refunds and a staff action to resume unfinished refunds.
+
 ### Fixed
 
+- Staff domain filters and pagination, Audit Apply Filters, and shared button attribute rendering.
+- Staff settlement now confirms only the cash remaining after gift-card reservations.
+- Closed invoices and expired or closed proformas no longer display a request to pay again.
+- Invoice line totals render correctly on desktop and mobile, and refund dialogs remain clickable.
+- Delayed local split refunds can resume without a gateway deadline; ledger transitions and
+  customer-authorized gift spending retain audit entries.
+- Partial split refunds require a request identifier so separate refunds of the same amount
+  are not mistaken for retries.
+- The coupon campaign filter is populated, staff offer links respect permissions, and promotion
+  dates follow staff timezone and date format preferences.
 - Suspending a customer now suspends their services. The cascade called a method that does not
   exist, so the failure was swallowed and every service kept running while the account read as
   suspended. Returning the customer to active resumes exactly the services that cascade stopped,

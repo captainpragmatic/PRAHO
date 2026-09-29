@@ -1,0 +1,10 @@
+{% extends "promotions/admin/base.html" %}
+{% load i18n localisation_tags %}
+{% block promotion_content %}
+  <h1 class="text-2xl font-semibold text-white">{% trans "Loyalty" %}</h1>
+  {% if program %}
+    <section class="space-y-3 rounded-lg border border-slate-700 bg-slate-800 p-6 text-slate-300"><h2 class="text-xl text-white">{{ program.name }}</h2><p>{{ program.description|linebreaksbr }}</p><dl class="grid gap-4 sm:grid-cols-3"><div><dt>{% trans "Members" %}</dt><dd>{{ total_members }}</dd></div><div><dt>{% trans "Points issued" %}</dt><dd>{{ total_points_issued }}</dd></div><div><dt>{% trans "Points redeemed" %}</dt><dd>{{ total_points_redeemed }}</dd></div></dl></section>
+    <ul class="space-y-3">{% for tier in tiers %}<li class="rounded-lg bg-slate-800 p-4 text-slate-300">{{ tier.name }} · {{ tier.member_count }} {% trans "members" %}</li>{% endfor %}</ul>
+    <h2 class="text-xl text-white">{% trans "Recent transactions" %}</h2><ul class="divide-y divide-slate-700">{% for entry in recent_transactions %}<li class="flex justify-between gap-3 p-4 text-sm text-slate-300"><span>{{ entry.customer_loyalty.customer }}</span><span>{{ entry.get_transaction_type_display }}</span><span>{{ entry.points }}</span><span>{% localised_date entry.created_at "datetime" %}</span></li>{% empty %}<li class="text-slate-400">{% trans "No transactions yet." %}</li>{% endfor %}</ul>
+  {% else %}<p class="rounded-lg border border-slate-700 bg-slate-800 p-6 text-slate-300">{% trans "No active loyalty program." %}</p>{% endif %}
+{% endblock %}

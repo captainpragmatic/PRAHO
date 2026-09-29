@@ -35,6 +35,7 @@
         <!-- Order Creation Form -->
         <form method="post" action="{% url 'orders:create_order' %}" class="p-6">
           {% csrf_token %}
+          <input type="hidden" name="promotion_quote" value="{{ calculation.promotion_quote }}">
           <input type="hidden" name="cart_version" value="{{ cart.get_cart_version }}">
 
           <!-- MVP Info Box -->
@@ -259,6 +260,17 @@
         <div class="p-6">
           <h3 class="text-lg font-medium text-white mb-4">{% trans "Final summary" %}</h3>
 
+          <form method="post" action="{% url 'orders:set_promotion_codes' %}" class="mb-5 space-y-3">
+            {% csrf_token %}
+            {% input_field "coupon_codes" label=_("Coupon codes") value=cart.get_coupon_codes|join:", " help_text=_("Separate codes with commas. Clear the field to remove them.") %}
+            {% input_field "gift_code" label=_("Gift-card code") value=cart.get_gift_code help_text=_("Use an existing balance toward this order. Clear the field to remove it.") %}
+            {% button _("Update offers") type="submit" variant="secondary" %}
+          </form>
+          {% if calculation.offers %}
+            <ul class="mb-4 space-y-2 text-sm">
+              {% for offer in calculation.offers %}<li>{{ offer.label }}{% if offer.renewals %} · {% trans "Includes a credit for future renewals" %}{% endif %}</li>{% endfor %}
+            </ul>
+          {% endif %}
           <!-- Order Totals -->
           <div class="space-y-3 mb-6">
             <div class="flex justify-between items-center">
@@ -268,6 +280,7 @@
               </span>
             </div>
 
+            {% if calculation.discount_cents %}<div class="flex justify-between items-center"><span class="text-slate-400">{% trans "Discount" %}</span><span class="text-white font-mono">−{{ calculation.discount_cents|cents_to_currency|romanian_currency:calculation.currency }}</span></div>{% endif %}
             <div class="flex justify-between items-center">
               <span class="text-slate-400">{% trans "VAT" %} ({{ calculation.vat_rate_percent }}%)</span>
               <span class="text-white font-mono">
@@ -284,6 +297,13 @@
               </div>
             </div>
           </div>
+
+          {% if calculation.gift_applied_cents %}
+          <div class="space-y-2 border-t border-slate-600 pt-3 text-sm">
+            <div class="flex justify-between"><span>{% trans "Gift-card payment" %}</span><span>{{ calculation.gift_applied_cents|cents_to_currency|romanian_currency:calculation.currency }}</span></div>
+            <div class="flex justify-between font-semibold"><span>{% trans "Remaining to pay" %}</span><span>{{ calculation.cash_due_cents|cents_to_currency|romanian_currency:calculation.currency }}</span></div>
+          </div>
+          {% endif %}
 
           <!-- Reactive Next Steps — driven by Alpine.js paymentMethod state -->
           <div class="border-t border-slate-600 pt-4 mt-2">

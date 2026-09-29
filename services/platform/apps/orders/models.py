@@ -382,12 +382,21 @@ class Order(ConcurrentTransitionMixin, models.Model):
 
     def can_edit_field(self, field_name: str) -> bool:
         """Check if a specific field can be edited based on current status"""
-        editable_fields = self.EDITABLE_FIELDS_BY_STATUS.get(self.status, [])
+        editable_fields = self.get_editable_fields()
         return "*" in editable_fields or field_name in editable_fields
 
     def get_editable_fields(self) -> list[str]:
         """Get list of fields that can be edited in current status"""
-        return self.EDITABLE_FIELDS_BY_STATUS.get(self.status, [])
+        fields = self.EDITABLE_FIELDS_BY_STATUS.get(self.status, [])
+        return [field for field in fields if field != "meta"] if self.has_frozen_quote else fields
+
+    @property
+    def has_frozen_quote(self) -> bool:
+        return isinstance(self.meta, dict) and self.meta.get("promotion_version") == 2  # noqa: PLR2004  # Persisted quote schema
+
+    @property
+    def can_edit_items(self) -> bool:
+        return not self.has_frozen_quote and (self.is_draft or self.status == "awaiting_payment")
 
     @staticmethod
     def _locked_latest_order_number(qs: models.QuerySet["Order"]) -> str | None:

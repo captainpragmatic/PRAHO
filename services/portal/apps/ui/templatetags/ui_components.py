@@ -6,7 +6,6 @@ HTMX-powered reusable components for Romanian hosting provider interface
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -22,6 +21,7 @@ if TYPE_CHECKING:
     from django.utils.functional import _StrPromise
 
 from apps.common.constants import FILE_SIZE_CONVERSION_FACTOR
+from apps.ui.attributes import serialize_button_attributes
 
 register = template.Library()
 
@@ -47,6 +47,7 @@ class HTMXAttributes:
     hx_indicator: str | None = None
     hx_push_url: str | None = None
     hx_select: str | None = None
+    hx_include: str | None = None
     hx_boost: bool = False
 
 
@@ -64,6 +65,7 @@ class ButtonConfig:
     class_: str = ""
     attrs: str = ""
     data_action: str = ""
+    data_copy: str = ""
     data_invoke: str = ""
     data_confirm: str = ""
 
@@ -196,59 +198,7 @@ def button(
         elif hasattr(htmx, key) and value is not None:
             setattr(htmx, key, value)
 
-    # 🔒 Security: Escape attrs to prevent XSS attacks
-    def _sanitize_and_escape_attrs(raw: Any) -> str:
-        s = str(raw or "")
-
-        # Check for truly complex attacks that need more than just escaping
-        # Also check for already-encoded versions
-        has_complex_payload = any(
-            pattern in s.lower()
-            for pattern in [
-                "onload=",
-                "onerror=",
-                "onmouseover=",
-                "onfocus=",
-                "onblur=",  # Auto-executing event handlers
-                "javascript:",
-                "eval(",
-                "atob(",  # Code injection vectors
-                "fetch(",
-                ".then(",
-                "JSON.stringify",  # Network/data exfiltration
-                "&lt;script&gt;",
-                "alert(1)",  # Already encoded attacks
-            ]
-        )
-
-        if has_complex_payload:
-            # Strip the auto-executing handlers early (defense-in-depth). onclick is
-            # absent here only because it needs a click — but the CSP on*= pass below
-            # strips it (and every other on*=) unconditionally, so no inline handler
-            # of any kind survives.
-            dangerous_events = r"\b(onload|onerror|onmouseover|onfocus|onblur)\s*="
-            s = re.sub(dangerous_events, "", s, flags=re.IGNORECASE)
-            # Remove javascript: URLs and code injection
-            s = re.sub(r"javascript:[^'\";\s)]*", "", s, flags=re.IGNORECASE)
-            s = re.sub(r"\b(eval|alert|atob)\s*\([^)]*\)", "", s, flags=re.IGNORECASE)
-            # Handle already encoded dangerous content
-            s = re.sub(r"alert\([^)]*\)", "", s, flags=re.IGNORECASE)
-
-        # CSP: strip any inline on*= event handler (name+value) so attrs can never inject a native handler.
-        # The lookbehind requires the handler to start an attribute (start/space/quote) and NOT be the
-        # tail of a legit hyphenated/word attr (e.g. `data-onboarding` must survive intact).
-        s = re.sub(r'''(?<![\w-])on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)''', "", s, flags=re.IGNORECASE)
-
-        # Manual HTML escaping to return plain string, not SafeString
-        s = s.replace("&", "&amp;")
-        s = s.replace("<", "&lt;")
-        s = s.replace(">", "&gt;")
-        s = s.replace('"', "&quot;")
-        s = s.replace("'", "&#x27;")
-        return s
-
-    # Return sanitized and escaped attrs
-    clean_attrs = _sanitize_and_escape_attrs(config.attrs)
+    clean_attrs = serialize_button_attributes(config.attrs)
 
     return {
         "text": text,
@@ -268,6 +218,7 @@ def button(
         "hx_indicator": htmx.hx_indicator,
         "hx_push_url": htmx.hx_push_url,
         "hx_select": htmx.hx_select,
+        "hx_include": htmx.hx_include,
         "hx_boost": htmx.hx_boost,
         "icon": config.icon,
         "icon_right": config.icon_right,
@@ -275,6 +226,7 @@ def button(
         "class": config.class_,
         "attrs": clean_attrs,
         "data_action": config.data_action,
+        "data_copy": config.data_copy,
         "data_invoke": config.data_invoke,
         "data_confirm": config.data_confirm,
     }
@@ -465,16 +417,21 @@ def form_field(field: Any, *, icon_left: str | None = None, **kwargs: str) -> di
         input_type = "checkbox"
     else:
         # Honour widget.input_type (email, password, number, etc.)
-        wt = getattr(widget, "input_type", "text")
+        wt = widget.attrs.get("type", getattr(widget, "input_type", "text"))
         if wt:
             input_type = wt
 
     # ── Build options list for <select> ──
-    options: list[dict[str, str]] | None = None
+    options: list[dict[str, Any]] | None = None
     if input_type == "select":
         # choices is list of (value, label) tuples
         choices = getattr(field.field, "choices", [])
-        options = [{"value": str(v), "label": str(lbl)} for v, lbl in choices]
+        selected = (
+            {str(value) for value in (field.value() or [])}
+            if getattr(widget, "allow_multiple_selected", False)
+            else {str(field.value())}
+        )
+        options = [{"value": str(v), "label": str(lbl), "selected": str(v) in selected} for v, lbl in choices]
 
     # ── Extract first error (if any) ──
     first_error: str | None = None
@@ -483,7 +440,8 @@ def form_field(field: Any, *, icon_left: str | None = None, **kwargs: str) -> di
 
     # ── Current value ──
     value = field.value()
-    value_str: str = str(value) if value is not None else ""
+    formatted_value = widget.format_value(value)
+    value_str: str = str(formatted_value) if formatted_value is not None else ""
 
     # ── Label text ──
     label = str(field.label) if field.label else None
@@ -492,8 +450,14 @@ def form_field(field: Any, *, icon_left: str | None = None, **kwargs: str) -> di
     help_text = str(field.help_text) if field.help_text else None
 
     return {
+        "min": widget.attrs.get("min", getattr(field.field, "min_value", None)),
+        "max": widget.attrs.get("max", getattr(field.field, "max_value", None)),
+        "step": widget.attrs.get(
+            "step", "any" if input_type == "number" and hasattr(field.field, "decimal_places") else None
+        ),
         "name": name,
         "input_type": input_type,
+        "multiple": getattr(widget, "allow_multiple_selected", False),
         "value": value_str,
         "label": label,
         "placeholder": kwargs.get("placeholder", getattr(widget, "attrs", {}).get("placeholder", "")),

@@ -114,6 +114,21 @@ def _assert_bank_payment_retry(page: Page, proforma_url: str, invoice_url: str, 
     expect(page.locator("tr").filter(has_text=reference)).to_have_count(1)
 
 
+def _assert_refund_dialog_controls(page: Page) -> None:
+    """The backdrop must not intercept desktop or mobile refund controls."""
+    original_viewport = page.viewport_size
+    for viewport in ({"width": 1440, "height": 1100}, {"width": 390, "height": 844}):
+        page.set_viewport_size(viewport)
+        page.get_by_role("button", name="Refund Invoice", exact=True).click()
+        modal = page.locator("#invoiceRefundModal")
+        expect(modal).to_be_visible()
+        modal.get_by_role("button", name="Process Refund", exact=True).click(trial=True)
+        modal.get_by_role("button", name="Cancel", exact=True).click()
+        expect(modal).to_be_hidden()
+    if original_viewport:
+        page.set_viewport_size(original_viewport)
+
+
 # ===============================================================================
 # STAFF BILLING SYSTEM ACCESS AND NAVIGATION TESTS
 # ===============================================================================
@@ -370,6 +385,7 @@ def test_staff_complete_billing_workflow(monitored_staff_page: Page, e2e_scenari
     _test_pdf_generation(page)
     _assert_conversion_link(page, proforma_url, invoice_url)
     _assert_bank_payment_retry(page, proforma_url, invoice_url, "E2E-MANUAL-BANK")
+    _assert_refund_dialog_controls(page)
 
 
 def test_staff_billing_system_responsive_breakpoints(monitored_staff_page: Page) -> None:

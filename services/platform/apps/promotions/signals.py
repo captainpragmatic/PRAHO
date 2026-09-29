@@ -23,16 +23,94 @@ from .models import (
     CouponRedemption,
     CustomerLoyalty,
     GiftCard,
+    GiftCardPurchase,
+    GiftCardReservation,
     GiftCardTransaction,
     LoyaltyProgram,
     LoyaltyTransaction,
+    PromotionApplication,
     PromotionCampaign,
     PromotionRule,
     Referral,
     ReferralCode,
+    RenewalBenefit,
+    RenewalBenefitUse,
+    TenderRefundCommand,
+    TenderRefundLeg,
 )
 
 logger = logging.getLogger(__name__)
+
+CAMPAIGN_AUDIT_FIELDS = [
+    "name",
+    "description",
+    "slug",
+    "campaign_type",
+    "status",
+    "is_active",
+    "start_date",
+    "end_date",
+    "budget_cents",
+    "budget_currency_id",
+    "utm_source",
+    "utm_medium",
+    "utm_campaign",
+]
+COUPON_AUDIT_FIELDS = [
+    "code",
+    "name",
+    "description",
+    "internal_notes",
+    "campaign_id",
+    "discount_type",
+    "discount_percent",
+    "discount_amount_cents",
+    "free_months",
+    "tiers",
+    "max_discount_cents",
+    "min_order_cents",
+    "min_order_items",
+    "valid_from",
+    "valid_until",
+    "usage_limit_type",
+    "max_total_uses",
+    "max_uses_per_customer",
+    "customer_target",
+    "assigned_customer_id",
+    "first_order_only",
+    "applies_to_all_products",
+    "product_restrictions",
+    "is_stackable",
+    "is_exclusive",
+    "stacking_priority",
+    "status",
+    "is_active",
+    "is_public",
+    "currency_id",
+]
+RULE_AUDIT_FIELDS = [
+    "name",
+    "description",
+    "campaign_id",
+    "rule_type",
+    "discount_type",
+    "discount_percent",
+    "discount_amount_cents",
+    "max_discount_cents",
+    "conditions",
+    "tiers",
+    "applies_to_all_products",
+    "product_restrictions",
+    "currency_id",
+    "valid_from",
+    "valid_until",
+    "is_stackable",
+    "priority",
+    "is_active",
+    "display_name",
+    "display_badge",
+    "published_at",
+]
 
 
 # ===============================================================================
@@ -84,6 +162,46 @@ def _serialize_value(value: Any) -> Any:
     return value
 
 
+@receiver(post_save, sender=PromotionApplication)
+@receiver(post_save, sender=RenewalBenefit)
+@receiver(post_save, sender=RenewalBenefitUse)
+@receiver(post_save, sender=GiftCardPurchase)
+@receiver(post_save, sender=GiftCardReservation)
+@receiver(post_save, sender=TenderRefundCommand)
+@receiver(post_save, sender=TenderRefundLeg)
+def promotion_ledger_saved(sender: type, instance: Any, created: bool, **kwargs: Any) -> None:
+    """Audit financial ledger records without copying bearer codes or signed quotes."""
+    fields = (
+        "status",
+        "amount_cents",
+        "discount_cents",
+        "future_cents",
+        "remaining_cents",
+        "remaining_months",
+        "monthly_cents",
+        "ended_at",
+        "customer_id",
+        "order_id",
+        "subscription_id",
+        "cycle_id",
+        "gift_card_id",
+        "invoice_id",
+        "proforma_id",
+        "payment_id",
+        "command_id",
+        "refund_id",
+        "funding_payment_id",
+    )
+    create_audit_event(
+        action="create" if created else "update",
+        instance=instance,
+        severity="medium",
+        user=getattr(instance, "_audit_actor", None) or getattr(instance, "created_by", None),
+        new_values={field: _serialize_value(getattr(instance, field)) for field in fields if hasattr(instance, field)},
+        description=f"Promotion ledger {instance._meta.label} {'created' if created else 'updated'}",
+    )
+
+
 def get_model_changes(instance: Any, fields: list[str]) -> tuple[dict[str, Any], dict[str, Any]]:
     """Get old and new values for specified fields."""
     old_values = {}
@@ -111,9 +229,8 @@ def campaign_pre_save(sender: type, instance: PromotionCampaign, **kwargs: Any) 
     if instance.pk:
         try:
             old_instance = PromotionCampaign.objects.get(pk=instance.pk)
-            instance._old_status = old_instance.status
-            instance._old_is_active = old_instance.is_active
-            instance._old_budget_cents = old_instance.budget_cents
+            for field in CAMPAIGN_AUDIT_FIELDS:
+                setattr(instance, f"_old_{field}", getattr(old_instance, field))
         except PromotionCampaign.DoesNotExist:
             pass
 
@@ -147,7 +264,7 @@ def campaign_post_save(
     else:
         old_values, new_values = get_model_changes(
             instance,
-            ["status", "is_active", "budget_cents"],
+            CAMPAIGN_AUDIT_FIELDS,
         )
         if old_values:
             # Determine severity based on change type
@@ -166,6 +283,7 @@ def campaign_post_save(
                 old_values=old_values,
                 new_values=new_values,
                 description=f"Promotion campaign '{instance.name}' updated",
+                user=getattr(instance, "_audit_actor", None),
             )
             logger.info(f"Campaign updated: {instance.name}")
 
@@ -181,12 +299,8 @@ def coupon_pre_save(sender: type, instance: Coupon, **kwargs: Any) -> None:
     if instance.pk:
         try:
             old_instance = Coupon.objects.get(pk=instance.pk)
-            instance._old_status = old_instance.status
-            instance._old_is_active = old_instance.is_active
-            instance._old_discount_percent = old_instance.discount_percent
-            instance._old_discount_amount_cents = old_instance.discount_amount_cents
-            instance._old_max_total_uses = old_instance.max_total_uses
-            instance._old_valid_until = old_instance.valid_until
+            for field in COUPON_AUDIT_FIELDS:
+                setattr(instance, f"_old_{field}", getattr(old_instance, field))
         except Coupon.DoesNotExist:
             pass
 
@@ -227,7 +341,7 @@ def coupon_post_save(
     else:
         old_values, new_values = get_model_changes(
             instance,
-            ["status", "is_active", "discount_percent", "discount_amount_cents", "max_total_uses", "valid_until"],
+            COUPON_AUDIT_FIELDS,
         )
         if old_values:
             severity = "low"
@@ -242,6 +356,7 @@ def coupon_post_save(
                 old_values=old_values,
                 new_values=new_values,
                 description=f"Coupon '{instance.code}' updated",
+                user=getattr(instance, "_audit_actor", None),
                 is_sensitive=True,
             )
             logger.info(f"Coupon updated: {instance.code}")
@@ -355,6 +470,14 @@ def redemption_post_save(
 # ===============================================================================
 
 
+@receiver(pre_save, sender=PromotionRule)
+def rule_pre_save(sender: type, instance: PromotionRule, **kwargs: Any) -> None:
+    old_instance = PromotionRule.objects.filter(pk=instance.pk).first()
+    if old_instance:
+        for field in RULE_AUDIT_FIELDS:
+            setattr(instance, f"_old_{field}", getattr(old_instance, field))
+
+
 @receiver(post_save, sender=PromotionRule)
 def rule_post_save(
     sender: type,
@@ -378,6 +501,17 @@ def rule_post_save(
             description=f"Promotion rule '{instance.name}' created",
             user=instance.created_by,
         )
+    else:
+        old_values, new_values = get_model_changes(instance, RULE_AUDIT_FIELDS)
+        if old_values:
+            create_audit_event(
+                action="promotion_rule_updated",
+                instance=instance,
+                old_values=old_values,
+                new_values=new_values,
+                user=getattr(instance, "_audit_actor", None),
+                description=f"Automatic offer '{instance.name}' updated",
+            )
 
 
 # ===============================================================================
@@ -408,6 +542,7 @@ def gift_card_post_save(
     if created:
         create_audit_event(
             action="gift_card_created",
+            user=getattr(instance, "_audit_actor", None),
             instance=instance,
             category="business_operation",
             severity="low",

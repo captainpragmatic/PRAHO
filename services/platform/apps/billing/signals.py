@@ -1466,7 +1466,7 @@ def _handle_invoice_voided(invoice: Invoice) -> None:
 def _handle_payment_success(payment: Payment) -> None:
     """Handle successful payment"""
     try:
-        if payment.invoice:
+        if payment.invoice and getattr(payment, "_defer_document_settlement", False) is not True:
             remaining_amount = payment.invoice.get_remaining_amount()
             if remaining_amount <= 0:
                 try:

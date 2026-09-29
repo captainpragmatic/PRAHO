@@ -55,6 +55,16 @@ class TestLocalisationParity(TestCase):
                 self.assertEqual((PLATFORM_COMMON / name).read_text(), (PORTAL_COMMON / name).read_text())
 
 
+class TestButtonAttributeParity(TestCase):
+    """Both isolated services must use the same attribute serialization policy."""
+
+    def test_button_attribute_helpers_match(self) -> None:
+        self.assertEqual(
+            (REPO_ROOT / "services/platform/apps/ui/attributes.py").read_bytes(),
+            (REPO_ROOT / "services/portal/apps/ui/attributes.py").read_bytes(),
+        )
+
+
 class TestMaintenanceMarkerParity(TestCase):
     """The platform writes a machine-readable maintenance marker; the portal reads it.
 

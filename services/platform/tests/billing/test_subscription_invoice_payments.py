@@ -416,12 +416,23 @@ class SubscriptionInvoicePaymentTestCase(_SubscriptionInvoicePaymentFixture, Tes
 
     def test_recurring_proforma_records_and_preserves_reverse_charge_evidence(self) -> None:
         CustomerTaxProfile.objects.create(
-            customer=self.customer, vat_number="DE136695976", is_vat_payer=True, vies_verification_status="valid",
-            vies_verified_at=timezone.now(), vies_consultation_reference="test-reference",
+            customer=self.customer,
+            vat_number="DE136695976",
+            is_vat_payer=True,
+            vies_verification_status="valid",
+            vies_verified_at=timezone.now(),
+            vies_consultation_reference="test-reference",
         )
 
-        CustomerAddress.objects.create(customer=self.customer, is_billing=True, address_line1="Example 1",
-            city="Berlin", county="Berlin", postal_code="10115", country="DE")
+        CustomerAddress.objects.create(
+            customer=self.customer,
+            is_billing=True,
+            address_line1="Example 1",
+            city="Berlin",
+            county="Berlin",
+            postal_code="10115",
+            country="DE",
+        )
         now = timezone.now()
         subscription = self._create_aligned_subscription("EVIDENCE", now)
         result = RecurringBillingOrchestrator.prepare_due_proformas(as_of=now)
@@ -962,10 +973,9 @@ class SubscriptionInvoicePaymentTestCase(_SubscriptionInvoicePaymentFixture, Tes
             },
         )
 
-        result = PaymentSuccessService.converge_gateway_success(
-            "pi_early_success_race_301",
-            self._succeeded_gateway_result(),
-        )
+        facts = self._succeeded_gateway_result()
+        facts["metadata"]["payment_attempt"] = str(payment.pk)
+        result = PaymentSuccessService.converge_gateway_success("pi_early_success_race_301", facts)
 
         self.assertTrue(result.is_ok(), result)
         payment.refresh_from_db()
@@ -1018,7 +1028,7 @@ class SubscriptionInvoicePaymentTestCase(_SubscriptionInvoicePaymentFixture, Tes
                         "customer_id": str(self.customer.id),
                         "platform": "PRAHO",
                         "source": "recurring_billing",
-                        "payment_attempt": "1",
+                        "payment_attempt": str(payment.pk),
                     },
                     "last_payment_error": {"message": "card declined"},
                 }
@@ -1775,6 +1785,7 @@ class SubscriptionInvoicePaymentTestCase(_SubscriptionInvoicePaymentFixture, Tes
         )
 
         self.assertTrue(result["success"], result)
+        payment = Payment.objects.get(gateway_txn_id="pi_invoice_301")
         gateway.create_off_session_payment_intent.assert_called_once_with(
             document_id=str(self.invoice.id),
             document_type="invoice",
@@ -1788,11 +1799,10 @@ class SubscriptionInvoicePaymentTestCase(_SubscriptionInvoicePaymentFixture, Tes
                 "customer_id": str(self.customer.id),
                 "platform": "PRAHO",
                 "source": "recurring_billing",
-                "payment_attempt": "1",
+                "payment_attempt": str(payment.pk),
             },
             idempotency_key=f"invoice:{self.invoice.id}:stripe:1",
         )
-        payment = Payment.objects.get(gateway_txn_id="pi_invoice_301")
         self.assertEqual(payment.invoice, self.invoice)
         self.assertEqual(payment.customer, self.customer)
         self.assertEqual(payment.amount_cents, self.invoice.total_cents)
@@ -2463,7 +2473,7 @@ class SubscriptionInvoicePaymentTestCase(_SubscriptionInvoicePaymentFixture, Tes
         self.assertEqual(self.subscription.current_period_end, paid_through)
         self.assertEqual(self.service.expires_at, service_expires_at)
 
-    def test_period_gap_rolls_back_payment_and_invoice_success(self) -> None:
+    def test_period_gap_preserves_gateway_fact_and_retries_local_settlement(self) -> None:
         from apps.integrations.webhooks.stripe import StripeWebhookProcessor  # noqa: PLC0415
 
         payment = self._create_pending_invoice_payment("pi_period_gap_301")
@@ -2496,12 +2506,27 @@ class SubscriptionInvoicePaymentTestCase(_SubscriptionInvoicePaymentFixture, Tes
         self.billing_cycle.refresh_from_db()
         self.subscription.refresh_from_db()
         self.service.refresh_from_db()
-        self.assertEqual(payment.status, "pending")
+        self.assertEqual(payment.status, "succeeded")
         self.assertEqual(self.invoice.status, "issued")
         self.assertEqual(self.billing_cycle.collection_status, "scheduled")
         self.assertIsNone(self.billing_cycle.entitlement_applied_at)
         self.assertNotEqual(self.subscription.current_period_end, self.billing_cycle.period_end)
         self.assertNotEqual(self.service.expires_at, self.billing_cycle.period_end)
+
+        # Money has moved at Stripe. Repairing the local gap must settle that
+        # same payment, without another charge or a second entitlement.
+        self.billing_cycle.period_start -= timedelta(days=1)
+        self.billing_cycle.period_end -= timedelta(days=1)
+        self.billing_cycle.save(update_fields=["period_start", "period_end", "updated_at"])
+        for _ in range(2):
+            success, message = StripeWebhookProcessor().handle_payment_intent_event("payment_intent.succeeded", payload)
+            self.assertTrue(success, message)
+        self.invoice.refresh_from_db()
+        self.billing_cycle.refresh_from_db()
+        self.subscription.refresh_from_db()
+        self.assertEqual(self.invoice.status, "paid")
+        self.assertIsNotNone(self.billing_cycle.entitlement_applied_at)
+        self.assertEqual(self.subscription.current_period_end, self.billing_cycle.period_end)
 
     def test_stale_cycle_cannot_reapply_entitlement_or_advance_schedule(self) -> None:
         self.subscription.current_period_end = self.billing_cycle.period_end + timedelta(days=1)
@@ -3065,9 +3090,7 @@ class WebhookAttemptMisbindingRegressionTests(TestCase):
         self.assertFalse(self.p2.gateway_txn_id)
 
     def test_matching_attempt_marker_still_recovers_the_right_payment(self) -> None:
-        result = PaymentSuccessService.recover_unlinked_recurring_attempt(
-            "pi_for_attempt_2", self._facts(self.p2.id)
-        )
+        result = PaymentSuccessService.recover_unlinked_recurring_attempt("pi_for_attempt_2", self._facts(self.p2.id))
 
         self.assertTrue(result.is_ok(), f"recovery failed: {result}")
         self.p2.refresh_from_db()

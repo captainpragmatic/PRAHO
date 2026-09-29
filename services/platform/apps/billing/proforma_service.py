@@ -221,7 +221,11 @@ class ProformaService:
                 bill_to_tax_id=business_tax_id,
                 bill_to_cnp=fiscal_identity.cnp if not business_tax_id else "",
                 discount_cents=discount_cents,
-                meta={"order_id": str(order.id), "order_number": order.order_number},
+                meta={
+                    "order_id": str(order.id),
+                    "order_number": order.order_number,
+                    "promotion_quote": order.meta.get("promotion_quote"),
+                },
             )
 
             # Create proforma lines from order items
@@ -275,6 +279,21 @@ class ProformaService:
                     )
                     setup_line.calculate_totals()
                     setup_line.save()
+
+            if order.has_frozen_quote:
+                # The customer confirmed these totals. Preserve their per-line rounding.
+                if any(Decimal(str(item.tax_rate)) != vat_rate_decimal for item in order_items):
+                    raise ValueError("The VAT scenario changed after quotation. Create a fresh order.")
+                proforma.subtotal_cents = order.subtotal_cents - order.discount_cents
+                proforma.tax_cents = order.tax_cents
+                proforma.total_cents = order.total_cents
+                proforma.vat_evidence = {
+                    **proforma.vat_evidence,
+                    "subtotal_cents": proforma.subtotal_cents,
+                    "tax_cents": proforma.tax_cents,
+                    "total_cents": proforma.total_cents,
+                }
+                proforma.save(update_fields=["subtotal_cents", "tax_cents", "total_cents", "vat_evidence"])
 
             # NOTE: Do NOT call proforma.recalculate_totals() here.
             # The correct totals (including discount_cents) were already set at creation.
@@ -388,6 +407,10 @@ class ProformaPaymentService:
         except ProformaInvoice.DoesNotExist:
             return Err(f"Proforma not found: {proforma_id}")
 
+        from apps.promotions.locking import lock_document_context  # noqa: PLC0415
+
+        lock_document_context(proforma)
+
         # Idempotent: already converted → return existing invoice (M9)
         if proforma.status == "converted":
             invoice_id = (proforma.meta or {}).get("invoice_id")
@@ -415,8 +438,11 @@ class ProformaPaymentService:
         if blocked:
             return Err(blocked)
 
-        # Validate full payment only (partial payments not supported yet)
-        if amount_cents != proforma.total_cents:
+        from apps.promotions.gift_cards import capture_reservations, reserved_value  # noqa: PLC0415
+
+        gift_cents = reserved_value(proforma)
+        # The complete tender set must settle the frozen tax-inclusive total.
+        if amount_cents + gift_cents != proforma.total_cents:
             return Err(
                 f"Payment amount ({amount_cents}) must equal proforma total ({proforma.total_cents}). "
                 f"Partial payments not supported."
@@ -482,6 +508,7 @@ class ProformaPaymentService:
             return Err(f"Proforma conversion failed: {conversion_result.unwrap_err()}")
 
         invoice = conversion_result.unwrap()
+        capture_reservations(proforma, invoice)
 
         # H2 fix: Now that conversion succeeded, mark bank/admin payment as succeeded.
         # For existing_payment (Stripe path) the payment was already succeeded by the gateway.

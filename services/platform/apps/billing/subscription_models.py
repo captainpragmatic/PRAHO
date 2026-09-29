@@ -701,6 +701,9 @@ class Subscription(models.Model):
                 self.ended_at = timezone.now()
                 self.save()
 
+            from apps.promotions.renewals import end_benefits  # noqa: PLC0415
+
+            end_benefits(self)
             log_security_event(
                 event_type="subscription_cancelled",
                 details={

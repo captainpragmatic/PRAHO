@@ -195,6 +195,14 @@ class OrderDetailSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source="get_status_display", read_only=True)
     currency_code = serializers.CharField(source="currency.code", read_only=True)
     vat_rate_percent = serializers.SerializerMethodField()
+    cash_due_cents = serializers.SerializerMethodField()
+
+    def get_cash_due_cents(self, obj: Order) -> int:
+        from apps.promotions.gift_cards import cash_due  # noqa: PLC0415
+
+        if obj.invoice is not None:
+            return obj.invoice.get_remaining_amount()
+        return cash_due(obj.proforma) if obj.proforma_id else obj.total_cents
 
     def get_vat_rate_percent(self, obj: Order) -> str | None:
         """Show a single percentage only when all recorded lines use that rate."""
@@ -218,6 +226,7 @@ class OrderDetailSerializer(serializers.ModelSerializer):
             "billing_address",
             "payment_method",
             "vat_rate_percent",
+            "cash_due_cents",
             "notes",
             "created_at",
             "updated_at",
@@ -253,7 +262,15 @@ class CartItemInputSerializer(serializers.Serializer):
         return attrs
 
 
-class CartCalculationInputSerializer(serializers.Serializer):
+class PromotionInputSerializer(serializers.Serializer):
+    gift_code = serializers.CharField(max_length=50, required=False, allow_blank=True, write_only=True)
+    coupon_codes = serializers.ListField(
+        child=serializers.CharField(max_length=50), max_length=5, required=False, default=list
+    )
+    promotion_quote = serializers.CharField(max_length=30000, required=False, allow_blank=True)
+
+
+class CartCalculationInputSerializer(PromotionInputSerializer):
     """Input serializer for cart total calculations"""
 
     currency = serializers.CharField(max_length=3, default="RON")
@@ -266,6 +283,11 @@ class CartCalculationOutputSerializer(serializers.Serializer):
     subtotal_cents = serializers.IntegerField()
     tax_cents = serializers.IntegerField()
     total_cents = serializers.IntegerField()
+    discount_cents = serializers.IntegerField(default=0)
+    gift_applied_cents = serializers.IntegerField(default=0)
+    cash_due_cents = serializers.IntegerField(required=False)
+    promotion_quote = serializers.CharField(required=False)
+    offers = serializers.ListField(child=serializers.DictField(), default=list)
     vat_rate_percent = serializers.DecimalField(
         max_digits=5,
         decimal_places=2,
@@ -279,7 +301,7 @@ class CartCalculationOutputSerializer(serializers.Serializer):
     items = serializers.ListField(child=serializers.DictField(), default=list)
 
 
-class OrderCreateInputSerializer(serializers.Serializer):
+class OrderCreateInputSerializer(PromotionInputSerializer):
     """Input serializer for order creation"""
 
     currency = serializers.CharField(max_length=3, default="RON")

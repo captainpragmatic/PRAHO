@@ -110,6 +110,15 @@ class InvoiceDetailViewTestCase(TestCase):
         self.assertContains(response, 'INV-DETAIL-001')
         self.assertContains(response, 'Test Service')
 
+    def test_invoice_detail_renders_persisted_line_total_on_desktop_and_mobile(self):
+        request = self.factory.get(f'/app/billing/invoices/{self.invoice.pk}/')
+        request.user = self.user
+        request = self.add_middleware_to_request(request)
+
+        response = invoice_detail(request, self.invoice.pk)
+
+        self.assertContains(response, '119,00 RON', count=2)
+
     def test_invoice_detail_refund_button_gated_on_financial_capability(self):
         """Refund UI in invoice_detail.html gates on user.can_manage_financial_data.
 

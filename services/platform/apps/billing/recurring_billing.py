@@ -333,7 +333,7 @@ class RecurringBillingOrchestrator:
     """PRAHO-owned preparation and collection of recurring service charges."""
 
     @staticmethod
-    def prepare_due_proformas(  # noqa: PLR0915  # One transaction creates the document and all cycle-linked lines
+    def prepare_due_proformas(  # noqa: C901, PLR0912, PLR0915  # One transaction creates the document and all cycle-linked lines
         as_of: datetime | None = None,
     ) -> RecurringPreparationResult:
         """Create one proforma per compatible customer collection group.
@@ -343,6 +343,8 @@ class RecurringBillingOrchestrator:
         service still owns its own Subscription and BillingCycle.
         """
         from apps.common.tax_service import TaxService  # noqa: PLC0415
+        from apps.promotions.gift_cards import release_expired_reservations  # noqa: PLC0415
+        from apps.promotions.renewals import reconcile_expired_credits  # noqa: PLC0415
 
         from .proforma_models import ProformaInvoice, ProformaLine, ProformaSequence  # noqa: PLC0415
         from .services import _build_customer_vat_info  # noqa: PLC0415
@@ -364,6 +366,8 @@ class RecurringBillingOrchestrator:
             )
 
         try:
+            reconcile_expired_credits()
+            release_expired_reservations()
             invoice_lead_days = get_invoice_generation_lead_days()
             preparation_cutoff = run_at + timedelta(days=invoice_lead_days)
             with transaction.atomic():
@@ -503,14 +507,22 @@ class RecurringBillingOrchestrator:
                                 )
                                 line.calculate_totals()
                                 line.save()
+                                from apps.common.financial_arithmetic import calculate_line_totals  # noqa: PLC0415
+                                from apps.promotions.renewals import reserve_cycle  # noqa: PLC0415
+
+                                cycle.discount_cents = reserve_cycle(subscription, cycle, line.subtotal_cents)
+                                cycle.base_charge_cents = line.subtotal_cents
+                                net = calculate_line_totals(line.subtotal_cents - cycle.discount_cents, line.tax_rate)
                                 cycle.proforma = proforma
                                 cycle.collection_status = "prepared"
-                                cycle.tax_cents = line.tax_cents
-                                cycle.total_cents = line.line_total_cents
+                                cycle.tax_cents = net.tax_cents
+                                cycle.total_cents = net.line_total_cents
                                 cycle.save(
                                     update_fields=[
                                         "proforma",
                                         "collection_status",
+                                        "discount_cents",
+                                        "base_charge_cents",
                                         "tax_cents",
                                         "total_cents",
                                         "updated_at",
@@ -519,8 +531,58 @@ class RecurringBillingOrchestrator:
                                 group_cycles_prepared += 1
 
                             proforma.recalculate_totals()
+                            discount = sum(cycle.discount_cents for _, cycle, _ in grouped_items)
+                            if discount:
+                                from apps.common.financial_arithmetic import calculate_document_totals  # noqa: PLC0415
+                                from apps.promotions.pricing import allocate  # noqa: PLC0415
+
+                                totals = calculate_document_totals(list(proforma.lines.all()), discount)
+                                proforma.discount_cents = discount
+                                proforma.subtotal_cents = totals.subtotal_cents - discount
+                                proforma.tax_cents = totals.tax_cents
+                                proforma.total_cents = totals.total_cents
+                                net_by_cycle = {
+                                    str(cycle.pk): cycle.base_charge_cents - cycle.discount_cents
+                                    for _, cycle, _ in grouped_items
+                                }
+                                cycle_taxes = allocate(totals.tax_cents, net_by_cycle)
+                                for _, cycle, _ in grouped_items:
+                                    cycle.tax_cents = cycle_taxes.get(str(cycle.pk), 0)
+                                    cycle.total_cents = net_by_cycle[str(cycle.pk)] + cycle.tax_cents
+                                    cycle.save(update_fields=["tax_cents", "total_cents"])
+                                proforma.vat_evidence = {
+                                    **proforma.vat_evidence,
+                                    "subtotal_cents": proforma.subtotal_cents,
+                                    "tax_cents": proforma.tax_cents,
+                                    "total_cents": proforma.total_cents,
+                                }
+                                proforma.meta = {
+                                    **proforma.meta,
+                                    "promotion_version": 2,
+                                    "promotion_cycle_discounts": {
+                                        str(cycle.pk): cycle.discount_cents for _, cycle, _ in grouped_items
+                                    },
+                                }
                             proforma.send_proforma()
-                            proforma.save(update_fields=["subtotal_cents", "tax_cents", "total_cents", "status"])
+                            proforma.save(
+                                update_fields=[
+                                    "subtotal_cents",
+                                    "discount_cents",
+                                    "tax_cents",
+                                    "total_cents",
+                                    "status",
+                                    "meta",
+                                    "vat_evidence",
+                                ]
+                            )
+                            if proforma.total_cents == 0:
+                                from .proforma_service import ProformaPaymentService  # noqa: PLC0415
+
+                                settled = ProformaPaymentService.record_payment_and_convert(
+                                    str(proforma.pk), 0, "other", reference="Promotional renewal credit"
+                                )
+                                if settled.is_err():
+                                    raise ValueError(settled.unwrap_err())
                     except Exception as exc:
                         result["errors"].append(str(exc))
                         logger.exception(
@@ -680,6 +742,13 @@ class RecurringBillingOrchestrator:
 
         marked = 0
         with transaction.atomic():
+            subscription_ids = BillingCycle.objects.filter(id__in=overdue_cycle_ids).values("subscription_id")
+            subscriptions = {
+                subscription.id: subscription
+                for subscription in Subscription.objects.select_for_update(of=("self",))
+                .filter(id__in=subscription_ids, status="active")
+                .order_by("id")
+            }
             cycles = list(
                 BillingCycle.objects.select_for_update(of=("self",))
                 .filter(
@@ -689,12 +758,6 @@ class RecurringBillingOrchestrator:
                 )
                 .order_by("subscription_id", "id")
             )
-            subscriptions = {
-                subscription.id: subscription
-                for subscription in Subscription.objects.select_for_update(of=("self",))
-                .filter(id__in={cycle.subscription_id for cycle in cycles}, status="active")
-                .order_by("id")
-            }
             for cycle in cycles:
                 subscription = subscriptions.get(cycle.subscription_id)
                 if subscription is None:

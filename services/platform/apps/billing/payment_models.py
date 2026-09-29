@@ -74,6 +74,8 @@ class Payment(ConcurrentTransitionMixin, models.Model):
     Updated to support multiple payment methods and gateway responses.
     """
 
+    _defer_document_settlement: bool = False
+
     STATUS_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("pending", _("Pending")),
         ("succeeded", _("Succeeded")),  # Changed from 'completed'
@@ -90,6 +92,7 @@ class Payment(ConcurrentTransitionMixin, models.Model):
         ("bank", _("Bank Transfer")),
         ("paypal", _("PayPal")),
         ("cash", _("Cash")),
+        ("gift_card", _("Gift Card")),
         ("other", _("Other")),
     )
 

@@ -456,6 +456,10 @@ def order_detail(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
     context = {
         "order": order,
         "is_staff": is_staff,
+        "refund_request_key": str(uuid.uuid4()),
+        "unfinished_refund": order.invoice.tender_refund_commands.exclude(status="completed").first()
+        if order.invoice is not None
+        else None,
         "can_edit": can_edit,
         "editable_fields": editable_fields,
         "can_edit_all": editable_fields == ["*"],
@@ -1030,6 +1034,7 @@ def order_refund(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
 
     refund_data: RefundData = {
         "refund_type": request.POST.get("refund_type", "full"),
+        "idempotency_key": request.POST.get("idempotency_key", ""),
         # The staff modal posts `refund_reason` (templates/orders/order_detail.html:654).
         # Reading only `reason` discarded every selection and handed the service an empty
         # string, so no order refund has ever recorded the reason the operator chose.
@@ -1048,6 +1053,8 @@ def order_refund(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
     result = RefundService.refund_order(str(order.id), refund_data, actor=request.user)
 
     if result.is_ok():
+        if result.unwrap().get("refund_status") == "failed":
+            return json_error("Part of the refund still needs processing. Retry this request to finish it safely.")
         log_security_event(
             event_type="order_refund",
             details={"order": order.order_number, "refund_type": refund_data.get("refund_type")},
@@ -1237,6 +1244,9 @@ def _process_order_item_creation(
     """Process the creation of a new order item with proper price override logic"""
     try:
         with transaction.atomic():
+            order = Order.objects.select_for_update().get(pk=order.pk)
+            if not order.can_edit_items:
+                return json_error("This order's confirmed prices cannot be changed. Cancel it and create a new order.")
             # Create order item
             item = form.save(commit=False)
             item.order = order
@@ -1325,7 +1335,7 @@ def order_item_create(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
         return access_denied
 
     # Check if order can be edited
-    if not (order.is_draft or order.status == "awaiting_payment"):
+    if not order.can_edit_items:
         return json_error("Order cannot be modified in current status")
 
     # Dynamic form creation for OrderItem
@@ -1474,6 +1484,9 @@ def _process_order_item_update(form: ModelForm[Any], order: Order, pk: uuid.UUID
     """Process the update of an existing order item with proper price override logic"""
     try:
         with transaction.atomic():
+            order = Order.objects.select_for_update().get(pk=order.pk)
+            if not order.can_edit_items:
+                return json_error("This order's confirmed prices cannot be changed. Cancel it and create a new order.")
             # Update order item
             updated_item = form.save(commit=False)
 
@@ -1543,7 +1556,7 @@ def order_item_edit(request: HttpRequest, pk: uuid.UUID, item_pk: uuid.UUID) -> 
         return access_denied
 
     # Check if order can be edited
-    if not (order.is_draft or order.status == "awaiting_payment"):
+    if not order.can_edit_items:
         return json_error("Order cannot be modified in current status")
 
     item = get_object_or_404(OrderItem, id=item_pk, order=order)
@@ -1588,7 +1601,7 @@ def order_item_delete(request: HttpRequest, pk: uuid.UUID, item_pk: uuid.UUID) -
         return json_error("Access denied")
 
     # Check if order can be edited
-    if not (order.is_draft or order.status == "awaiting_payment"):
+    if not order.can_edit_items:
         return json_error("Order cannot be modified in current status")
 
     try:
@@ -1596,6 +1609,9 @@ def order_item_delete(request: HttpRequest, pk: uuid.UUID, item_pk: uuid.UUID) -
         product_name = item.product_name
 
         with transaction.atomic():
+            order = Order.objects.select_for_update().get(pk=order.pk)
+            if not order.can_edit_items:
+                return json_error("This order's confirmed prices cannot be changed. Cancel it and create a new order.")
             # Delete the item
             item.delete()
 
@@ -1663,7 +1679,7 @@ def cart_view(request: HttpRequest) -> HttpResponse:
 
     # Get or create current customer context
     try:
-        customer = request.user.get_primary_customer()
+        customer = request.user.primary_customer
         if not customer:
             messages.error(request, _("❌ No customer profile found. Please contact support."))
             return redirect("dashboard")
@@ -1695,7 +1711,7 @@ def cart_calculate(request: HttpRequest) -> HttpResponse:
         return HttpResponse("Authentication required", status=401)
 
     try:
-        customer = request.user.get_primary_customer()
+        customer = request.user.primary_customer
         if not customer:
             return HttpResponse("No customer profile", status=400)
 
@@ -1723,6 +1739,7 @@ def cart_calculate(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
+@transaction.atomic
 def cart_update(  # noqa: PLR0911  # Complexity: multi-step business logic
     request: HttpRequest,
 ) -> HttpResponse:  # Complexity: order processing pipeline  # Complexity: multi-step business logic
@@ -1737,7 +1754,7 @@ def cart_update(  # noqa: PLR0911  # Complexity: multi-step business logic
         return HttpResponse("Authentication required", status=401)
 
     try:
-        customer = request.user.get_primary_customer()
+        customer = request.user.primary_customer
         if not customer:
             return HttpResponse("No customer profile", status=400)
 
@@ -1748,10 +1765,13 @@ def cart_update(  # noqa: PLR0911  # Complexity: multi-step business logic
             return HttpResponse("Invalid parameters", status=400)
 
         # Get cart order and item
-        cart_order = Order.objects.filter(customer=customer, status="draft").first()
+        cart_order = Order.objects.select_for_update().filter(customer=customer, status="draft").first()
 
         if not cart_order:
             return HttpResponse("Cart not found", status=404)
+
+        if not cart_order.can_edit_items:
+            return HttpResponse("Confirmed order prices cannot be changed", status=400)
 
         cart_item = get_object_or_404(OrderItem, id=item_id, order=cart_order)
 
@@ -1776,6 +1796,7 @@ def cart_update(  # noqa: PLR0911  # Complexity: multi-step business logic
 
 
 @login_required
+@transaction.atomic
 def cart_remove(  # noqa: PLR0911  # Complexity: multi-step business logic
     request: HttpRequest,
 ) -> HttpResponse:  # Complexity: order processing pipeline  # Complexity: multi-step business logic
@@ -1790,7 +1811,7 @@ def cart_remove(  # noqa: PLR0911  # Complexity: multi-step business logic
         return HttpResponse("Authentication required", status=401)
 
     try:
-        customer = request.user.get_primary_customer()
+        customer = request.user.primary_customer
         if not customer:
             return HttpResponse("No customer profile", status=400)
 
@@ -1799,10 +1820,13 @@ def cart_remove(  # noqa: PLR0911  # Complexity: multi-step business logic
             return HttpResponse("Invalid parameters", status=400)
 
         # Get cart order and item
-        cart_order = Order.objects.filter(customer=customer, status="draft").first()
+        cart_order = Order.objects.select_for_update().filter(customer=customer, status="draft").first()
 
         if not cart_order:
             return HttpResponse("Cart not found", status=404)
+
+        if not cart_order.can_edit_items:
+            return HttpResponse("Confirmed order prices cannot be changed", status=400)
 
         cart_item = get_object_or_404(OrderItem, id=item_id, order=cart_order)
 

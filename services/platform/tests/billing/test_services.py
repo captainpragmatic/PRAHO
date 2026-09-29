@@ -933,7 +933,7 @@ class InvoiceServiceCreateFromOrderBillToNameTestCase(TestCase):
 
     def setUp(self) -> None:
         self.currency, _ = Currency.objects.get_or_create(
-            code='RON', defaults={'name': 'Romanian Leu', 'symbol': 'lei', 'is_active': True}
+            code='RON', defaults={'name': 'Romanian Leu', 'symbol': 'lei'}
         )
 
     def _order_for(self, customer: Customer) -> Any:

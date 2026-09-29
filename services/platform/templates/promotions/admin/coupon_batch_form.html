@@ -1,0 +1,4 @@
+{% extends "promotions/admin/form.html" %}
+{% load i18n %}
+{% block form_title %}{% trans "Generate coupon batch" %}{% endblock %}
+{% block form_help %}<p class="text-sm text-slate-300">{% trans "All coupons in a batch are single-use. Invalid batches create no coupons." %}</p>{% endblock %}

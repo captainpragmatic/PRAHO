@@ -6,6 +6,7 @@ import logging
 from collections.abc import Mapping
 from typing import Any
 
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -83,17 +84,16 @@ def converge_recurring_payment_failure(payment: Payment) -> int:
     if payment.invoice_id is not None:
         cycle_filter |= Q(invoice_id=payment.invoice_id) | Q(usage_invoice_id=payment.invoice_id)
 
+    subscriptions = list(
+        Subscription.objects.select_for_update(of=("self",))
+        .filter(id__in=BillingCycle.objects.filter(cycle_filter).values("subscription_id"))
+        .order_by("id")
+    )
     cycles = list(
         BillingCycle.objects.select_for_update(of=("self",)).filter(cycle_filter).order_by("subscription_id", "id")
     )
     if not cycles:
         return 0
-
-    subscriptions = list(
-        Subscription.objects.select_for_update(of=("self",))
-        .filter(id__in={cycle.subscription_id for cycle in cycles})
-        .order_by("id")
-    )
     for subscription in subscriptions:
         if subscription.status in {"active", "trialing", "past_due", "paused"}:
             subscription.mark_payment_failed()
@@ -144,6 +144,7 @@ class PaymentSuccessService:
                     "stripe_customer": gateway_facts.get("customer_id"),
                 }
                 if payment.status == "pending":
+                    payment._defer_document_settlement = True
                     if not payment.apply_gateway_event("succeeded", meta_update):
                         return Err("Payment state mismatch: success transition was not applied")
                     log_security_event(
@@ -160,13 +161,18 @@ class PaymentSuccessService:
                     payment.meta = {**(payment.meta or {}), **meta_update}
                     payment.save(update_fields=["meta", "updated_at"])
 
-                if payment.invoice_id is not None:
-                    convergence_error = PaymentSuccessService._converge_paid_invoice(payment)
-                    if convergence_error:
-                        transaction.set_rollback(True)
-                        return Err(convergence_error)
+            # Gateway facts commit before document, promotion and gift-card locks.
+            from apps.promotions.models import GiftCardPurchase  # noqa: PLC0415
 
-                return Ok(payment)
+            purchase = GiftCardPurchase.objects.filter(funding_payment_id=payment.pk).first()
+            if purchase:
+                from apps.promotions.gift_cards import activate_verified_purchase  # noqa: PLC0415
+
+                activate_verified_purchase(purchase.pk)
+            elif payment.invoice_id is not None:
+                return PaymentSuccessService.converge_local_paid_document(payment.pk)
+            return Ok(payment)
+
         except Exception as exc:
             logger.exception("Payment-success convergence failed for %s", gateway_txn_id)
             return Err(f"Payment-success convergence failed: {exc}")
@@ -184,6 +190,33 @@ class PaymentSuccessService:
         fact is validated before the local attempt is bound.
         """
         metadata = gateway_facts.get("metadata")
+        if isinstance(metadata, Mapping) and metadata.get("source") == "gift_card_funding":
+            from apps.promotions.models import GiftCardPurchase  # noqa: PLC0415
+
+            try:
+                purchase = (
+                    GiftCardPurchase.objects.select_related("funding_payment")
+                    .filter(pk=str(metadata.get("purchase_id", "")), customer_id=str(metadata.get("customer_id", "")))
+                    .first()
+                )
+            except (ValueError, ValidationError):
+                purchase = None
+            if purchase is None:
+                return Err("Gift-card funding attempt was not found")
+            payment = Payment.objects.select_for_update().select_related("currency").get(pk=purchase.funding_payment_id)
+            if (
+                payment.gateway_txn_id
+                or payment.status != "pending"
+                or payment.payment_method != "stripe"
+                or payment.meta.get("purchase_id") != str(purchase.pk)
+            ):
+                return Err("Gift-card funding attempt is not available for recovery")
+            validation_error = PaymentSuccessService._validate_gateway_facts(payment, gateway_facts)
+            if validation_error:
+                return Err(validation_error)
+            payment.gateway_txn_id = gateway_txn_id
+            payment.save(update_fields=["gateway_txn_id", "updated_at"])
+            return Ok(payment)
         if not isinstance(metadata, Mapping) or metadata.get("source") != "recurring_billing":
             return Err(f"Payment not found for gateway transaction {gateway_txn_id}")
 
@@ -243,6 +276,14 @@ class PaymentSuccessService:
         """Advance invoice-linked state after a locally trusted proforma conversion."""
         try:
             with transaction.atomic():
+                from .invoice_models import Invoice  # noqa: PLC0415
+
+                invoice_id = Payment.objects.values_list("invoice_id", flat=True).get(pk=payment_id)
+                if invoice_id is not None:
+                    from apps.promotions.locking import lock_document_context  # noqa: PLC0415
+
+                    invoice = Invoice.objects.select_for_update().get(pk=invoice_id)
+                    lock_document_context(invoice)
                 payment = Payment.objects.select_for_update(of=("self",)).select_related("invoice").get(id=payment_id)
                 if payment.status != "succeeded":
                     return Err(f"Payment state mismatch: payment {payment.id} is '{payment.status}'")
@@ -518,5 +559,8 @@ class PaymentSuccessService:
                 service_update_fields.add("updated_at")
                 service.save(update_fields=sorted(service_update_fields))
 
+        from apps.promotions.renewals import settle_cycle  # noqa: PLC0415
+
+        settle_cycle(cycle)
         cycle.entitlement_applied_at = paid_at
         return None

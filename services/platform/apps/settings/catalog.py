@@ -2257,6 +2257,17 @@ CATALOG: tuple[SettingDef, ...] = (
         validation={"min": 0},
     ),
     SettingDef(
+        key="promotions.new_offers_enabled",
+        data_type="boolean",
+        default=False,
+        group="advanced",
+        section=_("Promotions"),
+        label=_("Allow new promotion quotes"),
+        help_text=_("Disabling new quotes preserves existing renewal benefits, gift-card balances and refunds."),
+        input_kind="toggle",
+        advanced=True,
+    ),
+    SettingDef(
         key="promotions.max_code_generation_attempts",
         data_type="integer",
         default=100,

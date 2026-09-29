@@ -9,6 +9,7 @@ from . import views
 app_name = "api_billing"
 
 urlpatterns = [
+    path("gift-card-payment/", views.gift_card_payment_api, name="gift_card_payment"),
     # Currency endpoints
     path("currencies/", views.currencies_api, name="currencies"),
     # Invoice endpoints

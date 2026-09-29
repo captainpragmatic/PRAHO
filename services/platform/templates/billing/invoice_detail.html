@@ -6,6 +6,7 @@
 {% block title %}{% trans "Invoice" %} {{ invoice.display_number }} - PRAHO Platform{% endblock %}
 
 {% block content %}
+{% include "billing/partials/refund_retry.html" %}
 <div class="px-4 sm:px-6 lg:px-8">
   <!-- Header -->
   <div class="sm:flex sm:items-center">
@@ -23,7 +24,7 @@
         {% icon "document" %} {% trans "Download PDF" %}
       </a>
       <!-- Refund Button for Staff -->
-      {% if user.can_manage_financial_data and invoice.status == "paid" %}
+      {% if user.can_manage_financial_data and can_refund %}
         {% trans "Refund Invoice" as bt1 %}{% button bt1 data_action="invoke" data_invoke="showInvoiceRefundModal" variant="success" %}
       {% elif not user.is_staff_user and invoice.status == "paid" %}
         <!-- Refund Request Button for Customers -->
@@ -154,7 +155,7 @@
               {{ item.unit_price_cents|cents_to_currency|romanian_currency:invoice.currency.code }}
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-white text-right">
-              {{ item.total_cents|cents_to_currency|romanian_currency:invoice.currency.code }}
+              {{ item.line_total_cents|cents_to_currency|romanian_currency:invoice.currency.code }}
             </td>
           </tr>
           {% empty %}
@@ -201,7 +202,7 @@
         <div class="flex items-center justify-between mb-2">
           {% badge item.get_kind_display variant="primary" size="xs" %}
           <span class="text-white font-medium text-sm">
-            {{ item.total_cents|cents_to_currency|romanian_currency:invoice.currency.code }}
+            {{ item.line_total_cents|cents_to_currency|romanian_currency:invoice.currency.code }}
           </span>
         </div>
         <div class="mb-2">
@@ -292,16 +293,17 @@
 </div>
 
 <!-- Invoice Refund Modal (for staff) -->
-{% if user.can_manage_financial_data and invoice.status == "paid" %}
+{% if user.can_manage_financial_data and can_refund %}
 <div id="invoiceRefundModal" class="hidden fixed inset-0 z-50 overflow-y-auto">
   <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
     <div class="fixed inset-0 transition-opacity" aria-hidden="true">
       <div class="absolute inset-0 bg-slate-900 opacity-75" data-action="invoke" data-invoke="hideInvoiceRefundModal"></div>
     </div>
 
-    <div class="inline-block align-bottom bg-slate-800 rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+    <div class="inline-block align-bottom bg-slate-800 rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full relative z-10">
       <form id="invoiceRefundForm" method="post" action="{% url 'billing:invoice_refund' pk=invoice.id %}">
         {% csrf_token %}
+        <input type="hidden" name="idempotency_key" value="{{ refund_request_key }}">
         <div class="px-6 pt-6 pb-4">
           <h3 class="text-lg font-medium text-white mb-4">{% icon "currency" %} {% trans "Refund Invoice" %}</h3>
 
@@ -475,7 +477,7 @@ document.getElementById('invoiceRefundForm').addEventListener('submit', function
       <div class="absolute inset-0 bg-slate-900 opacity-75" data-action="invoke" data-invoke="hideInvoiceRefundRequestModal"></div>
     </div>
 
-    <div class="inline-block align-bottom bg-slate-800 rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+    <div class="inline-block align-bottom bg-slate-800 rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full relative z-10">
       <form id="invoiceRefundRequestForm" method="post" action="{% url 'billing:invoice_refund_request' pk=invoice.id %}">
         {% csrf_token %}
         <div class="px-6 pt-6 pb-4">

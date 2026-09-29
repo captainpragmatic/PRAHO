@@ -272,6 +272,20 @@ class GDPRCompliantCartSession:
             f"💾 [Cart] Cart saved with {len(self.cart['items'])} items, version: {self.cart['version'][:8]}..."
         )
 
+    def set_coupon_codes(self, codes: list[str]) -> None:
+        self.cart["coupon_codes"] = list(dict.fromkeys(code.strip().upper() for code in codes if code.strip()))
+        self._save_cart()
+
+    def get_coupon_codes(self) -> list[str]:
+        return list(self.cart.get("coupon_codes", []))
+
+    def set_gift_code(self, code: str) -> None:
+        self.cart["gift_code"] = code.strip().upper()
+        self._save_cart()
+
+    def get_gift_code(self) -> str:
+        return str(self.cart.get("gift_code", ""))
+
     def add_item(
         self,
         product_slug: str,
@@ -491,6 +505,10 @@ class GDPRCompliantCartSession:
         """
         # Create canonical representation of cart state
         version_data = {"items": [], "currency": cart.get("currency", "RON")}
+        if cart.get("coupon_codes"):
+            version_data["coupon_codes"] = sorted(cart["coupon_codes"])
+        if cart.get("gift_code"):
+            version_data["gift_code"] = cart["gift_code"]
 
         # Include essential item data that affects pricing/checkout
         for item in cart.get("items", []):
@@ -570,6 +588,8 @@ class CartCalculationService:
                 "customer_id": customer_id,
                 "currency": cart.currency,
                 "items": cart.get_api_items(),
+                "coupon_codes": cart.get_coupon_codes(),
+                "gift_code": cart.get_gift_code(),
             }
 
             # Debug logging (no file writing for security)
@@ -636,6 +656,8 @@ class OrderCreationService:
             preflight_data = {
                 "customer_id": customer_id,
                 "items": cart.get_api_items(),
+                "coupon_codes": cart.get_coupon_codes(),
+                "gift_code": cart.get_gift_code(),
                 "currency": cart.currency,
                 "notes": notes,
                 "meta": {"cart_created_at": cart.cart.get("created_at"), "portal_version": "v1"},
@@ -721,6 +743,7 @@ class OrderCreationService:
         idempotency_key: str | None = None,
         api_client_factory: type[PlatformAPIClient] | None = None,
         payment_method: str = "",
+        promotion_quote: str = "",
     ) -> dict[str, Any]:
         """Create draft order from cart items"""
 
@@ -738,8 +761,11 @@ class OrderCreationService:
             order_data: dict[str, Any] = {
                 "customer_id": customer_id,
                 "items": cart.get_api_items(),
+                "coupon_codes": cart.get_coupon_codes(),
+                "gift_code": cart.get_gift_code(),
                 "currency": cart.currency,
                 "payment_method": payment_method,
+                "promotion_quote": promotion_quote,
                 "notes": notes,
                 "meta": {"cart_created_at": cart.cart.get("created_at"), "portal_version": "v1"},
             }
@@ -775,4 +801,7 @@ class OrderCreationService:
             if getattr(e, "is_rate_limited", False):
                 raise  # Let view handle rate-limit UX
             logger.error(f"🔥 [Orders] Order creation failed: {e}")
+            details = getattr(e, "response_data", {}) or {}
+            if "PROMOTION_QUOTE_CHANGED" in str(details):
+                raise ValidationError(_("An offer changed. Review and confirm the updated checkout total.")) from e
             raise ValidationError(_("Error creating order")) from e

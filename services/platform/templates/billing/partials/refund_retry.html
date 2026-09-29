@@ -1,0 +1,13 @@
+{% load i18n ui_components formatting %}
+{% if user.can_manage_financial_data and unfinished_refund %}
+<section class="my-4 rounded-lg border border-amber-600 p-4" data-testid="refund-recovery">
+  <h2 class="font-semibold">{% trans "Refund awaiting completion" %}</h2>
+  <p class="my-2">{{ unfinished_refund.amount_cents|cents_to_currency }} {{ unfinished_refund.invoice.currency.code }} · {{ unfinished_refund.reason }}</p>
+  <p class="mb-3 text-sm">{% trans "Resume this request to finish its unpaid parts. Completed refunds will not be repeated." %}</p>
+  <form method="post" action="{% url 'billing:invoice_refund_retry' pk=unfinished_refund.invoice_id command_id=unfinished_refund.pk %}">
+    {% csrf_token %}
+    {% trans "Resume refund" as retry_label %}
+    {% button retry_label type="submit" variant="primary" %}
+  </form>
+</section>
+{% endif %}

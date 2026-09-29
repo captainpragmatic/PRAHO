@@ -378,6 +378,7 @@ def _create_and_process_order(request: HttpRequest, ctx: CheckoutContext) -> Htt
                 ctx.notes,
                 auto_pending=True,
                 idempotency_key=ctx.idempotency_key or None,
+                promotion_quote=request.POST.get("promotion_quote", ""),
                 payment_method=ctx.payment_method,
                 api_client_factory=PlatformAPIClient,
             )
@@ -415,7 +416,7 @@ def _create_and_process_order(request: HttpRequest, ctx: CheckoutContext) -> Htt
             if order_status == "awaiting_payment" and ctx.payment_method == "card":
                 order_total = order_data.get("total", "0")
                 order_currency = order_data.get("currency_code", "RON")
-                total_cents = _parse_total_cents(str(order_total))
+                total_cents = int(order_data.get("cash_due_cents", _parse_total_cents(str(order_total))))
 
                 if total_cents <= 0:
                     logger.error(
@@ -1040,6 +1041,39 @@ def checkout(request: HttpRequest) -> HttpResponse:
     }
 
     return render(request, "orders/checkout.html", context)
+
+
+@require_customer_authentication
+@require_http_methods(["POST"])
+@require_billing_access()
+def set_promotion_codes(request: HttpRequest) -> HttpResponse:
+    cart = GDPRCompliantCartSession(request.session)
+    max_codes, max_code_length = 5, 50
+    raw = request.POST.get("coupon_codes", "")
+    codes = [code.strip() for code in raw.split(",") if code.strip()]
+    if len(codes) > max_codes or any(len(code) > max_code_length for code in codes):
+        messages.error(request, _("Enter at most five coupon codes, separated by commas."))
+        return redirect("orders:checkout")
+    previous = cart.get_coupon_codes()
+    previous_gift = cart.get_gift_code()
+    gift_code = request.POST.get("gift_code", "").strip()
+    if len(gift_code) > max_code_length:
+        messages.error(request, _("Enter a valid gift-card code."))
+        return redirect("orders:checkout")
+    cart.set_coupon_codes(codes)
+    cart.set_gift_code(gift_code)
+    customer_id, user_id = _get_customer_context(request)
+    try:
+        result = CartCalculationService.calculate_cart_totals(cart, str(customer_id or ""), int(user_id or 0))
+        if result.get("error"):
+            raise ValidationError(result["error"])
+    except (ValidationError, PlatformAPIError):
+        cart.set_coupon_codes(previous)
+        cart.set_gift_code(previous_gift)
+        messages.error(request, _("The coupon or gift card could not be applied. Check its eligibility and try again."))
+    else:
+        messages.success(request, _("Review the updated total before placing your order."))
+    return redirect("orders:checkout")
 
 
 @require_customer_authentication

@@ -7,6 +7,7 @@ import uuid
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from django.core.exceptions import ValidationError
 from django.db.models import CharField, Q, QuerySet, Value
 from django.http import HttpRequest, HttpResponse
 from rest_framework import status
@@ -36,6 +37,7 @@ from apps.users.models import User
 
 from .serializers import (
     CurrencySerializer,
+    GiftCardTenderSerializer,
     InvoiceDetailSerializer,
     InvoiceListSerializer,
     InvoiceSummarySerializer,
@@ -49,6 +51,35 @@ _INVOICE_STATUSES = {value for value, _label in Invoice.STATUS_CHOICES}
 _PROFORMA_STATUSES = {value for value, _label in ProformaInvoice.STATUS_CHOICES}
 _UNPAID_INVOICE_STATUSES = {"draft", "issued", "overdue"}
 _MAX_AMOUNT_SEARCH_LENGTH = 32
+
+
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([AllowAny])
+@require_customer_role_in(*BILLING_ROLES)
+def gift_card_payment_api(request: HttpRequest, customer: Customer) -> Response:
+    """Spend an existing gift-card balance against a customer-owned document."""
+    from apps.promotions.gift_cards import pay_document  # noqa: PLC0415
+
+    serializer = GiftCardTenderSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+    model = Invoice if data["document_type"] == "invoice" else ProformaInvoice
+    document = model.objects.filter(customer=customer, number=data["document_number"]).first()
+    if document is None:
+        return _error("Billing document not found", status.HTTP_404_NOT_FOUND)
+    try:
+        result = pay_document(
+            data["code"],
+            document,
+            customer,
+            str(data["operation_key"]),
+            data.get("amount_cents"),
+            actor=getattr(request, "_customer_user", None),
+        )
+    except ValidationError as exc:
+        return _error("; ".join(exc.messages))
+    return Response(result)
 
 
 def _request_actor(request: HttpRequest) -> User | None:

@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def release_promotions_for_order(order: Order, *, trigger: str) -> None:
+def release_promotions_for_order(order: Order, *, trigger: str) -> None:  # noqa: C901  # Legacy and payment-ledger releases remain separate
     """Release coupon usage and gift-card value after a terminal order event.
 
     Runs inside the caller's transaction. Each promotion service has its own
@@ -45,6 +45,17 @@ def release_promotions_for_order(order: Order, *, trigger: str) -> None:
     Promotion value remains conservatively consumed when a branch fails, with
     a loud log and review-queued audit event for manual follow-up.
     """
+    if order.has_frozen_quote:
+        from .engine import release_order  # noqa: PLC0415
+
+        if trigger == "full_refund" or (trigger == "cancellation" and order.status == "cancelled"):
+            release_order(order, full_refund=trigger == "full_refund")
+            if trigger == "cancellation" and order.proforma_id:
+                from .gift_cards import release_reservations  # noqa: PLC0415
+
+                release_reservations(order.proforma)
+        return
+
     if trigger not in ("cancellation", "full_refund"):
         raise ValueError(f"Unsupported promotion release trigger: {trigger!r}")
 
@@ -314,6 +325,9 @@ class CouponService:
                 error_code="ORDER_NOT_ELIGIBLE",
             )
 
+        if order.has_frozen_quote or order.status in {"paid", "in_review", "provisioning"}:
+            return ValidationResult(False, "This order has a frozen quote; start a new checkout.", "ORDER_NOT_ELIGIBLE")
+
         # Basic validity check
         can_use, reason = coupon.can_be_used()
         if not can_use:
@@ -511,9 +525,9 @@ class CouponService:
         # positive, so the net redeemed amount is the negated sum (review of #387 —
         # without this, a coupon applied after a gift card regained its full base).
         gift_card_net = (
-            GiftCardTransaction.objects.filter(order=order, transaction_type__in=("redemption", "refund")).aggregate(
-                total=models.Sum("amount_cents")
-            )["total"]
+            GiftCardTransaction.objects.filter(
+                order=order, ledger_version=1, transaction_type__in=("redemption", "refund")
+            ).aggregate(total=models.Sum("amount_cents"))["total"]
             or 0
         )
         total += max(0, -int(gift_card_net))
@@ -1182,6 +1196,8 @@ class GiftCardService:
         Redeem a gift card for an order.
         If amount_cents is None, uses order total up to card balance.
         """
+        if order.has_frozen_quote:
+            return ApplyResult(success=False, error_message="Use the gift-card payment action on the billing document.")
         validation = cls.validate_gift_card(code)
         if not validation.is_valid:
             return ApplyResult(success=False, error_message=validation.error_message)
@@ -1227,10 +1243,11 @@ class GiftCardService:
 
         # Calculate amount to redeem
         order_remaining = order.total_cents
+        available_balance = max(0, gift_card.current_balance_cents - gift_card.reserved_cents)
         if amount_cents is None:
-            amount_cents = min(gift_card.current_balance_cents, order_remaining)
+            amount_cents = min(available_balance, order_remaining)
         else:
-            amount_cents = min(amount_cents, gift_card.current_balance_cents, order_remaining)
+            amount_cents = min(amount_cents, available_balance, order_remaining)
 
         if amount_cents <= 0:
             return ApplyResult(
@@ -1304,7 +1321,11 @@ class GiftCardService:
             release_context = "full refund"
 
         gift_card_ids = sorted(
-            set(GiftCardTransaction.objects.filter(order=order).order_by().values_list("gift_card_id", flat=True)),
+            set(
+                GiftCardTransaction.objects.filter(ledger_version=1, order=order)
+                .order_by()
+                .values_list("gift_card_id", flat=True)
+            ),
             key=str,
         )
         if not gift_card_ids:
@@ -1317,6 +1338,7 @@ class GiftCardService:
         total_restored = 0
         for gift_card in locked_gift_cards:
             ledger_totals = GiftCardTransaction.objects.filter(
+                ledger_version=1,
                 gift_card=gift_card,
                 order=order,
             ).aggregate(
@@ -1344,6 +1366,7 @@ class GiftCardService:
             # ledger when a transferable card serves multiple customers.
             order_redemption = (
                 GiftCardTransaction.objects.filter(
+                    ledger_version=1,
                     gift_card=gift_card,
                     order=order,
                     transaction_type="redemption",
@@ -1404,6 +1427,16 @@ class GiftCardService:
         user: User | None = None,
     ) -> bool:
         """Activate a gift card after purchase."""
+        if gift_card.ledger_version == 2:  # noqa: PLR2004  # Persisted payment-ledger version
+            from django.core.exceptions import ValidationError  # noqa: PLC0415
+
+            from .gift_cards import activate_verified_purchase  # noqa: PLC0415
+
+            try:
+                activate_verified_purchase(gift_card.purchase.pk)
+            except (GiftCard.purchase.RelatedObjectDoesNotExist, ValidationError):
+                return False
+            return True
         if gift_card.status != "pending":
             return False
 

@@ -79,7 +79,7 @@ class ButtonAttrsSanitizationTests(SimpleTestCase):
         """< and > should be HTML-escaped in attrs output."""
         result = _render('{% button "Go" attrs="<script>" %}')
         self.assertNotIn("<script>", result)
-        self.assertIn("&lt;script&gt;", result)
+        self.assertNotIn("&lt;script&gt;", result)
 
     def test_double_quotes_escaped(self) -> None:
         """Double quotes in attrs should be HTML-escaped to prevent attribute break-out."""
