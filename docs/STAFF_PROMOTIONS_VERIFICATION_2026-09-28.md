@@ -223,7 +223,13 @@ failed their regression assertions (`pr561-review-red.log`, `pr561-refund-red.lo
 | Full lint | Passed, exit 0 | `pr561-lint-green.log` |
 | Types and migration state | Passed, exit 0; 491 Platform / 86 Portal files; no migration drift | `pr561-types-migrations-green.log` |
 | Templates | Byte-for-byte match with the pre-fix scan: 90 existing blockers, 553 warnings | `pr561-templates-before.log`, `pr561-templates-after.log` |
+| Full Platform suite after review fixes | 9,793 tests run, 35 skipped; exit 0 | `pr-review-full-test.log` |
+| Full Portal suite after review fixes | 1,324 passed, 3 skipped, 271 subtests passed | `pr-review-full-test.log` |
+| Counter store / integration | 18 passed, 3 skipped / 135 passed, 11 skipped | `pr-review-full-test.log` |
+| Database cache / service isolation | 9 passed, 1 skipped / 1 passed | `pr-review-full-test.log` |
 
 These refund requests exercise the real HMAC middleware and refund services through
 Django's test client, with the payment gateway mocked at its external boundary. The
-full suites and browser checks above were not repeated for these review fixes.
+full `DJANGO_TEST_PROCESSES=8 make test` command was repeated with local loopback
+access and exited 0 after all five phases. Browser interactions were not repeated
+for these review fixes.
