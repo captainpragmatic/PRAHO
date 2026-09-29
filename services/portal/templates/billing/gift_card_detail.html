@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% load i18n static ui_components formatting localisation_tags %}
+
+{% block title %}{% trans "Gift card purchase" %} - PRAHO{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto px-4 py-8 space-y-6">
+  <h1 class="text-2xl font-semibold text-white">{% trans "Gift card purchase" %}</h1>
+  {% include "billing/partials/section_tabs.html" with active="gift_cards" %}
+  {% if error %}{% alert error variant="warning" %}{% endif %}
+  {% if notice %}{% alert notice variant="info" %}{% endif %}
+  {% if purchase %}
+  <section class="rounded-xl border border-slate-700 bg-slate-800 p-6 space-y-4">
+    <p class="text-3xl font-bold text-white">{{ purchase.amount_cents|cents_to_currency|romanian_currency:purchase.currency_code }}</p>
+    <dl class="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+      <div><dt class="text-slate-400">{% trans "Payment status" %}</dt><dd class="mt-1 text-white">{% if purchase.payment_closed %}{% trans "Closed" %}{% elif purchase.funding_needs_review %}{% trans "Needs review" %}{% elif purchase.funding_status == 'processing' %}{% trans "Processing" %}{% else %}{{ purchase.status|title }}{% endif %}</dd></div>
+      <div><dt class="text-slate-400">{% trans "Delivery status" %}</dt><dd class="mt-1 text-white">{{ purchase.delivery_status|title }}</dd></div>
+      <div><dt class="text-slate-400">{% trans "Recipient" %}</dt><dd class="mt-1 text-white">{{ purchase.recipient_name }} {{ purchase.recipient_email }}</dd></div>
+      <div><dt class="text-slate-400">{% trans "Purchased" %}</dt><dd class="mt-1 text-white">{% localised_date purchase.created_at "datetime" %}</dd></div>
+    </dl>
+    {% if purchase.spending_frozen %}
+      <p class="text-amber-300">{% trans "Spending is frozen while the funding payment is reviewed." %}</p>
+    {% endif %}
+    {% if purchase.status == 'funded' or purchase.status == 'partially_refunded' or purchase.status == 'disputed' or purchase.status == 'refunded' %}
+      <p class="text-slate-300">{% trans "Available balance" %}: {{ purchase.available_balance_cents|cents_to_currency|romanian_currency:purchase.currency_code }}</p>
+      <p class="text-slate-300">{% trans "Recorded balance" %}: {{ purchase.current_balance_cents|cents_to_currency|romanian_currency:purchase.currency_code }}</p>
+      {% if purchase.refund_held_cents %}<p class="text-slate-300">{% trans "Held for refunds" %}: {{ purchase.refund_held_cents|cents_to_currency|romanian_currency:purchase.currency_code }}</p>{% endif %}
+      {% if purchase.reserved_cents %}<p class="text-slate-300">{% trans "Reserved for orders" %}: {{ purchase.reserved_cents|cents_to_currency|romanian_currency:purchase.currency_code }}</p>{% endif %}
+    {% elif purchase.status == 'pending' and not purchase.payment_closed and not purchase.funding_needs_review %}
+      <p class="text-sm text-slate-300">{% trans "The gift card becomes usable after payment is confirmed." %}</p>
+    {% endif %}
+    {% if purchase.payment_closed %}
+      <p class="text-slate-300">{% trans "This payment is closed. This purchase cannot be paid again." %}</p>
+      <a href="{% url 'billing:gift_cards' %}" class="text-slate-300 underline hover:text-white">{% trans "Start a new purchase" %}</a>
+    {% elif purchase.funding_needs_review %}
+      <p class="text-amber-300">{% trans "This payment needs review. Contact support before attempting another charge." %}</p>
+    {% elif purchase.funding_status == 'processing' %}
+      <p class="text-slate-300">{% trans "Payment is processing. Check its status shortly." %}</p>
+    {% endif %}
+    {% if purchase.status == 'pending' or purchase.status == 'funding' %}
+      {% if purchase.payment_method == 'bank' and not purchase.payment_closed and not purchase.funding_needs_review %}
+        <div class="rounded-lg border border-slate-600 p-4 space-y-2 text-sm text-slate-300">
+          <h2 class="font-medium text-white">{% trans "Bank transfer" %}</h2>
+          {% if bank_details and bank_details.currency == purchase.currency_code %}
+            <p>{{ bank_details.bank_name }}</p>
+            {% if bank_details.beneficiary %}<p>{{ bank_details.beneficiary }}</p>{% endif %}
+            <p class="break-all">{% trans "IBAN" %}: {{ bank_details.iban }}</p>
+            {% if bank_details.swift %}<p>{% trans "SWIFT" %}: {{ bank_details.swift }}</p>{% endif %}
+            <p>{% trans "Transfer amount" %}: {{ purchase.amount_cents|cents_to_currency|romanian_currency:purchase.currency_code }}</p>
+            <p class="break-all">{% trans "Payment reference" %}: {{ purchase.id }}</p>
+          {% else %}
+            <p>{% trans "Bank instructions for this currency are unavailable. Contact support before transferring funds." %}</p>
+          {% endif %}
+        </div>
+      {% elif purchase.can_pay and not payment %}
+        <form method="post" action="{% url 'billing:gift_card_action' purchase_id=purchase.id action='funding' %}">
+          {% csrf_token %}
+          {% trans "Pay by card" as pay_label %}
+          {% button pay_label type="submit" variant="primary" %}
+        </form>
+      {% endif %}
+    {% endif %}
+    {% if payment %}
+      <form method="post" action="{% url 'billing:gift_card_action' purchase_id=purchase.id action='refresh' %}" id="gift-card-payment-form" class="space-y-4" data-return-url="{% url 'billing:gift_card_detail' purchase_id=purchase.id %}" data-payment-error="{% trans 'Payment could not be confirmed. Check the purchase status before trying again.' %}">
+        {% csrf_token %}
+        <div id="gift-card-payment-element"></div>
+        <div id="gift-card-payment-error" hidden>
+          {% trans "Payment could not be confirmed. Check the purchase status before trying again." as payment_error %}
+          {% alert payment_error variant="danger" %}
+        </div>
+        {% trans "Confirm payment" as confirm_label %}
+        {% button confirm_label type="submit" variant="primary" %}
+      </form>
+    {% endif %}
+    {% if purchase.can_refresh or payment %}
+      <form method="post" id="gift-card-refresh-form" action="{% url 'billing:gift_card_action' purchase_id=purchase.id action='refresh' %}">
+        {% csrf_token %}
+        {% trans "Check payment status" as refresh_label %}
+        {% button refresh_label type="submit" variant="secondary" %}
+      </form>
+    {% endif %}
+    {% if purchase.delivery_queued %}
+      <p class="text-sm text-slate-300">{% trans "Delivery is queued. It can take a few minutes." %}</p>
+    {% elif not purchase.can_resend and purchase.resend_available_at and purchase.can_reveal %}
+      <p class="text-sm text-slate-300">{% trans "Sending again is available after" %} {% localised_date purchase.resend_available_at "datetime" %}.</p>
+    {% endif %}
+    {% if purchase.deliveries %}
+      <ul class="space-y-2 text-sm text-slate-300">
+        {% for item in purchase.deliveries %}
+          <li>
+            {% if item.purpose == 'voucher' %}{% trans "Voucher" %}{% else %}{% trans "Buyer receipt" %}{% endif %}: {{ item.status|title }}
+            {% if item.sent_at %} · {% localised_date item.sent_at "datetime" %}{% endif %}
+            {% if item.status == 'failed' and item.next_attempt_at %} · {% trans "Another delivery attempt is scheduled." %}{% endif %}
+            {% if item.status == 'failed' and not item.next_attempt_at %} · {% trans "Contact support if delivery is still unavailable after trying again." %}{% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </section>
+  {% if purchase.can_reveal or purchase.can_resend or revealed_code %}
+  <section class="rounded-xl border border-slate-700 bg-slate-800 p-6 space-y-4">
+    <h2 class="text-lg font-medium text-white">{% trans "Gift card code" %}</h2>
+    <p class="text-sm text-slate-300">{% trans "Anyone with the code can use its balance. Keep it private and share it only with your recipient." %}</p>
+    {% if revealed_code %}<code class="block break-all rounded-lg bg-slate-900 p-4 text-lg text-white">{{ revealed_code }}</code>{% endif %}
+    <div class="flex flex-wrap gap-3">
+      {% if purchase.can_reveal and not revealed_code %}
+      <form method="post" action="{% url 'billing:gift_card_action' purchase_id=purchase.id action='reveal' %}">
+        {% csrf_token %}
+        {% trans "Reveal code" as reveal_label %}
+        {% button reveal_label type="submit" variant="secondary" %}
+      </form>
+      {% endif %}
+      {% if purchase.can_resend %}
+      <form method="post" action="{% url 'billing:gift_card_action' purchase_id=purchase.id action='resend' %}">
+        {% csrf_token %}
+        {% trans "Send code again" as resend_label %}
+        {% button resend_label type="submit" variant="secondary" %}
+      </form>
+      {% endif %}
+    </div>
+    <p class="text-xs text-slate-400">{% trans "Sending again uses the same code. Email delivery can take a few minutes." %}</p>
+  </section>
+  {% endif %}
+  {% endif %}
+  <a href="{% url 'billing:gift_cards' %}" class="text-slate-300 underline hover:text-white">{% trans "Back to gift cards" %}</a>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{% if payment %}
+{{ payment|json_script:"gift-card-payment-config" }}
+{# nosemgrep: missing-integrity — Stripe does not support SRI on js.stripe.com #}
+<script src="https://js.stripe.com/v3/"></script>
+<script src="{% static 'js/gift-card-purchases.js' %}" defer></script>
+{% endif %}
+{% endblock %}

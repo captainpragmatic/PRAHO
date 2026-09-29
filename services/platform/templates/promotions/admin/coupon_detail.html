@@ -8,5 +8,6 @@
     <dl class="grid gap-4 sm:grid-cols-3"><div><dt>{% trans "Redemptions" %}</dt><dd class="text-xl text-white">{{ stats.total_redemptions }}</dd></div><div><dt>{% trans "Customers" %}</dt><dd class="text-xl text-white">{{ stats.unique_customers }}</dd></div><div><dt>{% trans "Valid until" %}</dt><dd class="text-white">{{ valid_until|default:'—' }}</dd></div></dl>
     {% if coupon.internal_notes %}<h2 class="font-semibold text-white">{% trans "Staff notes" %}</h2><p>{{ coupon.internal_notes|linebreaksbr }}</p>{% endif %}
   </section>
+  {% include 'promotions/admin/money_totals.html' %}
   <section class="space-y-3"><h2 class="text-xl text-white">{% trans "Redemption history" %}</h2>{% include 'promotions/admin/redemptions.html' %}</section>
 {% endblock %}

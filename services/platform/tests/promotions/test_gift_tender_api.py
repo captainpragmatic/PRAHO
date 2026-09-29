@@ -94,6 +94,7 @@ class GiftTenderAPITests(HMACTestMixin, TestCase):
             "customer_id": self.customer.pk,
             "user_id": self.owner.pk,
             "currency": "RON",
+            "currency_revision": 1,
             "items": [
                 {
                     "product_id": str(product.pk),

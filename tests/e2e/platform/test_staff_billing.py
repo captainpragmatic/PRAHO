@@ -44,7 +44,10 @@ def _fill_proforma_form(page: Page, data: dict) -> None:
     page.fill('input[name="line_0_description"]', data["description"])
     page.fill('input[name="line_0_unit_price"]', data["amount"])
     page.fill('input[name="line_0_quantity"]', "1")
-    page.select_option('select[name="currency"]', "RON")
+    currency = page.locator('input[name="currency"]')
+    expect(currency).to_have_value("RON")
+    expect(currency).not_to_be_editable()
+    expect(page.locator('input[name="currency_revision"]')).to_have_value(re.compile(r"^[1-9]\d*$"))
     page.select_option('select[name="line_0_vat_rate"]', "21")
 
 

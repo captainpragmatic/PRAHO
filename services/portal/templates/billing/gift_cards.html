@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% load i18n static ui_components formatting localisation_tags %}
+
+{% block title %}{% trans "Gift cards" %} - PRAHO{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto px-4 py-8 space-y-6">
+  <header>
+    <h1 class="text-2xl font-semibold text-white">{% trans "Gift cards" %}</h1>
+    <p class="mt-2 text-slate-300">{% trans "Buy hosting credit for yourself or send it as a gift." %}</p>
+  </header>
+  {% include "billing/partials/section_tabs.html" with active="gift_cards" %}
+  {% if notice %}{% alert notice variant="warning" %}{% endif %}
+  {% if catalog_error %}{% alert catalog_error variant="warning" %}{% endif %}
+
+  {% if form %}
+  <section class="rounded-xl border border-slate-700 bg-slate-800 p-6 space-y-5" aria-labelledby="gift-buy-title">
+    <div>
+      <h2 id="gift-buy-title" class="text-lg font-medium text-white">{% trans "Buy a gift card" %}</h2>
+      <p class="mt-2 text-sm text-slate-300">{% trans "Anyone with the code can use its balance. Keep it private and share it only with your recipient." %}</p>
+      <p class="mt-2 text-sm text-slate-400">{% trans "Pay by card or bank transfer. Coupons and gift card balances cannot fund another gift card." %}</p>
+    </div>
+    <form method="post" action="{% url 'billing:gift_card_create' %}" class="space-y-5" id="gift-purchase-form">
+      {% csrf_token %}
+      {% for field in form.hidden_fields %}{{ field }}{% endfor %}
+      {% for error in form.non_field_errors %}{% alert error variant="danger" %}{% endfor %}
+      <div class="grid gap-5 sm:grid-cols-2">
+        {% form_field form.amount_cents %}
+        {% form_field form.payment_method %}
+      </div>
+      {% form_field form.delivery %}
+      <div id="gift-recipient-fields" class="space-y-5">
+        <div class="grid gap-5 sm:grid-cols-2">
+          {% form_field form.recipient_email %}
+          {% form_field form.recipient_name %}
+        </div>
+        {% form_field form.recipient_message %}
+      </div>
+      <p class="text-sm text-slate-400" id="gift-for-me-help">{% trans "For personal use, we send the code to your account email after payment is confirmed." %}</p>
+      {% trans "Continue to payment" as buy_label %}
+      {% button buy_label type="submit" variant="primary" %}
+      <a href="{% url 'billing:gift_cards' %}" class="ml-3 text-sm text-slate-300 underline hover:text-white">{% trans "Start a new purchase" %}</a>
+    </form>
+  </section>
+  {% elif not catalog_error %}
+    <p class="rounded-xl border border-slate-700 bg-slate-800 p-6 text-slate-300">{% trans "New gift card purchases are currently unavailable. Your existing purchases remain accessible below." %}</p>
+  {% endif %}
+
+  <section class="space-y-4" aria-labelledby="gift-history-title">
+    <h2 id="gift-history-title" class="text-lg font-medium text-white">{% trans "Your purchases" %}</h2>
+    {% if history_error %}
+      {% alert history_error variant="warning" %}
+    {% else %}
+      {% for purchase in purchases %}
+      <a href="{% url 'billing:gift_card_detail' purchase_id=purchase.id %}" class="block rounded-xl border border-slate-700 bg-slate-800 p-5 hover:border-blue-500">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <span class="text-lg font-semibold text-white">{{ purchase.amount_cents|cents_to_currency|romanian_currency:purchase.currency_code }}</span>
+          <span class="text-sm text-slate-300">{{ purchase.status|title }}</span>
+        </div>
+        <p class="mt-2 text-sm text-slate-300">{% if purchase.is_gift %}{% trans "Gift for" %} {{ purchase.recipient_email }}{% else %}{% trans "For me" %}{% endif %}</p>
+        <p class="mt-1 text-xs text-slate-400">{% localised_date purchase.created_at "datetime" %} · {% trans "Delivery" %}: {{ purchase.delivery_status|title }}</p>
+      </a>
+      {% empty %}
+      <p class="text-slate-400">{% trans "You have no gift card purchases yet." %}</p>
+      {% endfor %}
+      {% if previous_page or next_page %}
+      <nav class="flex justify-between text-sm" aria-label="{% trans 'Purchase history pages' %}">
+        {% if previous_page %}<a class="text-slate-300 underline hover:text-white" href="?page={{ previous_page }}">{% trans "Previous" %}</a>{% endif %}
+        {% if next_page %}<a class="text-slate-300 underline hover:text-white" href="?page={{ next_page }}">{% trans "Next" %}</a>{% endif %}
+      </nav>
+      {% endif %}
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
+
+{% block extra_js %}<script src="{% static 'js/gift-card-purchases.js' %}" defer></script>{% endblock %}

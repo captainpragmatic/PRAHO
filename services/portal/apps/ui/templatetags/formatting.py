@@ -53,7 +53,7 @@ def validate_template_numeric(value: TemplateNumeric, default_message: str = "0,
 
 
 @register.filter
-def romanian_currency(value: TemplateNumeric, currency: str = "RON") -> str:
+def romanian_currency(value: TemplateNumeric, currency: str | None = "RON") -> str:
     """
     Format currency in Romanian business style
 
@@ -66,37 +66,17 @@ def romanian_currency(value: TemplateNumeric, currency: str = "RON") -> str:
         value: Numeric value to format
         currency: Currency code (RON, EUR, USD)
     """
-    is_valid, default_value = validate_template_numeric(value, "0,00 RON")
-    if not is_valid:
-        return default_value
-
+    if not isinstance(currency, str) or not re.fullmatch(r"[A-Z]{3}", currency):
+        return "—"
+    unavailable = f"— {currency}"
     try:
-        # Convert to Decimal for precise calculation
         decimal_value = Decimal(str(value))
-
-        # Format with 2 decimal places
-        formatted = f"{decimal_value:.2f}"
-
-        # Split integer and decimal parts
-        parts = formatted.split(".")
-        integer_part = parts[0]
-        decimal_part = parts[1]
-
-        # Add thousand separators (dots in Romanian style)
-        # Format: 1.234.567,89
-        integer_with_separators = ""
-        for i, digit in enumerate(reversed(integer_part)):
-            if i > 0 and i % 3 == 0:
-                integer_with_separators = "." + integer_with_separators
-            integer_with_separators = digit + integer_with_separators
-
-        # Use comma as decimal separator (Romanian style)
-        romanian_formatted = f"{integer_with_separators},{decimal_part}"
-
+        if not decimal_value.is_finite():
+            return unavailable
+        romanian_formatted = f"{decimal_value:,.2f}".translate(str.maketrans(",.", ".,"))
         return f"{romanian_formatted} {currency}"
-
-    except (ValueError, TypeError):
-        return "0,00 RON"
+    except (ValueError, TypeError, decimal.InvalidOperation):
+        return unavailable
 
 
 @register.filter
@@ -559,7 +539,7 @@ def cents_to_currency(value: int | float | Decimal) -> Decimal:
 
 
 @register.filter
-def format_currency(value: int | float | Decimal, currency: str = "RON") -> str:
+def format_currency(value: TemplateNumeric, currency: str | None = "RON") -> str:
     """
     Convenience filter: cents → formatted Romanian currency in one step.
 
@@ -574,7 +554,10 @@ def format_currency(value: int | float | Decimal, currency: str = "RON") -> str:
         value: Amount in cents (integer)
         currency: Currency code (RON, EUR, USD)
     """
-    converted = cents_to_currency(value)
+    try:
+        converted = Decimal(str(value)) / Decimal("100")
+    except (ValueError, TypeError, decimal.InvalidOperation):
+        return romanian_currency(None, currency)
     return romanian_currency(converted, currency)
 
 

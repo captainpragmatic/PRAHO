@@ -8,6 +8,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
+from apps.billing.currency_models import Currency
 from apps.domains.models import TLD, Registrar, TLDRegistrarAssignment
 
 User = get_user_model()
@@ -15,6 +16,7 @@ User = get_user_model()
 
 class CheckAvailabilityViewTests(TestCase):
     def setUp(self) -> None:
+        Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei"})
         self.user = User.objects.create_user(email="u@test.com", password="StrongPass123!")
         self.client.force_login(self.user)
         self.tld = TLD.objects.create(
@@ -74,8 +76,8 @@ class CheckAvailabilityViewTests(TestCase):
         self.assertEqual(
             data["registration_periods"],
             [
-                {"years": 2, "total_cost_cents": 5000},
-                {"years": 3, "total_cost_cents": 7500},
+                {"years": 2, "total_cost_cents": 5000, "currency": "RON", "whois_cost_cents": 1000},
+                {"years": 3, "total_cost_cents": 7500, "currency": "RON", "whois_cost_cents": 1500},
             ],
         )
         self.assertEqual(set(data["pricing"]), {"2_years", "3_years"})
@@ -87,9 +89,9 @@ class CheckAvailabilityViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         html = response.content.decode()
         self.assertNotIn('<option value="1" selected>', html)
-        self.assertIn("selectDomain(this.dataset.domain, data.registration_periods)", html)
+        self.assertIn("selectDomain(this.dataset.domain, data.registration_periods, data.whois_privacy_available)", html)
         self.assertIn("registrationPeriods.forEach", html)
-        self.assertIn("registrationPrices[period.years] = period.total_cost_cents", html)
+        self.assertIn("registrationPrices[period.years] = period", html)
         self.assertIn("yearsSelect.value = String(registrationPeriods[0].years)", html)
         featured_price = next(
             price for price in response.context["tld_pricing"] if price["tld"] == self.com_ro_tld

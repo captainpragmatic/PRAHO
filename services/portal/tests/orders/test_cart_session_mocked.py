@@ -27,7 +27,7 @@ class TestGDPRCompliantCartSessionMocked(SimpleTestCase):
         cart = GDPRCompliantCartSession(self.session)
 
         # Check cart structure
-        self.assertEqual(cart.cart['currency'], 'RON')
+        self.assertEqual(cart.cart['currency'], '')
         self.assertIn('items', cart.cart)
         self.assertIn('created_at', cart.cart)
         self.assertIn('expires_at', cart.cart)
@@ -55,7 +55,9 @@ class TestGDPRCompliantCartSessionMocked(SimpleTestCase):
             'name': 'Basic Shared Hosting',
             'product_type': 'shared_hosting',
             'is_active': True,
-            'requires_domain': False
+            'requires_domain': False,
+            "selling_currency": "RON",
+            "currency_revision": 1,
         }
         mock_api_client.return_value = mock_api
 

@@ -163,29 +163,13 @@
 
                 <div class="space-y-3">
                     <div class="flex justify-between items-center">
-                        <span class="text-slate-400">{% trans 'Monthly Price' %}</span>
-                        <span class="text-white font-semibold">{{ service.service_plan.price_monthly|romanian_currency }}</span>
+                        <span class="text-slate-400">{% trans 'Service price' %}</span>
+                        <span class="text-white font-semibold">{{ service.price|romanian_currency:service.currency.code }}</span>
                     </div>
 
-                    {% if service.service_plan.price_quarterly %}
                     <div class="flex justify-between items-center">
-                        <span class="text-slate-400">{% trans 'Quarterly Price' %}</span>
-                        <span class="text-white">{{ service.service_plan.price_quarterly|romanian_currency }}</span>
-                    </div>
-                    {% endif %}
-
-                    {% if service.service_plan.price_yearly %}
-                    <div class="flex justify-between items-center">
-                        <span class="text-slate-400">{% trans 'Yearly Price' %}</span>
-                        <span class="text-white">{{ service.service_plan.price_yearly|romanian_currency }}</span>
-                    </div>
-                    {% endif %}
-
-                    <div class="pt-3 border-t border-slate-700">
-                        <div class="flex justify-between items-center">
-                            <span class="text-slate-400">{% trans 'VAT (21%)' %}</span>
-                            <span class="text-slate-300">{{ service.service_plan.price_monthly|romanian_vat:0.21 }}</span>
-                        </div>
+                        <span class="text-slate-400">{% trans 'Billing cycle' %}</span>
+                        <span class="text-white">{{ service.get_billing_cycle_display }}</span>
                     </div>
                 </div>
             </div>

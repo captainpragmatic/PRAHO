@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% load i18n ui_components %}
+
+{% block title %}{% trans "Check previous order" %}{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto px-4 py-8">
+  <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+    <h1 class="text-2xl font-bold text-white mb-4">{% trans "Check previous order" %}</h1>
+    <p class="text-slate-300 mb-4">
+      {% trans "Your previous order may have been accepted. Check it before placing another order." %}
+    </p>
+    <p class="text-slate-400 mb-6">
+      {% blocktrans with currency=attempt.payload.currency %}The original purchase details and currency ({{ currency }}) will be kept.{% endblocktrans %}
+    </p>
+    <form method="post" action="{% url 'orders:create_order' %}">
+      {% csrf_token %}
+      {% trans "Check previous order" as check_label %}
+      {% button check_label type="submit" variant="primary" %}
+    </form>
+  </div>
+</div>
+{% endblock %}

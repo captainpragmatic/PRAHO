@@ -297,6 +297,7 @@ class CanonicalizationMigrationTests(TestCase):
     """
 
     def setUp(self) -> None:
+        Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei"})
         self.ro = TLD.objects.create(
             extension="ro",
             description=".ro",

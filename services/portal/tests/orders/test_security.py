@@ -60,6 +60,8 @@ class OrderHMACSecurityTestCase(TestCase):
             "name": "Shared Hosting Basic",
             "product_type": "hosting",
             "requires_domain": False,
+            "selling_currency": "RON",
+            "currency_revision": 1,
             "is_active": True,
         }
         self._platform_patcher = patch(
@@ -453,6 +455,8 @@ class OrderDosHardeningTestCase(TestCase):
             "name": "Generic Product",
             "product_type": "hosting",
             "requires_domain": False,
+            "selling_currency": "RON",
+            "currency_revision": 1,
             "is_active": True,
         }
         self._platform_patcher = patch(
@@ -639,6 +643,8 @@ class OrderCartVersioningSecurityTestCase(TestCase):
             "name": "Generic Product",
             "product_type": "hosting",
             "requires_domain": False,
+            "selling_currency": "RON",
+            "currency_revision": 1,
             "is_active": True,
         }
         self._platform_patcher = patch(

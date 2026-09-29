@@ -23,6 +23,9 @@ def _maintenance_mode_active() -> bool:
 
 def romanian_business_context(request: HttpRequest) -> dict[str, Any]:
     """Romanian business information for templates"""
+    from apps.billing.currency_policy import get_selling_currency_policy  # noqa: PLC0415  # ADR-0007
+
+    selling_currency = get_selling_currency_policy().currency_code
     return {
         "company_name": "PragmaticHost SRL",
         "company_cui": "RO12345678",
@@ -30,8 +33,8 @@ def romanian_business_context(request: HttpRequest) -> dict[str, Any]:
         "company_phone": "+40.21.123.4567",
         "company_email": "contact@pragmatichost.com",
         "vat_rate": int(TaxService.get_vat_rate("RO", as_decimal=False)),
-        "currency": "RON",
-        "currency_symbol": "lei",
+        "currency": selling_currency,
+        "currency_symbol": {"RON": "lei", "EUR": "€", "USD": "$"}[selling_currency],
         "support_hours": "09:00 - 18:00 (Luni - Vineri)",
         "emergency_phone": "+40.21.987.6543",
     }

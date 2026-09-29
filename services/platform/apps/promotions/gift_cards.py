@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from typing import TYPE_CHECKING, Any
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.validators import validate_email
 from django.db import transaction
 from django.db.models import Sum
 from django.utils import timezone
@@ -19,11 +21,124 @@ from .models import GiftCard, GiftCardPurchase, GiftCardReservation, GiftCardTra
 
 if TYPE_CHECKING:
     from apps.billing.payment_models import Payment
+    from apps.customers.models import Customer
     from apps.users.models import User
 
 MAX_REQUEST_LENGTH = 100
 MIN_PURCHASE_CENTS = 100
 MAX_PURCHASE_CENTS = 100_000_000
+MAX_GIFT_MESSAGE_LENGTH = 2000
+MAX_GIFT_RECIPIENT_NAME_LENGTH = 200
+
+
+class GiftRecipient(TypedDict, total=False):
+    email: str
+    name: str
+    message: str
+
+
+def _recipient_snapshot(recipient: Mapping[str, Any] | None) -> GiftRecipient:
+    if recipient is not None and (not isinstance(recipient, Mapping) or set(recipient) - {"email", "name", "message"}):
+        raise ValidationError(_("Enter valid gift recipient details."))
+    snapshot = {key: (recipient or {}).get(key, "") for key in ("email", "name", "message")}
+    if any(not isinstance(value, str) for value in snapshot.values()):
+        raise ValidationError(_("Enter valid gift recipient details."))
+    if len(snapshot["name"]) > MAX_GIFT_RECIPIENT_NAME_LENGTH or len(snapshot["message"]) > MAX_GIFT_MESSAGE_LENGTH:
+        raise ValidationError(_("The recipient name or gift message is too long."))
+    snapshot["email"] = snapshot["email"].strip()
+    if snapshot["email"]:
+        validate_email(snapshot["email"])
+    return GiftRecipient(email=snapshot["email"], name=snapshot["name"], message=snapshot["message"])
+
+
+def _assert_purchase_replay(  # noqa: PLR0913  # Compare each immutable purchase input explicitly
+    purchase: GiftCardPurchase,
+    currency_code: str,
+    amount_cents: int,
+    method: str,
+    recipient: GiftRecipient,
+    buyer_email: str,
+    is_gift: bool,
+) -> None:
+    if (
+        purchase.funding_payment.amount_cents != amount_cents
+        or purchase.gift_card.initial_value_cents != amount_cents
+        or purchase.funding_payment.currency_id != currency_code
+        or purchase.gift_card.currency_id != currency_code
+        or purchase.funding_payment.payment_method != method
+        or purchase.gift_card.recipient_email != recipient.get("email", "")
+        or purchase.gift_card.recipient_name != recipient.get("name", "")
+        or purchase.gift_card.personal_message != recipient.get("message", "")
+        or purchase.buyer_email != buyer_email
+        or purchase.is_gift != is_gift
+    ):
+        raise ValidationError(_("This purchase request already has different details."))
+
+
+@transaction.atomic
+def create_public_purchase(  # noqa: PLR0913  # Explicit signed buyer and immutable sale inputs
+    customer: Customer,
+    amount_cents: int,
+    key: str,
+    *,
+    policy_revision: int,
+    currency_code: str,
+    method: str,
+    recipient: GiftRecipient | None,
+    is_gift: bool,
+    actor: User,
+) -> GiftCardPurchase:
+    from apps.billing.currency_policy import require_current_selling_policy  # noqa: PLC0415  # ADR-0007
+    from apps.billing.models import Currency  # noqa: PLC0415  # ADR-0007
+
+    from .gift_purchase_policy import gift_purchase_options  # noqa: PLC0415
+
+    if (
+        type(is_gift) is not bool
+        or type(amount_cents) is not int
+        or type(policy_revision) is not int
+        or not MIN_PURCHASE_CENTS <= amount_cents <= MAX_PURCHASE_CENTS
+    ):
+        raise ValidationError(_("Choose valid gift-card purchase details."))
+    snapshot = _recipient_snapshot(recipient)
+    if (is_gift and not snapshot["email"]) or (not is_gift and any(snapshot.values())):
+        raise ValidationError(_("Choose a recipient for a gift, or leave recipient fields empty for yourself."))
+    operation = _operation_key(customer.pk, "gift-purchase", key)
+    existing = (
+        GiftCardPurchase.objects.select_related("funding_payment", "gift_card")
+        .filter(
+            customer=customer,
+            funding_payment__idempotency_key=operation,
+        )
+        .first()
+    )
+    if existing is not None:
+        if existing.buyer_actor_id != actor.pk:
+            raise ValidationError(_("This purchase request belongs to a different buyer."))
+        _assert_purchase_replay(existing, currency_code, amount_cents, method, snapshot, existing.buyer_email, is_gift)
+        return existing
+    buyer_email = actor.email.strip()
+    validate_email(buyer_email)
+    require_current_selling_policy(currency_code, policy_revision)
+    options = gift_purchase_options(currency_code)
+    if (
+        not options["sales_enabled"]
+        or amount_cents not in options["denominations_cents"]
+        or method not in options["payment_methods"]
+    ):
+        raise ValidationError(_("Gift-card sales or the selected denomination and payment method are unavailable."))
+    currency = Currency.objects.get(pk=currency_code)
+    return create_purchase(
+        customer,
+        currency,
+        amount_cents,
+        key,
+        method=method,
+        recipient=snapshot,
+        actor=actor,
+        buyer_email=buyer_email,
+        is_gift=is_gift,
+    )
 
 
 def _operation_key(customer_id: Any, operation: str, key: str) -> str:
@@ -40,8 +155,10 @@ def create_purchase(  # noqa: PLR0913  # Funding identity and optional recipient
     key: str,
     *,
     method: str = "stripe",
-    recipient: dict[str, str] | None = None,
+    recipient: GiftRecipient | None = None,
     actor: Any = None,
+    buyer_email: str | None = None,
+    is_gift: bool | None = None,
 ) -> GiftCardPurchase:
     from apps.billing.payment_models import Payment  # noqa: PLC0415
     from apps.customers.models import Customer  # noqa: PLC0415
@@ -52,19 +169,16 @@ def create_purchase(  # noqa: PLR0913  # Funding identity and optional recipient
         or method not in {"stripe", "bank"}
     ):
         raise ValidationError(_("Choose a valid purchase amount and payment method."))
-    assert_currency_issuable(currency.code, timezone.localdate())
     Customer.objects.select_for_update().get(pk=customer.pk)
+    recipient = _recipient_snapshot(recipient)
+    is_gift = bool(recipient["email"]) if is_gift is None else is_gift
+    buyer_email = buyer_email if buyer_email is not None else customer.primary_email
     operation = _operation_key(customer.pk, "gift-purchase", key)
     existing = GiftCardPurchase.objects.filter(funding_payment__idempotency_key=operation).first()
     if existing:
-        if (
-            existing.funding_payment.amount_cents != amount_cents
-            or existing.funding_payment.currency_id != currency.pk
-            or existing.funding_payment.payment_method != method
-        ):
-            raise ValidationError(_("This purchase request already has different details."))
+        _assert_purchase_replay(existing, currency.code, amount_cents, method, recipient, buyer_email, is_gift)
         return existing
-    recipient = recipient or {}
+    assert_currency_issuable(currency.code, timezone.localdate())
     card = GiftCard(
         code=GiftCard.generate_code(),
         initial_value_cents=amount_cents,
@@ -89,52 +203,22 @@ def create_purchase(  # noqa: PLR0913  # Funding identity and optional recipient
         meta={"source": "gift_card_funding"},
     )
     return GiftCardPurchase.objects.create(
-        gift_card=card, customer=customer, funding_payment=payment, receipt_number=f"GCF-{uuid.uuid4().hex.upper()}"
+        gift_card=card,
+        customer=customer,
+        funding_payment=payment,
+        receipt_number=f"GCF-{uuid.uuid4().hex.upper()}",
+        buyer_email=buyer_email,
+        buyer_name=customer.name,
+        buyer_actor=actor,
+        is_gift=is_gift,
     )
 
 
 def start_funding(purchase: GiftCardPurchase) -> dict[str, Any]:
     """Persist an exact gateway attempt before network I/O; retries reuse its key."""
-    from apps.billing.gateways import PaymentGatewayFactory  # noqa: PLC0415
-    from apps.billing.payment_models import Payment  # noqa: PLC0415
+    from .gift_funding import start_funding as start_purchase_funding  # noqa: PLC0415  # Public compatibility facade
 
-    with transaction.atomic():
-        purchase = (
-            GiftCardPurchase.objects.select_for_update().select_related("funding_payment__currency").get(pk=purchase.pk)
-        )
-        payment = purchase.funding_payment
-        if purchase.status != "pending" or payment.status != "pending" or payment.payment_method != "stripe":
-            raise ValidationError(_("This purchase cannot start a card payment."))
-        if payment.gateway_txn_id:
-            return {
-                "success": True,
-                "payment_intent_id": payment.gateway_txn_id,
-                "client_secret": payment.meta.get("client_secret"),
-            }
-        metadata = {
-            "source": "gift_card_funding",
-            "purchase_id": str(purchase.pk),
-            "customer_id": str(purchase.customer_id),
-        }
-        payment.meta = {**payment.meta, **metadata}
-        payment.save(update_fields=["meta", "updated_at"])
-    result = PaymentGatewayFactory.create_gateway("stripe").create_payment_intent(
-        order_id=str(purchase.pk),
-        amount_cents=payment.amount_cents,
-        currency=payment.currency.code,
-        metadata=metadata,
-        idempotency_key=payment.idempotency_key,
-    )
-    if not result.get("success") or not result.get("payment_intent_id"):
-        return dict(result)
-    with transaction.atomic():
-        locked = Payment.objects.select_for_update().get(pk=payment.pk)
-        if locked.gateway_txn_id and locked.gateway_txn_id != result["payment_intent_id"]:
-            raise ValidationError(_("The funding attempt is already linked to a different payment."))
-        locked.gateway_txn_id = result["payment_intent_id"]
-        locked.meta = {**locked.meta, **metadata, "client_secret": result.get("client_secret")}
-        locked.save(update_fields=["gateway_txn_id", "meta", "updated_at"])
-    return dict(result)
+    return start_purchase_funding(purchase)
 
 
 @transaction.atomic
@@ -190,6 +274,9 @@ def activate_verified_purchase(purchase_id: Any) -> GiftCardPurchase:
         description="Gift card funded after verified payment",
         metadata={"purchase_id": str(purchase.pk), "payment_id": payment.pk, "amount_cents": payment.amount_cents},
     )
+    from .gift_delivery import queue_purchase_delivery  # noqa: PLC0415  # Activation/delivery dependency cycle
+
+    queue_purchase_delivery(purchase.pk)
     return purchase
 
 
@@ -231,7 +318,7 @@ def preview_value(code: str, currency_id: Any, total_cents: int) -> dict[str, An
     card = GiftCard.objects.filter(code=code.strip().upper()).first()
     if card is None or not card.is_valid or card.currency_id != currency_id:
         raise ValidationError(_("Gift card unavailable for this currency."))
-    available = card.current_balance_cents - card.reserved_cents
+    available = card.available_balance_cents
     if available <= 0 or total_cents <= 0:
         raise ValidationError(_("There is no gift-card balance to apply to this order."))
     return {"id": str(card.pk), "amount_cents": min(available, total_cents)}
@@ -279,7 +366,7 @@ def reserve_value(  # noqa: PLR0913  # Signed actor supplements the immutable re
         raise ValidationError(_("Gift card unavailable.")) from exc
     if not card.is_valid or card.currency_id != document.currency_id:
         raise ValidationError(_("Gift card unavailable for this document or currency."))
-    available = max(0, card.current_balance_cents - card.reserved_cents)
+    available = card.available_balance_cents
     amount = min(available, outstanding) if amount_cents is None else amount_cents
     if type(amount) is not int or amount <= 0 or amount > min(available, outstanding):
         raise ValidationError(_("Choose an amount within the available card balance and document balance."))
@@ -328,8 +415,9 @@ def capture_reservations(document: Any, invoice: Any) -> list[Payment]:
         if (
             card.status == "cancelled"
             or not card.is_active
+            or card.spending_frozen_at is not None
             or card.reserved_cents < hold.amount_cents
-            or card.current_balance_cents < hold.amount_cents
+            or card.current_balance_cents - card.refund_held_cents < hold.amount_cents
         ):
             raise ValidationError(_("Gift-card funds require review before settlement."))
         payment = Payment.objects.create(

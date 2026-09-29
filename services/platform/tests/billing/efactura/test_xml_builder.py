@@ -17,6 +17,8 @@ from apps.billing.efactura.xml_builder import (
     UBLInvoiceBuilder,
     XMLBuilderError,
 )
+from apps.settings.models import SystemSetting
+from apps.settings.services import SettingsService
 from tests.factories import CurrencyFactory, CustomerFactory, InvoiceFactory, InvoiceLineFactory
 
 
@@ -67,6 +69,15 @@ class UBLInvoiceBuilderTestCase(TestCase):
         )
 
     def _foreign_invoice(self, **overrides: object):
+        bank_key = "billing.bank_accounts"
+        SystemSetting.objects.update_or_create(key=bank_key, defaults={
+            "name": "Test currency accounts", "description": "Explicit EUR account for invoice XML fixtures",
+            "category": "billing", "data_type": "json", "default_value": {}, "value": {
+                "EUR": {"iban": "DE89370400440532013000", "bank_name": "EUR Bank", "beneficiary": "Test Company SRL"},
+            },
+        })
+        SettingsService._clear_setting_cache(bank_key)
+        self.addCleanup(SettingsService._clear_setting_cache, bank_key)
         currency = CurrencyFactory(code="EUR")
         values: dict[str, object] = {
             "customer": self.customer,
@@ -1342,10 +1353,8 @@ class UBLCreditNoteBuilderTestCase(TestCase):
             tax_rate=Decimal("0.1900"),  # Matches credit note's tax_total_cents=9500
         )
 
-    def test_foreign_currency_credit_note_is_rejected_before_serialization(self):
-        """FC credit notes are unsupported (#219): fail closed in the builder
-        with an honest message instead of persisting invalid XML and letting
-        the validator misdiagnose it as a missing TaxCurrencyCode."""
+    def test_foreign_currency_credit_note_with_a_different_original_currency_is_rejected(self):
+        """A correction cannot silently re-denominate the original RON document."""
         eur = CurrencyFactory(code="EUR")
         fc_credit_note = InvoiceFactory(
             customer=self.customer,
@@ -1368,7 +1377,7 @@ class UBLCreditNoteBuilderTestCase(TestCase):
             tax_rate=Decimal("0.1900"),
         )
 
-        with self.assertRaisesRegex(XMLBuilderError, "credit note"):
+        with self.assertRaisesRegex(XMLBuilderError, "currency must match the original invoice"):
             UBLCreditNoteBuilder(fc_credit_note, self.original_invoice).build()
 
     def test_metadata_adjustment_is_rejected_before_credit_note_serialization(self):
@@ -1574,6 +1583,8 @@ class UBLCreditNoteBuilderTestCase(TestCase):
     COMPANY_POSTAL_CODE="010101",
     COMPANY_COUNTRY_CODE="RO",
     COMPANY_EMAIL="test@example.com",
+    COMPANY_BANK_ACCOUNT="RO49AAAA1B31007593840000",
+    COMPANY_BANK_NAME="Test Bank",
 )
 class BROutsideScopeRulesTestCase(TestCase):
     """EN16931 BR-O: an out-of-scope supply is not a taxable supply at zero rate.

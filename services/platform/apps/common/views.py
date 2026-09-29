@@ -52,7 +52,7 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
     # Calculate key statistics
     stats = {
         "total_customers": accessible_customers.count(),
-        "monthly_revenue": _calculate_monthly_revenue(accessible_customers),
+        "monthly_revenue_by_currency": _calculate_monthly_revenue(accessible_customers),
         "open_tickets": _count_open_tickets(accessible_customers),
         "active_services": _count_active_services(accessible_customers),
     }
@@ -119,18 +119,17 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
 # ===============================================================================
 
 
-def _calculate_monthly_revenue(customers: QuerySet[Customer]) -> int:
-    """Calculate total revenue for current month in RON"""
+def _calculate_monthly_revenue(customers: QuerySet[Customer]) -> dict[str, int]:
+    """Keep each paid invoice's recorded monetary unit in the monthly summary."""
     current_month = timezone.now().replace(day=1)
 
-    monthly_total = (
-        Invoice.objects.filter(customer__in=customers, created_at__gte=current_month, status="paid").aggregate(
-            total=Sum("total_cents")
-        )["total"]
-        or 0
+    monthly_totals = (
+        Invoice.objects.filter(customer__in=customers, created_at__gte=current_month, status="paid")
+        .order_by("currency_id")
+        .values("currency_id")
+        .annotate(currency_total_cents=Sum("total_cents"))
     )
-
-    return monthly_total
+    return {row["currency_id"]: row["currency_total_cents"] or 0 for row in monthly_totals}
 
 
 def _count_open_tickets(customers: QuerySet[Customer]) -> int:

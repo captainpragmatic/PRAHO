@@ -75,6 +75,7 @@
     <!-- Recent Invoices -->
     {% trans "My Recent Invoices & Proformas" as invoices_title %}
     {% section_card title=invoices_title icon="receipt" %}
+        {% include "billing/partials/currency_balances.html" with billing_summary=dashboard_data.billing_summary %}
         <div class="space-y-3">
           {% for invoice in dashboard_data.recent_documents %}
           <a href="{% if invoice.document_type == 'proforma' %}{% url 'billing:proforma_detail' invoice.number %}{% else %}{% url 'billing:invoice_detail' invoice.number %}{% endif %}" class="block group">
@@ -102,7 +103,7 @@
                   {{ invoice.created_at|date:"d.m.Y" }}
                 </div>
                 <div class="text-white font-medium text-sm leading-4">
-                  {{ invoice.total_cents|cents_to_currency|romanian_currency:invoice.currency.code }}
+                  {{ invoice.total_cents|format_currency:invoice.currency.code }}
                 </div>
               </div>
             </div>

@@ -120,6 +120,10 @@ class OfferConfigurationForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         from apps.products.models import Product  # noqa: PLC0415
 
+        self.fields["currency"].help_text = _(
+            "Required for fixed discounts, monetary limits, caps, and amount tiers. "
+            "Verify the original currency when editing an existing offer."
+        )
         for name in ("included_products", "excluded_products", "required_products"):
             if name in self.fields:
                 cast(forms.ModelMultipleChoiceField, self.fields[name]).queryset = Product.objects.all()
@@ -260,8 +264,6 @@ class CouponForm(OfferConfigurationForm):
 
     def clean(self) -> dict[str, object]:
         data = super().clean() or {}
-        if data.get("discount_type") == "fixed" and not data.get("currency"):
-            self.add_error("currency", _("Select the currency for a fixed discount."))
         if data.get("discount_type") == "free_shipping":
             self.add_error("discount_type", _("Shipping discounts are unavailable for hosting services."))
         return data
@@ -320,8 +322,13 @@ class GiftCardForm(forms.ModelForm):
         from apps.customers.models import Customer  # noqa: PLC0415
 
         cast(forms.ModelChoiceField, self.fields["purchased_by"]).queryset = Customer.objects.all()
+        from apps.billing.currency_policy import get_selling_currency_policy  # noqa: PLC0415
+
+        policy = get_selling_currency_policy()
+        self.initial.update(currency=policy.currency_code, currency_revision=policy.revision)
 
     purchased_by: forms.ModelChoiceField[Any] = forms.ModelChoiceField(queryset=None, label=_("Purchaser"))
+    currency_revision = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
     payment_method = forms.ChoiceField(
         choices=(("bank", _("Bank transfer")), ("stripe", _("Customer card payment"))), label=_("Payment method")
     )
@@ -337,7 +344,20 @@ class GiftCardForm(forms.ModelForm):
             "personal_message",
             "valid_until",
         )
-        widgets = {"valid_until": forms.DateTimeInput(attrs={"type": "datetime-local"}, format="%Y-%m-%dT%H:%M")}
+        widgets = {
+            "currency": forms.HiddenInput,
+            "valid_until": forms.DateTimeInput(attrs={"type": "datetime-local"}, format="%Y-%m-%dT%H:%M"),
+        }
+
+    def refresh_currency_for_review(self) -> None:
+        """Re-render rejected input with current terms for an explicit resubmission."""
+        from apps.billing.currency_policy import get_selling_currency_policy  # noqa: PLC0415
+
+        policy = get_selling_currency_policy()
+        data = self.data.copy()
+        data[self.add_prefix("currency")] = policy.currency_code
+        data[self.add_prefix("currency_revision")] = str(policy.revision)
+        self.data = data
 
     def clean_valid_until(self) -> object:
         expires = self.cleaned_data.get("valid_until")
@@ -445,8 +465,6 @@ class PromotionRuleForm(OfferConfigurationForm):
             self.add_error("discount_percent", _("Enter the percentage discount."))
         if kind == "fixed" and data.get("discount_amount_cents") is None:
             self.add_error("discount_amount_cents", _("Enter the fixed discount."))
-        if kind in {"fixed", "tiered_fixed"} and not data.get("currency"):
-            self.add_error("currency", _("Select the currency for a fixed discount."))
         if kind == "free_shipping":
             self.add_error("discount_type", _("Shipping discounts are unavailable for hosting services."))
         if data.get("valid_until") and data.get("valid_from") and data["valid_until"] <= data["valid_from"]:

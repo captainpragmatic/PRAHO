@@ -216,6 +216,29 @@ class PromotionCampaign(models.Model):
     def __str__(self) -> str:
         return self.name
 
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        from .money_history import validate_campaign_currency_change  # noqa: PLC0415
+
+        update_fields = kwargs.get("update_fields")
+        if self._state.adding or (
+            update_fields is not None
+            and not {"budget_cents", "budget_currency", "budget_currency_id"}.intersection(update_fields)
+        ):
+            super().save(*args, **kwargs)
+            return
+        with transaction.atomic():
+            original = type(self).objects.select_for_update().filter(pk=self.pk).first()
+            validate_campaign_currency_change(self, original)
+            super().save(*args, **kwargs)
+
+    def clean(self) -> None:
+        from .money_history import validate_campaign_currency_change  # noqa: PLC0415
+
+        super().clean()
+        if self.budget_cents is not None and not self.budget_currency_id:
+            raise ValidationError({"budget_currency": _("Choose the verified currency for this budget.")})
+        validate_campaign_currency_change(self)
+
     def refresh_from_db(
         self,
         using: str | None = None,
@@ -514,10 +537,13 @@ class Coupon(models.Model):
 
     def clean(self) -> None:
         """Validate coupon configuration."""
+        from .offer_currency import validate_offer_currency  # noqa: PLC0415
+
         super().clean()
         self._validate_discount_values()
         self._validate_usage_limits()
         self._validate_dates()
+        validate_offer_currency(self)
 
     def _validate_discount_values(self) -> None:
         """Validate discount type and value consistency."""
@@ -1106,6 +1132,12 @@ class PromotionRule(models.Model):
     def __str__(self) -> str:
         return self.name
 
+    def clean(self) -> None:
+        from .offer_currency import validate_offer_currency  # noqa: PLC0415
+
+        super().clean()
+        validate_offer_currency(self)
+
     @property
     def is_valid(self) -> bool:
         """Check if rule is currently valid."""
@@ -1309,6 +1341,38 @@ class Referral(models.Model):
 # ===============================================================================
 
 
+GIFT_CARD_IDENTITY_FIELDS = frozenset(
+    {
+        "code",
+        "currency",
+        "currency_id",
+        "initial_value_cents",
+        "purchased_by",
+        "purchased_by_id",
+        "recipient_email",
+        "recipient_name",
+        "personal_message",
+    }
+)
+GIFT_CODE_VISIBLE_SUFFIX = 4
+
+
+class GiftCardQuerySet(models.QuerySet["GiftCard"]):
+    def update(self, **kwargs: Any) -> int:
+        if not (GIFT_CARD_IDENTITY_FIELDS & kwargs.keys() or "activated_at" in kwargs):
+            return super().update(**kwargs)
+        with transaction.atomic():
+            rows = list(self.select_for_update(of=("self",)).order_by("pk"))
+            for card in rows:
+                if GIFT_CARD_IDENTITY_FIELDS & kwargs.keys() and card.has_frozen_identity:
+                    raise ValidationError(
+                        _("A purchased or activated gift card keeps its original value and recipient.")
+                    )
+                if "activated_at" in kwargs and card.activated_at is not None:
+                    raise ValidationError(_("A gift card's funding timestamp cannot be changed."))
+            return super().update(**kwargs)
+
+
 class GiftCard(models.Model):
     """
     Gift cards that can be purchased and redeemed for account credit.
@@ -1337,6 +1401,9 @@ class GiftCard(models.Model):
         help_text=_("Current remaining balance in cents"),
     )
     reserved_cents = models.PositiveBigIntegerField(default=0)
+    refund_held_cents = models.PositiveBigIntegerField(default=0)
+    spending_frozen_at = models.DateTimeField(null=True, blank=True)
+    spending_freeze_reason = models.CharField(max_length=255, blank=True)
     ledger_version = models.PositiveSmallIntegerField(default=1, editable=False)
     currency = models.ForeignKey(
         "billing.Currency",
@@ -1401,6 +1468,7 @@ class GiftCard(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     activated_at = models.DateTimeField(null=True, blank=True)
+    objects = GiftCardQuerySet.as_manager()
 
     class Meta:
         db_table = "promotion_gift_cards"
@@ -1416,18 +1484,58 @@ class GiftCard(models.Model):
         )
 
     def __str__(self) -> str:
-        return f"Gift Card {self.code} ({self.current_balance_cents / 100:.2f} {self.currency.code})"
+        return f"Gift Card {self.masked_code} ({self.current_balance_cents / 100:.2f} {self.currency.code})"
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        with transaction.atomic():
+            original = type(self).objects.select_for_update().filter(pk=self.pk).first()
+            if original is not None:
+                self._validate_original_identity(original)
+            super().save(*args, **kwargs)
+
+    @property
+    def masked_code(self) -> str:
+        return f"••••-{self.code[-GIFT_CODE_VISIBLE_SUFFIX:]}" if len(self.code) > GIFT_CODE_VISIBLE_SUFFIX else "••••"
+
+    @property
+    def has_frozen_identity(self) -> bool:
+        return (
+            self.activated_at is not None
+            or self.status != "pending"
+            or GiftCardPurchase.objects.filter(gift_card_id=self.pk).exists()
+        )
+
+    def _validate_original_identity(self, original: GiftCard) -> None:
+        if original.has_frozen_identity:
+            for name in GIFT_CARD_IDENTITY_FIELDS:
+                field = self._meta.get_field(name.removesuffix("_id"))
+                attname = getattr(field, "attname", name)
+                if getattr(self, attname) != getattr(original, attname):
+                    raise ValidationError({field.name: _("The purchased gift card's original details cannot change.")})
+        if original.activated_at is not None and self.activated_at != original.activated_at:
+            raise ValidationError({"activated_at": _("A gift card's funding timestamp cannot be changed.")})
+
+    def clean(self) -> None:
+        super().clean()
+        if not self._state.adding:
+            self._validate_original_identity(type(self).objects.get(pk=self.pk))
 
     @property
     def is_valid(self) -> bool:
         """Check if gift card can be used."""
         if not self.is_active or self.status not in ("active", "partially_used"):
             return False
-        if self.current_balance_cents <= 0:
+        if self.spending_frozen_at is not None or self.current_balance_cents - self.refund_held_cents <= 0:
             return False
         if self.valid_from and timezone.now() < self.valid_from:
             return False
         return not (self.valid_until and timezone.now() > self.valid_until)
+
+    @property
+    def available_balance_cents(self) -> int:
+        if self.spending_frozen_at is not None:
+            return 0
+        return max(0, self.current_balance_cents - self.reserved_cents - self.refund_held_cents)
 
     @classmethod
     def generate_code(cls, max_attempts: int = 100) -> str:
@@ -1530,7 +1638,7 @@ class GiftCardTransaction(models.Model):
         )
 
     def __str__(self) -> str:
-        return f"{self.transaction_type}: {self.amount_cents / 100:.2f} on {self.gift_card.code}"
+        return f"{self.transaction_type}: {self.amount_cents / 100:.2f} on {self.gift_card.masked_code}"
 
 
 # ===============================================================================
@@ -1851,13 +1959,52 @@ class RenewalBenefit(models.Model):
     subscription = models.ForeignKey(
         "billing.Subscription", on_delete=models.PROTECT, null=True, blank=True, related_name="promotion_benefits"
     )
+    currency = models.ForeignKey("billing.Currency", on_delete=models.PROTECT, null=True, blank=True)
+    currency_hold_reason = models.CharField(max_length=255, blank=True, editable=False)
     remaining_cents = models.PositiveBigIntegerField()
     remaining_months = models.PositiveSmallIntegerField()
     monthly_cents = models.DecimalField(max_digits=24, decimal_places=10)
     ended_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
-        constraints = [models.UniqueConstraint(fields=["application", "order_item"], name="one_benefit_per_offer_item")]
+        constraints = [
+            models.UniqueConstraint(fields=["application", "order_item"], name="one_benefit_per_offer_item"),
+            models.CheckConstraint(
+                condition=(
+                    Q(currency__isnull=False, currency_hold_reason="")
+                    | (Q(currency__isnull=True) & ~Q(currency_hold_reason=""))
+                ),
+                name="benefit_currency_known_or_held",
+            ),
+        ]
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        self.clean()
+        super().save(*args, **kwargs)
+
+    def clean(self) -> None:
+        super().clean()
+        if self.application_id and self.order_item_id:
+            order = self.application.order
+            if self.order_item.order_id != order.pk:
+                raise ValidationError({"order_item": _("The benefit and its item must belong to the same order.")})
+            if self.subscription is not None and self.subscription.customer_id != order.customer_id:
+                raise ValidationError({"subscription": _("The benefit belongs to a different customer.")})
+            if self.currency_id and self.currency_id != order.currency_id:
+                raise ValidationError({"currency": _("A renewal benefit retains its original order currency.")})
+            if self._state.adding and not self.currency_id:
+                self.currency_id = order.currency_id
+        if not self.currency_id:
+            if self._state.adding or not self.currency_hold_reason:
+                raise ValidationError({"currency": _("The original currency of this benefit needs review.")})
+        elif self.currency_hold_reason:
+            raise ValidationError(
+                {"currency_hold_reason": _("Resolve the original currency before using this benefit.")}
+            )
+        if not self._state.adding:
+            original_currency = type(self).objects.values_list("currency_id", flat=True).get(pk=self.pk)
+            if original_currency and self.currency_id != original_currency:
+                raise ValidationError({"currency": _("An existing benefit cannot change currency.")})
 
 
 class RenewalBenefitUse(models.Model):
@@ -1877,10 +2024,34 @@ class RenewalBenefitUse(models.Model):
         constraints = [models.UniqueConstraint(fields=["benefit", "cycle"], name="one_benefit_use_per_cycle")]
 
 
+class GiftPurchaseRecordQuerySet(models.QuerySet["GiftCardPurchase"]):
+    def update(self, **kwargs: Any) -> int:
+        protected = self.model.IMMUTABLE_FIELDS
+        if protected & kwargs.keys() and self.exists():
+            raise ValidationError(_("A gift purchase's recorded identity cannot change."))
+        return super().update(**kwargs)
+
+
 class GiftCardPurchase(models.Model):
     """A voucher funding receipt; never a service invoice or taxable service sale."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    IMMUTABLE_FIELDS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "gift_card",
+            "gift_card_id",
+            "customer",
+            "customer_id",
+            "funding_payment",
+            "funding_payment_id",
+            "receipt_number",
+            "buyer_email",
+            "buyer_name",
+            "is_gift",
+            "buyer_actor",
+            "buyer_actor_id",
+        }
+    )
     gift_card = models.OneToOneField(GiftCard, on_delete=models.PROTECT, related_name="purchase")
     customer = models.ForeignKey("customers.Customer", on_delete=models.PROTECT, related_name="gift_card_purchases")
     funding_payment = models.OneToOneField(
@@ -1898,8 +2069,199 @@ class GiftCardPurchase(models.Model):
         ),
     )
     receipt_number = models.CharField(max_length=60, unique=True)
+    buyer_email = models.EmailField(blank=True, editable=False)
+    buyer_name = models.CharField(max_length=255, blank=True, editable=False)
+    buyer_actor = models.ForeignKey(
+        "users.User",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        editable=False,
+        related_name="gift_card_purchases",
+    )
+    is_gift = models.BooleanField(default=False, editable=False)
     funded_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    objects = GiftPurchaseRecordQuerySet.as_manager()
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        original = type(self).objects.filter(pk=self.pk).first()
+        if original is not None:
+            for name in self.IMMUTABLE_FIELDS:
+                field = self._meta.get_field(name.removesuffix("_id"))
+                attname = getattr(field, "attname", name)
+                if getattr(self, attname) != getattr(original, attname):
+                    raise ValidationError({field.name: _("A gift purchase's recorded identity cannot change.")})
+        super().save(*args, **kwargs)
+
+    @property
+    def can_reveal_code(self) -> bool:
+        return bool(self.funded_at and self.gift_card.is_valid and self.gift_card.available_balance_cents > 0)
+
+
+class GiftFundingAttemptQuerySet(models.QuerySet["GiftCardFundingAttempt"]):
+    def update(self, **kwargs: Any) -> int:
+        if self.model.IMMUTABLE_FIELDS & kwargs.keys() and self.exists():
+            raise ValidationError(_("A gift funding attempt's original request cannot change."))
+        return super().update(**kwargs)
+
+
+class GiftCardFundingAttempt(models.Model):
+    """One durable Stripe intent identity, reused after customer-present declines."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    purchase = models.OneToOneField(GiftCardPurchase, on_delete=models.PROTECT, related_name="funding_attempt")
+    amount_cents = models.PositiveBigIntegerField()
+    currency = models.ForeignKey("billing.Currency", on_delete=models.PROTECT)
+    idempotency_key = models.CharField(max_length=100, unique=True)
+    request_metadata = models.JSONField(default=dict)
+    first_submitted_at = models.DateTimeField(null=True, blank=True)
+    gateway_intent_id = models.CharField(max_length=255, unique=True, null=True, blank=True)
+    client_secret = models.CharField(max_length=500, blank=True)
+    status = models.CharField(max_length=32, default="reserved")
+    error_code = models.CharField(max_length=100, blank=True)
+    checked_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    IMMUTABLE_FIELDS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "purchase",
+            "purchase_id",
+            "amount_cents",
+            "currency",
+            "currency_id",
+            "idempotency_key",
+            "request_metadata",
+        }
+    )
+    objects = GiftFundingAttemptQuerySet.as_manager()
+
+    class Meta:
+        constraints = [models.CheckConstraint(condition=Q(amount_cents__gt=0), name="gift_funding_attempt_positive")]
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        original = type(self).objects.filter(pk=self.pk).first()
+        if original is not None:
+            for name in self.IMMUTABLE_FIELDS:
+                field = self._meta.get_field(name.removesuffix("_id"))
+                attname = getattr(field, "attname", name)
+                if getattr(self, attname) != getattr(original, attname):
+                    raise ValidationError({field.name: _("A funding attempt's original request cannot change.")})
+            if original.first_submitted_at is not None and self.first_submitted_at != original.first_submitted_at:
+                raise ValidationError(_("The original payment submission time cannot change."))
+            if original.gateway_intent_id and self.gateway_intent_id != original.gateway_intent_id:
+                raise ValidationError(_("The original payment provider identity cannot change."))
+        super().save(*args, **kwargs)
+
+
+class GiftFundingRefundQuerySet(models.QuerySet["GiftCardFundingRefund"]):
+    def update(self, **kwargs: Any) -> int:
+        if (self.model.IMMUTABLE_FIELDS | {"funding_intent_id"}) & kwargs.keys() and self.exists():
+            raise ValidationError(_("A gift refund's original amount and tender cannot change."))
+        return super().update(**kwargs)
+
+
+class GiftCardFundingRefund(models.Model):
+    """Original-tender voucher refund with a durable hold before provider I/O."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    purchase = models.ForeignKey(GiftCardPurchase, on_delete=models.PROTECT, related_name="funding_refunds")
+    amount_cents = models.PositiveBigIntegerField()
+    currency = models.ForeignKey("billing.Currency", on_delete=models.PROTECT)
+    idempotency_key = models.CharField(max_length=100, unique=True)
+    reason = models.CharField(max_length=40, default="requested_by_customer")
+    status = models.CharField(max_length=32, default="reserved")
+    funding_intent_id = models.CharField(max_length=255, blank=True)
+    gateway_refund_id = models.CharField(max_length=255, unique=True, null=True, blank=True)
+    first_submitted_at = models.DateTimeField(null=True, blank=True)
+    checked_at = models.DateTimeField(null=True, blank=True)
+    gateway_event_created = models.PositiveBigIntegerField(null=True, blank=True)
+    held_cents = models.PositiveBigIntegerField(default=0)
+    applied_cents = models.PositiveBigIntegerField(default=0)
+    shortfall_cents = models.PositiveBigIntegerField(default=0)
+    settlement_version = models.PositiveIntegerField(default=0)
+    bank_reference = models.CharField(max_length=100, blank=True)
+    confirmed_by = models.ForeignKey(
+        "users.User", on_delete=models.PROTECT, null=True, blank=True, related_name="confirmed_gift_funding_refunds"
+    )
+    created_by = models.ForeignKey(
+        "users.User", on_delete=models.PROTECT, null=True, blank=True, related_name="requested_gift_funding_refunds"
+    )
+    error_code = models.CharField(max_length=100, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    IMMUTABLE_FIELDS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "purchase",
+            "purchase_id",
+            "amount_cents",
+            "currency",
+            "currency_id",
+            "idempotency_key",
+            "reason",
+        }
+    )
+    objects = GiftFundingRefundQuerySet.as_manager()
+
+    class Meta:
+        constraints = [models.CheckConstraint(condition=Q(amount_cents__gt=0), name="gift_funding_refund_positive")]
+        indexes = [models.Index(fields=["status", "checked_at"], name="gift_refund_reconcile")]
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        original = type(self).objects.filter(pk=self.pk).first()
+        if original is not None:
+            for name in self.IMMUTABLE_FIELDS:
+                field = self._meta.get_field(name.removesuffix("_id"))
+                attname = getattr(field, "attname", name)
+                if getattr(self, attname) != getattr(original, attname):
+                    raise ValidationError(_("A gift refund's original amount and tender cannot change."))
+            if original.gateway_refund_id and self.gateway_refund_id != original.gateway_refund_id:
+                raise ValidationError(_("A gift refund's provider identity cannot change."))
+            if original.funding_intent_id and self.funding_intent_id != original.funding_intent_id:
+                raise ValidationError(_("A gift refund's original funding intent cannot change."))
+            if original.first_submitted_at and self.first_submitted_at != original.first_submitted_at:
+                raise ValidationError(_("A gift refund's original submission time cannot change."))
+        super().save(*args, **kwargs)
+
+
+class GiftDeliveryQuerySet(models.QuerySet["GiftCardDelivery"]):
+    def update(self, **kwargs: Any) -> int:
+        if self.model.IMMUTABLE_FIELDS & kwargs.keys() and self.exists():
+            raise ValidationError(_("A gift delivery's recorded recipient cannot change."))
+        return super().update(**kwargs)
+
+
+class GiftCardDelivery(models.Model):
+    """Durable delivery identity. Bodies and bearer codes are never queued or logged."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    purchase = models.ForeignKey(GiftCardPurchase, on_delete=models.PROTECT, related_name="deliveries")
+    purpose = models.CharField(max_length=12, choices=(("voucher", "Voucher"), ("receipt", "Buyer receipt")))
+    target_email = models.EmailField()
+    status = models.CharField(max_length=12, default="pending")
+    attempt_count = models.PositiveIntegerField(default=0)
+    last_attempt_at = models.DateTimeField(null=True, blank=True)
+    next_attempt_at = models.DateTimeField(null=True, blank=True)
+    lease_until = models.DateTimeField(null=True, blank=True)
+    claim_token = models.UUIDField(null=True, blank=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    error_code = models.CharField(max_length=100, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    IMMUTABLE_FIELDS: ClassVar[frozenset[str]] = frozenset({"purchase", "purchase_id", "purpose", "target_email"})
+    objects = GiftDeliveryQuerySet.as_manager()
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["purchase", "purpose"], name="one_gift_delivery_per_purpose")]
+        indexes = [models.Index(fields=["status", "next_attempt_at"], name="gift_delivery_due")]
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        original = type(self).objects.filter(pk=self.pk).first()
+        if original is not None:
+            for name in self.IMMUTABLE_FIELDS:
+                field = self._meta.get_field(name.removesuffix("_id"))
+                attname = getattr(field, "attname", name)
+                if getattr(self, attname) != getattr(original, attname):
+                    raise ValidationError(_("A gift delivery's recorded recipient cannot change."))
+        super().save(*args, **kwargs)
 
 
 class GiftCardReservation(models.Model):

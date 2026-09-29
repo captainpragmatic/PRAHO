@@ -52,7 +52,7 @@ def validate_template_numeric(value: TemplateNumeric, default_message: str = "0,
 
 
 @register.filter
-def romanian_currency(value: TemplateNumeric, currency: str = "RON") -> str:
+def romanian_currency(value: TemplateNumeric, currency: object = "RON") -> str:
     """
     Format currency in Romanian business style
 
@@ -63,39 +63,20 @@ def romanian_currency(value: TemplateNumeric, currency: str = "RON") -> str:
 
     Args:
         value: Numeric value to format
-        currency: Currency code (RON, EUR, USD)
+        currency: Currency code or Currency model with its recorded code
     """
-    is_valid, default_value = validate_template_numeric(value, "0,00 RON")
-    if not is_valid:
-        return default_value
-
+    currency_code = currency if isinstance(currency, str) else getattr(currency, "code", None)
+    if not isinstance(currency_code, str) or not re.fullmatch(r"[A-Z]{3}", currency_code):
+        return "—"
+    unavailable = f"— {currency_code}"
     try:
-        # Convert to Decimal for precise calculation
         decimal_value = Decimal(str(value))
-
-        # Format with 2 decimal places
-        formatted = f"{decimal_value:.2f}"
-
-        # Split integer and decimal parts
-        parts = formatted.split(".")
-        integer_part = parts[0]
-        decimal_part = parts[1]
-
-        # Add thousand separators (dots in Romanian style)
-        # Format: 1.234.567,89
-        integer_with_separators = ""
-        for i, digit in enumerate(reversed(integer_part)):
-            if i > 0 and i % 3 == 0:
-                integer_with_separators = "." + integer_with_separators
-            integer_with_separators = digit + integer_with_separators
-
-        # Use comma as decimal separator (Romanian style)
-        romanian_formatted = f"{integer_with_separators},{decimal_part}"
-
-        return f"{romanian_formatted} {currency}"
-
-    except (ValueError, TypeError):
-        return "0,00 RON"
+        if not decimal_value.is_finite():
+            return unavailable
+        romanian_formatted = f"{decimal_value:,.2f}".translate(str.maketrans(",.", ".,"))
+        return f"{romanian_formatted} {currency_code}"
+    except (ValueError, TypeError, decimal.InvalidOperation):
+        return unavailable
 
 
 @register.filter

@@ -571,6 +571,7 @@ class CampaignBudgetTests(TestCase):
             campaign_type="flash_sale",
             start_date=timezone.now() - timezone.timedelta(days=1),
             budget_cents=10000,  # 100.00 budget
+            budget_currency=self.currency,
             spent_cents=10000,  # Already spent all
             status="active",
             is_active=True,
@@ -603,6 +604,7 @@ class CampaignBudgetTests(TestCase):
             campaign_type="seasonal",
             start_date=timezone.now() - timezone.timedelta(days=1),
             budget_cents=100000,  # 1000.00 budget
+            budget_currency=self.currency,
             spent_cents=0,
             status="active",
             is_active=True,
@@ -859,6 +861,7 @@ class CouponRedemptionReveralTests(TestCase):
             campaign_type="seasonal",
             start_date=timezone.now() - timezone.timedelta(days=1),
             budget_cents=100000,
+            budget_currency=self.currency,
             spent_cents=0,
             status="active",
             is_active=True,

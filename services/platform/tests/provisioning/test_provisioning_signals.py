@@ -115,6 +115,7 @@ class ServicePlanSignalTestCase(TestCase):
 
     def setUp(self):
         """Set up test data"""
+        Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
         self.admin_user = create_test_user('admin@test.ro', staff_role='admin')
 
     @patch('apps.provisioning.signals.logger')

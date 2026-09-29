@@ -339,6 +339,7 @@ class TestPriceGrandfatheringLifecycleSignals(TestCase):
     @patch("apps.billing.signals._log_billing_model_event")
     def test_created(self, mock_log):
         PriceGrandfathering.objects.create(
+            currency=_get_or_create_currency(),
             customer=self.customer,
             product=self.product,
             locked_price_cents=1000,
@@ -352,6 +353,7 @@ class TestPriceGrandfatheringLifecycleSignals(TestCase):
     @patch("apps.billing.signals._log_billing_model_event")
     def test_updated(self, mock_log):
         pg = PriceGrandfathering.objects.create(
+            currency=_get_or_create_currency(),
             customer=self.customer,
             product=self.product,
             locked_price_cents=1000,
@@ -368,6 +370,7 @@ class TestPriceGrandfatheringLifecycleSignals(TestCase):
     @patch("apps.billing.signals._log_billing_model_event")
     def test_deleted(self, mock_log):
         pg = PriceGrandfathering.objects.create(
+            currency=_get_or_create_currency(),
             customer=self.customer,
             product=self.product,
             locked_price_cents=1000,
@@ -444,6 +447,7 @@ class TestCreditLedgerLifecycleSignals(TestCase):
     @patch("apps.billing.signals._log_billing_model_event")
     def test_created(self, mock_log):
         CreditLedger.objects.create(
+            currency=_get_or_create_currency(),
             customer=self.customer,
             delta_cents=1000,
             reason="test credit",
@@ -454,6 +458,7 @@ class TestCreditLedgerLifecycleSignals(TestCase):
     @patch("apps.billing.signals._log_billing_model_event")
     def test_updated(self, mock_log):
         entry = CreditLedger.objects.create(
+            currency=_get_or_create_currency(),
             customer=self.customer,
             delta_cents=1000,
             reason="test credit",
@@ -467,6 +472,7 @@ class TestCreditLedgerLifecycleSignals(TestCase):
     @patch("apps.billing.signals._log_billing_model_event")
     def test_deleted(self, mock_log):
         entry = CreditLedger.objects.create(
+            currency=_get_or_create_currency(),
             customer=self.customer,
             delta_cents=1000,
             reason="test credit",
@@ -484,6 +490,7 @@ class TestCreditLedgerLifecycleSignals(TestCase):
         payment = _make_payment(self.customer, invoice=invoice, currency=currency)
         mock_log.reset_mock()
         CreditLedger.objects.create(
+            currency=_get_or_create_currency(),
             customer=self.customer,
             invoice=invoice,
             payment=payment,

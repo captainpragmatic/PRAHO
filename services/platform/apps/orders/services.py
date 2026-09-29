@@ -165,7 +165,7 @@ class OrderCreateData:
     customer: Customer
     items: list[OrderItemData]
     billing_address: BillingAddressData
-    currency: str = "RON"
+    currency: str | None = None
     notes: str = ""
     meta: dict[str, Any] = field(default_factory=dict)
     idempotency_key: str = ""
@@ -173,6 +173,7 @@ class OrderCreateData:
     coupon_codes: list[str] = field(default_factory=list)
     promotion_quote: str = ""
     gift_code: str = ""
+    currency_revision: int | None = None
 
 
 @dataclass
@@ -424,9 +425,20 @@ class OrderService:
         """Create new order with validation and audit trail"""
         logger.warning(f"🧮 [OrderService] Starting order creation for customer {data.customer.id}")
         try:
+            from apps.billing.currency_policy import (  # noqa: PLC0415  # ADR-0007
+                get_selling_currency_policy,
+                require_current_selling_policy,
+            )
+
             from .models import (  # Circular: same-app  # noqa: PLC0415  # Deferred: avoids circular import
                 Order,
                 OrderItem,
+            )
+
+            policy = get_selling_currency_policy(lock=True)
+            currency_code = data.currency if data.currency is not None else policy.currency_code
+            require_current_selling_policy(
+                currency_code, data.currency_revision if data.currency_revision is not None else policy.revision
             )
 
             # Generate order number
@@ -442,7 +454,7 @@ class OrderService:
             )
 
             # Get currency instance (Currency already imported at top)
-            currency_instance = Currency.objects.get(code=data.currency)
+            currency_instance = Currency.objects.get(code=currency_code)
 
             # Create order (idempotency_key set atomically to prevent race conditions)
             order = Order.objects.create(
@@ -1149,13 +1161,17 @@ class OrderPaymentConfirmationService:
             OrderService._create_status_history(order, "awaiting_payment", "paid", "Payment confirmed", None)
 
             # Review gate: configurable threshold determines if admin review is needed.
-            threshold = OrderPaymentConfirmationService._get_review_threshold()
+            threshold = OrderPaymentConfirmationService._get_review_threshold(order.currency_id)
             if order.total_cents >= threshold:
                 # High-value order → flag for admin review
                 order.flag_for_review()
                 order.save()
                 OrderService._create_status_history(
-                    order, "paid", "in_review", f"Flagged for review (total >= {threshold} cents)", None
+                    order,
+                    "paid",
+                    "in_review",
+                    f"Flagged for review (total >= {threshold} {order.currency_id} cents)",
+                    None,
                 )
                 log_security_event(
                     "order_flagged_for_review",
@@ -1164,6 +1180,7 @@ class OrderPaymentConfirmationService:
                         "order_number": order.order_number,
                         "total_cents": order.total_cents,
                         "threshold_cents": threshold,
+                        "currency": order.currency_id,
                     },
                 )
             else:
@@ -1243,19 +1260,22 @@ class OrderPaymentConfirmationService:
             return Err(f"Failed to confirm order: {e}")
 
     @staticmethod
-    def _get_review_threshold() -> int:
-        """Get the review threshold in cents from SettingsService.
-
-        Why configurable: different businesses have different risk tolerance.
-        Default 500000 (5000 RON) is a reasonable starting point for hosting.
-        """
+    def _get_review_threshold(currency_code: str = "RON") -> int:
+        """Use a limit in the order's currency; unconfigured foreign orders need review."""
         _DEFAULT_REVIEW_THRESHOLD = 500000  # 5000 RON  # noqa: N806
         _MAX_THRESHOLD = 100_000_000  # 1,000,000 RON — upper bound guard  # noqa: N806
         _MIN_SAFE_THRESHOLD = 1000  # 10 RON — below this is likely misconfiguration  # noqa: N806
         try:
             from apps.settings.services import SettingsService  # noqa: PLC0415
 
-            threshold = SettingsService.get_integer_setting("orders.review_threshold_cents", _DEFAULT_REVIEW_THRESHOLD)
+            configured = SettingsService.get_setting("orders.review_thresholds_cents", {})
+            threshold = configured.get(currency_code) if isinstance(configured, dict) else None
+            if type(threshold) is not int:
+                threshold = (
+                    SettingsService.get_integer_setting("orders.review_threshold_cents", _DEFAULT_REVIEW_THRESHOLD)
+                    if currency_code == "RON"
+                    else 0
+                )
             # H8 fix: Clamp to [0, 100_000_000] to reject misconfigured/negative values.
             clamped = max(0, min(threshold, _MAX_THRESHOLD))
             # M1 fix: Warn when threshold is suspiciously low — likely misconfiguration.
@@ -1272,7 +1292,7 @@ class OrderPaymentConfirmationService:
                 _DEFAULT_REVIEW_THRESHOLD,
                 e,
             )
-            return _DEFAULT_REVIEW_THRESHOLD
+            return _DEFAULT_REVIEW_THRESHOLD if currency_code == "RON" else 0
 
 
 # ===============================================================================

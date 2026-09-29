@@ -22,6 +22,7 @@ from .models import (
     Referral,
     ReferralCode,
 )
+from .money_history import format_money_totals
 
 # ===============================================================================
 # Inline Admin Classes
@@ -101,7 +102,7 @@ class PromotionCampaignAdmin(admin.ModelAdmin):
     )
     list_filter = ("status", "is_active", "campaign_type", "created_at")
     search_fields = ("name", "slug", "description")
-    readonly_fields = ("status", "spent_cents", "created_at", "updated_at", "created_by")
+    readonly_fields = ("status", "spent_display", "reserved_display", "created_at", "updated_at", "created_by")
     prepopulated_fields = {"slug": ("name",)}
     date_hierarchy = "created_at"
     inlines = [CouponInline]
@@ -109,22 +110,27 @@ class PromotionCampaignAdmin(admin.ModelAdmin):
     fieldsets = (
         (None, {"fields": ("name", "slug", "description", "campaign_type")}),
         (_("Schedule"), {"fields": ("start_date", "end_date", "status", "is_active")}),
-        (_("Budget"), {"fields": ("budget_cents", "spent_cents")}),
+        (_("Budget"), {"fields": ("budget_cents", "budget_currency", "spent_display", "reserved_display")}),
         (_("Tracking"), {"fields": ("utm_source", "utm_medium", "utm_campaign"), "classes": ("collapse",)}),
         (_("Metadata"), {"fields": ("metadata", "created_at", "updated_at", "created_by"), "classes": ("collapse",)}),
     )
 
     def budget_display(self, obj: Any) -> str:
-        if obj.budget_cents:
-            return f"{obj.budget_cents / 100:.2f}"
+        if obj.budget_cents is not None:
+            return f"{obj.budget_cents / 100:.2f} {obj.budget_currency_id or _('Unresolved currency')}"
         return "-"
 
     budget_display.short_description = _("Budget")
 
     def spent_display(self, obj: Any) -> str:
-        return f"{obj.spent_cents / 100:.2f}"
+        return format_money_totals(obj, "spent_cents")
 
     spent_display.short_description = _("Spent")
+
+    def reserved_display(self, obj: Any) -> str:
+        return format_money_totals(obj, "reserved_cents")
+
+    reserved_display.short_description = _("Reserved")
 
     def coupon_count(self, obj: Any) -> int:
         return int(obj.coupons.count())
@@ -160,7 +166,7 @@ class CouponAdmin(admin.ModelAdmin):
         "created_at",
     )
     search_fields = ("code", "name", "description")
-    readonly_fields = ("total_uses", "total_discount_cents", "created_at", "updated_at", "created_by")
+    readonly_fields = ("total_uses", "spent_display", "reserved_display", "created_at", "updated_at", "created_by")
     raw_id_fields = ("campaign", "assigned_customer", "currency")
     date_hierarchy = "created_at"
     inlines = [CouponRedemptionInline]
@@ -190,7 +196,8 @@ class CouponAdmin(admin.ModelAdmin):
                     "max_total_uses",
                     "max_uses_per_customer",
                     "total_uses",
-                    "total_discount_cents",
+                    "spent_display",
+                    "reserved_display",
                 )
             },
         ),
@@ -227,6 +234,16 @@ class CouponAdmin(admin.ModelAdmin):
         return str(obj.total_uses)
 
     usage_display.short_description = _("Usage")
+
+    def spent_display(self, obj: Any) -> str:
+        return format_money_totals(obj, "spent_cents")
+
+    spent_display.short_description = _("Discounts given")
+
+    def reserved_display(self, obj: Any) -> str:
+        return format_money_totals(obj, "reserved_cents")
+
+    reserved_display.short_description = _("Discounts reserved")
 
     def save_model(self, request: Any, obj: Any, form: Any, change: Any) -> None:
         if not change:
@@ -339,7 +356,7 @@ class GiftCardAdmin(admin.ModelAdmin):
     """Admin for gift cards."""
 
     list_display = (
-        "code",
+        "masked_code",
         "card_type",
         "status",
         "initial_value_display",
@@ -351,7 +368,7 @@ class GiftCardAdmin(admin.ModelAdmin):
     list_filter = ("status", "card_type", "currency", "created_at")
     search_fields = ("code", "recipient_email", "recipient_name")
     readonly_fields = (
-        "code",
+        "masked_code",
         "current_balance_cents",
         "activated_at",
         "created_at",
@@ -361,8 +378,21 @@ class GiftCardAdmin(admin.ModelAdmin):
     date_hierarchy = "created_at"
     inlines = [GiftCardTransactionInline]
 
+    def get_readonly_fields(self, request: Any, obj: GiftCard | None = None) -> tuple[str, ...]:
+        if obj and obj.has_frozen_identity:
+            return (
+                *self.readonly_fields,
+                "initial_value_cents",
+                "currency",
+                "purchased_by",
+                "recipient_email",
+                "recipient_name",
+                "personal_message",
+            )
+        return self.readonly_fields
+
     fieldsets = (
-        (None, {"fields": ("code", "card_type", "status", "is_active")}),
+        (None, {"fields": ("masked_code", "card_type", "status", "is_active")}),
         (_("Value"), {"fields": ("initial_value_cents", "current_balance_cents", "currency")}),
         (_("Purchase"), {"fields": ("purchased_by", "purchase_order")}),
         (_("Recipient"), {"fields": ("recipient_email", "recipient_name", "personal_message", "delivery_date")}),

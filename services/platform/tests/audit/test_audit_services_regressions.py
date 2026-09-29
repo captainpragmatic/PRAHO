@@ -1636,7 +1636,7 @@ class TestCustomersAuditService(TestCase):
         billing_profile.payment_terms = "net30"
         billing_profile.credit_limit = Decimal("1000.00")
         billing_profile.preferred_currency = "RON"
-        billing_profile.get_account_balance.return_value = Decimal("500.00")
+        billing_profile.get_account_balances.return_value = {"RON": Decimal("500.00")}
         billing_profile.created_at = timezone.now()
         billing_profile.updated_at = timezone.now()
         event = CustomersAuditService.log_billing_profile_event("billing_profile_updated", billing_profile)

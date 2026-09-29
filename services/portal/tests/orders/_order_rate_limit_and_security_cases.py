@@ -42,6 +42,8 @@ def _make_product_data(slug: str = "shared-hosting-basic") -> dict:
         "name": "Shared Hosting Basic",
         "product_type": "hosting",
         "requires_domain": False,
+        "selling_currency": "RON",
+        "currency_revision": 1,
         "is_active": True,
     }
 
@@ -1276,6 +1278,8 @@ class TestAddToCartToastProductName(TestCase):
                 "name": f"Product {slug.upper()}",
                 "product_type": "hosting",
                 "requires_domain": False,
+                "selling_currency": "RON",
+                "currency_revision": 1,
                 "is_active": True,
             }
 
@@ -1303,6 +1307,8 @@ class TestAddToCartToastProductName(TestCase):
                 "name": "Product PRODUCT-A",
                 "product_type": "hosting",
                 "requires_domain": False,
+                "selling_currency": "RON",
+                "currency_revision": 1,
                 "is_active": True,
             }
             mock_cls.return_value = mock_instance

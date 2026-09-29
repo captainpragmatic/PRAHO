@@ -73,6 +73,7 @@ class PromotionLedgerProtectionTest(TestCase):
             campaign_type="seasonal",
             start_date=timezone.now() - timedelta(days=1),
             budget_cents=100000,
+            budget_currency=self.currency,
             spent_cents=0,
             status="active",
             is_active=True,

@@ -133,7 +133,7 @@
               <div class="border border-slate-700 rounded-lg p-4">
                 <div class="flex items-center justify-between mb-2">
                   <h4 class="font-medium text-white">{{ plan.name }}</h4>
-                  <div class="text-sm text-green-400 font-mono">{{ plan.price_monthly }} RON/mo</div>
+                  <div class="text-sm text-green-400 font-mono">{% with cur=plan.currency_code %}{{ plan.price_monthly|romanian_currency:cur }}{% endwith %}/{% trans "month" %}</div>
                 </div>
                 <p class="text-xs text-slate-400 mb-3">{{ plan.description|truncatewords:15 }}</p>
 
@@ -225,7 +225,7 @@
 
           <div>
             <dt class="text-sm font-medium text-slate-400">{% trans "Monthly Cost" %}</dt>
-            <dd class="text-sm text-white font-mono">{{ service.monthly_price|romanian_currency }}</dd>
+            <dd class="text-sm text-white font-mono">{% with cur=service.currency_code %}{{ service.monthly_price|romanian_currency:cur }}{% endwith %}</dd>
           </div>
 
           <div>

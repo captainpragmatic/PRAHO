@@ -1,7 +1,7 @@
 """Currency admission across document creation, recurring collection, and checkout (#103).
 
 Every scenario exercises all five fail-closed admission sites plus the
-BILLING_DEFAULT_CURRENCY system check, across EUR/USD/RON and rate states
+stored selling-currency readiness check, across EUR/USD/RON and rate states
 (missing / shadowed / good / future-legacy). Only time and the external payment
 gateway are mocked; FX resolution uses real rows.
 """
@@ -17,8 +17,9 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 from django.utils.translation import override
 
-from apps.billing.config import DEFAULT_CURRENCY_CODE
+from apps.billing import config as billing_config
 from apps.billing.currency_models import Currency, FXRate
+from apps.billing.currency_policy import get_selling_currency_policy
 from apps.billing.metering_models import BillingCycle
 from apps.billing.payment_models import Payment
 from apps.billing.payment_service import PaymentService
@@ -28,6 +29,7 @@ from apps.billing.recurring_billing import RecurringBillingOrchestrator
 from apps.billing.subscription_models import Subscription
 from apps.billing.subscription_service import SubscriptionService
 from apps.orders.models import Order, OrderItem
+from apps.settings.models import SystemSetting
 from tests.billing.test_subscription_invoice_payments import _SubscriptionInvoicePaymentFixture
 
 
@@ -41,7 +43,6 @@ class _CurrencyAdmissionCases:
         self.today = timezone.localdate(self.now)
         self.enterContext(patch("django.utils.timezone.now", return_value=self.now))
         self.enterContext(override("en"))
-        self.enterContext(override_settings(BILLING_DEFAULT_CURRENCY=self.currency_code))
         self.currency, _ = Currency.objects.get_or_create(
             code=self.currency_code,
             defaults={"name": self.currency_code, "symbol": self.currency_code},
@@ -297,7 +298,10 @@ class _CurrencyAdmissionCases:
         self._exercise_checkout("bound")
 
     def test_default_currency_system_check(self) -> None:
-        errors = run_checks(tags=["billing_currency"])
+        get_selling_currency_policy(lock=True)
+        # Simulate the persisted policy after its FX evidence becomes unavailable.
+        SystemSetting.objects.filter(key="billing.default_currency").update(value=self.currency_code)
+        errors = run_checks(tags=["billing_currency"], databases=["default"])
         if self.admitted:
             self.assertEqual(errors, [])
         else:
@@ -341,31 +345,29 @@ class RONWithoutRateTests(_CurrencyAdmissionCases, _SubscriptionInvoicePaymentFi
 
 class DefaultCurrencyConfigurationTests(TestCase):
     def test_single_default_currency_source_of_truth(self) -> None:
-        """#103: BILLING_DEFAULT_CURRENCY is the one declared default; the former dead
-        DEFAULT_CURRENCY / SUPPORTED_CURRENCIES orphans were removed."""
+        """The stored policy owns sales; the compatibility environment option is ignored."""
         self.assertTrue(hasattr(settings, "BILLING_DEFAULT_CURRENCY"))
         self.assertFalse(hasattr(settings, "DEFAULT_CURRENCY"))
         self.assertFalse(hasattr(settings, "SUPPORTED_CURRENCIES"))
-        self.assertEqual(DEFAULT_CURRENCY_CODE, settings.BILLING_DEFAULT_CURRENCY)
+        self.assertFalse(hasattr(billing_config, "DEFAULT_CURRENCY_CODE"))
+        with override_settings(BILLING_DEFAULT_CURRENCY="EUR"):
+            self.assertEqual(get_selling_currency_policy().currency_code, "RON")
 
-    def test_ron_check_does_not_query_the_database(self) -> None:
-        with override_settings(BILLING_DEFAULT_CURRENCY="RON"), self.assertNumQueries(0):
+    def test_offline_check_does_not_query_the_database(self) -> None:
+        with override_settings(BILLING_DEFAULT_CURRENCY="EUR"), self.assertNumQueries(0):
             self.assertEqual(run_checks(tags=["billing_currency"]), [])
 
-    def test_invalid_or_noncanonical_default_is_rejected(self) -> None:
+    def test_invalid_or_noncanonical_deprecated_environment_is_ignored(self) -> None:
         for value in (None, "", " ", 123, "XXX", "eur", " EUR "):
             with self.subTest(value=value), override_settings(BILLING_DEFAULT_CURRENCY=value):
-                errors = run_checks(tags=["billing_currency"])
-                self.assertEqual([error.id for error in errors], ["billing.E001"])
+                self.assertEqual(run_checks(tags=["billing_currency"], databases=["default"]), [])
 
     def test_unavailable_fx_database_is_an_error(self) -> None:
-        with (
-            override_settings(BILLING_DEFAULT_CURRENCY="EUR"),
-            patch(
-                "apps.billing.currency_models.FXRate.objects.filter",
-                side_effect=OperationalError("database unavailable"),
-            ),
+        get_selling_currency_policy(lock=True)
+        SystemSetting.objects.filter(key="billing.default_currency").update(value="EUR")
+        with patch(
+            "apps.billing.currency_models.FXRate.objects.filter", side_effect=OperationalError("database unavailable")
         ):
-            errors = run_checks(tags=["billing_currency"])
+            errors = run_checks(tags=["billing_currency"], databases=["default"])
 
         self.assertEqual([error.id for error in errors], ["billing.E002"])

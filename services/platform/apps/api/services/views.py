@@ -20,6 +20,7 @@ from apps.api.secure_auth import (
     require_customer_authentication,
     require_customer_role_in,
 )
+from apps.billing.currency_policy import get_selling_currency_policy
 from apps.billing.recurring_locking import lock_recurring_collection_customer
 from apps.common.tax_service import TaxService
 from apps.customers.models import Customer
@@ -29,6 +30,7 @@ from .serializers import (
     ServiceDetailSerializer,
     ServiceListSerializer,
     ServicePlanAvailableSerializer,
+    service_monthly_price,
 )
 
 logger = logging.getLogger(__name__)
@@ -261,12 +263,20 @@ def customer_services_summary_api(request: HttpRequest, customer: Customer) -> R
 
         # Calculate cost information
         active_services = services.filter(status="active")
-        total_monthly_cost = sum(
-            service.service_plan.get_monthly_equivalent_price(service.billing_cycle) for service in active_services
-        )
+        costs: dict[str, Decimal] = {}
+        for service in active_services:
+            costs[service.currency_id] = costs.get(service.currency_id, Decimal("0")) + service_monthly_price(service)
         # Calculate cost with current Romanian VAT rate
         vat_multiplier = Decimal("1") + TaxService.get_vat_rate("RO", as_decimal=True)
-        total_monthly_cost_with_vat = total_monthly_cost * vat_multiplier  # Romanian VAT (current rate)
+        monthly_costs = [
+            {
+                "currency_code": code,
+                "total_monthly_cost": round(amount, 2),
+                "total_monthly_cost_with_vat": round(amount * vat_multiplier, 2),
+            }
+            for code, amount in sorted(costs.items())
+        ]
+        single_cost = monthly_costs[0] if len(monthly_costs) == 1 else {}
 
         # Calculate usage statistics
         total_disk_usage_gb = sum(service.disk_usage_mb / 1024 for service in services)
@@ -290,8 +300,10 @@ def customer_services_summary_api(request: HttpRequest, customer: Customer) -> R
             "overdue": stats["overdue"] or 0,
             "expiring_soon": stats["expiring_soon"] or 0,
             "status_counts": status_counts,
-            "total_monthly_cost": round(total_monthly_cost, 2),
-            "total_monthly_cost_with_vat": round(total_monthly_cost_with_vat, 2),
+            "currency_code": single_cost.get("currency_code"),
+            "total_monthly_cost": single_cost.get("total_monthly_cost"),
+            "total_monthly_cost_with_vat": single_cost.get("total_monthly_cost_with_vat"),
+            "monthly_costs_by_currency": monthly_costs,
             "total_disk_usage_gb": round(total_disk_usage_gb, 2),
             "total_bandwidth_usage_gb": round(total_bandwidth_usage_gb, 2),
             "service_types": service_types,
@@ -329,8 +341,16 @@ def available_service_plans_api(request: HttpRequest) -> Response:
     """
     try:
         # Get available service plans
-        queryset = ServicePlan.objects.filter(is_active=True, is_public=True).order_by(
-            "plan_type", "sort_order", "price_monthly"
+        policy = get_selling_currency_policy()
+        queryset = (
+            ServicePlan.objects.filter(
+                is_active=True,
+                is_public=True,
+                currency_prices__currency_id=policy.currency_code,
+                currency_prices__is_active=True,
+            )
+            .distinct()
+            .order_by("plan_type", "sort_order", "currency_prices__monthly_price_cents")
         )
 
         # Apply plan type filter
@@ -339,9 +359,11 @@ def available_service_plans_api(request: HttpRequest) -> Response:
             queryset = queryset.filter(plan_type=plan_type_filter)
 
         # Serialize data
-        serializer = ServicePlanAvailableSerializer(queryset, many=True)
+        serializer = ServicePlanAvailableSerializer(
+            queryset, many=True, context={"currency_code": policy.currency_code}
+        )
 
-        return Response({"success": True, "data": {"plans": serializer.data}})
+        return Response({"success": True, "data": {"plans": serializer.data, **policy.as_dict()}})
 
     except Exception as e:
         logger.error(f"🔥 [Services API] Error fetching service plans: {e}")

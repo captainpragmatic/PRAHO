@@ -131,7 +131,7 @@ class TestSessionCartBasics(SimpleTestCase):
         self.assertIsInstance(cart.cart, dict)
         self.assertIn('currency', cart.cart)
         self.assertIn('items', cart.cart)
-        self.assertEqual(cart.cart['currency'], 'RON')
+        self.assertEqual(cart.cart['currency'], '')
         self.assertEqual(len(cart.get_items()), 0)
         self.assertEqual(cart.get_item_count(), 0)
         self.assertEqual(cart.get_total_quantity(), 0)
@@ -210,7 +210,9 @@ class TestOrderServiceIntegration(SimpleTestCase):
             'subtotal_cents': 1000,
             'tax_cents': 190,
             'total_cents': 1190,
-            'currency': 'RON'
+            'currency': 'RON',
+            'selling_currency': 'RON',
+            'currency_revision': 1,
         }
         mock_api_client.return_value = mock_api
 
@@ -218,6 +220,9 @@ class TestOrderServiceIntegration(SimpleTestCase):
         mock_cart = Mock()
         mock_cart.has_items.return_value = True
         mock_cart.currency = 'RON'
+        mock_cart.currency_revision = 1
+        mock_cart.ensure_selling_policy.return_value = False
+        mock_cart.get_warnings.return_value = []
         mock_cart.get_api_items.return_value = [
             {
                 'product_id': 'test-123',

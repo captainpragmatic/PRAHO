@@ -7,7 +7,9 @@
     <form method="post" class="space-y-5 rounded-lg border border-slate-700 bg-slate-800 p-6">
       {% csrf_token %}
       {% form_error_summary form %}
-      {% for field in form %}
+      {% for field in form.hidden_fields %}{{ field }}{% endfor %}
+      {% block form_extra_fields %}{% endblock %}
+      {% for field in form.visible_fields %}
         {% if field.field.widget.input_type == "checkbox" %}{% form_checkbox field %}{% else %}{% form_field field %}{% endif %}
       {% endfor %}
       {% trans "Save" as save_label %}

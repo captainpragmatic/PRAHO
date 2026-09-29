@@ -16,7 +16,7 @@ from typing import Any, ClassVar, TypedDict
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
-from django.db.models import Q
+from django.db.models import Q, Sum
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django_fsm import ConcurrentTransition, ConcurrentTransitionMixin, FSMField, TransitionNotAllowed, transition
@@ -526,6 +526,8 @@ class CreditLedger(models.Model):
     customer = models.ForeignKey("customers.Customer", on_delete=models.CASCADE, related_name="credit_entries")
     invoice = models.ForeignKey("billing.Invoice", on_delete=models.SET_NULL, null=True, blank=True)
     payment = models.ForeignKey(Payment, on_delete=models.SET_NULL, null=True, blank=True)
+    currency = models.ForeignKey(Currency, on_delete=models.PROTECT, null=True, blank=True)
+    currency_hold_reason = models.CharField(max_length=255, blank=True, editable=False)
 
     # Credit change (positive = credit added, negative = credit used)
     delta_cents = models.BigIntegerField()
@@ -541,14 +543,88 @@ class CreditLedger(models.Model):
         db_table = "billing_credit_ledgers"
         verbose_name = _("Credit Entry")
         verbose_name_plural = _("Credit Entries")
-        indexes = (models.Index(fields=["customer", "-created_at"]),)
+        indexes = (
+            models.Index(fields=["customer", "-created_at"]),
+            models.Index(fields=["customer", "currency"], name="credit_customer_currency_idx"),
+        )
+        constraints = (
+            models.CheckConstraint(
+                condition=(
+                    Q(currency__isnull=False, currency_hold_reason="")
+                    | (Q(currency__isnull=True) & ~Q(currency_hold_reason=""))
+                ),
+                name="credit_currency_known_or_held",
+            ),
+        )
 
     def __str__(self) -> str:
         return f"{self.customer} - {self.delta} ({self.reason})"
 
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        self.clean()
+        super().save(*args, **kwargs)
+
     @property
     def delta(self) -> Decimal:
         return Decimal(self.delta_cents) / 100
+
+    def clean(self) -> None:
+        super().clean()
+        evidence = set()
+        for field in ("invoice", "payment"):
+            if getattr(self, f"{field}_id"):
+                source = getattr(self, field)
+                if source.customer_id != self.customer_id:
+                    raise ValidationError({field: _("The source belongs to a different customer.")})
+                evidence.add(source.currency_id)
+        if len(evidence) > 1 or (evidence and self.currency_id and self.currency_id not in evidence):
+            raise ValidationError({"currency": _("Credit currency must match every linked invoice and payment.")})
+        if self._state.adding and not self.currency_id and len(evidence) == 1:
+            self.currency_id = evidence.pop()
+        if not self.currency_id:
+            if self._state.adding or not self.currency_hold_reason:
+                raise ValidationError({"currency": _("Specify the original currency for a manual credit.")})
+        elif self.currency_hold_reason:
+            raise ValidationError(
+                {"currency_hold_reason": _("Resolve the currency hold before making this credit available.")}
+            )
+        if not self._state.adding:
+            original_currency = type(self).objects.values_list("currency_id", flat=True).get(pk=self.pk)
+            if original_currency and self.currency_id != original_currency:
+                raise ValidationError({"currency": _("An existing credit cannot be relabelled in another currency.")})
+
+    @classmethod
+    def balances_for_customer(cls, customer: models.Model) -> dict[str, int]:
+        """Report known balances independently; unresolved debits can still hold spending."""
+        balances = (
+            cls.objects.filter(customer=customer, currency__isnull=False, currency_hold_reason="")
+            .values("currency_id")
+            .annotate(total=Sum("delta_cents"))
+            .order_by("currency_id")
+        )
+        return {row["currency_id"]: row["total"] for row in balances}
+
+    @classmethod
+    def available_balance_for_customer(cls, customer: models.Model, currency: Currency) -> int:
+        """Read spendable funds; spending callers must hold the customer lock until their debit commits.
+
+        An unattributed debit holds spending until its original currency is resolved.
+        """
+        if cls.objects.filter(customer=customer, currency__isnull=True, delta_cents__lt=0).exists():
+            return 0
+        balance = cls.objects.filter(customer=customer, currency=currency, currency_hold_reason="").aggregate(
+            total=Sum("delta_cents")
+        )["total"]
+        return max(balance or 0, 0)
+
+    @classmethod
+    def held_entries_for_customer(cls, customer: models.Model) -> list[dict[str, Any]]:
+        """Keep uncertain historical entries visible without summing potentially different currencies."""
+        return list(
+            cls.objects.filter(customer=customer, currency__isnull=True)
+            .values("id", "delta_cents", "reason", "currency_hold_reason")
+            .order_by("id")
+        )
 
 
 # ===============================================================================

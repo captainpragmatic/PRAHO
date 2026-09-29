@@ -50,6 +50,7 @@ from .models import (
     RecurringPaymentSubmission,
     Refund,
     Subscription,
+    SubscriptionCurrencyTransition,
     TaxRule,
     VATValidation,
 )
@@ -99,6 +100,38 @@ _CREDIT_SCORE_ADJUSTMENTS_META_KEY = "credit_score_adjustments"
 # ===============================================================================
 # MODEL LIFECYCLE COVERAGE SIGNALS
 # ===============================================================================
+
+
+@receiver(post_save, sender=SubscriptionCurrencyTransition)
+def audit_subscription_currency_transition(
+    sender: type[SubscriptionCurrencyTransition],
+    instance: SubscriptionCurrencyTransition,
+    created: bool,
+    **kwargs: Any,
+) -> None:
+    """Record the notice proof and state without copying private email contents."""
+    _log_billing_model_event(
+        event_type="subscription_currency_transition_created"
+        if created
+        else "subscription_currency_transition_updated",
+        instance=instance,
+        description=f"Subscription currency offer {instance.pk}: {instance.status}",
+        new_values={
+            "subscription_id": str(instance.subscription_id),
+            "policy_revision": instance.policy_revision,
+            "status": instance.status,
+            "original_currency": instance.old_terms.get("currency"),
+            "target_currency": instance.target_terms.get("currency"),
+            "target_fingerprint": instance.target_fingerprint,
+            "notice_email_id": str(instance.notice_email_id) if instance.notice_email_id else None,
+            "notice_accepted_at": instance.notice_accepted_at,
+            "preparation_not_before": instance.preparation_not_before,
+            "effective_period_start": instance.effective_period_start,
+            "committed_cycle_id": str(instance.committed_cycle_id) if instance.committed_cycle_id else None,
+            "hold_reason": instance.hold_reason,
+        },
+        metadata={"model": "SubscriptionCurrencyTransition"},
+    )
 
 
 def _log_billing_model_event(  # Django signal parameters  # noqa: PLR0913  # Business logic parameters
@@ -298,6 +331,8 @@ def audit_price_grandfathering_lifecycle(
             "customer_id": str(instance.customer_id),
             "product_id": str(instance.product_id),
             "locked_price_cents": instance.locked_price_cents,
+            "currency": instance.currency_id,
+            "currency_hold_reason": instance.currency_hold_reason,
             "is_active": instance.is_active,
         },
         metadata={"model": "PriceGrandfathering"},
@@ -318,6 +353,8 @@ def audit_price_grandfathering_deleted(
             "customer_id": str(instance.customer_id),
             "product_id": str(instance.product_id),
             "locked_price_cents": instance.locked_price_cents,
+            "currency": instance.currency_id,
+            "currency_hold_reason": instance.currency_hold_reason,
             "is_active": instance.is_active,
         },
         metadata={"model": "PriceGrandfathering"},
@@ -379,6 +416,8 @@ def audit_credit_ledger_lifecycle(
             "payment_id": str(instance.payment_id) if instance.payment_id else None,
             "delta_cents": instance.delta_cents,
             "reason": instance.reason,
+            "currency": instance.currency_id,
+            "currency_hold_reason": instance.currency_hold_reason,
         },
         metadata={"model": "CreditLedger"},
     )
@@ -396,6 +435,8 @@ def audit_credit_ledger_deleted(sender: type[CreditLedger], instance: CreditLedg
             "customer_id": str(instance.customer_id),
             "delta_cents": instance.delta_cents,
             "reason": instance.reason,
+            "currency": instance.currency_id,
+            "currency_hold_reason": instance.currency_hold_reason,
         },
         metadata={"model": "CreditLedger"},
     )
@@ -1214,7 +1255,7 @@ def _handle_invoice_refund_completion(invoice: Invoice) -> None:
         # If the enclosing transaction rolls back, finance must NOT receive a ghost notification.
         from apps.billing.config import get_large_refund_threshold_cents  # runtime-configurable (#401)
 
-        if invoice.total_cents >= get_large_refund_threshold_cents():
+        if invoice.total_cents >= get_large_refund_threshold_cents(invoice.currency.code):
             transaction.on_commit(lambda inv=invoice: _notify_finance_team_large_refund(inv))
 
         # 6. Compliance and audit logging
@@ -1760,7 +1801,7 @@ def _notify_finance_team_large_refund(invoice: Invoice) -> None:
 
         # Same source as the decision in _handle_invoice_refund_completion, so the
         # stated threshold cannot drift from the one that actually fired.
-        threshold_major = Decimal(get_large_refund_threshold_cents()) / 100
+        threshold_major = Decimal(get_large_refund_threshold_cents(invoice.currency.code)) / 100
 
         EmailService.send_template_email(
             template_key="finance_large_refund_alert",

@@ -219,6 +219,26 @@ class StripeRefundTests(TestCase):
         )
         self.assertTrue(result["success"])
 
+    def test_optional_refund_metadata_preserves_exact_gift_identity(self):
+        mock_stripe = MagicMock()
+        mock_stripe.Refund.create.return_value = MagicMock(id="re_gift", amount=2000, status="pending")
+        gw = self._make_gateway(mock_stripe)
+        gw.refund_payment("pi_gift", amount_cents=2000, idempotency_key="gift-refund-key",
+                          metadata={"gift_refund_id": "gift-refund-id"})
+        mock_stripe.Refund.create.assert_called_once_with(
+            payment_intent="pi_gift", amount=2000, reason="requested_by_customer",
+            idempotency_key="gift-refund-key", metadata={"gift_refund_id": "gift-refund-id"},
+        )
+
+    def test_refund_retrieval_preserves_provider_metadata(self):
+        mock_stripe = MagicMock()
+        mock_stripe.Refund.retrieve.return_value = {
+            "id": "re_gift", "payment_intent": "pi_gift", "amount": 2000, "currency": "eur", "status": "pending",
+            "metadata": {"gift_refund_id": "gift-refund-id"},
+        }
+        result = self._make_gateway(mock_stripe).retrieve_refund("re_gift")
+        self.assertEqual(result["metadata"], {"gift_refund_id": "gift-refund-id"})
+
     def test_stripe_error_returns_failure(self):
         mock_stripe = MagicMock()
         mock_stripe.error.StripeError = type("StripeError", (Exception,), {})

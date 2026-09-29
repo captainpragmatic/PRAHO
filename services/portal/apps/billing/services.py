@@ -28,6 +28,33 @@ from .serializers import (
 logger = logging.getLogger(__name__)
 
 
+class GiftCardPurchaseService:
+    """Keep customer identities inside the signed body for all gift purchase operations."""
+
+    def __init__(self, customer_id: int, user_id: int) -> None:
+        self.customer_id = customer_id
+        self.user_id = user_id
+        self.api_client = PlatformAPIClient()
+
+    def call(self, action: str, data: dict[str, Any] | None = None) -> dict[str, Any]:
+        if action not in {"catalog", "purchases", "create", "detail", "funding", "refresh", "reveal", "resend"}:
+            raise ValueError("Unsupported gift purchase action")
+        result = self.api_client.post(
+            f"/billing/gift-cards/{action}/",
+            data={**(data or {}), "customer_id": self.customer_id, "user_id": self.user_id},
+        )
+        if result.get("success") is not True:
+            raise PlatformAPIError("Gift card request could not be completed", response_data=result)
+        return result
+
+    def stripe_public_key(self) -> str:
+        result = self.api_client.get_billing("stripe-config/")
+        key = result.get("config", {}).get("publishable_key")
+        if result.get("success") is not True or not isinstance(key, str) or not key:
+            raise PlatformAPIError("Card payments are unavailable")
+        return key
+
+
 def _raise_if_degraded(exc: Exception) -> None:
     """Re-raise a degraded-platform error so the view can say what happened.
 
@@ -215,6 +242,21 @@ class InvoiceViewService:
                     "overdue_invoices": summary.overdue_invoices,
                     "paid_invoices": summary.paid_invoices,
                     "total_amount_due": summary.total_amount_due_cents,  # Keep in cents for consistency
+                    "currency_code": summary.currency_code,
+                    "amount_due_by_currency": summary.amount_due_by_currency,
+                    "credit_balance_by_currency": summary.credit_balance_by_currency,
+                    "spendable_credit_by_currency": summary.spendable_credit_by_currency,
+                    "credit_balances": [
+                        {
+                            "currency_code": code,
+                            "recorded_cents": amount,
+                            "spendable_cents": summary.spendable_credit_by_currency.get(code),
+                        }
+                        for code, amount in summary.credit_balance_by_currency.items()
+                    ],
+                    "held_credit_entries": summary.held_credit_entries,
+                    "credit_spending_on_hold": summary.credit_spending_on_hold,
+                    "summary_available": True,
                     "recent_invoices": summary.recent_invoices,
                 }
 
@@ -397,7 +439,8 @@ class InvoiceViewService:
             _raise_if_degraded(e)
             return {"success": False, "error": str(e)}
 
-    def _empty_summary(self) -> dict[str, Any]:
+    @staticmethod
+    def _empty_summary() -> dict[str, Any]:
         """Return empty summary in case of errors"""
         return {
             "total_invoices": 0,
@@ -405,7 +448,15 @@ class InvoiceViewService:
             "issued_invoices": 0,
             "overdue_invoices": 0,
             "paid_invoices": 0,
-            "total_amount_due": 0,
+            "total_amount_due": None,
+            "currency_code": None,
+            "amount_due_by_currency": {},
+            "credit_balance_by_currency": {},
+            "spendable_credit_by_currency": {},
+            "credit_balances": [],
+            "held_credit_entries": [],
+            "credit_spending_on_hold": False,
+            "summary_available": False,
             "recent_invoices": [],
         }
 

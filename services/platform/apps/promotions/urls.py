@@ -4,7 +4,7 @@ URL configuration for the Promotions app.
 
 from django.urls import path
 
-from . import views
+from . import gift_staff_views, views
 
 app_name = "promotions"
 
@@ -44,6 +44,36 @@ urlpatterns = [
     path("admin/gift-cards/", views.GiftCardListView.as_view(), name="gift_card_list"),
     path("admin/gift-cards/create/", views.GiftCardCreateView.as_view(), name="gift_card_create"),
     path("admin/gift-cards/<uuid:pk>/", views.GiftCardDetailView.as_view(), name="gift_card_detail"),
+    path(
+        "admin/gift-cards/<uuid:pk>/reveal/",
+        gift_staff_views.gift_card_action,
+        {"action": "reveal"},
+        name="gift_card_reveal",
+    ),
+    path(
+        "admin/gift-cards/<uuid:pk>/resend/",
+        gift_staff_views.gift_card_action,
+        {"action": "resend"},
+        name="gift_card_resend",
+    ),
+    path(
+        "admin/gift-cards/<uuid:pk>/refund/",
+        gift_staff_views.gift_card_action,
+        {"action": "refund"},
+        name="gift_card_refund",
+    ),
+    path(
+        "admin/gift-cards/<uuid:pk>/refunds/<uuid:refund_id>/refresh/",
+        gift_staff_views.gift_card_action,
+        {"action": "refund_refresh"},
+        name="gift_card_refund_refresh",
+    ),
+    path(
+        "admin/gift-cards/<uuid:pk>/refunds/<uuid:refund_id>/bank-confirm/",
+        gift_staff_views.gift_card_action,
+        {"action": "refund_bank_confirm"},
+        name="gift_card_refund_bank_confirm",
+    ),
     path(
         "admin/gift-cards/<uuid:pk>/record-payment/",
         views.GiftCardRecordBankPaymentView.as_view(),

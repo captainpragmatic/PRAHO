@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 from uuid import UUID
 
 from django.db import transaction
@@ -37,12 +37,10 @@ if TYPE_CHECKING:
     from apps.customers.models import Customer
     from apps.orders.models import Order
 
+    from .currency_terms import DomainRenewalQuote
     from .gateways import BaseRegistrarGateway, DomainInfoResult, RegistrarAPIError
 
 logger = logging.getLogger(__name__)
-
-# Module-level default for WHOIS privacy price
-_DEFAULT_WHOIS_PRIVACY_PRICE_CENTS = 500
 
 # Domain name validation constants
 MIN_DOMAIN_NAME_LENGTH = 3  # Minimum length for domain names
@@ -66,6 +64,7 @@ class DomainRegistrationConfig:
     years: int = 1
     whois_privacy: bool = False
     auto_renew: bool = True
+    order_item: DomainOrderItem | None = None
 
 
 # Minimal country-name → ISO 3166-1 alpha-2 mapping for the registrant address.
@@ -292,23 +291,34 @@ class TLDService:
         years: int,
         include_whois_privacy: bool = False,
         *,
-        action: Literal["register", "renew"] = "register",
+        action: str = "register",
+        currency_code: str | None = None,
     ) -> dict[str, Any]:
         """💰 Calculate total domain cost with options"""
-        unit_price_cents = tld.registration_price_cents if action == "register" else tld.renewal_price_cents
+        from apps.billing.currency_policy import get_selling_currency_policy  # noqa: PLC0415  # ADR-0007
+
+        code = currency_code or get_selling_currency_policy().currency_code
+        price = tld.get_price_for_currency(code)
+        if price is None:
+            raise ValueError(f"No retail price for .{tld.extension} in {code}")
+        unit_price_cents = {
+            "register": price.registration_price_cents,
+            "renew": price.renewal_price_cents,
+            "transfer": price.transfer_price_cents,
+        }.get(action)
+        if unit_price_cents is None:
+            raise ValueError("Invalid domain action")
         base_cost_cents = unit_price_cents * years
         whois_cost_cents = 0
 
         # Add WHOIS privacy cost if requested and available
         if include_whois_privacy and tld.whois_privacy_available:
-            whois_privacy_price = SettingsService.get_integer_setting(
-                "domains.whois_privacy_price_cents", _DEFAULT_WHOIS_PRIVACY_PRICE_CENTS
-            )
-            whois_cost_cents = whois_privacy_price * years
+            whois_cost_cents = price.whois_privacy_price_cents * years
 
         total_cost_cents = base_cost_cents + whois_cost_cents
 
         return {
+            "currency": code,
             "base_cost_cents": base_cost_cents,
             "base_cost": base_cost_cents / 100,
             "whois_cost_cents": whois_cost_cents,
@@ -408,8 +418,13 @@ class DomainLifecycleService:
     """
 
     @staticmethod
-    def create_domain_registration(
-        customer: Customer, domain_name: str, years: int = 1, whois_privacy: bool = False, auto_renew: bool = True
+    def create_domain_registration(  # noqa: PLR0913  # Registration options and the original order promise.
+        customer: Customer,
+        domain_name: str,
+        years: int = 1,
+        whois_privacy: bool = False,
+        auto_renew: bool = True,
+        order_item: DomainOrderItem | None = None,
     ) -> Result[Domain, str]:
         """Create new domain registration.
 
@@ -447,6 +462,7 @@ class DomainLifecycleService:
             years=years,
             whois_privacy=whois_privacy,
             auto_renew=auto_renew,
+            order_item=order_item,
         )
         return DomainLifecycleService._execute_domain_registration(config)
 
@@ -1293,6 +1309,25 @@ class DomainOrderService:
     """
 
     @staticmethod
+    def _price_domain_item(
+        order: Order,
+        tld: TLD,
+        domain: Domain | None,
+        action: str,
+        whois_privacy: bool,
+    ) -> tuple[DomainRenewalQuote | None, int]:
+        from .currency_terms import domain_renewal_quote  # noqa: PLC0415
+
+        if domain is not None:
+            quote = domain_renewal_quote(domain)
+            if order.currency_id != quote.currency_code:
+                raise ValueError(f"The domain renewal remains priced in {quote.currency_code}.")
+            return quote, quote.unit_price_cents
+        cost = TLDService.calculate_domain_cost(tld, 1, whois_privacy, action=action, currency_code=order.currency_id)
+        return None, cost["total_cost_cents"]
+
+    @staticmethod
+    @transaction.atomic
     def create_domain_order_item(  # Domain order requires multiple configuration parameters  # domain registration fields  # noqa: PLR0913  # Business logic parameters
         order: Order,
         domain_name: str,
@@ -1303,6 +1338,12 @@ class DomainOrderService:
         epp_code: str = "",
     ) -> tuple[bool, DomainOrderItem | str]:
         """🛒 Create domain order item"""
+        from apps.billing.currency_policy import get_selling_currency_policy  # noqa: PLC0415  # ADR-0007
+
+        from .currency_terms import commit_domain_quote, purchase_renewal_terms, renewal_item_terms  # noqa: PLC0415
+
+        get_selling_currency_policy(lock=True)
+        order = type(order).objects.select_for_update().get(pk=order.pk)
 
         # Validate domain name
         is_valid, error_msg = DomainValidationService.validate_domain_name(domain_name)
@@ -1330,22 +1371,6 @@ class DomainOrderService:
             if period_error is not None:
                 return False, period_error
 
-        # Calculate pricing based on action
-        if action == "register":
-            unit_price_cents = tld.registration_price_cents
-        elif action == "renew":
-            unit_price_cents = tld.renewal_price_cents
-        elif action == "transfer":
-            unit_price_cents = tld.transfer_price_cents
-        else:
-            return False, cast(str, _("Invalid domain action"))
-
-        # Add WHOIS privacy cost
-        if whois_privacy and tld.whois_privacy_available:
-            unit_price_cents += SettingsService.get_integer_setting(
-                "domains.whois_privacy_price_cents", _DEFAULT_WHOIS_PRIVACY_PRICE_CENTS
-            )
-
         # #430: a renew acts on an EXISTING domain the customer owns. Link it here so
         # process_domain_order_items can reach the renew branch — its guard was
         # `item.action == "renew" and item.domain`, never true because .domain was never set, so
@@ -1362,7 +1387,28 @@ class DomainOrderService:
         # bulk-path queryset canonicalize every write, migration 0006 fixed legacy rows.
         existing_domain: Domain | None = None
         if action == "renew":
-            existing_domain = Domain.objects.filter(name=domain_name, customer=order.customer).first()
+            existing_domain = (
+                Domain.objects.select_for_update().filter(name=domain_name, customer=order.customer).first()
+            )
+
+        renewal_terms: dict[str, Any] = {}
+        try:
+            quote, unit_price_cents = DomainOrderService._price_domain_item(
+                order,
+                tld,
+                existing_domain,
+                action,
+                whois_privacy,
+            )
+            if existing_domain is not None and quote is not None:
+                renewal_terms = renewal_item_terms(existing_domain, quote, years)
+                whois_privacy = existing_domain.whois_privacy
+            elif action in {"register", "transfer"}:
+                renewal_terms = purchase_renewal_terms(
+                    tld, domain_name, order.customer_id, order.currency_id, whois_privacy
+                )
+        except ValueError as exc:
+            return False, str(exc)
 
         try:
             order_item = DomainOrderItem.objects.create(
@@ -1377,7 +1423,10 @@ class DomainOrderService:
                 auto_renew=auto_renew,
                 epp_code="",
                 domain=existing_domain,
+                renewal_terms=renewal_terms,
             )
+            if existing_domain is not None and quote is not None:
+                commit_domain_quote(existing_domain, order_item, quote)
 
             # Encrypt EPP code via model setter (single encryption boundary)
             if action == "transfer" and epp_code:
@@ -1389,6 +1438,7 @@ class DomainOrderService:
 
         except Exception as e:
             logger.error(f"🔥 [Domain] Failed to create order item: {e}")
+            transaction.set_rollback(True)
             return False, cast(str, _("Failed to create domain order item"))
 
     @staticmethod
@@ -1416,6 +1466,7 @@ class DomainOrderService:
                         years=item.years,
                         whois_privacy=item.whois_privacy,
                         auto_renew=item.auto_renew,
+                        order_item=item,
                     )
 
                     if result.is_ok():

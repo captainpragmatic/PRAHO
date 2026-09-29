@@ -144,14 +144,19 @@ class InvoiceSummary:
     issued_invoices: int
     overdue_invoices: int
     paid_invoices: int
-    total_amount_due_cents: int
-    currency_code: str
+    total_amount_due_cents: int | None
+    currency_code: str | None
     recent_invoices: list[dict[str, Any]]
+    amount_due_by_currency: dict[str, int] = field(default_factory=dict)
+    credit_balance_by_currency: dict[str, int] = field(default_factory=dict)
+    spendable_credit_by_currency: dict[str, int] = field(default_factory=dict)
+    held_credit_entries: list[dict[str, Any]] = field(default_factory=list)
+    credit_spending_on_hold: bool = False
 
     @property
     def total_amount_due_display(self) -> str:
         """Format total amount due for display"""
-        return f"{self.total_amount_due_cents / 100:.2f} {self.currency_code}"
+        return "; ".join(f"{amount / 100:.2f} {code}" for code, amount in self.amount_due_by_currency.items()) or "—"
 
 
 @dataclass

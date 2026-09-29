@@ -30,6 +30,8 @@ def _make_product_data(slug: str = "shared-hosting-basic") -> dict:
         "name": "Shared Hosting Basic",
         "product_type": "hosting",
         "requires_domain": False,
+        "selling_currency": "RON",
+        "currency_revision": 1,
         "is_active": True,
     }
 

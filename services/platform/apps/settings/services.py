@@ -291,6 +291,16 @@ class SettingsService:
         return SettingValidationError(key=key, field="value", message=message, code="validation_error")
 
     @classmethod
+    def _currency_switch_guard(cls, key: str, value: Any) -> SettingValidationError | None:
+        from apps.billing.currency_policy import validate_currency_switch  # noqa: PLC0415  # ADR-0007
+
+        try:
+            validate_currency_switch(value)
+        except (ValidationError, ValueError, AttributeError) as exc:
+            return SettingValidationError(key=key, field="value", message=str(exc), code="switch_blocked")
+        return None
+
+    @classmethod
     def _semantic_guard(cls, key: str, value: Any) -> SettingValidationError | None:
         """Refusals that depend on live system state, not on the value's shape.
 
@@ -305,6 +315,8 @@ class SettingsService:
         service call. It runs inside the caller's transaction, immediately before the
         row lock, so two operators racing the same switch cannot both be told yes.
         """
+        if key == "billing.default_currency":
+            return cls._currency_switch_guard(key, value)
         if key != "billing.invoice_issuer":
             return None
 

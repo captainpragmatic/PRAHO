@@ -2921,6 +2921,7 @@ class Command(BaseCommand):
         CreditLedger.objects.create(
             customer=customer,
             delta_cents=5000,
+            currency=self._get_ron_currency(),
             reason="Credit promoțional — bun venit",
             created_by=admin_user,
         )
@@ -2929,6 +2930,7 @@ class Command(BaseCommand):
         CreditLedger.objects.create(
             customer=customer,
             invoice=first_invoice,
+            currency=first_invoice.currency if first_invoice else self._get_ron_currency(),
             delta_cents=-3000,
             reason="Credit aplicat pe factura",
             created_by=admin_user,
@@ -2946,6 +2948,7 @@ class Command(BaseCommand):
         CreditLedger.objects.create(
             customer=customer,
             delta_cents=8000,
+            currency=self._get_ron_currency(),
             reason="Credit din rambursare serviciu anulat",
             created_by=admin_user,
         )

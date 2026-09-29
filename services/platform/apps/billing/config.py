@@ -44,10 +44,6 @@ def _get_positive_int(setting_name: str, default: int) -> int:
 # rather than a literal (#519) — a domestic-by-default assumption, not a Romanian one.
 DEFAULT_COUNTRY_CODE = getattr(settings, "BILLING_DEFAULT_COUNTRY", "") or operator_country()
 
-# Default currency
-DEFAULT_CURRENCY_CODE = getattr(settings, "BILLING_DEFAULT_CURRENCY", "RON") or "RON"
-
-
 # EU countries for VAT purposes
 EU_COUNTRY_CODES = frozenset(
     {
@@ -173,28 +169,37 @@ def get_event_grace_period_hours() -> int:
         return _get_positive_int("BILLING_EVENT_GRACE_PERIOD_HOURS", _DEFAULT_EVENT_GRACE_PERIOD_HOURS)
 
 
-_DEFAULT_LARGE_REFUND_THRESHOLD_CENTS = 50000  # 500 EUR — finance-team notification floor
+_DEFAULT_LARGE_REFUND_THRESHOLD_CENTS = 50000  # Legacy 500 RON finance-notification floor
 
 
-def get_large_refund_threshold_cents() -> int:
-    """Refund amount (cents) at or above which the finance team is notified.
+def get_large_refund_threshold_cents(currency_code: str = "RON") -> int:
+    """Finance-notification floor in the refunded document's recorded currency."""
+    from .currency_thresholds import get_currency_threshold_cents  # noqa: PLC0415
 
-    Runtime-configurable (#401) so the floor can be tuned per deployment without a
-    code change, rather than the hardcoded LARGE_REFUND_THRESHOLD_CENTS constant.
-    """
     try:
-        return max(
-            0,
+        legacy_ron_threshold = (
             SettingsService.get_integer_setting(
-                "billing.large_refund_notification_threshold_cents", _DEFAULT_LARGE_REFUND_THRESHOLD_CENTS
-            ),
+                "billing.large_refund_notification_threshold_cents",
+                _DEFAULT_LARGE_REFUND_THRESHOLD_CENTS,
+            )
+            if currency_code == "RON"
+            else 0
+        )
+        return get_currency_threshold_cents(
+            "billing.large_refund_thresholds_cents",
+            currency_code,
+            legacy_ron_threshold=legacy_ron_threshold,
         )
     except Exception:
         logger.warning(
             "Failed to read large_refund_notification_threshold_cents from SettingsService, using fallback",
             exc_info=True,
         )
-        return _get_positive_int("BILLING_LARGE_REFUND_THRESHOLD_CENTS", _DEFAULT_LARGE_REFUND_THRESHOLD_CENTS)
+        return (
+            _get_positive_int("BILLING_LARGE_REFUND_THRESHOLD_CENTS", _DEFAULT_LARGE_REFUND_THRESHOLD_CENTS)
+            if currency_code == "RON"
+            else 0
+        )
 
 
 def get_future_event_drift_minutes() -> int:

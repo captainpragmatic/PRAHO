@@ -54,7 +54,7 @@
 
     <div class="p-6">
       <!-- Order Form -->
-      <form method="post" class="space-y-6">
+      <form id="order-create-form" method="post" class="space-y-6">
         {% csrf_token %}
 
         {% form_error_summary form %}
@@ -84,14 +84,13 @@
             <label for="id_currency" class="block text-sm font-medium text-slate-400 mb-2">
               {% trans "Currency" %}
             </label>
-            <select id="id_currency" name="currency"
-                    class="w-full bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-              {% for option in currency_options %}
-                <option value="{{ option.value }}" {% if order and order.currency.code == option.value %}selected{% elif not order and option.value == "RON" %}selected{% endif %}>
-                  {{ option.label }}
-                </option>
-              {% endfor %}
-            </select>
+            {% if order %}
+              <p class="text-white">{{ order.currency.code }}</p>
+            {% else %}
+              <p class="text-white">{{ selling_currency }}</p>
+              {% input_field name="currency" input_type="hidden" value=selling_currency html_id="id_currency" %}
+              {% input_field name="currency_revision" input_type="hidden" value=currency_revision html_id="id_currency_revision" %}
+            {% endif %}
             <p class="mt-1 text-xs text-slate-500">{% trans "Order currency" %}</p>
           </div>
 
@@ -188,10 +187,10 @@
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label class="block text-sm font-medium text-slate-400 mb-2">{% trans "Product" %}</label>
-            <select name="first_product" id="first_product"
+            <select name="first_product" id="first_product" form="order-create-form"
                     class="w-full bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
                     hx-post="{% url 'orders:order_create_preview' %}"
-                    hx-include="#id_customer, #id_currency, #first_product, #first_billing_period, #first_quantity, #first_domain_name"
+                    hx-include="#id_customer, #id_currency, #id_currency_revision, #first_product, #first_billing_period, #first_quantity, #first_domain_name"
                     hx-target="#create-preview"
                     hx-swap="innerHTML">
               <option value="">{% trans "Select product..." %}</option>
@@ -202,10 +201,10 @@
           </div>
           <div>
             <label class="block text-sm font-medium text-slate-400 mb-2">{% trans "Billing Period" %}</label>
-            <select name="first_billing_period" id="first_billing_period"
+            <select name="first_billing_period" id="first_billing_period" form="order-create-form"
                     class="w-full bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
                     hx-post="{% url 'orders:order_create_preview' %}"
-                    hx-include="#id_customer, #id_currency, #first_product, #first_billing_period, #first_quantity, #first_domain_name"
+                    hx-include="#id_customer, #id_currency, #id_currency_revision, #first_product, #first_billing_period, #first_quantity, #first_domain_name"
                     hx-target="#create-preview"
                     hx-swap="innerHTML">
               <option value="monthly">{% trans "Monthly" %}</option>
@@ -219,19 +218,19 @@
           </div>
           <div>
             <label class="block text-sm font-medium text-slate-400 mb-2">{% trans "Quantity" %}</label>
-            <input type="number" min="1" value="1" name="first_quantity" id="first_quantity"
+            <input type="number" min="1" value="1" name="first_quantity" id="first_quantity" form="order-create-form"
                    class="w-full bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
                    hx-post="{% url 'orders:order_create_preview' %}"
-                   hx-include="#id_customer, #id_currency, #first_product, #first_billing_period, #first_quantity, #first_domain_name"
+                   hx-include="#id_customer, #id_currency, #id_currency_revision, #first_product, #first_billing_period, #first_quantity, #first_domain_name"
                    hx-target="#create-preview"
                    hx-swap="innerHTML">
           </div>
           <div>
             <label class="block text-sm font-medium text-slate-400 mb-2">{% trans "Domain (if required)" %}</label>
-            <input type="text" name="first_domain_name" id="first_domain_name" placeholder="exemplu.ro"
+            <input type="text" name="first_domain_name" id="first_domain_name" placeholder="exemplu.ro" form="order-create-form"
                    class="w-full bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
                    hx-post="{% url 'orders:order_create_preview' %}"
-                   hx-include="#id_customer, #id_currency, #first_product, #first_billing_period, #first_quantity, #first_domain_name"
+                   hx-include="#id_customer, #id_currency, #id_currency_revision, #first_product, #first_billing_period, #first_quantity, #first_domain_name"
                    hx-target="#create-preview"
                    hx-swap="innerHTML">
           </div>
@@ -263,7 +262,7 @@
         <div class="space-y-2">
           <div class="flex items-center text-sm">
             <span class="mr-2">{% icon "check" %}</span>
-            <span class="text-slate-300">{% trans "Multi-currency support (RON, EUR, USD)" %}</span>
+            <span class="text-slate-300">{% trans "Configured selling currency" %}: {{ selling_currency }}</span>
           </div>
           <div class="flex items-center text-sm">
             <span class="mr-2">{% icon "check" %}</span>

@@ -78,7 +78,12 @@ class UsageInvoiceService:
 
         subscription = billing_cycle.subscription
         customer = subscription.customer
-        currency = subscription.currency
+        from .cycle_terms import get_usage_cycle_currency  # noqa: PLC0415
+
+        try:
+            currency = get_usage_cycle_currency(billing_cycle)
+        except ValidationError as exc:
+            return Err(str(exc))
 
         # Check if invoice already exists
         if billing_cycle.usage_invoice:
@@ -150,7 +155,12 @@ class UsageInvoiceService:
 
             # Total = subtotal + tax (must satisfy Invoice model validation)
             total_cents = net_amount_cents + tax_cents
-            customer_credit = self._get_customer_credit_balance(customer)
+            # Different usage cycles may close concurrently for one customer.
+            # Serialize the available-credit check and debit on the customer row.
+            from apps.customers.models import Customer  # noqa: PLC0415
+
+            Customer.objects.select_for_update().get(pk=customer.pk)
+            customer_credit = self._get_customer_credit_balance(customer, currency)
             credit_applied_cents = min(max(customer_credit, 0), total_cents)
             _notice_at, charge_at = usage_collection_schedule(billing_cycle.period_end)
 
@@ -246,6 +256,7 @@ class UsageInvoiceService:
                 CreditLedger.objects.create(
                     customer=customer,
                     invoice=invoice,
+                    currency=currency,
                     delta_cents=-credit_applied_cents,
                     reason=f"Applied to invoice {invoice.audit_reference}",
                 )
@@ -307,11 +318,9 @@ class UsageInvoiceService:
             }
         )
 
-    def _get_customer_credit_balance(self, customer: Any) -> int:
-        """Get customer's available credit balance in cents"""
-        result = CreditLedger.objects.filter(customer=customer).aggregate(total=Sum("delta_cents"))
-
-        return result["total"] or 0
+    def _get_customer_credit_balance(self, customer: Any, currency: Any) -> int:
+        """Only money in the document's original currency can pay it."""
+        return CreditLedger.available_balance_for_customer(customer, currency)
 
     def _get_customer_vat_info(self, customer: Any, *, country: str | None = None) -> CustomerVATInfo:
         """Build the authoritative VAT context for a usage invoice."""

@@ -457,13 +457,11 @@ ROMANIAN_BUSINESS_CONTEXT = {
 }
 
 # Currency settings
-# BILLING_DEFAULT_CURRENCY is a VALIDATED forward-compatibility setting: the billing_currency
-# system check (#103) rejects an unsupported/unresolvable value at startup, and it is exposed
-# as apps.billing.config.DEFAULT_CURRENCY_CODE. It does NOT yet change the per-document default
-# — every creation path still defaults to literal RON (a non-RON default is deliberately not
-# wired: that touches many money paths and is future work). Setting this to EUR/USD validates
-# but does not (yet) make new documents non-RON. The former DEFAULT_CURRENCY / SUPPORTED_CURRENCIES
-# orphans were removed; supported codes live in the CurrencyCode enum.
+# Deprecated compatibility knob: this environment value does not select the selling currency.
+# New sales use the stored billing.default_currency policy; historical records keep their currency.
+# Upgrades retain RON until an explicit validated settings change. Run `make check-currency`
+# after migrations, with DJANGO_SETTINGS_MODULE pointing at the intended deployment database.
+# Ordinary offline system checks do not prove database-backed currency readiness.
 BILLING_DEFAULT_CURRENCY = os.environ.get("BILLING_DEFAULT_CURRENCY", "RON")
 
 # ===============================================================================

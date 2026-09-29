@@ -12,21 +12,23 @@ from django.http import Http404, HttpResponse
 from django.test import RequestFactory, TestCase
 from django.utils import timezone
 
+from apps.billing.currency_policy import get_selling_currency_policy
 from apps.billing.models import (
     Currency,
     FXRate,
     ProformaInvoice,
     ProformaLine,
 )
+from apps.billing.proforma_service import ProformaService
 from apps.billing.views import (
     _create_proforma_with_sequence,
     _handle_proforma_create_post,
     _validate_proforma_edit_access,
     proforma_detail,
 )
-
-# Note: Some helper functions may have been moved to services or removed in refactoring
+from apps.common.types import Ok
 from apps.customers.models import Customer, CustomerAddress
+from apps.settings.services import SettingsService
 from apps.users.models import CustomerMembership, User
 
 UserModel = get_user_model()
@@ -79,7 +81,7 @@ class ProformaViewsTestCase(TestCase):
         """Test _create_proforma_with_sequence helper"""
         valid_until = timezone.now() + timezone.timedelta(days=30)
 
-        proforma = _create_proforma_with_sequence(self.customer, valid_until)
+        proforma = _create_proforma_with_sequence(self.customer, valid_until, self.currency)
 
         self.assertIsInstance(proforma, ProformaInvoice)
         self.assertEqual(proforma.customer, self.customer)
@@ -101,6 +103,7 @@ class ProformaViewsTestCase(TestCase):
         proforma = _create_proforma_with_sequence(
             self.customer,
             timezone.now() + timezone.timedelta(days=30),
+            self.currency,
         )
 
         self.assertEqual(proforma.bill_to_address1, "Strada Test 1")
@@ -134,6 +137,8 @@ class ProformaViewsTestCase(TestCase):
         post_data = {
             'customer': str(self.customer.pk),
             'valid_until': '2024-12-31',
+            'currency': 'RON',
+            'currency_revision': get_selling_currency_policy().revision,
             'bill_to_name': 'Test Company SRL',
             'bill_to_email': 'test@company.ro',
             'line_0_description': 'Test Service',
@@ -155,14 +160,8 @@ class ProformaViewsTestCase(TestCase):
         self.assertEqual(proforma.bill_to_name, 'Test Company SRL')
         self.assertEqual(proforma.bill_to_email, 'test@company.ro')
 
-    def test_proforma_create_honors_selected_eur_currency(self):
-        """#103 DISCRIMINATOR: a staff-selected non-RON currency must persist.
-
-        Current code silently forces RON (currency is never read), so this FAILS
-        pre-fix ('RON' != 'EUR') and passes once the create path reads + validates
-        + applies the posted currency. A resolvable EUR->RON rate is seeded because
-        the fail-closed admission guard requires one (no rate => no non-RON proforma).
-        """
+    def test_proforma_create_honors_active_eur_currency(self):
+        """The current EUR selling policy and a proven FX rate admit the new document."""
         eur, _ = Currency.objects.get_or_create(code='EUR', defaults={'symbol': '€', 'decimals': 2})
         FXRate.objects.create(
             base_code=eur,
@@ -173,10 +172,12 @@ class ProformaViewsTestCase(TestCase):
             source_reference='https://curs.bnr.ro/nbrfxrates.xml',
             fetched_at=timezone.now(),
         )
+        self.assertIsInstance(SettingsService.update_setting('billing.default_currency', 'EUR'), Ok)
         post_data = {
             'customer': str(self.customer.pk),
             'valid_until': '2024-12-31',
             'currency': 'EUR',
+            'currency_revision': get_selling_currency_policy().revision,
             'bill_to_name': 'Test Company SRL',
             'bill_to_email': 'test@company.ro',
             'line_0_description': 'Test Service',
@@ -197,12 +198,12 @@ class ProformaViewsTestCase(TestCase):
         """#103 SAFETY: a non-RON currency with NO resolvable FX rate is rejected at
         creation (fail-closed). No proforma is written, so money can never be taken for
         a document whose invoice could not be issued for lack of a rate (stuck money)."""
-        Currency.objects.get_or_create(code='EUR', defaults={'symbol': '€', 'decimals': 2})
-        # Deliberately NO FXRate seeded for EUR->RON.
+        self._activate_eur_without_current_rate()
         post_data = {
             'customer': str(self.customer.pk),
             'valid_until': '2024-12-31',
             'currency': 'EUR',
+            'currency_revision': get_selling_currency_policy().revision,
             'line_0_description': 'Test Service',
             'line_0_quantity': '1',
             'line_0_unit_price': '100.00',
@@ -221,7 +222,7 @@ class ProformaViewsTestCase(TestCase):
         """#103 UX: a fail-closed re-render must preserve ALL submitted input (customer,
         validity date, every line item) and render totals in the selected currency — not
         only the currency dropdown, and never fall back to a hardcoded RON summary."""
-        Currency.objects.get_or_create(code='EUR', defaults={'symbol': '€', 'decimals': 2})
+        self._activate_eur_without_current_rate()
         # Ensure the customer is in the staff form's dropdown so the "selected" check is robust.
         CustomerMembership.objects.get_or_create(
             user=self.staff_user, customer=self.customer, defaults={'role': 'admin'}
@@ -231,6 +232,7 @@ class ProformaViewsTestCase(TestCase):
             'customer': str(self.customer.pk),
             'valid_until': '2026-12-31',
             'currency': 'EUR',
+            'currency_revision': get_selling_currency_policy().revision,
             'line_0_description': 'Alpha hosting',
             'line_0_quantity': '2',
             'line_0_unit_price': '150.00',
@@ -250,7 +252,7 @@ class ProformaViewsTestCase(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(ProformaInvoice.objects.filter(customer=self.customer).exists())
         # Rehydration: currency, customer, validity date, and BOTH line items are preserved.
-        self.assertIn('value="EUR" selected', html)
+        self.assertIn('name="currency" readonly value="EUR"', html)
         self.assertIn(f'value="{self.customer.pk}" selected', html)
         self.assertIn('value="2026-12-31"', html)
         self.assertIn('value="Alpha hosting"', html)
@@ -269,10 +271,12 @@ class ProformaViewsTestCase(TestCase):
             source=FXRate.Source.BNR, source_reference='https://curs.bnr.ro/nbrfxrates.xml',
             fetched_at=timezone.now(),
         )
+        self.assertIsInstance(SettingsService.update_setting('billing.default_currency', 'EUR'), Ok)
         post_data = {
             'customer': str(self.customer.pk),
             'valid_until': '2024-12-31',
             'currency': 'eur',
+            'currency_revision': get_selling_currency_policy().revision,
             'line_0_description': 'Test Service',
             'line_0_quantity': '1',
             'line_0_unit_price': '100.00',
@@ -286,6 +290,17 @@ class ProformaViewsTestCase(TestCase):
 
         proforma = ProformaInvoice.objects.get(customer=self.customer)
         self.assertEqual(proforma.currency.code, 'EUR')
+
+    def _activate_eur_without_current_rate(self):
+        """A valid switch does not replace the per-sale check when rate evidence later disappears."""
+        eur, _ = Currency.objects.get_or_create(code='EUR', defaults={'symbol': '€', 'decimals': 2})
+        FXRate.objects.create(
+            base_code=eur, quote_code=self.currency, rate=Decimal('4.9771'), as_of=timezone.localdate(),
+            source=FXRate.Source.BNR, source_reference='https://curs.bnr.ro/nbrfxrates.xml',
+            fetched_at=timezone.now(),
+        )
+        self.assertIsInstance(SettingsService.update_setting('billing.default_currency', 'EUR'), Ok)
+        FXRate.objects.filter(base_code=eur).delete()
 
 
 class ProformaDetailViewTestCase(TestCase):
@@ -452,8 +467,6 @@ class ProformaEditViewsTestCase(TestCase):
 
     def test_update_proforma_basic_info(self):
         """Test updating proforma basic information"""
-        from apps.billing.proforma_service import ProformaService
-
         update_data = {
             'bill_to_name': 'Updated Company Name',
             'bill_to_email': 'updated@test.ro',

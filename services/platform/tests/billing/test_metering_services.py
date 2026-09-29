@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 from datetime import timedelta
 from decimal import Decimal
+from functools import cached_property
 from unittest.mock import MagicMock, patch
 
 from django.db.models import Sum
@@ -380,14 +381,17 @@ class RatingEngineTestCase(TestCase):
             next_billing_date=now + timedelta(days=30),
         )
 
-        self.billing_cycle = BillingCycle.objects.create(
+        self.engine = RatingEngine()
+
+    @cached_property
+    def billing_cycle(self):
+        # Tests configure their tariff first; opening the period freezes that tariff.
+        return BillingCycle.objects.create(
             subscription=self.subscription,
-            period_start=now,
-            period_end=now + timedelta(days=30),
+            period_start=self.subscription.current_period_start,
+            period_end=self.subscription.current_period_end,
             status="active",
         )
-
-        self.engine = RatingEngine()
 
     def test_rate_aggregation_per_unit(self):
         """Test per-unit pricing rating."""
@@ -975,7 +979,9 @@ class UsageInvoiceServiceTestCase(TestCase):
         selected = SettingsService.update_setting("billing.invoice_issuer", ISSUER_SMARTBILL, reason="test")
         self.assertTrue(selected.is_ok(), getattr(selected, "error", ""))
 
-        CreditLedger.objects.create(customer=self.customer, delta_cents=500_000, reason="prepayment for test")
+        CreditLedger.objects.create(
+            customer=self.customer, currency=self.currency, delta_cents=500_000, reason="prepayment for test"
+        )
 
         result = self.service.generate_invoice_from_cycle(str(self.billing_cycle.id))
 
@@ -1079,6 +1085,7 @@ class UsageInvoiceServiceTestCase(TestCase):
 
     def test_account_credit_is_a_payment_and_does_not_reduce_invoice_tax_base(self):
         CreditLedger.objects.create(
+            currency=self.currency,
             customer=self.customer,
             delta_cents=1000,
             reason="Customer account credit",
@@ -1325,6 +1332,7 @@ class UsageInvoiceServiceTestCase(TestCase):
         """Test that credit ledger entries can be created for customers."""
         # Add credit to customer
         credit = CreditLedger.objects.create(
+            currency=self.currency,
             customer=self.customer,
             delta_cents=1000,  # 10.00 credit
             reason="Promotional credit",

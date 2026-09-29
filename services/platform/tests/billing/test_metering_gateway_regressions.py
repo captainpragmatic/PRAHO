@@ -12,6 +12,7 @@ import logging
 import uuid
 from datetime import timedelta
 from decimal import Decimal
+from functools import cached_property
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -820,8 +821,12 @@ class TestRatingEngine(TestCase):
         self.product = _make_product()
         self.meter = _make_meter(is_billable=True, rounding_mode="none")
         self.subscription = _make_subscription(self.customer, self.product, self.currency)
-        self.billing_cycle = _make_billing_cycle(self.subscription)
         self.engine = RatingEngine()
+
+    @cached_property
+    def billing_cycle(self):
+        # A new period snapshots the prices configured before its first usage.
+        return _make_billing_cycle(self.subscription)
 
     @patch("apps.billing.metering_service.AuditService.log_simple_event")
     def test_rate_aggregation_not_found(self, mock_audit):
@@ -881,14 +886,14 @@ class TestRatingEngine(TestCase):
     @patch("apps.billing.metering_service.AuditService.log_simple_event")
     def test_rate_aggregation_with_unit_price_from_sub_item(self, mock_audit):
         """When sub_item has effective_price_cents but no pricing tier."""
-        agg = _make_aggregation(
-            self.meter, self.customer, self.billing_cycle, self.subscription, total_value=Decimal("10")
-        )
         SubscriptionItem.objects.create(
             subscription=self.subscription,
             product=self.product,
             unit_price_cents=50,
             meta={"meter_name": self.meter.name},
+        )
+        agg = _make_aggregation(
+            self.meter, self.customer, self.billing_cycle, self.subscription, total_value=Decimal("10")
         )
         result = self.engine.rate_aggregation(str(agg.id))
         assert result.is_ok()
@@ -1230,8 +1235,11 @@ class TestRateBillingCycle(TestCase):
         self.product = _make_product()
         self.meter = _make_meter(is_billable=True)
         self.subscription = _make_subscription(self.customer, self.product, self.currency)
-        self.billing_cycle = _make_billing_cycle(self.subscription)
         self.engine = RatingEngine()
+
+    @cached_property
+    def billing_cycle(self):
+        return _make_billing_cycle(self.subscription)
 
     def test_not_found(self):
         result = self.engine.rate_billing_cycle(str(uuid.uuid4()))
@@ -1239,14 +1247,6 @@ class TestRateBillingCycle(TestCase):
 
     @patch("apps.billing.metering_service.AuditService.log_simple_event")
     def test_rate_cycle_success(self, mock_audit):
-        _agg = _make_aggregation(
-            self.meter,
-            self.customer,
-            self.billing_cycle,
-            self.subscription,
-            total_value=Decimal("10"),
-            status="pending_rating",
-        )
         _tier = PricingTier.objects.create(
             name="Default",
             meter=self.meter,
@@ -1255,6 +1255,14 @@ class TestRateBillingCycle(TestCase):
             unit_price_cents=100,
             is_active=True,
             is_default=True,
+        )
+        _agg = _make_aggregation(
+            self.meter,
+            self.customer,
+            self.billing_cycle,
+            self.subscription,
+            total_value=Decimal("10"),
+            status="pending_rating",
         )
         result = self.engine.rate_billing_cycle(str(self.billing_cycle.id))
         assert result.is_ok()

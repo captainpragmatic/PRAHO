@@ -544,6 +544,14 @@ class BillingCycle(models.Model):
     period_start = models.DateTimeField()
     period_end = models.DateTimeField()
 
+    # Original contract for this period; null legacy values require review.
+    currency = models.ForeignKey(Currency, on_delete=models.PROTECT, null=True, blank=True)
+    quantity = models.PositiveIntegerField(null=True, blank=True)
+    unit_price_cents = models.BigIntegerField(null=True, blank=True)
+    pricing_snapshot = models.JSONField(default=dict, blank=True)
+    terms_frozen_at = models.DateTimeField(null=True, blank=True)
+    terms_hold_reason = models.CharField(max_length=255, blank=True, editable=False)
+
     # Status
     status = FSMField(max_length=20, choices=STATUS_CHOICES, default="upcoming", protected=True)
     collection_status = models.CharField(
@@ -586,6 +594,7 @@ class BillingCycle(models.Model):
     collection_started_at = models.DateTimeField(null=True, blank=True)
     paid_at = models.DateTimeField(null=True, blank=True)
     entitlement_applied_at = models.DateTimeField(null=True, blank=True)
+    entitlement_skipped_at = models.DateTimeField(null=True, blank=True)
     collection_attempt_count = models.PositiveIntegerField(default=0)
     closed_at = models.DateTimeField(null=True, blank=True, help_text=_("When cycle was closed for new events"))
     invoiced_at = models.DateTimeField(null=True, blank=True, help_text=_("When invoice was generated"))
@@ -638,6 +647,35 @@ class BillingCycle(models.Model):
         return f"{self.subscription} - {self.period_start.date()} to {self.period_end.date()}"
 
     def save(self, *args: Any, **kwargs: Any) -> None:
+        from .cycle_terms import FROZEN_FIELDS, freeze_cycle_terms  # noqa: PLC0415
+
+        original = (
+            type(self)
+            .objects.filter(pk=self.pk)
+            .values(
+                "currency_id",
+                "quantity",
+                "unit_price_cents",
+                "pricing_snapshot",
+                "terms_frozen_at",
+                "period_start",
+                "period_end",
+            )
+            .first()
+            if not self._state.adding
+            else None
+        )
+        if original and original["terms_frozen_at"]:
+            if any(getattr(self, name) != value for name, value in original.items()):
+                raise ValidationError(_("A frozen billing cycle's currency, period and prices cannot be changed"))
+        elif self._state.adding and self.status != "upcoming" and not self.terms_hold_reason:
+            freeze_cycle_terms(self)
+        if (
+            self.terms_frozen_at
+            and (original is None or not original["terms_frozen_at"])
+            and kwargs.get("update_fields") is not None
+        ):
+            kwargs["update_fields"] = list(set(kwargs["update_fields"]) | set(FROZEN_FIELDS))
         self.clean()
         super().save(*args, **kwargs)
 
@@ -716,6 +754,9 @@ class BillingCycle(models.Model):
     @transition(field=status, source="upcoming", target="active")
     def activate(self) -> None:
         """Activate the billing cycle."""
+        from .cycle_terms import freeze_cycle_terms  # noqa: PLC0415
+
+        freeze_cycle_terms(self)
 
     @transition(field=status, source="active", target="closing")
     def start_closing(self) -> None:

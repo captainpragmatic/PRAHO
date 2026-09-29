@@ -50,7 +50,6 @@ services/platform/apps/orders/services.py|apps.provisioning.service_models|Servi
 services/platform/apps/orders/services.py|apps.provisioning.service_models|ServicePlan
 services/platform/apps/orders/tasks.py|apps.billing.models|Payment
 services/platform/apps/orders/tasks.py|apps.provisioning.models|Service
-services/platform/apps/orders/views.py|apps.billing.models|Currency
 services/platform/apps/orders/views.py|apps.customers.models|Customer
 services/platform/apps/orders/views.py|apps.products.models|Product
 services/platform/apps/orders/views.py|apps.tickets.models|SupportCategory
@@ -58,7 +57,6 @@ services/platform/apps/orders/views.py|apps.tickets.models|Ticket
 services/platform/apps/orders/views.py|apps.users.models|User
 services/platform/apps/products/views.py|apps.billing.models|Currency
 services/platform/apps/promotions/signals.py|apps.audit.models|AuditEvent
-services/platform/apps/provisioning/service_views.py|apps.billing.models|Currency
 services/platform/apps/provisioning/service_views.py|apps.customers.models|Customer
 services/platform/apps/provisioning/service_views.py|apps.users.models|User
 services/platform/apps/provisioning/virtualmin_views.py|apps.customers.models|Customer

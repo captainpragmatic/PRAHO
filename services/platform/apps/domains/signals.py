@@ -30,9 +30,69 @@ from apps.audit.services import (
 )
 from apps.common.validators import log_security_event
 
-from .models import TLD, Domain, DomainOrderItem, Registrar, TLDRegistrarAssignment
+from .models import (
+    TLD,
+    Domain,
+    DomainCurrencyTransition,
+    DomainOrderItem,
+    Registrar,
+    TLDRegistrarAssignment,
+    TLDRetailPrice,
+)
 
 logger = logging.getLogger(__name__)
+
+
+@receiver(post_save, sender=DomainCurrencyTransition)
+def audit_domain_currency_transition(
+    sender: type[DomainCurrencyTransition],
+    instance: DomainCurrencyTransition,
+    created: bool,
+    **kwargs: Any,
+) -> None:
+    if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+        return
+    AuditService.log_simple_event(
+        event_type="configuration_changed",
+        content_object=instance,
+        description=f"Domain currency offer {instance.status}: {instance.domain_id}",
+        new_values={
+            "domain_id": str(instance.domain_id),
+            "status": instance.status,
+            "policy_revision": instance.policy_revision,
+            "target_fingerprint": instance.target_fingerprint,
+            "old_currency": instance.old_terms.get("currency"),
+            "target_currency": instance.target_terms.get("currency"),
+            "target_unit_price_cents": instance.target_terms.get("unit_price_cents"),
+            "notice_email_id": str(instance.notice_email_id) if instance.notice_email_id else None,
+            "committed_item_id": instance.committed_item_id,
+            "effective_period_start": instance.effective_period_start.isoformat()
+            if instance.effective_period_start
+            else None,
+        },
+    )
+
+
+@receiver(post_save, sender=TLDRetailPrice)
+def audit_tld_retail_price(
+    sender: type[TLDRetailPrice], instance: TLDRetailPrice, created: bool, **kwargs: Any
+) -> None:
+    if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+        return
+    AuditService.log_simple_event(
+        event_type="create" if created else "update",
+        content_object=instance,
+        description=f"Domain retail price {'created' if created else 'updated'}: {instance.tld_id}/{instance.currency_id}",
+        new_values={
+            "currency": instance.currency_id,
+            "registration_price_cents": instance.registration_price_cents,
+            "renewal_price_cents": instance.renewal_price_cents,
+            "transfer_price_cents": instance.transfer_price_cents,
+            "whois_privacy_price_cents": instance.whois_privacy_price_cents,
+            "is_active": instance.is_active,
+        },
+    )
+
 
 # ===============================================================================
 # DOMAIN LIFECYCLE SIGNALS
@@ -66,6 +126,12 @@ def handle_domain_created_or_updated(sender: type[Domain], instance: Domain, cre
             "whois_privacy": instance.whois_privacy,
             "is_locked": instance.locked,
             "customer_id": str(instance.customer.id) if instance.customer else None,
+            "billing_currency": instance.billing_currency_id,
+            "renewal_unit_price_cents": instance.renewal_unit_price_cents,
+            "renewal_terms_effective_at": (
+                instance.renewal_terms_effective_at.isoformat() if instance.renewal_terms_effective_at else None
+            ),
+            "currency_hold_reason": instance.currency_hold_reason,
         }
 
         if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
@@ -131,6 +197,12 @@ def store_original_domain_values(sender: type[Domain], instance: Domain, **kwarg
                     "auto_renew": original.auto_renew,
                     "whois_privacy": original.whois_privacy,
                     "is_locked": original.locked,
+                    "billing_currency": original.billing_currency_id,
+                    "renewal_unit_price_cents": original.renewal_unit_price_cents,
+                    "renewal_terms_effective_at": (
+                        original.renewal_terms_effective_at.isoformat() if original.renewal_terms_effective_at else None
+                    ),
+                    "currency_hold_reason": original.currency_hold_reason,
                 }
             except Domain.DoesNotExist:
                 instance._original_domain_values = {}
@@ -399,6 +471,10 @@ def handle_domain_order_item_processing(
             "registrar": None,  # TLD doesn't have direct registrar relation
             "tld": instance.tld.extension if instance.tld else None,
             "total_price_cents": instance.total_price_cents,
+            "currency": instance.order.currency_id,
+            "unit_price_cents": instance.unit_price_cents,
+            "renewal_period_start": instance.renewal_terms.get("period_start"),
+            "renewal_period_end": instance.renewal_terms.get("period_end"),
         }
 
         if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
@@ -439,6 +515,10 @@ def store_original_order_item_values(sender: type[DomainOrderItem], instance: Do
                     "registrar": None,  # TLD doesn't have direct registrar relation
                     "tld": original.tld.extension if original.tld else None,
                     "total_price_cents": original.total_price_cents,
+                    "currency": original.order.currency_id,
+                    "unit_price_cents": original.unit_price_cents,
+                    "renewal_period_start": original.renewal_terms.get("period_start"),
+                    "renewal_period_end": original.renewal_terms.get("period_end"),
                 }
             except DomainOrderItem.DoesNotExist:
                 instance._original_order_item_values = {}

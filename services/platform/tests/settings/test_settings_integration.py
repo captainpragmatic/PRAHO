@@ -370,6 +370,7 @@ class DefaultSettingsCompleteness(TestCase):
         """Each DEFAULT_SETTINGS value matches expected type for its key suffix."""
         # Suffix -> expected Python types
         suffix_type_map: dict[str, tuple[type, ...]] = {
+            "_thresholds_cents": (dict,),  # Explicit currency -> integer amount mappings
             "_schedule_days": (list,),
             "_days": (int,),
             "_hours": (int,),

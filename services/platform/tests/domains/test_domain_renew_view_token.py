@@ -18,6 +18,7 @@ from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
 
+from apps.billing.currency_models import Currency
 from apps.common.types import Ok
 from apps.customers.models import Customer
 from apps.domains.models import TLD, Domain, Registrar
@@ -27,6 +28,7 @@ User = get_user_model()
 
 class DomainRenewViewTokenTests(TestCase):
     def setUp(self) -> None:
+        Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei"})
         self.user = User.objects.create_user(
             email="renewal-token-staff@example.test",
             password="StrongPass123!",

@@ -53,6 +53,7 @@ class PeriodCorrectAPIOrderPricingTests(TestCase):
         self.factory = RequestFactory()
 
     def _post(self, path: str, data: dict[str, Any], **headers: str) -> Any:
+        data = {"currency_revision": 1, **data}
         return self.factory.post(
             path,
             data=json.dumps(data, default=str).encode(),
@@ -147,7 +148,7 @@ class PeriodCorrectAPIOrderPricingTests(TestCase):
 
                 self.assertEqual(response.status_code, 400)
                 self.assertFalse(response.data["success"])
-                self.assertIn("billing_period", response.data["details"][0])
+                self.assertIn("billing_period", response.data["details"]["items"][0])
 
     def test_create_order_persists_sealed_price_for_every_billing_period(self) -> None:
         from apps.api.orders.views import create_order  # noqa: PLC0415

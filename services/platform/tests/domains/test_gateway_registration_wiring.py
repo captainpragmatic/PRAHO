@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 from django.test import TestCase, TransactionTestCase, override_settings
 
+from apps.billing.currency_models import Currency
 from apps.common.types import Ok
 from apps.customers.models import Customer, CustomerAddress, CustomerTaxProfile
 from apps.domains.gateways import DomainInfoResult, RegistrarGatewayFactory
@@ -46,6 +47,7 @@ class DomainRegistrationGatewayWiringTests(TransactionTestCase):
     """C2 — the live registration path must invoke the gateway."""
 
     def setUp(self) -> None:
+        Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei"})
         self.tld = TLD.objects.create(
             extension="com",
             description=".com",
@@ -198,6 +200,7 @@ class RenewalGatewayWiringTests(TransactionTestCase):
     """process_domain_renewal must contact the registrar, not just extend locally."""
 
     def setUp(self) -> None:
+        Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei"})
         self.tld = TLD.objects.create(
             extension="com", description=".com",
             registration_price_cents=1000, renewal_price_cents=1000,
@@ -347,6 +350,7 @@ class RegistrantDataBuildingTests(TestCase):
     sourced from Customer + address + tax profile, and validate required fields."""
 
     def setUp(self) -> None:
+        Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei"})
         self.CustomerAddress = CustomerAddress
         self.CustomerTaxProfile = CustomerTaxProfile
         self.company = Customer.objects.create(
@@ -429,6 +433,7 @@ class UnverifiedAdapterRegistrationTests(TransactionTestCase):
     return Err AND delete the pending row so the domain isn't deadlocked from retry."""
 
     def setUp(self) -> None:
+        Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei"})
         self.tld = TLD.objects.create(
             extension="com", description=".com", registration_price_cents=1000, renewal_price_cents=1000,
             transfer_price_cents=1000, registrar_cost_cents=500, min_registration_period=1, max_registration_period=10,

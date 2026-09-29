@@ -36,6 +36,8 @@ class CartServiceProductIdTestCase(SimpleTestCase):
             'name': 'Shared Hosting Basic',
             'product_type': 'hosting',
             'requires_domain': False,
+            "selling_currency": "RON",
+            "currency_revision": 1,
             'is_active': True,
         }
         return mock_instance
@@ -217,6 +219,8 @@ class CartServiceProductTypeTestCase(SimpleTestCase):
             'name': 'Shared Hosting Basic',
             'product_type': product_type,
             'requires_domain': False,
+            "selling_currency": "RON",
+            "currency_revision": 1,
             'is_active': True,
         }
         return mock_instance

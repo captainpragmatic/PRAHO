@@ -6,7 +6,9 @@ Session-based cart management with platform API integration.
 import hashlib
 import json
 import logging
+from copy import deepcopy
 from datetime import datetime, timedelta
+from http import HTTPStatus
 from secrets import token_hex
 from typing import Any, cast
 
@@ -21,6 +23,24 @@ from apps.common import counters
 from .validators import MAX_CART_ITEMS, OrderInputValidator
 
 logger = logging.getLogger(__name__)
+
+
+def read_selling_policy(data: dict[str, Any]) -> tuple[str, int]:
+    """Validate the Platform's sale policy without inventing a currency."""
+    currency = data.get("selling_currency")
+    revision = data.get("currency_revision")
+    if (
+        not isinstance(currency, str)
+        or currency not in {"RON", "EUR", "USD"}
+        or type(revision) is not int
+        or revision < 1
+    ):
+        raise ValidationError(_("Current prices are unavailable. Please try again later."))
+    return str(currency), revision
+
+
+def currency_review_message() -> str:
+    return _("Your cart prices changed. Review and confirm the updated total. Reapply any coupon or gift-card codes.")
 
 
 class HMACPriceSealer:
@@ -234,14 +254,17 @@ class GDPRCompliantCartSession:
         if "items" not in self.cart:
             self.cart["items"] = []
         if "currency" not in self.cart:
-            self.cart["currency"] = "RON"  # Romanian default
+            self.cart["currency"] = ""
+        self.cart.setdefault("currency_revision", None)
 
     def _create_empty_cart(self) -> dict[str, Any]:
         """Create an empty cart with proper structure and versioning"""
         expires_at = timezone.now() + timedelta(hours=self.CART_EXPIRY_HOURS)
 
-        cart = {
-            "currency": "RON",
+        cart: dict[str, Any] = {
+            "instance_id": token_hex(16),
+            "currency": "",
+            "currency_revision": None,
             "items": [],
             "created_at": timezone.now().isoformat(),
             "updated_at": timezone.now().isoformat(),
@@ -286,6 +309,30 @@ class GDPRCompliantCartSession:
     def get_gift_code(self) -> str:
         return str(self.cart.get("gift_code", ""))
 
+    def apply_selling_policy(self, metadata: dict[str, Any]) -> bool:
+        """Invalidate quote data when an authoritative selling policy changes."""
+        currency, revision = read_selling_policy(metadata)
+        if (self.currency, self.currency_revision) == (currency, revision):
+            return False
+        requires_review = self.has_items()
+        self.cart.update(currency=currency, currency_revision=revision)
+        if requires_review:
+            self.cart["coupon_codes"] = []
+            self.cart["gift_code"] = ""
+            self.cart.pop("promotion_quote", None)
+            for item in self.cart["items"]:
+                for field in ("sealed_price_token", "line_total_cents", "unit_price_cents", "setup_cents"):
+                    item.pop(field, None)
+            self.cart["warnings"] = [{"type": "currency_change", "message": currency_review_message()}]
+        self._save_cart()
+        return requires_review
+
+    def ensure_selling_policy(self, platform_api: PlatformAPIClient) -> bool:
+        """Resolve new or legacy carts; current carts are checked by sale endpoints."""
+        if self.currency in {"RON", "EUR", "USD"} and self.currency_revision is not None:
+            return False
+        return self.apply_selling_policy(platform_api.get("/api/billing/currencies/"))
+
     def add_item(
         self,
         product_slug: str,
@@ -302,9 +349,7 @@ class GDPRCompliantCartSession:
         billing_period = OrderInputValidator.validate_billing_period(billing_period)
         domain_name = OrderInputValidator.validate_domain_name(domain_name)
 
-        # Get product info from platform for validation.
-        # When platform is temporarily unavailable, keep cart operations functional
-        # and rely on server-authoritative checks during totals/order creation.
+        # Product metadata carries the same selling policy as its prices.
         try:
             platform_api = PlatformAPIClient()
             product_data = platform_api.get(f"/api/orders/products/{product_slug}/")
@@ -318,14 +363,7 @@ class GDPRCompliantCartSession:
             if getattr(e, "is_rate_limited", False):
                 raise  # Let view handle rate-limit UX
             logger.warning(f"⚠️ [Cart] Product lookup unavailable for {product_slug}: {e}")
-            product_data = {
-                "id": product_slug,
-                "slug": product_slug,
-                "name": product_slug.replace("-", " ").title(),
-                "product_type": "",
-                "requires_domain": True,  # Fail-safe: assume domain required during outage
-                "is_active": True,
-            }
+            raise ValidationError(_("Current prices are unavailable. Please try again later.")) from e
 
         # Validate domain requirement
         if product_data.get("requires_domain") and not domain_name:
@@ -333,6 +371,7 @@ class GDPRCompliantCartSession:
 
         # Validate and sanitize config
         clean_config = OrderInputValidator.validate_config(config or {}, product_data.get("product_type", ""))
+        self.apply_selling_policy(product_data)
 
         # Create minimal cart item (GDPR/business fields only).
         # NOTE: product_id (internal platform ID) is intentionally omitted;
@@ -468,16 +507,22 @@ class GDPRCompliantCartSession:
     @property
     def currency(self) -> str:
         """Get cart currency"""
-        return cast(str, self.cart.get("currency", "RON"))
+        return cast(str, self.cart.get("currency", ""))
 
     @currency.setter
     def currency(self, new_currency: str) -> None:
         """Set cart currency (clears warnings as prices may change)"""
         if new_currency != self.cart.get("currency"):
             self.cart["currency"] = new_currency
+            self.cart["currency_revision"] = None
             self.cart["warnings"] = []  # Clear warnings on currency change
             self._save_cart()
             logger.info(f"💱 [Cart] Currency changed to {new_currency}")
+
+    @property
+    def currency_revision(self) -> int | None:
+        revision = self.cart.get("currency_revision")
+        return revision if type(revision) is int and revision > 0 else None
 
     def is_expired(self) -> bool:
         """Check if cart has expired"""
@@ -504,7 +549,15 @@ class GDPRCompliantCartSession:
         Version changes when cart contents, quantities, or configuration changes.
         """
         # Create canonical representation of cart state
-        version_data = {"items": [], "currency": cart.get("currency", "RON")}
+        version_data = {
+            "items": [],
+            "currency": cart.get("currency", ""),
+            "currency_revision": cart.get("currency_revision"),
+        }
+        # Separate intentional repeat purchases while retaining one cart's retry
+        # identity. Legacy carts keep their existing hash until cleared or expired.
+        if cart.get("instance_id"):
+            version_data["instance_id"] = cart["instance_id"]
         if cart.get("coupon_codes"):
             version_data["coupon_codes"] = sorted(cart["coupon_codes"])
         if cart.get("gift_code"):
@@ -581,32 +634,42 @@ class CartCalculationService:
 
         try:
             platform_api = PlatformAPIClient()
-
-            # Prepare API payload - match pattern from working billing APIs
-            payload = {
-                "action": "calculate_cart_totals",
-                "customer_id": customer_id,
-                "currency": cart.currency,
-                "items": cart.get_api_items(),
-                "coupon_codes": cart.get_coupon_codes(),
-                "gift_code": cart.get_gift_code(),
-            }
-
-            # Debug logging (no file writing for security)
-            logger.info(
-                f"💾 [Cart] API payload - customer_id: {customer_id} ({type(customer_id)}), user_id: {user_id} ({type(user_id)}), items: {len(payload.get('items', []))}"
-            )
-
-            # Call platform calculation API
-            result = platform_api.post("orders/calculate/", payload, user_id=user_id)
-
-            # Update cart with any warnings
-            if result.get("warnings"):
-                cart.set_warnings(result["warnings"])
+            cart.ensure_selling_policy(platform_api)
+            for attempt in range(2):
+                payload = {
+                    "action": "calculate_cart_totals",
+                    "customer_id": customer_id,
+                    "currency": cart.currency,
+                    "currency_revision": cart.currency_revision,
+                    "items": cart.get_api_items(),
+                    "coupon_codes": cart.get_coupon_codes(),
+                    "gift_code": cart.get_gift_code(),
+                }
+                try:
+                    result = platform_api.post("orders/calculate/", payload, user_id=user_id)
+                    break
+                except PlatformAPIError as exc:
+                    details = exc.response_data or {}
+                    if exc.status_code != HTTPStatus.CONFLICT or details.get("code") != "currency_changed":
+                        raise
+                    cart.apply_selling_policy(details)
+                    if attempt:
+                        raise ValidationError(currency_review_message()) from exc
+            policy = read_selling_policy(result)
+            if policy != (cart.currency, cart.currency_revision) or result.get("currency") != cart.currency:
+                raise ValidationError(_("Current prices are unavailable. Please try again later."))
+            retained = [
+                warning
+                for warning in cart.get_warnings()
+                if isinstance(warning, dict) and warning.get("type") == "currency_change"
+            ]
+            cart.set_warnings(retained + result.get("warnings", []))
 
             logger.info(f"💰 [Cart] Calculated totals: {result.get('total_cents', 0)} cents")
             return result
 
+        except ValidationError:
+            raise
         except PlatformAPIError as e:
             if getattr(e, "is_rate_limited", False):
                 raise  # Let view handle rate-limit UX
@@ -623,6 +686,62 @@ class CartCalculationService:
 
 class OrderCreationService:
     """Service for creating orders from cart via platform API"""
+
+    ATTEMPTS_SESSION_KEY = "order_checkout_attempts"
+
+    @staticmethod
+    def pending_attempt(cart: GDPRCompliantCartSession, customer_id: str, user_id: str) -> dict[str, Any] | None:
+        attempts = cart.session.get(OrderCreationService.ATTEMPTS_SESSION_KEY, {})
+        attempt = attempts.get(str(customer_id)) if isinstance(attempts, dict) else None
+        if not isinstance(attempt, dict) or attempt.get("user_id") != str(user_id):
+            return None
+        payload = attempt.get("payload")
+        if not isinstance(payload, dict) or str(payload.get("customer_id")) != str(customer_id):
+            return None
+        return attempt
+
+    @staticmethod
+    def _save_attempt(
+        cart: GDPRCompliantCartSession,
+        customer_id: str,
+        user_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        attempt = {"user_id": str(user_id), "cart_version": cart.get_cart_version(), "payload": deepcopy(payload)}
+        attempts = dict(cart.session.get(OrderCreationService.ATTEMPTS_SESSION_KEY, {}))
+        attempts[str(customer_id)] = attempt
+        cart.session[OrderCreationService.ATTEMPTS_SESSION_KEY] = attempts
+        # Persist before network I/O: a timeout or interrupted response must retain
+        # the original accepted purchase even when a later page reprices the cart.
+        cart.session.save()
+        return attempt
+
+    @staticmethod
+    def _clear_attempt(cart: GDPRCompliantCartSession, customer_id: str) -> None:
+        attempts = dict(cart.session.get(OrderCreationService.ATTEMPTS_SESSION_KEY, {}))
+        attempts.pop(str(customer_id), None)
+        if attempts:
+            cart.session[OrderCreationService.ATTEMPTS_SESSION_KEY] = attempts
+        else:
+            cart.session.pop(OrderCreationService.ATTEMPTS_SESSION_KEY, None)
+        cart.session.modified = True
+
+    @staticmethod
+    def _complete_attempt(
+        cart: GDPRCompliantCartSession,
+        customer_id: str,
+        attempt: dict[str, Any],
+        result: dict[str, Any],
+    ) -> None:
+        if result.get("error"):
+            raise ValidationError(result["error"])
+        if not (result.get("order", {}).get("id") or result.get("order_id")):
+            raise ValidationError(_("The order response is incomplete. Retry to check the original purchase."))
+        OrderCreationService._clear_attempt(cart, customer_id)
+        # A later page may have repriced or edited this cart while the response
+        # was uncertain. Recovering the purchase does not discard that new cart.
+        if cart.get_cart_version() == attempt["cart_version"]:
+            cart.clear()
 
     @staticmethod
     def preflight_order(
@@ -651,6 +770,8 @@ class OrderCreationService:
         try:
             platform_api_class = api_client_factory or PlatformAPIClient
             platform_api = platform_api_class()
+            if cart.ensure_selling_policy(platform_api):
+                return {"valid": False, "errors": [currency_review_message()], "warnings": cart.get_warnings()}
 
             # Prepare preflight payload (same as order creation)
             preflight_data = {
@@ -659,6 +780,7 @@ class OrderCreationService:
                 "coupon_codes": cart.get_coupon_codes(),
                 "gift_code": cart.get_gift_code(),
                 "currency": cart.currency,
+                "currency_revision": cart.currency_revision,
                 "notes": notes,
                 "meta": {"cart_created_at": cart.cart.get("created_at"), "portal_version": "v1"},
             }
@@ -692,7 +814,18 @@ class OrderCreationService:
 
             # Update cart warnings if any
             if warnings:
-                cart.set_warnings(warnings)
+                retained = [
+                    warning
+                    for warning in cart.get_warnings()
+                    if isinstance(warning, dict) and warning.get("type") == "currency_change"
+                ]
+                cart.set_warnings(
+                    retained
+                    + [
+                        warning if isinstance(warning, dict) else {"type": "preflight", "message": str(warning)}
+                        for warning in warnings
+                    ]
+                )
 
             logger.info(
                 f"🔎 [Orders] Preflight result: valid={is_valid}, errors={len(errors)}, warnings={len(warnings)}"
@@ -709,29 +842,28 @@ class OrderCreationService:
             if getattr(e, "is_rate_limited", False):
                 raise  # Let view handle rate-limit UX
             logger.error(f"🔥 [Orders] Preflight validation failed: {e}")
+            return OrderCreationService._preflight_failure(cart, e)
 
-            # Check if this is an API response with error details
-            if hasattr(e, "response") and e.response:
-                try:
-                    # Try to parse JSON response for specific errors
-                    if isinstance(e.response, dict):
-                        api_errors = e.response.get("errors", [])
-                        if api_errors:
-                            return {"valid": False, "errors": api_errors, "warnings": []}
-                except (AttributeError, TypeError, ValueError):
-                    logger.debug("Could not parse structured preflight errors from platform response")
-
-            # If we can't get specific errors, provide a more helpful generic message
-            return {
-                "valid": False,
-                "errors": [
-                    _("Unable to validate your order. Please ensure your company profile is complete with:"),
-                    _("Company name and VAT number"),
-                    _("Complete billing address"),
-                    _("Contact email and phone number"),
-                ],
-                "warnings": [],
-            }
+    @staticmethod
+    def _preflight_failure(cart: GDPRCompliantCartSession, error: PlatformAPIError) -> dict[str, Any]:
+        details = error.response_data or {}
+        if error.status_code == HTTPStatus.CONFLICT and details.get("code") == "currency_changed":
+            cart.apply_selling_policy(details)
+            return {"valid": False, "errors": [currency_review_message()], "warnings": cart.get_warnings()}
+        legacy_response = getattr(error, "response", None)
+        if not details and isinstance(legacy_response, dict):
+            details = legacy_response
+        return {
+            "valid": False,
+            "errors": details.get("errors")
+            or [
+                _("Unable to validate your order. Please ensure your company profile is complete with:"),
+                _("Company name and VAT number"),
+                _("Complete billing address"),
+                _("Contact email and phone number"),
+            ],
+            "warnings": [],
+        }
 
     @staticmethod
     def create_draft_order(  # noqa: PLR0913
@@ -747,7 +879,8 @@ class OrderCreationService:
     ) -> dict[str, Any]:
         """Create draft order from cart items"""
 
-        if not cart.has_items():
+        attempt = OrderCreationService.pending_attempt(cart, customer_id, user_id)
+        if not attempt and not cart.has_items():
             raise ValidationError(_("Cart is empty"))
 
         # Validate notes
@@ -756,6 +889,8 @@ class OrderCreationService:
         try:
             platform_api_class = api_client_factory or PlatformAPIClient
             platform_api = platform_api_class()
+            if not attempt and cart.ensure_selling_policy(platform_api):
+                raise ValidationError(currency_review_message())
 
             # Prepare order data
             order_data: dict[str, Any] = {
@@ -764,6 +899,7 @@ class OrderCreationService:
                 "coupon_codes": cart.get_coupon_codes(),
                 "gift_code": cart.get_gift_code(),
                 "currency": cart.currency,
+                "currency_revision": cart.currency_revision,
                 "payment_method": payment_method,
                 "promotion_quote": promotion_quote,
                 "notes": notes,
@@ -780,6 +916,12 @@ class OrderCreationService:
             if auto_pending:
                 order_data["auto_pending"] = True
 
+            if attempt:
+                order_data = deepcopy(attempt["payload"])
+                effective_idempotency_key = order_data["idempotency_key"]
+            else:
+                attempt = OrderCreationService._save_attempt(cart, customer_id, user_id, order_data)
+
             logger.info(
                 f"🛡️ [Orders] Creating order with idempotency key: {effective_idempotency_key[:8]}... "
                 f"(auto_pending={auto_pending})"
@@ -788,11 +930,7 @@ class OrderCreationService:
             # Create order via platform API with user_id for HMAC authentication
             result = platform_api.post("orders/create/", order_data, user_id=int(user_id))
 
-            if result.get("error"):
-                raise ValidationError(result["error"])
-
-            # Clear cart after successful order creation
-            cart.clear()
+            OrderCreationService._complete_attempt(cart, customer_id, attempt, result)
 
             logger.info(f"📦 [Orders] Draft order created: {result.get('order', {}).get('order_number')}")
             return result
@@ -802,6 +940,11 @@ class OrderCreationService:
                 raise  # Let view handle rate-limit UX
             logger.error(f"🔥 [Orders] Order creation failed: {e}")
             details = getattr(e, "response_data", {}) or {}
+            if details.get("code") in {"currency_changed", "PROMOTION_QUOTE_CHANGED", "INVALID_ORDER"}:
+                OrderCreationService._clear_attempt(cart, customer_id)
+            if e.status_code == HTTPStatus.CONFLICT and details.get("code") == "currency_changed":
+                cart.apply_selling_policy(details)
+                raise ValidationError(currency_review_message()) from e
             if "PROMOTION_QUOTE_CHANGED" in str(details):
                 raise ValidationError(_("An offer changed. Review and confirm the updated checkout total.")) from e
             raise ValidationError(_("Error creating order")) from e

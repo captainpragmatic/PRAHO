@@ -1,0 +1,134 @@
+"""Staff summary cards show currency-specific totals, including fractional units."""
+
+from django.test import TestCase, override_settings
+from django.utils import timezone
+from lxml import etree
+
+from apps.billing.currency_policy import get_selling_currency_policy
+from apps.billing.models import Currency, Invoice, Payment, ProformaInvoice
+from apps.provisioning.service_models import ServicePlan, ServicePlanPrice
+from apps.settings.models import SystemSetting
+from apps.users.models import User
+from tests.factories import CustomerFactory
+
+
+@override_settings(LANGUAGE_CODE="en")
+class StaffCurrencySummaryTests(TestCase):
+    @classmethod
+    def setUpTestData(cls) -> None:
+        cls.staff = User.objects.create_user(email="currency-staff@example.test", is_staff=True, staff_role="billing")
+        cls.customer = CustomerFactory()
+        cls.ron = Currency.objects.get_or_create(code="RON", defaults={"symbol": "RON"})[0]
+        cls.eur = Currency.objects.get_or_create(code="EUR", defaults={"symbol": "EUR"})[0]
+        cls.invoices = []
+        for index, (currency, amount) in enumerate(((cls.eur, 10000), (cls.eur, 3000), (cls.ron, 7000))):
+            cls.invoices.append(Invoice.objects.create(
+                customer=cls.customer, currency=currency, number=f"INV-CURRENCY-{index}", status="paid",
+                subtotal_cents=amount, total_cents=amount, due_at=timezone.now(),
+            ))
+        for index, (currency, amount) in enumerate(((cls.eur, 1234), (cls.eur, 678), (cls.ron, 555))):
+            ProformaInvoice.objects.create(
+                customer=cls.customer, currency=currency, number=f"PRO-CURRENCY-{index}",
+                subtotal_cents=amount, total_cents=amount,
+                valid_until=timezone.now() + timezone.timedelta(days=14),
+            )
+        Payment.objects.bulk_create([
+            Payment(customer=cls.customer, invoice=invoice, currency=invoice.currency, amount_cents=amount,
+                    payment_method="bank", status="succeeded")
+            for invoice, amount in zip(cls.invoices, (2000, 1500, 5000), strict=True)
+        ])
+
+    def setUp(self) -> None:
+        self.client.force_login(self.staff)
+
+    def _card_text(self, content: bytes, heading: str) -> str:
+        doc = etree.HTML(content)
+        cards = doc.xpath("//p[normalize-space(.)=$heading]/..", heading=heading)
+        self.assertEqual(len(cards), 1)
+        return " ".join(cards[0].itertext())
+
+    def test_monthly_revenue_card_keeps_both_recorded_currencies(self) -> None:
+        response = self.client.get("/dashboard/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["stats"]["monthly_revenue_by_currency"], {"EUR": 13000, "RON": 7000})
+        card = self._card_text(response.content, "Monthly Revenue")
+        self.assertIn("130,00 EUR", card)
+        self.assertIn("70,00 RON", card)
+        self.assertNotIn("200,00 RON", card)
+
+    def test_combined_billing_cards_keep_currencies_and_fractional_amounts(self) -> None:
+        response = self.client.get("/billing/invoices/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["invoice_totals_by_currency"], {"EUR": 13000, "RON": 7000})
+        self.assertEqual(response.context["proforma_totals_by_currency"], {"EUR": 1912, "RON": 555})
+        proformas = self._card_text(response.content, "Proforma Value")
+        self.assertIn("19,12 EUR", proformas)
+        self.assertIn("5,55 RON", proformas)
+        invoices = self._card_text(response.content, "Invoice Revenue")
+        self.assertIn("130,00 EUR", invoices)
+        self.assertIn("70,00 RON", invoices)
+
+    def test_proforma_listing_also_uses_currency_groups(self) -> None:
+        response = self.client.get("/billing/proformas/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["proforma_totals_by_currency"], {"EUR": 1912, "RON": 555})
+        card = self._card_text(response.content, "Proforma Value")
+        self.assertIn("19,12 EUR", card)
+        self.assertIn("5,55 RON", card)
+
+    def test_payment_footer_groups_currency_despite_payment_date_ordering(self) -> None:
+        response = self.client.get("/billing/payments/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["payment_totals_by_currency"], {"EUR": 3500, "RON": 5000})
+        doc = etree.HTML(response.content)
+        totals = doc.xpath("//p[starts-with(normalize-space(.), 'Total:')]")
+        footer = " ".join(" ".join(total.itertext()) for total in totals)
+        self.assertIn("35,00 EUR", footer)
+        self.assertIn("50,00 RON", footer)
+        self.assertNotIn("85,00 RON", footer)
+
+    def test_customer_invoice_rows_keep_each_original_currency(self) -> None:
+        response = self.client.get(f"/customers/{self.customer.pk}/")
+        self.assertEqual(response.status_code, 200)
+        doc = etree.HTML(response.content)
+        for invoice in self.invoices:
+            links = doc.xpath("//*[@data-href=$path]", path=f"/billing/invoices/{invoice.pk}/")
+            self.assertEqual(len(links), 1)
+            row = " ".join(links[0].itertext())
+            self.assertIn(invoice.currency_id, row)
+            if invoice.currency_id == "EUR":
+                self.assertNotIn("RON", row)
+
+    def test_draft_invoice_currency_cannot_be_relabelled_in_edit_form(self) -> None:
+        invoice = Invoice.objects.create(
+            customer=self.customer, currency=self.eur, number="INV-EUR-DRAFT", status="draft",
+            subtotal_cents=1250, total_cents=1250,
+        )
+        response = self.client.get(f"/billing/invoices/{invoice.pk}/edit/")
+        self.assertEqual(response.status_code, 200)
+        doc = etree.HTML(response.content)
+        fields = doc.xpath("//*[@name='currency']")
+        self.assertEqual(len(fields), 1)
+        self.assertEqual(fields[0].get("value"), "EUR")
+        self.assertIn("readonly", fields[0].attrib)
+        self.assertContains(response, "0.00 EUR")
+        self.assertNotContains(response, "0.00 RON")
+
+    def test_plan_list_uses_explicit_selling_price_without_relabelling_legacy_price(self) -> None:
+        priced = ServicePlan.objects.create(name="Priced plan", price_monthly="51.23")
+        unpriced = ServicePlan.objects.create(name="Unpriced plan", price_monthly="84.56")
+        ServicePlanPrice.objects.create(service_plan=priced, currency=self.eur, monthly_price_cents=999)
+        get_selling_currency_policy()
+        SystemSetting.objects.filter(key="billing.default_currency").update(value="EUR")
+        response = self.client.get("/provisioning/plans/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["currency"], "EUR")
+        self.assertContains(response, "9,99 EUR")
+        self.assertContains(response, unpriced.name)
+        self.assertContains(response, "Price unavailable")
+        self.assertNotContains(response, "51.23")
+        self.assertNotContains(response, "84.56")

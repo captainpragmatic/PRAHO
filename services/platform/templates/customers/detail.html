@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% load localisation_tags i18n %}
-{% load ui_components %}
+{% load ui_components formatting %}
 
 {% block title %}{{ customer.name }} - {% trans 'Customer Details' %}{% endblock %}
 
@@ -580,7 +580,7 @@
                             </h3>
                             <p class="text-sm text-slate-400">
                                 {{ invoice.created_at|date:"d M Y" }} •
-                                {% if invoice.total %}{{ invoice.total|floatformat:2 }} {% trans 'RON' %}{% endif %}
+                                {{ invoice.total|romanian_currency:invoice.currency.code }}
                             </p>
                         </div>
                         <div class="flex items-center space-x-2">

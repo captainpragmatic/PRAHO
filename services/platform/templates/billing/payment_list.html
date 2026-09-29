@@ -80,11 +80,13 @@
   </div>
 
   <!-- Total Amount -->
-  {% if total_amount %}
+  {% if payment_totals_by_currency %}
   <div class="mt-4 text-right">
-    <p class="text-lg font-semibold text-white">
-      {% trans "Total:" %} {{ total_amount|cents_to_currency|romanian_currency:"RON" }}
-    </p>
+    {% for currency, amount in payment_totals_by_currency.items %}
+      <p class="text-lg font-semibold text-white">
+        {% trans "Total:" %} {{ amount|cents_to_currency|romanian_currency:currency }}
+      </p>
+    {% endfor %}
   </div>
   {% endif %}
 </div>

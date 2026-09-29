@@ -16,6 +16,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, Any, TypedDict
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from django_fsm import TransitionNotAllowed
 
@@ -26,6 +27,7 @@ if TYPE_CHECKING:
     from apps.products.models import Product
     from apps.users.models import User
 
+from .currency_models import Currency
 from .recurring_locking import lock_recurring_collection_customer
 from .subscription_models import (
     PriceGrandfathering,
@@ -97,8 +99,13 @@ class _SubscriptionCreationError(ValueError):
     """Expected, customer-safe subscription creation failure."""
 
 
-def _resolve_creation_currency(currency_code: str) -> Any:
+def _resolve_creation_currency(currency_code: str | None) -> Any:
     from .currency_models import Currency  # noqa: PLC0415
+    from .currency_policy import get_selling_currency_policy  # noqa: PLC0415
+
+    if currency_code is None:
+        currency_code = get_selling_currency_policy(lock=True).currency_code
+    currency_code = currency_code.upper()
 
     try:
         return Currency.objects.get(code=currency_code)
@@ -232,10 +239,9 @@ class SubscriptionService:
                         "create a recurring-payment authorization and enroll the subscription separately"
                     )
 
-                # Customer-initiated subscriptions default to RON. Order-backed
-                # subscriptions must retain the paid order's currency snapshot.
-                currency_code = data.get("currency_code", "RON").upper()
-                currency = _resolve_creation_currency(currency_code)
+                # An explicit paid-order currency remains authoritative. New
+                # subscriptions without one use the current selling policy.
+                currency = _resolve_creation_currency(data.get("currency_code"))
                 # #103: fail closed on a non-RON currency with no resolvable FX rate.
                 from apps.billing.currency_service import (  # noqa: PLC0415  # ADR-0007: deferred billing dependency
                     CurrencyNotIssuableError,
@@ -271,9 +277,24 @@ class SubscriptionService:
                 locked_price_cents = None
                 locked_price_reason = ""
                 if data.get("apply_grandfathering"):
+                    if (
+                        PriceGrandfathering.objects.filter(
+                            customer=customer,
+                            product=product,
+                            is_active=True,
+                            currency__isnull=True,
+                        )
+                        .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()))
+                        .exists()
+                    ):
+                        raise _SubscriptionCreationError(
+                            "The original currency of this customer's price protection needs review"
+                        )
                     grandfathering = PriceGrandfathering.objects.filter(
                         customer=customer,
                         product=product,
+                        currency=currency,
+                        currency_hold_reason="",
                         is_active=True,
                     ).first()
                     if grandfathering and not grandfathering.is_expired:
@@ -516,6 +537,8 @@ class GrandfatheringService:
         reason: str = "Price increase protection",
         expires_at: Any = None,
         user: User | None = None,
+        *,
+        currency: Currency | None = None,
     ) -> Result[int, str]:
         """
         Apply grandfathering to all active subscribers when a price increases.
@@ -541,17 +564,26 @@ class GrandfatheringService:
                     product=product,
                     status__in=["active", "trialing"],
                 )
+                if currency is None:
+                    codes = list(active_subs.order_by().values_list("currency_id", flat=True).distinct())
+                    if not codes:
+                        return Ok(0)
+                    if len(codes) != 1:
+                        return Err("Specify the currency of the price increase")
+                    currency = Currency.objects.get(pk=codes[0])
+                active_subs = active_subs.filter(currency=currency).select_for_update(of=("self",)).order_by("pk")
 
                 count = 0
                 for sub in active_subs:
                     # Skip if already grandfathered at same or lower price
-                    if sub.locked_price_cents and sub.locked_price_cents <= old_price_cents:
+                    if sub.locked_price_cents is not None and sub.locked_price_cents <= old_price_cents:
                         continue
 
                     # Create grandfathering record
                     PriceGrandfathering.objects.update_or_create(
                         customer=sub.customer,
                         product=product,
+                        currency=currency,
                         defaults={
                             "locked_price_cents": old_price_cents,
                             "original_price_cents": old_price_cents,
@@ -577,6 +609,7 @@ class GrandfatheringService:
                     event_type="bulk_grandfathering_applied",
                     details={
                         "product_id": str(product.id),
+                        "currency": currency.code,
                         "old_price_cents": old_price_cents,
                         "new_price_cents": new_price_cents,
                         "customers_affected": count,
@@ -597,15 +630,32 @@ class GrandfatheringService:
         customer: Customer,
         product: Product,
         user: User | None = None,
+        *,
+        currency: Currency | None = None,
     ) -> Result[bool, str]:
         """Expire a specific customer's grandfathering for a product."""
         try:
             with transaction.atomic():
+                scope = PriceGrandfathering.objects.filter(customer=customer, product=product, is_active=True)
+                if currency is None:
+                    codes = list(scope.order_by().values_list("currency_id", flat=True).distinct())
+                    if not codes:
+                        return Err("No active grandfathering found")
+                    if len(codes) != 1 or codes[0] is None:
+                        return Err("Specify the original currency of the price protection")
+                    currency = Currency.objects.get(pk=codes[0])
+                subscriptions = list(
+                    Subscription.objects.select_for_update(of=("self",))
+                    .filter(customer=customer, product=product, currency=currency)
+                    .order_by("id")
+                )
                 grandfathering = (
                     PriceGrandfathering.objects.select_for_update()
                     .filter(
                         customer=customer,
                         product=product,
+                        currency=currency,
+                        currency_hold_reason="",
                         is_active=True,
                     )
                     .first()
@@ -614,11 +664,6 @@ class GrandfatheringService:
                 if not grandfathering:
                     return Err("No active grandfathering found")
 
-                subscriptions = list(
-                    Subscription.objects.select_for_update(of=("self",))
-                    .filter(customer=customer, product=product)
-                    .order_by("id")
-                )
                 grandfathering.expire(user)
                 for subscription in subscriptions:
                     subscription.locked_price_cents = None

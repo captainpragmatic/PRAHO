@@ -39,6 +39,7 @@ from .models import (
     ServiceDomain,
     ServiceGroup,
     ServicePlan,
+    ServicePlanPrice,
 )
 from .security_utils import (
     IdempotencyManager,
@@ -51,6 +52,29 @@ from .security_utils import (
 from .virtualmin_tasks import VirtualminProvisioningParams, provision_virtualmin_account_async
 
 logger = logging.getLogger(__name__)
+
+
+@receiver(post_save, sender=ServicePlanPrice)
+def audit_service_plan_price(
+    sender: type[ServicePlanPrice], instance: ServicePlanPrice, created: bool, **kwargs: Any
+) -> None:
+    if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+        return
+    AuditService.log_simple_event(
+        event_type="create" if created else "update",
+        content_object=instance,
+        description=f"Service plan price {'created' if created else 'updated'}: {instance.service_plan_id}/{instance.currency_id}",
+        new_values={
+            "currency": instance.currency_id,
+            "monthly_price_cents": instance.monthly_price_cents,
+            "quarterly_price_cents": instance.quarterly_price_cents,
+            "semiannual_price_cents": instance.semiannual_price_cents,
+            "annual_price_cents": instance.annual_price_cents,
+            "setup_cents": instance.setup_cents,
+            "is_active": instance.is_active,
+        },
+    )
+
 
 # Constants for magic values used in signal handlers
 DEFAULT_TEMPLATE_NAME = "Default"
@@ -510,7 +534,9 @@ def _handle_new_service_plan_creation(instance: ServicePlan) -> None:
     Internal helper function for handling new service plan creation.
     Separated for testability and modularity.
     """
-    # Log plan creation
+    from apps.billing.currency_thresholds import get_currency_threshold_cents  # noqa: PLC0415
+
+    # Legacy plan fields record RON; explicit retail rows have their own price audit.
     # Savepoint: a failed audit INSERT must not poison the caller's transaction.
     with transaction.atomic():
         AuditService.log_event(
@@ -535,11 +561,16 @@ def _handle_new_service_plan_creation(instance: ServicePlan) -> None:
                     "source_app": "provisioning",
                     "compliance_event": True,
                     "pricing_event": True,
-                    "high_value_plan": float(instance.price_monthly)
-                    >= SettingsService.get_integer_setting(
-                        "provisioning.high_value_plan_threshold_cents", _DEFAULT_HIGH_VALUE_PLAN_THRESHOLD_CENTS
-                    )
-                    / 100,
+                    "currency": "RON",
+                    "high_value_plan": instance.price_monthly * 100
+                    >= get_currency_threshold_cents(
+                        "provisioning.high_value_thresholds_cents",
+                        "RON",
+                        legacy_ron_threshold=SettingsService.get_integer_setting(
+                            "provisioning.high_value_plan_threshold_cents",
+                            _DEFAULT_HIGH_VALUE_PLAN_THRESHOLD_CENTS,
+                        ),
+                    ),
                     "enterprise_plan": (instance.disk_space_gb and instance.disk_space_gb >= ENTERPRISE_DISK_THRESHOLD),
                 },
             ),
@@ -590,6 +621,8 @@ def _handle_new_service_creation(instance: Service) -> None:
     Internal helper function for handling new service creation.
     Separated for testability and modularity.
     """
+    from apps.billing.currency_thresholds import get_currency_threshold_cents  # noqa: PLC0415
+
     # Log service creation
     # Savepoint: a failed audit INSERT must not poison the caller's transaction.
     with transaction.atomic():
@@ -616,11 +649,20 @@ def _handle_new_service_creation(instance: Service) -> None:
                     "service_lifecycle": True,
                     "customer_id": str(instance.customer.id),
                     "billing_cycle": instance.billing_cycle,
-                    "high_value_service": float(instance.price)
-                    >= SettingsService.get_integer_setting(
-                        "provisioning.high_value_plan_threshold_cents", _DEFAULT_HIGH_VALUE_PLAN_THRESHOLD_CENTS
-                    )
-                    / 100,
+                    "currency": instance.currency.code,
+                    "high_value_service": instance.price * 100
+                    >= get_currency_threshold_cents(
+                        "provisioning.high_value_thresholds_cents",
+                        instance.currency.code,
+                        legacy_ron_threshold=(
+                            SettingsService.get_integer_setting(
+                                "provisioning.high_value_plan_threshold_cents",
+                                _DEFAULT_HIGH_VALUE_PLAN_THRESHOLD_CENTS,
+                            )
+                            if instance.currency.code == "RON"
+                            else 0
+                        ),
+                    ),
                 },
             ),
         )

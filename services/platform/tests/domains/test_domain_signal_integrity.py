@@ -15,12 +15,14 @@ from unittest.mock import patch
 from django.test import TestCase
 from django.utils import timezone
 
+from apps.billing.currency_models import Currency
 from apps.customers.models import Customer
 from apps.domains.models import TLD, Domain, Registrar
 
 
 class DomainSecuritySignalIntegrityTests(TestCase):
     def setUp(self) -> None:
+        Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei"})
         self.customer = Customer.objects.create(
             name="Signal Customer",
             company_name="Signal Customer SRL",
@@ -106,6 +108,7 @@ class TLDPricingSignalIntegrityTests(TestCase):
     log)."""
 
     def setUp(self) -> None:
+        Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei"})
         self.tld = TLD.objects.create(
             extension="com",
             description=".com",

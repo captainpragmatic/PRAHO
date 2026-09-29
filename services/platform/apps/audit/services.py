@@ -2440,8 +2440,11 @@ class CustomersAuditService:
             "customer_name": billing_profile.customer.get_display_name(),
             "payment_terms": billing_profile.payment_terms,
             "credit_limit": float(billing_profile.credit_limit),
+            "credit_limit_currency": "RON",
             "preferred_currency": billing_profile.preferred_currency,
-            "account_balance": float(billing_profile.get_account_balance()),
+            "account_balances": {
+                code: format(amount, ".2f") for code, amount in billing_profile.get_account_balances().items()
+            },
             "created_at": billing_profile.created_at.isoformat(),
             "updated_at": billing_profile.updated_at.isoformat(),
             **context.metadata,

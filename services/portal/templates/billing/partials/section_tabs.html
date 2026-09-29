@@ -1,0 +1,12 @@
+{% load i18n ui_components %}
+{% trans "Invoices" as invoices_label %}
+{% trans "Automatic payments" as automatic_label %}
+{% trans "Gift cards" as gifts_label %}
+{% url 'billing:invoices_list' as invoices_url %}
+{% url 'billing:recurring_payments' as automatic_url %}
+{% url 'billing:gift_cards' as gifts_url %}
+<nav class="flex flex-wrap gap-2 border-b border-slate-700 pb-3" aria-label="{% trans 'Billing sections' %}">
+  {% if active == 'invoices' %}{% button invoices_label href=invoices_url variant="primary" attrs='aria-current="page"' %}{% else %}<a href="{{ invoices_url }}" class="rounded-lg px-4 py-2 text-sm font-medium text-slate-300 hover:bg-slate-700">{{ invoices_label }}</a>{% endif %}
+  {% if active == 'automatic' %}{% button automatic_label href=automatic_url variant="primary" attrs='aria-current="page"' %}{% else %}<a href="{{ automatic_url }}" class="rounded-lg px-4 py-2 text-sm font-medium text-slate-300 hover:bg-slate-700">{{ automatic_label }}</a>{% endif %}
+  {% if active == 'gift_cards' %}{% button gifts_label href=gifts_url variant="primary" attrs='aria-current="page"' %}{% else %}<a href="{{ gifts_url }}" class="rounded-lg px-4 py-2 text-sm font-medium text-slate-300 hover:bg-slate-700">{{ gifts_label }}</a>{% endif %}
+</nav>

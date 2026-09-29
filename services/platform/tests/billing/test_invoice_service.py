@@ -502,6 +502,8 @@ class GenerateInvoicePdfTest(TestCase):
     COMPANY_CITY="Bucharest",
     COMPANY_POSTAL_CODE="010101",
     COMPANY_COUNTRY_CODE="RO",
+    COMPANY_BANK_ACCOUNT="RO49AAAA1B31007593840000",
+    COMPANY_BANK_NAME="Test Bank",
 )
 class GenerateEFacturaXmlTest(TestCase):
     """generate_e_factura_xml delegates to the canonical UBL builder (#188)."""

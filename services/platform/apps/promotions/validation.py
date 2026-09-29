@@ -7,6 +7,7 @@ from uuid import UUID
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext as _
 
+from .offer_currency import validate_offer_currency
 from .pricing import PERIOD_MONTHS
 
 MAX_TIERS = 50
@@ -105,9 +106,7 @@ def validate_offer(offer: Any) -> None:
         validate_conditions(offer.conditions)
     if offer.discount_type == "free_shipping":
         raise ValidationError(_("Shipping discounts are unavailable for hosting services."))
-    fixed_tiers = any("amount_cents" in tier for tier in offer.tiers or [])
-    if (offer.discount_type == "fixed" or fixed_tiers) and not offer.currency_id:
-        raise ValidationError(_("Choose a currency for fixed discounts."))
+    validate_offer_currency(offer)
     if offer.discount_type == "percent" and (
         offer.discount_percent is None or not 0 <= offer.discount_percent <= MAX_PERCENT
     ):
@@ -116,6 +115,3 @@ def validate_offer(offer: Any) -> None:
         raise ValidationError(_("Enter a nonnegative discount amount."))
     if offer.discount_type == "free_months" and not 1 <= (offer.free_months or 0) <= MAX_FREE_MONTHS:
         raise ValidationError(_("Enter between one and thirty-six free months."))
-    campaign = offer.campaign
-    if campaign and campaign.budget_cents is not None and not campaign.budget_currency_id:
-        raise ValidationError(_("Choose the campaign budget currency before publishing this offer."))

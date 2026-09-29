@@ -92,6 +92,7 @@ class RefundStatusResult(TypedDict):
     reason: str | None
     failure_reason: str | None
     error: str | None
+    metadata: NotRequired[dict[str, Any]]
 
 
 class RefundListResult(TypedDict):
@@ -199,6 +200,7 @@ class BasePaymentGateway(ABC):
         reason: str = "requested_by_customer",
         *,
         idempotency_key: str | None = None,
+        metadata: dict[str, str] | None = None,
     ) -> RefundResult:
         """
         Refund a payment via the gateway.

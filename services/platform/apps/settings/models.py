@@ -11,7 +11,7 @@ from decimal import Decimal
 from typing import Any, ClassVar, Literal, cast
 
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
@@ -91,6 +91,7 @@ class SystemSetting(models.Model):
     )
 
     updated_at = models.DateTimeField(_("Updated At"), auto_now=True, help_text=_("When this setting was last updated"))
+    revision = models.PositiveBigIntegerField(default=1, editable=False)
 
     class Meta:
         db_table = "setting_entries"
@@ -106,8 +107,23 @@ class SystemSetting(models.Model):
     def __str__(self) -> str:
         return f"⚙️ {self.key}: {self.get_display_value()}"
 
+    @transaction.atomic
     def save(self, *args: Any, **kwargs: Any) -> None:
         """Save setting with automatic encryption for sensitive values"""
+        update_fields = kwargs.get("update_fields")
+        if self.key == "billing.default_currency" and (update_fields is None or "value" in update_fields):
+            from apps.billing.currency_policy import prepare_currency_setting_save  # noqa: PLC0415  # ADR-0007
+
+            prepare_currency_setting_save(self)
+            if update_fields is not None:
+                kwargs["update_fields"] = {*update_fields, "revision"}
+        sync_whois_price = self.key == "domains.whois_privacy_price_cents" and (
+            update_fields is None or "value" in update_fields
+        )
+        if sync_whois_price:
+            from apps.billing.currency_policy import get_selling_currency_policy  # noqa: PLC0415  # ADR-0007
+
+            get_selling_currency_policy(lock=True)
         # Encrypt sensitive values; an empty value means "cleared / not configured"
         # and is stored plain — encrypting the empty string is rejected upstream.
         if self.is_sensitive and self.value:
@@ -117,6 +133,12 @@ class SystemSetting(models.Model):
                 self.value = encrypt_value(str(self.value))
 
         super().save(*args, **kwargs)
+        if sync_whois_price:
+            from apps.domains.models import TLDRetailPrice  # noqa: PLC0415  # ADR-0007
+
+            for price in TLDRetailPrice.objects.filter(currency_id="RON"):
+                price.whois_privacy_price_cents = int(self.value)
+                price.save(update_fields=["whois_privacy_price_cents", "updated_at"])
 
     def clean(self) -> None:
         """Validate setting data"""

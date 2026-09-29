@@ -67,6 +67,7 @@ class OrderCreateCustomerScopingTests(TestCase):
                 {
                     "customer": str(self.customer_b.id),
                     "currency": str(self.currency.id),
+                    "currency_revision": 1,
                     "payment_method": "bank_transfer",
                 },
             )
@@ -95,6 +96,7 @@ class OrderCreateCustomerScopingTests(TestCase):
                 {
                     "customer": str(self.customer_b.id),
                     "currency": "RON",
+                    "currency_revision": 1,
                 },
             )
         # With scoping in place, fetching customer_b with id__in=[customer_a.id]
@@ -136,6 +138,7 @@ class OrderCreateCustomerScopingTests(TestCase):
                 {
                     "customer": str(self.customer_a.id),
                     "currency": str(self.currency.id),
+                    "currency_revision": 1,
                     "payment_method": "bank_transfer",
                     "first_product": str(product.id),
                     "first_billing_period": "monthly",
@@ -199,6 +202,7 @@ class OrderCreateCustomerScopingTests(TestCase):
                     {
                         "customer": str(self.customer_a.id),
                         "currency": "RON",
+                        "currency_revision": 1,
                         "first_product": str(product.id),
                         "first_billing_period": "monthly",
                         "first_quantity": "1",

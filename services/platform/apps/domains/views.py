@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from decimal import Decimal
 from typing import Any, cast
 
 from dateutil.relativedelta import relativedelta
@@ -421,6 +422,7 @@ def domain_register(  # Complexity: multi-step workflow  # noqa: PLR0912  # Comp
                 "tld": tld,
                 "cost": pricing["total_cost"],
                 "cost_cents": pricing["total_cost_cents"],
+                "currency": pricing["currency"],
                 "years": tld.min_registration_period,
             }
         )
@@ -484,14 +486,17 @@ def check_availability(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911  
     # Return only periods allowed by the resolved TLD. The registration form
     # consumes this policy-authoritative list instead of advertising global
     # 1-10 year choices that the server may later reject.
-    registration_periods: list[dict[str, int]] = []
+    registration_periods: list[dict[str, int | str]] = []
     pricing: dict[str, dict[str, Any]] = {}
     for years in range(tld.min_registration_period, tld.max_registration_period + 1):
         period_pricing = TLDService.calculate_domain_cost(tld, years, False)
+        privacy_pricing = TLDService.calculate_domain_cost(tld, years, True, currency_code=period_pricing["currency"])
         registration_periods.append(
             {
                 "years": years,
                 "total_cost_cents": period_pricing["total_cost_cents"],
+                "currency": period_pricing["currency"],
+                "whois_cost_cents": privacy_pricing["whois_cost_cents"],
             }
         )
         period_key = f"{years}_year" if years == _SINGLE_YEAR else f"{years}_years"
@@ -566,15 +571,23 @@ def domain_renew(request: HttpRequest, domain_id: str) -> HttpResponse:
             else:
                 messages.error(request, _(f"❌ Renewal failed: {renewal_result.unwrap_err()}"))
 
-    # Calculate renewal costs
+    from .currency_terms import domain_renewal_quote  # noqa: PLC0415
+
+    # The manual registrar action remains available, but unknown prices stay unknown.
+    try:
+        quote = domain_renewal_quote(domain)
+    except ValueError:
+        quote = None
+        messages.warning(request, _("The original renewal price needs staff review."))
     renewal_costs = []
     for years in range(domain.tld.min_registration_period, domain.tld.max_registration_period + 1):
-        cost = TLDService.calculate_domain_cost(domain.tld, years, domain.whois_privacy, action="renew")
+        cents = quote.unit_price_cents * years if quote else None
         renewal_costs.append(
             {
                 "years": years,
-                "cost": cost["total_cost"],
-                "cost_cents": cost["total_cost_cents"],
+                "cost": Decimal(cents) / 100 if cents is not None else None,
+                "cost_cents": cents,
+                "currency": quote.currency_code if quote else "",
                 "new_expiry": domain.expires_at + relativedelta(years=years) if domain.expires_at else None,
             }
         )

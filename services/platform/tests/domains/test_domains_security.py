@@ -8,6 +8,7 @@ from django.contrib.auth import get_user_model
 from django.test import Client, TestCase, TransactionTestCase
 from django.urls import reverse
 
+from apps.billing.currency_models import Currency
 from apps.common.encryption import decrypt_sensitive_data, is_encrypted
 from apps.customers.models import Customer, CustomerAddress, CustomerTaxProfile
 from apps.domains.forms import RegistrarForm
@@ -89,6 +90,7 @@ class RegistrarFormSecurityTests(TestCase):
 
 class DomainRegistrationRaceConditionTests(TransactionTestCase):
     def setUp(self) -> None:
+        Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei"})
         self.tld = TLD.objects.create(
             extension="com",
             description=".com",

@@ -20,6 +20,7 @@ from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.utils.translation import gettext_lazy as _
 from django.views import View
+from django.views.decorators.cache import never_cache
 from django.views.generic import (
     CreateView,
     DetailView,
@@ -43,6 +44,7 @@ from .models import (
     PromotionRule,
     Referral,
 )
+from .money_history import campaign_history_is_complete, history_sources, money_totals
 from .presentation import staff_context
 from .services import (
     CouponService,
@@ -665,6 +667,11 @@ class CampaignDetailView(StaffRequiredMixin, DetailView):
     def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         context = super().get_context_data(**kwargs)
         campaign = self.object
+        legacy, applications = history_sources(campaign)
+        live_applications = applications.filter(status__in=["reserved", "settled"])
+        totals = money_totals(campaign)
+        context["money_totals"] = totals
+        context["money_history_incomplete"] = not campaign_history_is_complete(campaign, totals)
 
         # Get coupons with stats
         context["coupons"] = campaign.coupons.annotate(
@@ -673,22 +680,20 @@ class CampaignDetailView(StaffRequiredMixin, DetailView):
 
         # Get recent redemptions
         context["recent_redemptions"] = (
-            CouponRedemption.objects.filter(
-                coupon__campaign=campaign,
-                status="applied",
-            )
-            .select_related("coupon", "order", "customer")
-            .order_by("-applied_at")[:10]
+            legacy.filter(status="applied").select_related("coupon", "order", "customer").order_by("-applied_at")[:10]
         )
 
         # Calculate stats
         context["stats"] = {
             "total_coupons": campaign.coupons.count(),
             "active_coupons": campaign.coupons.filter(status="active", is_active=True).count(),
-            "total_redemptions": CouponRedemption.objects.filter(coupon__campaign=campaign, status="applied").count(),
-            "total_discount_cents": campaign.spent_cents,
+            "total_redemptions": legacy.filter(status="applied").count() + live_applications.count(),
             "budget_utilization": (
-                (campaign.spent_cents / campaign.budget_cents * 100) if campaign.budget_cents else 0
+                sum(row["spent_cents"] for row in totals) / campaign.budget_cents * 100
+                if campaign.budget_cents
+                and not context["money_history_incomplete"]
+                and all(row["currency_code"] == campaign.budget_currency_id for row in totals)
+                else None
             ),
         }
 
@@ -813,19 +818,21 @@ class CouponDetailView(StaffRequiredMixin, DetailView):
     def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         context = super().get_context_data(**kwargs)
         coupon = self.object
+        legacy, applications = history_sources(coupon)
+        live_applications = applications.filter(status__in=["reserved", "settled"])
+        context["money_totals"] = money_totals(coupon)
 
         # Get recent redemptions
         context["redemptions"] = coupon.redemptions.select_related("order", "customer").order_by("-created_at")[:50]
 
         # Calculate stats
-        applied_redemptions = coupon.redemptions.filter(status="applied")
+        applied_redemptions = legacy.filter(status="applied")
         context["stats"] = {
-            "total_redemptions": applied_redemptions.count(),
-            "total_discount_cents": applied_redemptions.aggregate(total=Sum("discount_cents"))["total"] or 0,
-            "unique_customers": applied_redemptions.values("customer").distinct().count(),
-            "average_discount_cents": (
-                applied_redemptions.aggregate(avg=Sum("discount_cents") / Count("id"))["avg"] or 0
-            ),
+            "total_redemptions": applied_redemptions.count() + live_applications.count(),
+            "unique_customers": applied_redemptions.order_by()
+            .values("order__customer_id")
+            .union(live_applications.order_by().values("order__customer_id"))
+            .count(),
         }
 
         return context
@@ -931,6 +938,7 @@ class GiftCardListView(StaffRequiredMixin, ListView):
         return queryset
 
 
+@method_decorator(never_cache, name="dispatch")
 class GiftCardDetailView(StaffRequiredMixin, DetailView):
     """Gift card detail view with transaction history."""
 
@@ -939,10 +947,13 @@ class GiftCardDetailView(StaffRequiredMixin, DetailView):
     context_object_name = "gift_card"
 
     def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
+        from .gift_staff_views import gift_staff_context  # noqa: PLC0415  # Avoid view imports in the action module
+
         context = super().get_context_data(**kwargs)
         context["transactions"] = self.object.transactions.select_related("order", "customer", "created_by").order_by(
             "-created_at"
         )
+        context.update(gift_staff_context(self.request, self.object))
         return context
 
 
@@ -957,26 +968,45 @@ class GiftCardCreateView(FinancialStaffRequiredMixin, CreateView):
     def form_valid(self, form: Any) -> HttpResponse:
         import uuid  # noqa: PLC0415
 
+        from apps.billing.currency_policy import (  # noqa: PLC0415
+            SellingCurrencyChangedError,
+            require_current_selling_policy,
+        )
+        from apps.billing.currency_service import CurrencyNotIssuableError  # noqa: PLC0415
+
         from .gift_cards import create_purchase  # noqa: PLC0415
 
         data = form.cleaned_data
-        purchase = create_purchase(
-            data["purchased_by"],
-            data["currency"],
-            data["initial_value_cents"],
-            uuid.uuid4().hex,
-            method=data["payment_method"],
-            recipient={
-                "email": data["recipient_email"],
-                "name": data["recipient_name"],
-                "message": data["personal_message"],
-            },
-            actor=self.request.user,
-        )
-        self.object = purchase.gift_card
-        self.object.card_type = data["card_type"]
-        self.object.valid_until = data["valid_until"]
-        self.object.save(update_fields=["card_type", "valid_until", "updated_at"])
+        try:
+            with transaction.atomic():
+                require_current_selling_policy(data["currency"].code, data["currency_revision"])
+                purchase = create_purchase(
+                    data["purchased_by"],
+                    data["currency"],
+                    data["initial_value_cents"],
+                    uuid.uuid4().hex,
+                    method=data["payment_method"],
+                    recipient={
+                        "email": data["recipient_email"],
+                        "name": data["recipient_name"],
+                        "message": data["personal_message"],
+                    },
+                    actor=self.request.user,
+                )
+                self.object = purchase.gift_card
+                self.object.card_type = data["card_type"]
+                self.object.valid_until = data["valid_until"]
+                self.object.save(update_fields=["card_type", "valid_until", "updated_at"])
+        except SellingCurrencyChangedError:
+            form.refresh_currency_for_review()
+            form.add_error(
+                None,
+                _("The selling currency changed. Review the amounts in the current currency and submit again."),
+            )
+            return self.form_invalid(form)
+        except (ValidationError, CurrencyNotIssuableError) as exc:
+            form.add_error(None, exc if isinstance(exc, ValidationError) else str(exc))
+            return self.form_invalid(form)
         messages.success(self.request, _("Gift-card purchase created. Payment is required before activation."))
         return redirect("promotions:gift_card_detail", pk=self.object.pk)
 

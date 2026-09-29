@@ -13,6 +13,7 @@ from apps.billing.tasks import setup_billing_scheduled_tasks, setup_fx_scheduled
 from apps.common.tasks import setup_system_status_scheduled_tasks
 from apps.domains.tasks import setup_domain_scheduled_tasks
 from apps.orders.tasks import setup_order_scheduled_tasks
+from apps.promotions.tasks import setup_gift_scheduled_tasks
 from apps.provisioning.virtualmin_tasks import setup_virtualmin_scheduled_tasks
 from apps.tickets.tasks import setup_ticket_scheduled_tasks
 from apps.users.tasks import setup_user_security_scheduled_tasks
@@ -163,6 +164,7 @@ class Command(BaseCommand):
             self.stdout.write("💳 Billing:")
             self.stdout.write("  - Prepare and collect recurring proformas: Hourly at :15")
             self.stdout.write("  - Retry failed recurring payments: Every 15 minutes")
+            self.stdout.write("  - Reconcile existing gift funding attempts: Every 10 minutes")
             self.stdout.write("  - Expire unpaid trials: Daily at 00:30")
             self.stdout.write("  - Apply grace-period lifecycle: Daily at 01:00")
             self.stdout.write("  - Process and rate local usage: Periodic")
@@ -219,6 +221,7 @@ class Command(BaseCommand):
             # RuntimeError cannot abort the command before the FX schedule is installed (#103).
             if run_all or flags["billing_only"]:
                 self._setup_task_category("fx rates", "💱", setup_fx_scheduled_tasks, all_results)
+                self._setup_task_category("gift funding", "🎁", setup_gift_scheduled_tasks, all_results)
 
             if run_all or flags["billing_only"]:
                 self._setup_task_category("billing", "💳", setup_billing_scheduled_tasks, all_results)

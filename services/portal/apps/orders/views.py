@@ -44,6 +44,7 @@ from .services import (
     GDPRCompliantCartSession,
     HMACPriceSealer,
     OrderCreationService,
+    read_selling_policy,
 )
 from .validators import OrderInputValidator
 
@@ -169,6 +170,7 @@ class CheckoutContext:
     notes: str
     idempotency_key: str
     agree_terms: bool
+    retry_pending: bool = False
 
 
 def _checkout_conflict(request: HttpRequest, message: str, status: int) -> HttpResponse:
@@ -176,6 +178,37 @@ def _checkout_conflict(request: HttpRequest, message: str, status: int) -> HttpR
     if request.headers.get("HX-Request") or request.headers.get("X-Requested-With") == "XMLHttpRequest":
         return JsonResponse({"error": message}, status=status)
     messages.info(request, message)
+    return redirect("orders:checkout")
+
+
+def _pending_checkout_context(
+    cart: GDPRCompliantCartSession,
+    customer_id: str | None,
+    user_id: str | None,
+) -> CheckoutContext | None:
+    if not customer_id or not user_id:
+        return None
+    attempt = OrderCreationService.pending_attempt(cart, customer_id, user_id)
+    if not attempt:
+        return None
+    payload = attempt["payload"]
+    return CheckoutContext(
+        cart=cart,
+        customer_id=customer_id,
+        user_id=user_id,
+        payment_method=payload["payment_method"],
+        cart_version=attempt["cart_version"],
+        notes=payload["notes"],
+        idempotency_key=payload["idempotency_key"],
+        agree_terms=True,
+        retry_pending=True,
+    )
+
+
+def _stale_checkout_response(request: HttpRequest) -> HttpResponse:
+    if request.headers.get("HX-Request") or request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return JsonResponse({"error": _("Cart version mismatch. Please refresh and try again.")}, status=400)
+    messages.error(request, _("Your cart was updated. Please review and try again."))
     return redirect("orders:checkout")
 
 
@@ -187,6 +220,10 @@ def _validate_checkout_request(request: HttpRequest) -> "CheckoutContext | HttpR
     customer_id, user_id = _get_customer_context(request)
 
     cart = GDPRCompliantCartSession(request.session)
+
+    pending = _pending_checkout_context(cart, customer_id, user_id)
+    if pending:
+        return pending
 
     # Order creation clears the cart. A retry must still find the completed
     # result using the original submitted version and customer-scoped key.
@@ -224,14 +261,7 @@ def _validate_checkout_request(request: HttpRequest) -> "CheckoutContext | HttpR
     cart_version = request.POST.get("cart_version", "")
     current_version = cart.get_cart_version()
     if not cart_version or cart_version != current_version:
-        is_ajax = request.headers.get("HX-Request") or request.headers.get("X-Requested-With") == "XMLHttpRequest"
-        if is_ajax:
-            return JsonResponse(
-                {"error": _("Cart version mismatch. Please refresh and try again.")},
-                status=400,
-            )
-        messages.error(request, _("Your cart was updated. Please review and try again."))
-        return redirect("orders:checkout")
+        return _stale_checkout_response(request)
 
     # Validate payment method against allowlist
     payment_method = request.POST.get("payment_method", "")
@@ -344,12 +374,17 @@ def _create_and_process_order(request: HttpRequest, ctx: CheckoutContext) -> Htt
         # finally block can clean up the lock on failure (but preserve it if order exists).
         order_created_on_platform = False
         try:
-            # Always run preflight validation — no bypass
-            preflight_result = OrderCreationService.preflight_order(
-                ctx.cart,
-                ctx.customer_id,
-                ctx.user_id,
-                api_client_factory=PlatformAPIClient,
+            # Resolve a previously submitted purchase before new-sale validation.
+            # Platform returns an accepted order before checking today's prices.
+            preflight_result: dict[str, Any] = (
+                {"valid": True}
+                if ctx.retry_pending
+                else OrderCreationService.preflight_order(
+                    ctx.cart,
+                    ctx.customer_id,
+                    ctx.user_id,
+                    api_client_factory=PlatformAPIClient,
+                )
             )
 
             if not preflight_result.get("valid", False):
@@ -415,7 +450,10 @@ def _create_and_process_order(request: HttpRequest, ctx: CheckoutContext) -> Htt
             payment_intent_result = None
             if order_status == "awaiting_payment" and ctx.payment_method == "card":
                 order_total = order_data.get("total", "0")
-                order_currency = order_data.get("currency_code", "RON")
+                order_currency = order_data.get("currency_code")
+                if not isinstance(order_currency, str) or not order_currency:
+                    messages.error(request, _("The order currency is unavailable. Please contact support."))
+                    return redirect("orders:confirmation", order_id=order_id)
                 total_cents = int(order_data.get("cash_due_cents", _parse_total_cents(str(order_total))))
 
                 if total_cents <= 0:
@@ -501,6 +539,17 @@ def _create_and_process_order(request: HttpRequest, ctx: CheckoutContext) -> Htt
         return redirect("orders:checkout")
 
 
+def _selling_product(product: dict[str, Any], currency: str) -> dict[str, Any]:
+    return {
+        **product,
+        "prices": [
+            price
+            for price in product.get("prices", [])
+            if price.get("currency") == currency and price.get("is_active") is not False
+        ],
+    }
+
+
 @require_customer_authentication
 def product_catalog(request: HttpRequest) -> HttpResponse:
     """
@@ -528,10 +577,13 @@ def product_catalog(request: HttpRequest) -> HttpResponse:
         if not products_response or "results" not in products_response:
             raise PlatformAPIError("Invalid response format")
 
-        products = products_response["results"]
+        currency, _revision = read_selling_policy(products_response)
+        products = [_selling_product(product, currency) for product in products_response["results"]]
+        products = [product for product in products if product["prices"]]
 
         # Get cart for item count
         cart = GDPRCompliantCartSession(request.session)
+        cart.apply_selling_policy(products_response)
 
         # Prepare product type filter options
         product_type_options = [
@@ -556,13 +608,13 @@ def product_catalog(request: HttpRequest) -> HttpResponse:
 
         logger.info(f"✅ [Catalog] Loaded {len(products)} products")
 
-    except PlatformAPIError as e:
+    except (PlatformAPIError, ValidationError) as e:
         # Orders uses messaging-only rate-limit UX (no automatic retry).
         # Order write operations (create, confirm-payment) are non-idempotent;
         # retrying could cause double-charges or duplicate orders.
         if is_rate_limited_error(e):
             logger.warning(f"⚠️ [Catalog] Rate-limited loading products: {e}")
-            messages.warning(request, get_rate_limit_message(e.retry_after))
+            messages.warning(request, get_rate_limit_message(getattr(e, "retry_after", None)))
         else:
             logger.error(f"🔥 [Catalog] Failed to load products: {e}")
             messages.error(request, _("Error loading products. Please try again."))
@@ -595,6 +647,21 @@ def product_detail(request: HttpRequest, product_slug: str) -> HttpResponse:
 
         # Get cart for context
         cart = GDPRCompliantCartSession(request.session)
+        currency, _revision = read_selling_policy(product)
+        product = _selling_product(product, currency)
+        if not product["prices"]:
+            raise ValidationError(_("Current prices are unavailable. Please try again later."))
+        cart.apply_selling_policy(product)
+        price = product["prices"][0]
+        billing_periods = [
+            {"value": period, "label": label, "amount": price[field]}
+            for period, label, field in (
+                ("monthly", _("Monthly"), "monthly_price"),
+                ("semiannual", _("Every six months"), "semiannual_price"),
+                ("annual", _("Annual"), "annual_price"),
+            )
+            if price.get(field) is not None
+        ]
 
         # Check if product is already in cart
         existing_item = None
@@ -605,6 +672,7 @@ def product_detail(request: HttpRequest, product_slug: str) -> HttpResponse:
 
         context = {
             "product": product,
+            "billing_periods": billing_periods,
             "existing_item": existing_item,
             "cart_count": cart.get_item_count(),
             "order_steps": ORDER_STEPS,
@@ -613,10 +681,10 @@ def product_detail(request: HttpRequest, product_slug: str) -> HttpResponse:
 
         logger.info(f"✅ [Product] Loaded product details: {product_slug}")
 
-    except PlatformAPIError as e:
+    except (PlatformAPIError, ValidationError) as e:
         if is_rate_limited_error(e):
             logger.warning(f"⚠️ [Product] Rate-limited loading product {product_slug}: {e}")
-            messages.warning(request, get_rate_limit_message(e.retry_after))
+            messages.warning(request, get_rate_limit_message(getattr(e, "retry_after", None)))
         else:
             logger.error(f"🔥 [Product] Failed to load product {product_slug}: {e}")
             messages.error(request, _("Product not found."))
@@ -969,13 +1037,17 @@ def checkout(request: HttpRequest) -> HttpResponse:
     """
 
     cart = GDPRCompliantCartSession(request.session)
+    customer_id, user_id = _get_customer_context(request)
+    pending = _pending_checkout_context(cart, customer_id, user_id)
+    if pending:
+        attempt = OrderCreationService.pending_attempt(cart, pending.customer_id, pending.user_id)
+        return render(request, "orders/checkout_recovery.html", {"attempt": attempt})
 
     if not cart.has_items():
         messages.error(request, _("Cannot proceed with empty cart."))
         return redirect("orders:catalog")
 
     # Calculate totals for display
-    customer_id, user_id = _get_customer_context(request)
     calculation_result = None
     preflight_result = None
 
@@ -1056,6 +1128,7 @@ def set_promotion_codes(request: HttpRequest) -> HttpResponse:
         return redirect("orders:checkout")
     previous = cart.get_coupon_codes()
     previous_gift = cart.get_gift_code()
+    previous_policy = (cart.currency, cart.currency_revision)
     gift_code = request.POST.get("gift_code", "").strip()
     if len(gift_code) > max_code_length:
         messages.error(request, _("Enter a valid gift-card code."))
@@ -1068,8 +1141,9 @@ def set_promotion_codes(request: HttpRequest) -> HttpResponse:
         if result.get("error"):
             raise ValidationError(result["error"])
     except (ValidationError, PlatformAPIError):
-        cart.set_coupon_codes(previous)
-        cart.set_gift_code(previous_gift)
+        if (cart.currency, cart.currency_revision) == previous_policy:
+            cart.set_coupon_codes(previous)
+            cart.set_gift_code(previous_gift)
         messages.error(request, _("The coupon or gift card could not be applied. Check its eligibility and try again."))
     else:
         messages.success(request, _("Review the updated total before placing your order."))
@@ -1174,13 +1248,9 @@ def order_confirmation(request: HttpRequest, order_id: str) -> HttpResponse:
         # Bank transfer details for pending bank_transfer orders
         bank_details: dict[str, str] = {}
         if order_data.get("payment_method") == "bank_transfer":
-            if not getattr(settings, "COMPANY_BANK_IBAN", ""):
-                logger.warning("⚠️ [Orders] COMPANY_BANK_IBAN not configured — bank transfer details unavailable")
-            bank_details = {
-                "iban": getattr(settings, "COMPANY_BANK_IBAN", "") or _("Not configured"),
-                "bank_name": getattr(settings, "COMPANY_BANK_NAME", "") or _("Not configured"),
-                "beneficiary": getattr(settings, "COMPANY_BANK_BENEFICIARY", "") or _("Not configured"),
-            }
+            instructions = order_data.get("bank_details")
+            if isinstance(instructions, dict) and instructions.get("currency") == order_data.get("currency_code"):
+                bank_details = instructions
 
         context = {
             "order": order_data,

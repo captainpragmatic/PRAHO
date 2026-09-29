@@ -179,34 +179,56 @@ class CustomerBillingProfile(SoftDeleteModel):
         verbose_name = _("Customer Billing Profile")
         verbose_name_plural = _("Customer Billing Profiles")
 
-    def get_account_balance(self) -> Decimal:
-        """Get customer outstanding balance in currency units (e.g. RON, not cents).
+    def get_account_balances(self) -> dict[str, Decimal]:
+        """Outstanding units by recorded currency, net of completed refunds.
 
-        Uses global aggregate: max(0, total_invoiced - total_paid) across all issued/overdue
-        invoices. Cross-invoice overpayments offset other invoices' debt (intentional).
+        Overpayments offset other issued/overdue invoices within the same currency.
+        The current selling policy and the customer's preference do not relabel debt.
         """
-        from django.db.models import Sum  # noqa: PLC0415  # Deferred: avoids circular import
-
         from apps.billing.models import (  # noqa: PLC0415  # Deferred: avoids circular import
-            Invoice,  # Cross-app import for balance calculation  # Circular: cross-app
+            Invoice,
             Payment,
+            Refund,
         )
 
-        # Total invoiced for outstanding invoices (issued or overdue)
-        total_invoiced = (
-            Invoice.objects.filter(customer=self.customer, status__in=["issued", "overdue"]).aggregate(
-                total=Sum("total_cents")
-            )["total"]
-            or 0
+        invoices = Invoice.objects.filter(customer=self.customer, status__in=["issued", "overdue"])
+        invoiced = {
+            row["currency_id"]: row["sum_cents"] or 0
+            for row in invoices.values("currency_id").annotate(sum_cents=models.Sum("total_cents"))
+        }
+        if not invoiced:
+            return {}
+
+        payments = Payment.objects.filter(
+            customer=self.customer,
+            invoice__in=invoices,
+            currency_id=models.F("invoice__currency_id"),
+            status__in=["succeeded", "partially_refunded", "refunded"],
         )
-        # Total paid against those invoices
-        total_paid = (
-            Payment.objects.filter(
-                invoice__customer=self.customer,
-                invoice__status__in=["issued", "overdue"],
-                status__in=["succeeded", "partially_refunded"],
-            ).aggregate(total=Sum("amount_cents"))["total"]
-            or 0
+        collected = {
+            row["currency_id"]: row["sum_cents"] or 0
+            for row in payments.values("currency_id").annotate(sum_cents=models.Sum("amount_cents"))
+        }
+        # Payment.amount_cents retains the original amount after a refund. Follow
+        # the invoice ledger's direct-invoice or payment-linked refund evidence;
+        # a refund matching both relationships is still one row in this query.
+        refunds = Refund.objects.filter(customer=self.customer, status="completed").filter(
+            models.Q(invoice__in=invoices, currency_id=models.F("invoice__currency_id"))
+            | models.Q(payment__in=payments, currency_id=models.F("payment__currency_id"))
         )
-        balance_cents = max(0, total_invoiced - total_paid)
-        return Decimal(balance_cents) / 100
+        refunded = {
+            row["currency_id"]: row["sum_cents"] or 0
+            for row in refunds.values("currency_id").annotate(sum_cents=models.Sum("amount_cents"))
+        }
+        balances = {}
+        for code, total in invoiced.items():
+            retained = max(0, collected.get(code, 0) - refunded.get(code, 0))
+            balances[code] = Decimal(max(0, total - retained)) / 100
+        return balances
+
+    def get_account_balance(self, currency_code: str) -> Decimal:
+        """Return outstanding units for one explicitly requested currency."""
+        from apps.billing.currency_service import normalize_currency_code  # noqa: PLC0415
+
+        code = normalize_currency_code(currency_code)
+        return self.get_account_balances().get(code, Decimal("0.00"))

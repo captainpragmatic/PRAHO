@@ -827,8 +827,20 @@ def process_auto_payment_async(invoice_id: str) -> str:
 # ===============================================================================
 
 
+def reconcile_currency_transition_notices() -> dict[str, Any]:
+    """Repair subscription and domain notices independently of payment collection."""
+    from apps.billing.currency_transitions import reconcile_currency_transitions  # noqa: PLC0415
+    from apps.domains.currency_terms import reconcile_domain_currency_notices  # noqa: PLC0415
+
+    return {
+        "subscriptions": reconcile_currency_transitions(),
+        "domains": reconcile_domain_currency_notices(),
+    }
+
+
 def run_daily_billing() -> dict[str, Any]:
     """Prepare due PRAHO proformas, then collect the automatic-payment groups."""
+    from apps.billing.currency_transitions import activate_due_currency_terms  # noqa: PLC0415
     from apps.billing.recurring_billing import RecurringBillingOrchestrator  # noqa: PLC0415
     from apps.billing.subscription_service import SubscriptionLifecycleService  # noqa: PLC0415
 
@@ -836,12 +848,14 @@ def run_daily_billing() -> dict[str, Any]:
 
     try:
         cancellations_finalized = SubscriptionLifecycleService.finalize_period_end_cancellations()
+        currency_terms_activated = activate_due_currency_terms()
         preparation = RecurringBillingOrchestrator.prepare_due_proformas()
         collection = RecurringBillingOrchestrator.collect_due_proformas()
         renewals_marked_overdue = RecurringBillingOrchestrator.mark_overdue_renewals()
         errors = [*preparation["errors"], *collection["errors"]]
         result = {
             "cancellations_finalized": cancellations_finalized,
+            "currency_terms_activated": currency_terms_activated,
             "preparation": preparation,
             "collection": collection,
             "renewals_marked_overdue": renewals_marked_overdue,
@@ -1393,6 +1407,8 @@ def _stripe_refund_facts(source: dict[str, Any], refund_id: str) -> RefundGatewa
         facts["reason"] = source["reason"]
     if source.get("failure_reason"):
         facts["failure_reason"] = source["failure_reason"]
+    if "metadata" in source:
+        facts["metadata"] = source["metadata"]
     return facts
 
 
@@ -2168,6 +2184,11 @@ def setup_billing_scheduled_tasks() -> dict[str, str]:
         (
             "billing-grace-expirations",
             "apps.billing.tasks.process_grace_period_expirations",
+            "0 1 * * *",
+        ),
+        (
+            "billing-currency-transition-notices",
+            "apps.billing.tasks.reconcile_currency_transition_notices",
             "0 1 * * *",
         ),
         (

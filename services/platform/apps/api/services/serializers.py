@@ -3,13 +3,20 @@
 # ===============================================================================
 
 from decimal import Decimal
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 from django.utils import timezone
 from rest_framework import serializers
 
+from apps.billing.currency_policy import get_selling_currency_policy
 from apps.common.tax_service import TaxService
-from apps.provisioning.service_models import Server, Service, ServicePlan
+from apps.provisioning.service_models import Server, Service, ServicePlan, ServicePlanPrice
+
+
+def service_monthly_price(service: Service) -> Decimal:
+    """Display the saved service charge, without repricing it from today's catalog."""
+    months = {"monthly": 1, "quarterly": 3, "semi_annual": 6, "annual": 12}[service.billing_cycle]
+    return service.price / months
 
 
 class ServicePlanListSerializer(serializers.ModelSerializer):
@@ -17,6 +24,39 @@ class ServicePlanListSerializer(serializers.ModelSerializer):
 
     # Plan display information
     plan_type_display = serializers.CharField(source="get_plan_type_display", read_only=True)
+    currency_code = serializers.SerializerMethodField()
+    price_monthly = serializers.SerializerMethodField()
+    price_quarterly = serializers.SerializerMethodField()
+    price_annual = serializers.SerializerMethodField()
+    setup_fee = serializers.SerializerMethodField()
+
+    def get_currency_code(self, obj: ServicePlan) -> str:
+        return str(self.context.get("currency_code") or get_selling_currency_policy().currency_code)
+
+    def _price(self, obj: ServicePlan) -> ServicePlanPrice | None:
+        code = self.get_currency_code(obj)
+        prices = self.context.setdefault("_currency_prices", {})
+        key = (obj.pk, code)
+        if key not in prices:
+            prices[key] = obj.get_price_for_currency(code)
+        return cast(ServicePlanPrice | None, prices[key])
+
+    def _amount(self, obj: ServicePlan, field: str) -> str | None:
+        price = self._price(obj)
+        cents = getattr(price, field, None) if price is not None else None
+        return f"{Decimal(cents) / 100:.2f}" if cents is not None else None
+
+    def get_price_monthly(self, obj: ServicePlan) -> str | None:
+        return self._amount(obj, "monthly_price_cents")
+
+    def get_price_quarterly(self, obj: ServicePlan) -> str | None:
+        return self._amount(obj, "quarterly_price_cents")
+
+    def get_price_annual(self, obj: ServicePlan) -> str | None:
+        return self._amount(obj, "annual_price_cents")
+
+    def get_setup_fee(self, obj: ServicePlan) -> str | None:
+        return self._amount(obj, "setup_cents")
 
     class Meta:
         model = ServicePlan
@@ -26,6 +66,7 @@ class ServicePlanListSerializer(serializers.ModelSerializer):
             "plan_type",
             "plan_type_display",
             "description",
+            "currency_code",
             "price_monthly",
             "price_quarterly",
             "price_annual",
@@ -154,7 +195,7 @@ class ServiceListSerializer(serializers.ModelSerializer):
 
     def get_monthly_price(self, obj: Service) -> Decimal:
         """Get monthly equivalent price"""
-        return obj.service_plan.get_monthly_equivalent_price(obj.billing_cycle)
+        return service_monthly_price(obj)
 
     def get_is_active(self, obj: Service) -> bool:
         """Check if service is active"""
@@ -170,7 +211,8 @@ class ServiceDetailSerializer(serializers.ModelSerializer):
     """Service detail serializer for complete service information"""
 
     # Related objects with full detail
-    service_plan = ServicePlanListSerializer(read_only=True)
+    service_plan = serializers.SerializerMethodField()
+    available_plans = serializers.SerializerMethodField()
     server = ServerListSerializer(read_only=True)
 
     # Customer information (limited for customer API)
@@ -234,6 +276,7 @@ class ServiceDetailSerializer(serializers.ModelSerializer):
             "customer_contact_phone",
             # Related objects
             "service_plan",
+            "available_plans",
             "server",
             # Usage and limits
             "disk_usage_gb",
@@ -296,7 +339,20 @@ class ServiceDetailSerializer(serializers.ModelSerializer):
 
     def get_monthly_price(self, obj: Service) -> Decimal:
         """Get monthly equivalent price"""
-        return obj.service_plan.get_monthly_equivalent_price(obj.billing_cycle)
+        return service_monthly_price(obj)
+
+    def get_service_plan(self, obj: Service) -> dict[str, Any]:
+        return ServicePlanListSerializer(obj.service_plan, context={"currency_code": obj.currency_id}).data
+
+    def get_available_plans(self, obj: Service) -> list[dict[str, Any]]:
+        plans = ServicePlan.objects.filter(
+            is_active=True,
+            is_public=True,
+            plan_type=obj.service_plan.plan_type,
+            currency_prices__currency_id=obj.currency_id,
+            currency_prices__is_active=True,
+        ).distinct()
+        return ServicePlanAvailableSerializer(plans, many=True, context={"currency_code": obj.currency_id}).data
 
     def get_total_monthly_cost(self, obj: Service) -> Decimal:
         """Get total monthly cost including VAT"""
@@ -362,8 +418,10 @@ class ServiceSummarySerializer(serializers.Serializer):
     expiring_soon = serializers.IntegerField()  # Within 30 days
 
     # Cost information
-    total_monthly_cost = serializers.DecimalField(max_digits=10, decimal_places=2)
-    total_monthly_cost_with_vat = serializers.DecimalField(max_digits=10, decimal_places=2)
+    currency_code = serializers.CharField(allow_null=True)
+    total_monthly_cost = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
+    total_monthly_cost_with_vat = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
+    monthly_costs_by_currency = serializers.ListField(child=serializers.DictField())
 
     # Usage statistics
     total_disk_usage_gb = serializers.FloatField()
@@ -376,7 +434,7 @@ class ServiceSummarySerializer(serializers.Serializer):
     recent_services = ServiceListSerializer(many=True)
 
 
-class ServicePlanAvailableSerializer(serializers.ModelSerializer):
+class ServicePlanAvailableSerializer(ServicePlanListSerializer):
     """Available service plans for customer selection"""
 
     plan_type_display = serializers.CharField(source="get_plan_type_display", read_only=True)
@@ -397,6 +455,7 @@ class ServicePlanAvailableSerializer(serializers.ModelSerializer):
             "plan_type",
             "plan_type_display",
             "description",
+            "currency_code",
             "price_monthly",
             "price_quarterly",
             "price_annual",
@@ -419,27 +478,32 @@ class ServicePlanAvailableSerializer(serializers.ModelSerializer):
 
     def get_monthly_equivalent(self, obj: ServicePlan) -> dict[str, Decimal]:
         """Get monthly equivalent prices for all cycles"""
+        price = self._price(obj)
+        if price is None:
+            return {}
         return {
-            "monthly": obj.get_monthly_equivalent_price("monthly"),
-            "quarterly": obj.get_monthly_equivalent_price("quarterly"),
-            "annual": obj.get_monthly_equivalent_price("annual"),
+            period: Decimal(cents) / (100 * months)
+            for period, cents, months in (
+                ("monthly", price.monthly_price_cents, 1),
+                ("quarterly", price.quarterly_price_cents, 3),
+                ("annual", price.annual_price_cents, 12),
+            )
+            if cents is not None
         }
 
     def get_quarterly_savings(self, obj: ServicePlan) -> Decimal:
         """Calculate quarterly savings compared to monthly"""
-        if not obj.price_quarterly:
+        price = self._price(obj)
+        if price is None or price.quarterly_price_cents is None:
             return Decimal("0.00")
-
-        monthly_cost_3months = obj.price_monthly * 3
-        return monthly_cost_3months - obj.price_quarterly
+        return Decimal(price.monthly_price_cents * 3 - price.quarterly_price_cents) / 100
 
     def get_annual_savings(self, obj: ServicePlan) -> Decimal:
         """Calculate annual savings compared to monthly"""
-        if not obj.price_annual:
+        price = self._price(obj)
+        if price is None or price.annual_price_cents is None:
             return Decimal("0.00")
-
-        monthly_cost_12months = obj.price_monthly * 12
-        return monthly_cost_12months - obj.price_annual
+        return Decimal(price.monthly_price_cents * 12 - price.annual_price_cents) / 100
 
     def get_feature_summary(self, obj: ServicePlan) -> list[str]:
         """Get feature summary list for display"""

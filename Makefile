@@ -67,6 +67,7 @@ help:
 	@echo "🔧 DATABASE & ASSETS:"
 	@echo "  make migrate         - Run platform database migrations"
 	@echo "  make check-migrations - Verify model and migration state match"
+	@echo "  make check-currency  - Check stored selling currency and FX in the selected Platform database"
 	@echo "  make fixtures        - Load comprehensive sample data (platform only)"
 	@echo "  make fixtures-light  - Load minimal sample data (fast, platform only)"
 	@echo "  make install-frontend - Install Node.js dependencies"
@@ -661,6 +662,10 @@ check-migrations:
 	@$(PYTHON_PLATFORM_MANAGE) makemigrations --check --dry-run --settings=config.settings.test
 	@echo "🔎 [Portal] Checking model and migration state..."
 	@$(PYTHON_PORTAL_MANAGE) makemigrations --check --dry-run --settings=config.settings.dev
+
+.PHONY: check-currency
+check-currency:
+	@$(PYTHON_PLATFORM_MANAGE) check --tag billing_currency --database default
 
 portal-clearsessions:
 	@echo "🧹 [Portal] Clearing expired sessions..."
