@@ -113,6 +113,8 @@ class ServiceRequestViewTests(SimpleTestCase):
             "service_type": "shared",
             "service_plan": {"name": "Basic"},
             "monthly_price": "10.00",
+            "currency_code": "EUR",
+            "available_plans": [{"name": "Plus", "price_monthly": "20.00", "currency_code": "EUR"}],
         }
         self.api.get_available_plans.return_value = [{"name": "Plus", "price_monthly": "20.00"}]
         self.api.get_service_usage.return_value = {}
@@ -313,13 +315,14 @@ class ServiceRequestViewTests(SimpleTestCase):
                 self.assertContains(response, "More storage")
                 self.assertEqual(self._open_form()[0], submission_id)
 
-    def test_plans_outage_does_not_discard_bound_request_form(self) -> None:
+    def test_missing_plan_metadata_does_not_discard_bound_request_form(self) -> None:
         submission_id, _ = self._open_form()
         self.api.request_service_action.side_effect = PlatformAPIError("timeout", status_code=504)
-        self.api.get_available_plans.side_effect = PlatformAPIError("maintenance", status_code=503)
+        self.api.get_service_detail.return_value.pop("available_plans")
         response, _ = self._post(submission_id, reason="Requested plan: Plus")
         self.assertContains(response, submission_id)
         self.assertContains(response, "Requested plan: Plus")
+        self.api.get_available_plans.assert_not_called()
 
     def test_post_detail_outage_retains_bound_form_without_submitting_action(self) -> None:
         submission_id, _ = self._open_form()
@@ -453,6 +456,8 @@ class ServiceRequestViewTests(SimpleTestCase):
 
     def test_available_plans_are_informational_and_form_has_reason_limit(self) -> None:
         _, html = self._open_form()
+        self.assertIn("Plus", html)
+        self.assertIn("20,00 EUR", html)
         self.assertIn("Include your preferred plan in the reason", html)
         self.assertIn('maxlength="4000"', html)
         self.assertNotIn("hover:border-blue-500 transition-colors cursor-pointer", html)

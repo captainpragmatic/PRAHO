@@ -459,15 +459,13 @@ def _submit_service_request(
     return redirect("tickets:detail", ticket_id=receipt["ticket_id"])
 
 
-def _service_request_plans(request: HttpRequest, customer_id: int, service: dict[str, Any]) -> list[dict[str, Any]]:
-    """An optional plan list must not discard a bound request form during an outage."""
-    try:
-        return services_api.get_available_plans(customer_id, service.get("service_type", ""))
-    except PlatformAPIError as exc:
-        if is_rate_limited_error(exc):
-            raise
-        messages.warning(request, get_degraded_message(exc))
+def _service_request_plans(service: dict[str, Any]) -> list[dict[str, Any]]:
+    """Use detail-provided prices in the existing service currency, never new-sale prices."""
+    currency_code = service.get("currency_code")
+    plans = service.get("available_plans")
+    if not isinstance(currency_code, str) or not currency_code or not isinstance(plans, list):
         return []
+    return [plan for plan in plans if isinstance(plan, dict) and plan.get("currency_code") == currency_code]
 
 
 def _service_request_load_error(request: HttpRequest, error: PlatformAPIError, context: dict[str, Any]) -> HttpResponse:
@@ -530,7 +528,7 @@ def service_request_action(request: HttpRequest, service_id: int) -> HttpRespons
             response = _submit_service_request(request, customer_id, user_id, submission_key, context)
             if response is not None:
                 return response
-        context["available_plans"] = _service_request_plans(request, customer_id, service)
+        context["available_plans"] = _service_request_plans(service)
         return render(request, "services/service_request_action.html", context, status=context.get("form_status", 200))
     except PlatformAPIError as exc:
         return _service_request_load_error(request, exc, context)
