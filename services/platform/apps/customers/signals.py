@@ -1235,27 +1235,64 @@ def _handle_customer_unsuspension(customer: Customer) -> None:
         logger.exception(f"🔥 [Customer Signal] Customer unsuspension failed: {e}")
 
 
+# A subscription in any of these states is not paid up. Resuming its service would be
+# giving away hosting: the money side has already decided this one should be off.
+DELINQUENT_SUBSCRIPTION_STATES = ("past_due", "paused", "cancelled", "expired")
+
+
 def _resume_cascade_suspended_services(customer: Customer) -> None:
     """Resume exactly what suspending this customer stopped, and nothing else.
 
-    Matching on the reason token is the whole design. Resuming on status alone would
-    restore service to an account suspended for non-payment or shut off by hand for
-    abuse; payment_convergence narrows its own resume the same way, on "payment_overdue".
+    Matching on the reason token is the design: resuming on status alone would restore
+    service to an account shut off for non-payment or by hand for abuse, and
+    payment_convergence narrows its own resume the same way, on "payment_overdue".
+
+    The token alone is NOT sufficient, for a reason that is easy to miss. The grace-expiry
+    job writes "payment_overdue" only when it finds the service ACTIVE
+    (subscription_service.py, handle_grace_period_expirations). If grace expires while the
+    service is already suspended by this cascade, the subscription moves to past_due,
+    paused or cancelled while the service keeps the "customer_suspended" token. Trusting
+    the token by itself would then hand an unpaid customer their hosting back on
+    reactivation. So the subscription state is checked too.
+
+    Each row is re-read under a lock before it is resumed. The queryset is evaluated once,
+    and another worker can change a later row's reason between that read and its turn.
     """
     try:
+        from django.db import transaction as db_transaction
+
+        from apps.billing.subscription_models import Subscription
         from apps.provisioning.models import Service
         from apps.provisioning.services import ServiceManagementService
 
-        cascade_suspended = Service.objects.filter(
-            customer=customer, status="suspended", suspension_reason=CUSTOMER_SUSPENSION_REASON
+        candidate_ids = list(
+            Service.objects.filter(
+                customer=customer, status="suspended", suspension_reason=CUSTOMER_SUSPENSION_REASON
+            ).values_list("id", flat=True)
         )
 
-        for service in cascade_suspended:
-            result = ServiceManagementService.manage_service(str(service.id), "resume")
-            if result.is_ok():
-                logger.info(f"⚡ [Customer] Service resumed: {service.id}")
-            else:
-                logger.error(f"🔥 [Customer] Service resume failed for {service.id}: {result.unwrap_err()}")
+        for service_id in candidate_ids:
+            with db_transaction.atomic():
+                service = (
+                    Service.objects.select_for_update(of=("self",))
+                    .filter(id=service_id, status="suspended", suspension_reason=CUSTOMER_SUSPENSION_REASON)
+                    .first()
+                )
+                if service is None:
+                    logger.info(f"⏭️ [Customer] Service {service_id} changed before resume; left alone")
+                    continue
+
+                if Subscription.objects.filter(
+                    service_id=service_id, status__in=DELINQUENT_SUBSCRIPTION_STATES
+                ).exists():
+                    logger.warning(f"⏭️ [Customer] Service {service_id} left suspended: its subscription is not paid up")
+                    continue
+
+                result = ServiceManagementService.manage_service(str(service_id), "resume")
+                if result.is_ok():
+                    logger.info(f"⚡ [Customer] Service resumed: {service_id}")
+                else:
+                    logger.error(f"🔥 [Customer] Service resume failed for {service_id}: {result.unwrap_err()}")
 
     except Exception as e:
         logger.exception(f"🔥 [Customer] Service resume failed: {e}")

@@ -15,8 +15,14 @@ tests/integration/test_platform_error_localisation.py derives the platform's mes
 set from its source and fails if this list drifts in either direction — a message added
 there and not here, or one kept here after the platform dropped it.
 
-Interpolated messages are excluded on purpose. Their msgid holds a {} template while
-the portal receives the formatted string, so a lookup cannot match by construction.
+Interpolated messages are excluded because they CANNOT work here, not because they do
+not matter. Their msgid holds a {} template while the portal receives the already
+formatted string, so a lookup can never match. Most of them report internal catalogue
+inconsistencies a customer could not act on anyway, but that is not true of all of them:
+"Item '{}': a domain is required before ordering" is squarely actionable and still
+reaches the customer in English. Translating it needs a different mechanism, such as the
+platform sending a code or the message being split so the product name is the only
+interpolated part. Recorded here so the gap is known rather than assumed away.
 """
 
 from django.utils.translation import gettext_lazy as _

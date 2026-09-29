@@ -15,11 +15,15 @@ from __future__ import annotations
 from decimal import Decimal
 
 from django.test import TestCase
+from django.utils import timezone as django_timezone
 
 from apps.billing.models import Currency
+from apps.billing.subscription_models import Subscription
 from apps.customers.models import Customer
 from apps.customers.signals import CUSTOMER_SUSPENSION_REASON
+from apps.products.models import Product
 from apps.provisioning.models import Service, ServicePlan
+from tests.helpers.fsm_helpers import force_status
 
 
 class CustomerSuspensionCascadeTests(TestCase):
@@ -150,3 +154,40 @@ class CustomerReactivationCascadeTests(CustomerSuspensionCascadeTests):
         unpaid.refresh_from_db()
         self.assertEqual(unpaid.status, "suspended")
         self.assertEqual(unpaid.suspension_reason, "payment_overdue")
+
+    def test_a_service_whose_subscription_went_delinquent_is_not_resumed(self) -> None:
+        """The reason token alone would hand back unpaid hosting.
+
+        handle_grace_period_expirations writes "payment_overdue" ONLY when it finds the
+        service active. If grace expires while this cascade already has it suspended,
+        the subscription moves to past_due/paused/cancelled and the service keeps the
+        "customer_suspended" token. Resuming on the token alone therefore restores
+        service to a customer who has stopped paying, and nothing downstream corrects it.
+        """
+        service = self._service(domain="cascade-delinquent.example.com")
+        self._suspend_customer()
+        service.refresh_from_db()
+        self.assertEqual(service.status, "suspended", "precondition: the cascade suspended it")
+        self.assertEqual(service.suspension_reason, CUSTOMER_SUSPENSION_REASON, "precondition: token unchanged")
+
+        product = Product.objects.create(
+            slug="cascade-delinquent-product", name="Cascade Delinquent", product_type="shared_hosting"
+        )
+        now = django_timezone.now()
+        subscription = Subscription.objects.create(
+            customer=self.customer,
+            product=product,
+            currency=self.currency,
+            service_id=service.id,
+            unit_price_cents=5000,
+            billing_cycle="monthly",
+            current_period_start=now,
+            current_period_end=now + django_timezone.timedelta(days=30),
+            next_billing_date=now + django_timezone.timedelta(days=30),
+        )
+        force_status(subscription, "past_due")
+
+        self._reactivate_customer()
+
+        service.refresh_from_db()
+        self.assertEqual(service.status, "suspended", "an unpaid customer got their hosting back")
