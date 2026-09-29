@@ -23,6 +23,7 @@ from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_http_methods, require_POST
 
+from apps.common.decorators import admin_required
 from apps.common.security_decorators import (
     audit_service_call,
     monitor_performance,
@@ -2195,7 +2196,7 @@ def virtualmin_account_activate(request: HttpRequest, account_id: str) -> HttpRe
 
 
 @login_required
-@user_passes_test(is_staff_or_superuser)
+@admin_required  # Disarms the guard on virtualmin_account_delete — same tier as the delete itself.
 @require_POST
 @audit_service_call("virtualmin_account_toggle_protection")
 def virtualmin_account_toggle_protection(request: HttpRequest, account_id: str) -> HttpResponse:
@@ -2241,7 +2242,7 @@ def virtualmin_account_toggle_protection(request: HttpRequest, account_id: str) 
 
 
 @login_required
-@user_passes_test(is_staff_or_superuser)
+@admin_required  # Permanent destruction of customer hosting. Admin/superuser only.
 @require_http_methods(["DELETE", "POST"])
 @audit_service_call("virtualmin_account_delete")
 def virtualmin_account_delete(request: HttpRequest, account_id: str) -> HttpResponse:

@@ -7,7 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_No unreleased changes._
+### Fixed
+
+- Suspending a customer now suspends their services. The cascade called a method that does not
+  exist, so the failure was swallowed and every service kept running while the account read as
+  suspended. Returning the customer to active resumes exactly the services that cascade stopped,
+  leaving anything suspended for non-payment or by hand untouched.
+- A domain status change no longer reaches Virtualmin before its transaction commits, so a rolled
+  back change can no longer leave the control panel disabled while the database says active.
+- A failure part way through creating a proforma no longer consumes an invoice sequence number.
+  Romanian sequential numbering requires those to have no gaps.
+- Six of the eight endpoints documented as public answered 401 to every caller, including the token
+  endpoint whose whole purpose is to be reachable without a token. Which endpoints are public is now
+  read from the endpoint itself rather than from a separate list that had drifted away from it.
+- Romanian customers see order validation errors in Romanian at checkout. These messages are
+  produced by the staff service, which has no customer language while serving an internal request,
+  so they arrived in English and were listed verbatim under a translated heading.
+
+### Changed
+
+- Deleting a Virtualmin account, and clearing the deletion-protection flag that guards it, now
+  require an administrator rather than any staff member.
 
 ---
 

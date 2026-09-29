@@ -51,8 +51,6 @@ from apps.billing.signals import (
     _handle_invoice_status_change,
     _handle_invoice_voided,
     _handle_new_invoice_creation,
-    _handle_overdue_order_services,
-    _handle_overdue_service_suspension,
     _handle_payment_failure,
     _handle_payment_refund,
     _handle_payment_status_change,
@@ -1089,12 +1087,19 @@ class TestSyncOrdersOnInvoiceStatusChange(TestCase):
         _sync_orders_on_invoice_status_change(invoice, "issued", "void")
         mock_os.update_order_status.assert_called_once()
 
-    @patch("apps.billing.signals._handle_overdue_order_services")
-    def test_overdue_handles_services(self, mock_overdue):
+    def test_overdue_no_longer_suspends_from_the_status_change(self):
+        """Non-payment suspension belongs to the subscription grace policy.
+
+        handle_grace_period_expirations already does it end to end, on a daily schedule,
+        with an audit event. What used to be here called a nonexistent method and never
+        ran. The sync must do nothing to services.
+        """
         invoice = MagicMock()
         invoice.orders.exists.return_value = True
+
         _sync_orders_on_invoice_status_change(invoice, "issued", "overdue")
-        mock_overdue.assert_called_once_with(invoice)
+
+        invoice.orders.all.assert_not_called()
 
     def test_exception_handling(self):
         invoice = MagicMock()
@@ -1498,11 +1503,10 @@ class TestHandleInvoicePaid(TestCase):
 
 
 class TestHandleInvoiceOverdue(TestCase):
-    @patch("apps.billing.signals._handle_overdue_service_suspension")
     @patch("apps.billing.signals._update_customer_payment_history")
     @patch("apps.billing.signals._trigger_dunning_process")
     @patch("apps.billing.signals._send_invoice_overdue_email")
-    def test_flow(self, mock_email, mock_dunning, mock_history, mock_suspend):
+    def test_flow(self, mock_email, mock_dunning, mock_history):
         # `document_kind` matters now: the handler refuses to chase anything that is not
         # a receivable, so a double without one silently takes the early return.
         invoice = MagicMock(document_kind=DOCUMENT_KIND_INVOICE)
@@ -1510,7 +1514,6 @@ class TestHandleInvoiceOverdue(TestCase):
         mock_email.assert_called_once()
         mock_dunning.assert_called_once()
         mock_history.assert_called_once_with(invoice.customer, "negative")
-        mock_suspend.assert_called_once()
 
 
 class TestHandleInvoiceOverdueIsNotDunned(TestCase):
@@ -1521,12 +1524,11 @@ class TestHandleInvoiceOverdueIsNotDunned(TestCase):
     package. This is the other direction, which is the one that proves the guard.
     """
 
-    @patch("apps.billing.signals._handle_overdue_service_suspension")
     @patch("apps.billing.signals._update_customer_payment_history")
     @patch("apps.billing.signals._trigger_dunning_process")
     @patch("apps.billing.signals._send_invoice_overdue_email")
-    def test_a_credit_note_is_not_emailed_blackened_or_suspended(
-        self, mock_email: MagicMock, mock_dunning: MagicMock, mock_history: MagicMock, mock_suspend: MagicMock
+    def test_a_credit_note_is_not_emailed_or_blackened(
+        self, mock_email: MagicMock, mock_dunning: MagicMock, mock_history: MagicMock
     ) -> None:
         credit_note = MagicMock(document_kind=DOCUMENT_KIND_CREDIT_NOTE)
 
@@ -1535,7 +1537,6 @@ class TestHandleInvoiceOverdueIsNotDunned(TestCase):
         mock_email.assert_not_called()
         mock_dunning.assert_not_called()
         mock_history.assert_not_called()
-        mock_suspend.assert_not_called()
 
 
 class TestHandleInvoiceVoided(TestCase):
@@ -2003,34 +2004,6 @@ class TestActivatePendingServices(TestCase):
         invoice.orders.all.return_value = [order]
         _activate_pending_services(invoice)
         mock_sas.activate_service.assert_not_called()
-
-
-class TestHandleOverdueServiceSuspension(TestCase):
-    @patch("apps.provisioning.services.ServiceManagementService")
-    def test_suspends_active_services(self, mock_sms):
-        invoice = MagicMock()
-        invoice.number = "INV-001"
-        service = MagicMock()
-        service.status = "active"
-        item = MagicMock()
-        item.service = service
-        order = MagicMock()
-        order.items.filter.return_value = [item]
-        invoice.orders.all.return_value = [order]
-        mock_result = MagicMock()
-        mock_result.is_ok.return_value = True
-        mock_sms.suspend_service.return_value = mock_result
-
-        _handle_overdue_service_suspension(invoice)
-        mock_sms.suspend_service.assert_called_once()
-
-
-class TestHandleOverdueOrderServices(TestCase):
-    @patch("apps.billing.signals._handle_overdue_service_suspension")
-    def test_delegates(self, mock_suspend):
-        invoice = MagicMock()
-        _handle_overdue_order_services(invoice)
-        mock_suspend.assert_called_once_with(invoice)
 
 
 class TestInvalidateTaxCache(TestCase):

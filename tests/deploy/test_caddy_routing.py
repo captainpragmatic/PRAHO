@@ -37,7 +37,27 @@ CONFIGS = {
     "native": "deploy/ansible/roles/praho-native/templates/Caddyfile.native.j2",
     "docker": "deploy/ansible/roles/praho/templates/Caddyfile.j2",
 }
-PUBLIC_EXACT = {"/api/users/health", "/api/orders/products"}
+# Public API paths the edge must route to the right upstream, with and without a
+# trailing slash. This is a CADDY ROUTING contract only. It used to double as the
+# middleware's HMAC-exemption list, and the two purposes disagreed: six more endpoints
+# were marked public in code than were named here. The exemption contract is now
+# PUBLIC_API_VIEWS below, read from the decorator itself.
+PUBLIC_ROUTED_PATHS = {"/api/users/health", "/api/orders/products"}
+
+# Views carrying @public_api_endpoint. The middleware no longer keeps a parallel path
+# list; it resolves the request and reads this marker, so this set IS the contract for
+# what bypasses HMAC authentication. The previous hardcoded path list named only two of
+# these eight, which is why the other six answered 401 while being documented as public.
+PUBLIC_API_VIEWS = {
+    "available_service_plans_api",
+    "currencies_api",
+    "customer_register_api",
+    "health_check",
+    "obtain_token",
+    "product_detail",
+    "product_list",
+    "support_categories_api",
+}
 STAFF_SESSION_PREFIXES = ["/api/customers/"]
 SHARED_PATHS = ("/dashboard/", "/billing/", "/tickets/", "/i18n/", "/cookie-policy/", "/auth/login/")
 PUBLIC_ROUTES = (
@@ -187,12 +207,37 @@ def _middleware_assignment(name: str) -> ast.expr:
     raise AssertionError(f"Missing middleware contract: {name}")
 
 
+def _public_api_views() -> set[str]:
+    """Every view marked @public_api_endpoint, asserting the marker sits outermost.
+
+    Position is load-bearing, not style. The decorator only sets an attribute on the
+    callable it is given, and the middleware reads that attribute off resolve().func.
+    Applied BELOW @api_view the attribute lands on the inner function, api_view returns
+    a new wrapper without it, and the endpoint answers 401 while still looking public in
+    the source. That is the defect this contract exists to prevent recurring.
+    """
+    found: set[str] = set()
+    for path in sorted((ROOT / "services" / "platform" / "apps" / "api").rglob("views.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.FunctionDef):
+                continue
+            names = [d.id for d in node.decorator_list if isinstance(d, ast.Name)]
+            if "public_api_endpoint" not in names:
+                continue
+            first = node.decorator_list[0]
+            assert isinstance(first, ast.Name) and first.id == "public_api_endpoint", (
+                f"{path.relative_to(ROOT)}:{node.lineno} {node.name}: @public_api_endpoint must be "
+                "the outermost decorator or the middleware cannot see it and the endpoint 401s"
+            )
+            found.add(node.name)
+    return found
+
+
 @pytest.mark.parametrize("name", CONFIGS)
 def test_route_ownership_and_public_exemptions(name: str) -> None:
     _assert_contract(name, _config(name))
-    exact = _middleware_assignment("_AUTH_EXEMPT_EXACT_PATHS_RAW")
-    assert isinstance(exact, ast.Call)
-    assert ast.literal_eval(exact.args[0]) == PUBLIC_EXACT
+    assert _public_api_views() == PUBLIC_API_VIEWS
     prefixes = _middleware_assignment("staff_session_allowed_prefixes")
     assert ast.literal_eval(prefixes) == STAFF_SESSION_PREFIXES
 
@@ -444,7 +489,7 @@ def _running_edge(name: str, tmp_path: Path) -> Iterator[tuple[str, str, str]]:
 
 def _ownership_table(name: str) -> Iterator[tuple[str, str, str, str]]:
     public = list(PUBLIC_ROUTES)
-    for path in sorted(PUBLIC_EXACT):
+    for path in sorted(PUBLIC_ROUTED_PATHS):
         public.extend((("GET", path), ("GET", path + "/")))
     if name != "platform":
         for method, path in [("GET", "/status/"), *public, *(("GET", path) for path in SHARED_PATHS)]:

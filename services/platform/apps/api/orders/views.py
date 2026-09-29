@@ -128,10 +128,10 @@ class ProductCatalogThrottle(EndpointRateThrottle):
     # intended ceiling on these two views for both traffic shapes.
 
 
+@public_api_endpoint
 @api_view(["GET"])
 @permission_classes([AllowAny])
 @throttle_classes([ProductCatalogThrottle])
-@public_api_endpoint
 def product_list(request: Request) -> Response:
     """
     Public endpoint — intentionally accessible without HMAC authentication.
@@ -163,10 +163,10 @@ def product_list(request: Request) -> Response:
     return Response({"results": serializer.data, "count": len(serializer.data)})
 
 
+@public_api_endpoint
 @api_view(["GET"])
 @permission_classes([AllowAny])
 @throttle_classes([ProductCatalogThrottle])
-@public_api_endpoint
 def product_detail(request: Request, slug: str) -> Response:
     """
     Public endpoint — intentionally accessible without HMAC authentication.

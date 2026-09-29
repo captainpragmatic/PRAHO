@@ -25,6 +25,7 @@ from django.core.cache import cache
 from django.db import DatabaseError, InterfaceError
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
+from django.urls import Resolver404, resolve
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
@@ -343,34 +344,51 @@ class GDPRComplianceMiddleware:
 # ===============================================================================
 
 
-# Exempt paths: endpoints accessible WITHOUT HMAC authentication.
-# These are for truly public/unauthenticated external callers only.
-# The Portal's PlatformAPIClient always signs ALL requests with HMAC,
-# so portal calls never rely on this exempt list.
-# The startswith->exact-match change (commit 2577b41d) was intentional:
-# it prevents unintended sub-path exemptions (e.g., /api/users/register/extra/).
-# Login and both password-reset endpoints require HMAC authentication.
-# Exempt paths stored without trailing slash; matching normalizes both sides.
+# Endpoints reachable WITHOUT HMAC authentication, for genuinely public external
+# callers only. The Portal's PlatformAPIClient signs every request, so portal traffic
+# never depends on this. There is no longer a list of literal paths here: the exemption
+# is read off the view, below.
+
 
 #
-# Each exempt path must have @public_api_endpoint on the corresponding view.
-# tests/api/test_api_auth_regressions.py::TestAPIAuthCoverage checks that every
-# /api/ view has an auth decorator or public marker; it does not compare exempt paths.
-_AUTH_EXEMPT_EXACT_PATHS_RAW: frozenset[str] = frozenset(
-    {
-        "/api/users/health",
-        "/api/orders/products",
-    }
-)
+# Exemption is derived from the view itself, not from a parallel list. The previous
+# hand-kept list of literal paths had drifted: six of the eight views carrying
+# @public_api_endpoint were absent from it and answered 401 to every caller,
+# including /api/users/token/, whose whole purpose is to be reachable without a
+# token. A second source of truth for one fact will drift again, so there is only
+# one now. As a bonus this expresses parameterised routes such as
+# /api/orders/products/<slug>/, which exact string matching structurally cannot.
+def _is_auth_exempt(request: HttpRequest) -> bool:
+    """Return True when the resolved view is explicitly marked public.
 
+    The marker must sit OUTERMOST in the view's decorator stack. DRF's ``api_view``
+    returns the callable from ``as_view()`` and does not copy ``__dict__``, so a
+    marker applied beneath it is invisible here. ``tests/api/test_api_auth_regressions.py``
+    pins that ordering for every marked view.
 
-def _is_auth_exempt(path: str) -> bool:
-    """Check if a request path is exempt from HMAC authentication.
-
-    Normalizes trailing slashes so both '/api/users/health' and
-    '/api/users/health/' match, regardless of Django's APPEND_SLASH setting.
+    An unresolvable path is never exempt — failing closed keeps a 404 probe from
+    becoming an authentication bypass. A slash-less form of an exempt route is still
+    exempt, because this middleware runs before Django can issue its APPEND_SLASH
+    redirect; without that retry, '/api/users/health' would start answering 401 where
+    it used to answer 301 then 200.
     """
-    return path.rstrip("/") in _AUTH_EXEMPT_EXACT_PATHS_RAW
+    path = request.path_info
+    # Keep the reach of the marker where it was. The deleted list held only /api/ paths,
+    # so a stray @public_api_endpoint could not previously exempt anything else. Reading
+    # the resolved view widened that to the entire ROOT_URLCONF, including the billing
+    # prefixes gated below, where a marker on a staff view would silently drop HMAC.
+    if not path.startswith("/api/"):
+        return False
+
+    urlconf = getattr(request, "urlconf", None)
+    candidates = [path] if path.endswith("/") else [path, f"{path}/"]
+    for candidate in candidates:
+        try:
+            match = resolve(candidate, urlconf=urlconf)
+        except Resolver404:
+            continue
+        return bool(getattr(match.func, "_is_public_api_endpoint", False))
+    return False
 
 
 class PortalServiceHMACMiddleware:
@@ -606,7 +624,7 @@ class PortalServiceHMACMiddleware:
             # Login and both password-reset endpoints require signed Portal requests
             # to prevent direct credential brute-force and reset-mail abuse.
 
-            if _is_auth_exempt(request.path):
+            if _is_auth_exempt(request):
                 logger.debug("🔓 [HMAC Auth] Skipping HMAC validation for auth endpoint: %s", request.path)
                 return self.get_response(request)
 

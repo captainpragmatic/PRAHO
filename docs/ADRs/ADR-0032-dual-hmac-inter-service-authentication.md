@@ -50,7 +50,11 @@ Portal signs every outbound API request to Platform using a canonical string sch
 **Code locations:**
 - Middleware (verifier): `services/platform/apps/common/middleware.py` — `PortalServiceHMACMiddleware`
 - Client (signer): `services/portal/apps/api_client/services.py` — `PlatformAPIClient`
-- Exempt paths: `_AUTH_EXEMPT_EXACT_PATHS_RAW` frozenset with `_is_auth_exempt()` helper (handles `APPEND_SLASH`)
+- Exemption: `_is_auth_exempt()` resolves the request and reads the `@public_api_endpoint`
+  marker off the view (handles `APPEND_SLASH`, limited to `/api/`). There is deliberately no
+  parallel list of literal paths. The frozenset this replaced, `_AUTH_EXEMPT_EXACT_PATHS_RAW`,
+  had drifted from the marker: six of the eight views documented as public were missing from
+  it and answered 401, including the token endpoint. One fact, one source.
 
 ### System 2: Platform to Portal (Webhook Signing)
 

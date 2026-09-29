@@ -31,13 +31,14 @@ class ServiceManagementService:
     VALID_ACTIONS = ("start", "stop", "restart", "suspend", "resume", "check_status")
 
     @staticmethod
-    def manage_service(service_id: str, action: str) -> Result[dict[str, Any], str]:
+    def manage_service(service_id: str, action: str, reason: str = "") -> Result[dict[str, Any], str]:
         """
         Manage a service with the specified action.
 
         Args:
             service_id: UUID of the service to manage
             action: One of 'start', 'stop', 'restart', 'suspend', 'resume', 'check_status'
+            reason: Recorded on the service when the action is 'suspend'; ignored otherwise
 
         Returns:
             Result with operation details or error message
@@ -82,9 +83,9 @@ class ServiceManagementService:
                 logger.info(f"⚙️ [ServiceMgmt] Restarted service {service_id}")
 
             elif action == "suspend":
-                service.suspend()
+                service.suspend(reason=reason)
                 service.save(update_fields=["status", "suspended_at", "suspension_reason", "updated_at"])
-                logger.info(f"⚙️ [ServiceMgmt] Suspended service {service_id}")
+                logger.info(f"⚙️ [ServiceMgmt] Suspended service {service_id}: {reason or 'no reason given'}")
 
             elif action == "resume":
                 if service.status != "suspended":

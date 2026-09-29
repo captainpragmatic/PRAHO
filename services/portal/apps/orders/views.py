@@ -27,6 +27,7 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse_lazy
 from django.utils import timezone
+from django.utils.translation import gettext
 from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy as _l
 from django.views.decorators.http import require_http_methods
@@ -264,6 +265,31 @@ def _is_profile_error(error: object) -> bool:
     return any(keyword in str(error).lower() for keyword in _PROFILE_KEYWORDS)
 
 
+def localise_platform_error(message: object) -> str:
+    """Translate a platform error by treating the received string as a msgid.
+
+    The platform already wraps these in gettext (apps/orders/preflight.py), but renders
+    them with str() while serving an HMAC request, where no customer language is active,
+    so they always arrive in English. The portal knows the language and the msgid IS the
+    English text, so looking it up here completes the translation with no code contract
+    and no change to the wire format.
+
+    gettext returns its input unchanged on a miss, so an interpolated message such as
+    "Item 'x': invalid pricing" stays English rather than breaking. Those are internal
+    consistency errors a customer cannot act on anyway.
+
+    Callers must keep the ORIGINAL strings for _is_profile_error, which keyword-matches
+    the English text to decide whether to show the profile-completion prompt.
+
+    Known property, not a bug: any received string that happens to match an unrelated
+    msgid is translated as that msgid. gettext("None") returns "Niciunul" here, because
+    a form label owns that msgid. Harmless for these messages, which are full sentences,
+    but it is the reason this is applied only to platform error text and not to
+    arbitrary API output.
+    """
+    return gettext(str(message))
+
+
 def _create_and_process_order(request: HttpRequest, ctx: CheckoutContext) -> HttpResponse:  # noqa: C901, PLR0911, PLR0912, PLR0915
     """Shared order creation logic used by both create_order and process_payment.
 
@@ -336,9 +362,11 @@ def _create_and_process_order(request: HttpRequest, ctx: CheckoutContext) -> Htt
                 if any(_is_profile_error(e) for e in errors):
                     messages.error(request, _("We need more information to complete your order."))
                 else:
-                    error_details = " ".join(str(e) for e in errors[:3])
-                    # Use %s substitution instead of .format() to avoid crashes when
-                    # error_details contains curly braces (e.g. from untrusted API responses).
+                    # Translate each reason before interpolating. Previously the wrapper was
+                    # translated and the platform detail was not, so a Romanian customer saw a
+                    # half-Romanian sentence. The English original stays in the log line above.
+                    error_details = " ".join(localise_platform_error(e) for e in errors[:3])
+                    # %s rather than .format() so braces in an API response cannot crash this.
                     messages.error(request, _("Order validation failed: %s") % error_details)
                 return redirect("orders:checkout")
 
@@ -961,6 +989,10 @@ def checkout(request: HttpRequest) -> HttpResponse:
         # 🔒 CRITICAL: Check if preflight validation failed with profile-related errors
         if preflight_result and not preflight_result.get("valid", False):
             errors = preflight_result.get("errors", [])
+            # The template lists every blocking reason, and those strings arrive in English.
+            # Translate them for display and leave `errors` untouched, because the
+            # profile-keyword match below and the log line both read the original.
+            preflight_result["display_errors"] = [localise_platform_error(e) for e in errors]
 
             # Look for company profile completeness errors
             profile_related_errors = []

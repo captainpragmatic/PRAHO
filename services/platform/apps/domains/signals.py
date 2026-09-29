@@ -17,6 +17,7 @@ from typing import Any, cast
 
 from django.conf import settings
 from django.core.cache import cache
+from django.db import transaction
 from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 from django.utils import timezone
@@ -905,6 +906,20 @@ def _handle_existing_virtualmin_account(domain: Domain, virtualmin_account: Any)
             )
 
 
+def _sync_domain_to_virtualmin_by_pk(domain_pk: Any) -> None:
+    """Reload the committed domain and sync it. Post-commit entry point.
+
+    Reloading rather than closing over the instance means the provider sees the state
+    that actually committed. A domain deleted between commit and callback is a no-op,
+    not a crash.
+    """
+    domain = Domain.objects.filter(pk=domain_pk).first()
+    if domain is None:
+        logger.warning("⚠️ [CrossApp] Domain %s vanished before Virtualmin sync; skipping", domain_pk)
+        return
+    sync_domain_to_virtualmin(domain)
+
+
 def sync_domain_to_virtualmin(domain: Domain) -> None:
     """
     Sync domain creation/updates to Virtualmin control panel.
@@ -964,9 +979,15 @@ def _handle_domain_status_change_with_virtualmin_sync(domain: Domain, old_status
         # Call existing status change logic
         _handle_domain_status_change(domain, old_status, new_status)
 
-        # Add Virtualmin synchronization for status changes
+        # Add Virtualmin synchronization for status changes.
+        # Deferred to post-commit: this reaches gateway.call("disable-domain", ...), a
+        # real provider mutation. Fired inline it runs inside the caller's still-open
+        # transaction, so a later rollback leaves the panel disabled while the database
+        # says active, and nothing reconciles it back (ADR-0045).
+        # The pk is captured, not the instance, so the callback reads committed state
+        # rather than a mutable object someone may have changed in the meantime.
         if old_status != new_status:
-            sync_domain_to_virtualmin(domain)
+            transaction.on_commit(lambda domain_pk=domain.pk: _sync_domain_to_virtualmin_by_pk(domain_pk))
 
     except Exception as e:
         logger.error(f"🔥 [CrossApp] Enhanced domain status change handling failed for {domain.name}: {e}")

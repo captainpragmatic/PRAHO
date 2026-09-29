@@ -780,9 +780,9 @@ def customer_invoice_summary_api(request: HttpRequest, customer: Customer) -> Re
 # ===============================================================================
 
 
+@public_api_endpoint
 @api_view(["GET"])
 @permission_classes([AllowAny])
-@public_api_endpoint
 def currencies_api(request: HttpRequest) -> Response:
     """
     💱 Currency List API -- intentionally public.

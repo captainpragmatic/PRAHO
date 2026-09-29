@@ -343,10 +343,10 @@ def customer_create_api(request: HttpRequest) -> Response:
 # ===============================================================================
 
 
+@public_api_endpoint
 @api_view(["POST"])
 @permission_classes([AllowAny])
 @throttle_classes([AuthThrottle])
-@public_api_endpoint
 def customer_register_api(request: HttpRequest) -> Response:
     """
     🔐 Customer Registration API -- intentionally public.
