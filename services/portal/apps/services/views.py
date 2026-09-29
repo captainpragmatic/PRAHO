@@ -521,7 +521,9 @@ def service_request_action(request: HttpRequest, service_id: int) -> HttpRespons
     }
     try:
         service = services_api.get_service_detail(customer_id, user_id, service_id)
-        if service.get("status") not in {"active", "suspended"}:
+        # Platform checks receipt identity before current status, including uncertain retries.
+        bound_submission = request.method == "POST" and request.POST.get("submission_id") == submission_id
+        if service.get("status") not in {"active", "suspended"} and not bound_submission:
             return HttpResponseForbidden(_("Requests are available for active or suspended services."))
         context["service"] = service
         if request.method == "POST":

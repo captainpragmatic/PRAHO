@@ -101,7 +101,11 @@ class AuthenticationRateLimitMiddleware:
         # Recovery submissions consume their own budget even when they succeed.
         # They must neither clear login counters nor be cleared by a successful login.
         if request.path.startswith("/password-reset/"):
-            return self.get_response(request)
+            start_time = time.time()
+            try:
+                return self.get_response(request)
+            finally:
+                self._uniform_response_delay(start_time)
 
         # Apply rate limiting to POST requests (actual auth attempts)
         if request.method == "POST":
@@ -388,8 +392,9 @@ class AuthenticationRateLimitMiddleware:
 
     def _uniform_response_delay(self, start_time: float) -> None:
         """
-        🔒 Apply uniform response delay to prevent timing attacks.
-        Ensures all auth responses take similar time regardless of success/failure.
+        Apply the established minimum delay with jitter to short auth requests.
+
+        Slower upstream calls can exceed the target and remain observable.
         """
         elapsed = time.time() - start_time
         target_delay = random.uniform(self.MIN_RESPONSE_TIME, self.MAX_RESPONSE_TIME)  # noqa: S311

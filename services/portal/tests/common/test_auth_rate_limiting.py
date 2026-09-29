@@ -113,6 +113,34 @@ class AuthenticationRateLimitTests(TestCase):
         self.assertEqual(counters.peek("auth_account_attempts_x@example.com"), 0)
         self.assertEqual(counters.peek(self.volume_key), 0)
 
+    def test_recovery_dispatch_applies_timing_delay_without_changing_login_budgets(self) -> None:
+        for outcome, expected_status in (("accepted", 302), ("unavailable", 503), ("limited", 429), ("invalid", 200)):
+            with self.subTest(outcome=outcome):
+                cache.clear()
+                for key in (self.ip_key, self.account_key, self.volume_key, "password_reset_ip_127.0.0.1"):
+                    counters.reset(key)
+                counters.increment(self.ip_key, 900, delta=2)
+                counters.increment(self.account_key, 1800, delta=2)
+                if outcome == "limited":
+                    counters.increment("password_reset_ip_127.0.0.1", 900, delta=5)
+                with (
+                    patch("apps.common.rate_limiting.time") as clock,
+                    patch("apps.common.rate_limiting.random.uniform", return_value=0.3),
+                    patch("apps.users.views.api_client.request_password_reset", return_value={"success": True}) as reset,
+                ):
+                    clock.time.side_effect = [100.0, 100.02]
+                    if outcome == "unavailable":
+                        reset.side_effect = PlatformAPIError("Unavailable", status_code=503)
+                    email = "invalid" if outcome == "invalid" else self.email
+                    response = self.client.post(reverse("users:password_reset"), {"email": email})
+                self.assertEqual(response.status_code, expected_status)
+                clock.sleep.assert_called_once()
+                self.assertAlmostEqual(clock.sleep.call_args.args[0], 0.28)
+                self.assertEqual(counters.peek(self.ip_key), 2)
+                self.assertEqual(counters.peek(self.account_key), 2)
+                self.assertEqual(counters.peek(self.volume_key), 0)
+                self.assertEqual(counters.peek("password_reset_ip_127.0.0.1"), 6 if outcome == "limited" else 1)
+
     def test_login_body_carries_client_ip(self) -> None:
         with patch("apps.users.views.api_client") as platform:
             platform.authenticate_customer.return_value = None

@@ -70,6 +70,40 @@ class PurchaseIdentityContracts(HMACTestMixin, TestCase):
         self.assertEqual(address["city"], "București")
         self.assertEqual(address["postal_code"], "010061")
 
+    def test_registration_and_login_preserve_leading_and_trailing_password_spaces(self):
+        for index, password in enumerate((" Leading-pass123!", "Trailing-pass123! ", " Both-pass123! ")):
+            with self.subTest(password_position=index):
+                cache.clear()
+                data = self.registration(email=f"password-spaces-{index}@example.test")
+                data["user_data"]["password"] = password
+                data["customer_data"]["company_name"] = f"Password Spaces {index} SRL"
+                registered = self.portal_post("/api/customers/register/", data)
+                self.assertEqual(registered.status_code, 201, registered.content)
+                login = self.portal_post("/api/users/login/", {
+                    "email": data["user_data"]["email"], "password": password,
+                })
+                self.assertEqual(login.status_code, 200, login.content)
+                self.assertTrue(login.json()["success"])
+                user = User.objects.get(pk=registered.json()["user"]["id"])
+                self.assertTrue(user.check_password(password))
+                self.assertFalse(user.check_password(password.strip()))
+                trimmed = self.portal_post("/api/users/login/", {
+                    "email": user.email, "password": password.strip(),
+                })
+                self.assertEqual(trimmed.status_code, 401, trimmed.content)
+
+    def test_registration_retains_password_length_validation(self):
+        for password in ("", "short", " short "):
+            with self.subTest(password_length=len(password)):
+                cache.clear()
+                data = self.registration()
+                data["user_data"]["password"] = password
+                response = self.portal_post("/api/customers/register/", data)
+                self.assertEqual(response.status_code, 400, response.content)
+                self.assertIn("password", response.json()["errors"]["user_data"])
+                self.assertFalse(User.objects.exists())
+                self.assertFalse(Customer.objects.exists())
+
     def test_onboarding_checkbox_consent_is_preserved_without_a_user_timestamp(self):
         data = self.registration()
         result = SecureUserRegistrationService.register_new_customer_owner(**data)

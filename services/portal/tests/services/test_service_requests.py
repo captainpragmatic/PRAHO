@@ -201,6 +201,49 @@ class ServiceRequestViewTests(SimpleTestCase):
         self.assertEqual(self.api.request_service_action.call_count, 2)
         self.assertEqual(self.api.request_service_action.call_args.kwargs["submission_id"], submission_id)
 
+    def test_accepted_retry_reaches_platform_after_service_termination(self) -> None:
+        submission_id, _ = self._open_form()
+        first, _ = self._post(submission_id)
+        self.api.get_service_detail.return_value["status"] = "terminated"
+        replay, _ = self._post(submission_id)
+        self.assertEqual(replay.status_code, 302)
+        self.assertEqual(replay.url, first.url)
+        self.assertEqual(self.api.request_service_action.call_count, 2)
+        self.assertEqual(self.api.request_service_action.call_args.kwargs["submission_id"], submission_id)
+
+        self.api.request_service_action.side_effect = PlatformAPIError("Different details", status_code=409)
+        conflict, _ = self._post(submission_id, reason="Changed request")
+        self.assertContains(conflict, "different details", status_code=409)
+        self.session["user_memberships"][0]["role"] = "viewer"
+        denied, _ = self._post(submission_id)
+        self.assertEqual(denied.status_code, 403)
+        self.assertEqual(self.api.request_service_action.call_count, 3)
+
+    def test_uncertain_retry_reaches_platform_after_service_termination(self) -> None:
+        submission_id, _ = self._open_form()
+        self.api.request_service_action.side_effect = [PlatformAPIError("timeout", status_code=504), self.receipt]
+        first, _ = self._post(submission_id)
+        self.assertContains(first, "temporarily unavailable")
+        self.api.get_service_detail.return_value["status"] = "terminated"
+        replay, _ = self._post(submission_id)
+        self.assertEqual(replay.status_code, 302)
+        self.assertEqual(replay.url, reverse("tickets:detail", kwargs={"ticket_id": 91}))
+        self.assertEqual(
+            [call.kwargs["submission_id"] for call in self.api.request_service_action.call_args_list],
+            [submission_id, submission_id],
+        )
+
+    def test_new_request_rejected_by_platform_after_status_change_is_not_acknowledged(self) -> None:
+        submission_id, _ = self._open_form()
+        self.api.get_service_detail.return_value["status"] = "terminated"
+        self.api.request_service_action.side_effect = PlatformAPIError("Inactive service", status_code=400)
+        response, request = self._post(submission_id)
+        self.assertContains(response, "Unable to submit service request")
+        self.assertFalse(any("submitted" in str(message) for message in get_messages(request)))
+        self.api.request_service_action.assert_called_once()
+        fresh_get = service_request_action(self._request(), service_id=55)
+        self.assertEqual(fresh_get.status_code, 403)
+
     def test_timeout_retains_form_values_and_retry_uses_original_submission_id(self) -> None:
         submission_id, _ = self._open_form()
         self.api.request_service_action.side_effect = [PlatformAPIError("timeout", status_code=504), self.receipt]

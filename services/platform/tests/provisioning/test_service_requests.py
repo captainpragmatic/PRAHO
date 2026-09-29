@@ -114,6 +114,26 @@ class ServiceRequestTests(HMACTestMixin, TestCase):
         self.assertEqual(Ticket.objects.count(), 1)
         self.assertNotIn("rejected", duplicate.content.decode())
 
+    def test_duplicate_after_termination_preserves_receipt_but_new_or_unauthorized_requests_fail(self):
+        payload = self.payload("cancel_request")
+        receipt = self.submit(payload)
+        self.service.terminate()
+        self.service.save()
+
+        replay = self.portal_post(self.path, payload)
+        self.assertEqual(replay.status_code, 200, replay.content)
+        self.assertEqual(replay.json()["data"], receipt)
+        new_request = self.portal_post(self.path, {**payload, "submission_id": str(uuid4())})
+        self.assertEqual(new_request.status_code, 400, new_request.content)
+        changed = self.portal_post(self.path, {**payload, "reason": "Different request"})
+        self.assertEqual(changed.status_code, 409, changed.content)
+        self.membership.is_active = False
+        self.membership.save(update_fields=["is_active"])
+        denied = self.portal_post(self.path, payload)
+        self.assertEqual(denied.status_code, 403, denied.content)
+        self.assertEqual(Ticket.objects.count(), 1)
+        self.assertEqual(ServiceRequest.objects.count(), 1)
+
     def test_private_review_completion_and_customer_visibility(self):
         receipt = self.submit()
         ticket = Ticket.objects.get(pk=receipt["ticket_id"])

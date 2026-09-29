@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rechecks one-time use under a database lock, and uses separate recovery rate limits.
 - Recovery email failures keep a neutral public acknowledgement and private diagnostics;
   accepted service-request retries keep their identity, and staff review dates follow local preferences.
+- Registration preserves password whitespace, recovery retains its response delay, and
+  service-request retries can recover the original receipt after service termination.
 - Staff domain filters and pagination, Audit Apply Filters, and shared button attribute rendering.
 - Staff settlement now confirms only the cash remaining after gift-card reservations.
 - Closed invoices and expired or closed proformas no longer display a request to pay again.

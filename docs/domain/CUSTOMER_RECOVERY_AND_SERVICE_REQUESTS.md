@@ -28,6 +28,8 @@ of five per IP and per reset link per 15 minutes. IP limits apply only when clie
 are distinguishable through the configured trusted proxies. These counters are independent of login attempts;
 opening the link or form consumes no quota. Platform's existing authentication
 throttle also applies; its IP limit is shared by requests from a Portal host.
+Recovery dispatch retains the authentication middleware's 100–500 ms response floor
+with jitter. This does not equalize synchronous mail calls that take longer than that target.
 
 Existing Portal session-hash validation still rejects sessions created before a
 password change. Native Platform recovery remains a separate staff-facing flow.
@@ -47,6 +49,9 @@ second ticket. The original customer, service, and requester remain on the reque
 even if someone edits the ticket's related-service field.
 Portal retains an accepted submission UUID for POST retries after a lost redirect;
 opening a fresh request form rotates it for the next request.
+Bound POST retries also reach Platform after the service's status changes. Platform
+returns a matching receipt while still checking current membership and ownership;
+new submissions for inactive services remain rejected.
 
 ### Staff workflow
 
