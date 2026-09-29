@@ -52,6 +52,7 @@ class CustomerLoginForm(forms.Form):
 
     password = forms.CharField(
         label=_("Password"),
+        strip=False,
         widget=forms.PasswordInput(
             attrs={
                 "class": "w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400",
@@ -134,6 +135,7 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
 
     password1 = forms.CharField(
         label=_("Password"),
+        strip=False,
         widget=forms.PasswordInput(
             attrs={
                 "class": "w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400",
@@ -144,6 +146,7 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
 
     password2 = forms.CharField(
         label=_("Confirm Password"),
+        strip=False,
         widget=forms.PasswordInput(
             attrs={
                 "class": "w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400",
@@ -583,11 +586,13 @@ class PasswordResetConfirmForm(forms.Form):
 
     new_password = forms.CharField(
         label=_("New Password"),
+        strip=False,
         widget=forms.PasswordInput(attrs={"autocomplete": "new-password"}),
         help_text=_("Choose a strong password with at least 12 characters."),
     )
     confirm_password = forms.CharField(
         label=_("Confirm New Password"),
+        strip=False,
         widget=forms.PasswordInput(attrs={"autocomplete": "new-password"}),
         help_text=_("Re-enter your new password to confirm."),
     )
@@ -619,6 +624,7 @@ class ChangePasswordForm(forms.Form):
 
     current_password = forms.CharField(
         label=_("Current Password"),
+        strip=False,
         widget=forms.PasswordInput(
             attrs={
                 "class": "w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400",
@@ -631,6 +637,7 @@ class ChangePasswordForm(forms.Form):
 
     new_password = forms.CharField(
         label=_("New Password"),
+        strip=False,
         widget=forms.PasswordInput(
             attrs={
                 "class": "w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400",
@@ -643,6 +650,7 @@ class ChangePasswordForm(forms.Form):
 
     confirm_password = forms.CharField(
         label=_("Confirm New Password"),
+        strip=False,
         widget=forms.PasswordInput(
             attrs={
                 "class": "w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400",
@@ -1027,4 +1035,4 @@ class CompanyCreationForm(CountryDefaultsMixin, forms.Form):
 class MFAReauthenticationForm(TwoFactorVerifyForm):
     """Step-up credentials for MFA removal and recovery-code regeneration."""
 
-    password = forms.CharField(label=_("Current password"), widget=forms.PasswordInput)
+    password = forms.CharField(label=_("Current password"), widget=forms.PasswordInput, strip=False)

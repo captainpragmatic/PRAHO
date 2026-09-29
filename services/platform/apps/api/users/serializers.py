@@ -26,6 +26,8 @@ from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
 from apps.common.localisation import DATE_FORMAT_CHOICES, LANGUAGE_CHOICES
+from apps.common.request_ip import get_safe_client_ip
+from apps.common.validators import log_security_event
 from apps.users.mfa import MFAService
 
 if TYPE_CHECKING:
@@ -186,7 +188,7 @@ class MFADisableSerializer(serializers.Serializer):
     """
 
     token = serializers.CharField(max_length=8, min_length=6)
-    password = serializers.CharField(write_only=True)
+    password = serializers.CharField(write_only=True, trim_whitespace=False)
 
     def validate(self, data: dict[str, Any]) -> dict[str, Any]:
         """Validate password and 2FA token"""
@@ -232,6 +234,19 @@ class PasswordResetRequestSerializer(serializers.Serializer):
 
     email = serializers.EmailField()
 
+    @staticmethod
+    def accepted_response() -> dict[str, Any]:
+        """Acknowledge the request without exposing account or delivery status."""
+        return {
+            "success": True,
+            "message": str(
+                _(
+                    "If an eligible account exists and email delivery is available, "
+                    "you will receive password reset instructions."
+                )
+            ),
+        }
+
     def validate_email(self, value: str) -> str:
         """Normalize email"""
         return value.lower().strip()
@@ -247,7 +262,7 @@ class PasswordResetRequestSerializer(serializers.Serializer):
         except User.DoesNotExist:
             # Don't reveal if user exists or not for security
             logger.warning(f"🚨 [Password Reset] Reset requested for non-existent email: {email}")
-            return {"success": True, "message": "If the email exists, a reset link has been sent."}
+            return self.accepted_response()
 
         # Generate reset token
         token = default_token_generator.make_token(user)
@@ -260,8 +275,17 @@ class PasswordResetRequestSerializer(serializers.Serializer):
             parsed_base = urlsplit(base)
         except ValueError as exc:
             raise ImproperlyConfigured("portal.public_base_url is not configured") from exc
-        if parsed_base.scheme not in {"http", "https"} or not parsed_base.netloc:
-            raise ImproperlyConfigured("portal.public_base_url is not configured")
+        if (
+            parsed_base.scheme not in {"http", "https"}
+            or not parsed_base.hostname
+            or parsed_base.username is not None
+            or parsed_base.password is not None
+            or parsed_base.path
+            or parsed_base.query
+            or parsed_base.fragment
+            or (parsed_base.scheme == "http" and parsed_base.hostname not in {"localhost", "127.0.0.1", "::1"})
+        ):
+            raise ImproperlyConfigured("portal.public_base_url must be an HTTPS origin (HTTP is allowed for loopback).")
 
         reset_url = f"{base}/password-reset/confirm/{uid}/{token}/"
         context = {
@@ -278,7 +302,7 @@ class PasswordResetRequestSerializer(serializers.Serializer):
 
         try:
             # Send email
-            send_mail(
+            sent = send_mail(
                 subject=subject,
                 message=text_message,
                 from_email=settings.DEFAULT_FROM_EMAIL,
@@ -286,6 +310,8 @@ class PasswordResetRequestSerializer(serializers.Serializer):
                 html_message=html_message,
                 fail_silently=False,
             )
+            if not sent:
+                raise OSError("Email backend did not accept the recovery message")
 
             logger.info(f"📧 [Password Reset] Reset email sent to: {user.email}")
 
@@ -293,7 +319,12 @@ class PasswordResetRequestSerializer(serializers.Serializer):
             logger.error(f"🔥 [Password Reset] Failed to send email to {user.email}: {e}")
             raise serializers.ValidationError(_("Failed to send reset email. Please try again later.")) from e
 
-        return {"success": True, "message": "If the email exists, a reset link has been sent."}
+        return self.accepted_response()
+
+
+class InvalidPasswordResetLink(serializers.ValidationError):
+    default_detail = _("Invalid or expired reset link.")
+    default_code = "invalid_reset_link"
 
 
 class PasswordResetConfirmSerializer(serializers.Serializer):
@@ -301,10 +332,10 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
     Serializer for password reset confirmation.
     """
 
-    token = serializers.CharField()
-    uid = serializers.CharField()
-    new_password = serializers.CharField(min_length=12, write_only=True)
-    new_password_confirm = serializers.CharField(min_length=12, write_only=True)
+    token = serializers.CharField(max_length=128, write_only=True)
+    uid = serializers.CharField(max_length=128)
+    new_password = serializers.CharField(min_length=12, write_only=True, trim_whitespace=False)
+    new_password_confirm = serializers.CharField(min_length=12, write_only=True, trim_whitespace=False)
 
     def validate(self, data: dict[str, Any]) -> dict[str, Any]:
         """Validate matching passwords, the reset token, and password policy."""
@@ -327,23 +358,39 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
             user = User.objects.get(pk=uid, is_active=True)
             return user
         except (TypeError, ValueError, OverflowError, User.DoesNotExist):
-            raise serializers.ValidationError(_("Invalid reset link.")) from None
+            raise InvalidPasswordResetLink() from None
 
     def create(self, validated_data: dict[str, Any]) -> dict[str, Any]:
         """
         Reset user password with valid token.
         """
-        user = validated_data["uid"]  # Already validated to be User object
-
-        # Reset password
-        user.set_password(validated_data["new_password"])
-        user.save()
-        user.reset_failed_login_attempts()
-
-        # Clear any 2FA setup in progress (security measure)
-        if not user.two_factor_enabled:
-            user.two_factor_secret = ""
-            user.save(update_fields=["_two_factor_secret"])
+        token = validated_data["token"]
+        new_password = validated_data["new_password"]
+        with transaction.atomic():
+            try:
+                user = User.objects.select_for_update().get(pk=validated_data["uid"].pk, is_active=True)
+            except User.DoesNotExist:
+                raise InvalidPasswordResetLink() from None
+            # Recheck against the locked row: a simultaneous reset may have consumed it.
+            if not default_token_generator.check_token(user, token):
+                raise InvalidPasswordResetLink()
+            try:
+                validate_password(new_password, user)
+            except DjangoValidationError as exc:
+                raise serializers.ValidationError({"new_password": exc.messages}) from exc
+            user.set_password(new_password)
+            user.failed_login_attempts = 0
+            user.account_locked_until = None
+            fields = ["password", "failed_login_attempts", "account_locked_until"]
+            # Password recovery does not replace the second factor.
+            if not user.two_factor_enabled:
+                user.two_factor_secret = ""
+                fields.append("_two_factor_secret")
+            user.save(update_fields=fields)
+            request = self.context.get("request")
+            log_security_event(
+                "password_reset_completed", {"user_id": user.pk}, get_safe_client_ip(request) if request else None
+            )
 
         logger.info(f"✅ [Password Reset] Password reset completed for user: {user.email}")
 

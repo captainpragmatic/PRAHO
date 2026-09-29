@@ -1,0 +1,35 @@
+{% load i18n localisation_tags %}
+{% if user.is_staff_user and ticket.service_request %}
+{% with review=ticket.service_request %}
+<section class="mb-6 rounded-lg border border-amber-700 bg-slate-800 p-5" data-testid="staff-service-request">
+  <h2 class="text-lg font-semibold text-white">{% trans "Service request — staff only" %}</h2>
+  <p class="mt-2 text-slate-200">{{ review.get_action_display }} · {{ review.get_status_display }}</p>
+  <p class="mt-1 text-sm text-slate-300">{{ review.service.service_name }} · {{ review.requested_by.email }}</p>
+  <p class="mt-3 whitespace-pre-wrap text-slate-200">{{ review.reason }}</p>
+  <p class="mt-3 text-sm text-amber-200">{% trans "Approval records an internal decision. Apply and verify hosting and billing changes separately before marking completed." %}</p>
+  {% if review.reviewed_by %}
+  <p class="mt-2 text-sm text-slate-300">{% trans "Reviewed by" %} {{ review.reviewed_by.get_full_name|default:review.reviewed_by.email }} · {% localised_date review.reviewed_at "datetime" %}</p>
+  {% endif %}
+  {% if review.completed_by %}
+  <p class="mt-2 text-sm text-slate-300">{% trans "Completed by" %} {{ review.completed_by.get_full_name|default:review.completed_by.email }} · {% localised_date review.completed_at "datetime" %}</p>
+  {% endif %}
+  <a href="{% url 'provisioning:service_detail' pk=review.service_id %}" class="mt-4 inline-block rounded bg-slate-700 px-4 py-2 text-white hover:bg-slate-600">{% trans "Open service" %}</a>
+  {% if review.status == 'pending' or review.status == 'approved' %}
+  <form method="post" action="{% url 'tickets:service_request_decision' pk=ticket.pk %}" class="mt-4">
+    {% csrf_token %}
+    <input type="hidden" name="expected_status" value="{{ review.status }}">
+    <label for="service-request-note" class="mb-2 block text-sm text-slate-200">{% trans "Internal note (required for rejection or completion)" %}</label>
+    <textarea id="service-request-note" name="note" rows="3" maxlength="4000" class="w-full rounded border border-slate-600 bg-slate-900 p-3 text-white"></textarea>
+    <div class="mt-3 flex flex-wrap gap-3">
+      {% if review.status == 'pending' %}
+      <button type="submit" name="decision" value="approve" class="rounded bg-green-700 px-4 py-2 text-white hover:bg-green-600">{% trans "Approve" %}</button>
+      {% else %}
+      <button type="submit" name="decision" value="complete" class="rounded bg-blue-700 px-4 py-2 text-white hover:bg-blue-600">{% trans "Mark completed" %}</button>
+      {% endif %}
+      <button type="submit" name="decision" value="reject" class="rounded bg-red-700 px-4 py-2 text-white hover:bg-red-600">{% trans "Reject" %}</button>
+    </div>
+  </form>
+  {% endif %}
+</section>
+{% endwith %}
+{% endif %}

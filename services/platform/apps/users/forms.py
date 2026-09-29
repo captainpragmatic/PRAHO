@@ -69,6 +69,7 @@ class LoginForm(forms.Form):
     )
     password = forms.CharField(
         label=_("Password"),
+        strip=False,
         widget=forms.PasswordInput(attrs={"class": "form-input", "placeholder": _("Your password")}),
     )
     remember_me = forms.BooleanField(

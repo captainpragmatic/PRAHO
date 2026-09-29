@@ -22,6 +22,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from rest_framework import status
 from rest_framework.decorators import api_view, authentication_classes, permission_classes, throttle_classes
+from rest_framework.exceptions import ValidationError as APIValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
@@ -54,6 +55,7 @@ from apps.users.models import APIToken, CustomerMembership, User, UserProfile
 from apps.users.services import APITokenService, SessionSecurityService
 
 from .serializers import (
+    InvalidPasswordResetLink,
     MFADisableSerializer,
     MFASetupSerializer,
     MFAVerifySerializer,
@@ -683,8 +685,8 @@ def password_reset_request_api(request: HttpRequest) -> Response:
     """
     Request a customer password reset through an HMAC-signed Portal call.
 
-    Email links use the configured public Portal URL. Successful requests
-    keep a neutral response whether or not the account exists.
+    Email links use the configured public Portal URL. Accepted requests
+    keep a neutral response whether or not the account exists or email is delivered.
 
     POST /api/users/password/reset/
     {
@@ -692,12 +694,13 @@ def password_reset_request_api(request: HttpRequest) -> Response:
     }
 
     Sends password reset email if account exists.
-    Always returns success to prevent email enumeration.
+    Responses do not disclose account or delivery status. Delivery and configuration
+    failures remain in private error logs.
 
     Response:
     {
         "success": true,
-        "message": "If the email exists, a reset link has been sent."
+        "message": "If an eligible account exists and email delivery is available, ..."
     }
     """
 
@@ -710,10 +713,8 @@ def password_reset_request_api(request: HttpRequest) -> Response:
 
         except Exception as e:
             logger.error("🔥 [Password Reset] Request failed (%s): %s", type(e).__name__, e)
-            return Response(
-                {"success": False, "error": "Password reset service temporarily unavailable."},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
+            # Failures after the account lookup must not reveal whether it exists.
+            return Response(PasswordResetRequestSerializer.accepted_response())
     else:
         return Response(
             {"success": False, "error": "Invalid email address", "errors": serializer.errors},
@@ -752,7 +753,7 @@ def password_reset_confirm_api(request: HttpRequest) -> Response:
     }
     """
 
-    serializer = PasswordResetConfirmSerializer(data=request.data)
+    serializer = PasswordResetConfirmSerializer(data=request.data, context={"request": request})
 
     if serializer.is_valid():
         try:
@@ -764,15 +765,28 @@ def password_reset_confirm_api(request: HttpRequest) -> Response:
 
             return Response(result)
 
-        except Exception as e:
-            logger.error("🔥 [Password Reset] Confirm failed (%s): %s", type(e).__name__, e)
+        except InvalidPasswordResetLink:
+            return Response(
+                {"success": False, "code": "invalid_reset_link", "error": "Invalid or expired reset link."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except APIValidationError as exc:
+            return Response(
+                {"success": False, "code": "validation_failed", "errors": exc.detail},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except Exception:
+            logger.exception("🔥 [Password Reset] Confirmation unavailable")
             return Response(
                 {"success": False, "error": "Password reset failed. Please try again."},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
     else:
+        code = (
+            "invalid_reset_link" if "uid" in serializer.errors or "token" in serializer.errors else "validation_failed"
+        )
         return Response(
-            {"success": False, "error": "Validation failed", "errors": serializer.errors},
+            {"success": False, "code": code, "error": "Validation failed", "errors": serializer.errors},
             status=status.HTTP_400_BAD_REQUEST,
         )
 

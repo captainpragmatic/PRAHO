@@ -35,8 +35,18 @@
       {% trans 'Select Action Type' as sc_sat_title %}
       {% section_card title=sc_sat_title icon="swap" %}
 
-        <form method="post" action="{% url 'services:request_action' service_id=service_id %}">
+        <form id="service-request-form" method="post" action="{% url 'services:request_action' service_id=service_id %}">
           {% csrf_token %}
+          <input type="hidden" name="submission_id" value="{{ submission_id }}">
+
+          {% if form_error %}
+          <div role="alert" class="mb-6 rounded-lg border border-yellow-600 bg-yellow-900/20 p-4 text-yellow-200">
+            <p>{{ form_error }}</p>
+            {% if submission_conflict %}
+            <a href="{% url 'tickets:list' %}" class="mt-2 inline-block underline">{% trans "View your tickets" %}</a>
+            {% endif %}
+          </div>
+          {% endif %}
 
           <!-- Action Type Selection -->
           <div class="space-y-4 mb-8">
@@ -47,7 +57,7 @@
                      name="action"
                      value="{{ action_value }}"
                      class="sr-only peer"
-                     {% if forloop.first %}checked{% endif %}>
+                     {% if action_value == selected_action %}checked{% endif %}>
 
               <label for="action_{{ action_value }}"
                      class="flex items-center p-4 border-2 border-slate-700 rounded-lg cursor-pointer
@@ -114,12 +124,13 @@
             {% endfor %}
           </div>
 
-          <!-- Upgrade Plans (shown only for upgrade requests) -->
+          <!-- Plan information for staff-reviewed upgrade and downgrade requests -->
           <div id="upgrade-plans" class="mb-8 hidden">
             <h3 class="text-lg font-semibold text-white mb-4">{% trans "Available Plans" %}</h3>
+            <p class="text-sm text-slate-400 mb-4">{% trans "Include your preferred plan in the reason. Our team will confirm availability and pricing with you." %}</p>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {% for plan in available_plans %}
-              <div class="border border-slate-700 rounded-lg p-4 hover:border-blue-500 transition-colors cursor-pointer">
+              <div class="border border-slate-700 rounded-lg p-4">
                 <div class="flex items-center justify-between mb-2">
                   <h4 class="font-medium text-white">{{ plan.name }}</h4>
                   <div class="text-sm text-green-400 font-mono">{{ plan.price_monthly }} RON/mo</div>
@@ -163,10 +174,11 @@
               id="reason"
               name="reason"
               rows="4"
+              maxlength="4000"
               class="w-full bg-slate-700 border border-slate-600 text-white rounded-lg px-4 py-2
                      focus:ring-2 focus:ring-blue-500 focus:border-transparent
                      placeholder-slate-400 resize-none"
-              placeholder="{% trans 'Please provide a detailed reason for this request...' %}"></textarea>
+              placeholder="{% trans 'Please provide a detailed reason for this request...' %}">{{ reason }}</textarea>
             <div class="text-xs text-slate-400 mt-1">
               {% trans "This information helps our team process your request faster" %}
             </div>
@@ -197,6 +209,9 @@
       {% trans 'Current Service' as sc_cs_title %}
       {% section_card title=sc_cs_title icon="server" %}
 
+        {% if service_details_unavailable %}
+        <p class="text-sm text-slate-300">{% trans "Service details are temporarily unavailable." %}</p>
+        {% else %}
         <div class="space-y-3">
           <div>
             <dt class="text-sm font-medium text-slate-400">{% trans "Service Name" %}</dt>
@@ -228,6 +243,7 @@
             </dd>
           </div>
         </div>
+        {% endif %}
       {% end_section_card %}
 
       <!-- Request Process -->
@@ -271,7 +287,7 @@
             </div>
             <div>
               <div class="text-sm font-medium text-slate-300">{% trans "Confirmation" %}</div>
-              <div class="text-xs text-slate-400">{% trans "You receive confirmation email" %}</div>
+              <div class="text-xs text-slate-400">{% trans "Follow updates in your support ticket" %}</div>
             </div>
           </div>
         </div>
@@ -343,8 +359,8 @@ document.addEventListener('DOMContentLoaded', function() {
       }
     });
 
-    // Show/hide upgrade plans
-    if (actionValue === 'upgrade_request') {
+    // Plans are informational; customers describe their preferred plan in the reason.
+    if (actionValue === 'upgrade_request' || actionValue === 'downgrade_request') {
       upgradeSection.classList.remove('hidden');
     } else {
       upgradeSection.classList.add('hidden');
@@ -372,7 +388,7 @@ document.addEventListener('DOMContentLoaded', function() {
   updateForm();
 
   // Form validation
-  document.querySelector('form').addEventListener('submit', function(e) {
+  document.getElementById('service-request-form').addEventListener('submit', function(e) {
     const selectedAction = document.querySelector('input[name="action"]:checked');
     if (!selectedAction) {
       e.preventDefault();

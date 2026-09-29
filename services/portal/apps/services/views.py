@@ -3,21 +3,24 @@
 # ===============================================================================
 
 import logging
+from http import HTTPStatus
 from typing import Any
+from uuid import uuid4
 
 from django.contrib import messages
-from django.http import HttpRequest, HttpResponse
+from django.http import HttpRequest, HttpResponse, HttpResponseForbidden
 from django.shortcuts import redirect, render
-from django.urls import reverse
-from django.utils.html import format_html
 from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy
+from django.views.decorators.csrf import csrf_protect
+from django.views.decorators.http import require_http_methods
 
-from apps.common.decorators import require_support_access
+from apps.common.decorators import _get_user_role_for_customer
 from apps.common.pagination import PaginatorData, build_pagination_params
 from apps.common.rate_limit_feedback import (
     build_maintenance_context,
     get_degraded_message,
+    get_retry_after_from_error,
     handle_platform_error,
     is_rate_limited_error,
     is_unavailable_error,
@@ -26,6 +29,15 @@ from apps.common.rate_limit_feedback import (
 from .services import PlatformAPIError, services_api
 
 logger = logging.getLogger(__name__)
+
+SERVICE_REQUEST_ACTIONS = [
+    ("upgrade_request", gettext_lazy("Request Service Upgrade")),
+    ("downgrade_request", gettext_lazy("Request Service Downgrade")),
+    ("suspend_request", gettext_lazy("Request Service Suspension")),
+    ("cancel_request", gettext_lazy("Request Service Cancellation")),
+]
+SERVICE_REQUEST_REASON_MAX_LENGTH = 4000
+SERVICE_REQUEST_SUBMISSIONS_KEY = "service_request_submissions"
 
 # Tab configuration for service status filtering.
 # Mirrors the platform Service.STATUS_CHOICES (provisioning/service_models.py) so
@@ -314,8 +326,8 @@ def service_detail(request: HttpRequest, service_id: int) -> HttpResponse:
             "service_id": service_id,  # Add service_id explicitly for URL reversing
             "usage": usage,
             "domains": domains,
-            "can_manage": service.get("status")
-            in ["active", "suspended"],  # Customer can manage active/suspended services
+            "can_manage": service.get("status") in {"active", "suspended"}
+            and _get_user_role_for_customer(request, str(customer_id)) in {"owner", "billing", "tech"},
             "usage_period": "30d",
         }
 
@@ -375,107 +387,153 @@ def service_usage(request: HttpRequest, service_id: int) -> HttpResponse:
         )
 
 
-@require_support_access()
+def _service_submission_id(request: HttpRequest, customer_id: int, user_id: int, service_id: int) -> tuple[str, str]:
+    """Keep accepted POSTs replayable; only a fresh GET starts the next request."""
+    key = f"{customer_id}:{user_id}:{service_id}"
+    submissions = dict(request.session.get(SERVICE_REQUEST_SUBMISSIONS_KEY, {}))
+    submission = submissions.get(key)
+    if isinstance(submission, str):
+        submission = {"id": submission, "accepted": False}  # Existing pending sessions.
+    if not isinstance(submission, dict) or (request.method == "GET" and submission.get("accepted")):
+        submission = {"id": str(uuid4()), "accepted": False}
+    if submissions.get(key) != submission:
+        submissions[key] = submission
+        request.session[SERVICE_REQUEST_SUBMISSIONS_KEY] = submissions
+    return key, str(submission["id"])
+
+
+def _service_request_form_error(request: HttpRequest, context: dict[str, Any]) -> tuple[str, int]:
+    """Validate the bound form before sending a mutation to Platform."""
+    if request.POST.get("submission_id") != context["submission_id"]:
+        return _("This request form has expired. Review the details and submit this form again."), HTTPStatus.CONFLICT
+    if context["selected_action"] not in {action for action, _label in SERVICE_REQUEST_ACTIONS}:
+        return _("Invalid action requested."), HTTPStatus.BAD_REQUEST
+    if not context["reason"] and context["selected_action"] in {"suspend_request", "cancel_request"}:
+        return _("Reason is required for this request."), HTTPStatus.BAD_REQUEST
+    if len(context["reason"]) > SERVICE_REQUEST_REASON_MAX_LENGTH:
+        return _("The reason must contain no more than 4,000 characters."), HTTPStatus.BAD_REQUEST
+    return "", HTTPStatus.OK
+
+
+def _submit_service_request(
+    request: HttpRequest, customer_id: int, user_id: int, submission_key: str, context: dict[str, Any]
+) -> HttpResponse | None:
+    """Return a ticket redirect only after Platform confirms a valid receipt."""
+    context["form_error"], context["form_status"] = _service_request_form_error(request, context)
+    if context["form_error"]:
+        return None
+
+    try:
+        receipt = services_api.request_service_action(
+            customer_id=customer_id,
+            user_id=user_id,
+            service_id=context["service_id"],
+            action=context["selected_action"],
+            reason=context["reason"],
+            submission_id=context["submission_id"],
+        )
+    except PlatformAPIError as exc:
+        if is_rate_limited_error(exc):
+            raise
+        if exc.status_code == HTTPStatus.CONFLICT:
+            context["form_error"] = _(
+                "This form was already submitted with different details. Check your tickets, "
+                "or restore the original details and submit again to open the existing ticket."
+            )
+            context["form_status"] = HTTPStatus.CONFLICT
+            context["submission_conflict"] = True
+        elif is_unavailable_error(exc):
+            context["form_error"] = get_degraded_message(exc)
+        else:
+            context["form_error"] = _("Unable to submit service request. Please try again later.")
+        logger.warning("Service request for service %s was not confirmed: %s", context["service_id"], exc)
+        return None
+
+    submissions = dict(request.session.get(SERVICE_REQUEST_SUBMISSIONS_KEY, {}))
+    submissions[submission_key] = {"id": context["submission_id"], "accepted": True}
+    request.session[SERVICE_REQUEST_SUBMISSIONS_KEY] = submissions
+    messages.success(
+        request, _("Service request submitted. Ticket #%(number)s.") % {"number": receipt["ticket_number"]}
+    )
+    logger.info("Service request for service %s accepted as ticket %s", context["service_id"], receipt["ticket_id"])
+    return redirect("tickets:detail", ticket_id=receipt["ticket_id"])
+
+
+def _service_request_plans(request: HttpRequest, customer_id: int, service: dict[str, Any]) -> list[dict[str, Any]]:
+    """An optional plan list must not discard a bound request form during an outage."""
+    try:
+        return services_api.get_available_plans(customer_id, service.get("service_type", ""))
+    except PlatformAPIError as exc:
+        if is_rate_limited_error(exc):
+            raise
+        messages.warning(request, get_degraded_message(exc))
+        return []
+
+
+def _service_request_load_error(request: HttpRequest, error: PlatformAPIError, context: dict[str, Any]) -> HttpResponse:
+    """Keep an unsubmitted form recoverable when the service lookup is unavailable."""
+    if is_rate_limited_error(error):
+        raise error
+    logger.warning("Service request form for service %s unavailable: %s", context["service_id"], error)
+    if request.method == "POST" and (
+        error.status_code is None or error.status_code >= HTTPStatus.INTERNAL_SERVER_ERROR
+    ):
+        context.update(
+            service={"service_name": _("Hosting service")},
+            service_details_unavailable=True,
+            available_plans=[],
+            form_error=get_degraded_message(error),
+        )
+        response = render(
+            request, "services/service_request_action.html", context, status=HTTPStatus.SERVICE_UNAVAILABLE
+        )
+        retry_after = get_retry_after_from_error(error)
+        if retry_after:
+            response["Retry-After"] = str(retry_after)
+        return response
+    if is_unavailable_error(error):
+        messages.warning(request, get_degraded_message(error))
+    else:
+        messages.error(request, _("Service not found or access denied."))
+    return redirect("services:list")
+
+
+@require_http_methods(["GET", "POST"])
+@csrf_protect
 def service_request_action(request: HttpRequest, service_id: int) -> HttpResponse:
-    """
-    Customer service action request (upgrade, suspend request, etc.).
-    Creates requests that require staff approval.
-    """
-    # Check authentication via Django session
+    """Create a support ticket for staff review without changing the hosting service."""
     customer_id, user_id = _get_session_identity(request)
     if not customer_id or not user_id:
         return redirect("/login/")
+    role = _get_user_role_for_customer(request, str(customer_id))
+    billing_action = request.method == "POST" and request.POST.get("action") in {"suspend_request", "cancel_request"}
+    if role not in {"owner", "billing", "tech"} or (billing_action and role == "tech"):
+        return HttpResponseForbidden(_("You do not have permission to request service changes."))
+    action_types = SERVICE_REQUEST_ACTIONS if role in {"owner", "billing"} else SERVICE_REQUEST_ACTIONS[:2]
 
-    if request.method == "POST":
-        action = request.POST.get("action", "")
-        reason = request.POST.get("reason", "").strip()
-
-        # Validate action
-        allowed_actions = ["upgrade_request", "downgrade_request", "suspend_request", "cancel_request"]
-        if action not in allowed_actions:
-            messages.error(request, _("Invalid action requested."))
-            return redirect("services:detail", service_id=service_id)
-
-        if not reason and action in ["suspend_request", "cancel_request"]:
-            messages.error(request, _("Reason is required for this request."))
-            return redirect("services:detail", service_id=service_id)
-
-        try:
-            # Submit service request
-            result = services_api.request_service_action(
-                customer_id=customer_id, user_id=user_id, service_id=service_id, action=action, reason=reason
-            )
-
-            action_labels = {
-                "upgrade_request": _("Upgrade Request"),
-                "downgrade_request": _("Downgrade Request"),
-                "suspend_request": _("Suspension Request"),
-                "cancel_request": _("Cancellation Request"),
-            }
-
-            request_data = result.get("data", result)
-            success_message = _("{} submitted successfully. Request ID: #{}").format(
-                action_labels.get(action, action), request_data.get("request_id", "N/A")
-            )
-            ticket_id = request_data.get("ticket_id")
-            if ticket_id is not None:
-                success_message = format_html(
-                    '{} <a href="{}">{}</a>',
-                    success_message,
-                    reverse("tickets:detail", kwargs={"ticket_id": ticket_id}),
-                    _("View ticket"),
-                )
-            messages.success(request, success_message)
-
-            logger.info(
-                f"✅ [Services View] Submitted {action} request for service {service_id} by customer {customer_id}"
-            )
-
-        except PlatformAPIError as e:
-            if is_rate_limited_error(e):
-                raise
-            # The generic wording was not wrong here, only vague: no reason, no sense of when to
-            # come back. This path already received a window, because the action call always re-raised.
-            _report_platform_failure(
-                request,
-                e,
-                subject=f"{action} for service {service_id}",
-                fallback=_("Unable to submit service request. Please try again later."),
-            )
-
-        return redirect("services:detail", service_id=service_id)
-
-    # GET request - show action form
+    submission_key, submission_id = _service_submission_id(request, customer_id, user_id, service_id)
+    context: dict[str, Any] = {
+        "service_id": service_id,
+        "submission_id": submission_id,
+        "selected_action": request.POST.get("action", "") if request.method == "POST" else "upgrade_request",
+        "reason": request.POST.get("reason", "").strip(),
+        "action_types": action_types,
+    }
     try:
         service = services_api.get_service_detail(customer_id, user_id, service_id)
-        available_plans = services_api.get_available_plans(customer_id, service.get("service_type", ""))
-
-        context = {
-            "service": service,
-            "service_id": service_id,  # Add service_id explicitly for URL reversing
-            "available_plans": available_plans,
-            "action_types": [
-                ("upgrade_request", _("Request Service Upgrade")),
-                ("downgrade_request", _("Request Service Downgrade")),
-                ("suspend_request", _("Request Service Suspension")),
-                ("cancel_request", _("Request Service Cancellation")),
-            ],
-        }
-
-        return render(request, "services/service_request_action.html", context)
-
-    except PlatformAPIError as e:
-        if is_rate_limited_error(e):
-            raise
-        # One exit for both, rather than a return per branch: the destination is the same and the
-        # extra return tripped PLR0911 on this function, which already has six.
-        _report_platform_failure(
-            request,
-            e,
-            subject=f"Action form for service {service_id}",
-            fallback=_("Service not found or access denied."),
-        )
-        return redirect("services:list")
+        # Platform checks receipt identity before current status, including uncertain retries.
+        bound_submission = request.method == "POST" and request.POST.get("submission_id") == submission_id
+        if service.get("status") not in {"active", "suspended"} and not bound_submission:
+            return HttpResponseForbidden(_("Requests are available for active or suspended services."))
+        context["service"] = service
+        if request.method == "POST":
+            response = _submit_service_request(request, customer_id, user_id, submission_key, context)
+            if response is not None:
+                return response
+        context["available_plans"] = _service_request_plans(request, customer_id, service)
+        return render(request, "services/service_request_action.html", context, status=context.get("form_status", 200))
+    except PlatformAPIError as exc:
+        return _service_request_load_error(request, exc, context)
 
 
 def services_dashboard_widget(request: HttpRequest) -> HttpResponse:

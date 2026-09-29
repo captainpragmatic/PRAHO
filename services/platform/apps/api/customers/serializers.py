@@ -75,7 +75,7 @@ class UserRegistrationDataSerializer(serializers.Serializer):
     first_name = serializers.CharField(max_length=30)
     last_name = serializers.CharField(max_length=30)
     phone = serializers.CharField(max_length=20, required=False, allow_blank=True)
-    password = serializers.CharField(min_length=12, write_only=True)
+    password = serializers.CharField(min_length=12, write_only=True, trim_whitespace=False)
 
     def validate_email(self, value: str) -> str:
         """Ensure email is not already taken"""

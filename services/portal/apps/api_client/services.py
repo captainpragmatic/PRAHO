@@ -627,7 +627,6 @@ class PlatformAPIClient:
         self, email: str, password: str, mfa_token: str = "", client_ip: str = ""
     ) -> dict[str, Any] | None:
         """Authenticate a customer, propagating throttles and service failures to the caller."""
-
         start_time = time.perf_counter()
         min_duration = float(getattr(settings, "PLATFORM_API_AUTH_MIN_DURATION_SECONDS", 0.0))
         try:

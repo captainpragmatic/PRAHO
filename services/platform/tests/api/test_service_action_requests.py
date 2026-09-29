@@ -1,5 +1,7 @@
 """Service action requests create attributed support tickets."""
 
+from uuid import uuid4
+
 from django.contrib.contenttypes.models import ContentType
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -10,6 +12,7 @@ from apps.billing.models import Currency, Invoice
 from apps.customers.models import Customer
 from apps.orders.models import Order
 from apps.provisioning.service_models import Server, Service, ServicePlan
+from apps.provisioning.service_request_models import ServiceRequest
 from apps.tickets.models import SupportCategory, Ticket
 from apps.users.models import CustomerMembership, User
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
@@ -53,6 +56,7 @@ class ServiceActionRequestTests(HMACTestMixin, TestCase):
     def _body(self, action: str, *, role: str = "owner", reason: object = "moving") -> dict[str, object]:
         return {
             "customer_id": self.customer.pk, "user_id": self.users[role].pk, "action": action, "reason": reason,
+            "submission_id": str(uuid4()),
         }
 
     def test_owner_cancel_request_creates_a_ticket_with_actor_and_audit(self) -> None:
@@ -62,7 +66,8 @@ class ServiceActionRequestTests(HMACTestMixin, TestCase):
         ticket = Ticket.objects.get(related_service=self.service)
         self.assertEqual(response.json(), {
             "success": True,
-            "data": {"request_id": ticket.ticket_number, "ticket_id": ticket.pk, "action": "cancel_request"},
+            "data": {"request_id": str(ServiceRequest.objects.get(ticket=ticket).pk), "ticket_id": ticket.pk,
+                     "ticket_number": ticket.ticket_number},
         })
         self.assertEqual(ticket.customer, self.customer)
         self.assertEqual(ticket.category_id, SupportCategory.objects.get(name="Service Requests").pk)
@@ -90,7 +95,7 @@ class ServiceActionRequestTests(HMACTestMixin, TestCase):
         self.assertEqual(ticket.description, "Upgrade request")
         cancel = self.portal_post(self.path, self._body("cancel_request", role="tech"))
         self.assertEqual(cancel.status_code, 403, cancel.content)
-        self.assertEqual(cancel.json(), {"success": False, "error": "Access denied"})
+        self.assertEqual(cancel.json(), {"success": False, "error": "Access denied."})
         self.assertEqual(list(Ticket.objects.values_list("pk", flat=True)), [ticket.pk])
 
     def test_viewer_is_denied(self) -> None:
@@ -104,11 +109,11 @@ class ServiceActionRequestTests(HMACTestMixin, TestCase):
             f"/api/services/{self.other_service.pk}/actions/", self._body("upgrade_request")
         )
         self.assertEqual(response.status_code, 404, response.content)
-        self.assertEqual(response.json(), {"success": False, "error": "Service not found"})
+        self.assertEqual(response.json(), {"success": False, "error": "Service not found or access denied."})
         self.assertFalse(Ticket.objects.exists())
 
     def test_cancel_without_reason_is_400(self) -> None:
-        for reason in ("", "   ", None, 123, "x" * 2001):
+        for reason in ("", "   ", None, 123, "x" * 4001):
             with self.subTest(reason=reason):
                 response = self.portal_post(self.path, self._body("cancel_request", reason=reason))
                 self.assertEqual(response.status_code, 400, response.content)
@@ -117,7 +122,8 @@ class ServiceActionRequestTests(HMACTestMixin, TestCase):
     def test_invalid_action_is_400(self) -> None:
         response = self.portal_post(self.path, self._body("terminate"))
         self.assertEqual(response.status_code, 400, response.content)
-        self.assertEqual(response.json(), {"success": False, "error": "Invalid action"})
+        self.assertIs(response.json()["success"], False)
+        self.assertIn("action", response.json()["errors"])
         self.assertFalse(Ticket.objects.exists())
 
     def test_billing_can_request_suspension(self) -> None:

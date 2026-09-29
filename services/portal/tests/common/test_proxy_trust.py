@@ -14,6 +14,7 @@ from django.urls import reverse
 from requests import Response
 
 from apps.common import counters
+from apps.users.constants import PASSWORD_RESET_SESSION_KEY
 
 
 @override_settings(
@@ -73,6 +74,34 @@ class ProxyTrustTests(TestCase):
             self.assertEqual(response.status_code, 200)
         self.assertEqual(counters.peek("auth_volume_ip_127.0.0.1"), 0)
         self.assertEqual(counters.peek("auth_ip_attempts_127.0.0.1"), 0)
+
+    def test_recovery_does_not_share_an_unknown_proxy_ip_budget(self) -> None:
+        with patch("apps.users.views.api_client.request_password_reset", return_value={"success": True}) as reset:
+            for index in range(6):
+                response = self.client.post("/password-reset/", {"email": f"owner{index}@example.test"})
+                self.assertEqual(response.status_code, 302)
+            self.assertEqual(reset.call_count, 6)
+            self.assertEqual(counters.peek("password_reset_ip_127.0.0.1"), 0)
+            for _ in range(4):
+                response = self.client.post("/password-reset/", {"email": "owner0@example.test"})
+                self.assertEqual(response.status_code, 302)
+            response = self.client.post("/password-reset/", {"email": "owner0@example.test"})
+            self.assertEqual(response.status_code, 429)
+            self.assertEqual(reset.call_count, 10)
+
+    def test_confirmation_retains_a_link_budget_without_proxy_trust(self) -> None:
+        session = self.client.session
+        session[PASSWORD_RESET_SESSION_KEY] = {"uid": "fixture-uid", "token": "fixture-token"}
+        session.save()
+        for _ in range(5):
+            response = self.client.post("/password-reset/confirm/", {})
+            self.assertEqual(response.status_code, 400)
+        response = self.client.post("/password-reset/confirm/", {})
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(counters.peek("password_reset_confirm_ip_127.0.0.1"), 0)
+        self.client.get("/password-reset/confirm/different-uid/different-token/")
+        response = self.client.post("/password-reset/confirm/", {})
+        self.assertEqual(response.status_code, 400)
 
     @override_settings(IPWARE_TRUSTED_PROXY_LIST=["10.0.0.0/8"])
     def test_trusted_proxy_uses_forwarded_ip_for_login_bucket(self) -> None:

@@ -3,16 +3,18 @@ Rate Limiting Middleware for PRAHO Portal
 DoS protection and brute force prevention for authentication endpoints.
 """
 
+import hashlib
 import logging
 import random
 import time
 from collections.abc import Callable
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from django.conf import settings
 from django.contrib import messages
 from django.http import HttpRequest, HttpResponse, JsonResponse
-from django.shortcuts import redirect
+from django.shortcuts import redirect, render
+from django.utils.cache import add_never_cache_headers
 from django.utils.translation import gettext as _
 
 from apps.common import counters
@@ -96,6 +98,15 @@ class AuthenticationRateLimitMiddleware:
         if not self._is_auth_endpoint(request):
             return self.get_response(request)
 
+        # Recovery submissions consume their own budget even when they succeed.
+        # They must neither clear login counters nor be cleared by a successful login.
+        if request.path.startswith("/password-reset/"):
+            start_time = time.time()
+            try:
+                return self.get_response(request)
+            finally:
+                self._uniform_response_delay(start_time)
+
         # Apply rate limiting to POST requests (actual auth attempts)
         if request.method == "POST":
             rate_limit_response = self._check_rate_limits(request)
@@ -129,13 +140,63 @@ class AuthenticationRateLimitMiddleware:
 
         return response
 
+    def process_view(
+        self,
+        request: HttpRequest,
+        view_func: Callable[..., HttpResponse],
+        view_args: tuple[Any, ...],
+        view_kwargs: dict[str, Any],
+    ) -> HttpResponse | None:
+        """Render recovery feedback after session and message middleware have run."""
+        if (
+            getattr(settings, "RATE_LIMITING_ENABLED", True)
+            and request.method == "POST"
+            and request.path.startswith("/password-reset/")
+        ):
+            return self._check_password_reset_limits(request)
+        return None
+
+    def _check_password_reset_limits(self, request: HttpRequest) -> HttpResponse | None:
+        """Use separate budgets for email requests, confirmations and ordinary login."""
+        try:
+            for key, window, maximum in self._password_reset_budgets(request):
+                attempts = counters.increment(key, window)
+                if attempts > maximum:
+                    return self._rate_limit_response(
+                        request, _("Too many password reset requests. Please try again later."), window, 429
+                    )
+        except Exception:
+            logger.exception("🔥 [RateLimit] Password reset limiter unavailable")
+            return self._rate_limit_response(
+                request, _("Service temporarily unavailable. Please try again later."), 60, 503
+            )
+        return None
+
+    def _password_reset_budgets(self, request: HttpRequest) -> list[tuple[str, int, int]]:
+        from apps.users.constants import PASSWORD_RESET_SESSION_KEY  # noqa: PLC0415
+
+        confirmation = request.path.startswith("/password-reset/confirm/")
+        prefix = "password_reset_confirm" if confirmation else "password_reset"
+        limits = []
+        if _client_ip_is_distinguishable():
+            limits.append((f"{prefix}_ip_{self._get_client_ip(request)}", self.IP_WINDOW_SECONDS, self.IP_RATE_LIMIT))
+        email = self._extract_email_from_request(request)
+        if email and not confirmation:
+            digest = hashlib.sha256(email.encode()).hexdigest()
+            limits.append((f"password_reset_email_{digest}", self.ACCOUNT_WINDOW_SECONDS, self.ACCOUNT_RATE_LIMIT))
+        credentials = request.session.get(PASSWORD_RESET_SESSION_KEY)
+        if confirmation and credentials:
+            digest = hashlib.sha256(f"{credentials['uid']}:{credentials['token']}".encode()).hexdigest()
+            limits.append((f"password_reset_link_{digest}", self.IP_WINDOW_SECONDS, self.IP_RATE_LIMIT))
+        return limits
+
     def _is_auth_endpoint(self, request: HttpRequest) -> bool:
         """Check if request is for an authentication endpoint"""
         return any(request.path.startswith(path) for path in self.AUTH_PATHS)
 
     def _is_volume_endpoint(self, request: HttpRequest) -> bool:
         """Identify endpoints that consume a separate IP request budget."""
-        return request.path.startswith(("/password-reset/", "/register/"))
+        return request.path.startswith("/register/")
 
     def _check_rate_limits(self, request: HttpRequest) -> HttpResponse | None:
         """Check the separate MFA, volume or login budgets, failing closed on cache errors."""
@@ -164,7 +225,7 @@ class AuthenticationRateLimitMiddleware:
         return self._rate_limit_response(request, error_msg, self.REAUTH_WINDOW_SECONDS, 429)
 
     def _check_volume_budget(self, request: HttpRequest) -> HttpResponse | None:
-        """Registration and password-reset POSTs share a per-address volume budget."""
+        """Registration POSTs consume their own per-address volume budget."""
         if not _client_ip_is_distinguishable():
             return None
         client_ip = self._get_client_ip(request)
@@ -209,14 +270,36 @@ class AuthenticationRateLimitMiddleware:
         self, request: HttpRequest, error_msg: str, retry_after: int, status_code: int
     ) -> HttpResponse:
         """Return appropriate rate limit response based on request type."""
+        recovery = request.path.startswith("/password-reset/")
+        response: HttpResponse
         if self._is_api_or_htmx_request(request):
-            return JsonResponse(
+            response = JsonResponse(
                 {"error": error_msg, "retry_after": retry_after, "attempts_remaining": 0},
                 status=status_code,
             )
-        # Browser form submission — redirect to login page with error message.
-        messages.error(request, error_msg)
-        return redirect("users:login")
+        elif recovery:
+            from apps.users.constants import PASSWORD_RESET_SESSION_KEY  # noqa: PLC0415
+            from apps.users.forms import PasswordResetConfirmForm, PasswordResetRequestForm  # noqa: PLC0415
+
+            confirmation = request.path.startswith("/password-reset/confirm/")
+            form = PasswordResetConfirmForm(request.POST) if confirmation else PasswordResetRequestForm(request.POST)
+            form.add_error(None, error_msg)
+            template = "users/password_reset_confirm.html" if confirmation else "users/password_reset.html"
+            response = render(
+                request,
+                template,
+                {"form": form, "validlink": bool(request.session.get(PASSWORD_RESET_SESSION_KEY))},
+                status=status_code,
+            )
+        else:
+            messages.error(request, error_msg)
+            return redirect("users:login")
+        if recovery:
+            response["Retry-After"] = str(retry_after)
+            token_free = request.path in {"/password-reset/", "/password-reset/confirm/"}
+            response["Referrer-Policy"] = "same-origin" if token_free else "no-referrer"
+            add_never_cache_headers(response)
+        return response
 
     def _record_reauth_attempt(self, request: HttpRequest) -> None:
         """Count MFA reauthentication failures against the session user."""
@@ -309,8 +392,9 @@ class AuthenticationRateLimitMiddleware:
 
     def _uniform_response_delay(self, start_time: float) -> None:
         """
-        🔒 Apply uniform response delay to prevent timing attacks.
-        Ensures all auth responses take similar time regardless of success/failure.
+        Apply the established minimum delay with jitter to short auth requests.
+
+        Slower upstream calls can exceed the target and remain observable.
         """
         elapsed = time.time() - start_time
         target_delay = random.uniform(self.MIN_RESPONSE_TIME, self.MAX_RESPONSE_TIME)  # noqa: S311

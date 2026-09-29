@@ -189,6 +189,7 @@ def seed_baseline() -> dict[str, Any]:
     for command in ("setup_default_settings", "setup_tax_rules", "setup_email_templates"):
         call_command(command, stdout=StringIO())
     SystemSetting.objects.filter(key="node_deployment.dns_default_zone").update(value="nodes.e2e.example")
+    SystemSetting.objects.filter(key="portal.public_base_url").update(value="http://localhost:8701")
     demo = DemoCommand(stdout=StringIO())
     demo.create_service_plans()
     demo.create_support_categories()
@@ -348,7 +349,7 @@ def seed_scenario(scenario: str, key: str) -> dict[str, Any]:
         )
         return {"product_id": str(product.pk), "product_slug": product.slug, "name": product.name}
     customer = _customer(f"scenario-{key}", name=f"E2E billing {key}")
-    if scenario == "account":
+    if scenario in {"account", "service_request"}:
         user = _user(f"account-{key}@e2e.test")
         CustomerMembership.objects.create(user=user, customer=customer, role="owner", is_primary=True)
         other_address = CustomerAddress.objects.create(
@@ -361,7 +362,7 @@ def seed_scenario(scenario: str, key: str) -> dict[str, Any]:
             country="România",
             is_current=True,
         )
-        return {
+        account = {
             "customer_id": customer.pk,
             "user_id": user.pk,
             "email": user.email,
@@ -369,6 +370,21 @@ def seed_scenario(scenario: str, key: str) -> dict[str, Any]:
             "name": customer.name,
             "address_id": other_address.pk,
         }
+        if scenario == "service_request":
+            from apps.provisioning.models import Service, ServicePlan  # noqa: PLC0415 -- fixture orchestration
+
+            service = Service.objects.create(
+                customer=customer,
+                service_plan=ServicePlan.objects.get(name="E2E Hosting"),
+                currency_id="RON",
+                service_name=f"E2E request hosting {key}",
+                username=f"e2e-request-{key}",
+                domain=f"request-{key}.example",
+                price=Decimal("100.00"),
+                status="active",
+            )
+            account.update(id=customer.pk, service_id=str(service.pk), service_name=service.service_name)
+        return account
     product = Product.objects.get(slug="e2e-hosting")
     address: BillingAddressData = {
         "company_name": customer.company_name,
