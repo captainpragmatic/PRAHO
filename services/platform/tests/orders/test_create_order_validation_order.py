@@ -15,6 +15,7 @@ from rest_framework.test import APIRequestFactory
 
 from apps.billing.models import Currency
 from apps.customers.models import Customer
+from apps.orders.models import Order
 from apps.users.models import User
 
 
@@ -75,12 +76,18 @@ class CreateOrderValidationBeforeDBTest(TestCase):
         # Still gets 400 (invalid input) — but DB WAS checked first
         self.assertEqual(response.status_code, 400)
         # DB SHOULD have been queried for idempotency (M9: DB check before validation)
-        mock_manager.filter.assert_called_once()
+        mock_manager.filter.assert_called_once_with(customer=self.customer, idempotency_key="a" * 32)
 
-    def test_valid_input_reaches_db_fallback(self) -> None:
-        """Valid requests with idempotency key DO reach the DB fallback check."""
+    def test_valid_input_recovers_existing_order_without_current_currency_revision(self) -> None:
+        """A cache miss recovers the accepted order before current sale-policy validation."""
         from apps.api.orders.views import create_order  # noqa: PLC0415
 
+        original = Order.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            order_number="M9-ACCEPTED-ORDER",
+            idempotency_key="b" * 32,
+        )
         request = self.factory.post(
             "/api/orders/create/",
             data={
@@ -94,20 +101,10 @@ class CreateOrderValidationBeforeDBTest(TestCase):
         request._portal_authenticated = True
         request.user = self.user
 
-        with (
-            patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
-            patch("apps.api.orders.views.Order.objects") as mock_manager,
-            patch("apps.api.orders.views.OrderService") as mock_svc,
-        ):
-            mock_manager.filter.return_value.first.return_value = None
-            mock_svc.build_billing_address_from_customer.return_value = {}
-            # Let it fail after the DB check — we only care about order of operations
-            mock_svc.create_order.side_effect = Exception("Stop here")
+        with patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)):
+            response = create_order(request)
 
-            import contextlib  # noqa: PLC0415
-
-            with contextlib.suppress(Exception):
-                create_order(request)
-
-        # DB fallback SHOULD have been attempted (after validation passed)
-        mock_manager.filter.assert_called_once()
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["duplicate"])
+        self.assertEqual(response.data["order"]["id"], str(original.pk))
+        self.assertEqual(Order.objects.filter(customer=self.customer, idempotency_key="b" * 32).count(), 1)
