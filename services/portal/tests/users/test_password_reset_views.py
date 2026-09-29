@@ -13,6 +13,7 @@ from apps.users.forms import PasswordResetConfirmForm
 
 
 @override_settings(
+    RATE_LIMITING_ENABLED=False,
     SESSION_ENGINE="django.contrib.sessions.backends.cache",
     CACHES={
         "default": {
@@ -40,7 +41,9 @@ class PasswordResetViewTests(SimpleTestCase):
         self.platform.request_password_reset.return_value = {"success": True}
         self.platform.confirm_password_reset.return_value = {"success": True}
         self.request_url = reverse("users:password_reset")
-        self.confirm_url = reverse("users:password_reset_confirm", kwargs={"uidb64": "MQ", "token": "reset-token"})
+        self.link_url = reverse("users:password_reset_link", kwargs={"uidb64": "MQ", "token": "reset-token"})
+        self.confirm_url = reverse("users:password_reset_confirm")
+        self.client.get(self.link_url)
         self.body = {"new_password": self.password, "confirm_password": self.password}
 
     def test_request_calls_platform_and_redirects_with_neutral_message(self) -> None:
@@ -49,11 +52,12 @@ class PasswordResetViewTests(SimpleTestCase):
         self.assertRedirects(response, reverse("users:login"), fetch_redirect_response=False)
         self.assertEqual([str(message) for message in get_messages(response.wsgi_request)], [self.neutral_message])
 
-    def test_request_error_preserves_neutral_message(self) -> None:
+    def test_request_error_reports_unavailability_without_false_success(self) -> None:
         self.platform.request_password_reset.side_effect = PlatformAPIError("Unavailable", status_code=500)
         response = self.client.post(self.request_url, {"email": "reset@example.com"})
-        self.assertRedirects(response, reverse("users:login"), fetch_redirect_response=False)
-        self.assertEqual([str(message) for message in get_messages(response.wsgi_request)], [self.neutral_message])
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(list(get_messages(response.wsgi_request)), [])
+        self.assertNotContains(response, self.neutral_message, status_code=503)
 
     def test_confirm_get_renders_form(self) -> None:
         response = self.client.get(self.confirm_url)
@@ -66,14 +70,14 @@ class PasswordResetViewTests(SimpleTestCase):
 
     def test_confirm_mismatch_does_not_call_platform(self) -> None:
         response = self.client.post(self.confirm_url, {**self.body, "confirm_password": "Different-Meadow-631!"})
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 400)
         self.assertFormError(response.context["form"], None, "New password and confirmation don't match.")
         self.platform.confirm_password_reset.assert_not_called()
 
     def test_confirm_short_password_is_rejected_before_calling_platform(self) -> None:
         short = {"new_password": "Short-1234", "confirm_password": "Short-1234"}
         response = self.client.post(self.confirm_url, short)
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 400)
         self.assertFormError(response.context["form"], None, "Password must be at least 12 characters long.")
         self.platform.confirm_password_reset.assert_not_called()
 
@@ -85,26 +89,26 @@ class PasswordResetViewTests(SimpleTestCase):
         self.assertRedirects(response, reverse("users:login"), fetch_redirect_response=False)
         self.assertEqual(
             [str(message) for message in get_messages(response.wsgi_request)],
-            ["Password reset successfully. You can now log in with your new password."],
+            ["Password reset successfully. Please sign in with your new password."],
         )
 
     def test_confirm_rejected_by_platform_shows_form_error(self) -> None:
         self.platform.confirm_password_reset.side_effect = PlatformAPIError("Rejected", status_code=400)
         response = self.client.post(self.confirm_url, self.body)
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 400)
         self.assertFormError(
             response.context["form"],
             None,
-            "This reset link is invalid or has expired, or the password was rejected.",
+            "Please check your new password and try again.",
         )
-        self.assertEqual(getattr(response.wsgi_request, "_portal_auth_outcome", None), "failure")
+        self.assertIsNone(getattr(response.wsgi_request, "_portal_auth_outcome", None))
 
     def test_confirm_password_policy_errors_are_shown_on_field(self) -> None:
         self.platform.confirm_password_reset.side_effect = PlatformAPIError(
             "Rejected", status_code=400, response_data={"errors": {"new_password": ["This password is too common."]}}
         )
         response = self.client.post(self.confirm_url, self.body)
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 400)
         self.assertFormError(response.context["form"], "new_password", "This password is too common.")
 
     def test_request_rate_limit_shows_retry_seconds(self) -> None:
@@ -112,27 +116,23 @@ class PasswordResetViewTests(SimpleTestCase):
             "Throttled", status_code=429, retry_after=45
         )
         response = self.client.post(self.request_url, {"email": "reset@example.com"})
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            [str(message) for message in get_messages(response.wsgi_request)],
-            ["Too many attempts. Please try again in 45 seconds."],
-        )
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response["Retry-After"], "45")
+        self.assertContains(response, "45 seconds", status_code=429)
 
     def test_confirm_rate_limit_shows_retry_seconds(self) -> None:
         self.platform.confirm_password_reset.side_effect = PlatformAPIError(
             "Throttled", status_code=429, retry_after=45
         )
         response = self.client.post(self.confirm_url, self.body)
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            [str(message) for message in get_messages(response.wsgi_request)],
-            ["Too many attempts. Please try again in 45 seconds."],
-        )
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response["Retry-After"], "45")
+        self.assertContains(response, "45 seconds", status_code=429)
         self.assertIsNone(getattr(response.wsgi_request, "_portal_auth_outcome", None))
 
     def test_confirm_service_error_is_generic(self) -> None:
         self.platform.confirm_password_reset.side_effect = PlatformAPIError("Unavailable", status_code=503)
         response = self.client.post(self.confirm_url, self.body)
-        self.assertEqual(response.status_code, 200)
-        self.assertFormError(response.context["form"], None, "Password reset failed. Please try again.")
+        self.assertEqual(response.status_code, 503)
+        self.assertFormError(response.context["form"], None, "Password recovery is temporarily unavailable. Please try again later.")
         self.assertIsNone(getattr(response.wsgi_request, "_portal_auth_outcome", None))

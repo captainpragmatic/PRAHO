@@ -32,10 +32,12 @@ from apps.common.localisation_services import store_localisation_preferences
 from apps.common.rate_limit_feedback import (
     build_maintenance_context,
     get_degraded_message,
+    get_rate_limit_message,
     is_rate_limited_error,
 )
 from apps.common.rate_limiting import mark_auth_failure, mark_auth_success
 from apps.common.request_ip import get_safe_client_ip
+from apps.users.constants import PASSWORD_RESET_SESSION_KEY
 from apps.users.forms import (
     ChangePasswordForm,
     CompanyCreationForm,
@@ -665,95 +667,116 @@ def profile_view(request: HttpRequest) -> HttpResponse:
 @csrf_protect
 @require_http_methods(["GET", "POST"])
 def password_reset_view(request: HttpRequest) -> HttpResponse:
-    """
-    Password reset request view.
-    Sends reset email via Platform API.
-    """
+    """Submit recovery requests to Platform and show the same accepted response for every account."""
+    form = PasswordResetRequestForm(request.POST if request.method == "POST" else None)
+    response_status = 200
+    retry_after = None
+    if request.method == "POST" and form.is_valid():
+        try:
+            result = api_client.request_password_reset(
+                form.cleaned_data["email"], client_ip=get_safe_client_ip(request)
+            )
+            if not result.get("success"):
+                raise PlatformAPIError("Password reset was not accepted")
+            messages.success(
+                request, _("If an account with that email exists, you will receive password reset instructions.")
+            )
+            return redirect("users:login")
+        except PlatformAPIError as exc:
+            response_status = 429 if exc.is_rate_limited else 503
+            retry_after = exc.retry_after
+            form.add_error(
+                None,
+                get_rate_limit_message(retry_after)
+                if exc.is_rate_limited
+                else get_degraded_message(exc)
+                if exc.is_degraded
+                else _("Password recovery is temporarily unavailable. Please try again later."),
+            )
+            logger.warning("⚠️ [Portal Password Reset] Request unavailable (status=%s)", exc.status_code)
+    response = render(request, "users/password_reset.html", {"form": form}, status=response_status)
+    if retry_after:
+        response["Retry-After"] = str(retry_after)
+    return response
 
-    # Allow authenticated users to reset password
 
-    if request.method == "GET":
-        form = PasswordResetRequestForm()
-    else:  # POST
-        form = PasswordResetRequestForm(request.POST)
-
-        if form.is_valid():
-            email = form.cleaned_data["email"]
-            rate_limited = False
-            try:
-                api_client.request_password_reset(email, client_ip=get_safe_client_ip(request))
-                logger.info("✅ [Portal Password Reset] Reset requested")
-            except PlatformAPIError as exc:
-                rate_limited = is_rate_limited_error(exc)
-                if rate_limited:
-                    messages.warning(
-                        request,
-                        _("Too many attempts. Please try again in %(seconds)s seconds.")
-                        % {"seconds": exc.retry_after or 30},
-                    )
-                else:
-                    logger.error("🔥 [Portal Password Reset] Request failed (%s)", type(exc).__name__)
-
-            if not rate_limited:
-                messages.success(
-                    request, _("If an account with that email exists, you will receive password reset instructions.")
-                )
-                return redirect("users:login")
-
-    context = {
-        "form": form,
-        "page_title": _("Password Reset"),
-        "brand_name": "PRAHO Portal",
-    }
-
-    return render(request, "users/password_reset.html", context)
+def _add_reset_validation_errors(form: PasswordResetConfirmForm, payload: dict[str, object]) -> None:
+    errors = payload.get("errors", {})
+    if not isinstance(errors, dict):
+        errors = {}
+    for field, field_errors in errors.items():
+        form_field = "confirm_password" if field == "new_password_confirm" else field
+        form.add_error(form_field if form_field in form.fields else None, field_errors)
+    if not errors:
+        form.add_error(None, _("Please check your new password and try again."))
 
 
 @never_cache
 @csrf_protect
 @require_http_methods(["GET", "POST"])
-def password_reset_confirm_view(request: HttpRequest, uidb64: str, token: str) -> HttpResponse:
-    """Redeem a reset link through the Platform password policy."""
+def password_reset_confirm_view(
+    request: HttpRequest, uidb64: str | None = None, token: str | None = None
+) -> HttpResponse:
+    """Keep recovery credentials in the session after opening the emailed link."""
+    if uidb64 is not None and token is not None:
+        if request.method != "GET":
+            return HttpResponse(status=405)
+        request.session[PASSWORD_RESET_SESSION_KEY] = {"uid": uidb64, "token": token}
+        response = redirect("users:password_reset_confirm")
+        response["Referrer-Policy"] = "no-referrer"
+        return response
+
+    credentials = request.session.get(PASSWORD_RESET_SESSION_KEY)
     form = PasswordResetConfirmForm(request.POST if request.method == "POST" else None)
-    if request.method == "POST" and form.is_valid():
+    response_status = 200
+    retry_after = None
+    if credentials and request.method == "POST" and form.is_valid():
         try:
             result = api_client.confirm_password_reset(
-                uidb64,
-                token,
+                credentials["uid"],
+                credentials["token"],
                 form.cleaned_data["new_password"],
                 form.cleaned_data["confirm_password"],
                 client_ip=get_safe_client_ip(request),
             )
-            if result.get("success"):
-                messages.success(request, _("Password reset successfully. You can now log in with your new password."))
-                return redirect("users:login")
-            form.add_error(None, _("Password reset failed. Please try again."))
+            if not result.get("success"):
+                raise PlatformAPIError("Password reset was not accepted")
+            request.session.flush()
+            messages.success(request, _("Password reset successfully. Please sign in with your new password."))
+            response = redirect("users:login")
+            response["Referrer-Policy"] = "no-referrer"
+            return response
         except PlatformAPIError as exc:
-            if is_rate_limited_error(exc):
-                messages.warning(
-                    request,
-                    _("Too many attempts. Please try again in %(seconds)s seconds.")
-                    % {"seconds": exc.retry_after or 30},
-                )
+            payload = exc.response_data or {}
+            if payload.get("code") == "invalid_reset_link":
+                request.session.pop(PASSWORD_RESET_SESSION_KEY, None)
+                credentials = None
+                response_status = 400
             elif exc.status_code == HTTPStatus.BAD_REQUEST:
-                mark_auth_failure(request)
-                form.add_error(None, _("This reset link is invalid or has expired, or the password was rejected."))
-                errors = (exc.response_data or {}).get("errors", {})
-                password_errors = errors.get("new_password") if isinstance(errors, dict) else None
-                if isinstance(password_errors, str):
-                    form.add_error("new_password", password_errors)
-                elif isinstance(password_errors, list):
-                    for error in password_errors:
-                        if isinstance(error, str):
-                            form.add_error("new_password", error)
+                _add_reset_validation_errors(form, payload)
+                response_status = 400
             else:
-                logger.error("🔥 [Portal Password Reset] Confirmation failed (%s)", type(exc).__name__)
-                form.add_error(None, _("Password reset failed. Please try again."))
-    return render(
+                response_status = 429 if exc.is_rate_limited else 503
+                retry_after = exc.retry_after
+                form.add_error(
+                    None,
+                    get_rate_limit_message(retry_after)
+                    if exc.is_rate_limited
+                    else _("Password recovery is temporarily unavailable. Please try again later."),
+                )
+    elif credentials and request.method == "POST":
+        response_status = 400
+    response = render(
         request,
         "users/password_reset_confirm.html",
-        {"form": form, "page_title": _("Reset Password"), "brand_name": "PRAHO Portal"},
+        {"form": form, "validlink": bool(credentials)},
+        status=response_status,
     )
+    # The token is already absent from this URL. Form POSTs need a real Origin for CSRF.
+    response["Referrer-Policy"] = "same-origin"
+    if retry_after:
+        response["Retry-After"] = str(retry_after)
+    return response
 
 
 @never_cache

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Customer service requests create support tickets with a private staff panel to
+  approve, reject, open the service and record manual completion.
 - Staff promotion screens with validated campaign, coupon, batch and automatic-offer forms.
 - Signed checkout promotion quotes, explicit offer stacking, BOGO and tiered discounts,
   and credits that retain their original value across subscription renewals.
@@ -17,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Password recovery keeps reset tokens out of form URLs, preserves password whitespace,
+  rechecks one-time use under a database lock, and uses separate recovery rate limits.
 - Staff domain filters and pagination, Audit Apply Filters, and shared button attribute rendering.
 - Staff settlement now confirms only the cash remaining after gift-card reservations.
 - Closed invoices and expired or closed proformas no longer display a request to pay again.
@@ -67,7 +71,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   available, and starts the Portal against empty and sessions-only databases.
 - ADR-0050: the Portal database may hold named infrastructure tables (sessions and counters), never
   business data.
-
 - SmartBill can now be selected as the invoice issuer, from Settings → Integrations. It
   numbers the invoice, supplies the PDF customers receive, and files e-Factura with ANAF
   in PRAHO's place. Proformas, payments, refunds, dunning, recurring billing, VAT
@@ -107,7 +110,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   authenticator app never matched.
 - The test-layout audit flagged the substring "fix" inside words such as "fixed" and "round" inside
   "rounding"; it now matches whole tokens and has its own tests.
-
 - A SmartBill reply that refuses without saying why no longer lets PRAHO resend the
   same invoice. A timeout or a throttle carries no refusal envelope, so it cannot
   prove the document was not created; resending on one risks a second legally

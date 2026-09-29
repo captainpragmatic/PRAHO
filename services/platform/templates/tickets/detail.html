@@ -8,6 +8,8 @@
 <div class="px-4 py-6">
     <h1 class="text-3xl font-bold text-white mb-6">{% trans 'Ticket' %} #{{ ticket.ticket_number }}</h1>
 
+    {% include 'tickets/partials/service_request_review.html' %}
+
     <!-- Dynamic content that updates after replies -->
     <div id="ticket-status-and-comments">
         {# comments comes from ticket_detail() already filtered by staff permissions — never re-derive it from ticket.comments here #}

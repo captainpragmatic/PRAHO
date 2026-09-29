@@ -165,11 +165,23 @@ def test_customer_billing_dashboard_widget(monitored_customer_page: Page) -> Non
 def test_customer_billing_sync_button(monitored_customer_page: Page, e2e_baseline) -> None:
     page = monitored_customer_page
     page.goto(f"{BASE_URL}/billing/invoices/")
+    # The real success handler reloads immediately. Capture the real XHR body
+    # before that navigation discards Chromium's response-body handle.
+    page.evaluate("""() => {
+        sessionStorage.removeItem('e2e-billing-sync-response');
+        document.addEventListener('htmx:afterRequest', event => {
+            const xhr = event.detail.xhr;
+            if (new URL(xhr.responseURL).pathname === '/billing/sync/') {
+                sessionStorage.setItem('e2e-billing-sync-response', xhr.responseText);
+            }
+        }, {capture: true});
+    }""")
     with page.expect_response(re.compile(r"/billing/sync/$")) as result:
         page.locator('button[hx-post="/billing/sync/"]:visible').first.click()
     response = result.value
     assert response.status == 200
-    data = response.json()
+    page.wait_for_function("sessionStorage.getItem('e2e-billing-sync-response') !== null")
+    data = page.evaluate("JSON.parse(sessionStorage.getItem('e2e-billing-sync-response'))")
     assert data["success"] is True
     assert data["synced_count"] >= 25
     _detail(page, e2e_baseline)

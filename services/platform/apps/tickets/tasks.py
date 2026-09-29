@@ -53,6 +53,7 @@ def auto_close_inactive_tickets(*, now: datetime | None = None) -> AutoCloseResu
             status="waiting_on_customer",
             updated_at__lte=cutoff,
         )
+        .exclude(service_request__status__in=["pending", "approved"])
         .order_by("pk")
         .values_list("pk", flat=True)
     )
@@ -65,6 +66,9 @@ def auto_close_inactive_tickets(*, now: datetime | None = None) -> AutoCloseResu
             with transaction.atomic():
                 ticket = Ticket.objects.select_for_update(of=("self",)).select_related("customer").get(pk=ticket_id)
                 if ticket.status != "waiting_on_customer" or ticket.updated_at > cutoff:
+                    continue
+
+                if Ticket.objects.filter(pk=ticket.pk, service_request__status__in=["pending", "approved"]).exists():
                     continue
 
                 TicketStatusService.close_ticket(ticket, _AUTO_CLOSE_RESOLUTION, allow_system_codes=True)

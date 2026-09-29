@@ -82,7 +82,7 @@ class PortalCounterSiteTests(TestCase):
         middleware = AuthenticationRateLimitMiddleware(downstream)
         middleware.VOLUME_RATE_LIMIT = 2
         statuses = [
-            middleware(self.request(path)).status_code for path in ("/register/", "/password-reset/", "/register/")
+            middleware(self.request("/register/")).status_code for _ in range(3)
         ]
         self.assertEqual(statuses, [200, 200, 429])
         self.assertEqual(observed, [1, 2])

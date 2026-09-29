@@ -13,7 +13,9 @@ class Command(BaseCommand):
     help = "Create deterministic E2E prerequisites or an owned, named test scenario."
 
     def add_arguments(self, parser: CommandParser) -> None:
-        parser.add_argument("--scenario", choices=("baseline", "billing", "pricing", "account"), default="baseline")
+        parser.add_argument(
+            "--scenario", choices=("baseline", "billing", "pricing", "account", "service_request"), default="baseline"
+        )
         parser.add_argument("--key", default="")
 
     def handle(self, *args: Any, **options: Any) -> None:

@@ -5,6 +5,7 @@
 from django.urls import path
 
 from . import views
+from .service_request_views import service_request_decision
 
 app_name = "tickets"
 
@@ -13,6 +14,7 @@ urlpatterns = [
     path("search/", views.ticket_search_htmx, name="search_htmx"),
     path("create/", views.ticket_create, name="create"),
     path("<int:pk>/", views.ticket_detail, name="detail"),
+    path("<int:pk>/service-request/decision/", service_request_decision, name="service_request_decision"),
     path("<int:pk>/reply/", views.ticket_reply, name="reply"),
     path("<int:pk>/comments/", views.ticket_comments_htmx, name="comments_htmx"),
     path("<int:pk>/close/", views.ticket_close, name="close"),

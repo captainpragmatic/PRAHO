@@ -630,7 +630,7 @@ disable_error_code = ["attr-defined", "misc", "assignment", "type-arg", "untyped
 
 # API views: additional DRF-specific relaxations
 [[tool.mypy.overrides]]
-module = ["apps.api.*.views"]
+module = ["apps.api.*.views", "apps.api.services.request_views"]
 disable_error_code = ["attr-defined", "misc", "no-untyped-def", "no-untyped-call", "untyped-decorator"]
 
 # API serializers and core: DRF typing issues

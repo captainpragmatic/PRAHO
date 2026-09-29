@@ -241,6 +241,10 @@ class Ticket(models.Model):
     @transition(field=status, source=["open", "in_progress", "waiting_on_customer"], target="closed")
     def close(self) -> None:
         """Close the ticket."""
+        from apps.provisioning.service_request_models import ServiceRequest  # noqa: PLC0415 -- cross-app invariant
+
+        if ServiceRequest.objects.filter(ticket_id=self.pk, status__in=["pending", "approved"]).exists():
+            raise ValueError(_("Staff must reject or complete the service request before closing this ticket."))
         self.closed_at = timezone.now()
 
     @transition(field=status, source="closed", target="open")

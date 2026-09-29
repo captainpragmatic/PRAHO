@@ -1,8 +1,8 @@
 """Customer service reads, filters and action form against explicit fixtures.
 
-Provisioning transitions are exercised by the real ORM workflow tests. The portal
-currently offers a request form; its unimplemented action API is not a provisioning
-success assertion. Usage history charts are not implemented; current usage is.
+Provisioning transitions are exercised by the real ORM workflow tests. Customer
+requests and private staff decisions are covered in test_service_request_workflow.
+Usage history charts are not implemented; current usage is.
 """
 
 import re

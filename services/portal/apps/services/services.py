@@ -15,12 +15,39 @@ Security guidelines:
 
 import logging
 from typing import Any, cast
+from uuid import UUID
 
 from django.utils.dateparse import parse_date, parse_datetime
 
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 
 logger = logging.getLogger(__name__)
+
+
+def _service_request_receipt(response: dict[str, Any]) -> dict[str, Any]:
+    """Accept only a usable customer receipt, excluding private review metadata."""
+    data = response.get("data")
+    if response.get("success") is not True or not isinstance(data, dict):
+        raise PlatformAPIError("Invalid service request receipt")
+
+    request_id = data.get("request_id")
+    ticket_id = data.get("ticket_id")
+    ticket_number = data.get("ticket_number")
+    if (
+        not isinstance(request_id, str)
+        or not isinstance(ticket_id, int)
+        or isinstance(ticket_id, bool)
+        or ticket_id <= 0
+        or not isinstance(ticket_number, str)
+        or not ticket_number.strip()
+    ):
+        raise PlatformAPIError("Invalid service request receipt")
+    try:
+        request_id = str(UUID(request_id))
+    except ValueError as exc:
+        raise PlatformAPIError("Invalid service request receipt") from exc
+
+    return {"request_id": request_id, "ticket_id": ticket_id, "ticket_number": ticket_number}
 
 
 def _raise_if_degraded(exc: Exception) -> None:
@@ -319,8 +346,15 @@ class ServicesAPIClient(PlatformAPIClient):
             )
             return []
 
-    def request_service_action(
-        self, customer_id: int, user_id: int, service_id: int, action: str, reason: str = ""
+    def request_service_action(  # noqa: PLR0913 -- signed identity and submission receipt are required for this mutation
+        self,
+        customer_id: int,
+        user_id: int,
+        service_id: int,
+        action: str,
+        reason: str = "",
+        *,
+        submission_id: str,
     ) -> dict[str, Any]:
         """
         Request service action (customer-available actions only).
@@ -328,13 +362,14 @@ class ServicesAPIClient(PlatformAPIClient):
 
         Args:
             customer_id: Customer ID for authorization
-            user_id: User ID for HMAC authentication
+            user_id: Acting user whose membership Platform must verify
             service_id: Service ID to perform action on
-            action: Action type (upgrade, downgrade, suspend_request, cancel_request)
+            action: One of the four customer request actions
             reason: Optional reason for the request
+            submission_id: Stable form UUID, retained when the outcome is unknown
 
         Returns:
-            Dict containing request information
+            Receipt containing request_id, ticket_id, and ticket_number only
         """
         try:
             # Only allow customer-safe actions
@@ -342,14 +377,22 @@ class ServicesAPIClient(PlatformAPIClient):
             if action not in allowed_actions:
                 raise PlatformAPIError(f"Action '{action}' not allowed for customer requests")
 
-            data = {"customer_id": customer_id, "action": action, "reason": reason, "requested_by_customer": True}
+            data = {
+                "customer_id": customer_id,
+                "user_id": user_id,
+                "action": action,
+                "reason": reason,
+                "submission_id": submission_id,
+            }
 
+            # Writes are not automatically retried. A deliberate retry uses the same submission UUID.
             response = self._make_request("POST", f"/services/{service_id}/actions/", user_id=user_id, data=data)
+            receipt = _service_request_receipt(response)
 
             logger.info(
                 f"✅ [Services API] Requested action '{action}' for service {service_id} by customer {customer_id}"
             )
-            return response
+            return receipt
 
         except PlatformAPIError as e:
             logger.error(

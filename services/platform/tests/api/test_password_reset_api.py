@@ -96,7 +96,7 @@ class PasswordResetAPITests(HMACTestMixin, TestCase):
 
     def test_unconfigured_portal_url_is_a_server_error(self) -> None:
         response = self.portal_post(self.request_path, {"email": self.user.email})
-        self.assertEqual(response.status_code, 500, response.content)
+        self.assertEqual(response.status_code, 503, response.content)
         self.assertEqual(response.json()["error"], "Password reset service temporarily unavailable.")
         self.assertEqual(len(mail.outbox), 0)
 
@@ -105,7 +105,7 @@ class PasswordResetAPITests(HMACTestMixin, TestCase):
             with self.subTest(base=base):
                 self.configure_portal_url(base)
                 response = self.portal_post(self.request_path, {"email": self.user.email})
-                self.assertEqual(response.status_code, 500, response.content)
+                self.assertEqual(response.status_code, 503, response.content)
                 self.assertEqual(len(mail.outbox), 0)
 
     def test_confirm_with_valid_token_sets_password_and_clears_lockout(self) -> None:

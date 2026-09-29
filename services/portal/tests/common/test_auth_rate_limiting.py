@@ -100,20 +100,18 @@ class AuthenticationRateLimitTests(TestCase):
         self.assertEqual(counters.peek(self.ip_key), 3)
 
     def test_reset_requests_use_their_own_volume_bucket(self) -> None:
-        for _ in range(10):
+        with patch("apps.users.views.api_client.request_password_reset", return_value={"success": True}) as reset:
+            for _ in range(5):
+                response = self.client.post(reverse("users:password_reset"), {"email": "x@example.com"})
+                self.assertRedirects(response, reverse("users:login"), fetch_redirect_response=False)
+            self.assertEqual(counters.peek("password_reset_ip_127.0.0.1"), 5)
             response = self.client.post(reverse("users:password_reset"), {"email": "x@example.com"})
-            self.assertRedirects(response, reverse("users:login"), fetch_redirect_response=False)
-        self.assertEqual(counters.peek(self.volume_key), 10)
-
-        response = self.client.post(reverse("users:password_reset"), {"email": "x@example.com"})
-        self.assertRedirects(response, reverse("users:login"), fetch_redirect_response=False)
-        self.assertIn(
-            "Too many authentication attempts",
-            " ".join(str(message) for message in get_messages(response.wsgi_request)),
-        )
+            self.assertContains(response, "Too many password reset requests", status_code=429)
+            self.assertEqual(response["Retry-After"], "900")
+            self.assertEqual(reset.call_count, 5)
         self.assertEqual(counters.peek(self.ip_key), 0)
         self.assertEqual(counters.peek("auth_account_attempts_x@example.com"), 0)
-        self.assertEqual(counters.peek(self.volume_key), 11)
+        self.assertEqual(counters.peek(self.volume_key), 0)
 
     def test_login_body_carries_client_ip(self) -> None:
         with patch("apps.users.views.api_client") as platform:
@@ -259,9 +257,10 @@ class AuthenticationRateLimitTests(TestCase):
         counters.increment(self.ip_key, 900, delta=5)
         counters.increment(self.account_key, 1800, delta=5)
         for name in ("users:password_reset", "users:register"):
-            response = self.client.post(reverse(name), {"email": self.email})
-            self.assertEqual(response.status_code, 302 if name == "users:password_reset" else 200)
-        self.assertEqual(counters.peek(self.volume_key), 2)
+            response = self.client.post(reverse(name), {"email": "not-an-email"})
+            self.assertEqual(response.status_code, 200)
+        self.assertEqual(counters.peek(self.volume_key), 1)
+        self.assertEqual(counters.peek("password_reset_ip_127.0.0.1"), 1)
         self.assertEqual(counters.peek(self.ip_key), 5)
         self.assertEqual(counters.peek(self.account_key), 5)
 
