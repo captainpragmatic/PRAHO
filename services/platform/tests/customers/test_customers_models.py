@@ -13,7 +13,6 @@ This covers the main Customer model - profiles, addresses, etc. are in separate 
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
-from django.core.exceptions import ValidationError
 from django.test import TestCase
 
 from apps.customers.models import (
@@ -232,7 +231,7 @@ class CustomerBillingProfileTestCase(TestCase):
         )
 
         # Should return 0.00 when no invoices
-        balance = billing_profile.get_account_balance()
+        balance = billing_profile.get_account_balance("RON")
         self.assertEqual(balance, Decimal('0.00'))
 
 

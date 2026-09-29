@@ -112,8 +112,10 @@ def _empty_services_summary() -> dict[str, Any]:
         # None means "counts unknown" — the services view hides tab badges
         # instead of rendering fabricated zeros next to a failed/absent summary.
         "status_counts": None,
-        "total_monthly_cost": 0.0,
-        "total_monthly_cost_with_vat": 0.0,
+        "currency_code": None,
+        "total_monthly_cost": None,
+        "total_monthly_cost_with_vat": None,
+        "monthly_costs_by_currency": [],
         "total_disk_usage_gb": 0.0,
         "total_bandwidth_usage_gb": 0.0,
         "service_types": {},
@@ -190,9 +192,7 @@ class ServicesAPIClient(PlatformAPIClient):
             if response.get("success") and "data" in response:
                 platform_data = response["data"]
                 services = platform_data.get("services", [])
-                # Ensure currency_code defaults to RON for template rendering
                 for svc in services:
-                    svc.setdefault("currency_code", "RON")
                     _parse_service_dates(svc)
                 adapted_response = {
                     "results": services,
@@ -232,7 +232,6 @@ class ServicesAPIClient(PlatformAPIClient):
             # Extract service data from nested platform API response
             if response.get("success") and "data" in response and "service" in response["data"]:
                 service_data = response["data"]["service"]
-                service_data.setdefault("currency_code", "RON")
                 _parse_service_dates(service_data)
                 logger.info(f"✅ [Services API] Retrieved service {service_id} details for customer {customer_id}")
                 return cast(dict[str, Any], service_data)

@@ -322,6 +322,15 @@ def _get_accessible_customer_ids(user: User) -> list[int]:
         return []  # type: ignore[unreachable]
 
 
+def _totals_by_currency(
+    rows: QuerySet[Invoice] | QuerySet[ProformaInvoice] | QuerySet[Payment],
+    amount_field: str = "total_cents",
+) -> dict[str, int]:
+    """Group recorded money, clearing date ordering so it cannot split currency groups."""
+    totals = rows.order_by("currency_id").values("currency_id").annotate(currency_total_cents=Sum(amount_field))
+    return {row["currency_id"]: row["currency_total_cents"] or 0 for row in totals}
+
+
 @billing_staff_required
 @staff_rate_limit(requests_per_minute=60, per_user=True)
 def billing_list(request: HttpRequest) -> HttpResponse:
@@ -429,10 +438,6 @@ def billing_list(request: HttpRequest) -> HttpResponse:
             "extra_params": {k: v for k, v in request.GET.items() if k != "page"},
         }
 
-        # Statistics (calculate from original querysets for accuracy)
-        proforma_total = proformas_qs.aggregate(total=Sum("total_cents"))["total"] or 0
-        invoice_total = invoices_qs.aggregate(total=Sum("total_cents"))["total"] or 0
-
         # Platform is staff-only
         is_staff_user = True
 
@@ -441,9 +446,8 @@ def billing_list(request: HttpRequest) -> HttpResponse:
             "doc_type": doc_type,
             "proforma_count": proformas_qs.count(),
             "invoice_count": invoices_qs.count(),
-            "proforma_total": Decimal(proforma_total) / 100,
-            "invoice_total": Decimal(invoice_total) / 100,
-            "total_amount": Decimal(proforma_total + invoice_total) / 100,
+            "proforma_totals_by_currency": _totals_by_currency(proformas_qs),
+            "invoice_totals_by_currency": _totals_by_currency(invoices_qs),
             "is_staff_user": is_staff_user,
             **pagination_context,  # ✅ Add pagination context (page_obj, is_paginated, extra_params)
             **search_context,  # ✅ Add search context (search_query, has_search)
@@ -465,9 +469,8 @@ def billing_list(request: HttpRequest) -> HttpResponse:
             "doc_type": "all",
             "proforma_count": 0,
             "invoice_count": 0,
-            "proforma_total": Decimal("0.00"),
-            "invoice_total": Decimal("0.00"),
-            "total_amount": Decimal("0.00"),
+            "proforma_totals_by_currency": {},
+            "invoice_totals_by_currency": {},
             "is_staff_user": False,
             "page_obj": None,
             "is_paginated": False,
@@ -539,9 +542,6 @@ def proforma_list(request: HttpRequest) -> HttpResponse:
             "extra_params": {k: v for k, v in request.GET.items() if k != "page"},
         }
 
-        # Statistics
-        proforma_total = proformas_qs.aggregate(total=Sum("total_cents"))["total"] or 0
-
         # Platform is staff-only
         is_staff_user = True
 
@@ -550,9 +550,8 @@ def proforma_list(request: HttpRequest) -> HttpResponse:
             "doc_type": "proforma",  # Always proforma for this view
             "proforma_count": proformas_qs.count(),
             "invoice_count": 0,  # No invoices in this view
-            "proforma_total": Decimal(proforma_total) / 100,
-            "invoice_total": Decimal("0.00"),
-            "total_amount": Decimal(proforma_total) / 100,
+            "proforma_totals_by_currency": _totals_by_currency(proformas_qs),
+            "invoice_totals_by_currency": {},
             "is_staff_user": is_staff_user,
             **pagination_context,
             **search_context,
@@ -571,9 +570,8 @@ def proforma_list(request: HttpRequest) -> HttpResponse:
             "doc_type": "proforma",
             "proforma_count": 0,
             "invoice_count": 0,
-            "proforma_total": Decimal("0.00"),
-            "invoice_total": Decimal("0.00"),
-            "total_amount": Decimal("0.00"),
+            "proforma_totals_by_currency": {},
+            "invoice_totals_by_currency": {},
             "is_staff_user": False,
             "page_obj": None,
             "is_paginated": False,
@@ -736,24 +734,14 @@ def invoice_detail(request: HttpRequest, pk: int) -> HttpResponse:
     return render(request, "billing/invoice_detail.html", context)
 
 
-def _create_proforma_with_sequence(
-    customer: Customer, valid_until: datetime, currency: Currency | None = None
-) -> ProformaInvoice:
-    """Create a new proforma with proper sequence number.
-
-    ``currency`` defaults to RON when not supplied. Callers that let staff choose a
-    currency (#103) validate + fail-closed-guard it first (see ``currency_service``)
-    and pass the resolved ``Currency`` here.
-    """
+def _create_proforma_with_sequence(customer: Customer, valid_until: datetime, currency: Currency) -> ProformaInvoice:
+    """Create a numbered proforma using the currency confirmed by its caller."""
     from apps.billing.fiscal_identity import billing_country_code, get_customer_fiscal_identity  # noqa: PLC0415
 
     with transaction.atomic():
         sequence, _created = ProformaSequence.objects.get_or_create(scope="default")
         proforma_number = sequence.get_next_number("PRO")
 
-        # Create proforma
-        if currency is None:
-            currency = Currency.objects.get(code="RON")
         fiscal_identity = get_customer_fiscal_identity(customer)
         billing_address = customer.get_billing_address()
 
@@ -815,6 +803,8 @@ def _render_proforma_create_form(request: HttpRequest, *, error: str | None = No
     """
     if not isinstance(request.user, User):
         return redirect("users:login")
+    from apps.billing.currency_policy import get_selling_currency_policy  # noqa: PLC0415
+
     if error:
         messages.error(request, _("❌ {error}").format(error=error))
     posted = request.POST if request.method == "POST" else None
@@ -824,11 +814,12 @@ def _render_proforma_create_form(request: HttpRequest, *, error: str | None = No
         "document_type": "proforma",
         "posted": posted,
         "lines": _posted_proforma_lines(posted) if posted else None,
+        **get_selling_currency_policy().as_dict(),
     }
     return render(request, "billing/proforma_form.html", context)
 
 
-def _handle_proforma_create_post(request: HttpRequest) -> HttpResponse:
+def _handle_proforma_create_post(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911  # Bound errors and access redirects
     """Handle POST request for proforma creation."""
     # Type guard for authenticated user
     if not isinstance(request.user, User):
@@ -843,9 +834,10 @@ def _handle_proforma_create_post(request: HttpRequest) -> HttpResponse:
     # Process valid_until date
     valid_until, validation_errors = _process_valid_until_date(request.POST)
 
-    # #103: honor the selected currency, and FAIL CLOSED before any write when it is
-    # unsupported or has no resolvable FX rate (a non-RON proforma with no rate would
-    # take money it can never issue an invoice for). Validate before creating anything.
+    from apps.billing.currency_policy import (  # noqa: PLC0415
+        SellingCurrencyChangedError,
+        require_current_selling_policy,
+    )
     from apps.billing.currency_service import (  # noqa: PLC0415
         CurrencyNotIssuableError,
         CurrencyValidationError,
@@ -854,39 +846,43 @@ def _handle_proforma_create_post(request: HttpRequest) -> HttpResponse:
     )
 
     try:
-        # Absent/blank currency defaults to RON (the form's default + historical behavior);
-        # a PROVIDED value is validated, and any non-RON currency is fail-closed guarded.
-        currency_code = normalize_currency_code(request.POST.get("currency") or "RON")
-        assert_currency_issuable(currency_code, timezone.localdate())
-    except (CurrencyValidationError, CurrencyNotIssuableError) as exc:
+        currency_code = normalize_currency_code(request.POST.get("currency"))
+        revision = int(request.POST.get("currency_revision", ""))
+    except CurrencyValidationError as exc:
         return _render_proforma_create_form(request, error=str(exc))
-    currency = Currency.objects.get(code=currency_code)
+    except ValueError:
+        return _render_proforma_create_form(request, error=str(_("Review the current currency and submit again.")))
 
     try:
         # Create proforma - customer is guaranteed to be not None here due to validation above
         if customer is None:
             messages.error(request, _("❌ Customer is required to create proforma."))
             return redirect("billing:proforma_list")
-        proforma = _create_proforma_with_sequence(customer, valid_until, currency)
+        with transaction.atomic():
+            require_current_selling_policy(currency_code, revision)
+            assert_currency_issuable(currency_code, timezone.localdate())
+            currency = Currency.objects.get(code=currency_code)
+            proforma = _create_proforma_with_sequence(customer, valid_until, currency)
 
-        # Update billing info from POST data if provided
-        bill_to_name = request.POST.get("bill_to_name")
-        bill_to_email = request.POST.get("bill_to_email")
-        if bill_to_name:
-            proforma.bill_to_name = bill_to_name
-        if bill_to_email:
-            proforma.bill_to_email = bill_to_email
-
+            # Keep the policy locked through the line prices and document totals.
+            bill_to_name = request.POST.get("bill_to_name")
+            bill_to_email = request.POST.get("bill_to_email")
+            if bill_to_name:
+                proforma.bill_to_name = bill_to_name
+            if bill_to_email:
+                proforma.bill_to_email = bill_to_email
+            validation_errors.extend(_process_proforma_line_items(proforma, request.POST))
+            proforma.save()
+    except SellingCurrencyChangedError:
+        return _render_proforma_create_form(
+            request,
+            error=str(_("The selling currency changed. Review the amounts in the current currency and submit again.")),
+        )
+    except CurrencyNotIssuableError as exc:
+        return _render_proforma_create_form(request, error=str(exc))
     except Exception as e:
         messages.error(request, _("❌ Error creating proforma: {error}").format(error=str(e)))
         return redirect("billing:proforma_list")
-
-    # Process line items
-    line_errors = _process_proforma_line_items(proforma, request.POST)
-    validation_errors.extend(line_errors)
-
-    # Save proforma with totals
-    proforma.save()
 
     # Show validation errors if any
     for error in validation_errors:
@@ -1544,7 +1540,7 @@ def payment_list(request: HttpRequest) -> HttpResponse:
 
     context = {
         "payments": payments_page,
-        "total_amount": payments.aggregate(total=Sum("amount_cents"))["total"] or Decimal("0"),
+        "payment_totals_by_currency": _totals_by_currency(payments, "amount_cents"),
     }
 
     return render(request, "billing/payment_list.html", context)
@@ -2104,9 +2100,10 @@ def api_create_payment_intent(  # noqa: C901, PLR0911, PLR0912  # Complexity: mu
                 return JsonResponse(
                     {"success": False, "error": "amount_cents must be an integer when provided"}, status=400
                 )
-            if amount_cents <= 0 or amount_cents > _get_max_payment_amount_cents():  # Max 1M RON
+            maximum_amount = _get_max_payment_amount_cents()
+            if amount_cents <= 0 or amount_cents > maximum_amount:
                 return JsonResponse(
-                    {"success": False, "error": "amount_cents must be between 1 and 100,000,000 (1M RON)"}, status=400
+                    {"success": False, "error": f"amount_cents must be between 1 and {maximum_amount:,}"}, status=400
                 )
 
         if currency and currency not in ["RON", "EUR", "USD"]:
@@ -2328,10 +2325,11 @@ def api_stripe_config(request: HttpRequest) -> JsonResponse:
 
         # Get public configuration from settings system
         publishable_key = SettingsService.get_setting("integrations.stripe_publishable_key")
+        from .currency_policy import get_selling_currency_policy  # noqa: PLC0415
 
         config = {
             "publishable_key": publishable_key,
-            "currency": "RON",
+            "currency": get_selling_currency_policy().currency_code,
             "country": "RO",
             "supported_payment_methods": ["card"],
             "appearance": {

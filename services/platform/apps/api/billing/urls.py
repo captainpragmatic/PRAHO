@@ -4,11 +4,19 @@
 
 from django.urls import path
 
-from . import views
+from . import gift_views, views
 
 app_name = "api_billing"
 
 urlpatterns = [
+    path("gift-cards/catalog/", gift_views.catalog, name="gift_card_catalog"),
+    path("gift-cards/purchases/", gift_views.purchases, name="gift_card_purchases"),
+    path("gift-cards/create/", gift_views.create, name="gift_card_create"),
+    path("gift-cards/detail/", gift_views.detail, name="gift_card_detail"),
+    path("gift-cards/funding/", gift_views.funding, name="gift_card_funding"),
+    path("gift-cards/refresh/", gift_views.refresh, name="gift_card_refresh"),
+    path("gift-cards/reveal/", gift_views.reveal, name="gift_card_reveal"),
+    path("gift-cards/resend/", gift_views.resend, name="gift_card_resend"),
     path("gift-card-payment/", views.gift_card_payment_api, name="gift_card_payment"),
     # Currency endpoints
     path("currencies/", views.currencies_api, name="currencies"),

@@ -59,7 +59,7 @@ def _call_preflight(customer: Customer, cart_items: list[dict]) -> tuple[int, di
     """Call preflight_order with mocked auth. Returns (status_code, response_data)."""
     from apps.api.orders.views import preflight_order  # noqa: PLC0415
 
-    body = json.dumps({"items": cart_items}, default=str).encode()
+    body = json.dumps({"items": cart_items, "currency": "RON", "currency_revision": 1}, default=str).encode()
     factory = RequestFactory()
     raw_request = factory.post(
         "/api/orders/preflight/",

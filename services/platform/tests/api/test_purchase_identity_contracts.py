@@ -164,6 +164,7 @@ class PurchaseIdentityContracts(HMACTestMixin, TestCase):
                 "user_id": user.pk,
                 "idempotency_key": "bank-order-contract",
                 "currency": "RON",
+                "currency_revision": 1,
                 "payment_method": "bank_transfer",
                 "items": [
                     {

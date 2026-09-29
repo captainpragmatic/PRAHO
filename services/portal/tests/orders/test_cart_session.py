@@ -22,6 +22,8 @@ def _make_mock_platform_api(requires_domain: bool = False) -> Mock:
         "name": "Generic Product",
         "product_type": "hosting",
         "requires_domain": requires_domain,
+        "selling_currency": "RON",
+        "currency_revision": 1,
         "is_active": True,
     }
     mock_cls = Mock(return_value=mock_instance)
@@ -52,7 +54,7 @@ class TestGDPRCompliantCartSession(SimpleTestCase):
         cart = GDPRCompliantCartSession(self.session)
 
         # Check cart structure
-        self.assertEqual(cart.cart['currency'], 'RON')
+        self.assertEqual(cart.cart['currency'], '')
         self.assertIn('items', cart.cart)
         self.assertIn('created_at', cart.cart)
         self.assertIn('expires_at', cart.cart)

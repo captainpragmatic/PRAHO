@@ -1,0 +1,14 @@
+{% load i18n formatting %}
+<section class="space-y-3">
+  <h2 class="text-xl text-white">{% trans "Recorded discounts by currency" %}</h2>
+  {% if money_history_incomplete %}<p class="text-amber-300">{% trans "Some older campaign totals need review against their original records." %}</p>{% endif %}
+  <ul class="divide-y divide-slate-700 rounded-lg border border-slate-700 bg-slate-800">
+    {% for total in money_totals %}
+      <li class="flex flex-wrap justify-between gap-3 p-4 text-sm text-slate-300">
+        <span class="font-semibold text-white">{% if total.currency_code %}{{ total.currency_code }}{% else %}{% trans "Unresolved currency" %}{% endif %}</span>
+        <span>{% trans "Given" %}: {{ total.spent_cents|cents_to_currency|floatformat:2 }}</span>
+        <span>{% trans "Reserved" %}: {{ total.reserved_cents|cents_to_currency|floatformat:2 }}</span>
+      </li>
+    {% empty %}<li class="p-6 text-slate-400">{% trans "No recorded discounts yet." %}</li>{% endfor %}
+  </ul>
+</section>

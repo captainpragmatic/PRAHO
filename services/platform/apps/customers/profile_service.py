@@ -151,11 +151,17 @@ class ProfileService:
         return billing_profile
 
     @staticmethod
-    def get_customer_account_balance(customer: Customer) -> Decimal:
-        """Get customer's current account balance."""
+    def get_customer_account_balances(customer: Customer) -> dict[str, Decimal]:
+        """Get outstanding amounts grouped by their recorded currency."""
+        billing_profile = customer.get_billing_profile()
+        return billing_profile.get_account_balances() if billing_profile else {}
+
+    @staticmethod
+    def get_customer_account_balance(customer: Customer, currency_code: str) -> Decimal:
+        """Get outstanding units in one explicitly requested currency."""
         billing_profile = customer.get_billing_profile()
         if billing_profile:
-            return billing_profile.get_account_balance()
+            return billing_profile.get_account_balance(currency_code)
         return Decimal("0.00")
 
     @staticmethod

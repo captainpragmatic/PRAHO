@@ -10,6 +10,7 @@ Tests for Provisioning Views focusing on authentication, authorization, and func
 """
 
 from decimal import Decimal
+from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.contrib.messages import get_messages
 from django.test import TestCase, Client
@@ -304,7 +305,9 @@ class ServiceCreateViewTestCase(TestCase):
         post_data = {
             'customer_id': self.customer.id,
             'plan_id': self.plan.id,
-            'domain': 'newservice.example.com'
+            'domain': 'newservice.example.com',
+            'currency': 'RON',
+            'currency_revision': 1,
         }
 
         response = self.client.post(reverse('provisioning:service_create'), post_data)
@@ -345,11 +348,15 @@ class ServiceCreateViewTestCase(TestCase):
         post_data = {
             'customer_id': other_customer.id,
             'plan_id': self.plan.id,
-            'domain': 'unauthorized.example.com'
+            'domain': 'unauthorized.example.com',
+            'currency': 'RON',
+            'currency_revision': 1,
         }
 
-        response = self.client.post(reverse('provisioning:service_create'), post_data)
+        with patch('apps.provisioning.service_views._get_accessible_customer_ids', return_value=[self.customer.id]):
+            response = self.client.post(reverse('provisioning:service_create'), post_data)
 
+        self.assertFalse(Service.objects.filter(customer=other_customer).exists())
         # Should redirect with error message
         self.assertEqual(response.status_code, 302)
         self.assertIn('services', response.url)

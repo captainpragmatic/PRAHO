@@ -8,6 +8,7 @@ from unittest.mock import patch
 from django.core.cache import cache
 from django.test import TestCase
 
+from apps.billing.currency_models import Currency
 from apps.customers.models import Customer
 from apps.domains.models import TLD, Domain, Registrar
 from apps.domains.services import DomainNotificationService
@@ -21,6 +22,7 @@ class DomainRenewalNoticePolicyTests(TestCase):
     now = datetime(2026, 7, 24, 10, 0, tzinfo=UTC)
 
     def setUp(self) -> None:
+        Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei"})
         cache.clear()
         self.tld = TLD.objects.create(
             extension="com",
@@ -110,6 +112,7 @@ class DomainRenewalNoticeTaskTests(TestCase):
     now = datetime(2026, 7, 24, 10, 0, tzinfo=UTC)
 
     def setUp(self) -> None:
+        Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei"})
         cache.clear()
         self.tld = TLD.objects.create(
             extension="com",

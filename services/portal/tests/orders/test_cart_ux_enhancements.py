@@ -32,6 +32,8 @@ def _make_product_data(
         "name": "Shared Hosting Basic",
         "product_type": product_type,
         "requires_domain": requires_domain,
+        "selling_currency": "RON",
+        "currency_revision": 1,
         "is_active": True,
         "prices": [
             {

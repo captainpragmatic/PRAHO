@@ -241,6 +241,9 @@
     </div>
 
     <div class="p-6">
+      {% if not bank_details %}
+      <p role="status" class="text-amber-200 mb-4">{% trans "Bank instructions are currently unavailable. Please contact support before making a transfer." %}</p>
+      {% endif %}
       <div class="grid sm:grid-cols-2 gap-6">
         <div class="space-y-4">
           {% if bank_details.iban %}

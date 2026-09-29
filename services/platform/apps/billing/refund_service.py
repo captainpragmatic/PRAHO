@@ -23,6 +23,7 @@ from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 from apps.orders.models import Order
 
 if TYPE_CHECKING:
+    from apps.promotions.models import GiftCardFundingRefund
     from apps.users.models import User
 
 logger = logging.getLogger(__name__)
@@ -163,6 +164,7 @@ class RefundGatewayFacts(TypedDict, total=False):
     failure_reason: str
     event_id: str
     event_created: int
+    metadata: dict[str, Any]
 
 
 class RefundStatus(enum.Enum):
@@ -2421,7 +2423,7 @@ class RefundConvergenceService:
     @staticmethod
     def converge_gateway_refund(  # noqa: C901, PLR0911, PLR0912, PLR0915
         facts: RefundGatewayFacts,
-    ) -> Result[Refund | None, str]:
+    ) -> Result[Refund | GiftCardFundingRefund | None, str]:
         refund_id = facts.get("refund_id")
         payment_intent_id = facts.get("payment_intent_id")
         amount_cents = facts.get("amount_cents")
@@ -2442,11 +2444,19 @@ class RefundConvergenceService:
             return RefundConvergenceService._permanent_error("Gateway refund event timestamp is invalid")
 
         try:
+            from apps.promotions.gift_refunds import converge_gift_refund  # noqa: PLC0415
             from apps.promotions.tender_refunds import converge_tender_refund  # noqa: PLC0415
 
+            gift_result = converge_gift_refund(facts)
+            if gift_result is not None:
+                if gift_result.is_err():
+                    return Err(gift_result.unwrap_err(), retriability=retriability_of(gift_result))
+                return Ok(gift_result.unwrap())
             tender_result = converge_tender_refund(facts)
             if tender_result is not None:
-                return tender_result
+                if tender_result.is_err():
+                    return Err(tender_result.unwrap_err(), retriability=retriability_of(tender_result))
+                return Ok(tender_result.unwrap())
             with transaction.atomic():
                 snapshot_query = Refund.objects.filter(gateway_refund_id=refund_id)
                 snapshot = snapshot_query.values("id", "payment_id", "invoice_id", "order_id").first()

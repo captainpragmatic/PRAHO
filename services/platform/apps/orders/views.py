@@ -28,8 +28,13 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_POST
 
+from apps.billing.currency_policy import (
+    SellingCurrencyChangedError,
+    SellingCurrencyPolicy,
+    get_selling_currency_policy,
+    require_current_selling_policy,
+)
 from apps.billing.fiscal_identity import billing_country_code
-from apps.billing.models import Currency
 from apps.billing.refund_service import RefundData, RefundService
 from apps.common.decorators import billing_staff_api_required, staff_required_strict
 from apps.common.mixins import get_search_context
@@ -512,7 +517,8 @@ def order_create(request: HttpRequest) -> HttpResponse:
     """
     # Dynamic form creation for Order — scope customer queryset to accessible customers (H13)
     accessible_customer_ids = _get_accessible_customer_ids(request.user) if isinstance(request.user, User) else []
-    order_form = modelform_factory(Order, fields=["customer", "currency", "payment_method", "notes", "customer_notes"])
+    order_form = modelform_factory(Order, fields=["customer", "payment_method", "notes", "customer_notes"])
+    response_status = 200
 
     if request.method == "POST":
         form = order_form(request.POST)
@@ -520,8 +526,10 @@ def order_create(request: HttpRequest) -> HttpResponse:
         if form.is_valid():
             try:
                 with transaction.atomic():
+                    policy = _submitted_selling_policy(request)
                     # Create order from form data
                     order = form.save(commit=False)
+                    order.currency_id = policy.currency_code
 
                     # Set customer information snapshot
                     customer = order.customer
@@ -577,6 +585,9 @@ def order_create(request: HttpRequest) -> HttpResponse:
                     )
                     return redirect("orders:order_detail", pk=order.id)
 
+            except SellingCurrencyChangedError as e:
+                form.add_error(None, e)
+                response_status = 409
             except Exception as e:
                 logger.error(f"🔥 [Orders] Error creating order: {e}")
                 messages.error(request, _("❌ Error creating order. Please try again."))
@@ -587,10 +598,37 @@ def order_create(request: HttpRequest) -> HttpResponse:
         form = order_form()
         form.fields["customer"].queryset = Customer.objects.filter(id__in=accessible_customer_ids)
 
+    return _render_order_create(request, form, accessible_customer_ids, status=response_status)
+
+
+def _submitted_selling_policy(request: HttpRequest) -> SellingCurrencyPolicy:
+    """Validate the rendered form revision while the enclosing transaction holds the policy lock."""
+    try:
+        revision = int(request.POST.get("currency_revision", ""))
+    except (TypeError, ValueError):
+        revision = None
+    return require_current_selling_policy(request.POST.get("currency", ""), revision)
+
+
+def _render_order_create(
+    request: HttpRequest,
+    form: ModelForm,
+    accessible_customer_ids: list[int],
+    *,
+    status: int = 200,
+) -> HttpResponse:
+    policy = get_selling_currency_policy()
     # Get customers and products for selection — scoped to accessible customers (H13)
     customers = Customer.objects.filter(status="active", id__in=accessible_customer_ids).order_by("company_name")
-    currencies = Currency.objects.all().order_by("code")
-    products = Product.objects.filter(is_active=True).order_by("name")
+    products = (
+        Product.objects.filter(
+            is_active=True,
+            prices__currency_id=policy.currency_code,
+            prices__is_active=True,
+        )
+        .distinct()
+        .order_by("name")
+    )
 
     # Convert to component format for dropdowns
     customer_options = []
@@ -598,10 +636,6 @@ def order_create(request: HttpRequest) -> HttpResponse:
         tax_profile = customer.get_tax_profile()
         vat_display = tax_profile.cui if tax_profile else "No CUI"
         customer_options.append({"value": customer.id, "label": f"{customer.get_display_name()} ({vat_display})"})
-
-    currency_options = [
-        {"value": currency.code, "label": f"{currency.code} - {currency.symbol}"} for currency in currencies
-    ]
 
     payment_method_choices = Order._meta.get_field("payment_method").choices
     payment_method_options = [
@@ -612,19 +646,19 @@ def order_create(request: HttpRequest) -> HttpResponse:
         "form": form,
         "action": "create",
         "customers": customers,
-        "currencies": currencies,
         "products": products,
         "customer_options": customer_options,
-        "currency_options": currency_options,
+        **policy.as_dict(),
         "payment_method_options": payment_method_options,
         "is_staff_user": True,
     }
 
-    return render(request, "orders/order_form.html", context)
+    return render(request, "orders/order_form.html", context, status=status)
 
 
 @staff_required_strict
 @require_POST
+@transaction.atomic
 def order_create_preview(request: HttpRequest) -> HttpResponse:
     """
     🧮 HTMX endpoint: Preview first item + VAT totals during order creation (staff UI)
@@ -632,7 +666,7 @@ def order_create_preview(request: HttpRequest) -> HttpResponse:
     """
     try:
         customer_id = request.POST.get("customer")
-        currency_code = request.POST.get("currency", "RON")
+        currency_code = _submitted_selling_policy(request).currency_code
         product_id = request.POST.get("first_product")
         billing_period = request.POST.get("first_billing_period", "monthly")
         quantity = int(request.POST.get("first_quantity", 1) or 1)
@@ -718,6 +752,13 @@ def order_create_preview(request: HttpRequest) -> HttpResponse:
         }
         return render(request, "orders/partials/create_preview_totals.html", context)
 
+    except SellingCurrencyChangedError as e:
+        return render(
+            request,
+            "orders/partials/create_preview_totals.html",
+            {"error": True, "message": str(e)},
+            status=409,
+        )
     except Exception as e:
         logger.error(f"🔥 [Orders] Preview error: {e}")
         return render(
@@ -739,7 +780,7 @@ def order_create_with_item(request: HttpRequest) -> HttpResponse:
     """
     # Scope customer queryset to accessible customers (H13)
     accessible_customer_ids = _get_accessible_customer_ids(request.user) if isinstance(request.user, User) else []
-    order_form = modelform_factory(Order, fields=["customer", "currency", "payment_method", "notes", "customer_notes"])
+    order_form = modelform_factory(Order, fields=["customer", "payment_method", "notes", "customer_notes"])
     form = order_form(request.POST)
     form.fields["customer"].queryset = Customer.objects.filter(id__in=accessible_customer_ids)
     if not form.is_valid():
@@ -748,8 +789,10 @@ def order_create_with_item(request: HttpRequest) -> HttpResponse:
 
     try:
         with transaction.atomic():
+            policy = _submitted_selling_policy(request)
             # Create order (reuse logic from order_create)
             order = form.save(commit=False)
+            order.currency_id = policy.currency_code
             customer = order.customer
             tax_profile = customer.get_tax_profile()
             billing_address = customer.get_billing_address()
@@ -831,6 +874,9 @@ def order_create_with_item(request: HttpRequest) -> HttpResponse:
             )
             return redirect("orders:order_detail", pk=order.id)
 
+    except SellingCurrencyChangedError as e:
+        form.add_error(None, e)
+        return _render_order_create(request, form, accessible_customer_ids, status=409)
     except Exception as e:
         logger.error(f"🔥 [Orders] Error creating order with item: {e}")
         messages.error(request, _("❌ Error creating order with first item. Please try again."))

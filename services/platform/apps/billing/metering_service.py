@@ -16,9 +16,11 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import ROUND_HALF_EVEN, Decimal, InvalidOperation
+from types import SimpleNamespace
 from typing import Any, cast
 
 from django.core.cache import cache as django_cache
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import F, Q, Sum
 from django.utils import timezone
@@ -33,6 +35,7 @@ from apps.provisioning.provisioning_service import ProvisioningService
 from . import config as billing_config
 from .metering_models import (
     BillingCycle,
+    PricingTier,
     PricingTierBracket,
     UsageAggregation,
     UsageAlert,
@@ -623,39 +626,70 @@ class RatingEngine:
         if aggregation.customer_id != subscription.customer_id:
             return Err("Aggregation customer does not match its billing cycle subscription")
 
+        from .currency_policy import get_selling_currency_policy  # noqa: PLC0415
+        from .cycle_terms import frozen_pricing_tier, get_cycle_terms, get_usage_cycle_currency  # noqa: PLC0415
+
+        cycle = aggregation.billing_cycle
+        try:
+            currency = get_usage_cycle_currency(cycle)
+            frozen = get_cycle_terms(cycle).snapshot["meters"].get(str(meter.pk)) if cycle.terms_frozen_at else None
+        except (ValidationError, KeyError) as exc:
+            return Err(str(exc))
+        if cycle.terms_frozen_at and not isinstance(frozen, dict):
+            return Err(f"Meter {meter.name} has no original tariff for this billing cycle; review is required")
+        if not cycle.terms_frozen_at and get_selling_currency_policy().revision > 1:
+            return Err("Unreviewed historical usage tariffs cannot be rated after a currency policy change")
+
         # Get included allowance from subscription item
         included_quantity = Decimal("0")
-        pricing_tier = None
+        pricing_tier: PricingTier | SimpleNamespace | None = None
         unit_price_cents = None
 
-        sub_item = _get_subscription_item_for_meter(subscription, meter)
+        sub_item = _get_subscription_item_for_meter(subscription, meter) if frozen is None else None
 
-        if sub_item:
+        if sub_item and sub_item.currency_id == currency.code and not sub_item.currency_hold_reason:
             included_quantity = _get_allowance_from_subscription_item(sub_item)
             unit_price_cents = sub_item.effective_price_cents
 
         effective_at = aggregation.billing_cycle.period_start
-        effective_tiers = list(
-            meter.pricing_tiers.filter(
-                Q(valid_from__isnull=True) | Q(valid_from__lte=effective_at),
-                Q(valid_until__isnull=True) | Q(valid_until__gt=effective_at),
-                is_active=True,
-                is_default=True,
-                currency_id=subscription.currency_id,
-            ).order_by("id")[:2]
+        effective_tiers = (
+            list(
+                meter.pricing_tiers.filter(
+                    Q(valid_from__isnull=True) | Q(valid_from__lte=effective_at),
+                    Q(valid_until__isnull=True) | Q(valid_until__gt=effective_at),
+                    is_active=True,
+                    is_default=True,
+                    currency_id=currency.code,
+                ).order_by("id")[:2]
+            )
+            if frozen is None
+            else []
         )
         if len(effective_tiers) > 1:
-            return Err(
-                f"Ambiguous active {subscription.currency.code} pricing for meter {meter.name} "
-                f"at {effective_at.isoformat()}"
-            )
+            return Err(f"Ambiguous active {currency.code} pricing for meter {meter.name} at {effective_at.isoformat()}")
         pricing_tier = effective_tiers[0] if effective_tiers else None
         service_plan = getattr(subscription.product, "default_service_plan", None)
-        if included_quantity <= 0:
+        if included_quantity <= 0 and frozen is None:
             included_quantity = _get_allowance_from_service_plan(meter, service_plan)
 
+        rounding_mode, rounding_increment, is_billable = (
+            meter.rounding_mode,
+            meter.rounding_increment,
+            meter.is_billable,
+        )
+        if frozen is not None:
+            if frozen.get("currency") != currency.code:
+                return Err("Frozen meter currency does not match its billing period")
+            included_quantity = Decimal(frozen["included_allowance"])
+            rounding_mode, rounding_increment = frozen["rounding_mode"], Decimal(frozen["rounding_increment"])
+            is_billable = frozen["is_billable"]
+            if frozen.get("source") == "pricing_tier":
+                pricing_tier = frozen_pricing_tier(frozen)
+            elif frozen.get("source") == "subscription_item":
+                unit_price_cents = frozen["unit_price_cents"]
+
         # Calculate billable value after rounding
-        billable_value = self._apply_rounding(aggregation.total_value, meter.rounding_mode, meter.rounding_increment)
+        billable_value = self._apply_rounding(aggregation.total_value, rounding_mode, rounding_increment)
 
         # Calculate overage
         overage_value = max(Decimal("0"), billable_value - included_quantity)
@@ -663,13 +697,16 @@ class RatingEngine:
         # Calculate charge
         charge_cents = 0
         rating_snapshot: dict[str, Any] = {
+            "currency": currency.code,
             "effective_at": effective_at.isoformat(),
             "billable_value": str(billable_value),
             "included_allowance": str(included_quantity),
             "overage_value": str(overage_value),
         }
 
-        if overage_value > 0 and meter.is_billable:
+        if overage_value > 0 and is_billable:
+            if frozen and frozen.get("hold_reason"):
+                return Err(str(frozen["hold_reason"]))
             if pricing_tier:
                 pricing_error = self._validate_pricing_configuration(pricing_tier)
                 if pricing_error:
@@ -690,7 +727,7 @@ class RatingEngine:
                     }
                 )
             else:
-                return Err(f"No active {subscription.currency.code} pricing configured for meter {meter.name}")
+                return Err(f"No active {currency.code} pricing configured for meter {meter.name}")
         elif pricing_tier:
             rating_snapshot.update(self._pricing_snapshot(pricing_tier))
         elif unit_price_cents is not None:
@@ -821,6 +858,8 @@ class RatingEngine:
         return value
 
     def _get_pricing_brackets(self, pricing_tier: Any) -> Any:
+        if hasattr(pricing_tier, "frozen_brackets"):
+            return pricing_tier.frozen_brackets
         return PricingTierBracket.objects.filter(pricing_tier=pricing_tier).order_by("from_quantity")
 
     @staticmethod

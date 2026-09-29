@@ -16,6 +16,7 @@ from django.test import TransactionTestCase, override_settings
 from django.utils import timezone
 
 from apps.audit.models import AuditEvent
+from apps.billing.currency_models import Currency
 from apps.common.types import Err, Ok
 from apps.customers.models import Customer
 from apps.domains.gateways import DomainInfoResult, RegistrarAPIError
@@ -29,6 +30,8 @@ from tests.domains.test_registrar_contracts import CONTACT, FIXTURES, response
 
 class IntentFixture:
     def setUp(self) -> None:
+        # TransactionTestCase flushes the Currency seed between tests.
+        Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei"})
         cache.clear()
         self.registrar = Registrar.objects.create(name="gandi", api_endpoint="https://api.sandbox.gandi.net/v5")
         self.tld = TLD.objects.create(

@@ -3,6 +3,7 @@ Portal Billing Serializers - API Response Conversion Functions
 Convert Platform API responses to portal dataclass instances.
 """
 
+import re
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, cast
@@ -98,17 +99,66 @@ def create_invoice_from_api(data: dict[str, Any], lines: list[dict[str, Any]] | 
     return invoice
 
 
+def _currency_amounts_from_api(value: object, *, nonnegative: bool = False) -> dict[str, int]:
+    """Historical amounts require explicit currency and integer minor units."""
+    if not isinstance(value, dict):
+        raise ValueError("Currency amounts must be grouped by their recorded currency")
+    amounts = {}
+    for code, amount in value.items():
+        if not isinstance(code, str) or not re.fullmatch(r"[A-Z]{3}", code):
+            raise ValueError("A historical amount has no valid recorded currency")
+        if not isinstance(amount, int) or isinstance(amount, bool) or (nonnegative and amount < 0):
+            raise ValueError("Currency amounts must be valid integer minor units")
+        amounts[code] = amount
+    return dict(sorted(amounts.items()))
+
+
 def create_invoice_summary_from_api(data: dict[str, Any]) -> InvoiceSummary:
-    """Create InvoiceSummary dataclass from API response"""
+    """Keep historical currency groups intact, including explicit legacy single-currency responses."""
+    if "amount_due_by_currency" in data:
+        amounts_due = _currency_amounts_from_api(data["amount_due_by_currency"], nonnegative=True)
+    elif data.get("total_amount_due_cents") == 0 and data.get("currency_code") is None:
+        amounts_due = {}
+    else:
+        amounts_due = _currency_amounts_from_api(
+            {data.get("currency_code"): data.get("total_amount_due_cents")}, nonnegative=True
+        )
+    recorded_credit = _currency_amounts_from_api(data.get("credit_balance_by_currency", {}))
+    spendable_credit = _currency_amounts_from_api(data.get("spendable_credit_by_currency", {}), nonnegative=True)
+    if any(
+        code not in recorded_credit or amount > max(recorded_credit[code], 0)
+        for code, amount in spendable_credit.items()
+    ):
+        raise ValueError("Spendable credit cannot exceed the recorded balance in its currency")
+    held_entries = data.get("held_credit_entries", [])
+    if not isinstance(held_entries, list) or any(
+        not isinstance(entry, dict)
+        or not isinstance(entry.get("delta_cents"), int)
+        or isinstance(entry["delta_cents"], bool)
+        for entry in held_entries
+    ):
+        raise ValueError("Historical credit holds must remain separate entries")
+    spending_on_hold = bool(data.get("credit_spending_on_hold")) or any(
+        entry["delta_cents"] < 0 for entry in held_entries
+    )
+    if spending_on_hold and any(spendable_credit.values()):
+        raise ValueError("Credit awaiting review cannot be reported as spendable")
+    single_code = next(iter(amounts_due)) if len(amounts_due) == 1 else None
+    single_amount = amounts_due[single_code] if single_code else (None if amounts_due else 0)
     return InvoiceSummary(
         total_invoices=data["total_invoices"],
         draft_invoices=data["draft_invoices"],
         issued_invoices=data["issued_invoices"],
         overdue_invoices=data["overdue_invoices"],
         paid_invoices=data["paid_invoices"],
-        total_amount_due_cents=data["total_amount_due_cents"],
-        currency_code=data["currency_code"],
+        total_amount_due_cents=single_amount,
+        currency_code=single_code,
         recent_invoices=data.get("recent_invoices", []),
+        amount_due_by_currency=amounts_due,
+        credit_balance_by_currency=recorded_credit,
+        spendable_credit_by_currency=spendable_credit,
+        held_credit_entries=held_entries,
+        credit_spending_on_hold=spending_on_hold,
     )
 
 

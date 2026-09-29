@@ -1,0 +1,32 @@
+{% load i18n formatting %}
+<div class="mb-4 space-y-3 border-b border-slate-700 pb-4">
+  {% if billing_summary.summary_available %}
+    <div>
+      <h3 class="text-sm font-medium text-slate-300">{% trans "Outstanding invoices" %}</h3>
+      {% for currency, amount in billing_summary.amount_due_by_currency.items %}
+        <p class="text-white">{{ amount|format_currency:currency }}</p>
+      {% empty %}
+        <p class="text-sm text-slate-400">{% trans "No outstanding invoice balance." %}</p>
+      {% endfor %}
+    </div>
+    {% for balance in billing_summary.credit_balances %}
+      <div class="text-sm">
+        <p class="text-slate-300">{% trans "Recorded credit" %}: <span class="text-white">{{ balance.recorded_cents|format_currency:balance.currency_code }}</span></p>
+        <p class="text-slate-400">{% trans "Available credit" %}: {{ balance.spendable_cents|format_currency:balance.currency_code }}</p>
+      </div>
+    {% endfor %}
+    {% if billing_summary.held_credit_entries %}
+      <div class="rounded-md border border-amber-700/50 bg-amber-900/20 p-3 text-sm text-amber-200">
+        <p class="font-medium">{% trans "Historical credit requires review" %}</p>
+        {% for entry in billing_summary.held_credit_entries %}
+          <p>{% trans "Entry" %} #{{ entry.id }}: {{ entry.delta_cents|cents_to_currency|floatformat:2 }} — {% trans "Currency unavailable" %}</p>
+        {% endfor %}
+        {% if billing_summary.credit_spending_on_hold %}
+          <p class="mt-2">{% trans "Credit spending is on hold until these entries are reviewed." %}</p>
+        {% endif %}
+      </div>
+    {% endif %}
+  {% else %}
+    <p class="text-sm text-slate-400">{% trans "Billing balances are temporarily unavailable." %}</p>
+  {% endif %}
+</div>

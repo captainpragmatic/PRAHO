@@ -2,3 +2,6 @@
 {% load i18n %}
 {% block form_title %}{% trans "Gift card purchase" %}{% endblock %}
 {% block form_help %}<p class="text-sm text-slate-300">{% trans "The card remains pending with no spendable balance until its purchase payment is verified." %}</p>{% endblock %}
+{% block form_extra_fields %}
+  <p class="text-sm text-slate-300">{% trans "Currency" %}: <strong class="text-white">{{ form.currency.value }}</strong></p>
+{% endblock %}

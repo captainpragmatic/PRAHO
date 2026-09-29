@@ -2,7 +2,7 @@
 Tests for remaining chaos monkey fixes (M8, L4, L5).
 
 Covers:
-  M8: Platform fallback must use requires_domain=True (fail-safe)
+  M8: Platform outages must prevent adding unpriced products
   L4: Cart item removal dispatches cartUpdated only once (no duplicate POST)
   L5: VAT rate templates use dynamic value without hardcoded default
 
@@ -23,20 +23,20 @@ _CACHE_SETTINGS = {
 
 
 # ---------------------------------------------------------------------------
-# M8: Platform fallback must use requires_domain=True (fail-safe)
+# M8: Platform outages must prevent adding unpriced products
 # ---------------------------------------------------------------------------
 
 
 @override_settings(**_CACHE_SETTINGS)
 class TestPlatformFallbackFailSafe(SimpleTestCase):
-    """M8: During Platform outage, product fallback must assume domain is required."""
+    """M8: Product and selling-currency metadata must be authoritative."""
 
     def setUp(self) -> None:
         self.session = SessionStore()
         self.session.create()
 
-    def test_fallback_requires_domain_true(self) -> None:
-        """When Platform API is down, fallback product_data sets requires_domain=True."""
+    def test_product_outage_rejects_cart_addition_without_domain(self) -> None:
+        """Without product metadata, adding an item fails closed."""
         from apps.api_client.services import PlatformAPIError  # noqa: PLC0415
         from apps.orders.services import GDPRCompliantCartSession  # noqa: PLC0415
 
@@ -47,17 +47,18 @@ class TestPlatformFallbackFailSafe(SimpleTestCase):
 
             cart = GDPRCompliantCartSession(self.session)
 
-            # Without a domain_name, adding should raise ValidationError
-            # because fallback now defaults to requires_domain=True
             from django.core.exceptions import ValidationError  # noqa: PLC0415
 
             with self.assertRaises(ValidationError) as ctx:
                 cart.add_item(product_slug="hosting-plan", quantity=1, billing_period="monthly")
 
-            self.assertIn("domain", str(ctx.exception).lower())
+            self.assertIn("unavailable", str(ctx.exception).lower())
+            self.assertFalse(cart.has_items())
 
-    def test_fallback_with_domain_succeeds(self) -> None:
-        """When Platform API is down but domain_name is provided, add_item succeeds."""
+    def test_product_outage_rejects_cart_addition_even_with_domain(self) -> None:
+        """A valid domain cannot replace missing authoritative prices and currency."""
+        from django.core.exceptions import ValidationError  # noqa: PLC0415
+
         from apps.api_client.services import PlatformAPIError  # noqa: PLC0415
         from apps.orders.services import GDPRCompliantCartSession  # noqa: PLC0415
 
@@ -67,16 +68,16 @@ class TestPlatformFallbackFailSafe(SimpleTestCase):
             mock_cls.return_value = mock_instance
 
             cart = GDPRCompliantCartSession(self.session)
-            cart.add_item(
-                product_slug="hosting-plan",
-                quantity=1,
-                billing_period="monthly",
-                domain_name="example.com",
-            )
+            with self.assertRaisesMessage(ValidationError, "unavailable"):
+                cart.add_item(
+                    product_slug="hosting-plan",
+                    quantity=1,
+                    billing_period="monthly",
+                    domain_name="example.com",
+                )
 
-            items = cart.get_items()
-            self.assertEqual(len(items), 1)
-            self.assertEqual(items[0]["product_slug"], "hosting-plan")
+            self.assertFalse(cart.has_items())
+            self.assertEqual(cart.currency, "")
 
 
 # ---------------------------------------------------------------------------

@@ -34,11 +34,11 @@
           {% if product.prices %}
           <div class="text-center mb-4 p-3 bg-slate-700/50 rounded-lg">
             <div class="text-2xl font-bold text-green-400">
-              {{ product.prices.0.monthly_price|romanian_currency }} /{% trans "mo" %}
+              {{ product.prices.0.monthly_price|romanian_currency:product.prices.0.currency }} /{% trans "mo" %}
             </div>
             {% if product.prices.0.setup_fee and product.prices.0.setup_fee != "0.00" %}
             <div class="text-xs text-slate-500 mt-1">
-              + {{ product.prices.0.setup_fee|romanian_currency }} {% trans "setup fee" %}
+              + {{ product.prices.0.setup_fee|romanian_currency:product.prices.0.currency }} {% trans "setup fee" %}
             </div>
             {% endif %}
           </div>
@@ -51,8 +51,8 @@
             <div class="mb-3">
               <label class="block text-sm text-slate-300 mb-1">{% trans "Billing period" %}</label>
               <select name="billing_period" class="w-full bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2">
-                {% for price in product.prices %}
-                <option value="{{ price.billing_period }}">{{ price.billing_period_display }}</option>
+                {% for period in billing_periods %}
+                <option value="{{ period.value }}">{{ period.label }} — {{ period.amount|romanian_currency:product.prices.0.currency }}</option>
                 {% endfor %}
               </select>
             </div>

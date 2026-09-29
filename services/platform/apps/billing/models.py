@@ -51,6 +51,7 @@ from .payment_models import (
 from .proforma_models import ProformaInvoice, ProformaLine, ProformaSequence
 from .recurring_models import RecurringPaymentAuthorization
 from .refund_models import Refund, RefundNote, RefundStatusHistory
+from .subscription_currency_models import SubscriptionCurrencyTransition
 from .subscription_models import (
     PriceGrandfathering,
     Subscription,
@@ -104,6 +105,7 @@ __all__ = [  # noqa: RUF022  # Grouped by billing domain for discoverability
     "SENSITIVE_FINANCIAL_KEYS",
     # Usage-based billing models
     "BillingCycle",
+    "SubscriptionCurrencyTransition",
     # Currency Models
     "CreditLedger",
     "Currency",

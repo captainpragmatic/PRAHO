@@ -42,6 +42,8 @@ def _make_product_data(
         "name": "Shared Hosting Basic",
         "product_type": product_type,
         "requires_domain": requires_domain,
+        "selling_currency": "RON",
+        "currency_revision": 1,
         "is_active": True,
     }
 
@@ -446,6 +448,8 @@ class TestProductTypeInCartItem(TestCase):
             "name": "Some Product",
             # product_type intentionally missing
             "requires_domain": False,
+            "selling_currency": "RON",
+            "currency_revision": 1,
             "is_active": True,
         }
         mock_cls.return_value = mock_instance
@@ -497,6 +501,8 @@ class TestCartTotalsVatRatePercent(TestCase):
             "tax_cents": 1050,
             "total_cents": 6050,
             "currency": "RON",
+            "selling_currency": "RON",
+            "currency_revision": 1,
             "vat_rate_percent": "21.00",
             "warnings": [],
             "items": [],
@@ -555,6 +561,8 @@ class TestCartTotalsPerItemArray(TestCase):
             "tax_cents": 1050,
             "total_cents": 6050,
             "currency": "RON",
+            "selling_currency": "RON",
+            "currency_revision": 1,
             "vat_rate_percent": "21.00",
             "warnings": [],
             "items": [
@@ -598,6 +606,8 @@ class TestCartTotalsPerItemArray(TestCase):
             "tax_cents": 1050,
             "total_cents": 6050,
             "currency": "RON",
+            "selling_currency": "RON",
+            "currency_revision": 1,
             "vat_rate_percent": "21.00",
             "warnings": [],
             "items": [
@@ -643,6 +653,8 @@ class TestCartTotalsPerItemArray(TestCase):
             "tax_cents": 1680,
             "total_cents": subtotal + 1680,
             "currency": "RON",
+            "selling_currency": "RON",
+            "currency_revision": 1,
             "vat_rate_percent": "21.00",
             "warnings": [],
             "items": [
@@ -1130,6 +1142,10 @@ def _make_bank_transfer_order(status: str = "pending") -> dict:
         "vat_rate_percent": "19",
         "currency_code": "RON",
         "customer_email": "customer@example.com",
+        "bank_details": {
+            "currency": "RON", "iban": "RO49AAAA1B31007593840000",
+            "bank_name": "Banca Transilvania", "beneficiary": "PragmaticHost SRL",
+        },
         "items": [],
         "created_at": "2026-03-10T12:00:00Z",
     }
@@ -1288,6 +1304,29 @@ class TestBankTransferContextPassthrough(TestCase):
         self.assertEqual(response.status_code, 200)
         bank_details = response.context["bank_details"]
         self.assertEqual(bank_details, {})
+
+    def test_eur_order_uses_platform_bank_account(self) -> None:
+        order = _make_bank_transfer_order()
+        order.update(currency_code="EUR", bank_details={
+            "currency": "EUR", "iban": "DE89370400440532013000",
+            "bank_name": "EUR bank", "beneficiary": "Original seller",
+        })
+        with patch("apps.orders.views.PlatformAPIClient") as api:
+            api.return_value.post.return_value = order
+            response = self.client.get(_ENH2_CONFIRM_URL)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["bank_details"], order["bank_details"])
+        self.assertNotContains(response, "RO49AAAA1B31007593840000")
+
+    def test_missing_or_wrong_currency_account_is_unavailable(self) -> None:
+        for details in (None, {"currency": "RON", "iban": "RO49AAAA1B31007593840000"}):
+            with self.subTest(details=details), patch("apps.orders.views.PlatformAPIClient") as api:
+                order = _make_bank_transfer_order()
+                order.update(currency_code="EUR", bank_details=details)
+                api.return_value.post.return_value = order
+                response = self.client.get(_ENH2_CONFIRM_URL)
+                self.assertEqual(response.context["bank_details"], {})
+                self.assertContains(response, "Bank instructions are currently unavailable")
 
 
 # ---------------------------------------------------------------------------

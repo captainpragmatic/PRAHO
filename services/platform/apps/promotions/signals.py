@@ -23,6 +23,9 @@ from .models import (
     CouponRedemption,
     CustomerLoyalty,
     GiftCard,
+    GiftCardDelivery,
+    GiftCardFundingAttempt,
+    GiftCardFundingRefund,
     GiftCardPurchase,
     GiftCardReservation,
     GiftCardTransaction,
@@ -166,6 +169,9 @@ def _serialize_value(value: Any) -> Any:
 @receiver(post_save, sender=RenewalBenefit)
 @receiver(post_save, sender=RenewalBenefitUse)
 @receiver(post_save, sender=GiftCardPurchase)
+@receiver(post_save, sender=GiftCardDelivery)
+@receiver(post_save, sender=GiftCardFundingAttempt)
+@receiver(post_save, sender=GiftCardFundingRefund)
 @receiver(post_save, sender=GiftCardReservation)
 @receiver(post_save, sender=TenderRefundCommand)
 @receiver(post_save, sender=TenderRefundLeg)
@@ -179,6 +185,8 @@ def promotion_ledger_saved(sender: type, instance: Any, created: bool, **kwargs:
         "remaining_cents",
         "remaining_months",
         "monthly_cents",
+        "currency_id",
+        "currency_hold_reason",
         "ended_at",
         "customer_id",
         "order_id",
@@ -191,12 +199,30 @@ def promotion_ledger_saved(sender: type, instance: Any, created: bool, **kwargs:
         "command_id",
         "refund_id",
         "funding_payment_id",
+        "purchase_id",
+        "gateway_intent_id",
+        "gateway_refund_id",
+        "funding_intent_id",
+        "first_submitted_at",
+        "checked_at",
+        "purpose",
+        "attempt_count",
+        "sent_at",
+        "error_code",
+        "held_cents",
+        "applied_cents",
+        "shortfall_cents",
+        "confirmed_by_id",
     )
     create_audit_event(
         action="create" if created else "update",
         instance=instance,
         severity="medium",
-        user=getattr(instance, "_audit_actor", None) or getattr(instance, "created_by", None),
+        user=(
+            getattr(instance, "_audit_actor", None)
+            or getattr(instance, "confirmed_by", None)
+            or getattr(instance, "created_by", None)
+        ),
         new_values={field: _serialize_value(getattr(instance, field)) for field in fields if hasattr(instance, field)},
         description=f"Promotion ledger {instance._meta.label} {'created' if created else 'updated'}",
     )
@@ -547,11 +573,11 @@ def gift_card_post_save(
             category="business_operation",
             severity="low",
             new_values={
-                "code": instance.code,
+                "code": instance.masked_code,
                 "initial_value_cents": instance.initial_value_cents,
                 "card_type": instance.card_type,
             },
-            description=f"Gift card '{instance.code}' created with value {instance.initial_value_cents / 100:.2f}",
+            description=f"Gift card '{instance.masked_code}' created with value {instance.initial_value_cents / 100:.2f}",
             is_sensitive=True,
         )
     else:
@@ -562,16 +588,16 @@ def gift_card_post_save(
 
             if instance.status == "active" and old_status == "pending":
                 action = "gift_card_activated"
-                description = f"Gift card '{instance.code}' activated"
+                description = f"Gift card '{instance.masked_code}' activated"
             elif instance.status == "depleted":
                 action = "gift_card_depleted"
-                description = f"Gift card '{instance.code}' fully redeemed"
+                description = f"Gift card '{instance.masked_code}' fully redeemed"
             elif instance.status == "cancelled":
                 action = "gift_card_cancelled"
                 severity = "medium"
-                description = f"Gift card '{instance.code}' cancelled"
+                description = f"Gift card '{instance.masked_code}' cancelled"
             else:
-                description = f"Gift card '{instance.code}' status changed to {instance.status}"
+                description = f"Gift card '{instance.masked_code}' status changed to {instance.status}"
 
             create_audit_event(
                 action=action,
@@ -611,7 +637,7 @@ def gift_card_transaction_post_save(
             category="business_operation",
             severity=severity,
             new_values={
-                "gift_card_code": instance.gift_card.code,
+                "gift_card_code": instance.gift_card.masked_code,
                 "transaction_type": instance.transaction_type,
                 "amount_cents": instance.amount_cents,
                 "balance_after_cents": instance.balance_after_cents,

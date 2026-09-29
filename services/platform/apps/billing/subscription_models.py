@@ -236,6 +236,14 @@ class Subscription(models.Model):
     )
     next_proforma_at = models.DateTimeField(null=True, blank=True, db_index=True)
     next_charge_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    effective_terms_cycle = models.ForeignKey(
+        "billing.BillingCycle",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="effective_subscriptions",
+    )
+    effective_terms_at = models.DateTimeField(null=True, blank=True)
 
     # Trial configuration
     trial_start = models.DateTimeField(
@@ -293,6 +301,20 @@ class Subscription(models.Model):
     )
 
     # Payment tracking
+    last_payment_currency = models.ForeignKey(
+        Currency,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="last_paid_subscriptions",
+    )
+    last_payment = models.ForeignKey(
+        "billing.Payment",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="last_paid_subscriptions",
+    )
     saved_payment_method = models.ForeignKey(
         "customers.CustomerPaymentMethod",
         on_delete=models.PROTECT,
@@ -983,6 +1005,8 @@ class PriceGrandfathering(models.Model):
         on_delete=models.CASCADE,
         related_name="grandfathered_customers",
     )
+    currency = models.ForeignKey(Currency, on_delete=models.PROTECT, null=True, blank=True)
+    currency_hold_reason = models.CharField(max_length=255, blank=True, editable=False)
 
     # Locked pricing
     locked_price_cents = models.BigIntegerField(
@@ -1051,7 +1075,21 @@ class PriceGrandfathering(models.Model):
         db_table = "billing_price_locks"
         verbose_name = _("Price Grandfathering")
         verbose_name_plural = _("Price Grandfatherings")
-        unique_together = (("customer", "product"),)
+        unique_together = (("customer", "product", "currency"),)
+        constraints = (
+            models.CheckConstraint(
+                condition=(
+                    Q(currency__isnull=False, currency_hold_reason="")
+                    | (Q(currency__isnull=True) & ~Q(currency_hold_reason=""))
+                ),
+                name="price_lock_currency_known_or_held",
+            ),
+            models.UniqueConstraint(
+                fields=["customer", "product"],
+                condition=Q(currency__isnull=True),
+                name="one_unresolved_price_lock",
+            ),
+        )
         indexes = (
             models.Index(fields=["customer", "is_active"]),
             models.Index(fields=["product", "is_active"]),
@@ -1060,6 +1098,24 @@ class PriceGrandfathering(models.Model):
 
     def __str__(self) -> str:
         return f"{self.customer} - {self.product} @ {self.locked_price_cents / 100:.2f}"
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        self.clean()
+        super().save(*args, **kwargs)
+
+    def clean(self) -> None:
+        super().clean()
+        if not self.currency_id:
+            if self._state.adding or not self.currency_hold_reason:
+                raise ValidationError({"currency": _("Specify the original currency of this price promise.")})
+        elif self.currency_hold_reason:
+            raise ValidationError(
+                {"currency_hold_reason": _("Resolve the original currency before using this price promise.")}
+            )
+        if not self._state.adding:
+            original_currency = type(self).objects.values_list("currency_id", flat=True).get(pk=self.pk)
+            if original_currency and self.currency_id != original_currency:
+                raise ValidationError({"currency": _("An existing price promise cannot change currency.")})
 
     @property
     def locked_price(self) -> Decimal:
@@ -1128,6 +1184,10 @@ class SubscriptionItem(models.Model):
         related_name="subscription_items",
     )
 
+    # An add-on's original money must survive a later subscription-currency change.
+    currency = models.ForeignKey(Currency, on_delete=models.PROTECT, null=True, blank=True)
+    currency_hold_reason = models.CharField(max_length=255, blank=True, editable=False)
+
     # Pricing
     unit_price_cents = models.BigIntegerField(
         validators=[MinValueValidator(0)],
@@ -1155,10 +1215,18 @@ class SubscriptionItem(models.Model):
     def __str__(self) -> str:
         return f"{self.subscription.subscription_number} - {self.product}"
 
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if self._state.adding and not self.currency_id and not self.currency_hold_reason:
+            self.currency_id = self.subscription.currency_id
+        original_currency = type(self).objects.filter(pk=self.pk).values_list("currency_id", flat=True).first()
+        if original_currency and original_currency != self.currency_id:
+            raise ValidationError({"currency": _("An existing subscription item's currency cannot be changed")})
+        super().save(*args, **kwargs)
+
     @property
     def effective_price_cents(self) -> int:
         """Get effective price."""
-        return self.locked_price_cents if self.locked_price_cents else self.unit_price_cents
+        return self.locked_price_cents if self.locked_price_cents is not None else self.unit_price_cents
 
     @property
     def line_total_cents(self) -> int:

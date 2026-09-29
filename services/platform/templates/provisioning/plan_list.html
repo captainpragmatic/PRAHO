@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load i18n %}
+{% load i18n formatting %}
 
 {% block title %}{% trans "Planuri de găzduire" %} - {{ block.super }}{% endblock %}
 
@@ -14,7 +14,11 @@
                 <h2 class="text-xl font-semibold text-gray-900 mb-2">{{ plan.name }}</h2>
                 <p class="text-sm text-gray-600 mb-4">{{ plan.description }}</p>
                 <div class="text-2xl font-bold text-blue-600 mb-4">
-                    {{ plan.price_monthly }} RON/{% trans "lună" %}
+                    {% if plan.selling_monthly_price_cents != None %}
+                      {{ plan.selling_monthly_price_cents|cents_to_currency|romanian_currency:selling_currency }}/{% trans "lună" %}
+                    {% else %}
+                      {% trans "Price unavailable" %}
+                    {% endif %}
                 </div>
                 <div class="text-sm text-gray-500">
                     <div>{% trans "Spațiu disc" %}: {{ plan.disk_space_gb }}GB</div>

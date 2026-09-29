@@ -198,7 +198,10 @@ class InvoiceSummarySerializer(serializers.Serializer):
 
     def to_representation(self, instance: dict[str, Any]) -> dict[str, Any]:
         """Build invoice summary from queryset"""
+        from apps.billing.models import CreditLedger  # noqa: PLC0415  # ADR-0007
+
         invoices_qs = instance["invoices_queryset"]
+        customer = instance["customer"]
 
         # Calculate counts by status
         total_invoices = invoices_qs.count()
@@ -207,12 +210,29 @@ class InvoiceSummarySerializer(serializers.Serializer):
         overdue_invoices = invoices_qs.filter(status="overdue").count()
         paid_invoices = invoices_qs.filter(status="paid").count()
 
-        # Calculate total amount due (issued + overdue)
-        pending_invoices = invoices_qs.filter(status__in=["issued", "overdue"])
-        total_amount_due_cents = sum(inv.total_cents for inv in pending_invoices)
-
-        # Get currency (assume RON for now, could be enhanced)
-        currency_code = "RON"
+        # The document owns its currency; partial cash and gift payments reduce its
+        # authoritative remaining amount. Closed documents and credits are not debts.
+        pending_invoices = invoices_qs.filter(status__in=["issued", "overdue"], document_kind="invoice")
+        remaining_by_id = {}
+        amount_due_by_currency: dict[str, int] = {}
+        for invoice in pending_invoices:
+            remaining = invoice.amount_due
+            remaining_by_id[invoice.pk] = remaining
+            if remaining:
+                amount_due_by_currency[invoice.currency_id] = (
+                    amount_due_by_currency.get(invoice.currency_id, 0) + remaining
+                )
+        amount_due_by_currency = dict(sorted(amount_due_by_currency.items()))
+        currency_code = next(iter(amount_due_by_currency)) if len(amount_due_by_currency) == 1 else None
+        total_amount_due_cents = (
+            amount_due_by_currency[currency_code] if currency_code else (None if amount_due_by_currency else 0)
+        )
+        recorded_credit = CreditLedger.balances_for_customer(customer)
+        currencies = Currency.objects.in_bulk(recorded_credit)
+        spendable_credit = {
+            code: CreditLedger.available_balance_for_customer(customer, currencies[code]) for code in recorded_credit
+        }
+        held_credit_entries = CreditLedger.held_entries_for_customer(customer)
 
         # Get recent invoices
         recent_invoices_qs = invoices_qs.order_by("-created_at")[:5]
@@ -221,6 +241,8 @@ class InvoiceSummarySerializer(serializers.Serializer):
                 "number": invoice.number,
                 "status": invoice.status,
                 "total_cents": invoice.total_cents,
+                "currency_code": invoice.currency_id,
+                "amount_due": remaining_by_id.get(invoice.pk, 0),
                 "due_at": invoice.due_at,
                 "is_overdue": invoice.is_overdue(),
                 "created_at": invoice.created_at,
@@ -236,6 +258,11 @@ class InvoiceSummarySerializer(serializers.Serializer):
             "paid_invoices": paid_invoices,
             "total_amount_due_cents": total_amount_due_cents,
             "currency_code": currency_code,
+            "amount_due_by_currency": amount_due_by_currency,
+            "credit_balance_by_currency": recorded_credit,
+            "spendable_credit_by_currency": spendable_credit,
+            "held_credit_entries": held_credit_entries,
+            "credit_spending_on_hold": any(entry["delta_cents"] < 0 for entry in held_credit_entries),
             "recent_invoices": recent_invoices,
         }
 

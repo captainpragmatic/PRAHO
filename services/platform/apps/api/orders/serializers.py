@@ -32,11 +32,13 @@ class ProductPriceSerializer(serializers.ModelSerializer):
     has_semiannual_discount = serializers.BooleanField(read_only=True)
     has_annual_discount = serializers.BooleanField(read_only=True)
     sealed_price_token = serializers.SerializerMethodField()
+    currency = serializers.CharField(source="currency_id", read_only=True)
 
     class Meta:
         model = ProductPrice
         fields = (
             "id",
+            "currency",
             "monthly_price",
             "semiannual_price",
             "annual_price",
@@ -196,6 +198,12 @@ class OrderDetailSerializer(serializers.ModelSerializer):
     currency_code = serializers.CharField(source="currency.code", read_only=True)
     vat_rate_percent = serializers.SerializerMethodField()
     cash_due_cents = serializers.SerializerMethodField()
+    bank_details = serializers.SerializerMethodField()
+
+    def get_bank_details(self, obj: Order) -> dict[str, str] | None:
+        from apps.billing.bank_transfer import bank_transfer_instructions  # noqa: PLC0415  # ADR-0007
+
+        return bank_transfer_instructions(obj.currency_id) if obj.payment_method == "bank_transfer" else None
 
     def get_cash_due_cents(self, obj: Order) -> int:
         from apps.promotions.gift_cards import cash_due  # noqa: PLC0415
@@ -227,6 +235,7 @@ class OrderDetailSerializer(serializers.ModelSerializer):
             "payment_method",
             "vat_rate_percent",
             "cash_due_cents",
+            "bank_details",
             "notes",
             "created_at",
             "updated_at",
@@ -273,7 +282,8 @@ class PromotionInputSerializer(serializers.Serializer):
 class CartCalculationInputSerializer(PromotionInputSerializer):
     """Input serializer for cart total calculations"""
 
-    currency = serializers.CharField(max_length=3, default="RON")
+    currency = serializers.CharField(max_length=3)
+    currency_revision = serializers.IntegerField(min_value=1, required=False)
     items = CartItemInputSerializer(many=True)
 
 
@@ -295,6 +305,8 @@ class CartCalculationOutputSerializer(serializers.Serializer):
         max_value=Decimal("100"),
     )
     currency = serializers.CharField(max_length=3)
+    selling_currency = serializers.CharField(max_length=3)
+    currency_revision = serializers.IntegerField(min_value=1)
     warnings = serializers.ListField(child=serializers.DictField(), default=list)
 
     # Individual item calculations
@@ -304,7 +316,8 @@ class CartCalculationOutputSerializer(serializers.Serializer):
 class OrderCreateInputSerializer(PromotionInputSerializer):
     """Input serializer for order creation"""
 
-    currency = serializers.CharField(max_length=3, default="RON")
+    currency = serializers.CharField(max_length=3)
+    currency_revision = serializers.IntegerField(min_value=1, required=False)
     payment_method = serializers.ChoiceField(choices=["card", "bank_transfer"], default="", allow_blank=True)
     items = CartItemInputSerializer(many=True)
     notes = serializers.CharField(max_length=500, required=False, allow_blank=True)

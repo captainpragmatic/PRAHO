@@ -24,15 +24,37 @@ def _lock_campaigns(benefits: list[RenewalBenefit]) -> None:
     )
 
 
+def _cycle_currency_id(cycle: Any) -> str | None:
+    """Prepared document/cycle identity takes precedence over mutable subscription terms."""
+    evidence = {
+        getattr(cycle, "currency_id", None),
+        cycle.proforma.currency_id if cycle.proforma_id else None,
+        cycle.invoice.currency_id if cycle.invoice_id else None,
+    } - {None}
+    if len(evidence) > 1:
+        raise ValueError("Billing cycle documents disagree on currency; review the billing document")
+    return next(iter(evidence)) if evidence else cycle.subscription.currency_id
+
+
 @transaction.atomic
 def reserve_cycle(subscription: Any, cycle: Any, charge_cents: int) -> int:
     if subscription.status not in {"active", "trialing", "past_due"} or subscription.cancel_at_period_end:
         return 0
-    existing = list(RenewalBenefitUse.objects.filter(cycle=cycle, status__in=["reserved", "settled"]))
+    currency_id = _cycle_currency_id(cycle)
+    existing = list(
+        RenewalBenefitUse.objects.filter(cycle=cycle, status__in=["reserved", "settled"]).select_related("benefit")
+    )
     if existing:
+        if any(use.benefit.currency_id != currency_id or use.benefit.currency_hold_reason for use in existing):
+            raise ValueError("Reserved promotion currency does not match the billing cycle")
         return sum(use.amount_cents for use in existing)
     benefits = list(
-        subscription.promotion_benefits.filter(ended_at__isnull=True, remaining_cents__gt=0)
+        subscription.promotion_benefits.filter(
+            ended_at__isnull=True,
+            remaining_cents__gt=0,
+            currency_id=currency_id,
+            currency_hold_reason="",
+        )
         .select_related("application")
         .order_by("application__campaign_id", "pk")
     )
@@ -60,6 +82,7 @@ def reserve_cycle(subscription: Any, cycle: Any, charge_cents: int) -> int:
 
 @transaction.atomic
 def settle_cycle(cycle: Any) -> None:
+    currency_id = _cycle_currency_id(cycle)
     uses = list(
         cycle.promotion_uses.filter(status="reserved")
         .select_related("benefit__application")
@@ -68,6 +91,8 @@ def settle_cycle(cycle: Any) -> None:
     _lock_campaigns([use.benefit for use in uses])
     for use in uses:
         benefit = RenewalBenefit.objects.select_for_update().get(pk=use.benefit_id)
+        if benefit.currency_id != currency_id or benefit.currency_hold_reason:
+            raise ValueError("Reserved promotion currency does not match the billing cycle")
         if not RenewalBenefitUse.objects.filter(pk=use.pk, status="reserved").update(
             status="settled"
         ):  # fsm-bypass: Locked ledger CharField; no protected FSM field

@@ -30,15 +30,7 @@ logger = logging.getLogger(__name__)
 
 def _empty_billing_summary() -> dict[str, Any]:
     """Return empty billing summary matching InvoiceViewService._empty_summary shape."""
-    return {
-        "total_invoices": 0,
-        "draft_invoices": 0,
-        "issued_invoices": 0,
-        "overdue_invoices": 0,
-        "paid_invoices": 0,
-        "total_amount_due": 0,
-        "recent_invoices": [],
-    }
+    return InvoiceViewService._empty_summary()
 
 
 # A dash rather than a number for a section whose data never arrived. `stat_tile` renders whatever it
@@ -265,7 +257,7 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0915
     # banners for ACCOUNT_HEALTH_CACHE_TTL (300s) even after the platform
     # recovers (PR #164 review finding H2).
     # `not sections_unavailable` as well, and it is load-bearing rather than symmetry: the truthiness
-    # checks below cannot stand in for it, because `_empty_billing_summary()` returns a SEVEN-KEY dict
+    # checks below cannot stand in for it, because `_empty_billing_summary()` returns a non-empty dict
     # and is therefore truthy after a failure. This guard has always depended on the flag, not on the
     # data, to notice a degraded billing section - so adding a second degraded state without teaching
     # this reader about it would cache the empty fallback for ACCOUNT_HEALTH_CACHE_TTL (300s) during a
@@ -275,6 +267,7 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0915
         not sections_rate_limited
         and not sections_unavailable
         and invoice_summary
+        and invoice_summary.get("summary_available", True)
         and services_summary
         and tickets_summary
     ):
@@ -292,6 +285,7 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0915
     dashboard_data = {
         "customers": customers,
         "recent_documents": recent_documents,
+        "billing_summary": invoice_summary,
         "recent_tickets": recent_tickets,
         "stats": {
             "total_customers": len(customers),

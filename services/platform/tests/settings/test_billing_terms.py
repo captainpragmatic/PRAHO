@@ -59,7 +59,7 @@ class LargeRefundThresholdTests(TestCase):
     def tearDown(self) -> None:
         SettingsService.clear_all_cache()
 
-    def test_default_is_500_eur(self) -> None:
+    def test_legacy_default_is_500_ron(self) -> None:
         self.assertEqual(get_large_refund_threshold_cents(), 50000)
 
     def test_reads_operator_override(self) -> None:

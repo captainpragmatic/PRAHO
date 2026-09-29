@@ -4,23 +4,51 @@
 
 from __future__ import annotations
 
-from typing import cast
+from decimal import Decimal
+from typing import Any, cast
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
+from django.db import transaction
 from django.db.models import QuerySet
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
 from django_fsm import ConcurrentTransition, TransitionNotAllowed
 
-from apps.billing.models import Currency
+from apps.billing.currency_policy import (
+    SellingCurrencyChangedError,
+    get_selling_currency_policy,
+    require_current_selling_policy,
+)
 from apps.common.decorators import staff_required_strict
 from apps.customers.models import Customer
 from apps.users.models import User
 
-from .service_models import Service, ServicePlan
+from .service_models import Service, ServicePlan, ServicePlanPrice
+
+
+def _plan_options(currency_code: str) -> list[dict[str, Any]]:
+    prices = (
+        ServicePlanPrice.objects.filter(
+            currency_id=currency_code,
+            is_active=True,
+            service_plan__is_active=True,
+        )
+        .select_related("service_plan")
+        .order_by("service_plan__sort_order", "service_plan__name")
+    )
+    return [
+        {
+            "id": price.service_plan_id,
+            "name": price.service_plan.name,
+            "price": Decimal(price.monthly_price_cents) / 100,
+            "currency": currency_code,
+        }
+        for price in prices
+    ]
 
 
 def _get_accessible_customer_ids(user: User) -> list[int]:
@@ -124,7 +152,8 @@ def service_create(request: HttpRequest) -> HttpResponse:
         customers = Customer.objects.filter(id__in=[c.id for c in accessible_customers])
     else:
         customers = accessible_customers  # type: ignore[unreachable]
-    plans = ServicePlan.objects.filter(is_active=True)
+    policy = get_selling_currency_policy()
+    response_status = 200
 
     if request.method == "POST":
         customer_id = request.POST.get("customer_id")
@@ -149,32 +178,42 @@ def service_create(request: HttpRequest) -> HttpResponse:
                 username = f"{base_username}_{counter}"[:100]
                 counter += 1
 
-            # TODO: Add currency selection to service creation form for multi-currency support
-            ron_currency, _created = Currency.objects.get_or_create(
-                code="RON", defaults={"symbol": "lei", "decimals": 2}
-            )
-            service = Service.objects.create(
-                customer=customer,
-                service_plan=plan,
-                currency=ron_currency,
-                service_name=f"{plan.name} - {domain}",  # Generate service name
-                domain=domain,
-                username=username,
-                price=plan.price_monthly,  # Set the monthly price from the plan
-                status="pending",
-            )
-
-            messages.success(request, _("✅ Service for {domain} has been created!").format(domain=domain))
-            return redirect("provisioning:service_detail", pk=service.pk)
+            try:
+                try:
+                    revision = int(request.POST.get("currency_revision", ""))
+                except (TypeError, ValueError):
+                    revision = None
+                with transaction.atomic():
+                    policy = require_current_selling_policy(request.POST.get("currency", ""), revision)
+                    price = plan.get_price_for_currency(policy.currency_code)
+                    if not plan.is_active or price is None:
+                        raise ValidationError(_("This plan has no current price. Select an available plan."))
+                    service = Service.objects.create(
+                        customer=customer,
+                        service_plan=plan,
+                        currency_id=policy.currency_code,
+                        service_name=f"{plan.name} - {domain}",
+                        domain=domain,
+                        username=username,
+                        price=Decimal(price.monthly_price_cents) / 100,
+                        status="pending",
+                    )
+                messages.success(request, _("✅ Service for {domain} has been created!").format(domain=domain))
+                return redirect("provisioning:service_detail", pk=service.pk)
+            except ValidationError as exc:
+                messages.error(request, " ".join(exc.messages))
+                response_status = 409 if isinstance(exc, SellingCurrencyChangedError) else 400
+                policy = get_selling_currency_policy()
         else:
             messages.error(request, _("❌ All fields are required."))
 
     context = {
         "customers": customers,
-        "plans": plans,
+        "plan_options": _plan_options(policy.currency_code),
+        **policy.as_dict(),
     }
 
-    return render(request, "provisioning/service_form.html", context)
+    return render(request, "provisioning/service_form.html", context, status=response_status)
 
 
 @staff_required_strict
@@ -230,6 +269,7 @@ def service_edit(request: HttpRequest, pk: int) -> HttpResponse:
         "service": service,
         "customers": customers,
         "plans": plans,
+        "plan_options": _plan_options(service.currency_id),
         "is_edit": True,
     }
 

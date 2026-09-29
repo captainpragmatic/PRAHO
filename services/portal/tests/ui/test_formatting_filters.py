@@ -11,7 +11,29 @@ from decimal import Decimal
 
 from django.test import TestCase
 
-from apps.ui.templatetags.formatting import as_percentage, romanian_date
+from apps.ui.templatetags.formatting import as_percentage, format_currency, romanian_currency, romanian_date
+
+
+class CurrencyFormattingTests(unittest.TestCase):
+    def test_valid_money_keeps_explicit_currency_and_sign(self):
+        for code in ("RON", "EUR", "USD"):
+            with self.subTest(currency=code):
+                self.assertEqual(romanian_currency(Decimal("1234.56"), code), f"1.234,56 {code}")
+                self.assertEqual(romanian_currency(Decimal("-123"), code), f"-123,00 {code}")
+                self.assertEqual(format_currency(123456, code), f"1.234,56 {code}")
+                self.assertEqual(format_currency(0, code), f"0,00 {code}")
+
+    def test_malformed_values_do_not_become_zero_or_change_currency(self):
+        for value in (None, "", "invalid", Decimal("NaN"), Decimal("Infinity")):
+            with self.subTest(value=value):
+                self.assertEqual(romanian_currency(value, "EUR"), "— EUR")
+                self.assertEqual(format_currency(value, "EUR"), "— EUR")
+
+    def test_missing_historical_currency_stays_unavailable(self):
+        for code in (None, "", "unknown"):
+            with self.subTest(currency=code):
+                self.assertEqual(romanian_currency(12, code), "—")
+                self.assertEqual(format_currency(1200, code), "—")
 
 
 class AsPercentageFilterTestCase(unittest.TestCase):

@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
+from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.db.models import F
 from django.utils import timezone
@@ -23,10 +24,12 @@ from .models import (
     LoyaltyProgram,
     LoyaltyTier,
     LoyaltyTransaction,
+    PromotionCampaign,
     PromotionRule,
     Referral,
     ReferralCode,
 )
+from .offer_currency import validate_order_currency
 
 if TYPE_CHECKING:
     from apps.customers.models import Customer
@@ -346,6 +349,12 @@ class CouponService:
                 error_code="CUSTOMER_INELIGIBLE",
             )
 
+        # Check configured units before interpreting monetary eligibility limits.
+        try:
+            validate_order_currency(coupon, order.currency_id)
+        except ValidationError as exc:
+            return ValidationResult(False, "; ".join(exc.messages), "CURRENCY_MISMATCH")
+
         # Minimum order check
         if coupon.min_order_cents and order.subtotal_cents < coupon.min_order_cents:
             min_order = coupon.min_order_cents / 100
@@ -373,19 +382,6 @@ class CouponService:
                     error_message="No eligible products in order for this coupon",
                     error_code="NO_ELIGIBLE_PRODUCTS",
                 )
-
-        # Currency check for fixed discounts
-        if (
-            coupon.discount_type == "fixed"
-            and coupon.currency
-            and order.currency
-            and order.currency.code != coupon.currency.code
-        ):
-            return ValidationResult(
-                is_valid=False,
-                error_message=f"Coupon only valid for {coupon.currency.code} orders",
-                error_code="CURRENCY_MISMATCH",
-            )
 
         # Check if already applied to this order
         if CouponRedemption.objects.filter(coupon=coupon, order=order).exists():
@@ -544,6 +540,11 @@ class CouponService:
         Calculate the discount amount for a coupon.
         Returns detailed breakdown of the discount.
         """
+        try:
+            validate_order_currency(coupon, order.currency_id)
+        except ValidationError:
+            return DiscountResult()
+
         if items is None:
             if coupon.applies_to_all_products:
                 items = list(order.items.all())
@@ -683,6 +684,11 @@ class CouponService:
         # Pre-fetch order items once from the locked order for all operations.
         cached_items = list(order.items.select_related("product").all())
 
+        # Match checkout's campaign-before-coupon order. Staff currency edits must
+        # finish before the locked coupon is re-read and its monetary units checked.
+        if coupon.campaign_id:
+            list(PromotionCampaign.objects.select_for_update().filter(pk=coupon.campaign_id))
+
         # RACE CONDITION FIX: Lock the coupon row to prevent concurrent applications
         # This prevents multiple requests from using the last available coupon use
         # Use of=("self",) to lock only the Coupon row; without it PostgreSQL raises
@@ -696,6 +702,9 @@ class CouponService:
             )
         except Coupon.DoesNotExist:
             return ApplyResult(success=False, error_message="Coupon not found")
+
+        if locked_coupon.campaign_id != coupon.campaign_id:
+            return ApplyResult(success=False, error_message="The coupon campaign changed. Review and try again.")
 
         # Re-validate with locked coupon (state may have changed)
         validation = cls._validate_coupon_instance(locked_coupon, order, customer, cached_items)
@@ -836,6 +845,12 @@ class CouponService:
             key=lambda r: (str(r.charged_campaign_id or ""), str(r.coupon_id)),
         )
 
+        # Campaigns precede coupons in checkout and application, including when
+        # the coupon has since moved to a different campaign.
+        campaign_ids = {r.charged_campaign_id for r in pending if r.charged_campaign_id}
+        if campaign_ids:
+            list(PromotionCampaign.objects.select_for_update().filter(pk__in=campaign_ids).order_by("pk"))
+
         # #421: lock the coupon rows before reversing, mirroring apply_coupon's
         # select_for_update at the top of this class. Without it, two concurrent removes
         # of the same redemption raced and both ran the counter decrements, which drove
@@ -953,7 +968,7 @@ class PromotionRuleService:
         return applicable
 
     @classmethod
-    def _rule_matches_order(
+    def _rule_matches_order(  # noqa: PLR0911  # Independent currency and eligibility gates
         cls,
         rule: PromotionRule,
         order: Order,
@@ -967,6 +982,11 @@ class PromotionRuleService:
             order: Order to check against.
             cached_items: Pre-fetched order items.
         """
+        try:
+            validate_order_currency(rule, order.currency_id)
+        except ValidationError:
+            return False
+
         conditions = rule.conditions or {}
 
         # Minimum order amount
@@ -1013,6 +1033,11 @@ class PromotionRuleService:
             order: Order to calculate discount against.
             cached_items: Pre-fetched order items to avoid N+1 queries.
         """
+        try:
+            validate_order_currency(rule, order.currency_id)
+        except ValidationError:
+            return DiscountResult()
+
         # Cache items if not provided
         if cached_items is None:
             cached_items = list(order.items.select_related("product").all())
@@ -1243,7 +1268,7 @@ class GiftCardService:
 
         # Calculate amount to redeem
         order_remaining = order.total_cents
-        available_balance = max(0, gift_card.current_balance_cents - gift_card.reserved_cents)
+        available_balance = gift_card.available_balance_cents
         if amount_cents is None:
             amount_cents = min(available_balance, order_remaining)
         else:

@@ -5,12 +5,14 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
+from apps.billing.currency_models import Currency
 from apps.customers.models import Customer
 from apps.domains.models import TLD, Domain, Registrar
 
 
 class DomainAdminRenderingTests(TestCase):
     def setUp(self) -> None:
+        Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei"})
         self.staff = get_user_model().objects.create_user(
             email="domain-staff@example.test", password="SecurePass123!", staff_role="support"
         )

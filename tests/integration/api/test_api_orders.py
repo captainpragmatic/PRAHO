@@ -119,10 +119,12 @@ class OrdersAPIIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 401)
 
     def test_calculate_cart_totals_returns_server_authoritative_totals(self) -> None:
+        catalog = product_list(self.factory.get("/api/orders/products/"))
         request = self.factory.post(
             "/api/orders/calculate/",
             data=self._auth_payload(
                 currency=self.currency.code,
+                currency_revision=catalog.data["currency_revision"],
                 items=[
                     {
                         "product_id": str(self.product.id),

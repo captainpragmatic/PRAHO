@@ -1,69 +1,64 @@
-"""Fail-closed validation of the deployment's default billing currency (#103).
+"""Read-only readiness checks for the stored selling currency and its FX evidence.
 
-Runs as a standard Django system check (never at import time). RON requires no
-database access; a non-RON default must have a resolvable provenanced FX rate, else
-the deployment is misconfigured (it would open the automated billing paths to a
-currency that cannot be issued). Bootstrap/migrate with RON before enabling a foreign
-default.
+Database access is explicit: use ``check --tag billing_currency --database default``.
+Ordinary checks and imports stay offline. Missing pre-upgrade settings schema keeps
+the RON bootstrap baseline, allowing migrations to install the policy safely.
 """
 
 from __future__ import annotations
 
-from django.conf import settings
-from django.core.checks import Error, register
-from django.db import DatabaseError
+from collections.abc import Sequence
+
+from django.core.checks import Error, Tags, register
+from django.db import DatabaseError, connections, router
 from django.utils import timezone
 
 
-@register("billing_currency")
-def check_billing_default_currency(**_kwargs: object) -> list[Error]:
-    """Validate BILLING_DEFAULT_CURRENCY during system checks, never during app import."""
+def _policy_schema_installed(alias: str, table: str) -> bool:
+    connection = connections[alias]
+    with connection.cursor() as cursor:
+        if table not in connection.introspection.table_names(cursor):
+            return False
+        columns = connection.introspection.get_table_description(cursor, table)
+    return any(column.name == "revision" for column in columns)
+
+
+@register("billing_currency", Tags.database)
+def check_billing_default_currency(*, databases: Sequence[str] | None = None, **_kwargs: object) -> list[Error]:
+    """Validate the installed policy only when its database was explicitly selected."""
+    from apps.billing.currency_policy import get_selling_currency_policy  # noqa: PLC0415
     from apps.billing.currency_service import (  # noqa: PLC0415  # ADR-0007: deferred billing dependency
         CurrencyNotIssuableError,
         CurrencyValidationError,
         assert_currency_issuable,
-        normalize_currency_code,
     )
+    from apps.settings.models import SystemSetting  # noqa: PLC0415  # ADR-0007: deferred settings dependency
 
-    raw = getattr(settings, "BILLING_DEFAULT_CURRENCY", "RON")
-    if not isinstance(raw, str):
-        return [
-            Error(
-                "BILLING_DEFAULT_CURRENCY must be a currency-code string.",
-                hint="Use RON, or a supported currency with a resolvable provenanced rate to RON.",
-                id="billing.E001",
-            )
-        ]
+    alias = router.db_for_read(SystemSetting)
+    if not databases or alias not in databases:
+        return []
 
     try:
-        code = normalize_currency_code(raw)
-    except CurrencyValidationError as exc:
-        return [Error(f"BILLING_DEFAULT_CURRENCY: {exc}", id="billing.E001")]
-
-    if raw != code:
+        if not _policy_schema_installed(alias, SystemSetting._meta.db_table):
+            return []
+        policy = get_selling_currency_policy()
+        assert_currency_issuable(policy.currency_code, timezone.localdate())
+    except (CurrencyValidationError, CurrencyNotIssuableError) as exc:
         return [
             Error(
-                "BILLING_DEFAULT_CURRENCY must use an uppercase code without surrounding whitespace.",
-                hint=f"Use {code}.",
+                f"billing.default_currency: {exc}",
+                hint="Correct the stored selling policy or provision a provenanced rate effective today or earlier.",
                 id="billing.E001",
             )
         ]
-
-    try:
-        assert_currency_issuable(code, timezone.localdate())
-    except CurrencyNotIssuableError as exc:
-        return [
-            Error(
-                f"BILLING_DEFAULT_CURRENCY: {exc}",
-                hint="Provision a provenanced rate effective today or earlier, or configure RON.",
-                id="billing.E001",
-            )
-        ]
+    except (AttributeError, TypeError):
+        return [Error("billing.default_currency must be a supported currency-code string.", id="billing.E001")]
     except DatabaseError:
         return [
             Error(
-                "BILLING_DEFAULT_CURRENCY could not be validated against the FX-rate database.",
-                hint="Restore database access; for initial setup, migrate with RON before enabling a foreign default.",
+                "billing.default_currency could not be validated against the policy and FX-rate database.",
+                hint="Restore database access and apply pending migrations, then rerun the currency readiness check.",
+                obj=alias,
                 id="billing.E002",
             )
         ]

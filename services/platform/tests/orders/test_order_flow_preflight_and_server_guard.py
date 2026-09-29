@@ -27,11 +27,11 @@ from apps.provisioning.models import ServicePlan
 # ---------------------------------------------------------------------------
 
 
-def _call_preflight(customer: Customer, cart_items: list[dict], currency: str | None = None) -> tuple[int, dict]:
+def _call_preflight(customer: Customer, cart_items: list[dict], currency: str | None = "RON") -> tuple[int, dict]:
     """Call preflight_order with optional currency. Returns (status_code, response_data)."""
     from apps.api.orders.views import preflight_order  # noqa: PLC0415
 
-    body_data: dict = {"items": cart_items}
+    body_data: dict = {"items": cart_items, "currency_revision": 1}
     if currency is not None:
         body_data["currency"] = currency
     body = json.dumps(body_data, default=str).encode()
@@ -75,14 +75,11 @@ class PreflightCurrencyValidationTests(TestCase):
         )
         self.cart_items = [{"product_slug": "test-product", "quantity": 1, "billing_period": "monthly"}]
 
-    def test_default_ron_accepted(self) -> None:
-        """No currency field defaults to RON."""
-        _status_code, data = _call_preflight(self.customer, self.cart_items)
-        # Should not fail on currency validation (may fail later on other checks)
-        if not data.get("success"):
-            errors = data.get("errors", [])
-            for err in errors:
-                self.assertNotIn("currency", err.lower())
+    def test_missing_currency_requires_a_fresh_cart(self) -> None:
+        """A legacy cart cannot silently inherit a changed selling currency."""
+        status_code, data = _call_preflight(self.customer, self.cart_items, currency=None)
+        self.assertEqual(status_code, 400)
+        self.assertIn("currency", data["details"])
 
     def test_unsupported_currency_rejected(self) -> None:
         """GBP is not in CurrencyCode enum."""
@@ -99,7 +96,7 @@ class PreflightCurrencyValidationTests(TestCase):
         """Numeric currency code should be rejected."""
         status_code, data = _call_preflight(self.customer, self.cart_items, currency=123)
         self.assertEqual(status_code, 400)
-        self.assertTrue(any("string" in e.lower() for e in data["errors"]))
+        self.assertTrue(any("currency" in e.lower() for e in data["errors"]))
 
     def test_missing_db_record_distinct_error(self) -> None:
         """Currency passes enum but has no DB row — should say 'not configured', not 'unsupported'."""

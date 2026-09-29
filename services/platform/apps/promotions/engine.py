@@ -20,6 +20,7 @@ from apps.common.financial_arithmetic import calculate_line_totals
 from apps.settings.services import SettingsService
 
 from .models import Coupon, GiftCard, PromotionApplication, PromotionCampaign, PromotionRule, RenewalBenefit
+from .offer_currency import validate_order_currency
 from .pricing import Offer, PriceLine, evaluate_offers
 from .validation import validate_offer
 
@@ -139,11 +140,8 @@ def _validate_coupon_customer(candidate: Coupon, order: Any, items: list[Any]) -
 
 def _validate_offer_state(candidate: Coupon | PromotionRule, order: Any) -> None:
     validate_offer(candidate)
-    if candidate.currency_id and candidate.currency_id != order.currency_id:
-        raise ValidationError(_("This offer uses a different currency."))
-    if candidate.campaign and (
-        not candidate.campaign.can_apply() or candidate.campaign.budget_currency_id not in {None, order.currency_id}
-    ):
+    validate_order_currency(candidate, order.currency_id)
+    if candidate.campaign and not candidate.campaign.can_apply():
         raise ValidationError(_("This campaign is unavailable."))
 
 

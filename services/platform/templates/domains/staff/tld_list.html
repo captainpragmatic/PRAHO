@@ -123,7 +123,7 @@
                                 <span>{{ tld.grace_period_days }} {% trans "days" %}</span>
                                 {% if tld.redemption_fee_cents and tld.redemption_fee_cents|add:0 > 0 %}
                                     <span class="font-medium ml-3">{% trans "Redemption:" %}</span>
-                                    <span>{{ tld.redemption_fee_cents|cents_to_currency|romanian_currency }}</span>
+                                    <span>{{ tld.redemption_fee_cents|cents_to_currency|romanian_currency:"RON" }}</span>
                                 {% endif %}
                             </div>
                         </div>
@@ -133,15 +133,15 @@
                     <div class="grid grid-cols-3 gap-4">
                         <div class="text-center">
                             <div class="text-xs text-slate-500 dark:text-slate-400">{% trans "Registration" %}</div>
-                            <div class="text-sm font-mono font-semibold">{{ tld.registration_price_cents|cents_to_currency|romanian_currency }}</div>
+                            <div class="text-sm font-mono font-semibold">{{ tld.registration_price_cents|cents_to_currency|romanian_currency:"RON" }}</div>
                         </div>
                         <div class="text-center">
                             <div class="text-xs text-slate-500 dark:text-slate-400">{% trans "Renewal" %}</div>
-                            <div class="text-sm font-mono font-semibold">{{ tld.renewal_price_cents|cents_to_currency|romanian_currency }}</div>
+                            <div class="text-sm font-mono font-semibold">{{ tld.renewal_price_cents|cents_to_currency|romanian_currency:"RON" }}</div>
                         </div>
                         <div class="text-center">
                             <div class="text-xs text-slate-500 dark:text-slate-400">{% trans "Transfer" %}</div>
-                            <div class="text-sm font-mono font-semibold">{{ tld.transfer_price_cents|cents_to_currency|romanian_currency }}</div>
+                            <div class="text-sm font-mono font-semibold">{{ tld.transfer_price_cents|cents_to_currency|romanian_currency:"RON" }}</div>
                         </div>
                     </div>
 

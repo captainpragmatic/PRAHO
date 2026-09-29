@@ -115,7 +115,7 @@
           <div>
             <p class="text-xs text-slate-500 uppercase tracking-wide">{% trans "Monthly" %}</p>
             <p class="text-lg font-semibold text-white">
-              {{ plan.price_monthly|romanian_currency }}
+              {{ plan.price_monthly|romanian_currency:plan.currency_code }}
             </p>
           </div>
           {% endif %}
@@ -124,10 +124,10 @@
           <div>
             <p class="text-xs text-slate-500 uppercase tracking-wide">{% trans "Quarterly" %}</p>
             <p class="text-lg font-semibold text-white">
-              {{ plan.price_quarterly|romanian_currency }}
+              {{ plan.price_quarterly|romanian_currency:plan.currency_code }}
             </p>
             {% if plan.quarterly_savings %}
-            <p class="text-xs text-green-400">{% trans "Save" %} {{ plan.quarterly_savings }}%</p>
+            <p class="text-xs text-green-400">{% trans "Save" %} {{ plan.quarterly_savings|romanian_currency:plan.currency_code }}</p>
             {% endif %}
           </div>
           {% endif %}
@@ -136,10 +136,10 @@
           <div>
             <p class="text-xs text-slate-500 uppercase tracking-wide">{% trans "Annual" %}</p>
             <p class="text-lg font-semibold text-white">
-              {{ plan.price_annual|romanian_currency }}
+              {{ plan.price_annual|romanian_currency:plan.currency_code }}
             </p>
             {% if plan.annual_savings %}
-            <p class="text-xs text-green-400">{% trans "Save" %} {{ plan.annual_savings }}%</p>
+            <p class="text-xs text-green-400">{% trans "Save" %} {{ plan.annual_savings|romanian_currency:plan.currency_code }}</p>
             {% endif %}
           </div>
           {% endif %}
@@ -147,7 +147,7 @@
 
         {% if plan.setup_fee %}
         <p class="text-xs text-slate-400 text-center">
-          {% filter force_escape %}{% blocktrans %}Setup fee: {{ plan.setup_fee }} RON{% endblocktrans %}{% endfilter %}
+          {% trans "Setup fee:" %} {{ plan.setup_fee|romanian_currency:plan.currency_code }}
         </p>
         {% endif %}
       </div>

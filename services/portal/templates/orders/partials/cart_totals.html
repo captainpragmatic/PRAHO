@@ -5,6 +5,11 @@
   <h3 class="text-lg font-medium text-white mb-4">{% trans "Order Summary" %}</h3>
 
   {% if calculation %}
+  {% for warning in warnings %}
+    {% if warning.type == 'currency_change' %}
+      {% alert warning.message variant="warning" %}
+    {% endif %}
+  {% endfor %}
   <!-- Order Summary -->
   <div class="space-y-3 mb-6">
 

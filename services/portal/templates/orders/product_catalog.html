@@ -59,6 +59,11 @@
     {% include "orders/partials/trust_signals.html" %}
   </div>
 
+  <a href="{% url 'billing:gift_cards' %}" class="mb-6 block rounded-xl border border-slate-700 bg-slate-800 p-5 hover:border-blue-500">
+    <h2 class="font-semibold text-white">{% trans "Gift cards" %}</h2>
+    <p class="mt-1 text-sm text-slate-300">{% trans "Hosting credit for yourself or someone else. View gift cards in Billing." %}</p>
+  </a>
+
   <!-- Product Type Filters -->
   <div class="mb-6 sm:mb-8">
     <div class="border-b border-slate-700">
@@ -130,12 +135,12 @@
                 <!-- Monthly price (visible when billingPeriod === 'monthly') -->
                 <div x-show="isPeriod('monthly')" x-cloak>
                   <div class="text-xl sm:text-2xl font-bold text-green-400">
-                    {{ price.monthly_price|romanian_currency }}
+                    {{ price.monthly_price|romanian_currency:price.currency }}
                   </div>
                   <div class="text-xs text-slate-400">{% trans "per month" %}</div>
                   {% if price.setup_fee and price.setup_fee != "0.00" %}
                   <div class="text-xs text-slate-500 mt-1">
-                    + {{ price.setup_fee|romanian_currency }} {% trans "setup fee" %}
+                    + {{ price.setup_fee|romanian_currency:price.currency }} {% trans "setup fee" %}
                   </div>
                   {% endif %}
                 </div>
@@ -144,12 +149,12 @@
                 {% if price.has_annual_discount %}
                 <div x-show="isPeriod('annual')" x-cloak>
                   <div class="text-xl sm:text-2xl font-bold text-green-400">
-                    {{ price.annual_price|romanian_currency }}
+                    {{ price.annual_price|romanian_currency:price.currency }}
                   </div>
                   <div class="text-xs text-slate-400">{% trans "for 12 months" %}</div>
                   {% if price.setup_fee and price.setup_fee != "0.00" %}
                   <div class="text-xs text-slate-500 mt-1">
-                    + {{ price.setup_fee|romanian_currency }} {% trans "setup fee" %}
+                    + {{ price.setup_fee|romanian_currency:price.currency }} {% trans "setup fee" %}
                   </div>
                   {% endif %}
                 </div>
@@ -157,7 +162,7 @@
                 <!-- No annual discount — show monthly price in annual mode too -->
                 <div x-show="isPeriod('annual')" x-cloak>
                   <div class="text-xl sm:text-2xl font-bold text-green-400">
-                    {{ price.monthly_price|romanian_currency }}
+                    {{ price.monthly_price|romanian_currency:price.currency }}
                   </div>
                   <div class="text-xs text-slate-400">{% trans "per month" %}</div>
                 </div>

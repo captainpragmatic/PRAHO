@@ -952,6 +952,7 @@ class PriceGrandfatheringTestCase(TestCase):
             "customer": self.customer,
             "product": self.product,
             "locked_price_cents": 800,
+            "currency": _make_currency(),
             "original_price_cents": 1000,
             "current_product_price_cents": 1200,
             "reason": "Early adopter",

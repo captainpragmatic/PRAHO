@@ -11,9 +11,8 @@
 {% endblock %}
 
 {% block content %}
-{% comment %} #103: one currency used across the form — the stored currency on edit
-(immutable), the posted value on a rejected create re-render, else RON. {% endcomment %}
-{% if proforma %}{% firstof proforma.currency.code "RON" as selected_currency %}{% else %}{% firstof posted.currency "RON" as selected_currency %}{% endif %}
+{% comment %} Existing documents keep their currency; new sales confirm the current policy. {% endcomment %}
+{% if proforma %}{% firstof proforma.currency.code as selected_currency %}{% else %}{% firstof selling_currency as selected_currency %}{% endif %}
 <div class="px-4 sm:px-6 lg:px-8 max-w-6xl mx-auto">
   <!-- Header -->
   <div class="sm:flex sm:items-center mb-6">
@@ -58,6 +57,7 @@
   <!-- Proforma Form -->
   <form method="post" class="space-y-8" id="proforma-form">
     {% csrf_token %}
+    {% if not proforma %}<input type="hidden" name="currency_revision" value="{{ currency_revision }}">{% endif %}
 
     <!-- Form Errors -->
     {% form_error_summary form %}
@@ -150,14 +150,8 @@
               <label class="block text-sm font-medium text-slate-300 mb-2">
                 {% trans 'Currency' %} <span class="text-red-500">*</span>
               </label>
-              {% comment %} #103: currency is immutable on edit (disabled); selected_currency
-              is computed once at the top of the form. {% endcomment %}
-              <select name="currency" required {% if proforma %}disabled{% endif %}
-                class="w-full rounded-md border border-slate-600 bg-slate-700 px-3 py-2 text-white focus:ring-2 focus:ring-blue-500 disabled:opacity-60">
-                <option value="RON" {% if selected_currency == "RON" %}selected{% endif %}>RON - Romanian Leu</option>
-                <option value="EUR" {% if selected_currency == "EUR" %}selected{% endif %}>EUR - Euro</option>
-                <option value="USD" {% if selected_currency == "USD" %}selected{% endif %}>USD - US Dollar</option>
-              </select>
+              <input type="text" name="currency" readonly value="{{ selected_currency }}"
+                class="w-full rounded-md border border-slate-600 bg-slate-700 px-3 py-2 text-white">
             </div>
             <div>
               <label class="block text-sm font-medium text-slate-300 mb-2">
@@ -374,8 +368,7 @@
 
   // Enhanced calculation function
   function currentCurrency() {
-    const sel = document.querySelector('select[name="currency"]');
-    return (sel && sel.value) || 'RON';
+    return document.querySelector('input[name="currency"]').value;
   }
 
   function calculateTotals() {
@@ -427,7 +420,7 @@
   // Add new line item
   function addLineItem() {
     const container = document.getElementById('proforma-lines');
-    const currency = document.querySelector('select[name="currency"]').value || 'RON';
+    const currency = currentCurrency();
     const lineHtml = `
         <div class="proforma-line grid grid-cols-2 md:grid-cols-12 gap-3 items-center border border-slate-700 md:border-0 rounded-lg md:rounded-none p-3 md:p-0" data-line="${lineCounter}">
             <div class="col-span-2 md:col-span-4">
@@ -543,18 +536,6 @@
     document.querySelectorAll('.line-quantity, .line-price, .line-vat').forEach(input => {
       input.addEventListener('input', calculateTotals);
     });
-
-    // Update currency labels when currency dropdown changes
-    const currencySelect = document.querySelector('select[name="currency"]');
-    if (currencySelect) {
-      currencySelect.addEventListener('change', function () {
-        document.querySelectorAll('.currency-label').forEach(el => {
-          el.textContent = this.value;
-        });
-        // Re-render line totals and the summary in the newly selected currency.
-        calculateTotals();
-      });
-    }
 
   // Add line button
   document.querySelector('.add-line-btn').addEventListener('click', function (e) {

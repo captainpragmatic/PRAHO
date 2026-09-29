@@ -22,6 +22,8 @@ CANONICAL_SERVICES_SUMMARY_KEYS = {
     "status_counts",
     "total_monthly_cost",
     "total_monthly_cost_with_vat",
+    "currency_code",
+    "monthly_costs_by_currency",
     "total_disk_usage_gb",
     "total_bandwidth_usage_gb",
     "service_types",
@@ -62,6 +64,9 @@ class ServicesAPIClientSummaryShapeTests(SimpleTestCase):
 
         # Unknown counts are None (badges hidden), never a fabricated all-zero dict.
         self.assertIsNone(result["status_counts"])
+        self.assertIsNone(result["total_monthly_cost"])
+        self.assertIsNone(result["currency_code"])
+        self.assertEqual(result["monthly_costs_by_currency"], [])
 
     @patch("apps.services.services.ServicesAPIClient._make_request")
     def test_platform_api_error_fallback_matches_canonical(self, mock_make_request) -> None:

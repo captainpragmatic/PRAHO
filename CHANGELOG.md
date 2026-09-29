@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Customer service requests create support tickets with a private staff panel to
   approve, reject, open the service and record manual completion.
+- One configured currency for new sales (RON, EUR or USD), explicit product, service-plan
+  and domain prices, and a staff price editor. Checkout requires confirmation after a currency change.
+- Billing-period snapshots preserve the original currency, quantity, price, usage tariff and rounding rules.
+- Currency-specific bank instructions and finance-alert thresholds.
+- Subscription and domain currency transitions preserve commitments and require 30 days'
+  notice before a new-currency renewal document, with activation at the renewal boundary.
+- Digital gift purchases in Portal Billing, saved-recipient delivery and retries, masked
+  codes, available-balance displays, and staff controls for original-payment refunds.
 - Staff promotion screens with validated campaign, coupon, batch and automatic-offer forms.
 - Signed checkout promotion quotes, explicit offer stacking, BOGO and tiered discounts,
   and credits that retain their original value across subscription renewals.
@@ -25,6 +33,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   accepted service-request retries keep their identity, and staff review dates follow local preferences.
 - Registration preserves password whitespace, recovery retains its response delay, and
   service-request retries can recover the original receipt after service termination.
+- Identical repeat purchases in one session create separate orders while retries
+  retain the original order.
+- Domain order history, registration, renewal and WHOIS privacy prices display
+  their recorded or quoted currency.
+- Customer balances and promotion spending display each original currency separately.
+  Existing credits, invoices and gift-card values retain their recorded amounts and currency.
+- Monetary promotion limits require a recorded currency; used campaign budgets cannot be
+  relabelled, including during a concurrent coupon redemption.
+- Checkout can recover a previous submission after a lost response even if catalog prices
+  or the selling currency have changed.
 - Staff domain filters and pagination, Audit Apply Filters, and shared button attribute rendering.
 - Staff settlement now confirms only the cash remaining after gift-card reservations.
 - Closed invoices and expired or closed proformas no longer display a request to pay again.

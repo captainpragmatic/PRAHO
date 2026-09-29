@@ -16,6 +16,7 @@ from django.contrib.messages import get_messages
 from django.test import Client, TestCase
 from django.urls import reverse
 
+from apps.billing.currency_models import Currency
 from apps.common.types import Err
 from apps.customers.models import Customer
 from apps.domains.models import TLD
@@ -26,6 +27,7 @@ User = get_user_model()
 
 class DomainRegisterViewPendingMessageTests(TestCase):
     def setUp(self) -> None:
+        Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei"})
         self.user = User.objects.create_user(
             email="register-pending-staff@example.test",
             password="StrongPass123!",

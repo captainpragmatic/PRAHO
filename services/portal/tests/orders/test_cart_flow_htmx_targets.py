@@ -21,6 +21,8 @@ _PRODUCT_DATA = {
     "name": "Shared Hosting Basic",
     "product_type": "hosting",
     "requires_domain": False,
+    "selling_currency": "RON",
+    "currency_revision": 1,
     "is_active": True,
 }
 _SECOND_PRODUCT_SLUG = "managed-vps"
@@ -30,6 +32,8 @@ _SECOND_PRODUCT_DATA = {
     "name": "Managed VPS",
     "product_type": "vps",
     "requires_domain": False,
+    "selling_currency": "RON",
+    "currency_revision": 1,
     "is_active": True,
 }
 _CALCULATION_RESULT = {
@@ -38,6 +42,8 @@ _CALCULATION_RESULT = {
     "tax_cents": 420,
     "total_cents": 2420,
     "currency": "RON",
+    "selling_currency": "RON",
+    "currency_revision": 1,
     "vat_rate_percent": "21.00",
     "warnings": [],
 }

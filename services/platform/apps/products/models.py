@@ -13,7 +13,7 @@ from typing import Any, ClassVar
 
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
-from django.db import models
+from django.db import models, transaction
 from django.db.models.query import QuerySet
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
@@ -26,6 +26,22 @@ MAX_JSON_CONTENT_SIZE = _DEFAULT_MAX_JSON_CONTENT_SIZE
 MAX_JSON_DEPTH = 10  # Maximum JSON nesting depth
 _DEFAULT_MAX_PRICE_CENTS = 100_000_000  # Maximum price in cents (1M major units)
 MAX_PRICE_CENTS = _DEFAULT_MAX_PRICE_CENTS
+
+
+def validate_custom_period_prices(value: Any) -> None:
+    """Custom terms have explicit integer cents for a canonical number of days."""
+    if not isinstance(value, dict):
+        raise ValidationError(_("Custom period prices must map day counts to amounts in cents."))
+    for days, amount in value.items():
+        if (
+            not isinstance(days, str)
+            or not days.isdecimal()
+            or str(int(days)) != days
+            or not 1 <= int(days) <= 730  # noqa: PLR2004  # Matches Subscription.custom_cycle_days
+            or type(amount) is not int
+            or not 0 <= amount <= MAX_PRICE_CENTS
+        ):
+            raise ValidationError(_("Custom prices require 1 to 730 days and a non-negative integer amount in cents."))
 
 
 def get_max_json_content_size() -> int:
@@ -312,6 +328,13 @@ class Product(models.Model):
     def __str__(self) -> str:
         return self.name
 
+    @transaction.atomic
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        from apps.billing.currency_policy import get_selling_currency_policy  # noqa: PLC0415  # ADR-0007
+
+        get_selling_currency_policy(lock=True)
+        super().save(*args, **kwargs)
+
     def clean(self) -> None:
         """🔒 Validate model fields for security"""
         super().clean()
@@ -384,6 +407,8 @@ class ProductPrice(models.Model):
     monthly_price_cents = models.BigIntegerField(
         validators=[MinValueValidator(0)], help_text=_("Monthly base price in cents (e.g., 2999 for 29.99 RON)")
     )
+    quarterly_price_cents = models.PositiveBigIntegerField(null=True, blank=True)
+    custom_period_prices = models.JSONField(default=dict, blank=True, validators=[validate_custom_period_prices])
     setup_cents = models.BigIntegerField(
         default=0, validators=[MinValueValidator(0)], help_text=_("One-time setup fee in cents")
     )
@@ -437,6 +462,16 @@ class ProductPrice(models.Model):
     def __str__(self) -> str:
         return f"{self.product.name} - {self.currency.code} {self.monthly_price} monthly"
 
+    @transaction.atomic
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        from apps.billing.currency_policy import get_selling_currency_policy  # noqa: PLC0415  # ADR-0007
+
+        get_selling_currency_policy(lock=True)
+        update_fields = kwargs.get("update_fields")
+        if update_fields is None or "custom_period_prices" in update_fields:
+            validate_custom_period_prices(self.custom_period_prices)
+        super().save(*args, **kwargs)
+
     @property
     def monthly_price(self) -> Decimal:
         """Return monthly price in currency units (e.g., 29.99)"""
@@ -447,9 +482,21 @@ class ProductPrice(models.Model):
         """Return setup fee in currency units"""
         return Decimal(self.setup_cents) / 100
 
-    def get_price_for_period(self, billing_period: str) -> Decimal:
+    def get_price_for_period(
+        self, billing_period: str, *, custom_cycle_days: int | None = None, include_promotions: bool = True
+    ) -> Decimal:
         """Calculate the promotion-aware price for a billing period with discounts applied."""
-        effective_monthly_price = self.effective_monthly_price
+        billing_period = {"yearly": "annual", "semi_annual": "semiannual"}.get(billing_period, billing_period)
+        if billing_period in {"quarterly", "custom"}:
+            cents = (
+                self.quarterly_price_cents
+                if billing_period == "quarterly"
+                else self.custom_period_prices.get(str(custom_cycle_days))
+            )
+            if cents is None:
+                raise ValueError(f"Missing {billing_period} ({custom_cycle_days or ''}) price in {self.currency_id}")
+            return Decimal(cents) / 100
+        effective_monthly_price = self.effective_monthly_price if include_promotions else self.monthly_price
         if billing_period == "monthly":
             return effective_monthly_price
         elif billing_period == "semiannual":
@@ -467,9 +514,16 @@ class ProductPrice(models.Model):
         else:
             raise ValueError(f"Unsupported billing period: {billing_period}")
 
-    def get_price_cents_for_period(self, billing_period: str) -> int:
+    def get_price_cents_for_period(
+        self, billing_period: str, *, custom_cycle_days: int | None = None, include_promotions: bool = True
+    ) -> int:
         """Calculate price in cents for a specific billing period with discounts applied"""
-        return int(self.get_price_for_period(billing_period) * 100)
+        return int(
+            self.get_price_for_period(
+                billing_period, custom_cycle_days=custom_cycle_days, include_promotions=include_promotions
+            )
+            * 100
+        )
 
     @property
     def semiannual_price(self) -> Decimal:

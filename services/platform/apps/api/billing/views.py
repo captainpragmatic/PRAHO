@@ -763,8 +763,13 @@ def customer_invoice_summary_api(request: HttpRequest, customer: Customer) -> Re
             "issued_invoices": 8,
             "overdue_invoices": 1,
             "paid_invoices": 34,
-            "total_amount_due_cents": 45000,
-            "currency_code": "RON",
+            "total_amount_due_cents": null,
+            "currency_code": null,
+            "amount_due_by_currency": {"RON": 45000, "EUR": 12000},
+            "credit_balance_by_currency": {"EUR": 2000},
+            "spendable_credit_by_currency": {"EUR": 2000},
+            "held_credit_entries": [],
+            "credit_spending_on_hold": false,
             "recent_invoices": [
                 {
                     "number": "INV-000123",
@@ -790,7 +795,7 @@ def customer_invoice_summary_api(request: HttpRequest, customer: Customer) -> Re
         # document LISTINGS hide it, because it is not yet a document.
         invoices_qs = Invoice.objects.filter(customer=customer)
 
-        summary_data = {"customer_id": customer.id, "invoices_queryset": invoices_qs}
+        summary_data = {"customer": customer, "invoices_queryset": invoices_qs}
 
         serializer = InvoiceSummarySerializer(summary_data)
 
@@ -837,10 +842,12 @@ def currencies_api(request: HttpRequest) -> Response:
     }
     """
     try:
-        currencies = Currency.objects.filter(is_active=True).order_by("code")
+        from apps.billing.currency_policy import get_selling_currency_policy  # noqa: PLC0415  # ADR-0007
+
+        currencies = Currency.objects.order_by("code")
         serializer = CurrencySerializer(currencies, many=True)
 
-        return Response({"success": True, "currencies": serializer.data})
+        return Response({"success": True, "currencies": serializer.data, **get_selling_currency_policy().as_dict()})
 
     except Exception as e:
         logger.error(f"🔥 [Billing API] Currency list error: {e}")

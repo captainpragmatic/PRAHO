@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% load i18n %}
 {% load ui_components %}
+{% load formatting %}
 
 {% block title %}{% trans "Billing" %} - PRAHO Platform{% endblock %}
 
@@ -70,7 +71,11 @@
         </div>
         <div class="ml-4">
             <p class="text-sm font-medium text-slate-400">{% trans 'Proforma Value' %}</p>
-          <p class="text-2xl font-semibold text-white">{{ proforma_total|floatformat:0 }} RON</p>
+          {% for currency, amount in proforma_totals_by_currency.items %}
+            <p class="text-2xl font-semibold text-white">{{ amount|cents_to_currency|romanian_currency:currency }}</p>
+          {% empty %}
+            <p class="text-2xl font-semibold text-white">—</p>
+          {% endfor %}
         </div>
       </div>
     </div>
@@ -82,7 +87,11 @@
         </div>
         <div class="ml-4">
             <p class="text-sm font-medium text-slate-400">{% trans 'Invoice Revenue' %}</p>
-          <p class="text-2xl font-semibold text-white">{{ invoice_total|floatformat:0 }} RON</p>
+          {% for currency, amount in invoice_totals_by_currency.items %}
+            <p class="text-2xl font-semibold text-white">{{ amount|cents_to_currency|romanian_currency:currency }}</p>
+          {% empty %}
+            <p class="text-2xl font-semibold text-white">—</p>
+          {% endfor %}
         </div>
       </div>
     </div>

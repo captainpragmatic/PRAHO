@@ -102,7 +102,7 @@ def _call_calculate(customer: Customer, currency: Currency, cart_items: list[dic
     from apps.api.orders.views import calculate_cart_totals
 
     body = json.dumps(
-        {"customer_id": customer.id, "currency": currency.code, "items": []},
+        {"customer_id": customer.id, "currency": currency.code, "currency_revision": 1, "items": []},
         default=str,
     ).encode()
 
@@ -119,6 +119,7 @@ def _call_calculate(customer: Customer, currency: Currency, cart_items: list[dic
     mock_serializer.validated_data = {
         "customer_id": customer.id,
         "currency": currency.code,
+        "currency_revision": 1,
         "items": cart_items,
     }
 
@@ -254,6 +255,8 @@ class CartCalculationOutputSerializerTestCase(TestCase):
             "tax_cents": 1_950,
             "total_cents": 11_950,
             "currency": "RON",
+            "selling_currency": "RON",
+            "currency_revision": 1,
             "warnings": [],
             "items": [],
         }

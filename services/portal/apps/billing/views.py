@@ -397,11 +397,16 @@ def billing_dashboard_widget(request: HttpRequest) -> JsonResponse:
         # Get invoice summary
         summary = invoice_service.get_invoice_summary(int(customer_id), int(request.user.id))  # type: ignore[union-attr, arg-type]
 
-        # Format amounts for display
-        if summary["total_amount_due"] > 0:
-            total_due_formatted = f"{summary['total_amount_due'] / 100:.2f} RON"
-        else:
-            total_due_formatted = "0.00 RON"
+        if not summary["summary_available"]:
+            return JsonResponse(
+                {"success": False, "error": _("Billing balances are temporarily unavailable.")},
+                status=HTTPStatus.SERVICE_UNAVAILABLE,
+            )
+        total_due_formatted = (
+            f"{summary['total_amount_due'] / 100:.2f} {summary['currency_code']}"
+            if summary["currency_code"] is not None
+            else None
+        )
 
         # Prepare response data
         widget_data = {
@@ -412,6 +417,12 @@ def billing_dashboard_widget(request: HttpRequest) -> JsonResponse:
                 "pending_count": summary["issued_invoices"],
                 "total_due_formatted": total_due_formatted,
                 "total_due_cents": summary["total_amount_due"],
+                "currency_code": summary["currency_code"],
+                "amount_due_by_currency": summary["amount_due_by_currency"],
+                "credit_balance_by_currency": summary["credit_balance_by_currency"],
+                "spendable_credit_by_currency": summary["spendable_credit_by_currency"],
+                "held_credit_entries": summary["held_credit_entries"],
+                "credit_spending_on_hold": summary["credit_spending_on_hold"],
                 "recent_invoices": summary["recent_invoices"][:3],  # Limit to 3 for widget
             },
         }

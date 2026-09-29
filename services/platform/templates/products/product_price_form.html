@@ -57,7 +57,7 @@
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
         <!-- Currency -->
         <div>
-          {% input_field "currency" input_type="select" label="Currency" html_id="id_currency" placeholder="Select currency" required=True options=currency_options value=form.currency.value help_text="RON recommended for Romanian customers" error=form.currency.errors.0 %}
+          {% input_field "currency" input_type="select" label="Currency" html_id="id_currency" placeholder="Select currency" required=True options=currency_options value=form.currency.value help_text="Set an explicit price in this currency" error=form.currency.errors.0 %}
         </div>
 
         <!-- Monthly Price (in cents) -->

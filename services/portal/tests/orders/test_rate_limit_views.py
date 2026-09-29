@@ -118,6 +118,8 @@ class OrdersServicesRateLimitTests(TestCase):
         cart = MagicMock()
         cart.has_items.return_value = True
         cart.currency = "RON"
+        cart.currency_revision = 1
+        cart.ensure_selling_policy.return_value = False
         cart.get_api_items.return_value = [{"product_id": 1, "quantity": 1}]
 
         with patch("apps.orders.services.PlatformAPIClient") as mock_client:
@@ -130,6 +132,8 @@ class OrdersServicesRateLimitTests(TestCase):
         cart = MagicMock()
         cart.has_items.return_value = True
         cart.currency = "RON"
+        cart.currency_revision = 1
+        cart.ensure_selling_policy.return_value = False
         cart.get_api_items.return_value = [{"product_id": 1, "quantity": 1}]
         cart.cart = {"created_at": "2026-01-01"}
 

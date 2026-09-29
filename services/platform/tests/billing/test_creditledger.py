@@ -36,6 +36,7 @@ class CreditLedgerTestCase(TestCase):
     def test_create_credit_ledger_entry(self):
         """Test basic credit ledger entry creation"""
         entry = CreditLedger.objects.create(
+            currency=self.currency,
             customer=self.customer,
             delta_cents=5000,  # 50.00 EUR
             reason='Manual credit adjustment',
@@ -50,6 +51,7 @@ class CreditLedgerTestCase(TestCase):
     def test_credit_ledger_str_representation(self):
         """Test string representation"""
         entry = CreditLedger.objects.create(
+            currency=self.currency,
             customer=self.customer,
             delta_cents=2500,
             reason='Service charge'
@@ -63,6 +65,7 @@ class CreditLedgerTestCase(TestCase):
         """Test positive and negative amounts"""
         # Positive amount (credit added)
         credit_entry = CreditLedger.objects.create(
+            currency=self.currency,
             customer=self.customer,
             delta_cents=5000,
             reason='Credit added'
@@ -70,6 +73,7 @@ class CreditLedgerTestCase(TestCase):
 
         # Negative amount (credit used)
         debit_entry = CreditLedger.objects.create(
+            currency=self.currency,
             customer=self.customer,
             delta_cents=-3000,
             reason='Credit used'
@@ -81,6 +85,7 @@ class CreditLedgerTestCase(TestCase):
     def test_credit_ledger_customer_relationship(self):
         """Test customer relationship"""
         entry = CreditLedger.objects.create(
+            currency=self.currency,
             customer=self.customer,
             delta_cents=1000,
             reason='Test entry'
@@ -100,6 +105,7 @@ class CreditLedgerTestCase(TestCase):
         )
 
         entry = CreditLedger.objects.create(
+            currency=self.currency,
             customer=self.customer,
             invoice=invoice,
             delta_cents=-10000,
@@ -119,6 +125,7 @@ class CreditLedgerTestCase(TestCase):
         )
 
         entry = CreditLedger.objects.create(
+            currency=self.currency,
             customer=self.customer,
             payment=payment,
             delta_cents=5000,
@@ -130,6 +137,7 @@ class CreditLedgerTestCase(TestCase):
     def test_credit_ledger_delta_property(self):
         """Test delta property converts cents to decimal"""
         entry = CreditLedger.objects.create(
+            currency=self.currency,
             customer=self.customer,
             delta_cents=2550,  # 25.50
             reason='Property test'
@@ -142,6 +150,7 @@ class CreditLedgerTestCase(TestCase):
         before_creation = timezone.now()
 
         entry = CreditLedger.objects.create(
+            currency=self.currency,
             customer=self.customer,
             delta_cents=1000,
             reason='Timestamp test'
@@ -155,6 +164,7 @@ class CreditLedgerTestCase(TestCase):
     def test_credit_ledger_created_by_optional(self):
         """Test that created_by is optional"""
         entry = CreditLedger.objects.create(
+            currency=self.currency,
             customer=self.customer,
             delta_cents=1000,
             reason='No user specified'
@@ -185,6 +195,7 @@ class CreditLedgerIntegrationTestCase(TestCase):
         """Test credit balance calculation across multiple entries"""
         # Initial credit
         CreditLedger.objects.create(
+            currency=self.currency,
             customer=self.customer,
             delta_cents=10000,  # +100.00
             reason='Initial credit'
@@ -192,6 +203,7 @@ class CreditLedgerIntegrationTestCase(TestCase):
 
         # Partial use
         CreditLedger.objects.create(
+            currency=self.currency,
             customer=self.customer,
             delta_cents=-3000,  # -30.00
             reason='Credit used'
@@ -199,6 +211,7 @@ class CreditLedgerIntegrationTestCase(TestCase):
 
         # Additional credit
         CreditLedger.objects.create(
+            currency=self.currency,
             customer=self.customer,
             delta_cents=5000,  # +50.00
             reason='Additional credit'
@@ -206,6 +219,7 @@ class CreditLedgerIntegrationTestCase(TestCase):
 
         # Another use
         CreditLedger.objects.create(
+            currency=self.currency,
             customer=self.customer,
             delta_cents=-2000,  # -20.00
             reason='More credit used'
@@ -223,6 +237,7 @@ class CreditLedgerIntegrationTestCase(TestCase):
         """Test applying credit to an invoice"""
         # Customer has existing credit
         CreditLedger.objects.create(
+            currency=self.currency,
             customer=self.customer,
             delta_cents=15000,  # 150.00 EUR credit
             reason='Prepayment credit'
@@ -238,6 +253,7 @@ class CreditLedgerIntegrationTestCase(TestCase):
 
         # Apply credit to invoice
         CreditLedger.objects.create(
+            currency=self.currency,
             customer=self.customer,
             invoice=invoice,
             delta_cents=-8000,  # -80.00 (debit)
@@ -276,6 +292,7 @@ class CreditLedgerIntegrationTestCase(TestCase):
         # Convert overpayment to credit
         overpayment_amount = payment.amount_cents - invoice.total_cents
         CreditLedger.objects.create(
+            currency=self.currency,
             customer=self.customer,
             payment=payment,
             invoice=invoice,
@@ -300,6 +317,7 @@ class CreditLedgerIntegrationTestCase(TestCase):
 
         # Refund converted to credit instead of bank refund
         CreditLedger.objects.create(
+            currency=self.currency,
             customer=self.customer,
             payment=payment,
             delta_cents=10000,
@@ -323,6 +341,7 @@ class CreditLedgerIntegrationTestCase(TestCase):
         )
 
         CreditLedger.objects.create(
+            currency=self.currency,
             customer=self.customer,
             payment=payment,
             delta_cents=5000,
@@ -331,6 +350,7 @@ class CreditLedgerIntegrationTestCase(TestCase):
 
         # Chargeback removes the credit
         CreditLedger.objects.create(
+            currency=self.currency,
             customer=self.customer,
             payment=payment,
             delta_cents=-5000,
@@ -361,6 +381,7 @@ class CreditLedgerIntegrationTestCase(TestCase):
 
         for delta_cents, reason in operations:
             CreditLedger.objects.create(
+                currency=self.currency,
                 customer=self.customer,
                 delta_cents=delta_cents,
                 reason=reason,
@@ -386,6 +407,7 @@ class CreditLedgerIntegrationTestCase(TestCase):
         """Test credit ledger entries with user tracking"""
         # Admin adds credit
         admin_entry = CreditLedger.objects.create(
+            currency=self.currency,
             customer=self.customer,
             delta_cents=10000,
             reason='Admin credit adjustment',
@@ -394,6 +416,7 @@ class CreditLedgerIntegrationTestCase(TestCase):
 
         # System deducts credit (no user)
         system_entry = CreditLedger.objects.create(
+            currency=self.currency,
             customer=self.customer,
             delta_cents=-2000,
             reason='Automatic billing cycle charge'
@@ -415,6 +438,7 @@ class CreditLedgerIntegrationTestCase(TestCase):
 
         for delta_cents, reason in entries_data:
             CreditLedger.objects.create(
+                currency=self.currency,
                 customer=self.customer,
                 delta_cents=delta_cents,
                 reason=reason
@@ -437,6 +461,7 @@ class CreditLedgerIntegrationTestCase(TestCase):
     def test_credit_ledger_cascade_behavior(self):
         """Test cascade behavior when customer is deleted"""
         CreditLedger.objects.create(
+            currency=self.currency,
             customer=self.customer,
             delta_cents=1000,
             reason='Test cascade'
@@ -468,6 +493,7 @@ class CreditLedgerIntegrationTestCase(TestCase):
         )
 
         entry = CreditLedger.objects.create(
+            currency=self.currency,
             customer=self.customer,
             invoice=invoice,
             payment=payment,

@@ -534,6 +534,7 @@ class IdempotencyKeyContentValidationTest(TestCase):
         """Build a create_order request with the given idempotency key header."""
         data = body or {
             "currency": "RON",
+            "currency_revision": 1,
             "items": [],
         }
         request = self.factory.post(
@@ -647,7 +648,7 @@ class CreateOrderIntegrityErrorScopeTest(TestCase):
     def _make_create_request(self, idempotency_key: str) -> object:
         request = self.factory.post(
             "/api/orders/create/",
-            data={"currency": "RON", "items": []},
+            data={"currency": "RON", "currency_revision": 1, "items": []},
             content_type="application/json",
             HTTP_IDEMPOTENCY_KEY=idempotency_key,
         )
@@ -708,7 +709,9 @@ class CreateOrderIntegrityErrorScopeTest(TestCase):
             patch.object(
                 OrderCreateInputSerializer,
                 "validated_data",
-                new_callable=lambda: property(lambda self: {"currency": "RON", "items": [], "notes": "", "meta": {}}),
+                new_callable=lambda: property(
+                    lambda self: {"currency": "RON", "currency_revision": 1, "items": [], "notes": "", "meta": {}}
+                ),
                 create=True,
             ),
             patch(

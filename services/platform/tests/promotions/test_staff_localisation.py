@@ -41,11 +41,12 @@ class PromotionStaffLocalisationTests(TestCase):
             discount_type="percent", discount_percent=10, valid_until=cls.instant,
         )
         order = Order.objects.create(customer=cls.customer, currency=cls.currency, order_number="ORD-LOCALDATES")
-        CouponRedemption.objects.create(
+        redemption = CouponRedemption.objects.create(
             coupon=cls.coupon, order=order, customer=cls.customer, discount_type="percent", discount_value=10,
-            order_subtotal_cents=1000, order_total_cents=900, discount_cents=100, status="applied",
-            applied_at=cls.instant,
+            order_subtotal_cents=1000, order_total_cents=900, currency_code=cls.currency.code,
         )
+        redemption.mark_applied(100)
+        CouponRedemption.objects.filter(pk=redemption.pk).update(applied_at=cls.instant)
         cls.gift = GiftCard.objects.create(
             code="LOCAL-GIFT", initial_value_cents=1000, current_balance_cents=0, currency=cls.currency
         )

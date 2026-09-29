@@ -60,7 +60,10 @@ class SharedCheckoutClaimTests(TransactionTestCase):
     def platform(self, **kwargs: object) -> Response:
         url = str(kwargs["url"])
         if "/products/" in url:
-            body: dict[str, object] = {"slug": "shared-hosting", "is_active": True, "requires_domain": False}
+            body: dict[str, object] = {
+                "slug": "shared-hosting", "is_active": True, "requires_domain": False,
+                "selling_currency": "RON", "currency_revision": 1,
+            }
         elif url.endswith("/preflight/"):
             body = {"success": not self.reject_preflight, "errors": ["Unavailable"] if self.reject_preflight else []}
         elif url.endswith("/create/"):
@@ -107,6 +110,31 @@ class SharedCheckoutClaimTests(TransactionTestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn(self.order_id, response["Location"])
         self.assertEqual(counters.lookup(self.key), self.order_id)
+
+    def test_identical_new_purchase_is_distinct_while_each_completed_checkout_replays(self) -> None:
+        """A second purchase in one session must not reuse the previous order's claim."""
+        self.payload.pop("idempotency_key")  # The browser form uses the server fallback.
+        with patch("apps.api_client.services.portal_request", side_effect=self.platform) as transport:
+            first = self.submit()
+            self.assertEqual(first.status_code, 302)
+            self.assertIn(self.order_id, first["Location"])
+            first_version = self.payload["cart_version"]
+            self.assertEqual(self.submit()["Location"], first["Location"])
+
+            session = self.client.session
+            cart = GDPRCompliantCartSession(session)
+            cart.add_item("shared-hosting", 1, "monthly")
+            session.save()
+            self.payload["cart_version"] = cart.get_cart_version()
+            self.order_id = "550e8400-e29b-41d4-a716-446655440100"
+
+            second = self.submit()
+            self.assertEqual(second.status_code, 302)
+            self.assertIn(self.order_id, second["Location"])
+            self.assertNotEqual(self.payload["cart_version"], first_version)
+            self.assertEqual(self.submit()["Location"], second["Location"])
+            creations = [call for call in transport.call_args_list if str(call.kwargs["url"]).endswith("/create/")]
+            self.assertEqual(len(creations), 2, "Retries must not send another Platform create request")
 
     def test_loser_cannot_release_or_complete_another_workers_claim(self) -> None:
         self.assertTrue(counters.claim(self.key, 300, "winner"))

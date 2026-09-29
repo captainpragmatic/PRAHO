@@ -20,6 +20,7 @@ from django.http import HttpResponse
 from django.test import Client, RequestFactory, TestCase, override_settings
 from django.utils import timezone
 
+from apps.billing.currency_policy import get_selling_currency_policy
 from apps.billing.models import (
     Currency,
     Invoice,
@@ -396,6 +397,10 @@ class InvoiceSendViewTest(BillingViewsTestBase):
 class ProformaCreateViewTest(BillingViewsTestBase):
     """Tests for proforma_create view."""
 
+    def policy_fields(self):
+        policy = get_selling_currency_policy()
+        return {"currency": policy.currency_code, "currency_revision": policy.revision}
+
     def test_proforma_create_get(self):
         self.client.force_login(self.staff_user)
         response = self.client.get("/billing/proformas/create/")
@@ -406,6 +411,7 @@ class ProformaCreateViewTest(BillingViewsTestBase):
         response = self.client.post(
             "/billing/proformas/create/",
             {
+                **self.policy_fields(),
                 "customer": str(self.customer.pk),
                 "valid_until": (timezone.now() + timedelta(days=30)).strftime("%Y-%m-%d"),
                 "bill_to_name": "Test Company SRL",
@@ -434,6 +440,7 @@ class ProformaCreateViewTest(BillingViewsTestBase):
         response = self.client.post(
             "/billing/proformas/create/",
             {
+                **self.policy_fields(),
                 "customer": str(self.customer.pk),
                 "valid_until": "not-a-date",
             },
@@ -445,6 +452,7 @@ class ProformaCreateViewTest(BillingViewsTestBase):
         response = self.client.post(
             "/billing/proformas/create/",
             {
+                **self.policy_fields(),
                 "customer": str(self.customer.pk),
                 "line_0_description": "Bad line",
                 "line_0_quantity": "abc",
@@ -459,6 +467,7 @@ class ProformaCreateViewTest(BillingViewsTestBase):
         response = self.client.post(
             "/billing/proformas/create/",
             {
+                **self.policy_fields(),
                 "customer": str(self.customer.pk),
                 "line_0_description": "Bad line",
                 "line_0_quantity": "1",
@@ -473,6 +482,7 @@ class ProformaCreateViewTest(BillingViewsTestBase):
         response = self.client.post(
             "/billing/proformas/create/",
             {
+                **self.policy_fields(),
                 "customer": str(self.customer.pk),
                 "line_0_description": "Bad line",
                 "line_0_quantity": "1",
@@ -860,6 +870,8 @@ class GenerateEFacturaViewTest(BillingViewsTestBase):
         COMPANY_CITY="Bucharest",
         COMPANY_POSTAL_CODE="010101",
         COMPANY_COUNTRY_CODE="RO",
+        COMPANY_BANK_ACCOUNT="RO49AAAA1B31007593840000",
+        COMPANY_BANK_NAME="Test Bank",
     )
     def test_generate_efactura_success(self):
         # A complete, issued invoice generates the canonical CIUS-RO XML. The staff

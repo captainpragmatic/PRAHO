@@ -112,6 +112,11 @@ class PaymentSuccessService:
         gateway_txn_id: str,
         gateway_facts: Mapping[str, Any],
     ) -> Result[Payment, str]:
+        from apps.promotions.gift_funding import converge_gift_funding  # noqa: PLC0415  # ADR-0007
+
+        gift_result = converge_gift_funding(gateway_txn_id, {**gateway_facts, "status": "succeeded"})
+        if gift_result is not None:
+            return gift_result
         try:
             with transaction.atomic():
                 try:
@@ -445,6 +450,7 @@ class PaymentSuccessService:
                     subscription=subscription,
                     service=services.get(subscription.service_id),
                     paid_at=now,
+                    payment=payment,
                 )
                 if period_error:
                     return period_error
@@ -486,7 +492,10 @@ class PaymentSuccessService:
         subscription: Subscription,
         service: Any,
         paid_at: Any,
+        payment: Payment | None = None,
     ) -> str | None:
+        if subscription.status in {"cancelled", "expired"} or subscription.cancel_at_period_end:
+            return f"Subscription {subscription.subscription_number} no longer permits renewal entitlement"
         current_end = subscription.current_period_end
         if current_end < cycle.period_start:
             return (
@@ -507,8 +516,7 @@ class PaymentSuccessService:
         if current_end == cycle.period_start:
             subscription.current_period_start = cycle.period_start
             subscription.current_period_end = cycle.period_end
-        elif current_end < cycle.period_end:
-            return f"Subscription period mismatch for {subscription.subscription_number}"
+        # The gap/overlap/stale guards leave only the two exact period boundaries.
 
         next_proforma_at, next_charge_at = fixed_renewal_schedule(cycle.period_end)
         subscription.next_proforma_at = next_proforma_at
@@ -516,6 +524,10 @@ class PaymentSuccessService:
         subscription.next_billing_date = next_proforma_at
         subscription.last_payment_date = paid_at
         subscription.last_payment_amount_cents = cycle.total_cents
+        from .cycle_terms import get_cycle_currency  # noqa: PLC0415
+
+        subscription.last_payment_currency = get_cycle_currency(cycle)
+        subscription.last_payment = payment
         subscription.failed_payment_count = 0
         subscription.grace_period_ends_at = None
         if subscription.status == "trialing":
@@ -546,6 +558,10 @@ class PaymentSuccessService:
                 },
             )
         subscription.save()
+
+        from .currency_transitions import activate_locked_currency_terms  # noqa: PLC0415
+
+        activate_locked_currency_terms(subscription, as_of=paid_at)
 
         if service is not None:
             service_update_fields: set[str] = set()

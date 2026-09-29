@@ -9,6 +9,7 @@ from unittest.mock import patch
 from django.test import TestCase
 from django_q.models import Schedule
 
+from apps.billing.currency_models import Currency
 from apps.common.types import Err, Ok, Result
 from apps.customers.models import Customer
 from apps.domains.gateways import DomainInfoResult, RegistrarAPIError, RegistrarNotFoundError
@@ -50,6 +51,7 @@ class DomainReconciliationTests(TestCase):
     now = datetime(2026, 8, 27, 12, 0, tzinfo=UTC)
 
     def setUp(self) -> None:
+        Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei"})
         self.tld = TLD.objects.create(
             extension="example",
             description=".example",

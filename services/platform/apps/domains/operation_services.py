@@ -97,6 +97,7 @@ class DomainOperationService:
 
     @classmethod
     def register(cls, config: DomainRegistrationConfig) -> Result[Domain, str]:  # noqa: PLR0911  # explicit dispatch outcomes
+        from .currency_terms import domain_fields_from_order_item  # noqa: PLC0415
         from .services import REGISTRATION_PENDING_MESSAGE, DomainRegistrarGateway  # noqa: PLC0415
 
         if not require_autocommit():
@@ -104,6 +105,16 @@ class DomainOperationService:
         try:
             gateway = RegistrarGatewayFactory.create_gateway(config.registrar)
             gateway.validate_registration_data(config.registrant_data)
+            terms = (
+                domain_fields_from_order_item(
+                    config.order_item,
+                    customer_id=config.customer.pk,
+                    domain_name=config.domain_name,
+                    tld_id=config.tld.pk,
+                )
+                if config.order_item is not None
+                else {}
+            )
         except (ValueError, RegistrarAPIError) as exc:
             return Err(str(exc))
 
@@ -115,6 +126,7 @@ class DomainOperationService:
                 customer=config.customer,
                 whois_privacy=config.whois_privacy,
                 auto_renew=config.auto_renew,
+                **terms,
             )
             operation = DomainOperation.objects.create(
                 domain=domain,
@@ -344,6 +356,8 @@ class DomainOperationService:
 
     @staticmethod
     def confirm_renewal(operation: DomainOperation, expiry: datetime) -> bool:
+        from .currency_terms import apply_effective_domain_terms  # noqa: PLC0415
+
         with transaction.atomic():
             domain = Domain.objects.select_for_update().get(pk=operation.domain_id)
             op = DomainOperation.objects.select_for_update().get(pk=operation.pk)
@@ -371,6 +385,12 @@ class DomainOperationService:
                 domain.save(update_fields=["expires_at", "renewal_notices_sent", "updated_at"])
             op.mark_completed({"new_expires_at": expiry.isoformat()})
             op.save()
+            try:
+                apply_effective_domain_terms(domain)
+            except ValueError as exc:
+                # Preserve registrar proof even when imported price terms need review.
+                domain.currency_hold_reason = str(exc)[:255]
+                domain.save(update_fields=["currency_hold_reason", "updated_at"])
             return True
 
     @classmethod

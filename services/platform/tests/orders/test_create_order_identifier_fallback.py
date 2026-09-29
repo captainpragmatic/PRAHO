@@ -68,6 +68,7 @@ def _call_create_order(customer: Customer, items: list[dict], currency: str = "R
             "customer_id": customer.id,
             "items": items,
             "currency": currency,
+            "currency_revision": 1,
             "Idempotency-Key": idempotency_key,
         },
         default=str,

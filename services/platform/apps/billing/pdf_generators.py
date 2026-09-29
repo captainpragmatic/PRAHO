@@ -21,6 +21,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 
+from apps.billing.bank_transfer import bank_transfer_instructions
 from apps.billing.document_adjustments import validate_no_unsupported_adjustments
 from apps.billing.models import Invoice, ProformaInvoice
 from apps.billing.tax_evidence import REVERSE_CHARGE_LEGAL_BASIS, recorded_tax_category
@@ -116,10 +117,10 @@ class RomanianDocumentPDFGenerator:
         self._render_document_footer()
 
     def _get_currency_code(self) -> str:
-        """Get the currency code from the document, defaulting to RON."""
+        """Render only the currency actually recorded on the document."""
         if self.document.currency:
             return self.document.currency.code
-        return "RON"
+        raise ValueError("The billing document has no recorded currency")
 
     @staticmethod
     def _fit(text: object, max_chars: int) -> str:
@@ -143,6 +144,7 @@ class RomanianDocumentPDFGenerator:
 
     def _get_company_info(self) -> dict[str, str]:
         """Get company information from settings with Romanian defaults."""
+        bank = bank_transfer_instructions(self._get_currency_code()) or {}
         return {
             "name": getattr(settings, "COMPANY_NAME", "PRAHO Platform"),
             "address": getattr(settings, "COMPANY_ADDRESS", "Str. Exemplu Nr. 1"),
@@ -151,8 +153,8 @@ class RomanianDocumentPDFGenerator:
             "cui": getattr(settings, "COMPANY_CUI", "RO12345678"),
             "email": getattr(settings, "COMPANY_EMAIL", "contact@praho.ro"),
             "registration_number": getattr(settings, "COMPANY_REGISTRATION_NUMBER", ""),
-            "bank_name": getattr(settings, "COMPANY_BANK_NAME", ""),
-            "bank_account": getattr(settings, "COMPANY_BANK_ACCOUNT", ""),
+            "bank_name": bank.get("bank_name", ""),
+            "bank_account": bank.get("iban", ""),
             "phone": getattr(settings, "COMPANY_PHONE", ""),
         }
 

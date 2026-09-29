@@ -6,7 +6,7 @@ from typing import Any, ClassVar
 
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
-from django.db import models
+from django.db import models, transaction
 from django.db.models.query import QuerySet
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
@@ -15,6 +15,9 @@ from django_fsm import ConcurrentTransitionMixin, FSMField, transition
 from apps.common.encryption import decrypt_value, encrypt_sensitive_data
 from apps.domains.domain_names import canonicalize_domain_name
 
+from .currency_models import (
+    DomainCurrencyTransition as DomainCurrencyTransition,  # noqa: PLC0414  # Explicit typed export.
+)
 from .domain_names import longest_matching_tld_suffix
 
 # ===============================================================================
@@ -105,6 +108,35 @@ class TLD(models.Model):
     def __str__(self) -> str:
         return f".{self.extension}"
 
+    @transaction.atomic
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """The existing retail fields continue to edit the original RON price."""
+        from apps.billing.currency_policy import get_selling_currency_policy  # noqa: PLC0415  # ADR-0007
+        from apps.settings.services import SettingsService  # noqa: PLC0415  # ADR-0007
+
+        get_selling_currency_policy(lock=True)
+        fields = ("registration_price_cents", "renewal_price_cents", "transfer_price_cents")
+        previous = type(self).objects.filter(pk=self.pk).values(*fields).first() if self.pk else None
+        super().save(*args, **kwargs)
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None and not set(fields).intersection(update_fields):
+            return
+        saved = type(self).objects.values(*fields).get(pk=self.pk)
+        if previous is None or previous != saved:
+            TLDRetailPrice.objects.update_or_create(
+                tld=self,
+                currency_id="RON",
+                defaults={
+                    **saved,
+                    "whois_privacy_price_cents": SettingsService.get_integer_setting(
+                        "domains.whois_privacy_price_cents", 500
+                    ),
+                },
+            )
+
+    def get_price_for_currency(self, currency_code: str) -> TLDRetailPrice | None:
+        return self.retail_prices.filter(currency_id=currency_code, is_active=True).first()
+
     @property
     def registration_price(self) -> float:
         """💰 Registration price in RON"""
@@ -135,6 +167,42 @@ class TLD(models.Model):
 # ===============================================================================
 # REGISTRAR MANAGEMENT
 # ===============================================================================
+
+
+class TLDRetailPrice(models.Model):
+    """Customer retail prices are independent of the registrar's cost currency."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tld = models.ForeignKey(TLD, on_delete=models.CASCADE, related_name="retail_prices")
+    currency = models.ForeignKey("billing.Currency", on_delete=models.PROTECT)
+    registration_price_cents = models.PositiveBigIntegerField()
+    renewal_price_cents = models.PositiveBigIntegerField()
+    transfer_price_cents = models.PositiveBigIntegerField()
+    whois_privacy_price_cents = models.PositiveBigIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.UniqueConstraint(fields=["tld", "currency"], name="tld_retail_currency_price")
+        ]
+
+    @transaction.atomic
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        from apps.billing.currency_policy import get_selling_currency_policy  # noqa: PLC0415  # ADR-0007
+
+        get_selling_currency_policy(lock=True)
+        super().save(*args, **kwargs)
+        if kwargs.get("update_fields") is not None and not kwargs["update_fields"]:
+            return
+        saved = type(self).objects.get(pk=self.pk)
+        if saved.currency_id == "RON":
+            TLD.objects.filter(pk=saved.tld_id).update(
+                registration_price_cents=saved.registration_price_cents,
+                renewal_price_cents=saved.renewal_price_cents,
+                transfer_price_cents=saved.transfer_price_cents,
+            )
 
 
 class Registrar(models.Model):
@@ -393,6 +461,11 @@ class Domain(ConcurrentTransitionMixin, models.Model):
     last_paid_amount_cents = models.BigIntegerField(
         validators=[MinValueValidator(0)], default=0, help_text=_("Last amount paid for this domain")
     )
+    billing_currency = models.ForeignKey("billing.Currency", on_delete=models.PROTECT, null=True, blank=True)
+    renewal_unit_price_cents = models.BigIntegerField(null=True, blank=True, validators=[MinValueValidator(0)])
+    renewal_terms = models.JSONField(default=dict, blank=True)
+    currency_hold_reason = models.CharField(max_length=255, blank=True)
+    renewal_terms_effective_at = models.DateTimeField(null=True, blank=True)
 
     # Metadata
     notes = models.TextField(blank=True)
@@ -432,6 +505,7 @@ class Domain(ConcurrentTransitionMixin, models.Model):
     def __str__(self) -> str:
         return self.name
 
+    @transaction.atomic
     def save(self, *args: Any, **kwargs: Any) -> None:
         """Canonicalize the domain name before every write (#442).
 
@@ -467,6 +541,10 @@ class Domain(ConcurrentTransitionMixin, models.Model):
                     update_fields = list(update_fields)
                     if "name" not in update_fields:
                         kwargs["update_fields"] = [*update_fields, "name"]
+        if self._state.adding and not self.billing_currency_id and not self.currency_hold_reason:
+            from .currency_terms import initialize_domain_terms  # noqa: PLC0415
+
+            initialize_domain_terms(self)
         super().save(*args, **kwargs)
 
     @property
@@ -779,6 +857,7 @@ class DomainOrderItem(models.Model):
     total_price_cents = models.BigIntegerField(
         validators=[MinValueValidator(0)], help_text=_("Total price for all years")
     )
+    renewal_terms = models.JSONField(default=dict, blank=True)
 
     # Domain options
     whois_privacy = models.BooleanField(default=False, help_text=_("Include WHOIS privacy protection"))
@@ -818,6 +897,27 @@ class DomainOrderItem(models.Model):
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         """💾 Calculate total price on save"""
+        if not self._state.adding:
+            original = type(self).objects.filter(pk=self.pk).first()
+            if (
+                original
+                and original.renewal_terms
+                and any(
+                    getattr(original, field) != getattr(self, field)
+                    for field in (
+                        "order_id",
+                        "domain_name",
+                        "tld_id",
+                        "action",
+                        "years",
+                        "unit_price_cents",
+                        "total_price_cents",
+                        "renewal_terms",
+                        "whois_privacy",
+                    )
+                )
+            ):
+                raise ValidationError(_("A prepared domain offer cannot be repriced; create a new order item."))
         if self.unit_price_cents and self.years:
             self.total_price_cents = self.unit_price_cents * self.years
         super().save(*args, **kwargs)

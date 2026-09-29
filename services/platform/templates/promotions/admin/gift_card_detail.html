@@ -1,14 +1,25 @@
 {% extends "promotions/admin/base.html" %}
 {% load i18n formatting ui_components localisation_tags %}
 {% block promotion_content %}
-  <h1 class="text-2xl font-semibold text-white">{% trans "Gift card" %} {{ gift_card.code }}</h1>
+  <h1 class="text-2xl font-semibold text-white">{% trans "Gift card" %} {{ gift_card.masked_code }}</h1>
+  {% if gift_error %}{% alert gift_error variant="warning" %}{% endif %}
   <section class="space-y-3 rounded-lg border border-slate-700 bg-slate-800 p-6 text-slate-300">
     <p>{{ gift_card.get_status_display }}</p>
-    <dl class="grid gap-4 sm:grid-cols-3"><div><dt>{% trans "Face value" %}</dt><dd class="text-xl text-white">{{ gift_card.initial_value_cents|cents_to_currency }} {{ gift_card.currency.code }}</dd></div><div><dt>{% trans "Spendable balance" %}</dt><dd class="text-xl text-white">{{ gift_card.current_balance_cents|cents_to_currency }} {{ gift_card.currency.code }}</dd></div><div><dt>{% trans "Recipient" %}</dt><dd class="text-white">{{ gift_card.recipient_name }} {{ gift_card.recipient_email }}</dd></div></dl>
+    <dl class="grid gap-4 sm:grid-cols-3">
+      <div><dt>{% trans "Face value" %}</dt><dd class="text-xl text-white">{{ gift_card.initial_value_cents|cents_to_currency|romanian_currency:gift_card.currency }}</dd></div>
+      <div><dt>{% trans "Recorded balance" %}</dt><dd class="text-xl text-white">{{ gift_card.current_balance_cents|cents_to_currency|romanian_currency:gift_card.currency }}</dd></div>
+      <div><dt>{% trans "Available balance" %}</dt><dd class="text-xl text-white">{{ gift_card.available_balance_cents|cents_to_currency|romanian_currency:gift_card.currency }}</dd></div>
+      <div><dt>{% trans "Reserved for orders" %}</dt><dd>{{ gift_card.reserved_cents|cents_to_currency|romanian_currency:gift_card.currency }}</dd></div>
+      <div><dt>{% trans "Held for refunds" %}</dt><dd>{{ gift_card.refund_held_cents|cents_to_currency|romanian_currency:gift_card.currency }}</dd></div>
+      <div><dt>{% trans "Recipient" %}</dt><dd>{% if gift_purchase and not gift_purchase.is_gift %}{{ gift_purchase.buyer_name }} {{ gift_purchase.buyer_email }}{% else %}{{ gift_card.recipient_name }} {{ gift_card.recipient_email }}{% endif %}</dd></div>
+    </dl>
+    {% if gift_card.spending_frozen_at %}
+      <p class="text-amber-300">{% trans "Spending is frozen while the funding payment is reviewed." %}</p>
+    {% endif %}
     {% if gift_card.status == 'pending' %}<p>{% trans "Awaiting verified purchase payment." %}</p>{% endif %}
-    {% if gift_card.ledger_version == 2 %}
-      <p>{% trans "Funding receipt" %}: {{ gift_card.purchase.receipt_number }}</p>
-      {% if gift_card.status == 'pending' and gift_card.purchase.funding_payment.payment_method == 'bank' and request.user.can_manage_financial_data %}
+    {% if gift_purchase %}
+      <p>{% trans "Funding receipt" %}: {{ gift_purchase.receipt_number|default:'—' }}</p>
+      {% if gift_card.status == 'pending' and gift_purchase.funding_payment.payment_method == 'bank' and gift_financial %}
         <form method="post" action="{% url 'promotions:gift_card_record_payment' pk=gift_card.pk %}" class="space-y-3">
           {% csrf_token %}
           {% input_field "reference" label=_("Received bank transfer reference") required=True maxlength="100" %}
@@ -16,8 +27,90 @@
         </form>
       {% endif %}
     {% endif %}
+    {% if revealed_code %}
+      <p>{% trans "Anyone with this code can use its balance. Keep it private." %}</p>
+      <code class="block break-all rounded bg-slate-900 p-4 text-white">{{ revealed_code }}</code>
+    {% elif can_reveal %}
+      <form method="post" action="{% url 'promotions:gift_card_reveal' pk=gift_card.pk %}">
+        {% csrf_token %}
+        {% button _("Reveal code") type="submit" variant="secondary" %}
+      </form>
+    {% endif %}
   </section>
-  <section class="space-y-3"><h2 class="text-xl text-white">{% trans "Transactions" %}</h2><ul class="divide-y divide-slate-700 rounded-lg border border-slate-700 bg-slate-800">
-    {% for entry in transactions %}<li class="flex flex-wrap justify-between gap-3 p-4 text-sm text-slate-300"><span>{% localised_date entry.created_at "datetime" %}</span><span>{{ entry.get_transaction_type_display }}</span><span>{{ entry.amount_cents|cents_to_currency }} {{ gift_card.currency.code }}</span><span>{{ entry.customer|default:'—' }}</span></li>{% empty %}<li class="p-6 text-slate-400">{% trans "No transactions yet." %}</li>{% endfor %}
-  </ul></section>
+  {% if gift_purchase %}
+    <section class="space-y-3 rounded-lg border border-slate-700 bg-slate-800 p-6 text-slate-300">
+      <h2 class="text-xl text-white">{% trans "Delivery" %}</h2>
+      <p>{% trans "Voucher and receipt use the addresses saved with the purchase." %}</p>
+      <ul class="space-y-2">
+        {% for item in delivery.deliveries %}
+          <li>
+            {% if item.purpose == 'voucher' %}{% trans "Voucher" %}{% else %}{% trans "Buyer receipt" %}{% endif %}:
+            {{ item.status|title }}
+            {% if item.sent_at %} · {% localised_date item.sent_at "datetime" %}{% endif %}
+            {% if item.next_attempt_at %} · {% trans "Next delivery attempt" %}: {% localised_date item.next_attempt_at "datetime" %}{% endif %}
+            {% if item.status == 'failed' and not item.next_attempt_at %} · {% trans "Delivery needs attention." %}{% endif %}
+          </li>
+        {% empty %}<li>{% trans "Delivery starts after verified payment." %}</li>{% endfor %}
+      </ul>
+      {% if gift_financial and delivery.can_resend %}
+        <form method="post" action="{% url 'promotions:gift_card_resend' pk=gift_card.pk %}">
+          {% csrf_token %}
+          {% button _("Send code again") type="submit" variant="secondary" %}
+        </form>
+      {% elif delivery.is_queued %}
+        <p>{% trans "Delivery is queued. It can take a few minutes." %}</p>
+      {% elif delivery.resend_available_at and can_reveal %}
+        <p>{% trans "Sending again is available after" %} {% localised_date delivery.resend_available_at "datetime" %}.</p>
+      {% endif %}
+    </section>
+    <section class="space-y-4 rounded-lg border border-slate-700 bg-slate-800 p-6 text-slate-300">
+      <h2 class="text-xl text-white">{% trans "Original payment refunds" %}</h2>
+      {% if refund_form %}
+        <p>{% trans "Refund only unused, unreserved value to the original payment method. Pending refunds hold that value." %}</p>
+        <form method="post" action="{% url 'promotions:gift_card_refund' pk=gift_card.pk %}" class="space-y-3">
+          {% csrf_token %}
+          {{ refund_form.request_key }}
+          {% form_error_summary refund_form %}
+          <p>{% trans "Refund currency" %}: {{ gift_card.currency.code }}</p>
+          {% form_field refund_form.amount %}
+          {% form_field refund_form.reason %}
+          {% button _("Request refund") type="submit" variant="danger" %}
+        </form>
+      {% endif %}
+      <ul class="divide-y divide-slate-700">
+        {% for refund in funding_refunds %}
+          <li class="space-y-3 py-4">
+            <p>{{ refund.amount_cents|cents_to_currency|romanian_currency:refund.currency_id }} · {{ refund.status|humanize_slug }} · {% localised_date refund.created_at "datetime" %}</p>
+            {% if refund.status == 'needs_review' %}<p>{% trans "This refund needs payment review. Its hold remains in place." %}</p>{% endif %}
+            {% if refund.bank_reference %}<p>{% trans "Bank refund reference" %}: {{ refund.bank_reference }}</p>{% endif %}
+            {% if gift_financial %}
+              {% if refund.status == 'awaiting_bank_transfer' %}
+                <p>{% trans "Complete the transfer through the bank first. This button records the completed transfer." %}</p>
+                <form method="post" action="{% url 'promotions:gift_card_refund_bank_confirm' pk=gift_card.pk refund_id=refund.pk %}" class="space-y-3">
+                  {% csrf_token %}
+                  {% input_field "reference" label=_("Completed bank refund reference") required=True maxlength="100" %}
+                  {% button _("Record completed bank refund") type="submit" variant="secondary" %}
+                </form>
+              {% elif refund.status != 'succeeded' and refund.status != 'failed' and refund.status != 'canceled' %}
+                {% if refund.status != 'needs_review' or refund.gateway_refund_id %}
+                  <form method="post" action="{% url 'promotions:gift_card_refund_refresh' pk=gift_card.pk refund_id=refund.pk %}">
+                    {% csrf_token %}
+                    {% button _("Check refund status") type="submit" variant="secondary" %}
+                  </form>
+                {% endif %}
+              {% endif %}
+            {% endif %}
+          </li>
+        {% empty %}<li>{% trans "No original payment refunds." %}</li>{% endfor %}
+      </ul>
+    </section>
+  {% endif %}
+  <section class="space-y-3">
+    <h2 class="text-xl text-white">{% trans "Transactions" %}</h2>
+    <ul class="divide-y divide-slate-700 rounded-lg border border-slate-700 bg-slate-800">
+      {% for entry in transactions %}
+        <li class="flex flex-wrap justify-between gap-3 p-4 text-sm text-slate-300"><span>{% localised_date entry.created_at "datetime" %}</span><span>{{ entry.get_transaction_type_display }}</span><span>{{ entry.amount_cents|cents_to_currency|romanian_currency:gift_card.currency }}</span><span>{{ entry.customer|default:'—' }}</span></li>
+      {% empty %}<li class="p-6 text-slate-400">{% trans "No transactions yet." %}</li>{% endfor %}
+    </ul>
+  </section>
 {% endblock %}

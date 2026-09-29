@@ -245,6 +245,24 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
         if not stripe_payment_id:
             return False, "Missing PaymentIntent ID"
 
+        if event_type != "payment_intent.succeeded":
+            from apps.promotions.gift_funding import converge_gift_funding  # noqa: PLC0415  # ADR-0007
+
+            gift_result = converge_gift_funding(
+                stripe_payment_id,
+                {
+                    "status": payment_intent.get("status"),
+                    "amount": payment_intent.get("amount"),
+                    "amount_received": payment_intent.get("amount_received"),
+                    "currency": payment_intent.get("currency"),
+                    "metadata": payment_intent.get("metadata"),
+                },
+            )
+            if gift_result is not None:
+                return (
+                    (False, gift_result.unwrap_err()) if gift_result.is_err() else (True, "Gift funding state verified")
+                )
+
         if event_type == "payment_intent.succeeded":
             return self._handle_payment_intent_succeeded(stripe_payment_id, payment_intent)
 
@@ -463,6 +481,7 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
             RefundGatewayFacts,
         )
 
+        refund_metadata = refund_object.get("metadata")
         facts = RefundGatewayFacts(
             refund_id=self._stripe_string(refund_object.get("id")),
             payment_intent_id=self._stripe_string(refund_object.get("payment_intent")),
@@ -473,6 +492,7 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
             failure_reason=self._stripe_string(refund_object.get("failure_reason")),
             event_id=self._stripe_string(payload.get("id")),
             event_created=self._stripe_integer(payload.get("created")),
+            metadata=refund_metadata if isinstance(refund_metadata, dict) else {},
         )
         result = RefundConvergenceService.converge_gateway_refund(facts)
         if result.is_err():
@@ -544,11 +564,14 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
         )
 
         if payment_intent_id:
+            from apps.promotions.gift_refunds import freeze_purchase_for_dispute  # noqa: PLC0415
+
+            gift_dispute = freeze_purchase_for_dispute(payment_intent_id, str(dispute_id))
             with transaction.atomic():
                 payment = (
                     Payment.objects.select_for_update(of=("self",)).filter(gateway_txn_id=payment_intent_id).first()
                 )
-                if payment is not None and payment.status != "disputed":
+                if payment is not None and payment.status != "disputed" and not gift_dispute:
                     changed = payment.apply_gateway_event(
                         "disputed",
                         {

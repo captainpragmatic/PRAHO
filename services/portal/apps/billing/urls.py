@@ -4,11 +4,15 @@
 
 from django.urls import path
 
-from . import views
+from . import gift_card_views, views
 
 app_name = "billing"
 
 urlpatterns = [
+    path("gift-cards/", gift_card_views.gift_cards, name="gift_cards"),
+    path("gift-cards/create/", gift_card_views.gift_card_create, name="gift_card_create"),
+    path("gift-cards/<uuid:purchase_id>/", gift_card_views.gift_card_detail, name="gift_card_detail"),
+    path("gift-cards/<uuid:purchase_id>/<str:action>/", gift_card_views.gift_card_action, name="gift_card_action"),
     path("gift-card-payment/", views.gift_card_payment, name="gift_card_payment"),
     # Invoice list, search, and detail views
     path("invoices/", views.invoices_list_view, name="invoices_list"),

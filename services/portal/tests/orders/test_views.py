@@ -131,6 +131,8 @@ class TestOrderViews(TestCase):
         # Mock API response
         mock_api = Mock()
         mock_api.get.return_value = {
+            'selling_currency': 'RON',
+            'currency_revision': 1,
             'results': [
                 {
                     'slug': 'shared-hosting-basic',
@@ -388,6 +390,8 @@ class TestOrderViewsIntegration(TestCase):
 
         # Mock product catalog
         mock_api.get.return_value = {
+            'selling_currency': 'RON',
+            'currency_revision': 1,
             'results': [
                 {
                     'slug': 'shared-hosting-basic',

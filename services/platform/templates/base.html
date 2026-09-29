@@ -314,14 +314,6 @@
 
   <!-- Scripts -->
   <script nonce="{{ csp_nonce }}">
-    // Romanian number formatting
-    function formatRomanianCurrency(amount) {
-      return new Intl.NumberFormat('ro-RO', {
-        style: 'currency',
-        currency: 'RON'
-      }).format(amount);
-    }
-
     // HTMX Error Handling
     document.body.addEventListener('htmx:responseError', function (event) {
       console.error(' HTMX Error:', event.detail);

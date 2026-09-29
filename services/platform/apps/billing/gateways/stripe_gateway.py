@@ -406,6 +406,7 @@ class StripeGateway(BasePaymentGateway):
         reason: str = "requested_by_customer",
         *,
         idempotency_key: str | None = None,
+        metadata: dict[str, str] | None = None,
     ) -> RefundResult:
         """
         Create a Stripe Refund for a PaymentIntent.
@@ -422,6 +423,8 @@ class StripeGateway(BasePaymentGateway):
             params: dict[str, Any] = {"payment_intent": gateway_txn_id, "reason": reason}
             if amount_cents is not None:
                 params["amount"] = amount_cents
+            if metadata is not None:
+                params["metadata"] = metadata
             if idempotency_key:
                 # A retry after an uncertain outcome (timeout) must replay the SAME refund,
                 # not create a second one. RefundService derives this from the committed
@@ -486,7 +489,7 @@ class StripeGateway(BasePaymentGateway):
         reason = field("reason")
         failure_reason = field("failure_reason")
 
-        return RefundStatusResult(
+        result = RefundStatusResult(
             success=True,
             refund_id=refund_id,
             payment_intent_id=payment_intent_id,
@@ -497,6 +500,10 @@ class StripeGateway(BasePaymentGateway):
             failure_reason=failure_reason if isinstance(failure_reason, str) else None,
             error=None,
         )
+        metadata = field("metadata")
+        if isinstance(metadata, dict):
+            result["metadata"] = metadata
+        return result
 
     def retrieve_refund(self, refund_id: str) -> RefundStatusResult:
         """Retrieve authoritative Stripe state for one refund."""

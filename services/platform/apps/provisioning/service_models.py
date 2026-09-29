@@ -5,13 +5,14 @@ Service plans, servers, services, and provisioning tasks.
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Iterable
 from decimal import Decimal
 from typing import Any, ClassVar
 
 from dateutil.relativedelta import relativedelta
 from django.core.validators import MinValueValidator
-from django.db import models
+from django.db import models, transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django_fsm import ConcurrentTransitionMixin, FSMField, transition
@@ -112,6 +113,38 @@ class ServicePlan(models.Model):
     def __str__(self) -> str:
         return f"{self.name} ({self.get_plan_type_display()})"
 
+    @transaction.atomic
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """Keep the legacy RON editor as a compatibility view of the RON price."""
+        from apps.billing.currency_policy import get_selling_currency_policy  # noqa: PLC0415  # ADR-0007
+
+        get_selling_currency_policy(lock=True)
+        price_fields = ("price_monthly", "price_quarterly", "price_annual", "setup_fee")
+        previous = type(self).objects.filter(pk=self.pk).values(*price_fields).first() if self.pk else None
+        super().save(*args, **kwargs)
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None and not set(price_fields).intersection(update_fields):
+            return
+        saved = type(self).objects.values(*price_fields).get(pk=self.pk)
+        if previous is None or previous != saved:
+            ServicePlanPrice.objects.update_or_create(
+                service_plan=self,
+                currency_id="RON",
+                defaults={
+                    "monthly_price_cents": int(saved["price_monthly"] * 100),
+                    "quarterly_price_cents": int(saved["price_quarterly"] * 100)
+                    if saved["price_quarterly"] is not None
+                    else None,
+                    "annual_price_cents": int(saved["price_annual"] * 100)
+                    if saved["price_annual"] is not None
+                    else None,
+                    "setup_cents": int(saved["setup_fee"] * 100),
+                },
+            )
+
+    def get_price_for_currency(self, currency_code: str) -> ServicePlanPrice | None:
+        return self.currency_prices.filter(currency_id=currency_code, is_active=True).first()
+
     def get_effective_price(self, billing_cycle: str = "monthly") -> Decimal:
         """Get price for specific billing cycle"""
         if billing_cycle == "quarterly" and self.price_quarterly:
@@ -128,6 +161,59 @@ class ServicePlan(models.Model):
         elif billing_cycle == "annual":
             return price / 12
         return price
+
+
+class ServicePlanPrice(models.Model):
+    """Explicit retail prices; no conversion from another currency or billing period."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    service_plan = models.ForeignKey(ServicePlan, on_delete=models.CASCADE, related_name="currency_prices")
+    currency = models.ForeignKey("billing.Currency", on_delete=models.PROTECT)
+    monthly_price_cents = models.PositiveBigIntegerField()
+    quarterly_price_cents = models.PositiveBigIntegerField(null=True, blank=True)
+    semiannual_price_cents = models.PositiveBigIntegerField(null=True, blank=True)
+    annual_price_cents = models.PositiveBigIntegerField(null=True, blank=True)
+    setup_cents = models.PositiveBigIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.UniqueConstraint(fields=["service_plan", "currency"], name="service_plan_currency_price")
+        ]
+
+    @transaction.atomic
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        from apps.billing.currency_policy import get_selling_currency_policy  # noqa: PLC0415  # ADR-0007
+
+        get_selling_currency_policy(lock=True)
+        super().save(*args, **kwargs)
+        if kwargs.get("update_fields") is not None and not kwargs["update_fields"]:
+            return
+        saved = type(self).objects.get(pk=self.pk)
+        if saved.currency_id == "RON":
+            ServicePlan.objects.filter(pk=saved.service_plan_id).update(
+                price_monthly=Decimal(saved.monthly_price_cents) / 100,
+                price_quarterly=Decimal(saved.quarterly_price_cents) / 100
+                if saved.quarterly_price_cents is not None
+                else None,
+                price_annual=Decimal(saved.annual_price_cents) / 100 if saved.annual_price_cents is not None else None,
+                setup_fee=Decimal(saved.setup_cents) / 100,
+            )
+
+    def price_for_period(self, period: str) -> int:
+        field = {
+            "monthly": "monthly_price_cents",
+            "quarterly": "quarterly_price_cents",
+            "semi_annual": "semiannual_price_cents",
+            "annual": "annual_price_cents",
+            "yearly": "annual_price_cents",
+        }.get(period)
+        value = getattr(self, field, None) if field else None
+        if value is None:
+            raise ValueError(f"No {period} price for {self.service_plan.name} in {self.currency_id}")
+        return int(value)
 
 
 class Server(models.Model):

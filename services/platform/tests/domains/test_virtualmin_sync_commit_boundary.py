@@ -17,6 +17,7 @@ from unittest.mock import patch
 from django.db import transaction
 from django.test import TestCase
 
+from apps.billing.currency_models import Currency
 from apps.customers.models import Customer
 from apps.domains.models import TLD, Domain, Registrar, TLDRegistrarAssignment
 
@@ -27,6 +28,7 @@ class _RollbackError(Exception):
 
 class DomainVirtualminSyncCommitBoundaryTests(TestCase):
     def setUp(self) -> None:
+        Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei"})
         self.tld = TLD.objects.create(
             extension="ro",
             description=".ro",

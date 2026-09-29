@@ -86,8 +86,10 @@ class BillingOwnershipContractTestCase(SimpleTestCase):
         "apps.billing.subscription_service.SubscriptionLifecycleService.finalize_period_end_cancellations",
         return_value=0,
     )
+    @patch("apps.billing.currency_transitions.activate_due_currency_terms", return_value=0)
     def test_daily_billing_prepares_then_collects_praho_proformas(
         self,
+        activate_currency_terms,
         finalize_cancellations,
         prepare_due_proformas,
         collect_due_proformas,
@@ -111,6 +113,7 @@ class BillingOwnershipContractTestCase(SimpleTestCase):
 
         self.assertTrue(result["success"])
         finalize_cancellations.assert_called_once_with()
+        activate_currency_terms.assert_called_once_with()
         prepare_due_proformas.assert_called_once_with()
         collect_due_proformas.assert_called_once_with()
         mark_overdue_renewals.assert_called_once_with()
@@ -183,7 +186,6 @@ class BillingScheduleContractTestCase(TestCase):
         )
         self.assertEqual(recurring_reconciliation.cron, "*/10 * * * *")
         # Counted, not just spot-checked: a schedule that is defined but never
-        # registered is dead code that looks alive. Raised to 11 by the abandoned-claim
-        # sweep.
-        self.assertEqual(len(result), 11)
+        # registered is dead code that looks alive. Includes durable currency-notice repair.
+        self.assertEqual(len(result), 12)
         register_usage.assert_called_once_with()

@@ -28,6 +28,10 @@ class DomainFixtureMixin:
     """
 
     def setUp(self) -> None:
+        # TransactionTestCase flushes migration seeds; TLD prices now reference Currency.
+        currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"name": "Romanian Leu", "symbol": "lei", "decimals": 2},
+        )
         factory_patch = patch("apps.domains.gateways.RegistrarGatewayFactory.create_gateway", side_effect=GandiGateway)
         factory_patch.start()
         self.addCleanup(factory_patch.stop)
@@ -89,10 +93,6 @@ class DomainFixtureMixin:
             is_current=True,
         )
         CustomerTaxProfile.objects.create(customer=self.customer, cui="RO12345678")
-        currency, _ = Currency.objects.get_or_create(
-            code="RON",
-            defaults={"name": "Romanian Leu", "symbol": "lei", "decimals": 2},
-        )
         self.order = Order.objects.create(
             customer=self.customer,
             order_number="ORD-DOMAIN-LOGIC-1",

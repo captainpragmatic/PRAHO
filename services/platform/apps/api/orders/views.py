@@ -12,6 +12,7 @@ from typing import Any
 from django.core.cache import cache
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import IntegrityError, transaction
+from django.db.models import Prefetch
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from rest_framework import status
@@ -25,6 +26,11 @@ from apps.api.secure_auth import (
     public_api_endpoint,
     require_customer_authentication,
     require_customer_role_in,
+)
+from apps.billing.currency_policy import (
+    SellingCurrencyChangedError,
+    get_selling_currency_policy,
+    require_current_selling_policy,
 )
 from apps.billing.models import Currency
 from apps.common.localisation import normalize_country_code
@@ -49,13 +55,11 @@ from apps.provisioning.tasks import queue_service_provisioning
 from .serializers import (
     CartCalculationInputSerializer,
     CartCalculationOutputSerializer,
-    CartItemInputSerializer,
     OrderCreateInputSerializer,
     OrderDetailSerializer,
     OrderListSerializer,
     ProductDetailSerializer,
     ProductListSerializer,
-    PromotionInputSerializer,
 )
 
 logger = logging.getLogger(__name__)
@@ -148,7 +152,10 @@ def product_list(request: Request) -> Response:
     featured = request.query_params.get("featured") == "true"
 
     # Build queryset
-    queryset = Product.objects.filter(is_active=True, is_public=True)
+    policy = get_selling_currency_policy()
+    queryset = Product.objects.filter(
+        is_active=True, is_public=True, prices__is_active=True, prices__currency_id=policy.currency_code
+    )
 
     if product_type:
         queryset = queryset.filter(product_type=product_type)
@@ -157,12 +164,14 @@ def product_list(request: Request) -> Response:
         queryset = queryset.filter(is_featured=True)
 
     # Order by sort_order, then by name
-    queryset = queryset.prefetch_related("prices").order_by("sort_order", "name")
+    queryset = queryset.prefetch_related(
+        Prefetch("prices", queryset=ProductPrice.objects.filter(is_active=True, currency_id=policy.currency_code))
+    ).order_by("sort_order", "name")
 
     # Serialize and return (pass request context for sealed price tokens)
     serializer = ProductListSerializer(queryset, many=True, context={"request": request})
 
-    return Response({"results": serializer.data, "count": len(serializer.data)})
+    return Response({"results": serializer.data, "count": len(serializer.data), **policy.as_dict()})
 
 
 @public_api_endpoint
@@ -176,13 +185,18 @@ def product_detail(request: Request, slug: str) -> Response:
     for the portal to display products to unauthenticated visitors.
     """
 
+    policy = get_selling_currency_policy()
     try:
-        product = Product.objects.prefetch_related("prices").get(slug=slug, is_active=True, is_public=True)
+        product = Product.objects.prefetch_related(
+            Prefetch("prices", queryset=ProductPrice.objects.filter(is_active=True, currency_id=policy.currency_code))
+        ).get(
+            slug=slug, is_active=True, is_public=True, prices__is_active=True, prices__currency_id=policy.currency_code
+        )
     except Product.DoesNotExist:
         return Response({"error": "Product not found"}, status=status.HTTP_404_NOT_FOUND)
 
     serializer = ProductDetailSerializer(product, context={"request": request})
-    return Response(serializer.data)
+    return Response({**serializer.data, **policy.as_dict()})
 
 
 @api_view(["POST"])
@@ -190,6 +204,7 @@ def product_detail(request: Request, slug: str) -> Response:
 @permission_classes([AllowAny])
 @throttle_classes([PortalHMACRateThrottle, PortalHMACBurstThrottle, OrderCalculateThrottle])
 @require_customer_authentication
+@transaction.atomic
 def calculate_cart_totals(  # noqa: PLR0915  # Complexity: multi-step business logic
     request: Request, customer: Customer
 ) -> Response:  # Complexity: order processing pipeline  # Complexity: multi-step business logic
@@ -213,6 +228,10 @@ def calculate_cart_totals(  # noqa: PLR0915  # Complexity: multi-step business l
     customer_id = customer.id
     currency_code = validated_data["currency"]
     cart_items = validated_data["items"]
+    try:
+        policy = require_current_selling_policy(currency_code, validated_data.get("currency_revision"))
+    except SellingCurrencyChangedError as exc:
+        return _currency_changed_response(exc)
 
     try:
         # Get currency
@@ -339,6 +358,7 @@ def calculate_cart_totals(  # noqa: PLR0915  # Complexity: multi-step business l
 
         # Prepare response
         response_data = {
+            **policy.as_dict(),
             "promotion_quote": promotion["quote_token"],
             "gift_applied_cents": promotion["gift"]["amount_cents"],
             "cash_due_cents": promotion["cash_due_cents"],
@@ -366,20 +386,33 @@ def calculate_cart_totals(  # noqa: PLR0915  # Complexity: multi-step business l
             ],
         }
 
-        # Validate output
-        output_serializer = CartCalculationOutputSerializer(data=response_data)
-        if output_serializer.is_valid():
-            logger.info(f"💰 [API] Cart calculated: {totals['total_cents']} cents for customer {customer_id}")
-            return Response(output_serializer.data)
-        else:
-            logger.error(f"🔥 [API] Output serializer error: {output_serializer.errors}")
-            return Response({"error": "Calculation error"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        logger.info(f"💰 [API] Cart calculated: {totals['total_cents']} cents for customer {customer_id}")
+        return _serialize_cart_calculation(response_data)
 
     except ValidationError as e:
         return Response({"error": "; ".join(e.messages)}, status=status.HTTP_400_BAD_REQUEST)
     except Exception as e:
         logger.exception(f"🔥 [API] Cart calculation failed: {e}")
         return Response({"error": "Calculation failed"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+def _serialize_cart_calculation(response_data: dict[str, Any]) -> Response:
+    output_serializer = CartCalculationOutputSerializer(data=response_data)
+    if output_serializer.is_valid():
+        return Response(output_serializer.data)
+    logger.error("🔥 [API] Output serializer error: %s", output_serializer.errors)
+    return Response({"error": "Calculation error"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+def _currency_changed_response(error: SellingCurrencyChangedError) -> Response:
+    return Response(
+        {
+            "error": "; ".join(error.messages),
+            "code": "currency_changed",
+            **get_selling_currency_policy().as_dict(),
+        },
+        status=status.HTTP_409_CONFLICT,
+    )
 
 
 def _resolve_currency(raw_code: object) -> tuple[Currency | None, Response | None]:
@@ -413,6 +446,7 @@ def _resolve_currency(raw_code: object) -> tuple[Currency | None, Response | Non
 @permission_classes([AllowAny])  # No permissions required (auth handled by secure_auth)
 @throttle_classes([PortalHMACRateThrottle, PortalHMACBurstThrottle, OrderCalculateThrottle])
 @require_customer_authentication
+@transaction.atomic
 def preflight_order(  # noqa: PLR0911, PLR0915  # Complexity: multi-step business logic
     request: Request, customer: Customer
 ) -> Response:  # Complexity: order processing pipeline  # Complexity: multi-step business logic
@@ -437,27 +471,31 @@ def preflight_order(  # noqa: PLR0911, PLR0915  # Complexity: multi-step busines
             )
 
         # Keep preflight on the same item contract as calculation and creation.
-        item_serializer = CartItemInputSerializer(data=cart_items, many=True)
-        if not item_serializer.is_valid():
+        input_serializer = CartCalculationInputSerializer(data=request.data)
+        if not input_serializer.is_valid():
             return Response(
                 {
                     "success": False,
                     "errors": [str(_("Cart contains invalid items"))],
                     "warnings": [],
-                    "details": item_serializer.errors,
+                    "details": input_serializer.errors,
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        cart_items = item_serializer.validated_data
-        promotion_input = PromotionInputSerializer(data=request.data)
-        if not promotion_input.is_valid():
-            return Response({"success": False, "errors": [str(promotion_input.errors)], "warnings": []}, status=400)
+        cart_items = input_serializer.validated_data["items"]
+        promotion_input = input_serializer
 
         # Create a preview order data structure (without saving to DB)
-        currency, error_response = _resolve_currency(request.data.get("currency", "RON"))
+        currency, error_response = _resolve_currency(input_serializer.validated_data["currency"])
         if error_response is not None:
             return error_response
         assert currency is not None  # _resolve_currency guarantees non-None when error_response is None
+        try:
+            policy = require_current_selling_policy(
+                currency.code, input_serializer.validated_data.get("currency_revision")
+            )
+        except SellingCurrencyChangedError as exc:
+            return _currency_changed_response(exc)
 
         # Build billing address from customer profile
         billing_address = OrderService.build_billing_address_from_customer(customer)
@@ -602,6 +640,7 @@ def preflight_order(  # noqa: PLR0911, PLR0915  # Complexity: multi-step busines
         )
         return Response(
             {
+                **policy.as_dict(),
                 "promotion_quote": promotion["quote_token"],
                 "gift_applied_cents": promotion["gift"]["amount_cents"],
                 "cash_due_cents": promotion["cash_due_cents"],
@@ -639,6 +678,7 @@ def preflight_order(  # noqa: PLR0911, PLR0915  # Complexity: multi-step busines
 @permission_classes([AllowAny])  # No permissions required (auth handled by secure_auth)
 @throttle_classes([PortalHMACRateThrottle, PortalHMACBurstThrottle, OrderCreateThrottle])
 @require_customer_role_in(*BILLING_ROLES)
+@transaction.atomic
 def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-step business logic
     request: Request, customer: Customer
 ) -> Response:  # Complexity: order processing pipeline  # Complexity: multi-step business logic
@@ -717,6 +757,18 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
     # customer parameter is injected by decorator and already validated
     customer_id = customer.id
 
+    # A retry can reach this point before the first request commits. Wait for
+    # that request's policy lock, then recover its order before checking prices.
+    get_selling_currency_policy(lock=True)
+    accepted_order = Order.objects.filter(customer=customer, idempotency_key=idempotency_key).first()
+    if accepted_order is not None:
+        return Response({"success": True, "order": OrderDetailSerializer(accepted_order).data, "duplicate": True})
+
+    try:
+        require_current_selling_policy(validated_data["currency"], validated_data.get("currency_revision"))
+    except SellingCurrencyChangedError as exc:
+        return _currency_changed_response(exc)
+
     try:
         # Convert input to OrderCreateData
         # Build billing address from customer data (fetched from database)
@@ -738,13 +790,13 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
                     product = Product.objects.get(slug=product_slug, is_active=True, is_public=True)
                 else:
                     return Response(
-                        {"error": "Cart item missing product_id and product_slug"},
+                        {"error": "Cart item missing product_id and product_slug", "code": "INVALID_ORDER"},
                         status=status.HTTP_400_BAD_REQUEST,
                     )
             except Product.DoesNotExist:
                 identifier = product_id or product_slug
                 return Response(
-                    {"error": f"Product not found: {identifier}"},
+                    {"error": f"Product not found: {identifier}", "code": "INVALID_ORDER"},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
@@ -752,7 +804,10 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
             price = product.get_price_for_period(currency_code, billing_period)
             if not price:
                 return Response(
-                    {"error": f"Pricing not available for {product.slug} ({billing_period}/{currency_code})"},
+                    {
+                        "error": f"Pricing not available for {product.slug} ({billing_period}/{currency_code})",
+                        "code": "INVALID_ORDER",
+                    },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
@@ -793,7 +848,7 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
                 except Exception as e:
                     logger.error(f"🔥 [API] Price token validation failed for {product.slug}: {e}")
                     return Response(
-                        {"error": f"Invalid sealed price token for {product.name}"},
+                        {"error": f"Invalid sealed price token for {product.name}", "code": "INVALID_ORDER"},
                         status=status.HTTP_400_BAD_REQUEST,
                     )
 
@@ -826,6 +881,7 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
             items=order_items,  # type: ignore[arg-type]
             billing_address=billing_address_data,
             currency=validated_data["currency"],
+            currency_revision=validated_data["currency_revision"],
             notes=validated_data.get("notes", ""),
             meta=validated_data.get("meta", {}),
             idempotency_key=idempotency_key,

@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 from django.test import TestCase, override_settings
 from django_fsm import TransitionNotAllowed
 
+from apps.billing.currency_models import Currency
 from apps.common.types import Err, Ok, Retriability
 from apps.customers.models import Customer, CustomerAddress, CustomerTaxProfile
 from apps.domains.gateways.base import (
@@ -472,6 +473,7 @@ class LifecycleServicePhase2Tests(TestCase):
 
     def test_sync_domain_info_updates_local_record(self) -> None:
         # Create test data
+        Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei"})
         registrar = Registrar.objects.create(
             name="gandi",
             display_name="Gandi",
@@ -535,6 +537,7 @@ class LifecycleServicePhase2FailureContractTests(TestCase):
     initiate_transfer must not strand the unique Domain name on a definite rejection."""
 
     def setUp(self) -> None:
+        Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei"})
         self.registrar = Registrar.objects.create(
             name="gandi", display_name="Gandi", website_url="https://gandi.net",
             api_endpoint="https://api.gandi.net/v5", status="active",

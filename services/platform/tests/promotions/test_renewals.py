@@ -178,7 +178,10 @@ class RenewalDocumentTests(_SubscriptionInvoicePaymentFixture, TestCase):
         self.assertEqual(prepared["proformas_created"], 1, prepared)
         return subscriptions, subscriptions[0].billing_cycles.get().proforma, campaign
 
-    @override_settings(EFACTURA_COMPANY_CUI="RO12345678")
+    @override_settings(
+        EFACTURA_COMPANY_CUI="RO12345678", COMPANY_NAME="Test Company SRL",
+        COMPANY_BANK_ACCOUNT="RO49AAAA1B31007593840000", COMPANY_BANK_NAME="Test Bank",
+    )
     def test_grouped_renewal_vat_matches_converted_invoice_and_xml(self) -> None:
 
         subscriptions, proforma, campaign = self.prepare_discounted_document(count=2)

@@ -334,6 +334,42 @@ class BaseUBLBuilder:
         cents = int(_tax if _tax is not None else getattr(self.invoice, "tax_cents", 0))
         return Decimal(cents) / 100
 
+    @staticmethod
+    def _validate_foreign_currency_snapshot(invoice: Invoice, errors: list[str]) -> None:
+        """Require the immutable fiscal evidence used to calculate BT-111."""
+        currency_code = invoice.currency.code
+        if currency_code == "RON":
+            return
+
+        rate = Decimal(str(invoice.exchange_to_ron)) if invoice.exchange_to_ron is not None else None
+        rate_as_of = invoice.exchange_rate_as_of
+        source = invoice.exchange_rate_source
+        reference = invoice.exchange_rate_source_reference
+        tax_point = invoice.tax_point_date
+        if rate is None or rate_as_of is None or not source.strip() or not reference.strip() or tax_point is None:
+            errors.append(f"Foreign-currency invoice requires a complete provenanced {currency_code}/RON snapshot")
+        elif source not in ExchangeRateService.APPROVED_SOURCES:
+            errors.append(f"Foreign-currency invoice requires an approved {currency_code}/RON source")
+        elif not rate.is_finite() or rate <= 0:
+            errors.append(f"Foreign-currency invoice requires a finite positive {currency_code}/RON exchange rate")
+        elif rate_as_of > tax_point:
+            errors.append(f"{currency_code}/RON exchange-rate date cannot be after the invoice tax point")
+
+    def _add_accounting_tax_total(self) -> None:
+        """Emit BT-111 in RON from the stored rate, preserving the document's direction."""
+        if self.invoice.currency.code == "RON":
+            return
+
+        accounting_tax_total = self._add_cac(self.root, "TaxTotal")
+        rate = Decimal(str(self.invoice.exchange_to_ron))
+        accounting_tax_cents = ExchangeRateService.convert_cents(self.invoice.tax_cents, rate)
+        accounting_amount_elem = self._add_cbc(
+            accounting_tax_total,
+            "TaxAmount",
+            self._format_amount(Decimal(accounting_tax_cents) / 100),
+        )
+        accounting_amount_elem.set("currencyID", "RON")
+
     def _get_line_gross(self) -> Decimal:
         """Sum of line gross amounts (BT-106), before any document-level discount.
 
@@ -583,7 +619,7 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
             errors.append("Invoice must have at least one line item")
 
         self._validate_supported_adjustments(errors)
-        self._validate_foreign_currency_snapshot(errors)
+        self._validate_foreign_currency_snapshot(self.invoice, errors)
 
         # Single-category invariant: the builder emits ONE TaxSubtotal at one document rate, so the
         # e-Factura XML cannot faithfully represent an invoice whose lines carry multiple distinct
@@ -615,26 +651,6 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
 
         if errors:
             raise XMLBuilderError(f"Invalid invoice data: {'; '.join(errors)}")
-
-    def _validate_foreign_currency_snapshot(self, errors: list[str]) -> None:
-        """Require the immutable fiscal evidence used to calculate BT-111."""
-        currency_code = self.invoice.currency.code
-        if currency_code == "RON":
-            return
-
-        rate = getattr(self.invoice, "exchange_to_ron", None)
-        rate_as_of = getattr(self.invoice, "exchange_rate_as_of", None)
-        source = getattr(self.invoice, "exchange_rate_source", "")
-        reference = getattr(self.invoice, "exchange_rate_source_reference", "")
-        tax_point = getattr(self.invoice, "tax_point_date", None)
-        if rate is None or rate_as_of is None or not source or not reference or tax_point is None:
-            errors.append(f"Foreign-currency invoice requires a complete provenanced {currency_code}/RON snapshot")
-        elif source not in ExchangeRateService.APPROVED_SOURCES:
-            errors.append(f"Foreign-currency invoice requires an approved {currency_code}/RON source")
-        elif Decimal(str(rate)) <= 0:
-            errors.append(f"Foreign-currency invoice requires a positive {currency_code}/RON exchange rate")
-        elif rate_as_of > tax_point:
-            errors.append(f"{currency_code}/RON exchange-rate date cannot be after the invoice tax point")
 
     def _create_root(self) -> None:
         """Create Invoice root element with namespaces."""
@@ -766,10 +782,18 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
 
     def _add_payment_means(self) -> None:
         """Add PaymentMeans element (BG-16)."""
+        from apps.billing.bank_transfer import bank_transfer_instructions  # noqa: PLC0415  # ADR-0007
+
+        code = self._get_payment_means_code()
+        bank = bank_transfer_instructions(self.invoice.currency_id)
+        if code in {"30", "58"} and bank is None:
+            raise XMLBuilderError(
+                f"{self.invoice.currency_id} bank account is required for credit-transfer payment instructions (BR-61)"
+            )
         payment_means = self._add_cac(self.root, "PaymentMeans")
 
         # Payment Means Code (BT-81) - Mandatory
-        self._add_cbc(payment_means, "PaymentMeansCode", self._get_payment_means_code())
+        self._add_cbc(payment_means, "PaymentMeansCode", code)
 
         # Payment Due Date
         if self.invoice.due_at:
@@ -779,12 +803,11 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         self._add_cbc(payment_means, "PaymentID", self.invoice.number)
 
         # Payee Financial Account (bank account details)
-        bank_account = getattr(settings, "COMPANY_BANK_ACCOUNT", "")
-        if bank_account:
+        if bank:
             account = self._add_cac(payment_means, "PayeeFinancialAccount")
-            self._add_cbc(account, "ID", bank_account)
+            self._add_cbc(account, "ID", bank["iban"])
 
-            bank_name = getattr(settings, "COMPANY_BANK_NAME", "")
+            bank_name = bank["bank_name"]
             if bank_name:
                 branch = self._add_cac(account, "FinancialInstitutionBranch")
                 self._add_cbc(branch, "Name", bank_name)
@@ -813,20 +836,7 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
 
     def _add_tax_total(self) -> None:
         """Add document tax total and, for non-RON invoices, BT-111 in RON."""
-        if self.invoice.currency.code != "RON":
-            accounting_tax_total = self._add_cac(self.root, "TaxTotal")
-            rate = Decimal(str(self.invoice.exchange_to_ron))
-            accounting_tax_cents = ExchangeRateService.convert_cents(
-                int(getattr(self.invoice, "tax_cents", 0)),
-                rate,
-            )
-            accounting_tax_amount = Decimal(accounting_tax_cents) / 100
-            accounting_amount_elem = self._add_cbc(
-                accounting_tax_total,
-                "TaxAmount",
-                self._format_amount(accounting_tax_amount),
-            )
-            accounting_amount_elem.set("currencyID", "RON")
+        self._add_accounting_tax_total()
 
         tax_total = self._add_cac(self.root, "TaxTotal")
 
@@ -1098,16 +1108,34 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
         if self.original_invoice is None:
             errors.append("Original invoice reference is required for credit notes")
 
-        if self.invoice.currency.code != "RON":
-            # The credit note builder cannot yet emit the RON accounting totals
-            # BR-RO-030/BR-53 require (fiscal credit-note ledger, #219). Fail
-            # here with an honest message instead of persisting invalid XML.
-            errors.append("Foreign-currency credit notes are not supported yet; RON only")
+        self._validate_original_currency_snapshot(errors)
 
         self._validate_supported_adjustments(errors)
 
         if errors:
             raise XMLBuilderError(f"Invalid credit note data: {'; '.join(errors)}")
+
+    def _validate_original_currency_snapshot(self, errors: list[str]) -> None:
+        """A reversal retains the original monetary unit and all four FX evidence fields."""
+        original = self.original_invoice
+        if original is None:
+            return
+        if self.invoice.currency_id != original.currency_id:
+            errors.append("Credit note currency must match the original invoice")
+            return
+        if self.invoice.currency_id == "RON":
+            return
+
+        self._validate_foreign_currency_snapshot(original, errors)
+        self._validate_foreign_currency_snapshot(self.invoice, errors)
+        snapshot_fields = (
+            "exchange_to_ron",
+            "exchange_rate_as_of",
+            "exchange_rate_source",
+            "exchange_rate_source_reference",
+        )
+        if any(getattr(self.invoice, field) != getattr(original, field) for field in snapshot_fields):
+            errors.append("Credit note exchange-rate snapshot must match the original invoice")
 
     def _create_root(self) -> None:
         """Create CreditNote root element with namespaces."""
@@ -1133,6 +1161,9 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
             self._add_cbc(self.root, "Note", notes[:1000])
 
         self._add_cbc(self.root, "DocumentCurrencyCode", self.invoice.currency.code)
+
+        if self.invoice.currency.code != "RON":
+            self._add_cbc(self.root, "TaxCurrencyCode", "RON")
 
     def _add_billing_reference(self) -> None:
         """Add BillingReference to original invoice."""
@@ -1183,7 +1214,8 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
         self._add_party_legal_entity(party, customer.name, self._customer_legal_identifier(customer))
 
     def _add_tax_total(self) -> None:
-        """Add TaxTotal element."""
+        """Add document VAT and, for foreign currencies, the original RON accounting VAT."""
+        self._add_accounting_tax_total()
         tax_total = self._add_cac(self.root, "TaxTotal")
 
         tax_amount = self._get_tax_amount()

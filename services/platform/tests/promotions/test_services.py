@@ -167,6 +167,7 @@ class CouponServiceTests(TestCase):
     def test_validate_coupon_min_order_not_met(self):
         """Test validating when minimum order not met."""
         self.coupon.min_order_cents = 50000  # 500.00
+        self.coupon.currency = self.currency
         self.coupon.save()
 
         result = CouponService.validate_coupon(
@@ -230,6 +231,7 @@ class CouponServiceTests(TestCase):
     def test_calculate_discount_capped(self):
         """Test discount capping."""
         self.coupon.max_discount_cents = 1500  # Cap at 15.00
+        self.coupon.currency = self.currency
         self.coupon.save()
 
         result = CouponService.calculate_discount(
@@ -574,6 +576,7 @@ class PromotionRuleServiceTests(TestCase):
             discount_type="percent",
             discount_percent=Decimal("10.00"),
             conditions={"min_order_cents": 20000},
+            currency=self.currency,
             is_active=True,
             valid_from=timezone.now() - timezone.timedelta(days=1),
         )

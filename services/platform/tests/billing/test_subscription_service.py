@@ -165,6 +165,7 @@ class SubscriptionServiceCreateTestCase(TestCase):
         """apply_grandfathering=True locks price if active grandfathering exists."""
         # Create a grandfathering record
         PriceGrandfathering.objects.create(
+            currency=self.currency,
             customer=self.customer,
             product=self.product,
             locked_price_cents=1500,
@@ -301,6 +302,7 @@ class SubscriptionServiceCreateTestCase(TestCase):
         """Expired grandfathering is not applied."""
         past = timezone.now() - timedelta(days=1)
         PriceGrandfathering.objects.create(
+            currency=self.currency,
             customer=self.customer,
             product=self.product,
             locked_price_cents=1500,
@@ -628,6 +630,7 @@ class GrandfatheringServiceExpireTestCase(TestCase):
     def test_expire_grandfathering_success(self, mock_model_log: MagicMock, mock_log: MagicMock) -> None:
         """Expiring active grandfathering returns Ok(True) and deactivates it."""
         PriceGrandfathering.objects.create(
+            currency=self.currency,
             customer=self.customer,
             product=self.product,
             locked_price_cents=1500,
@@ -673,6 +676,7 @@ class GrandfatheringServiceExpireTestCase(TestCase):
             subscription.save()
 
         PriceGrandfathering.objects.create(
+            currency=self.currency,
             customer=self.customer,
             product=self.product,
             locked_price_cents=1500,
@@ -707,6 +711,7 @@ class GrandfatheringServiceQueryTestCase(TestCase):
         """get_customer_grandfathering returns only active records."""
         # Active
         PriceGrandfathering.objects.create(
+            currency=self.currency,
             customer=self.customer,
             product=self.product1,
             locked_price_cents=1000,
@@ -717,6 +722,7 @@ class GrandfatheringServiceQueryTestCase(TestCase):
         )
         # Inactive
         PriceGrandfathering.objects.create(
+            currency=self.currency,
             customer=self.customer,
             product=self.product2,
             locked_price_cents=1000,
@@ -739,6 +745,7 @@ class GrandfatheringServiceQueryTestCase(TestCase):
         """Records expiring within days_ahead are returned."""
         soon = timezone.now() + timedelta(days=10)
         PriceGrandfathering.objects.create(
+            currency=self.currency,
             customer=self.customer,
             product=self.product1,
             locked_price_cents=1000,
@@ -757,6 +764,7 @@ class GrandfatheringServiceQueryTestCase(TestCase):
         """Records expiring after window are not returned."""
         far_future = timezone.now() + timedelta(days=90)
         PriceGrandfathering.objects.create(
+            currency=self.currency,
             customer=self.customer,
             product=self.product1,
             locked_price_cents=1000,
@@ -774,6 +782,7 @@ class GrandfatheringServiceQueryTestCase(TestCase):
     def test_check_expiring_grandfathering_no_expiry_excluded(self) -> None:
         """Records without expiry date are not returned."""
         PriceGrandfathering.objects.create(
+            currency=self.currency,
             customer=self.customer,
             product=self.product1,
             locked_price_cents=1000,
@@ -792,6 +801,7 @@ class GrandfatheringServiceQueryTestCase(TestCase):
         """Records already notified are not returned."""
         soon = timezone.now() + timedelta(days=5)
         PriceGrandfathering.objects.create(
+            currency=self.currency,
             customer=self.customer,
             product=self.product1,
             locked_price_cents=1000,

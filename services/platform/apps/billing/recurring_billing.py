@@ -25,9 +25,11 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from apps.customers.models import CustomerPaymentMethod
 
+    from .cycle_terms import CycleTerms
     from .invoice_models import Invoice
     from .metering_models import BillingCycle
     from .proforma_models import ProformaInvoice
+    from .subscription_currency_models import SubscriptionCurrencyTransition
     from .subscription_models import Subscription
 
 _CYCLE_MONTHS: dict[str, int] = {
@@ -346,6 +348,8 @@ class RecurringBillingOrchestrator:
         from apps.promotions.gift_cards import release_expired_reservations  # noqa: PLC0415
         from apps.promotions.renewals import reconcile_expired_credits  # noqa: PLC0415
 
+        from .currency_policy import get_selling_currency_policy  # noqa: PLC0415
+        from .currency_transitions import commit_prepared_offer, terms_for_preparation  # noqa: PLC0415
         from .proforma_models import ProformaInvoice, ProformaLine, ProformaSequence  # noqa: PLC0415
         from .services import _build_customer_vat_info  # noqa: PLC0415
         from .subscription_models import Subscription  # noqa: PLC0415
@@ -371,6 +375,7 @@ class RecurringBillingOrchestrator:
             invoice_lead_days = get_invoice_generation_lead_days()
             preparation_cutoff = run_at + timedelta(days=invoice_lead_days)
             with transaction.atomic():
+                policy = get_selling_currency_policy(lock=True)
                 candidate_subscriptions = list(
                     Subscription.objects.select_for_update(of=("self",))
                     .select_related(
@@ -400,6 +405,8 @@ class RecurringBillingOrchestrator:
                 result["subscriptions_checked"] = len(candidate_subscriptions)
 
                 groups: dict[tuple[object, ...], list[tuple[Subscription, BillingCycle, datetime]]] = {}
+                cycle_terms: dict[object, CycleTerms] = {}
+                cycle_offers: dict[object, SubscriptionCurrencyTransition | None] = {}
                 for subscription in candidate_subscriptions:
                     due_cycle = _resolve_due_unprepared_cycle(
                         subscription,
@@ -410,10 +417,13 @@ class RecurringBillingOrchestrator:
                     if due_cycle is None:
                         continue
                     cycle, period_end = due_cycle
+                    terms, offer = terms_for_preparation(cycle, policy, prepared_at=run_at)
+                    cycle_terms[cycle.pk] = terms
+                    cycle_offers[cycle.pk] = offer
 
                     collection_key = (
                         subscription.customer_id,
-                        subscription.currency_id,
+                        terms.currency.code,
                         subscription.auto_payment_enabled,
                         subscription.saved_payment_method_id if subscription.auto_payment_enabled else None,
                         subscription.payment_authorization_id if subscription.auto_payment_enabled else None,
@@ -426,18 +436,19 @@ class RecurringBillingOrchestrator:
                     try:
                         with transaction.atomic():
                             first_subscription = grouped_items[0][0]
+                            first_terms = cycle_terms[grouped_items[0][1].pk]
                             # #103: fail closed if the subscription's currency has no
                             # resolvable FX rate (per-group except records the error).
                             from apps.billing.currency_service import (  # noqa: PLC0415  # ADR-0007
                                 assert_currency_issuable,
                             )
 
-                            assert_currency_issuable(first_subscription.currency.code, timezone.localdate())
+                            assert_currency_issuable(first_terms.currency.code, timezone.localdate())
                             customer = first_subscription.customer
                             billing_address = customer.get_billing_address()
                             bill_to_country = billing_country_code(getattr(billing_address, "country", ""))
                             vat_result = TaxService.calculate_vat_for_document(
-                                subtotal_cents=sum(item[0].total_price_cents for item in grouped_items),
+                                subtotal_cents=sum(cycle_terms[item[1].pk].subtotal_cents for item in grouped_items),
                                 customer_info=_build_customer_vat_info(customer, country=bill_to_country),
                             )
                             vat_rate = (vat_result.vat_rate / Decimal("100")).quantize(Decimal("0.0001"))
@@ -458,7 +469,7 @@ class RecurringBillingOrchestrator:
                             proforma = ProformaInvoice.objects.create(
                                 customer=customer,
                                 number=sequence.get_next_number("PRO"),
-                                currency=first_subscription.currency,
+                                currency=first_terms.currency,
                                 valid_until=valid_until,
                                 bill_to_name=customer.company_name or customer.name or "",
                                 bill_to_email=customer.primary_email or "",
@@ -483,6 +494,7 @@ class RecurringBillingOrchestrator:
                             )
 
                             for sort_order, (subscription, cycle, _period_end) in enumerate(grouped_items, start=1):
+                                terms = cycle_terms[cycle.pk]
                                 line = ProformaLine(
                                     proforma=proforma,
                                     kind="service",
@@ -492,8 +504,8 @@ class RecurringBillingOrchestrator:
                                         f"{subscription.product.name} - {subscription.billing_cycle.replace('_', ' ').title()} "
                                         f"({ro_local_date(cycle.period_start)} to {ro_local_date(cycle.period_end)})"
                                     ),
-                                    quantity=Decimal(subscription.quantity),
-                                    unit_price_cents=subscription.effective_price_cents,
+                                    quantity=Decimal(terms.quantity),
+                                    unit_price_cents=terms.unit_price_cents,
                                     tax_rate=vat_rate,
                                     domain_name=getattr(subscription.service, "domain", "") or "",
                                     # Romanian calendar days: these are DateFields emitted verbatim into
@@ -528,6 +540,7 @@ class RecurringBillingOrchestrator:
                                         "updated_at",
                                     ]
                                 )
+                                commit_prepared_offer(cycle_offers[cycle.pk], cycle)
                                 group_cycles_prepared += 1
 
                             proforma.recalculate_totals()

@@ -183,7 +183,7 @@
           {% if warnings %}
           <div class="mb-6">
             {% for warning in warnings %}
-            {% if warning.type == 'price_change' %}
+            {% if warning.type == 'price_change' or warning.type == 'currency_change' %}
             {% trans "Attention - Price updated" as price_updated_title %}
             {% alert warning.message variant="warning" title=price_updated_title %}
             {% endif %}

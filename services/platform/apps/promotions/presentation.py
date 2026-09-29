@@ -97,7 +97,7 @@ LISTS = {
         "Gift cards",
         "gift_cards",
         (
-            ("Code", "code"),
+            ("Code", "masked_code"),
             ("Status", "get_status_display"),
             ("Balance (cents)", "current_balance_cents"),
             ("Currency", "currency.code"),

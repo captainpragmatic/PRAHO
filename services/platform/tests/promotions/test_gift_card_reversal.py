@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock
 
 from django.contrib import admin
+from django.core.exceptions import ValidationError
 from django.test import TestCase
 
 from apps.billing.models import Currency
@@ -311,9 +312,10 @@ class GiftCardReversalTest(TestCase):
             ).exists()
         )
 
-    def test_full_restore_returns_card_to_active_after_initial_value_is_lowered(self) -> None:
+    def test_full_restore_keeps_original_value_and_rejects_relabeling(self) -> None:
         self._redeem(self.card, self.order, 10000)
-        GiftCard.objects.filter(pk=self.card.pk).update(initial_value_cents=8000)
+        with self.assertRaises(ValidationError):
+            GiftCard.objects.filter(pk=self.card.pk).update(initial_value_cents=8000)
         force_status(self.order, "cancelled")
 
         restored = GiftCardService.release_for_order(self.order)
@@ -321,7 +323,7 @@ class GiftCardReversalTest(TestCase):
         self.assertEqual(restored, 10000)
         self.card.refresh_from_db()
         self.assertEqual(self.card.current_balance_cents, 10000)
-        self.assertEqual(self.card.initial_value_cents, 8000)
+        self.assertEqual(self.card.initial_value_cents, 10000)
         self.assertEqual(self.card.status, "active")
 
     def test_admin_change_does_not_overwrite_concurrent_balance_update(self) -> None:
