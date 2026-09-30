@@ -33,7 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A failure while updating the control panel after a domain change no longer counts against
   the unrelated work that triggered it. The nightly expiry sweep recorded failures for
   domains whose expiry had in fact been saved, and retried them forever.
-- Romanian customers now see the missing-domain message at checkout in Romanian.
+- The missing-domain message from the order API is now translatable. Customers ordering
+  through the portal were already protected, because the cart refuses that case earlier and
+  in Romanian; this closes it for callers of the public order API.
 
 
 ### Added
