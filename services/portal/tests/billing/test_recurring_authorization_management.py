@@ -54,7 +54,7 @@ class RecurringAuthorizationWithdrawTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(json.loads(response.content)["error"], "Authorization already withdrawn")
 
-    def test_a_missing_authorization_id_is_rejected_before_calling_the_service(self) -> None:
+    def test_a_missing_authorization_id_is_forwarded_empty_and_the_service_rejects_it(self) -> None:
         with patch("apps.billing.views.RecurringPaymentsService.withdraw_authorization") as withdraw:
             withdraw.return_value = {"success": False, "error": "Authorization not found"}
             response = self.client.post(

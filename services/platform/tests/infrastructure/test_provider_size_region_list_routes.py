@@ -48,10 +48,14 @@ class SizeListRouteTests(TestCase):
         )
 
     def test_a_sizes_display_name_and_provider_render(self) -> None:
+        # display_name must be a value the template's OTHER computed field (vcpus/memory_gb) could
+        # never independently produce - "2 vCPU / 4GB" is a substring of the template's own
+        # "{{ vcpus }} vCPU / {{ memory_gb }}GB RAM", so asserting it would pass even if
+        # display_name itself were never rendered.
         NodeSize.objects.create(
             provider=self.provider,
             name="Small",
-            display_name="2 vCPU / 4GB",
+            display_name="Starter Plan",
             provider_type_id="cpx21",
             vcpus=2,
             memory_gb=4,
@@ -63,7 +67,8 @@ class SizeListRouteTests(TestCase):
         response = self.client.get(reverse("infrastructure:size_list"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "2 vCPU / 4GB")
+        self.assertContains(response, "Starter Plan")
+        self.assertContains(response, "2 vCPU / 4GB RAM")
         self.assertContains(response, "Test Hetzner")
 
 
@@ -76,9 +81,13 @@ class RegionListRouteTests(TestCase):
         )
 
     def test_a_regions_name_and_city_render_grouped_by_provider(self) -> None:
+        # name and city are given UNRELATED strings on purpose, with neither a substring of the
+        # other: a real "Falkenstein" datacenter's name and city are coincidentally identical, and
+        # asserting that one shared string would pass even if one of the two fields were never
+        # rendered - exactly the collision this test exists to rule out.
         NodeRegion.objects.create(
             provider=self.provider,
-            name="Falkenstein",
+            name="FSN1 Compute Zone",
             provider_region_id="fsn1",
             normalized_code="fsn1",
             country_code="de",
@@ -88,5 +97,6 @@ class RegionListRouteTests(TestCase):
         response = self.client.get(reverse("infrastructure:region_list"))
 
         self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "FSN1 Compute Zone")
         self.assertContains(response, "Falkenstein")
         self.assertContains(response, "Test Hetzner")

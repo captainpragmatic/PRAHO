@@ -45,8 +45,14 @@ class InvoicePdfExportTests(TestCase):
             reverse("billing:invoice_pdf_export", kwargs={"invoice_number": "INV-2026-0100"})
         )
 
+        # fetch_redirect_response=False: this test's claim is only about the redirect TARGET, not
+        # that invoice_detail itself renders correctly. The default True follows the redirect with
+        # an unmocked request, which hit real outbound Platform calls under this session's
+        # customer_id/user_id - network-dependent and not what this test is meant to verify.
         self.assertRedirects(
-            response, reverse("billing:invoice_detail", kwargs={"invoice_number": "INV-2026-0100"})
+            response,
+            reverse("billing:invoice_detail", kwargs={"invoice_number": "INV-2026-0100"}),
+            fetch_redirect_response=False,
         )
 
     def test_an_unauthenticated_request_is_redirected_to_login(self) -> None:
