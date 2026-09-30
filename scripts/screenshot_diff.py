@@ -13,6 +13,14 @@ Auth: logs in once via the portal login form using the first E2E fixture custome
 (logs/e2e-fixtures.json, seeded by `make dev-e2e-bg`) and asserts the post-login redirect
 actually lands on /dashboard/ - a failed login that silently redirects back to the login page
 would otherwise screenshot the login form twice and report a false-clean zero diff.
+
+RESTART THE STACK between a BEFORE and an AFTER capture. `engines['django'].engine.
+template_loaders` under config.settings.e2e shows Django installs `cached.Loader` even with
+DEBUG=True when no explicit OPTIONS.loaders is set, so a compiled template stays cached in
+memory for the life of the runserver process - editing the .html file has no effect until a
+fresh process recompiles it. `make stop-e2e && VENV_DIR=.venv-darwin make dev-e2e-bg` between
+captures; two captures of the same unchanged page within one process (the `control` command)
+will not catch this, since neither one ever needed the cache to be busted.
 """
 
 from __future__ import annotations
