@@ -223,9 +223,12 @@ class InvoicesListStatusFilterTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         select = _element_with_name(response.content.decode(), "select", "status")
-        self.assertIn("hx-get", select)
+        self.assertEqual(select.get("hx-get"), reverse("billing:invoices_search_api"))
+        self.assertEqual(select.get("hx-target"), "#invoices-content")
         self.assertEqual(select.get("hx-sync"), "closest .list-filters-sync:replace")
-        self.assertIn("hx-indicator", select)
+        self.assertEqual(select.get("hx-trigger"), "change")
+        self.assertEqual(select.get("hx-include"), "#list-filter-search, #list-filter-active-tab")
+        self.assertEqual(select.get("hx-indicator"), "#invoices-skeleton")
         self.assertIn("list-filter-extra-select", select.get("class", ""))
 
     @patch("apps.billing.views.InvoiceViewService.get_customer_documents")
