@@ -345,6 +345,8 @@ def customer_create_api(request: HttpRequest) -> Response:
 
 @public_api_endpoint
 @api_view(["POST"])
+@authentication_classes([])  # public: consumes no credential. Also the one public view
+# whose throttle is anon-keyed, so authenticating a caller removed its ONLY rate limit
 @permission_classes([AllowAny])
 @throttle_classes([AuthThrottle])
 def customer_register_api(request: HttpRequest) -> Response:

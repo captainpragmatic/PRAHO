@@ -6522,6 +6522,10 @@ msgid "Please provide a contact name for your order"
 msgstr "Vă rugăm să indicați o persoană de contact pentru comandă"
 
 #: apps/orders/preflight.py (platform)
+msgid "Please provide a domain name for the items that require one"
+msgstr "Vă rugăm să indicați un nume de domeniu pentru produsele care necesită unul"
+
+#: apps/orders/preflight.py (platform)
 msgid "Please provide a contact email address"
 msgstr "Vă rugăm să indicați o adresă de e-mail de contact"
 

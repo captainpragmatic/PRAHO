@@ -1203,6 +1203,15 @@ def _trigger_customer_onboarding(customer: Customer) -> None:
 # The suspension_reason written by the customer cascade, and the exact value its
 # reactivation half matches on. A machine token, not prose, matching the convention set
 # by "payment_overdue" and "manual_stop" elsewhere: these values are compared, not read.
+class CascadeSuspensionError(Exception):
+    """Raised to abort a partially-applied suspension cascade.
+
+    manage_service converts its own exceptions into Err, so an Err is the realistic
+    failure on this path. Raising turns it into the rollback the enclosing atomic needs;
+    the receiver's broad handler logs it.
+    """
+
+
 CUSTOMER_SUSPENSION_REASON = "customer_suspended"
 
 
@@ -1307,14 +1316,33 @@ def _suspend_customer_services(customer: Customer) -> None:
 
         active_services = Service.objects.filter(customer=customer, status="active")
 
-        for service in active_services:
-            result = ServiceManagementService.manage_service(
-                str(service.id), "suspend", reason=CUSTOMER_SUSPENSION_REASON
-            )
-            if result.is_ok():
+        # One outcome, not an arbitrary prefix of one. This runs from a post-commit
+        # callback, so nothing wraps it and each service used to commit on its own: a
+        # worker timeout or pod eviction part way through left the customer marked
+        # suspended with some services down and the rest running, and nothing re-runs the
+        # cascade — it fires only on a status change that has already happened, and no
+        # sweep looks for "customer suspended, service active".
+        #
+        # This is not recovery and is not claimed to be. It makes the failure uniform, so
+        # it is detectable, and safe to retry, because the filter above already skips
+        # anything not active.
+        #
+        # An Err ABORTS the batch rather than being logged and stepped over.
+        # manage_service catches its own exceptions and converts them to Err, so treating
+        # Err as "keep going" would commit every earlier suspension and leave the failed
+        # one running — the exact arbitrary prefix this block exists to prevent, and a far
+        # more likely path in production than an exception escaping.
+        #
+        # The queryset already filtered on status="active", so an Err here is a genuine
+        # anomaly such as a concurrent transition, not an ordinary refusal.
+        with transaction.atomic():
+            for service in active_services:
+                result = ServiceManagementService.manage_service(
+                    str(service.id), "suspend", reason=CUSTOMER_SUSPENSION_REASON
+                )
+                if result.is_err():
+                    raise CascadeSuspensionError(f"service {service.id}: {result.unwrap_err()}")
                 logger.info(f"⏸️ [Customer] Service suspended: {service.id}")
-            else:
-                logger.error(f"🔥 [Customer] Service suspension failed for {service.id}: {result.unwrap_err()}")
 
     except Exception as e:
         logger.exception(f"🔥 [Customer] Service suspension failed: {e}")

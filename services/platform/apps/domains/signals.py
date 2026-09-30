@@ -1067,7 +1067,16 @@ def _handle_domain_status_change_with_virtualmin_sync(domain: Domain, old_status
         # The pk is captured, not the instance, so the callback reads committed state
         # rather than a mutable object someone may have changed in the meantime.
         if old_status != new_status:
-            transaction.on_commit(lambda domain_pk=domain.pk: _sync_domain_to_virtualmin_by_pk(domain_pk))
+            # robust=True: this callback runs from the commit machinery, after the
+            # transaction closed and outside the try/except above. Without it a provider
+            # or reload failure escapes into whoever exited the atomic block — the
+            # post-grace expiry sweep would record a failure for a domain whose expiry
+            # actually committed, and retry it forever. Robust also protects callbacks
+            # queued behind this one, which a local try/except would not.
+            transaction.on_commit(
+                lambda domain_pk=domain.pk: _sync_domain_to_virtualmin_by_pk(domain_pk),
+                robust=True,
+            )
 
     except Exception as e:
         logger.error(f"🔥 [CrossApp] Enhanced domain status change handling failed for {domain.name}: {e}")

@@ -728,6 +728,11 @@ THROTTLE_RATES = {
     "burst": "60/10s",
     # Per-view API throttles (apps.api.core.throttling)
     "auth": "10/minute",
+    # Per-account budget on the public token endpoint. Replaces that endpoint's ability
+    # to drive the progressive account lockout, which an unauthenticated caller could
+    # use to lock arbitrary accounts. Keyed on the submitted address, so unlike every
+    # client-keyed throttle here it does not depend on IPWARE_TRUSTED_PROXY_LIST.
+    "token_request": "5/minute",
     # End-user IP from the Portal's signed body; no throttle key (None) when absent.
     "auth_login_ip": "10/minute",
     "auth_reset_ip": "5/minute",

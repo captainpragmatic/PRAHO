@@ -83,6 +83,10 @@ class ThrottleArchitectureGuardrailTests(SimpleTestCase):
             "customer",
             "burst",
             "auth",
+            # Per-account budget on the public token endpoint. Keyed on the submitted
+            # address rather than the client, so it is the one auth throttle that binds
+            # without a populated trusted-proxy list.
+            "token_request",
             "auth_login_ip",
             "auth_reset_ip",
             "sustained",

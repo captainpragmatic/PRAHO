@@ -18,6 +18,7 @@ Layer 3 (portal middleware):
 
 from __future__ import annotations
 
+import hashlib
 import ipaddress
 import json
 import logging
@@ -434,6 +435,49 @@ class BurstAPIThrottle(_CustomTimeRateMixin, UserRateThrottle):  # type: ignore[
     """
 
     scope = "api_burst"
+
+
+class TokenRequestAccountThrottle(_ConfigurableRateThrottle):
+    """Per-ACCOUNT limit on the public token endpoint, keyed on the submitted email.
+
+    This is the replacement for that endpoint driving `increment_failed_login_attempts`.
+    Five wrong passwords there used to apply a progressive account lock escalating to
+    four hours, so an unauthenticated caller could lock any account it knew the address
+    of, with no credentials and nothing to attribute the attempt to.
+
+    Keying on the submitted address rather than on the client is deliberate and is what
+    makes this work TODAY. Every client-keyed throttle here depends on
+    `IPWARE_TRUSTED_PROXY_LIST`, which is empty in production, so a caller can rotate a
+    forwarded header into a fresh bucket. An attacker cannot rotate the address they are
+    trying to break into, so this budget binds regardless of proxy configuration.
+
+    It also cannot become a denial of service against anyone else: exhausting one
+    account's budget leaves every other account's untouched, which a shared or
+    client-keyed budget would not.
+
+    A request with no usable email is not throttled here. It is rejected before any
+    password hashing, and endpoint volume is still covered by AuthThrottle.
+    """
+
+    scope = "token_request"
+    cache_format = "throttle_token_request_%(scope)s_%(ident)s"
+
+    def get_cache_key(self, request: Request, view: Any) -> str | None:
+        email = request.data.get("email") if hasattr(request, "data") else None
+        if not isinstance(email, str) or not email.strip():
+            return None
+        # Hashed, for two reasons. An address may be up to 254 characters and the
+        # DatabaseCache backend stores keys in a 255-character column, so the raw value
+        # plus prefix and version can overflow it. And it keeps the address itself out of
+        # the cache table, which is not a place credentials-adjacent data needs to be.
+        #
+        # Case-folded rather than lowercased: `User.email` has no case-insensitive
+        # uniqueness constraint, but authentication resolves the address case-sensitively,
+        # so two spellings can be separate identities. Folding merges them into one
+        # bucket ON PURPOSE — otherwise varying the case is a free way to get a fresh
+        # budget, which is exactly the evasion this throttle exists to stop.
+        ident = hashlib.sha256(email.strip().casefold().encode("utf-8")).hexdigest()[:32]
+        return self.cache_format % {"scope": self.scope, "ident": ident}
 
 
 class AuthThrottle(_CustomTimeRateMixin, AnonRateThrottle):  # type: ignore[misc]  # DRF throttle base uses dynamic attrs
