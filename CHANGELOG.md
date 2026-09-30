@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- An unauthenticated caller can no longer lock other people's accounts. Five wrong passwords
+  sent to the public token endpoint used to lock that account for up to four hours across
+  every login path, with no credentials needed. That endpoint no longer drives the lockout
+  counter, and a per-account limit keyed on the submitted address replaces it. The lockout
+  itself is unchanged on the paths that can attribute a failure.
+- Six public endpoints no longer accept an API token or session they never read. They
+  inherited the project default authentication classes, which meant presenting any valid
+  token also removed the only rate limit they had.
+
+### Fixed
+
+- A registrar webhook that fails part way through no longer half-applies. A domain status
+  change and its audit record are now one unit, and the control panel is updated only after
+  both succeed rather than before the audit record exists.
+- An order that times out is now cancelled. If creating its proforma failed, the order kept
+  an internal reference to a document that no longer existed, and every later attempt to
+  cancel it failed, so it was retried indefinitely.
+- Suspending a customer either suspends all of their services or none. Interrupted part way
+  through, it previously left the account marked suspended with some services still running
+  and nothing to finish the job.
+- A failure while updating the control panel after a domain change no longer counts against
+  the unrelated work that triggered it. The nightly expiry sweep recorded failures for
+  domains whose expiry had in fact been saved, and retried them forever.
+- Romanian customers now see the missing-domain message at checkout in Romanian.
+
+
 ### Added
 
 - Customer service requests create support tickets with a private staff panel to
