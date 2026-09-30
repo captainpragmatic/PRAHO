@@ -436,6 +436,38 @@ class BurstAPIThrottle(_CustomTimeRateMixin, UserRateThrottle):  # type: ignore[
     scope = "api_burst"
 
 
+class TokenRequestAccountThrottle(_ConfigurableRateThrottle):
+    """Per-ACCOUNT limit on the public token endpoint, keyed on the submitted email.
+
+    This is the replacement for that endpoint driving `increment_failed_login_attempts`.
+    Five wrong passwords there used to apply a progressive account lock escalating to
+    four hours, so an unauthenticated caller could lock any account it knew the address
+    of, with no credentials and nothing to attribute the attempt to.
+
+    Keying on the submitted address rather than on the client is deliberate and is what
+    makes this work TODAY. Every client-keyed throttle here depends on
+    `IPWARE_TRUSTED_PROXY_LIST`, which is empty in production, so a caller can rotate a
+    forwarded header into a fresh bucket. An attacker cannot rotate the address they are
+    trying to break into, so this budget binds regardless of proxy configuration.
+
+    It also cannot become a denial of service against anyone else: exhausting one
+    account's budget leaves every other account's untouched, which a shared or
+    client-keyed budget would not.
+
+    A request with no usable email is not throttled here. It is rejected before any
+    password hashing, and endpoint volume is still covered by AuthThrottle.
+    """
+
+    scope = "token_request"
+    cache_format = "throttle_token_request_%(scope)s_%(ident)s"
+
+    def get_cache_key(self, request: Request, view: Any) -> str | None:
+        email = request.data.get("email") if hasattr(request, "data") else None
+        if not isinstance(email, str) or not email.strip():
+            return None
+        return self.cache_format % {"scope": self.scope, "ident": email.strip().lower()}
+
+
 class AuthThrottle(_CustomTimeRateMixin, AnonRateThrottle):  # type: ignore[misc]  # DRF throttle base uses dynamic attrs
     """Restrictive anonymous throttle for authentication-related endpoints.
 

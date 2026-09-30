@@ -143,17 +143,29 @@ class AccountLockoutTokenTests(TestCase):
         )
         self.url = "/api/users/token/"
 
-    def test_obtain_token_failed_login_increments_attempt_counter(self) -> None:
-        """Failed token request with wrong password must increment failed_login_attempts."""
+    def test_obtain_token_failed_login_does_not_touch_the_account_lockout_counter(self) -> None:
+        """Inverted deliberately. This asserted the opposite until the counter was removed.
+
+        Driving the lockout from a PUBLIC endpoint made it an unauthenticated weapon: five
+        wrong passwords for a known address locked that account across every login path,
+        with no credentials and nothing to attribute the attempt to. The per-account
+        budget in TokenRequestAccountThrottle replaces it, keyed on the submitted address
+        so it binds without a populated trusted-proxy list. The full reasoning and the
+        replacement's own coverage live in tests/api/test_token_endpoint_lockout.py.
+        """
         response = self.client.post(
             self.url,
             {"email": self.user.email, "password": "WRONG_PASSWORD"},
             format="json",
         )
 
-        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.status_code, 401, "a wrong password must still be rejected")
         self.user.refresh_from_db()
-        self.assertGreater(self.user.failed_login_attempts, 0)
+        self.assertEqual(
+            self.user.failed_login_attempts,
+            0,
+            "the public endpoint is driving the account lockout again",
+        )
 
     def test_obtain_token_locked_account_returns_invalid_credentials(self) -> None:
         """Locked account must return the same 401 'Invalid credentials' as a bad password.

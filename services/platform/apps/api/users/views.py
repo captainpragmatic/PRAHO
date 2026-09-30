@@ -26,7 +26,7 @@ from rest_framework.exceptions import ValidationError as APIValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
-from apps.api.core.throttling import AuthThrottle
+from apps.api.core.throttling import AuthThrottle, TokenRequestAccountThrottle
 from apps.api.secure_auth import (
     public_api_endpoint,
     require_customer_authentication,
@@ -251,10 +251,14 @@ def _authenticate_token_request(request: HttpRequest) -> User | Response:
     user = authenticate(request, username=email, password=password)
 
     if user is None:
-        # Increment counter silently (no-op if email doesn't exist)
-        with contextlib.suppress(User.DoesNotExist):
-            failed_user = User.objects.get(email=email)
-            failed_user.increment_failed_login_attempts()
+        # Deliberately does NOT drive the account lockout. This endpoint is public, so
+        # anyone could otherwise lock any account they knew the address of: five wrong
+        # passwords applied a progressive lock escalating to four hours, across every
+        # login path, with no credentials and nothing to attribute the attempt to. Every
+        # other caller of that counter sits behind a working per-account rate limit; this
+        # one inherited the lockout without the protection. TokenRequestAccountThrottle
+        # now provides the per-account budget, keyed on the submitted address so it binds
+        # even though the client-keyed throttles can be rotated away.
         logger.warning(  # nosemgrep: python-logger-credential-disclosure — literal log message, no secrets
             "[Auth] Failed token request — ip=%s", client_ip
         )
@@ -285,7 +289,7 @@ def _authenticate_token_request(request: HttpRequest) -> User | Response:
 @api_view(["POST"])
 @authentication_classes([])  # No DRF authentication - credential auth performed in the view
 @permission_classes([AllowAny])
-@throttle_classes([AuthThrottle])
+@throttle_classes([AuthThrottle, TokenRequestAccountThrottle])
 def obtain_token(request: HttpRequest) -> Response:
     """
     🔐 Obtain authentication token for API access -- intentionally public.
