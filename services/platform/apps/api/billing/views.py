@@ -818,6 +818,7 @@ def customer_invoice_summary_api(request: HttpRequest, customer: Customer) -> Re
 
 @public_api_endpoint
 @api_view(["GET"])
+@authentication_classes([])  # public: no credential is consulted, and accepting one would drop the anon throttle
 @permission_classes([AllowAny])
 def currencies_api(request: HttpRequest) -> Response:
     """

@@ -319,6 +319,7 @@ def customer_services_summary_api(request: HttpRequest, customer: Customer) -> R
 
 @public_api_endpoint
 @api_view(["GET"])
+@authentication_classes([])  # public: no credential is consulted, and accepting one would drop the anon throttle
 @permission_classes([AllowAny])
 def available_service_plans_api(request: HttpRequest) -> Response:
     """

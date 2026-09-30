@@ -345,6 +345,7 @@ def customer_create_api(request: HttpRequest) -> Response:
 
 @public_api_endpoint
 @api_view(["POST"])
+@authentication_classes([])  # public: no credential is consulted, and accepting one would drop the anon throttle
 @permission_classes([AllowAny])
 @throttle_classes([AuthThrottle])
 def customer_register_api(request: HttpRequest) -> Response:
