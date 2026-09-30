@@ -246,7 +246,13 @@ repos:
       - id: lint-template-components
         name: "Design System: Template Lint (TMPL001-009)"
         entry: scripts/run_project_python
-        args: [scripts/lint_template_components.py, "--fail-on", ""]
+        # `--fail-on ""` produced an empty set after the script's own `.discard("")` (added to
+        # prevent an always-pass sentinel), so this hook could never fail regardless of what a
+        # staged template contained. Omitted entirely: the script's own default (blockers only -
+        # TMPL001-004, TMPL008) is correct, and `pass_filenames: true` means this only evaluates
+        # files actually staged, so it cannot retroactively block an unrelated commit over one of
+        # the pre-existing violations in a file nobody touched.
+        args: [scripts/lint_template_components.py]
         language: system
         files: \.html$
         exclude: ^(services/platform/templates/|services/portal/static/)

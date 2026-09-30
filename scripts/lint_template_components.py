@@ -396,12 +396,18 @@ def main() -> int:
             has_fail = True
 
     print("━" * 60)
+    # A violation's SEVERITY is a fixed property of its rule (the table at the top of this file) -
+    # it does not depend on what a caller happened to pass to --fail-on. `--fail-on` controls the
+    # EXIT CODE only (which codes are allowed to fail this specific run); conflating the two meant
+    # `lint-templates-strict` passing all nine codes reported 643 "blockers" - every TMPL005
+    # warning reclassified by the act of asking for it to also fail the build.
+    blocker_count = sum(1 for v in all_violations if v.severity == SEVERITY_BLOCKER)
+    warn_count = len(all_violations) - blocker_count
     fail_count = sum(1 for v in all_violations if v.code in fail_codes)
-    warn_count = len(all_violations) - fail_count
-    print(f"📊 {fail_count} blocker(s)  |  {warn_count} warning(s)")
+    print(f"📊 {blocker_count} blocker(s)  |  {warn_count} warning(s)")
 
     if has_fail:
-        print(f"\n❌ Non-zero exit: {fail_count} blocker violation(s) found.")
+        print(f"\n❌ Non-zero exit: {fail_count} violation(s) at the requested severity found.")
         print("   Fix the violations above or update design-system docs if intentional.")
         return 1
 
