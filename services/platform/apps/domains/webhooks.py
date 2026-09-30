@@ -226,6 +226,7 @@ class RegistrarWebhookView(View):
         domain = Domain.objects.select_for_update().get(pk=domain.pk)
         self._apply_webhook_domain_fields(domain, webhook_data)
         if domain.expires_at is None:
+            transaction.set_rollback(True)
             return False, "Registration confirmation requires a valid expiry"
         try:
             try:
@@ -235,6 +236,7 @@ class RegistrarWebhookView(View):
                     logger.info(f"✅ [Webhook] Domain {domain.name} already active (idempotent)")
                 else:
                     logger.warning(f"⚠️ [Webhook] Cannot activate domain {domain.name} from status '{domain.status}'")
+                    transaction.set_rollback(True)
                     return False, f"Domain {domain.name} cannot transition from '{domain.status}' to active"
 
             self._apply_webhook_domain_fields(domain, webhook_data)
@@ -243,6 +245,7 @@ class RegistrarWebhookView(View):
                 domain.save()
             except ConcurrentTransition:
                 logger.warning(f"⚠️ [Webhook] Domain {domain.name} was modified concurrently during registration")
+                transaction.set_rollback(True)
                 return False, f"Domain {domain.name} was modified concurrently"
 
             # Log audit event
@@ -259,6 +262,7 @@ class RegistrarWebhookView(View):
 
         except Exception as e:
             logger.error(f"🔥 [Webhook] Failed to process domain registration: {e}")
+            transaction.set_rollback(True)
             return False, str(e)
 
     @transaction.atomic
@@ -268,9 +272,11 @@ class RegistrarWebhookView(View):
         try:
             expires_at_raw = webhook_data.get("expires_at")
             if not expires_at_raw or not isinstance(expires_at_raw, str):
+                transaction.set_rollback(True)
                 return False, "Missing expires_at in renewal webhook"
             expiry = parse_date(expires_at_raw)
             if expiry is None:
+                transaction.set_rollback(True)
                 return False, "expires_at present but could not be parsed — renewal aborted"
             previous_expiry = domain.expires_at
             self._apply_webhook_domain_fields(domain, webhook_data)
@@ -297,8 +303,10 @@ class RegistrarWebhookView(View):
 
         except Exception as e:
             logger.error(f"🔥 [Webhook] Failed to process domain renewal: {e}")
+            transaction.set_rollback(True)
             return False, str(e)
 
+    @transaction.atomic
     def _handle_domain_transfer_completed(
         self, domain: Domain, webhook_data: dict[str, Any], client_ip: str
     ) -> tuple[bool, str]:
@@ -312,6 +320,7 @@ class RegistrarWebhookView(View):
                     logger.info(f"✅ [Webhook] Domain {domain.name} already active after transfer (idempotent)")
                 else:
                     logger.warning(f"⚠️ [Webhook] Cannot activate domain {domain.name} from status '{domain.status}'")
+                    transaction.set_rollback(True)
                     return False, f"Domain {domain.name} cannot transition from '{domain.status}' to active"
 
             self._apply_webhook_domain_fields(domain, webhook_data)
@@ -320,6 +329,7 @@ class RegistrarWebhookView(View):
                 domain.save()
             except ConcurrentTransition:
                 logger.warning(f"⚠️ [Webhook] Domain {domain.name} was modified concurrently during transfer")
+                transaction.set_rollback(True)
                 return False, f"Domain {domain.name} was modified concurrently"
 
             # Log security event for domain transfer
@@ -340,6 +350,7 @@ class RegistrarWebhookView(View):
 
         except Exception as e:
             logger.error(f"🔥 [Webhook] Failed to process domain transfer: {e}")
+            transaction.set_rollback(True)
             return False, str(e)
 
     def _handle_domain_expiring(self, domain: Domain, webhook_data: dict[str, Any], client_ip: str) -> tuple[bool, str]:
@@ -357,6 +368,7 @@ class RegistrarWebhookView(View):
             logger.error(f"🔥 [Webhook] Failed to process expiration warning: {e}")
             return False, str(e)
 
+    @transaction.atomic
     def _handle_domain_expired(self, domain: Domain, webhook_data: dict[str, Any], client_ip: str) -> tuple[bool, str]:
         """🔴 Handle domain expiration"""
         try:
@@ -369,11 +381,13 @@ class RegistrarWebhookView(View):
                     return True, "Domain already expired"
                 else:
                     logger.warning(f"⚠️ [Webhook] Cannot expire domain {domain.name} from status '{domain.status}'")
+                    transaction.set_rollback(True)
                     return False, f"Domain {domain.name} cannot transition from '{domain.status}' to expired"
             try:
                 domain.save()
             except ConcurrentTransition:
                 logger.warning(f"⚠️ [Webhook] Domain {domain.name} was modified concurrently during expiration")
+                transaction.set_rollback(True)
                 return False, f"Domain {domain.name} was modified concurrently"
 
             # Log audit event
@@ -390,8 +404,10 @@ class RegistrarWebhookView(View):
 
         except Exception as e:
             logger.error(f"🔥 [Webhook] Failed to process domain expiration: {e}")
+            transaction.set_rollback(True)
             return False, str(e)
 
+    @transaction.atomic
     def _handle_domain_suspended(
         self, domain: Domain, webhook_data: dict[str, Any], client_ip: str
     ) -> tuple[bool, str]:
@@ -406,11 +422,13 @@ class RegistrarWebhookView(View):
                     return True, "Domain already suspended"
                 else:
                     logger.warning(f"⚠️ [Webhook] Cannot suspend domain {domain.name} from status '{domain.status}'")
+                    transaction.set_rollback(True)
                     return False, f"Domain {domain.name} cannot transition from '{domain.status}' to suspended"
             try:
                 domain.save()
             except ConcurrentTransition:
                 logger.warning(f"⚠️ [Webhook] Domain {domain.name} was modified concurrently during suspension")
+                transaction.set_rollback(True)
                 return False, f"Domain {domain.name} was modified concurrently"
 
             # Log security event for suspension
@@ -432,6 +450,7 @@ class RegistrarWebhookView(View):
 
         except Exception as e:
             logger.error(f"🔥 [Webhook] Failed to process domain suspension: {e}")
+            transaction.set_rollback(True)
             return False, str(e)
 
     def _handle_whois_privacy_changed(

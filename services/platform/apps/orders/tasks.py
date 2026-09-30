@@ -220,6 +220,14 @@ def process_pending_orders() -> dict[str, Any]:  # noqa: C901, PLR0912  # Comple
                                     order.order_number,
                                     proforma_result.unwrap_err(),
                                 )
+                                # create_from_order links the proforma to the order and
+                                # saves it BEFORE it can fail, then marks the transaction
+                                # for rollback. The database discards that link; this
+                                # in-memory order does not. Everything below reads this
+                                # object, and the timeout path performs a full save, which
+                                # would write a foreign key to a row that no longer exists
+                                # and strand the order uncancelled forever.
+                                order.refresh_from_db()
                         except Exception as e:
                             logger.error("🔥 [OrderProcessor] Failed to create proforma fallback: %s", e)
 

@@ -113,3 +113,29 @@ class DomainVirtualminSyncCommitBoundaryTests(TestCase):
                 Domain.objects.filter(pk=self.domain.pk).delete()
 
             sync.assert_not_called()
+
+    def test_a_failing_callback_does_not_punish_the_caller_that_committed(self) -> None:
+        """The post-commit sync must not turn someone else's successful write into an error.
+
+        The callback runs from Django's commit machinery, after the transaction closed and
+        outside the receiver's own broad handler. An exception there escapes into whoever
+        exited the atomic block. The concrete victim is the post-grace expiry sweep, which
+        would count a failure for a domain whose expiry actually committed, and then retry
+        it forever.
+
+        Registering with robust=True makes Django log the callback's exception and carry
+        on, which also protects any later callback queued behind this one — something a
+        try/except inside the callback would not do.
+        """
+        with (
+            patch(
+                "apps.domains.signals._sync_domain_to_virtualmin_by_pk",
+                side_effect=RuntimeError("virtualmin unreachable"),
+            ),
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            self.domain.suspend()
+            self.domain.save()
+
+        self.domain.refresh_from_db()
+        self.assertEqual(self.domain.status, "suspended", "the committed write must stand")
