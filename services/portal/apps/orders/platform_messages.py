@@ -15,14 +15,18 @@ tests/integration/test_platform_error_localisation.py derives the platform's mes
 set from its source and fails if this list drifts in either direction — a message added
 there and not here, or one kept here after the platform dropped it.
 
-Interpolated messages are excluded because they CANNOT work here, not because they do
-not matter. Their msgid holds a {} template while the portal receives the already
-formatted string, so a lookup can never match. Most of them report internal catalogue
-inconsistencies a customer could not act on anyway, but that is not true of all of them:
-"Item '{}': a domain is required before ordering" is squarely actionable and still
-reaches the customer in English. Translating it needs a different mechanism, such as the
-platform sending a code or the message being split so the product name is the only
-interpolated part. Recorded here so the gap is known rather than assumed away.
+Interpolated messages are excluded because they CANNOT work here: the msgid holds a {}
+template while the portal receives the already formatted string, so a lookup never
+matches. That exclusion used to hide a real gap — the domain requirement was squarely
+customer-actionable and reached people in English. It was reworded on the platform side
+to carry no placeholder and now appears in the list below.
+
+The five that remain excluded all report an internal catalogue or arithmetic fault: a
+negative price, a missing product reference, a currency with no price, a VAT mismatch, a
+total mismatch. A customer can do nothing about any of them, and each is really a bug
+report for staff, so shipping them in English is the honest outcome rather than an
+oversight. If another actionable one is ever added, reword it the same way instead of
+reaching for a new mechanism.
 """
 
 from django.utils.translation import gettext_lazy as _
@@ -32,6 +36,7 @@ from django.utils.translation import gettext_lazy as _
 PLATFORM_ORDER_ERRORS = (
     _("Failed to validate VAT and totals"),
     _("Order currency not set"),
+    _("Please provide a domain name for the items that require one"),
     _("Please provide a contact email address"),
     _("Please provide a contact name for your order"),
     _("Please provide your city"),

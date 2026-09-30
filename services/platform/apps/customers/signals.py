@@ -1307,14 +1307,26 @@ def _suspend_customer_services(customer: Customer) -> None:
 
         active_services = Service.objects.filter(customer=customer, status="active")
 
-        for service in active_services:
-            result = ServiceManagementService.manage_service(
-                str(service.id), "suspend", reason=CUSTOMER_SUSPENSION_REASON
-            )
-            if result.is_ok():
-                logger.info(f"⏸️ [Customer] Service suspended: {service.id}")
-            else:
-                logger.error(f"🔥 [Customer] Service suspension failed for {service.id}: {result.unwrap_err()}")
+        # One outcome, not an arbitrary prefix of one. This runs from a post-commit
+        # callback, so nothing wraps it and each service used to commit on its own: a
+        # worker timeout or pod eviction part way through left the customer marked
+        # suspended with some services down and the rest running, and nothing re-runs the
+        # cascade — it fires only on a status change that has already happened, and no
+        # sweep looks for "customer suspended, service active".
+        #
+        # This is not recovery and is not claimed to be. It makes the failure uniform, so
+        # it is detectable, and safe to retry, because the filter above already skips
+        # anything not active. An expected refusal still returns Err and is logged without
+        # aborting the rest; only an unexpected failure rolls the batch back.
+        with transaction.atomic():
+            for service in active_services:
+                result = ServiceManagementService.manage_service(
+                    str(service.id), "suspend", reason=CUSTOMER_SUSPENSION_REASON
+                )
+                if result.is_ok():
+                    logger.info(f"⏸️ [Customer] Service suspended: {service.id}")
+                else:
+                    logger.error(f"🔥 [Customer] Service suspension failed for {service.id}: {result.unwrap_err()}")
 
     except Exception as e:
         logger.exception(f"🔥 [Customer] Service suspension failed: {e}")

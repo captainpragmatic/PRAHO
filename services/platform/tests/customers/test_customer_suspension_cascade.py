@@ -13,7 +13,9 @@ stay honest if the call is rewired again.
 from __future__ import annotations
 
 from decimal import Decimal
+from unittest.mock import patch
 
+from django.db import DatabaseError
 from django.test import TestCase
 from django.utils import timezone as django_timezone
 
@@ -23,6 +25,7 @@ from apps.customers.models import Customer
 from apps.customers.signals import CUSTOMER_SUSPENSION_REASON
 from apps.products.models import Product
 from apps.provisioning.models import Service, ServicePlan
+from apps.provisioning.services import ServiceManagementService
 from tests.helpers.fsm_helpers import force_status
 
 
@@ -191,3 +194,44 @@ class CustomerReactivationCascadeTests(CustomerSuspensionCascadeTests):
 
         service.refresh_from_db()
         self.assertEqual(service.status, "suspended", "an unpaid customer got their hosting back")
+
+
+class CustomerSuspensionCascadeAtomicityTests(CustomerSuspensionCascadeTests):
+    """A cascade interrupted part way through must not leave the customer half-suspended.
+
+    The cascade runs from a post-commit callback, so there is no enclosing transaction,
+    and the suspend branch of manage_service has none of its own. Each service therefore
+    committed independently. A worker timeout or pod eviction after the third of ten
+    services left that customer marked suspended with three services down and seven
+    running, and nothing re-runs the cascade: it fires only on a status change that has
+    already happened, and no sweep looks for "customer suspended, service active".
+
+    Wrapping the loop does not give recovery, and this is not claimed to. What it gives is
+    a single outcome instead of an arbitrary prefix of one, which is both easier to detect
+    and safe to retry, since the loop already filters on status="active".
+    """
+
+    def test_a_failure_part_way_through_suspends_nothing(self) -> None:
+        first = self._service(domain="cascade-atomic-one.example.com")
+        second = self._service(domain="cascade-atomic-two.example.com")
+
+        real = ServiceManagementService.manage_service
+        calls: list[str] = []
+
+        def fail_on_the_second(service_id: str, action: str, **kwargs: object):
+            calls.append(service_id)
+            if len(calls) == 2:
+                raise DatabaseError("connection lost mid-cascade")
+            return real(service_id, action, **kwargs)
+
+        with patch.object(ServiceManagementService, "manage_service", side_effect=fail_on_the_second):
+            self._suspend_customer()
+
+        self.assertEqual(len(calls), 2, "precondition: the loop reached a second service")
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertEqual(
+            [first.status, second.status],
+            ["active", "active"],
+            "a partial cascade committed; this customer is half-suspended with no way back",
+        )

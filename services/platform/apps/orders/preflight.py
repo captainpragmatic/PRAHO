@@ -64,6 +64,14 @@ class OrderPreflightValidationService:
             warnings.append(str(_("Romanian business without VAT number - verify tax profile")))
 
         # 2) Pricing snapshots and product state per item
+        # Collected rather than emitted per item, because this one is customer-actionable
+        # and therefore has to survive translation. The portal translates our errors by
+        # looking each received string up as a message id, which can never match a string
+        # built with .format(): the id holds the placeholder and the portal receives the
+        # filled-in text. Every other interpolated message here reports an internal
+        # catalogue or arithmetic fault that a customer cannot act on, so those stay as
+        # they are and stay English.
+        items_missing_domain: list[str] = []
         for item in order_items:
             # Non-negative prices
             if int(item.unit_price_cents) < 0 or int(item.setup_cents) < 0:
@@ -80,7 +88,7 @@ class OrderPreflightValidationService:
                 # Price availability in catalog for the order currency
                 price = product.get_price_for_currency(order.currency.code)
                 if product.requires_domain and product.domain_required_at_signup and not item.domain_name.strip():
-                    errors.append(str(_("Item '{}': a domain is required before ordering").format(item.product_name)))
+                    items_missing_domain.append(str(item.product_name))
                 if price is None:
                     errors.append(
                         str(_("Item '{}': no current price for {}").format(item.product_name, order.currency.code))
@@ -89,6 +97,17 @@ class OrderPreflightValidationService:
                 # Snapshot presence (optional warn for legacy)
                 if not isinstance(item.config, dict) or not str(item.config.get("product_price_id", "")):
                     warnings.append(str(_("Item '{}': missing price snapshot metadata").format(item.product_name)))
+
+        if items_missing_domain:
+            # No placeholder, so the portal can translate it. The customer can see which
+            # item is short a domain on the checkout page, which already lists the cart;
+            # the item names go to the log so support keeps the detail.
+            errors.append(str(_("Please provide a domain name for the items that require one")))
+            logger.info(
+                "🛒 [Preflight] Order %s blocked: items missing a domain: %s",
+                order.id,
+                ", ".join(items_missing_domain),
+            )
 
         # 3) VAT and totals consistency - recompute
         try:
