@@ -1,9 +1,10 @@
 """`request_refund_view`, found untouched by any test - a money-affecting action.
 
 A refund is the one request on this endpoint where the customer's assumption ("it worked" vs
-"it did not") has a financial consequence if wrong. A status-only check could not distinguish
-a successful refund from a rejected one, since the view answers 200 for a rejection with
-`success: False` in the body as much as for an acceptance.
+"it did not") has a financial consequence if wrong. The view does map success and rejection to
+different status codes (200 vs 400), but a status-only check on the success path still leaves
+the refund_id itself unverified - a 200 proves the view didn't error, not that it returned the
+identifier the customer needs to track their own refund.
 """
 
 from __future__ import annotations

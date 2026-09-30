@@ -34,9 +34,11 @@ class ProviderListRouteTests(TestCase):
         self.assertContains(response, "HET")
 
     def test_no_providers_does_not_silently_render_an_empty_page(self) -> None:
+        # "Cloud Providers" is the unconditional page heading - it renders whether or not the
+        # empty-state branch does, so asserting it proves nothing about the empty state itself.
         response = self.client.get(reverse("infrastructure:provider_list"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Cloud Providers")
+        self.assertContains(response, "No providers configured")
 
 
 class SizeListRouteTests(TestCase):

@@ -33,7 +33,7 @@ class InvoicePdfExportTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/pdf")
-        self.assertIn("factura_INV-2026-0100.pdf", response["Content-Disposition"])
+        self.assertEqual(response["Content-Disposition"], 'attachment; filename="factura_INV-2026-0100.pdf"')
         self.assertEqual(response.content, b"%PDF-1.4 fake invoice bytes")
         get_pdf.assert_called_once_with("INV-2026-0100", 42, 7)
 
@@ -83,6 +83,8 @@ class ProformaPdfExportTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/pdf")
-        self.assertIn("PRO-2026-0050", response["Content-Disposition"])
+        # A bare substring match on the document number would still pass for the wrong prefix,
+        # extension, or disposition type (inline vs attachment) - assert the full header value.
+        self.assertEqual(response["Content-Disposition"], 'attachment; filename="proforma_PRO-2026-0050.pdf"')
         self.assertEqual(response.content, b"%PDF-1.4 fake proforma bytes")
         get_pdf.assert_called_once_with("PRO-2026-0050", 42, 7)
