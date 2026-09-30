@@ -18,6 +18,7 @@ Layer 3 (portal middleware):
 
 from __future__ import annotations
 
+import hashlib
 import ipaddress
 import json
 import logging
@@ -465,7 +466,18 @@ class TokenRequestAccountThrottle(_ConfigurableRateThrottle):
         email = request.data.get("email") if hasattr(request, "data") else None
         if not isinstance(email, str) or not email.strip():
             return None
-        return self.cache_format % {"scope": self.scope, "ident": email.strip().lower()}
+        # Hashed, for two reasons. An address may be up to 254 characters and the
+        # DatabaseCache backend stores keys in a 255-character column, so the raw value
+        # plus prefix and version can overflow it. And it keeps the address itself out of
+        # the cache table, which is not a place credentials-adjacent data needs to be.
+        #
+        # Case-folded rather than lowercased: `User.email` has no case-insensitive
+        # uniqueness constraint, but authentication resolves the address case-sensitively,
+        # so two spellings can be separate identities. Folding merges them into one
+        # bucket ON PURPOSE — otherwise varying the case is a free way to get a fresh
+        # budget, which is exactly the evasion this throttle exists to stop.
+        ident = hashlib.sha256(email.strip().casefold().encode("utf-8")).hexdigest()[:32]
+        return self.cache_format % {"scope": self.scope, "ident": ident}
 
 
 class AuthThrottle(_CustomTimeRateMixin, AnonRateThrottle):  # type: ignore[misc]  # DRF throttle base uses dynamic attrs

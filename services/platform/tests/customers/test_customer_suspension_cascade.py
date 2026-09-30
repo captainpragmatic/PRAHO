@@ -15,12 +15,12 @@ from __future__ import annotations
 from decimal import Decimal
 from unittest.mock import patch
 
-from django.db import DatabaseError
 from django.test import TestCase
 from django.utils import timezone as django_timezone
 
 from apps.billing.models import Currency
 from apps.billing.subscription_models import Subscription
+from apps.common.types import Err
 from apps.customers.models import Customer
 from apps.customers.signals import CUSTOMER_SUSPENSION_REASON
 from apps.products.models import Product
@@ -219,9 +219,15 @@ class CustomerSuspensionCascadeAtomicityTests(CustomerSuspensionCascadeTests):
         calls: list[str] = []
 
         def fail_on_the_second(service_id: str, action: str, **kwargs: object):
+            """Returns Err, which is what production actually does.
+
+            manage_service catches its own exceptions and converts them to Err. An
+            earlier version of this test raised instead, which exercised a path the
+            service never takes and let a real partial-commit bug pass.
+            """
             calls.append(service_id)
             if len(calls) == 2:
-                raise DatabaseError("connection lost mid-cascade")
+                return Err("connection lost mid-cascade")
             return real(service_id, action, **kwargs)
 
         with patch.object(ServiceManagementService, "manage_service", side_effect=fail_on_the_second):

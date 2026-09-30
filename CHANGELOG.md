@@ -14,9 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every login path, with no credentials needed. That endpoint no longer drives the lockout
   counter, and a per-account limit keyed on the submitted address replaces it. The lockout
   itself is unchanged on the paths that can attribute a failure.
-- Six public endpoints no longer accept an API token or session they never read. They
-  inherited the project default authentication classes, which meant presenting any valid
-  token also removed the only rate limit they had.
+- Six public endpoints no longer accept an API token or session they never read. They had
+  inherited the project default authentication classes. For customer registration this also
+  removed its only rate limit, because presenting a valid token made the request count as
+  authenticated and its limit applies to anonymous callers only.
 
 ### Fixed
 

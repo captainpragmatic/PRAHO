@@ -136,7 +136,9 @@ class ProductCatalogThrottle(EndpointRateThrottle):
 
 @public_api_endpoint
 @api_view(["GET"])
-@authentication_classes([])  # public: no credential is consulted, and accepting one would drop the anon throttle
+@authentication_classes([])  # public: consumes no credential, so a stray or invalid
+# Authorization header must not reject it, and a token issued without a second factor
+# must not be usable here (ADR-0031, and the house pattern the other public views follow)
 @permission_classes([AllowAny])
 @throttle_classes([ProductCatalogThrottle])
 def product_list(request: Request) -> Response:
@@ -177,7 +179,9 @@ def product_list(request: Request) -> Response:
 
 @public_api_endpoint
 @api_view(["GET"])
-@authentication_classes([])  # public: no credential is consulted, and accepting one would drop the anon throttle
+@authentication_classes([])  # public: consumes no credential, so a stray or invalid
+# Authorization header must not reject it, and a token issued without a second factor
+# must not be usable here (ADR-0031, and the house pattern the other public views follow)
 @permission_classes([AllowAny])
 @throttle_classes([ProductCatalogThrottle])
 def product_detail(request: Request, slug: str) -> Response:

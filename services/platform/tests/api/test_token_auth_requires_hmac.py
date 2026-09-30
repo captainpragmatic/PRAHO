@@ -11,11 +11,15 @@ accept a key; what makes a key unspendable from outside is that those views all 
 behind the HMAC gate. The moment a view accepts token authentication WITHOUT that gate,
 the missing second factor turns into account takeover.
 
-Six public endpoints were in exactly that position and are fixed alongside this test.
-They inherited the default classes, so a caller could authenticate to them with any valid
-key. Beyond the second-factor question that also silently removed their only rate limit,
-because DRF's anonymous throttle returns no cache key for an authenticated request and
-therefore does not limit it at all.
+Six public endpoints were in exactly that position and are fixed alongside this test. They
+inherited the default classes, so a caller could authenticate to them with any valid key.
+
+One of the six, customer registration, also lost its rate limit that way: its AuthThrottle
+is an AnonRateThrottle, and DRF returns no cache key for an authenticated request, so
+presenting a token removed the only limit it had. The other five were NOT affected — the
+product routes use a throttle that always returns a key, and the reference-data routes
+inherit user-aware ones. An earlier version of this file claimed the throttle loss applied
+to all six, which was wrong and is corrected here.
 
 Nothing in the code says so, and the endpoint's own docstring cannot enforce it. This
 test is the enforcement: it fails the build the day that precondition stops holding,

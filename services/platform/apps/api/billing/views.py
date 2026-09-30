@@ -818,7 +818,9 @@ def customer_invoice_summary_api(request: HttpRequest, customer: Customer) -> Re
 
 @public_api_endpoint
 @api_view(["GET"])
-@authentication_classes([])  # public: no credential is consulted, and accepting one would drop the anon throttle
+@authentication_classes([])  # public: consumes no credential, so a stray or invalid
+# Authorization header must not reject it, and a token issued without a second factor
+# must not be usable here (ADR-0031, and the house pattern the other public views follow)
 @permission_classes([AllowAny])
 def currencies_api(request: HttpRequest) -> Response:
     """
