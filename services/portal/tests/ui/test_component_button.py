@@ -226,3 +226,39 @@ class ButtonCustomClassTests(SimpleTestCase):
     def test_extra_class_applied(self) -> None:
         result = _render('{% button "Test" class_="w-full" %}')
         self.assertIn("w-full", result)
+
+
+# ===============================================================================
+# ICON TESTS
+# ===============================================================================
+
+
+class ButtonIconTests(SimpleTestCase):
+    """icon= used to render `<i class="{{ icon }}">` - a CSS-class-font icon system that was
+    never built (no CSS ever defined a class named "check", "trash", etc.), so every existing
+    icon= call site rendered an empty, invisible <i> tag. button.html now renders the real
+    {% icon %} SVG tag instead, the same one used directly everywhere else in this codebase."""
+
+    def test_icon_renders_an_svg_not_an_empty_i_tag(self) -> None:
+        result = _render('{% button "Apply" icon="check" %}')
+        self.assertIn("<svg", result)
+        self.assertNotIn('<i class="check', result)
+
+    def test_unknown_icon_name_renders_nothing_not_a_broken_tag(self) -> None:
+        result = _render('{% button "Apply" icon="not-a-real-icon" %}')
+        self.assertNotIn("<svg", result)
+
+    def test_icon_right_uses_flexbox_order_not_dom_position(self) -> None:
+        """The icon stays first in DOM order regardless of icon_right - the CSS `order-2` class
+        is what visually moves it after the label via flexbox, not source order."""
+        result = _render('{% button "Next" icon="check" icon_right=True %}')
+        self.assertIn("order-2", result)
+        self.assertLess(result.index("<svg"), result.index("btn-label"))
+
+    def test_icon_left_is_the_default_placement(self) -> None:
+        result = _render('{% button "Apply" icon="check" %}')
+        self.assertLess(result.index("<svg"), result.index("btn-label"))
+
+    def test_href_variant_also_renders_the_icon(self) -> None:
+        result = _render('{% button "Open" icon="check" href="/x/" %}')
+        self.assertIn("<svg", result)
