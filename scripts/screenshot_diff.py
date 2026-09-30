@@ -26,13 +26,14 @@ will not catch this, since neither one ever needed the cache to be busted.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import Page, sync_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "logs" / "e2e-fixtures.json"
@@ -67,24 +68,35 @@ def _login_and_get_context(playwright_browser):
     return context
 
 
+def _navigate_and_validate(page: Page, url: str) -> None:
+    """Shared by every capture path: the response must be a real 2xx for THIS url, and the
+    final URL must still be the one requested. Either check alone is not enough - a 500 error
+    page can still "land" on the requested path, and a redirect to a 200 page is not an error."""
+    response = page.goto(url, timeout=15000)
+    page.wait_for_load_state("networkidle", timeout=10000)
+    if response is None or not response.ok:
+        status = response.status if response is not None else "no response"
+        raise RuntimeError(f"navigating to {url!r} returned status {status} - not a valid page to screenshot.")
+    landed = urlparse(page.url).path
+    target_path = urlparse(url).path
+    if landed != target_path:
+        raise RuntimeError(
+            f"navigating to {target_path!r} ended on {landed!r} instead - likely a redirect "
+            "(permission denied, missing object) rather than the intended page."
+        )
+
+
 def capture(url: str, out: Path, mask_selectors: list[str]) -> None:
     with sync_playwright() as p:
         browser = p.chromium.launch()
-        context = _login_and_get_context(browser)
-        page = context.new_page()
-        page.goto(url, timeout=15000)
-        page.wait_for_load_state("networkidle", timeout=10000)
-        landed = urlparse(page.url).path
-        target_path = urlparse(url).path
-        if landed != target_path:
+        try:
+            context = _login_and_get_context(browser)
+            page = context.new_page()
+            _navigate_and_validate(page, url)
+            mask = [page.locator(sel) for sel in mask_selectors] if mask_selectors else None
+            page.screenshot(path=str(out), full_page=True, mask=mask)
+        finally:
             browser.close()
-            raise RuntimeError(
-                f"navigating to {target_path!r} ended on {landed!r} instead - likely a redirect "
-                "(permission denied, missing object) rather than the intended page."
-            )
-        mask = [page.locator(sel) for sel in mask_selectors] if mask_selectors else None
-        page.screenshot(path=str(out), full_page=True, mask=mask)
-        browser.close()
     print(f"captured {out}")
 
 
@@ -98,77 +110,93 @@ def capture_with_mutation(url: str, out: Path, mask_selectors: list[str]) -> Non
     document height, size mismatch, and a real detection got reported as -1 differing pixels."""
     with sync_playwright() as p:
         browser = p.chromium.launch()
-        context = _login_and_get_context(browser)
-        page = context.new_page()
-        page.goto(url, timeout=15000)
-        page.wait_for_load_state("networkidle", timeout=10000)
-        page.evaluate(
-            """() => {
-                const el = document.body;
-                el.style.outline = '12px solid magenta';
-                el.style.outlineOffset = '-12px';
-            }"""
-        )
-        mask = [page.locator(sel) for sel in mask_selectors] if mask_selectors else None
-        page.screenshot(path=str(out), full_page=True, mask=mask)
-        browser.close()
+        try:
+            context = _login_and_get_context(browser)
+            page = context.new_page()
+            _navigate_and_validate(page, url)
+            page.evaluate(
+                """() => {
+                    const el = document.body;
+                    el.style.outline = '12px solid magenta';
+                    el.style.outlineOffset = '-12px';
+                }"""
+            )
+            mask = [page.locator(sel) for sel in mask_selectors] if mask_selectors else None
+            page.screenshot(path=str(out), full_page=True, mask=mask)
+        finally:
+            browser.close()
     print(f"captured (mutated) {out}")
 
 
 def _slug(url: str) -> str:
-    """`/company/addresses/add/` -> `company_addresses_add.png` - stable across before/after runs
-    so batch_diff can pair files by name alone."""
+    """`/company/addresses/add/` -> `company_addresses_add-<hash>.png`. The path alone is not
+    unique - `/billing/invoices/?page=1` and `?page=2` both reduce to the same path, and
+    `/a/b/` collides with the literal segment `/a_b/` once `/` and `_` both become `_`. The
+    hash covers the full URL (path + query), so any real distinction between two URLs survives
+    even though the human-readable prefix does not."""
     path = urlparse(url).path.strip("/")
     safe = re.sub(r"[^a-zA-Z0-9_-]+", "_", path) or "root"
-    return f"{safe}.png"
+    digest = hashlib.sha256(url.encode()).hexdigest()[:8]
+    return f"{safe}-{digest}.png"
 
 
 def capture_many(urls: list[str], out_dir: Path, mask_selectors: list[str]) -> dict[str, Path]:
     """Log in once, capture every URL, return {url: png_path}. One login per batch, not one per
-    URL - 32 files times their pages would otherwise mean a login per capture."""
+    URL - 32 files times their pages would otherwise mean a login per capture.
+
+    Removes any pre-existing file at the target path before attempting the capture: a URL that
+    fails this run (redirect, non-2xx) must not leave behind a PNG from some earlier, different
+    run at the same out_dir - batch_diff() has no way to tell a stale success from a fresh one."""
     out_dir.mkdir(parents=True, exist_ok=True)
     results: dict[str, Path] = {}
     with sync_playwright() as p:
         browser = p.chromium.launch()
-        context = _login_and_get_context(browser)
-        for url in urls:
-            out = out_dir / _slug(url)
-            page = context.new_page()
-            page.goto(url, timeout=15000)
-            page.wait_for_load_state("networkidle", timeout=10000)
-            landed = urlparse(page.url).path
-            target_path = urlparse(url).path
-            if landed != target_path:
+        try:
+            context = _login_and_get_context(browser)
+            for url in urls:
+                out = out_dir / _slug(url)
+                out.unlink(missing_ok=True)
+                page = context.new_page()
+                try:
+                    _navigate_and_validate(page, url)
+                except RuntimeError as exc:
+                    page.close()
+                    print(f"⚠️  SKIPPED {url}: {exc}")
+                    continue
+                mask = [page.locator(sel) for sel in mask_selectors] if mask_selectors else None
+                page.screenshot(path=str(out), full_page=True, mask=mask)
                 page.close()
-                print(f"⚠️  SKIPPED {url}: landed on {landed!r} instead (redirect, not the target page)")
-                continue
-            mask = [page.locator(sel) for sel in mask_selectors] if mask_selectors else None
-            page.screenshot(path=str(out), full_page=True, mask=mask)
-            page.close()
-            results[url] = out
-            print(f"captured {url} -> {out}")
-        browser.close()
+                results[url] = out
+                print(f"captured {url} -> {out}")
+        finally:
+            browser.close()
     return results
 
 
-def batch_diff(before_dir: Path, after_dir: Path, out_dir: Path | None) -> dict[str, int | None]:
+def batch_diff(before_dir: Path, after_dir: Path, out_dir: Path | None) -> tuple[dict[str, int | None], set[str]]:
     """Diff every PNG in before_dir against its same-named counterpart in after_dir. Returns
-    {filename: differing_pixels_or_None}. A file present in only one directory is reported and
-    skipped, not silently ignored - a missing AFTER capture is a broken run, not a zero diff."""
+    ({filename: differing_pixels_or_None}, {filenames missing a counterpart in either
+    direction}). A file present in only one directory is reported, not silently ignored - a
+    missing AFTER capture is a broken run, not a zero diff, and the caller must be able to
+    fail on it rather than just print a warning nobody's exit code reflects."""
     results: dict[str, int | None] = {}
+    missing: set[str] = set()
     before_files = sorted(before_dir.glob("*.png"))
+    before_names = {p.name for p in before_files}
     for before_path in before_files:
         after_path = after_dir / before_path.name
         if not after_path.exists():
             print(f"⚠️  {before_path.name}: no matching AFTER capture at {after_path}")
+            missing.add(before_path.name)
             continue
         out = (out_dir / f"diff_{before_path.name}") if out_dir else None
         differing = diff(before_path, after_path, out)
         results[before_path.name] = differing
-    after_only = {p.name for p in after_dir.glob("*.png")} - {p.name for p in before_files}
+    after_only = {p.name for p in after_dir.glob("*.png")} - before_names
     for name in sorted(after_only):
         print(f"⚠️  {name}: no matching BEFORE capture")
-    return results
+        missing.add(name)
+    return results, missing
 
 
 def diff(before: Path, after: Path, out: Path | None) -> int | None:
@@ -291,15 +319,26 @@ def main() -> int:
         return 0 if len(results) == len(urls) else 1
 
     if args.command == "batch-diff":
+        if not args.before_dir.is_dir():
+            print(f"❌ before-dir does not exist: {args.before_dir}")
+            return 1
+        if not args.after_dir.is_dir():
+            print(f"❌ after-dir does not exist: {args.after_dir}")
+            return 1
         if args.out_dir:
             args.out_dir.mkdir(parents=True, exist_ok=True)
-        results = batch_diff(args.before_dir, args.after_dir, args.out_dir)
+        results, missing = batch_diff(args.before_dir, args.after_dir, args.out_dir)
+        if not results and not missing:
+            print(f"❌ nothing to compare: no PNGs found in {args.before_dir} or {args.after_dir}")
+            return 1
         changed = {name: count for name, count in results.items() if count != 0}
         for name, count in sorted(results.items()):
             marker = "≡" if count == 0 else "≠"
             print(f"  {marker} {name}: {count if count is not None else 'SIZE MISMATCH'}")
-        print(f"\n{len(results)} compared, {len(changed)} changed.")
-        return 0
+        for name in sorted(missing):
+            print(f"  ⚠️  {name}: missing counterpart")
+        print(f"\n{len(results)} compared, {len(changed)} changed, {len(missing)} missing a counterpart.")
+        return 0 if not changed and not missing else 1
 
     if args.command == "capture":
         capture(args.url, args.out, args.mask)
