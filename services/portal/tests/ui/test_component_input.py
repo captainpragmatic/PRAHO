@@ -238,3 +238,23 @@ class InputConstraintAttributeTests(SimpleTestCase):
         self.assertNotIn("onfocus", result)
         self.assertNotIn("autofocus=", result)
         self.assertIn('data-safe-key="ok"', result)
+
+
+class InputHxSyncAndIndicatorTests(SimpleTestCase):
+    """billing/partials/invoice_extra_filters.html's <select> uses hx-sync (to cancel a stale
+    in-flight request from a sibling filter) and hx-indicator - neither was in HTMXAttributes
+    or wired into input_field(), which would have silently dropped both on the swap."""
+
+    def test_hx_sync_renders_on_select(self) -> None:
+        result = _render('{% input_field "status" input_type="select" hx_get="/x/" hx_sync="closest form:abort" %}')
+        self.assertIn('hx-sync="closest form:abort"', result)
+
+    def test_hx_indicator_renders_on_select(self) -> None:
+        result = _render('{% input_field "status" input_type="select" hx_get="/x/" hx_indicator="#spinner" %}')
+        self.assertIn('hx-indicator="#spinner"', result)
+
+    def test_hx_sync_renders_on_input_and_textarea(self) -> None:
+        result = _render('{% input_field "f" hx_get="/x/" hx_sync="closest form:abort" %}')
+        self.assertIn('hx-sync="closest form:abort"', result)
+        result = _render('{% input_field "f" input_type="textarea" hx_get="/x/" hx_sync="closest form:abort" %}')
+        self.assertIn('hx-sync="closest form:abort"', result)
