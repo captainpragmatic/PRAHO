@@ -250,6 +250,63 @@ class IdentityOnlyExemptionTests(_DetectorTestCase):
         """
         self.assertEqual(self._scan_source(source), ["test_sample.py::test_the_team_page_lists_the_new_member"])
 
+    def test_a_self_attribute_binding_is_also_identity(self) -> None:
+        """`self.staff = create_staff_user(...)` is the ordinary Django idiom - 346 tests in this
+        repo force_login against a `self.` attribute. An Attribute target, not just a bare Name,
+        must be traced back to its creation call or every one of them would be a false positive."""
+        source = """
+        class MaintenanceGateTests(TestCase):
+            def test_staff_still_pass_through(self) -> None:
+                self.staff = create_staff_user(username="gate_admin")
+                self.client.force_login(self.staff)
+                response = self.client.get("/settings/")
+                self.assertEqual(response.status_code, 200)
+        """
+        self.assertEqual(self._scan_source(source), [])
+
+    def test_an_annotated_assignment_is_also_identity(self) -> None:
+        """`staff: User = create_staff_user(...)` is an `ast.AnnAssign`, a different node type from
+        the plain `ast.Assign` the first version of this check only looked for."""
+        source = """
+        class MaintenanceGateTests(TestCase):
+            def test_staff_still_pass_through(self) -> None:
+                staff: User = create_staff_user(username="gate_admin")
+                self.client.force_login(staff)
+                response = self.client.get("/settings/")
+                self.assertEqual(response.status_code, 200)
+        """
+        self.assertEqual(self._scan_source(source), [])
+
+    def test_a_credential_derived_from_the_created_user_is_also_identity(self) -> None:
+        """Django's `client.login()` takes credential VALUES, not the user object, so
+        `login(username=staff.username, password=...)` never passes `staff` itself to the login
+        call - only an attribute of it. The reference still has to resolve back to the creation."""
+        source = """
+        class MaintenanceGateTests(TestCase):
+            def test_staff_still_pass_through(self) -> None:
+                staff = create_staff_user(username="gate_admin")
+                self.client.login(username=staff.username, password="testpass123")
+                response = self.client.get("/settings/")
+                self.assertEqual(response.status_code, 200)
+        """
+        self.assertEqual(self._scan_source(source), [])
+
+    def test_reusing_a_login_name_for_an_unrelated_user_is_still_domain_state(self) -> None:
+        """The reaching-definition boundary: `user` is logged in as, then REBOUND to a second,
+        different user who is never authenticated as. Crediting every assignment ever made to a
+        reused name - rather than only the one that reached the login call - would let this second,
+        genuinely-untested subject hide behind a name that already earned its exemption."""
+        source = """
+        class TeamPageTests(TestCase):
+            def test_the_team_page_lists_the_new_member(self) -> None:
+                user = create_staff_user(username="owner")
+                self.client.force_login(user)
+                user = create_user(username="newcomer")
+                response = self.client.get("/team/")
+                self.assertEqual(response.status_code, 200)
+        """
+        self.assertEqual(self._scan_source(source), ["test_sample.py::test_the_team_page_lists_the_new_member"])
+
 
 class NonRequestTests(_DetectorTestCase):
     """The page-response gate must leave pure unit tests outside its scope."""
@@ -260,6 +317,22 @@ class NonRequestTests(_DetectorTestCase):
         class VatCalculationTests(SimpleTestCase):
             def test_vat_is_calculated_in_minor_units(self) -> None:
                 self.assertEqual(calculate_vat(10000, 19), 1900)
+        """
+        self.assertEqual(self._scan_source(source), [])
+
+    def test_a_response_shaped_object_without_a_client_call_is_ignored(self) -> None:
+        """Textually indistinguishable from a real finding - domain setup, then a literal
+        `status_code, 200` assertion - with the one thing that actually matters missing: no
+        `self.client.*` call anywhere. Without the request guard doing real work, this fixture's
+        text alone would satisfy every later check and be flagged; it must be the ABSENCE of a
+        request, not the presence of a status-code-shaped assertion, that exempts it.
+        """
+        source = """
+        class VatCalculationTests(SimpleTestCase):
+            def test_a_locally_built_response_is_not_a_request(self) -> None:
+                Invoice.objects.create(customer=self.customer, status="paid")
+                response = FakeResponse(status_code=200)
+                self.assertEqual(response.status_code, 200)
         """
         self.assertEqual(self._scan_source(source), [])
 

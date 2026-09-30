@@ -171,35 +171,91 @@ def _factory_call_name(call: ast.Call) -> str | None:
     return name if isinstance(name, str) and _IDENTITY_FACTORY.match(name) else None
 
 
+def _binding_key(target: ast.expr) -> str | None:
+    """A stable key for an assignment target this module can trace.
+
+    `x` for a bare name, and the final attribute for `self.x` - a receiver-qualified attribute is
+    how almost every Django test in this repo binds a fixture (`self.staff = create_staff_user(...)`
+    in `setUp`, or inline in the test itself). Anything else - subscripts, tuple unpacking - is left
+    untracked, which is the conservative direction: an untracked binding cannot be credited as
+    identity, so it falls back to being treated as domain state rather than silently exempted.
+    """
+    if isinstance(target, ast.Name):
+        return target.id
+    if isinstance(target, ast.Attribute):
+        return target.attr
+    return None
+
+
+def _referenced_keys(expr: ast.expr) -> set[str]:
+    """Every name this expression touches, by the same key `_binding_key` would produce for it.
+
+    `client.login(username=staff.username, password=...)` is exactly as much an identity act as
+    `client.force_login(staff)` - Django's `login()` takes credential VALUES, not the user object,
+    so the only way to connect `staff.username` back to `staff = create_staff_user(...)` is to walk
+    into the attribute access rather than requiring the argument to be a bare name.
+    """
+    keys: set[str] = set()
+    for node in ast.walk(expr):
+        if isinstance(node, ast.Name):
+            keys.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            keys.add(node.attr)
+    return keys
+
+
 def _user_creation_is_all_identity(fn: ast.FunctionDef) -> bool:
     """True when every user this test creates is one it logs in as.
 
-    Both shapes are written in this repo and mean the same thing:
+    All of these are written in this repo and mean the same thing:
 
         self.client.force_login(create_admin_user(username="x"))
         staff = create_staff_user(username="x"); self.client.force_login(staff)
+        self.staff = create_staff_user(username="x"); self.client.force_login(self.staff)
+        staff: User = create_staff_user(username="x"); self.client.force_login(staff)
+        staff = create_staff_user(username="x"); self.client.login(username=staff.username, password="x")
 
     A user created and never authenticated as is different: it is a row the page is expected to
     display, so asserting only the status leaves the display unchecked.
+
+    Reused names are resolved by line number, not by name alone: `user = create_staff_user(...)`,
+    `force_login(user)`, then `user = create_user(...)` for an unrelated subject must credit only
+    the FIRST creation (the one that reached the login call), not both - crediting both would let a
+    genuinely new, unauthenticated-as subject hide behind a name that already earned its exemption.
     """
+    bindings: dict[str, list[tuple[int, ast.Call]]] = {}
+    for node in ast.walk(fn):
+        target: ast.expr | None = None
+        value: ast.expr | None = None
+        lineno = 0
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target, value, lineno = node.targets[0], node.value, node.lineno
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            target, value, lineno = node.target, node.value, node.lineno
+        if target is None or value is None or not isinstance(value, ast.Call):
+            continue
+        key = _binding_key(target)
+        if key is None or not _factory_call_name(value):
+            continue
+        bindings.setdefault(key, []).append((lineno, value))
+
     consumed: set[int] = set()
-    login_names: set[str] = set()
     for call in ast.walk(fn):
         if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)):
             continue
         if call.func.attr not in _LOGIN_METHODS:
             continue
         for arg in (*call.args, *(kw.value for kw in call.keywords)):
-            consumed.update(id(node) for node in ast.walk(arg))
-            if isinstance(arg, ast.Name):
-                login_names.add(arg.id)
-
-    # A user bound to a name that a login call later uses is just as consumed as a nested one.
-    for assign in ast.walk(fn):
-        if not isinstance(assign, ast.Assign):
-            continue
-        if any(isinstance(target, ast.Name) and target.id in login_names for target in assign.targets):
-            consumed.update(id(node) for node in ast.walk(assign.value))
+            # Directly nested: `force_login(create_admin_user(...))` - the creation IS the argument.
+            for node in ast.walk(arg):
+                if isinstance(node, ast.Call) and _factory_call_name(node):
+                    consumed.add(id(node))
+            # Bound earlier: resolve each referenced key to its most recent assignment AT OR BEFORE
+            # this call's line - the reaching definition, not every assignment ever made to that name.
+            for key in _referenced_keys(arg):
+                reaching = [pair for pair in bindings.get(key, []) if pair[0] <= call.lineno]
+                if reaching:
+                    consumed.add(id(max(reaching, key=lambda pair: pair[0])[1]))
 
     creations = [call for call in ast.walk(fn) if isinstance(call, ast.Call) and _factory_call_name(call)]
     return all(id(call) in consumed for call in creations)
