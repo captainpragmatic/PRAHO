@@ -148,3 +148,59 @@ class InputTypeTests(SimpleTestCase):
     def test_email_type_attribute(self) -> None:
         result = _render('{% input_field "f" input_type="email" %}')
         self.assertIn('type="email"', result)
+
+
+# ===============================================================================
+# CONSTRAINT ATTRIBUTE PASSTHROUGH TESTS
+# ===============================================================================
+
+
+class InputConstraintAttributeTests(SimpleTestCase):
+    """components/input.html already reads min/max/step/maxlength/pattern/autocomplete/
+    autofocus/rows/multiple/data_attrs ({% if min %}, {% if rows %}, ...), but InputConfig had
+    none of these fields - a kwarg matching neither InputConfig nor HTMXAttributes is silently
+    dropped by input_field()'s **kwargs loop (hasattr() is False for both), not rejected, so the
+    attribute just never reached the template. Each of these fails on the pre-fix component."""
+
+    def test_min_and_max_render_on_number_input(self) -> None:
+        result = _render('{% input_field "age" input_type="number" min=0 max=120 %}')
+        self.assertIn('min="0"', result)
+        self.assertIn('max="120"', result)
+
+    def test_zero_value_still_renders(self) -> None:
+        """`{% if value %}` treats 0 as absent, same trap as min=0 - a numeric field whose
+        current value is legitimately 0 would render with no value attribute at all."""
+        result = _render('{% input_field "quantity" input_type="number" value=0 %}')
+        self.assertIn('value="0"', result)
+
+    def test_step_renders(self) -> None:
+        result = _render('{% input_field "price" input_type="number" step="0.01" %}')
+        self.assertIn('step="0.01"', result)
+
+    def test_maxlength_renders(self) -> None:
+        result = _render('{% input_field "name" maxlength=50 %}')
+        self.assertIn('maxlength="50"', result)
+
+    def test_pattern_renders(self) -> None:
+        result = _render('{% input_field "code" pattern="[0-9]{4}" %}')
+        self.assertIn('pattern="[0-9]{4}"', result)
+
+    def test_autocomplete_renders(self) -> None:
+        result = _render('{% input_field "email" input_type="email" autocomplete="email" %}')
+        self.assertIn('autocomplete="email"', result)
+
+    def test_autofocus_renders(self) -> None:
+        result = _render('{% input_field "search" autofocus=True %}')
+        self.assertIn("autofocus", result)
+
+    def test_rows_renders_on_textarea(self) -> None:
+        result = _render('{% input_field "notes" input_type="textarea" rows=8 %}')
+        self.assertIn('rows="8"', result)
+
+    def test_multiple_renders_on_select(self) -> None:
+        result = _render('{% input_field "tags" input_type="select" multiple=True %}')
+        self.assertIn("multiple", result)
+
+    def test_data_attrs_render_as_individual_data_attributes(self) -> None:
+        result = _render('{% input_field "f" data_attrs=attrs %}', {"attrs": {"testid": "f-input"}})
+        self.assertIn('data-testid="f-input"', result)
