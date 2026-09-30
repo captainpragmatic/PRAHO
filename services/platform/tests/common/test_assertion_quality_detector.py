@@ -52,7 +52,7 @@ class StatusOnlyDetectionTests(_DetectorTestCase):
                 response = self.client.get("/x/")
                 self.assertEqual(response.status_code, 200)
         """
-        self.assertEqual(self._scan_source(source), ["test_sample.py::test_paid_invoices_are_shown"])
+        self.assertEqual(self._scan_source(source), ["test_sample.py::InvoicePageTests.test_paid_invoices_are_shown"])
 
     def test_a_bare_200_with_a_query_string_is_flagged(self) -> None:
         """A filter can be ignored while the page still returns 200."""
@@ -62,7 +62,7 @@ class StatusOnlyDetectionTests(_DetectorTestCase):
                 response = self.client.get("/x/?status=paid")
                 self.assertEqual(response.status_code, 200)
         """
-        self.assertEqual(self._scan_source(source), ["test_sample.py::test_paid_filter_is_applied"])
+        self.assertEqual(self._scan_source(source), ["test_sample.py::InvoicePageTests.test_paid_filter_is_applied"])
 
     def test_a_bare_200_with_post_data_is_flagged(self) -> None:
         """Accepting a payload says nothing about whether its effect is correct."""
@@ -72,7 +72,7 @@ class StatusOnlyDetectionTests(_DetectorTestCase):
                 response = self.client.post("/x/", data={"status": "paid"})
                 self.assertEqual(response.status_code, 200)
         """
-        self.assertEqual(self._scan_source(source), ["test_sample.py::test_paid_filter_is_submitted"])
+        self.assertEqual(self._scan_source(source), ["test_sample.py::InvoicePageTests.test_paid_filter_is_submitted"])
 
 
 class StatusIsTheBehaviourTests(_DetectorTestCase):
@@ -205,7 +205,7 @@ class IdentityOnlyExemptionTests(_DetectorTestCase):
                 response = self.client.get("/x/")
                 self.assertEqual(response.status_code, 200)
         """
-        self.assertEqual(self._scan_source(source), ["test_sample.py::test_the_ticket_page_is_accessible"])
+        self.assertEqual(self._scan_source(source), ["test_sample.py::TicketPageTests.test_the_ticket_page_is_accessible"])
 
     def test_creating_the_user_it_logs_in_as_is_not_domain_state(self) -> None:
         """Establishing WHO is asking is the identity act, not state the page should reflect.
@@ -248,7 +248,7 @@ class IdentityOnlyExemptionTests(_DetectorTestCase):
                 response = self.client.get("/team/")
                 self.assertEqual(response.status_code, 200)
         """
-        self.assertEqual(self._scan_source(source), ["test_sample.py::test_the_team_page_lists_the_new_member"])
+        self.assertEqual(self._scan_source(source), ["test_sample.py::TeamPageTests.test_the_team_page_lists_the_new_member"])
 
     def test_a_self_attribute_binding_is_also_identity(self) -> None:
         """`self.staff = create_staff_user(...)` is the ordinary Django idiom - 346 tests in this
@@ -305,7 +305,64 @@ class IdentityOnlyExemptionTests(_DetectorTestCase):
                 response = self.client.get("/team/")
                 self.assertEqual(response.status_code, 200)
         """
-        self.assertEqual(self._scan_source(source), ["test_sample.py::test_the_team_page_lists_the_new_member"])
+        self.assertEqual(self._scan_source(source), ["test_sample.py::TeamPageTests.test_the_team_page_lists_the_new_member"])
+
+    def test_a_differently_bound_object_sharing_an_attribute_name_is_not_credited(self) -> None:
+        """`_binding_key` used to key an Attribute target by its trailing name alone, so a LOCAL
+        `member` and a `self.member` set up elsewhere both reduced to the same key "member". That
+        let `force_login(self.member)` - authenticating as a fixture from setUp - wrongly credit the
+        creation of an unrelated, never-authenticated `member` created earlier in this same test."""
+        source = """
+        class TeamPageTests(TestCase):
+            def test_the_team_page_lists_the_new_member(self) -> None:
+                member = create_user(username="newcomer")
+                self.client.force_login(self.member)
+                response = self.client.get("/team/")
+                self.assertEqual(response.status_code, 200)
+        """
+        self.assertEqual(self._scan_source(source), ["test_sample.py::TeamPageTests.test_the_team_page_lists_the_new_member"])
+
+    def test_a_non_factory_reassignment_before_login_kills_the_earlier_binding(self) -> None:
+        """`user` is bound to a created staff member, then REBOUND to `self.owner` - a non-factory
+        value - before `force_login(user)` runs. The reaching definition at the login call is the
+        rebinding, not the creation, so nothing about this test's identity claim covers the earlier
+        creation; it must still read as an uncredited domain-state subject."""
+        source = """
+        class TeamPageTests(TestCase):
+            def test_the_team_page_lists_the_new_member(self) -> None:
+                user = create_staff_user(username="newcomer")
+                user = self.owner
+                self.client.force_login(user)
+                response = self.client.get("/team/")
+                self.assertEqual(response.status_code, 200)
+        """
+        self.assertEqual(self._scan_source(source), ["test_sample.py::TeamPageTests.test_the_team_page_lists_the_new_member"])
+
+    def test_two_classes_with_the_same_test_method_name_get_distinct_findings(self) -> None:
+        """Two unrelated classes in one file both naming a method `test_list_view` used to collapse
+        to the identical finding string `path::test_list_view`. Baselining the genuinely-debt one
+        would then also silently exempt the other, distinct, never-reviewed test. Qualifying by the
+        containing class must keep them as two independent findings."""
+        source = """
+        class ActiveListTests(TestCase):
+            def test_list_view(self) -> None:
+                Invoice.objects.create(customer=self.customer, status="paid")
+                response = self.client.get("/active/")
+                self.assertEqual(response.status_code, 200)
+
+        class ArchivedListTests(TestCase):
+            def test_list_view(self) -> None:
+                Invoice.objects.create(customer=self.customer, status="archived")
+                response = self.client.get("/archived/")
+                self.assertEqual(response.status_code, 200)
+        """
+        self.assertCountEqual(
+            self._scan_source(source),
+            [
+                "test_sample.py::ActiveListTests.test_list_view",
+                "test_sample.py::ArchivedListTests.test_list_view",
+            ],
+        )
 
 
 class NonRequestTests(_DetectorTestCase):
@@ -347,7 +404,7 @@ class RatchetTests(_DetectorTestCase):
         '        response = self.client.get("/x/")\n'
         "        self.assertEqual(response.status_code, 200)\n"
     )
-    FINDING = "test_sample.py::test_paid_invoices_are_shown"
+    FINDING = "test_sample.py::InvoicePageTests.test_paid_invoices_are_shown"
 
     def test_findings_matching_the_baseline_exit_zero(self) -> None:
         """Known debt must not make the new blocking target fail immediately."""

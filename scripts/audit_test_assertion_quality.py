@@ -174,16 +174,18 @@ def _factory_call_name(call: ast.Call) -> str | None:
 def _binding_key(target: ast.expr) -> str | None:
     """A stable key for an assignment target this module can trace.
 
-    `x` for a bare name, and the final attribute for `self.x` - a receiver-qualified attribute is
-    how almost every Django test in this repo binds a fixture (`self.staff = create_staff_user(...)`
-    in `setUp`, or inline in the test itself). Anything else - subscripts, tuple unpacking - is left
-    untracked, which is the conservative direction: an untracked binding cannot be credited as
+    `x` for a bare name, and `receiver.x` - qualified by the receiver, not just the trailing
+    attribute - for `self.x`. Qualifying by receiver matters: `self.staff` and `other.staff` (or a
+    bare `staff`) are different bindings that happen to share an attribute name, and collapsing them
+    to the same key credits one object's creation as covering a login that actually used a different
+    object. Anything else - subscripts, tuple unpacking, an attribute on a non-Name receiver - is
+    left untracked, which is the conservative direction: an untracked binding cannot be credited as
     identity, so it falls back to being treated as domain state rather than silently exempted.
     """
     if isinstance(target, ast.Name):
         return target.id
-    if isinstance(target, ast.Attribute):
-        return target.attr
+    if isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name):
+        return f"{target.value.id}.{target.attr}"
     return None
 
 
@@ -193,14 +195,16 @@ def _referenced_keys(expr: ast.expr) -> set[str]:
     `client.login(username=staff.username, password=...)` is exactly as much an identity act as
     `client.force_login(staff)` - Django's `login()` takes credential VALUES, not the user object,
     so the only way to connect `staff.username` back to `staff = create_staff_user(...)` is to walk
-    into the attribute access rather than requiring the argument to be a bare name.
+    into the attribute access rather than requiring the argument to be a bare name. The receiver
+    itself (`staff`) is also walked as a plain `ast.Name`, so both `staff` and `staff.username` land
+    in the result - matching whichever way the creation happened to bind it.
     """
     keys: set[str] = set()
     for node in ast.walk(expr):
         if isinstance(node, ast.Name):
             keys.add(node.id)
-        elif isinstance(node, ast.Attribute):
-            keys.add(node.attr)
+        elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            keys.add(f"{node.value.id}.{node.attr}")
     return keys
 
 
@@ -222,8 +226,15 @@ def _user_creation_is_all_identity(fn: ast.FunctionDef) -> bool:
     `force_login(user)`, then `user = create_user(...)` for an unrelated subject must credit only
     the FIRST creation (the one that reached the login call), not both - crediting both would let a
     genuinely new, unauthenticated-as subject hide behind a name that already earned its exemption.
+
+    The reverse direction matters just as much: `user = create_staff_user(...)`, then
+    `user = self.owner` (a non-factory reassignment) BEFORE `force_login(user)`, must credit
+    nothing. By the time of the login call, `user` no longer refers to the created object - the
+    reassignment kills the earlier binding. Every assignment to a tracked key is recorded, not only
+    the factory-call ones, so a later non-factory write can shadow an earlier factory one instead of
+    being invisible to the reaching-definition lookup.
     """
-    bindings: dict[str, list[tuple[int, ast.Call]]] = {}
+    bindings: dict[str, list[tuple[int, ast.Call | None]]] = {}
     for node in ast.walk(fn):
         target: ast.expr | None = None
         value: ast.expr | None = None
@@ -232,12 +243,13 @@ def _user_creation_is_all_identity(fn: ast.FunctionDef) -> bool:
             target, value, lineno = node.targets[0], node.value, node.lineno
         elif isinstance(node, ast.AnnAssign) and node.value is not None:
             target, value, lineno = node.target, node.value, node.lineno
-        if target is None or value is None or not isinstance(value, ast.Call):
+        if target is None or value is None:
             continue
         key = _binding_key(target)
-        if key is None or not _factory_call_name(value):
+        if key is None:
             continue
-        bindings.setdefault(key, []).append((lineno, value))
+        factory_call = value if isinstance(value, ast.Call) and _factory_call_name(value) else None
+        bindings.setdefault(key, []).append((lineno, factory_call))
 
     consumed: set[int] = set()
     for call in ast.walk(fn):
@@ -252,10 +264,15 @@ def _user_creation_is_all_identity(fn: ast.FunctionDef) -> bool:
                     consumed.add(id(node))
             # Bound earlier: resolve each referenced key to its most recent assignment AT OR BEFORE
             # this call's line - the reaching definition, not every assignment ever made to that name.
+            # Only credit it when that reaching assignment is itself a factory call; a non-factory
+            # reassignment reaching the call site kills the earlier binding instead of passing it through.
             for key in _referenced_keys(arg):
                 reaching = [pair for pair in bindings.get(key, []) if pair[0] <= call.lineno]
-                if reaching:
-                    consumed.add(id(max(reaching, key=lambda pair: pair[0])[1]))
+                if not reaching:
+                    continue
+                _, factory_call = max(reaching, key=lambda pair: pair[0])
+                if factory_call is not None:
+                    consumed.add(id(factory_call))
 
     creations = [call for call in ast.walk(fn) if isinstance(call, ast.Call) and _factory_call_name(call)]
     return all(id(call) in consumed for call in creations)
@@ -296,6 +313,32 @@ def _helper_bodies(tree: ast.Module) -> dict[str, ast.FunctionDef]:
     }
 
 
+def _qualified_test_names(tree: ast.Module) -> dict[int, str]:
+    """`ClassName.test_method` for a test method, or the bare name for a module-level test function.
+
+    `ast.walk` has no parent pointers, so two unrelated classes in the same file that both define
+    `test_all_status_filter` (this repo has exactly that, in test_audit_views_regressions.py) produce
+    identical `path::test_all_status_filter` finding strings with a name-only key. Once baselined,
+    that single string exempts BOTH methods - a genuinely new violation in one class hides behind an
+    already-accepted finding in the other. Walking with class context breaks the tie.
+    """
+    qualified: dict[int, str] = {}
+
+    def visit(node: ast.AST, class_name: str | None) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.ClassDef):
+                visit(child, child.name)
+            elif isinstance(child, ast.FunctionDef):
+                if child.name.startswith("test"):
+                    qualified[id(child)] = f"{class_name}.{child.name}" if class_name else child.name
+                visit(child, None)
+            else:
+                visit(child, class_name)
+
+    visit(tree, None)
+    return qualified
+
+
 def _asserted_status_codes(source_lines: list[str], fn: ast.FunctionDef) -> set[str]:
     body = "\n".join(source_lines[fn.lineno - 1 : (fn.end_lineno or fn.lineno)])
     codes = set(re.findall(r"status_code,?\s*(?:==\s*)?(\d{3})", body))
@@ -312,6 +355,7 @@ def scan_file(path: Path) -> list[str]:
         return []
     lines = source.splitlines()
     helpers = _helper_bodies(tree)
+    qualified_names = _qualified_test_names(tree)
     findings: list[str] = []
 
     for fn in ast.walk(tree):
@@ -334,7 +378,8 @@ def scan_file(path: Path) -> list[str]:
             continue
         if _varies_only_identity(lines, fn):
             continue
-        findings.append(f"{path.relative_to(PROJECT_ROOT)}::{fn.name}")
+        name = qualified_names.get(id(fn), fn.name)
+        findings.append(f"{path.relative_to(PROJECT_ROOT)}::{name}")
 
     return findings
 
