@@ -3,7 +3,7 @@
 # ===============================================================================
 # Enhanced for Platform/Portal separation with scoped PYTHONPATH security
 
-.PHONY: help install lock-upgrade check-env check-venv-platform dev dev-e2e dev-e2e-bg dev-e2e-csp dev-platform dev-portal dev-all test test-fast test-file test-platform test-platform-fast test-ci test-ci-focused test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-file test-e2e-csp test-e2e-orm test-security test-cache show-test-deps install-frontend build-css watch-css check-css-tooling migrate check-migrations fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-imports lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict lint-error-handling
+.PHONY: help install lock-upgrade check-env check-venv-platform dev dev-e2e dev-e2e-bg dev-e2e-csp dev-platform dev-portal dev-all test test-fast test-file test-platform test-platform-fast test-ci test-ci-focused test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-file test-e2e-csp test-e2e-orm test-security test-cache show-test-deps install-frontend build-css watch-css check-css-tooling migrate check-migrations fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-imports lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict lint-error-handling lint-assertion-quality
 
 # ===============================================================================
 # SCOPED PYTHON ENVIRONMENTS 🔒
@@ -766,6 +766,8 @@ else
 	@$(MAKE) lint-imports
 	@echo "📋 Phase 9: Error handling risk scan"
 	@$(MAKE) lint-error-handling
+	@echo "📋 Phase 10: Status-only test assertion ratchet"
+	@$(MAKE) lint-assertion-quality
 	@echo "🎉 All services linting complete!"
 endif
 
@@ -869,6 +871,15 @@ lint-security:
 lint-error-handling:
 	@echo "🧯 [Error Handling] Scanning for swallowed failures..."
 	@$(VENV_DIR)/bin/python scripts/error_handling_scan.py services/ --exclude-tests --min-severity high
+
+# Blocking on purpose. This is a ratchet against a baseline (scripts/status_only_test_baseline.txt),
+# not a count-based gate: it can only fail on a NEW status-only test, or on a baselined one that grew
+# a real assertion and was not removed from the list. It cannot fail merely because debt exists, so
+# there is no `|| true` here — unlike a raw violation count, a ratchet at zero current drift is safe
+# to block builds on from day one.
+lint-assertion-quality:
+	@echo "🔬 [Assertion Quality] Scanning for tests that assert only HTTP 200..."
+	@$(VENV_DIR)/bin/python scripts/audit_test_assertion_quality.py
 
 lint-credentials:
 	@echo "🔑 [Credentials] Hardcoded credentials security check..."
