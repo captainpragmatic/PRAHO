@@ -245,8 +245,14 @@ class ButtonIconTests(SimpleTestCase):
         self.assertNotIn('<i class="check', result)
 
     def test_unknown_icon_name_renders_nothing_not_a_broken_tag(self) -> None:
+        """Asserting only the absence of <svg> would pass against the pre-fix <i class="..."">
+        implementation too, since that one never emitted <svg> for anything - proving nothing
+        about which implementation is live. Also assert the dead <i> tag is gone and the label
+        still renders, which only the fixed version satisfies."""
         result = _render('{% button "Apply" icon="not-a-real-icon" %}')
         self.assertNotIn("<svg", result)
+        self.assertNotIn("<i class=", result)
+        self.assertIn("Apply", result)
 
     def test_icon_right_uses_flexbox_order_not_dom_position(self) -> None:
         """The icon stays first in DOM order regardless of icon_right - the CSS `order-2` class
