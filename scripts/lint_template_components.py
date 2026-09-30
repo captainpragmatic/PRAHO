@@ -407,11 +407,14 @@ def main() -> int:
     print(f"📊 {blocker_count} blocker(s)  |  {warn_count} warning(s)")
 
     if has_fail:
-        print(f"\n❌ Non-zero exit: {fail_count} violation(s) at the requested severity found.")
+        print(f"\n❌ Non-zero exit: {fail_count} violation(s) matching --fail-on codes found.")
         print("   Fix the violations above or update design-system docs if intentional.")
         return 1
 
-    print("\n⚠️  Warnings only — exit 0 (fix before Phase A Definition of Done).")
+    if warn_count or blocker_count:
+        print(f"\n⚠️  {blocker_count + warn_count} violation(s) found, none matching --fail-on codes — exit 0.")
+    else:
+        print("\n✅ No violations found — exit 0.")
     return 0
 
 
