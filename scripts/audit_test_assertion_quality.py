@@ -149,10 +149,60 @@ def _reads_beyond_status(node: ast.AST) -> bool:
 
 
 # Calls that establish domain state the page is then expected to reflect.
-_STATE_SETUP = re.compile(
+#
+# User-creating helpers are deliberately NOT here. Creating the user a test then authenticates as is
+# the identity act, not state the page should show, and conflating the two flagged
+# `test_maintenance_gate.py::test_staff_still_pass_through` - a test whose 200 proves the maintenance
+# middleware's staff bypass works, and which would be 503 if that bypass broke. They are handled by
+# `_user_creation_is_all_identity` instead, which asks the discriminating question: was this user
+# handed to a login call, or left as a subject the page is supposed to display?
+_DOMAIN_STATE = re.compile(
     r"\.objects\.(?:create|bulk_create|get_or_create|update)\(|\.save\(|Factory\(|"
-    r"\bcreate_(?:full_)?(?:customer|invoice|order|ticket|user|staff_user|admin_user)\("
+    r"\bcreate_(?:full_)?(?:customer|invoice|order|ticket)\("
 )
+_IDENTITY_FACTORY = re.compile(r"^create_(?:full_)?(?:user|staff_user|admin_user)$")
+_LOGIN_METHODS = frozenset({"force_login", "login"})
+
+
+def _factory_call_name(call: ast.Call) -> str | None:
+    """The called name, when it is one of the user-creating helpers."""
+    func = call.func
+    name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
+    return name if isinstance(name, str) and _IDENTITY_FACTORY.match(name) else None
+
+
+def _user_creation_is_all_identity(fn: ast.FunctionDef) -> bool:
+    """True when every user this test creates is one it logs in as.
+
+    Both shapes are written in this repo and mean the same thing:
+
+        self.client.force_login(create_admin_user(username="x"))
+        staff = create_staff_user(username="x"); self.client.force_login(staff)
+
+    A user created and never authenticated as is different: it is a row the page is expected to
+    display, so asserting only the status leaves the display unchecked.
+    """
+    consumed: set[int] = set()
+    login_names: set[str] = set()
+    for call in ast.walk(fn):
+        if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)):
+            continue
+        if call.func.attr not in _LOGIN_METHODS:
+            continue
+        for arg in (*call.args, *(kw.value for kw in call.keywords)):
+            consumed.update(id(node) for node in ast.walk(arg))
+            if isinstance(arg, ast.Name):
+                login_names.add(arg.id)
+
+    # A user bound to a name that a login call later uses is just as consumed as a nested one.
+    for assign in ast.walk(fn):
+        if not isinstance(assign, ast.Assign):
+            continue
+        if any(isinstance(target, ast.Name) and target.id in login_names for target in assign.targets):
+            consumed.update(id(node) for node in ast.walk(assign.value))
+
+    creations = [call for call in ast.walk(fn) if isinstance(call, ast.Call) and _factory_call_name(call)]
+    return all(id(call) in consumed for call in creations)
 
 
 def _varies_only_identity(source_lines: list[str], fn: ast.FunctionDef) -> bool:
@@ -163,7 +213,9 @@ def _varies_only_identity(source_lines: list[str], fn: ast.FunctionDef) -> bool:
     supposed to show - and asserting only the status leaves that unchecked.
     """
     body = "\n".join(source_lines[fn.lineno - 1 : (fn.end_lineno or fn.lineno)])
-    if _STATE_SETUP.search(body):
+    if _DOMAIN_STATE.search(body):
+        return False
+    if not _user_creation_is_all_identity(fn):
         return False
     for call in ast.walk(fn):
         if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)):
