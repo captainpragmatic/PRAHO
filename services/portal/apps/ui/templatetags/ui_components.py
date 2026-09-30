@@ -6,6 +6,7 @@ HTMX-powered reusable components for Romanian hosting provider interface
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -953,6 +954,23 @@ def status_label(status: str) -> str:
     if mapped:
         return str(mapped)
     return status.replace("_", " ").title()
+
+
+@register.filter
+def as_select_options(choices: Iterable[tuple[Any, Any]]) -> list[dict[str, Any]]:
+    """
+    Convert Django's classic (value, label) CHOICES tuples into the {value, label} dicts
+    {% input_field type="select" options=... %} expects.
+
+    Several view-level CHOICES constants (e.g. INVOICE_STATUS_CHOICES) are shared with code
+    that iterates them as tuples (`for value, label in CHOICES`), so they can't just be
+    redefined as dicts - a second consumer would break. This filter bridges the two shapes at
+    the one call site that needs dicts, without changing the constant everyone else reads.
+
+    Usage:
+        {% input_field "status" input_type="select" options=status_choices|as_select_options %}
+    """
+    return [{"value": value, "label": label} for value, label in choices]
 
 
 @register.inclusion_tag("components/table.html")

@@ -50,6 +50,24 @@ PROFORMA_STATUS_VARIANT_MAP: dict[str, str] = {
     "cancelled": "danger",
 }
 
+# Options for the refund-request modal's reason <select>, swapped from a static <option> list
+# to {% input_field type="select" %} - that component reads options from context, not from
+# inline template markup, so the (deliberately free-form, not server-validated - see
+# request_refund_view) reason strings moved here instead of staying literal in the template.
+# Labels are lazy: module-level gettext would freeze them to the import-time locale.
+REFUND_REASON_CHOICES: list[dict[str, Any]] = [
+    {"value": "customer_request", "label": gettext_lazy("General Customer Request")},
+    {"value": "service_failure", "label": gettext_lazy("Service Not Working")},
+    {"value": "quality_issue", "label": gettext_lazy("Quality Not As Expected")},
+    {"value": "technical_issue", "label": gettext_lazy("Technical Problems")},
+    {"value": "cancellation", "label": gettext_lazy("Want to Cancel Service")},
+    {"value": "duplicate_payment", "label": gettext_lazy("Duplicate Invoice")},
+    {"value": "billing_error", "label": gettext_lazy("Billing Error")},
+    {"value": "policy_violation", "label": gettext_lazy("Service Policy Issue")},
+    {"value": "unsatisfied_service", "label": gettext_lazy("Not Satisfied with Service")},
+    {"value": "other", "label": gettext_lazy("Other Reason")},
+]
+
 PROFORMA_STATUS_ICON_MAP: dict[str, str] = {
     "draft": "document",
     "sent": "mail",
@@ -356,6 +374,7 @@ def invoice_detail_view(request: HttpRequest, invoice_number: str) -> HttpRespon
             "invoice": invoice,
             "invoice_number": invoice_number,
             "status_variant": INVOICE_STATUS_VARIANT_MAP.get(invoice.status, "secondary"),
+            "refund_reason_choices": REFUND_REASON_CHOICES,
             "gift_card_form": _gift_payment_form(request, "invoice", invoice_number)
             if invoice.status in {"issued", "overdue"}
             else None,
