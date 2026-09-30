@@ -205,3 +205,4 @@ test-layout-audit.json
 # Local browser traces, screenshots and run manifests
 output/playwright/
 output/e2e-media/
+output/screenshot-diff/
