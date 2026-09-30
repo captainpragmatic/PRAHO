@@ -72,6 +72,22 @@ class ServiceUsageIdentityTests(SimpleTestCase):
                 mock_get_usage.assert_not_called()
 
     @patch("apps.services.views.services_api.get_service_usage")
+    def test_the_template_does_not_leak_its_own_dev_comment(self, mock_get_usage: MagicMock) -> None:
+        """A `{# ... #}` comment that spans multiple lines is not a comment to Django's template
+        engine - it renders as literal text. usage_chart.html had exactly this, and an internal
+        note about CSP nonces and a removed auto-refresh script was visible on every customer's
+        usage page. Fixed with the block form ({% comment %}...{% endcomment %}), which does
+        support multiple lines."""
+        mock_get_usage.return_value = {"bandwidth_used": 12, "storage_used": 3}
+        request = self._request(customer_id="101", user_id="7")
+
+        response = service_usage(request, service_id=55)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(b"Auto-refresh removed", response.content)
+        self.assertNotIn(b"{#", response.content)
+
+    @patch("apps.services.views.services_api.get_service_usage")
     def test_invalid_or_missing_identity_redirects_without_platform_call(self, mock_get_usage: MagicMock) -> None:
         invalid_identities = [
             (None, 7),
