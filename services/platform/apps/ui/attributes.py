@@ -44,3 +44,21 @@ def serialize_button_attributes(raw: object) -> str:
         if value is not None and (name in _ALLOWED or _ATTRIBUTE_NAME.fullmatch(name)):
             accepted.setdefault(name, value)
     return " ".join(f'{name}="{escape(value)}"' for name, value in accepted.items())
+
+
+_DATA_ATTR_KEY = re.compile(r"[a-z0-9_-]+\Z")
+
+
+def sanitize_data_attrs(raw: Mapping[str, object] | None) -> dict[str, object]:
+    """Drop any data_attrs key that isn't a bare data-* suffix.
+
+    components/input.html renders these as `data-{{ key }}="{{ value }}"` with the KEY
+    interpolated unescaped - a key containing a space, `=`, or `>` would close the attribute
+    and open a new one (Django auto-escapes the VALUE, but never validated the key). No current
+    caller passes anything but a literal dict, but the key is still attacker-shaped if that
+    ever changes, so the same class of check serialize_button_attributes already does for
+    buttons applies here too.
+    """
+    if not raw:
+        return {}
+    return {str(key): value for key, value in raw.items() if _DATA_ATTR_KEY.fullmatch(str(key).lower())}

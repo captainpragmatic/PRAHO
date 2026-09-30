@@ -204,3 +204,37 @@ class InputConstraintAttributeTests(SimpleTestCase):
     def test_data_attrs_render_as_individual_data_attributes(self) -> None:
         result = _render('{% input_field "f" data_attrs=attrs %}', {"attrs": {"testid": "f-input"}})
         self.assertIn('data-testid="f-input"', result)
+
+    def test_maxlength_zero_renders_on_input_and_textarea(self) -> None:
+        result = _render('{% input_field "f" maxlength=0 %}')
+        self.assertIn('maxlength="0"', result)
+        result = _render('{% input_field "f" input_type="textarea" maxlength=0 %}')
+        self.assertIn('maxlength="0"', result)
+
+    def test_max_zero_renders(self) -> None:
+        result = _render('{% input_field "f" input_type="number" max=0 %}')
+        self.assertIn('max="0"', result)
+
+    def test_hx_include_renders(self) -> None:
+        result = _render('{% input_field "f" hx_get="/x/" hx_include="#other-field" %}')
+        self.assertIn('hx-include="#other-field"', result)
+
+    def test_omitted_constraints_render_no_attribute(self) -> None:
+        """The default (None/False) for every new field must produce no attribute at all, not
+        an empty or 'None' string - min/max/step/maxlength default to None, autofocus/multiple
+        default to False."""
+        result = _render('{% input_field "f" %}')
+        for absent in ("min=", "max=", "step=", "maxlength=", "pattern=", "autocomplete=", "autofocus", "multiple"):
+            self.assertNotIn(absent, result)
+
+    def test_data_attrs_with_an_unsafe_key_is_dropped_not_injected(self) -> None:
+        """A key containing a space closes the data-* attribute early and opens a new one - the
+        exact shape serialize_button_attributes already guards against for buttons. Values are
+        already escaped by Django's auto-escaping; the key itself was never validated."""
+        result = _render(
+            '{% input_field "f" data_attrs=attrs %}',
+            {"attrs": {"x autofocus onfocus": "alert(1)", "safe-key": "ok"}},
+        )
+        self.assertNotIn("onfocus", result)
+        self.assertNotIn("autofocus=", result)
+        self.assertIn('data-safe-key="ok"', result)

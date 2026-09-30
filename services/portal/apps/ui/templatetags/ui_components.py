@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from django.utils.functional import _StrPromise
 
 from apps.common.constants import FILE_SIZE_CONVERSION_FACTOR
-from apps.ui.attributes import serialize_button_attributes
+from apps.ui.attributes import sanitize_data_attrs, serialize_button_attributes
 
 register = template.Library()
 
@@ -307,7 +307,7 @@ def input_field(
         "autofocus": config.autofocus,
         "rows": config.rows,
         "multiple": config.multiple,
-        "data_attrs": config.data_attrs,
+        "data_attrs": sanitize_data_attrs(config.data_attrs),
     }
 
 
