@@ -6,10 +6,18 @@ writes. The in-memory `Order` the caller still holds does not: it keeps `proform
 set to a row that no longer exists.
 
 `process_pending_orders` refreshes the order on the success branch and not on the error
-branch. Everything it does next in the same iteration reads that stale object. The
-timeout path performs a full `save()`, which writes the dangling foreign key; on
-PostgreSQL that fails at COMMIT, outside the caller's own try/except, so the timed-out
-order is never cancelled and the next run repeats it forever.
+branch. Everything it does next in the same iteration reads that stale object.
+
+The damage lands on the timeout deadline. `_order_timeout_deadline` reads
+`order.proforma` and, for offline payment methods, anchors the deadline to that
+proforma's `valid_until` — about a month out for a proforma created seconds earlier. An
+order that has timed out is therefore judged not to have, is never cancelled, and is
+re-examined on every run for as long as that window would have lasted.
+
+This docstring first blamed a dangling foreign key written by the cancellation save. That
+was wrong: `OrderService.update_order_status` re-fetches the row under
+`select_for_update` before writing, so the stale id never reaches the database. The test
+below was correct and the explanation was not, which is worth keeping visible.
 
 The failure is injected at `log_security_event`, which the service calls immediately
 after linking the proforma to the order. That is a real dependency boundary and it

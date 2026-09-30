@@ -223,10 +223,21 @@ def process_pending_orders() -> dict[str, Any]:  # noqa: C901, PLR0912  # Comple
                                 # create_from_order links the proforma to the order and
                                 # saves it BEFORE it can fail, then marks the transaction
                                 # for rollback. The database discards that link; this
-                                # in-memory order does not. Everything below reads this
-                                # object, and the timeout path performs a full save, which
-                                # would write a foreign key to a row that no longer exists
-                                # and strand the order uncancelled forever.
+                                # in-memory order does not, and everything below reads it.
+                                #
+                                # The concrete damage is the timeout deadline.
+                                # _order_timeout_deadline reads order.proforma and, for
+                                # offline payment methods, anchors the deadline to that
+                                # proforma's valid_until — roughly a month out for a
+                                # proforma created seconds ago. So an order that HAS timed
+                                # out is judged not to have, is never cancelled, and is
+                                # re-examined on every run for as long as the fallback
+                                # window would have applied.
+                                #
+                                # Not, as first written, a dangling foreign key:
+                                # OrderService.update_order_status re-fetches the row under
+                                # select_for_update before writing, so the stale id never
+                                # reaches the database. Reviewed and corrected.
                                 order.refresh_from_db()
                         except Exception as e:
                             logger.error("🔥 [OrderProcessor] Failed to create proforma fallback: %s", e)
