@@ -465,8 +465,11 @@ def test_customer_password_reset_form(page: Page) -> None:
     submit_btn.click()
     page.wait_for_load_state("networkidle")
 
-    # Verify uniform success message (ADR-003: no email enumeration)
-    success_message: Locator = page.locator("text=If an account with that email exists")
+    # Verify uniform success message (ADR-003: no email enumeration). password_reset_view
+    # redirects to the login page and flashes this via the Django messages framework
+    # (services/portal/apps/users/views.py) - the page under test after submit is login, not
+    # password-reset.
+    success_message: Locator = page.locator("text=If an eligible account exists")
     expect(success_message).to_be_visible(timeout=5000)
     print("    ✅ Uniform success message displayed (email enumeration prevention)")
 

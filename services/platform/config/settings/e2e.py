@@ -53,6 +53,8 @@ COMPANY_POSTAL_CODE = "010061"
 COMPANY_COUNTRY_CODE = "RO"
 COMPANY_COUNTRY_NAME = "Romania"
 COMPANY_EMAIL = "supplier@e2e.test"
+COMPANY_BANK_ACCOUNT = "RO49AAAA1B31007593840000"
+COMPANY_BANK_NAME = "E2E Test Bank"
 ALLOWED_HOSTS = ["localhost", "127.0.0.1", "testserver"]
 if "django.middleware.csrf.CsrfViewMiddleware" not in MIDDLEWARE:
     MIDDLEWARE.insert(
