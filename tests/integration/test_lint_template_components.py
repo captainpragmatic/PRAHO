@@ -297,4 +297,42 @@ def test_exempted_violations_are_reported_but_not_counted_as_blockers(tmp_path, 
     out = capsys.readouterr().out
     assert "0 blocker(s)" in out
     assert "1 exempted" in out
-    assert "No violations found" in out
+    assert "Only exempted violations found" in out
+
+
+def test_marker_text_mentioning_an_element_does_not_self_match(tmp_path, lint, monkeypatch):
+    """codex finding: a marker's own reason is free-form prose, not template code - if it
+    happens to mention a raw element by name, the marker's own line must not also be scanned
+    for TMPL001-004, or the comment itself becomes a second, unexempted violation."""
+    feature_file = _write_feature_file(
+        tmp_path,
+        lint,
+        monkeypatch,
+        "{# tmpl-allow TMPL002: raw <button> needed for Alpine click handler #}\n"
+        '<button @click="open = true">Open</button>\n',
+    )
+
+    violations = lint.scan_file(feature_file)
+    tmpl002 = [v for v in violations if v.code == "TMPL002"]
+    assert len(tmpl002) == 1, f"the marker line itself must not also be scanned, got: {violations}"
+    assert tmpl002[0].line == 2
+    assert tmpl002[0].exempted is True
+
+
+def test_two_markers_on_one_line_is_an_error_not_a_silent_first_match(tmp_path, lint, monkeypatch):
+    """codex finding: _find_tmpl_allow_markers used .search(), which only validates the first
+    marker on a line - a second marker (even one with an empty reason) was silently ignored."""
+    feature_file = _write_feature_file(
+        tmp_path,
+        lint,
+        monkeypatch,
+        '{# tmpl-allow TMPL002: Alpine #} {# tmpl-allow TMPL001: #}\n'
+        '<button type="submit">Pay</button>\n',
+    )
+
+    violations = lint.scan_file(feature_file)
+    no_reason = [v for v in violations if v.code == "TMPL_ALLOW_NO_REASON"]
+    assert len(no_reason) == 1
+    tmpl002 = [v for v in violations if v.code == "TMPL002"]
+    assert len(tmpl002) == 1
+    assert tmpl002[0].exempted is False, "a rejected multi-marker line must not exempt anything"

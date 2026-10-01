@@ -942,7 +942,7 @@ lint-templates:
 lint-templates-strict:
 	@echo "🎨 [Templates] Strict scan (all codes block)..."
 	@$(VENV_DIR)/bin/python scripts/lint_template_components.py \
-		--fail-on TMPL001,TMPL002,TMPL003,TMPL004,TMPL005,TMPL006,TMPL007,TMPL008,TMPL009
+		--fail-on TMPL001,TMPL002,TMPL003,TMPL004,TMPL005,TMPL006,TMPL007,TMPL008,TMPL009,TMPL_ALLOW_STALE,TMPL_ALLOW_NO_REASON
 
 audit-a11y:
 	@echo "♿ [A11Y] Accessibility audit (WCAG AA)..."
