@@ -25,33 +25,14 @@
         </div>
 
         <!-- Category & Priority -->
+        {% trans "Category" as category_label %}{% trans "Priority" as priority_label %}
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label for="category" class="block text-sm font-medium text-slate-300 mb-2">
-              {% trans 'Category' %}
-            </label>
-            <select name="category" id="category"
-              class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
-              <option value="" {% if not category %}selected{% endif %}>{% trans 'Select category (optional)' %}</option>
-              <option value="technical" {% if category == "technical" %}selected{% endif %}>{% trans 'Technical Support' %}</option>
-              <option value="billing" {% if category == "billing" %}selected{% endif %}>{% trans 'Billing & Account' %}</option>
-              <option value="hosting" {% if category == "hosting" %}selected{% endif %}>{% trans 'Hosting Services' %}</option>
-              <option value="domains" {% if category == "domains" %}selected{% endif %}>{% trans 'Domain Management' %}</option>
-              <option value="general" {% if category == "general" %}selected{% endif %}>{% trans 'General Inquiry' %}</option>
-            </select>
+            {% input_field "category" input_type="select" label=category_label html_id="category" value=category options=category_options %}
           </div>
 
           <div>
-            <label for="priority" class="block text-sm font-medium text-slate-300 mb-2">
-              {% trans 'Priority' %}
-            </label>
-            <select name="priority" id="priority"
-              class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
-              <option value="low" {% if priority == "low" %}selected{% endif %}>{% trans 'Low' %}</option>
-              <option value="normal" {% if priority != "low" and priority != "high" and priority != "critical" %}selected{% endif %}>{% trans 'Normal' %}</option>
-              <option value="high" {% if priority == "high" %}selected{% endif %}>{% trans 'High' %}</option>
-              <option value="critical" {% if priority == "critical" %}selected{% endif %}>{% trans 'Critical' %}</option>
-            </select>
+            {% input_field "priority" input_type="select" label=priority_label html_id="priority" value=priority options=priority_options %}
           </div>
         </div>
 
@@ -83,12 +64,9 @@
 
         <!-- Description -->
         <div>
-          <label for="description" class="block text-sm font-medium text-slate-300 mb-2">
-            {% trans 'Description' %}
-          </label>
-          <textarea name="description" id="description" rows="6" required
-            class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500"
-            placeholder="{% trans 'Please provide detailed information about your request or issue...' %}"></textarea>
+          {% trans "Description" as description_label %}
+          {% trans "Please provide detailed information about your request or issue..." as description_placeholder %}
+          {% input_field "description" input_type="textarea" label=description_label html_id="description" value=description rows=6 required=True placeholder=description_placeholder %}
           <p class="mt-1 text-xs text-slate-400">
             {% trans 'Be as specific as possible. Include error messages, steps to reproduce, etc.' %}
           </p>
