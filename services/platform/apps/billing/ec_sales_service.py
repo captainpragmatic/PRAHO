@@ -299,8 +299,6 @@ def _vies_problems(invoice: Invoice) -> list[str]:
             raise ValueError("Malformed consultation reference")
         if not proof["is_valid"]:
             raise ValueError("Captured VAT validation was negative")
-        if proof.get("source") == "vies" and proof.get("is_active") is not True:
-            raise ValueError("Captured VIES validation did not establish active VAT status")
         if vat_identity(proof["vat_number"], proof["country_code"]) != vat_identity(
             invoice.bill_to_tax_id, invoice.bill_to_country
         ):
