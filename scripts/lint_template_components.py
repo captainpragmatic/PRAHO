@@ -60,11 +60,19 @@ class Violation:
     line: int
     message: str
     snippet: str = ""
+    exempted: bool = False
+    reason: str = ""
 
     def __str__(self) -> str:
         rel = self.file.relative_to(REPO_ROOT)
-        indicator = "❌" if self.severity == SEVERITY_BLOCKER else "⚠️ "
-        return f"  {indicator} {rel}:{self.line} [{self.code}] {self.message}"
+        if self.exempted:
+            indicator = "🔸"
+        elif self.severity == SEVERITY_BLOCKER:
+            indicator = "❌"
+        else:
+            indicator = "⚠️ "
+        suffix = f" — EXEMPTED: {self.reason}" if self.exempted else ""
+        return f"  {indicator} {rel}:{self.line} [{self.code}] {self.message}{suffix}"
 
 
 # ===============================================================================
@@ -77,6 +85,12 @@ _RAW_INPUT_RE = re.compile(r"<input\b(?![^>]*type=(?:['\"]hidden['\"]|hidden\b))
 _RAW_BUTTON_RE = re.compile(r"<button\b", re.IGNORECASE)
 _RAW_SELECT_RE = re.compile(r"<select\b", re.IGNORECASE)
 _RAW_TEXTAREA_RE = re.compile(r"<textarea\b", re.IGNORECASE)
+
+# TMPL001-004 exemption marker: a single-line {# tmpl-allow CODE: reason #} directly above the
+# violating element. Per-line (not file-level like TMPL009's allowlist) because a single file can
+# have both legitimate blockers to fix and legitimate exceptions on different lines - a file-level
+# allowlist would exempt every future raw element in the file, not just the one it was written for.
+_TMPL_ALLOW_RE = re.compile(r"\{#\s*tmpl-allow\s+(TMPL\d{3})\s*:\s*(.*?)\s*#\}")
 
 # TMPL005: Raw semantic color classes used as status indicators
 _SEMANTIC_COLOR_RE = re.compile(r"\b(bg|text)-(green|red|yellow|blue|orange|purple|pink)-\d{2,3}\b")
@@ -163,6 +177,48 @@ def load_component_svg_allowlist() -> set[str]:
 # ===============================================================================
 
 
+def _find_tmpl_allow_markers(lines: list[str], path: Path) -> tuple[dict[int, tuple[str, str]], list[Violation]]:
+    """Scan every line for a `{# tmpl-allow CODE: reason #}` marker.
+
+    Returns (markers, meta_violations): `markers` maps the marker's own 1-indexed line number to
+    (code, reason), for lookup by the line directly below it. A marker with an empty reason is
+    never added to `markers` (it exempts nothing) and instead produces a TMPL_ALLOW_NO_REASON
+    blocker in `meta_violations` - require a reason rather than silently accepting a blank one.
+    """
+    markers: dict[int, tuple[str, str]] = {}
+    meta_violations: list[Violation] = []
+    for line_no, raw_line in enumerate(lines, start=1):
+        match = _TMPL_ALLOW_RE.search(raw_line)
+        if not match:
+            continue
+        code, reason = match.group(1), match.group(2).strip()
+        if not reason:
+            meta_violations.append(
+                Violation(
+                    "TMPL_ALLOW_NO_REASON",
+                    SEVERITY_BLOCKER,
+                    path,
+                    line_no,
+                    f"tmpl-allow marker for {code} has no reason — every exemption must say why",
+                    snippet=raw_line.strip()[:120],
+                )
+            )
+            continue
+        markers[line_no] = (code, reason)
+    return markers, meta_violations
+
+
+def _exemption_for(
+    markers: dict[int, tuple[str, str]], consumed: set[int], line_no: int, code: str
+) -> tuple[bool, str]:
+    """Check whether the line directly above `line_no` carries a marker for `code`."""
+    marker = markers.get(line_no - 1)
+    if marker is not None and marker[0] == code:
+        consumed.add(line_no - 1)
+        return True, marker[1]
+    return False, ""
+
+
 def scan_file(path: Path) -> list[Violation]:
     """Scan a single template file and return all violations found."""
     violations: list[Violation] = []
@@ -178,12 +234,16 @@ def scan_file(path: Path) -> list[Violation]:
     except (OSError, UnicodeDecodeError):
         return violations
 
+    tmpl_allow_markers, tmpl_allow_meta_violations = _find_tmpl_allow_markers(lines, path) if is_feature else ({}, [])
+    consumed_marker_lines: set[int] = set()
+
     for line_no, raw_line in enumerate(lines, start=1):
         line = raw_line.strip()
 
         # ── Feature template checks (TMPL001-005, TMPL008) ─────────────────────
         if is_feature:
             if _RAW_INPUT_RE.search(raw_line):
+                exempted, reason = _exemption_for(tmpl_allow_markers, consumed_marker_lines, line_no, "TMPL001")
                 violations.append(
                     Violation(
                         "TMPL001",
@@ -192,10 +252,13 @@ def scan_file(path: Path) -> list[Violation]:
                         line_no,
                         "Raw <input> element — use {% input_field %} component tag",
                         snippet=line[:120],
+                        exempted=exempted,
+                        reason=reason,
                     )
                 )
 
             if _RAW_BUTTON_RE.search(raw_line):
+                exempted, reason = _exemption_for(tmpl_allow_markers, consumed_marker_lines, line_no, "TMPL002")
                 violations.append(
                     Violation(
                         "TMPL002",
@@ -204,10 +267,13 @@ def scan_file(path: Path) -> list[Violation]:
                         line_no,
                         "Raw <button> element — use {% button %} component tag",
                         snippet=line[:120],
+                        exempted=exempted,
+                        reason=reason,
                     )
                 )
 
             if _RAW_SELECT_RE.search(raw_line):
+                exempted, reason = _exemption_for(tmpl_allow_markers, consumed_marker_lines, line_no, "TMPL003")
                 violations.append(
                     Violation(
                         "TMPL003",
@@ -216,10 +282,13 @@ def scan_file(path: Path) -> list[Violation]:
                         line_no,
                         'Raw <select> element — use {% input_field type="select" %} tag',
                         snippet=line[:120],
+                        exempted=exempted,
+                        reason=reason,
                     )
                 )
 
             if _RAW_TEXTAREA_RE.search(raw_line):
+                exempted, reason = _exemption_for(tmpl_allow_markers, consumed_marker_lines, line_no, "TMPL004")
                 violations.append(
                     Violation(
                         "TMPL004",
@@ -228,6 +297,8 @@ def scan_file(path: Path) -> list[Violation]:
                         line_no,
                         'Raw <textarea> element — use {% input_field type="textarea" %} tag',
                         snippet=line[:120],
+                        exempted=exempted,
+                        reason=reason,
                     )
                 )
 
@@ -316,6 +387,21 @@ def scan_file(path: Path) -> list[Violation]:
                     )
                 )
 
+    for marker_line_no, (code, _reason) in tmpl_allow_markers.items():
+        if marker_line_no not in consumed_marker_lines:
+            violations.append(
+                Violation(
+                    "TMPL_ALLOW_STALE",
+                    SEVERITY_BLOCKER,
+                    path,
+                    marker_line_no,
+                    f"tmpl-allow marker for {code} has no matching violation on the next line — "
+                    "remove the marker or restore the element it was written for",
+                    snippet=lines[marker_line_no - 1].strip()[:120],
+                )
+            )
+    violations.extend(tmpl_allow_meta_violations)
+
     return violations
 
 
@@ -335,7 +421,7 @@ def main() -> int:
     parser.add_argument(
         "--fail-on",
         metavar="CODES",
-        default="TMPL001,TMPL002,TMPL003,TMPL004,TMPL008",
+        default="TMPL001,TMPL002,TMPL003,TMPL004,TMPL008,TMPL_ALLOW_STALE,TMPL_ALLOW_NO_REASON",
         help="Comma-separated violation codes that cause non-zero exit (default: blockers only).",
     )
     parser.add_argument("--list-violations", action="store_true", help="Print all violation codes and exit.")
@@ -352,6 +438,8 @@ def main() -> int:
             ("TMPL007", SEVERITY_WARNING, "Inline <script> block in component template"),
             ("TMPL008", SEVERITY_BLOCKER, "Emoji character in template"),
             ("TMPL009", SEVERITY_WARNING, "Raw <svg> in component template not allowlisted"),
+            ("TMPL_ALLOW_STALE", SEVERITY_BLOCKER, "tmpl-allow marker with no matching violation below it"),
+            ("TMPL_ALLOW_NO_REASON", SEVERITY_BLOCKER, "tmpl-allow marker with an empty reason"),
         ]
         for code, sev, desc in codes:
             print(f"  {code}  [{sev:7}]  {desc}")
@@ -387,13 +475,9 @@ def main() -> int:
     print(f"🔍 [lint-templates] Found {len(all_violations)} violation(s):")
     print("━" * 60)
 
-    has_fail = False
     for code in sorted(by_code):
-        group = by_code[code]
-        for v in group:
+        for v in by_code[code]:
             print(str(v))
-        if code in fail_codes:
-            has_fail = True
 
     print("━" * 60)
     # A violation's SEVERITY is a fixed property of its rule (the table at the top of this file) -
@@ -401,10 +485,19 @@ def main() -> int:
     # EXIT CODE only (which codes are allowed to fail this specific run); conflating the two meant
     # `lint-templates-strict` passing all nine codes reported 643 "blockers" - every TMPL005
     # warning reclassified by the act of asking for it to also fail the build.
-    blocker_count = sum(1 for v in all_violations if v.severity == SEVERITY_BLOCKER)
-    warn_count = len(all_violations) - blocker_count
-    fail_count = sum(1 for v in all_violations if v.code in fail_codes)
-    print(f"📊 {blocker_count} blocker(s)  |  {warn_count} warning(s)")
+    #
+    # An exempted violation (a documented tmpl-allow exception) is reported above like any other -
+    # explicit, not silent - but never counts toward blocker/warning/fail totals: that is the whole
+    # point of the marker. `has_fail`/`fail_count` check `not v.exempted` per violation rather than
+    # per code, because one code (e.g. TMPL002) can have both exempted and non-exempted instances
+    # in the same run.
+    blocker_count = sum(1 for v in all_violations if v.severity == SEVERITY_BLOCKER and not v.exempted)
+    warn_count = sum(1 for v in all_violations if v.severity == SEVERITY_WARNING and not v.exempted)
+    exempted_count = sum(1 for v in all_violations if v.exempted)
+    has_fail = any(v.code in fail_codes and not v.exempted for v in all_violations)
+    fail_count = sum(1 for v in all_violations if v.code in fail_codes and not v.exempted)
+    exempted_suffix = f"  |  {exempted_count} exempted" if exempted_count else ""
+    print(f"📊 {blocker_count} blocker(s)  |  {warn_count} warning(s){exempted_suffix}")
 
     if has_fail:
         print(f"\n❌ Non-zero exit: {fail_count} violation(s) matching --fail-on codes found.")
