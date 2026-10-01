@@ -16,25 +16,43 @@
 
     encode gzip zstd
 
+    # Public handles cap request bodies at Django's DATA_UPLOAD_MAX_MEMORY_SIZE (10 MiB):
+    # nothing legitimate is refused, but an oversized body is rejected here instead of
+    # being streamed into a worker before Django rejects it.
     handle /api/users/health/* {
+        request_body {
+            max_size 10MiB
+        }
         reverse_proxy platform:8700
     }
 
     handle /integrations/webhooks/* {
+        request_body {
+            max_size 10MiB
+        }
         reverse_proxy platform:8700
     }
 
     # Email provider bounce feeds and the recipient unsubscribe page are public too.
     handle /notifications/webhooks/* {
+        request_body {
+            max_size 10MiB
+        }
         reverse_proxy platform:8700
     }
 
     handle /notifications/unsubscribe/* {
+        request_body {
+            max_size 10MiB
+        }
         reverse_proxy platform:8700
     }
 
     # Django enforces API authentication, including its explicit public exceptions.
     handle /api/* {
+        request_body {
+            max_size 10MiB
+        }
         reverse_proxy platform:8700
     }
 
