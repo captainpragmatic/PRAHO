@@ -34,7 +34,10 @@ class _Imports:
     def __init__(self, tree: ast.Module) -> None:
         self.names: dict[str, str] = {}  # local name -> django.db exception name
         self.modules: set[str] = set()  # local names bound to django.db / django.db.utils
+        self.suppress: set[str] = {"suppress"}  # local names bound to contextlib.suppress
         for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module == "contextlib":
+                self.suppress.update(alias.asname or alias.name for alias in node.names if alias.name == "suppress")
             if isinstance(node, ast.ImportFrom) and node.module in _DB_MODULES:
                 for alias in node.names:
                     if node.module == "django.db" and alias.name == "utils":
@@ -46,20 +49,22 @@ class _Imports:
             elif isinstance(node, ast.Import):
                 self.modules.update(alias.asname for alias in node.names if alias.name in _DB_MODULES and alias.asname)
 
+    def _is_db_module(self, base: ast.expr) -> bool:
+        if isinstance(base, ast.Name):
+            return base.id in self.modules
+        # `from django import db` then `db.utils.DatabaseError`
+        if isinstance(base, ast.Attribute) and base.attr == "utils" and self._is_db_module(base.value):
+            return True
+        return ast.unparse(base) in _DB_MODULES
+
     def resolve(self, expr: ast.expr) -> str | None:
         """Return the django.db exception an expression names, a builtin, or None."""
         if isinstance(expr, ast.Name):
-            if expr.id in self.names:
-                return self.names[expr.id]
             if expr.id in _BROAD_BUILTINS:
                 return expr.id
-            return None
-        if isinstance(expr, ast.Attribute):
-            base = expr.value
-            if isinstance(base, ast.Name) and base.id in self.modules:
-                return expr.attr
-            if ast.unparse(base) in _DB_MODULES:
-                return expr.attr
+            return self.names.get(expr.id)
+        if isinstance(expr, ast.Attribute) and self._is_db_module(expr.value):
+            return expr.attr
         return None
 
 
@@ -69,11 +74,11 @@ def _caught(node: ast.expr | None) -> list[ast.expr]:
     return list(node.elts) if isinstance(node, ast.Tuple) else [node]
 
 
-def _is_suppress(call: ast.expr) -> bool:
+def _is_suppress(call: ast.expr, imports: _Imports) -> bool:
     if not isinstance(call, ast.Call):
         return False
     func = call.func
-    return (isinstance(func, ast.Name) and func.id == "suppress") or (
+    return (isinstance(func, ast.Name) and func.id in imports.suppress) or (
         isinstance(func, ast.Attribute) and func.attr == "suppress"
     )
 
@@ -102,7 +107,7 @@ def find_narrow_handlers(source: str) -> list[int]:
                 item.context_expr.lineno
                 for item in node.items
                 if isinstance(item.context_expr, ast.Call)
-                and _is_suppress(item.context_expr)
+                and _is_suppress(item.context_expr, imports)
                 and _narrow(imports, list(item.context_expr.args))
                 and not marked(item.context_expr.lineno)
             )
@@ -182,3 +187,14 @@ def test_marker_exempts_on_handler_line_or_next() -> None:
         "try:\n    x()\nexcept DatabaseError:\n    # narrow-db-catch: fallback writes, so it would fail anyway\n    pass\n"
     )
     assert find_narrow_handlers(src) == []
+
+
+def test_detects_db_utils_chain_and_aliased_suppress() -> None:
+    src = (
+        "from contextlib import suppress as ignore\n"
+        "from django import db\n"
+        "from django.db import DatabaseError\n"
+        "try:\n    x()\nexcept db.utils.DatabaseError:\n    pass\n"
+        "with ignore(DatabaseError):\n    x()\n"
+    )
+    assert find_narrow_handlers(src) == [6, 8]
