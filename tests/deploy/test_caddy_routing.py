@@ -59,8 +59,8 @@ PUBLIC_API_VIEWS = {
     "support_categories_api",
 }
 STAFF_SESSION_PREFIXES = ["/api/customers/"]
-# Equal to Django's DATA_UPLOAD_MAX_MEMORY_SIZE (10485760): the edge rejects only what
-# Django would reject anyway, but before the body reaches a worker.
+# Equal to Django's DATA_UPLOAD_MAX_MEMORY_SIZE (10485760). That limit excludes file uploads,
+# so the equivalence holds only because no public Platform route accepts multipart files.
 PLATFORM_PUBLIC_BODY_CAP = "10MiB"
 SHARED_PATHS = ("/dashboard/", "/billing/", "/tickets/", "/i18n/", "/cookie-policy/", "/auth/login/")
 PUBLIC_ROUTES = (
