@@ -1,0 +1,53 @@
+{% load i18n %}
+{% load ui_components %}
+
+{% comment %} tickets_dashboard_widget renders THIS file, and until it existed the view raised
+   TemplateDoesNotExist on every request - the route was routable and reachable but crashed
+   unconditionally. Found by the route sweep (Phase 4), not by any test that existed before it.
+
+   Arm order mirrors the sibling `tickets_table.html`: a throttle and an undeclared platform
+   failure must each say what they are, never fall through to "no tickets yet". {% endcomment %}
+{% if rate_limited %}
+{% include "components/rate_limit_inline_alert.html" %}
+{% elif maintenance %}
+{% include "components/maintenance_inline_alert.html" %}
+{% elif error %}
+{% comment %} handle_platform_error returns {} (no rate_limited, no maintenance) for anything it
+   doesn't have a specific case for, but the view still sets error=True in that context. Without
+   this arm, a bare platform failure fell through to the counts below - all defaulting to 0 - and
+   rendered a real outage as "No support tickets yet". {% endcomment %}
+<div class="mb-4 bg-red-900/20 border border-red-700 rounded-lg p-3">
+  <div class="flex items-center space-x-2">
+    {% icon "exclamation-circle" size="lg" css_class="text-red-400" %}
+    <p class="text-red-200 text-sm">{% trans "Unable to load your tickets right now." %}</p>
+  </div>
+</div>
+{% else %}
+<div class="grid grid-cols-2 gap-3 mb-4">
+  <div class="bg-slate-800/50 rounded-lg p-3">
+    <div class="text-xs text-slate-400 uppercase tracking-wide">{% trans "Open" %}</div>
+    <div class="text-2xl font-bold text-white">{{ summary.open_tickets|default:0 }}</div>
+  </div>
+  <div class="bg-slate-800/50 rounded-lg p-3">
+    <div class="text-xs text-slate-400 uppercase tracking-wide">{% trans "Total" %}</div>
+    <div class="text-2xl font-bold text-white">{{ summary.total_tickets|default:0 }}</div>
+  </div>
+</div>
+
+{% if recent_tickets %}
+<ul class="divide-y divide-slate-700">
+  {% for ticket in recent_tickets %}
+  <li class="py-2">
+    <a href="{% url 'tickets:detail' ticket_id=ticket.id %}" class="text-sm font-medium text-white hover:text-blue-300">
+      {% if ticket.ticket_number %}{{ ticket.ticket_number }}{% else %}#{{ ticket.id }}{% endif %}
+    </a>
+    <div class="text-xs text-slate-400">
+      {% if ticket.title %}{{ ticket.title }}{% elif ticket.subject %}{{ ticket.subject }}{% endif %}
+    </div>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="text-sm text-slate-400 text-center py-4">{% trans "No support tickets yet" %}</p>
+{% endif %}
+{% endif %}
