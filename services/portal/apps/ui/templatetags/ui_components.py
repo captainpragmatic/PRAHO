@@ -111,6 +111,11 @@ class InputConfig:
     # wired for <select>) or had a dataclass field at all (accept, aria_label).
     accept: str | None = None
     aria_label: str | None = None
+    # input.html's own wrapper <div> already reads {% if container_class %} (CheckboxConfig
+    # already has this field; InputConfig never did) - without it, a hidden file input still
+    # gets a plain space-y-2 wrapper div that renders as a visible, empty flex child wherever
+    # the caller's own layout expects nothing to be there.
+    container_class: str = ""
 
 
 @dataclass
@@ -322,6 +327,7 @@ def input_field(
         "data_attrs": sanitize_data_attrs(config.data_attrs),
         "accept": config.accept,
         "aria_label": config.aria_label,
+        "container_class": config.container_class,
     }
 
 
