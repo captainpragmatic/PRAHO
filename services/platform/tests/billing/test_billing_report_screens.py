@@ -82,12 +82,19 @@ class FinancialReportsScreenTests(BillingReportScreenTestCase):
         self.assertContains(response, TOTAL_GROSS, count=2)
 
     def test_the_monthly_series_is_rendered(self) -> None:
-        self._paid_invoices()
-        now = timezone.now()
+        """The series groups by `ExtractMonth` in the active timezone (Europe/Bucharest), so the
+        expected month must be the local calendar month too. Built from `timezone.now()` (UTC) this
+        test failed every month between 21:00 and 24:00 UTC on the last day, when Bucharest is
+        already in the next month - pinned to that window so it cannot pass by luck of the clock."""
+        last_day_late_evening = datetime(2026, 9, 30, 22, 30, tzinfo=UTC)  # 1 Oct 01:30 in Bucharest
+        with patch("django.utils.timezone.now", return_value=last_day_late_evening):
+            self._paid_invoices()
+            today = timezone.localdate()
 
-        response = self.client.get(reverse("billing:reports"))
+            response = self.client.get(reverse("billing:reports"))
 
-        self.assertContains(response, f"{now.month:02d}.{now.year}")
+        self.assertEqual((today.month, today.year), (10, 2026))
+        self.assertContains(response, f"{today.month:02d}.{today.year}")
 
     def test_the_screen_survives_having_nothing_to_report(self) -> None:
         response = self.client.get(reverse("billing:reports"))
