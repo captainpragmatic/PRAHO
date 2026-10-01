@@ -157,6 +157,11 @@ def _parse_total_cents(order_total: str) -> int:
 
 ALLOWED_PAYMENT_METHODS = frozenset({"bank_transfer", "card"})
 
+# The checkout claim's lease only has to outlast one Platform round trip, but the order id it publishes
+# must answer a resubmitted checkout for as long as that cart could still be resubmitted (#551).
+CHECKOUT_CLAIM_LEASE_SECONDS = 300
+CHECKOUT_REPLAY_RETENTION_SECONDS = GDPRCompliantCartSession.CART_EXPIRY_HOURS * 3600
+
 
 @dataclasses.dataclass
 class CheckoutContext:
@@ -358,7 +363,7 @@ def _create_and_process_order(request: HttpRequest, ctx: CheckoutContext) -> Htt
         idem_cache_key = f"orders:idempotency:{ctx.customer_id}:{ctx.idempotency_key}"
 
         claim_token = uuid.uuid4().hex
-        if not counters.claim(idem_cache_key, 300, claim_token):
+        if not counters.claim(idem_cache_key, CHECKOUT_CLAIM_LEASE_SECONDS, claim_token):
             completed_order_id = counters.lookup(idem_cache_key)
             if completed_order_id:
                 try:
@@ -440,7 +445,12 @@ def _create_and_process_order(request: HttpRequest, ctx: CheckoutContext) -> Htt
 
             # Retain the reservation once Platform has created the order, including
             # when publishing the result fails. Platform also receives the same key.
-            if not counters.complete(idem_cache_key, claim_token, str(order_id or "__processed__")):
+            if not counters.complete(
+                idem_cache_key,
+                claim_token,
+                str(order_id or "__processed__"),
+                retain_seconds=CHECKOUT_REPLAY_RETENTION_SECONDS,
+            ):
                 logger.warning("🚨 [Orders] Checkout claim expired before completion: %s", idem_cache_key)
                 return _checkout_conflict(
                     request, _("Your order is being processed. Please check your orders list."), 409

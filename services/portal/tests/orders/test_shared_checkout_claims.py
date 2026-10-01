@@ -3,6 +3,7 @@
 import json
 import time
 from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.core.cache import cache
@@ -13,6 +14,7 @@ from requests import Response
 
 from apps.common import counters
 from apps.orders.services import GDPRCompliantCartSession
+from apps.orders.views import CHECKOUT_REPLAY_RETENTION_SECONDS
 
 
 @override_settings(
@@ -99,6 +101,23 @@ class SharedCheckoutClaimTests(TransactionTestCase):
             status, location = pool.submit(retry).result(timeout=10)
         self.assertEqual((status, location), (302, first["Location"]))
         self.assertEqual(counters.lookup(self.key), self.order_id)
+
+    def test_completed_checkout_replays_after_the_claim_lease_would_have_expired(self) -> None:
+        """#551: the order id outlives the 300 s claim lease, for as long as the cart could be resubmitted."""
+        first = self.submit()
+        self.assertEqual(first.status_code, 302)
+        self.assertIn(self.order_id, first["Location"])
+        submitted_at = time.time()
+
+        def counter_clock(offset: float) -> SimpleNamespace:
+            return SimpleNamespace(time=lambda: submitted_at + offset)
+
+        with patch.object(counters, "time", counter_clock(301)):
+            self.assertEqual(self.submit()["Location"], first["Location"])
+        with patch.object(counters, "time", counter_clock(CHECKOUT_REPLAY_RETENTION_SECONDS - 5)):
+            self.assertEqual(self.submit()["Location"], first["Location"])
+        with patch.object(counters, "time", counter_clock(CHECKOUT_REPLAY_RETENTION_SECONDS + 5)):
+            self.assertIsNone(counters.lookup(self.key))
 
     def test_immediate_retry_after_preflight_failure_is_admitted(self) -> None:
         self.reject_preflight = True

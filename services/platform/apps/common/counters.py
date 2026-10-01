@@ -165,15 +165,21 @@ def claim(key: str, ttl_seconds: int, token: str) -> bool:
         return cursor.fetchone() is not None
 
 
-def complete(key: str, token: str, result: str) -> bool:
-    """Publish a result once, only for the owner of a live pending claim."""
+def complete(key: str, token: str, result: str, *, retain_seconds: int = 0) -> bool:
+    """Publish a result once, only for the owner of a live pending claim.
+
+    The result stays readable until the claim's expiry, extended to at least
+    retain_seconds from now; retention never shortens the lease it replaces.
+    """
     if len(result) > MAX_VALUE_LENGTH:
         raise ValueError(_("Claim results must contain at most 255 characters."))
+    now = int(time.time())
     with _write_connection().cursor() as cursor:
         cursor.execute(
-            "UPDATE common_counters SET count = 0, value = %s "
+            "UPDATE common_counters SET count = 0, value = %s, "
+            "expires_at = CASE WHEN expires_at > %s THEN expires_at ELSE %s END "
             "WHERE key = %s AND value = %s AND count = 1 AND expires_at > %s",
-            [result, _key(key), token, int(time.time())],
+            [result, now + retain_seconds, now + retain_seconds, _key(key), token, now],
         )
         return bool(cursor.rowcount == 1)
 
