@@ -60,6 +60,31 @@ TICKET_STATUS_TABS = [
     },
 ]
 
+# ticket_create's category/priority <select> options, swapped from hardcoded template <option>
+# tags to {% input_field type="select" options=... %} (Phase 4 TMPL003). Values match the
+# template's own prior hardcoded options exactly, not the older "priorities"/"categories"
+# context keys below the GET branch - those listed "urgent"/"domain"/"email", values the
+# template itself never rendered as an <option>, so they were dead since before this change.
+TICKET_CATEGORY_OPTIONS = [
+    {"value": "", "label": gettext_lazy("Select category (optional)")},
+    {"value": "technical", "label": gettext_lazy("Technical Support")},
+    {"value": "billing", "label": gettext_lazy("Billing & Account")},
+    {"value": "hosting", "label": gettext_lazy("Hosting Services")},
+    {"value": "domains", "label": gettext_lazy("Domain Management")},
+    {"value": "general", "label": gettext_lazy("General Inquiry")},
+]
+
+# "normal" is the template's historical default: the old hardcoded <option> selected it whenever
+# priority was anything other than low/high/critical, including when priority was never set at
+# all (GET). input_field selects by exact value match, so the view must pass "normal" explicitly
+# rather than relying on an empty value happening to fall through.
+TICKET_PRIORITY_OPTIONS = [
+    {"value": "low", "label": gettext_lazy("Low")},
+    {"value": "normal", "label": gettext_lazy("Normal")},
+    {"value": "high", "label": gettext_lazy("High")},
+    {"value": "critical", "label": gettext_lazy("Critical")},
+]
+
 # Allowlist for the ?status= query param ("" = All tab). The value is echoed
 # into rendered context and forwarded to the platform API, and the shared tab
 # component's roving tabindex needs a matching tab — unknown values fall back
@@ -264,6 +289,8 @@ def ticket_create(request: HttpRequest) -> HttpResponse:
                     "category": category,
                     "service_id": service_id_str,
                     "service_name": service_name,
+                    "category_options": TICKET_CATEGORY_OPTIONS,
+                    "priority_options": TICKET_PRIORITY_OPTIONS,
                 },
             )
 
@@ -313,21 +340,8 @@ def ticket_create(request: HttpRequest) -> HttpResponse:
                     "category": category,
                     "service_id": service_id_str,
                     "service_name": service_name,
-                    "priorities": [
-                        ("low", _("Low")),
-                        ("normal", _("Normal")),
-                        ("high", _("High")),
-                        ("urgent", _("Urgent")),
-                        ("critical", _("Critical")),
-                    ],
-                    "categories": [
-                        ("", _("General Support")),
-                        ("technical", _("Technical Issue")),
-                        ("billing", _("Billing Question")),
-                        ("hosting", _("Hosting Services")),
-                        ("domain", _("Domain Management")),
-                        ("email", _("Email Services")),
-                    ],
+                    "category_options": TICKET_CATEGORY_OPTIONS,
+                    "priority_options": TICKET_PRIORITY_OPTIONS,
                 },
             )
 
@@ -344,21 +358,10 @@ def ticket_create(request: HttpRequest) -> HttpResponse:
             # Keep service_id even if name resolution fails — Platform will validate on create
 
     context = {
-        "priorities": [
-            ("low", _("Low")),
-            ("normal", _("Normal")),
-            ("high", _("High")),
-            ("urgent", _("Urgent")),
-            ("critical", _("Critical")),
-        ],
-        "categories": [
-            ("", _("General Support")),
-            ("technical", _("Technical Issue")),
-            ("billing", _("Billing Question")),
-            ("hosting", _("Hosting Services")),
-            ("domain", _("Domain Management")),
-            ("email", _("Email Services")),
-        ],
+        "category_options": TICKET_CATEGORY_OPTIONS,
+        "priority_options": TICKET_PRIORITY_OPTIONS,
+        "category": "",
+        "priority": "normal",
         "service_id": service_id,
         "service_name": service_name,
     }
