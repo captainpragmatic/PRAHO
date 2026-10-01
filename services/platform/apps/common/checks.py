@@ -23,7 +23,7 @@ MAX_SESSION_AGE_SECONDS = _DEFAULT_MAX_SESSION_AGE_SECONDS
 def get_max_session_age_seconds() -> int:
     """Max allowed session age (seconds) from SettingsService, safe pre-migrate."""
     from django.core.exceptions import ImproperlyConfigured  # noqa: PLC0415
-    from django.db import DatabaseError  # noqa: PLC0415
+    from django.db import DatabaseError, InterfaceError  # noqa: PLC0415
 
     from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
         SettingsService,
@@ -31,7 +31,7 @@ def get_max_session_age_seconds() -> int:
 
     try:
         return SettingsService.get_integer_setting("security.max_session_age_seconds", _DEFAULT_MAX_SESSION_AGE_SECONDS)
-    except (DatabaseError, ImproperlyConfigured):
+    except (DatabaseError, InterfaceError, ImproperlyConfigured):
         # System checks can run before migrations or with a deliberately broken
         # cache config — fall back to the code default
         return _DEFAULT_MAX_SESSION_AGE_SECONDS
@@ -646,7 +646,7 @@ def check_counter_table(app_configs: Any, **kwargs: Any) -> list[Any]:
     try:
         with connections[alias].cursor() as cursor:
             cursor.execute("SELECT 1 FROM common_counters LIMIT 1")
-    except DatabaseError:
+    except DatabaseError:  # narrow-db-catch: reports a missing table; an unusable connection should surface as itself
         return [
             Error(
                 "The counter store table common_counters is missing.",

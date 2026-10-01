@@ -1351,6 +1351,8 @@ class RefundService:
                         changed_by=actor,
                     )
             except DatabaseError:
+                # narrow-db-catch: an unusable connection cannot commit the refund row either;
+                # InterfaceError must reach the transient handler below and return a retriable Err.
                 logger.warning(
                     "Failed to create refund status history for refund_id=%s — audit trail gap",
                     refund.pk,

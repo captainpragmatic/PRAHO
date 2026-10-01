@@ -23,7 +23,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
-from django.db import DatabaseError, transaction
+from django.db import DatabaseError, InterfaceError, transaction
 from django.db.models import Count, Q, QuerySet, Sum
 from django.db.models.functions import Coalesce, ExtractMonth, ExtractYear
 from django.http import (
@@ -2498,7 +2498,7 @@ def efactura_document_detail(request: HttpRequest, pk: str) -> HttpResponse:
                     event_id__startswith=document.anaf_upload_index,
                 ).order_by("-received_at")[:20]
             )
-        except DatabaseError as exc:
+        except (DatabaseError, InterfaceError) as exc:
             logger.warning(f"Could not load webhook audit trail for e-Factura document {pk}: {exc}")
 
     context = {

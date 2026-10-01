@@ -107,5 +107,5 @@ class InfrastructureConfig(AppConfig):
 
         try:
             queue_sync_providers()
-        except db_utils.DatabaseError:
+        except db_utils.DatabaseError:  # narrow-db-catch: only the not-yet-migrated django_q tables
             logger.debug("Skipping provider sync — django_q tables not yet migrated")
