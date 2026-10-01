@@ -121,10 +121,10 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
 
 def _calculate_monthly_revenue(customers: QuerySet[Customer]) -> dict[str, int]:
     """Keep each paid invoice's recorded monetary unit in the monthly summary."""
-    current_month = timezone.now().replace(day=1)
+    current_month = timezone.localdate().replace(day=1)
 
     monthly_totals = (
-        Invoice.objects.filter(customer__in=customers, created_at__gte=current_month, status="paid")
+        Invoice.objects.filter(customer__in=customers, created_at__date__gte=current_month, status="paid")
         .order_by("currency_id")
         .values("currency_id")
         .annotate(currency_total_cents=Sum("total_cents"))
