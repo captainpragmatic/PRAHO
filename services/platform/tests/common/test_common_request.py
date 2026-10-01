@@ -5,10 +5,13 @@ Tests the apps.common.request_ip module to ensure proper IP trust behavior
 and protection against IP spoofing attacks in different environments.
 """
 
-from unittest.mock import Mock, patch
+import importlib
+from unittest.mock import patch
+
 from django.http import HttpRequest
 from django.test import TestCase, override_settings
 
+from apps.common import request_ip
 from apps.common.request_ip import get_safe_client_ip
 
 
@@ -208,32 +211,25 @@ class TestSecureIPDetection(TestCase):
 
 
 class TestIPDetectionWithoutIPware(TestCase):
-    """Test IP detection when django-ipware is not available."""
+    """Client IP resolution is hand-rolled and must not depend on django-ipware (#569).
 
-    def setUp(self):
-        """Set up test fixtures."""
-        self.request = HttpRequest()
+    The module used to import `ipware.get_client_ip` behind an ImportError shim and never
+    call it, while its docstring claimed the resolution came from ipware. Reloading it with
+    ipware unimportable proves the trusted-hop logic stands on its own.
+    """
 
-    @patch.dict('sys.modules', {'ipware': None})
-    def test_fallback_implementation(self):
-        """Test fallback implementation when ipware is not installed."""
-        # This would test the ImportError fallback, but since ipware is already
-        # imported, we'll test the behavior through our fallback function
+    def tearDown(self):
+        importlib.reload(request_ip)  # restore the module other tests imported
 
-        # Create a mock request
-        request = Mock()
-        request.META = {'REMOTE_ADDR': '203.0.113.99'}
+    @override_settings(IPWARE_TRUSTED_PROXY_LIST=["10.0.0.0/8"])
+    def test_resolves_the_client_with_ipware_unimportable(self):
+        with patch.dict("sys.modules", {"ipware": None}):
+            module = importlib.reload(request_ip)
 
-        # Test our fallback function directly
-        from apps.common.request_ip import get_safe_client_ip
-
-        # Mock the ipware function to simulate ImportError scenario
-        with patch('apps.common.request_ip.get_client_ip') as mock_func:
-            # Simulate the fallback function behavior
-            mock_func.return_value = ('203.0.113.99', False)
-
-            result = get_safe_client_ip(request)
-            self.assertEqual(result, '203.0.113.99')
+        self.assertFalse(hasattr(module, "get_client_ip"), "request_ip still carries the unused ipware import")
+        request = HttpRequest()
+        request.META = {"REMOTE_ADDR": "10.0.0.5", "HTTP_X_FORWARDED_FOR": "203.0.113.99, 10.0.0.7"}
+        self.assertEqual(module.get_safe_client_ip(request), "203.0.113.99")
 
 
 class TestRateLimitingIntegration(TestCase):

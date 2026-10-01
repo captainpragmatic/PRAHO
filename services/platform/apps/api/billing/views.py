@@ -11,7 +11,6 @@ from django.core.exceptions import ValidationError
 from django.db.models import CharField, Q, QuerySet, Value
 from django.http import HttpRequest, HttpResponse
 from rest_framework import status
-from rest_framework.authentication import BaseAuthentication
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -406,22 +405,6 @@ def subscription_auto_payment_api(request: HttpRequest, customer: Customer) -> R
     if result.is_err():
         return _error(result.unwrap_err())
     return Response({"success": True, "auto_payment_enabled": result.unwrap().auto_payment_enabled})
-
-
-class MiddlewareUserAuthentication(BaseAuthentication):
-    """
-    🔒 Pass-through authentication that preserves middleware-set user.
-
-    This allows DRF to work with users set by our HMAC middleware
-    without overriding them with AnonymousUser.
-    """
-
-    def authenticate(self, request: HttpRequest) -> tuple | None:
-        # If middleware has set a user (not AnonymousUser), preserve it
-        if hasattr(request, "user") and request.user and not request.user.is_anonymous:
-            return (request.user, None)
-        # Otherwise, no authentication (will be AnonymousUser)
-        return None
 
 
 # ===============================================================================

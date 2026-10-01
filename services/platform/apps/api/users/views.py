@@ -246,7 +246,8 @@ def _authenticate_token_request(request: HttpRequest) -> User | Response:
     # Authenticate user.
     # Timing note: authenticate() runs Argon2 hashing (~100-200ms) which dominates
     # response time.  The DB writes for lockout increment/reset add <5ms variance.
-    # Combined with AuthThrottle (5/min), statistical timing analysis is impractical.
+    # Combined with AuthThrottle (10/min per client) and TokenRequestAccountThrottle
+    # (5/min per address), statistical timing analysis is impractical.
     # Portal callers additionally pad via PLATFORM_API_AUTH_MIN_DURATION_SECONDS.
     user = authenticate(request, username=email, password=password)
 
@@ -379,8 +380,10 @@ def token_info(request: HttpRequest) -> Response:
     Authorization: Bearer <key>   (or Token <key>)
 
     Designed for CLI tools and scripts to confirm their token is valid and
-    see which user it belongs to. Uses HashedTokenAuthentication only — no
-    HMAC or session required.
+    see which user it belongs to. The view authenticates with
+    HashedTokenAuthentication only, but the route is not public: the
+    inter-service HMAC gate still runs first, so a bare token is rejected
+    today (#569, ADR-0031 "Current limitations").
     """
     user = cast(User, request.user)
     token: APIToken = request.auth
