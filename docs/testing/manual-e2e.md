@@ -1,6 +1,6 @@
 # Manual E2E workflow and coverage audit
 
-The browser suite is a local/manual check. It is not added to PR, scheduled, or nightly CI. Ordinary Django/API/security tests remain in CI. The unused `run_e2e` workflow input was removed because it never enabled a browser job.
+The browser suite runs in CI on a nightly cron and on manual dispatch (`.github/workflows/nightly.yml`, `nightly-e2e` job) — never on a pull request. A scheduled run selects only branches with commits in the last 24 hours (master or staging, with PR activity against master counting); a manual dispatch always runs both. Each selected branch installs Playwright Chromium, runs `make test-e2e-coverage` with server-side coverage, combines that with the portal's unit coverage into the gated union figure, and uploads the browser evidence. It is not a PR gate — the suite takes minutes rather than seconds and browser tests are the flakiest thing in this repo — so it stays a local/manual check for day-to-day development, run the same way described below. Ordinary Django/API/security tests remain the PR-blocking CI. The unused `run_e2e` workflow input was removed because it never enabled a browser job.
 
 ## Running the complete suite
 
