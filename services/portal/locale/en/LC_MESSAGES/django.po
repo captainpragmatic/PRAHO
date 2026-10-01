@@ -573,7 +573,7 @@ msgid "Enter your new password"
 msgstr ""
 
 #: apps/users/forms.py:480
-msgid "Choose a strong password with at least 8 characters."
+msgid "Choose a strong password with at least 12 characters."
 msgstr ""
 
 #: apps/users/forms.py:484
@@ -590,10 +590,6 @@ msgstr ""
 
 #: apps/users/forms.py:500
 msgid "New password and confirmation don't match."
-msgstr ""
-
-#: apps/users/forms.py:503
-msgid "Password must be at least 8 characters long."
 msgstr ""
 
 #: apps/users/views.py:84
@@ -2120,7 +2116,7 @@ msgid "Password Security Tips"
 msgstr ""
 
 #: templates/users/change_password.html:91
-msgid "Use at least 8 characters"
+msgid "Use at least 12 characters"
 msgstr ""
 
 #: templates/users/change_password.html:92
