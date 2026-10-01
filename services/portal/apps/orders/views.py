@@ -295,7 +295,7 @@ def _is_profile_error(error: object) -> bool:
     return any(keyword in str(error).lower() for keyword in _PROFILE_KEYWORDS)
 
 
-def localise_platform_error(message: object) -> str:
+def _localise_platform_error(message: object) -> str:
     """Translate a platform error by treating the received string as a msgid.
 
     The platform already wraps these in gettext (apps/orders/preflight.py), but renders
@@ -400,7 +400,7 @@ def _create_and_process_order(request: HttpRequest, ctx: CheckoutContext) -> Htt
                     # Translate each reason before interpolating. Previously the wrapper was
                     # translated and the platform detail was not, so a Romanian customer saw a
                     # half-Romanian sentence. The English original stays in the log line above.
-                    error_details = " ".join(localise_platform_error(e) for e in errors[:3])
+                    error_details = " ".join(_localise_platform_error(e) for e in errors[:3])
                     # %s rather than .format() so braces in an API response cannot crash this.
                     messages.error(request, _("Order validation failed: %s") % error_details)
                 return redirect("orders:checkout")
@@ -1065,7 +1065,7 @@ def checkout(request: HttpRequest) -> HttpResponse:
             # The template lists every blocking reason, and those strings arrive in English.
             # Translate them for display and leave `errors` untouched, because the
             # profile-keyword match below and the log line both read the original.
-            preflight_result["display_errors"] = [localise_platform_error(e) for e in errors]
+            preflight_result["display_errors"] = [_localise_platform_error(e) for e in errors]
 
             # Look for company profile completeness errors
             profile_related_errors = []

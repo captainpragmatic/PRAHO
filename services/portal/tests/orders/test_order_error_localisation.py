@@ -26,7 +26,7 @@ from django.utils import translation
 
 from apps.api_client.services import PlatformAPIError
 from apps.orders.services import OrderCreationService
-from apps.orders.views import localise_platform_error
+from apps.orders.views import _localise_platform_error
 
 # Exactly as apps/orders/preflight.py emits them.
 ENGLISH_STREET = "Please provide your street address"
@@ -38,7 +38,7 @@ INTERPOLATED = "Item 'Hosting Pro': invalid pricing (negative values)"
 class LocalisePlatformErrorTests(TestCase):
     def test_a_known_platform_message_is_translated(self) -> None:
         with translation.override("ro"):
-            result = localise_platform_error(ENGLISH_STREET)
+            result = _localise_platform_error(ENGLISH_STREET)
 
         self.assertNotEqual(result, ENGLISH_STREET, "the Romanian catalogue is missing this msgid")
         self.assertIn("adresa", result.lower())
@@ -46,18 +46,18 @@ class LocalisePlatformErrorTests(TestCase):
     def test_an_unknown_string_passes_through_unchanged(self) -> None:
         """gettext returns its input on a miss, so an interpolated message cannot break."""
         with translation.override("ro"):
-            self.assertEqual(localise_platform_error(INTERPOLATED), INTERPOLATED)
+            self.assertEqual(_localise_platform_error(INTERPOLATED), INTERPOLATED)
 
     def test_english_stays_english(self) -> None:
         with translation.override("en"):
-            self.assertEqual(localise_platform_error(ENGLISH_STREET), ENGLISH_STREET)
+            self.assertEqual(_localise_platform_error(ENGLISH_STREET), ENGLISH_STREET)
 
     def test_non_string_input_does_not_raise(self) -> None:
         """Returns a str for anything. The value may be translated if it collides with
         an unrelated msgid — gettext("None") is "Niciunul" here — which is why this is
         applied only to platform error text."""
         with translation.override("ro"):
-            self.assertIsInstance(localise_platform_error(None), str)
+            self.assertIsInstance(_localise_platform_error(None), str)
 
 
 class CheckoutPageLocalisationTests(TestCase):

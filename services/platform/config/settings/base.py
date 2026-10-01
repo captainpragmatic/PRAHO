@@ -420,6 +420,8 @@ REST_FRAMEWORK = {
         "django_filters.rest_framework.DjangoFilterBackend",
     ],
     "EXCEPTION_HANDLER": "apps.api.exception_handlers.platform_exception_handler",
+    # OPTIONS must not publish view docstrings to unauthenticated callers (#567)
+    "DEFAULT_METADATA_CLASS": "apps.api.metadata.NoDocstringMetadata",
     # Set explicitly later from THROTTLE_RATES + canonical throttle classes.
     "DEFAULT_THROTTLE_CLASSES": [],
     "DEFAULT_THROTTLE_RATES": {},
