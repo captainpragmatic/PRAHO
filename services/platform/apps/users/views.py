@@ -701,8 +701,11 @@ def mfa_regenerate_backup_codes(request: HttpRequest) -> HttpResponse:
         return redirect("users:user_profile")
 
     if request.method == "POST":
-        # Generate new backup codes
         backup_codes = user.generate_backup_codes()
+        # A 2FA change rotates the acting session's key, as enable and disable do. Only this
+        # session: the codes are not part of the session auth hash and the credential version
+        # does not change, so signing out other sessions here could not be relied on.
+        request.session.cycle_key()
         request.session["new_backup_codes"] = backup_codes
 
         messages.success(request, _("New backup codes have been generated."))
