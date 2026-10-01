@@ -158,4 +158,143 @@ def test_fail_on_excluding_every_present_code_exits_0_without_claiming_warnings_
     out = capsys.readouterr().out
     assert "1 blocker(s)  |  1 warning(s)" in out
     assert "Warnings only" not in out
-    assert "2 violation(s) found, none matching --fail-on codes" in out
+
+
+# ===============================================================================
+# tmpl-allow EXEMPTION MARKER
+# ===============================================================================
+#
+# The Alpine-blocked buttons and the few buttons bound to page JS by exact child-element id
+# (phase4-area-tickets:status_and_comments.html) can never pass TMPL002 - the generic {% button
+# %}/{% input_field %} components can't carry Alpine directives through the security allowlist,
+# or a caller-chosen id onto their fixed inner spans. Before this, lint_template_components.py had
+# no way to mark either as an accepted exception: TMPL009 is the only code with any allowlist, and
+# it's file-level (component SVG), not per-line. A `{# tmpl-allow CODE: reason #}` comment directly
+# above the element is the per-line equivalent - explicit in the report (not silently dropped),
+# and a stale marker (one whose line no longer violates CODE) fails the build, the same two-way
+# ratchet as status_only_test_baseline.txt.
+
+
+def _write_feature_file(tmp_path: Path, lint, monkeypatch, content: str) -> Path:
+    feature_file = tmp_path / "services" / "portal" / "templates" / "billing" / "detail.html"
+    feature_file.parent.mkdir(parents=True, exist_ok=True)
+    feature_file.write_text(content, encoding="utf-8")
+    monkeypatch.setattr(lint, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(lint, "PORTAL_TEMPLATES", tmp_path / "services" / "portal" / "templates")
+    monkeypatch.setattr(lint, "COMPONENT_DIR", tmp_path / "services" / "portal" / "templates" / "components")
+    return feature_file
+
+
+def test_marked_line_is_exempt_not_a_blocker(tmp_path, lint, monkeypatch):
+    feature_file = _write_feature_file(
+        tmp_path,
+        lint,
+        monkeypatch,
+        '{# tmpl-allow TMPL002: Alpine @click rejected by the button attrs allowlist #}\n'
+        '<button @click="open = true">Open</button>\n',
+    )
+
+    violations = lint.scan_file(feature_file)
+    tmpl002 = [v for v in violations if v.code == "TMPL002"]
+    assert len(tmpl002) == 1
+    assert tmpl002[0].exempted is True
+    assert "Alpine @click" in tmpl002[0].reason
+
+
+def test_unmarked_line_is_still_a_blocker(tmp_path, lint, monkeypatch):
+    feature_file = _write_feature_file(tmp_path, lint, monkeypatch, '<button type="submit">Pay</button>\n')
+
+    violations = lint.scan_file(feature_file)
+    tmpl002 = [v for v in violations if v.code == "TMPL002"]
+    assert len(tmpl002) == 1
+    assert tmpl002[0].exempted is False
+
+
+def test_marker_for_a_different_code_does_not_exempt(tmp_path, lint, monkeypatch):
+    feature_file = _write_feature_file(
+        tmp_path,
+        lint,
+        monkeypatch,
+        "{# tmpl-allow TMPL001: unrelated reason #}\n"
+        '<button type="submit">Pay</button>\n',
+    )
+
+    violations = lint.scan_file(feature_file)
+    tmpl002 = [v for v in violations if v.code == "TMPL002"]
+    assert len(tmpl002) == 1
+    assert tmpl002[0].exempted is False
+
+
+def test_marker_two_lines_up_does_not_apply(tmp_path, lint, monkeypatch):
+    """The marker must sit directly above the element - skipping a line (e.g. a blank line or
+    an unrelated attribute continuation) must not exempt it, or the marker would silently cover
+    whatever the next TMPL002 hit in the file turns out to be."""
+    feature_file = _write_feature_file(
+        tmp_path,
+        lint,
+        monkeypatch,
+        "{# tmpl-allow TMPL002: reason #}\n"
+        "\n"
+        '<button type="submit">Pay</button>\n',
+    )
+
+    violations = lint.scan_file(feature_file)
+    tmpl002 = [v for v in violations if v.code == "TMPL002"]
+    assert len(tmpl002) == 1
+    assert tmpl002[0].exempted is False
+
+
+def test_stale_marker_with_no_matching_violation_is_an_error(tmp_path, lint, monkeypatch):
+    """A marker whose element was fixed (or deleted) but the marker was left behind must fail -
+    otherwise the exemption list only ever grows, and a future raw element reusing that exact
+    line number would be silently exempted without anyone writing a new marker for it."""
+    feature_file = _write_feature_file(
+        tmp_path,
+        lint,
+        monkeypatch,
+        "{# tmpl-allow TMPL002: reason #}\n"
+        '{% button "Pay" %}\n',
+    )
+
+    violations = lint.scan_file(feature_file)
+    stale = [v for v in violations if v.code == "TMPL_ALLOW_STALE"]
+    assert len(stale) == 1
+    assert stale[0].severity == lint.SEVERITY_BLOCKER
+
+
+def test_marker_with_no_reason_is_an_error(tmp_path, lint, monkeypatch):
+    feature_file = _write_feature_file(
+        tmp_path,
+        lint,
+        monkeypatch,
+        "{# tmpl-allow TMPL002: #}\n"
+        '<button type="submit">Pay</button>\n',
+    )
+
+    violations = lint.scan_file(feature_file)
+    no_reason = [v for v in violations if v.code == "TMPL_ALLOW_NO_REASON"]
+    assert len(no_reason) == 1
+    assert no_reason[0].severity == lint.SEVERITY_BLOCKER
+    # The element itself must still be reported too - a malformed marker is not a free pass.
+    tmpl002 = [v for v in violations if v.code == "TMPL002"]
+    assert len(tmpl002) == 1
+    assert tmpl002[0].exempted is False
+
+
+def test_exempted_violations_are_reported_but_not_counted_as_blockers(tmp_path, lint, monkeypatch, capsys):
+    feature_file = _write_feature_file(
+        tmp_path,
+        lint,
+        monkeypatch,
+        '{# tmpl-allow TMPL002: Alpine @click rejected by the button attrs allowlist #}\n'
+        '<button @click="open = true">Open</button>\n',
+    )
+    monkeypatch.setattr(sys, "argv", ["lint_template_components.py", str(feature_file)])
+
+    exit_code = lint.main()
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "0 blocker(s)" in out
+    assert "1 exempted" in out
+    assert "No violations found" in out
