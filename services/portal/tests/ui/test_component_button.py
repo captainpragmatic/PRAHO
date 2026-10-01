@@ -268,3 +268,19 @@ class ButtonIconTests(SimpleTestCase):
     def test_href_variant_also_renders_the_icon(self) -> None:
         result = _render('{% button "Open" icon="check" href="/x/" %}')
         self.assertIn("<svg", result)
+
+
+class ButtonIdTests(SimpleTestCase):
+    """button.html already reads {% if button_id %}id="{{ button_id }}"{% endif %} on the
+    <button> branch, but ButtonConfig had no button_id field - the same silent-drop shape as
+    the InputConfig gaps: a kwarg matching neither ButtonConfig nor HTMXAttributes is dropped
+    by button()'s **kwargs loop instead of raising. A page's `getElementById('attach-btn')`
+    would return null against the pre-fix component."""
+
+    def test_button_id_renders_as_id_attribute(self) -> None:
+        result = _render('{% button "Attach" button_id="attach-btn" %}')
+        self.assertIn('id="attach-btn"', result)
+
+    def test_button_id_omitted_renders_no_id_attribute(self) -> None:
+        result = _render('{% button "Attach" %}')
+        self.assertNotIn(" id=", result)
