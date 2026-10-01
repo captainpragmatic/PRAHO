@@ -336,3 +336,63 @@ def test_two_markers_on_one_line_is_an_error_not_a_silent_first_match(tmp_path, 
     tmpl002 = [v for v in violations if v.code == "TMPL002"]
     assert len(tmpl002) == 1
     assert tmpl002[0].exempted is False, "a rejected multi-marker line must not exempt anything"
+
+
+def test_real_element_sharing_a_line_with_a_marker_is_still_reported(tmp_path, lint, monkeypatch):
+    """Copilot review: a marker is only "clean" (exempts the element below it) when it is the
+    line's entire content. `<input> {# tmpl-allow TMPL002: reason #}` previously counted as a
+    marker-only line just because .search() found marker text anywhere on it, so the real
+    <input> sharing that line went completely unscanned - not a blocker, not exempted, just
+    gone."""
+    feature_file = _write_feature_file(
+        tmp_path,
+        lint,
+        monkeypatch,
+        '<input type="text" name="f"> {# tmpl-allow TMPL002: unrelated reason #}\n',
+    )
+
+    violations = lint.scan_file(feature_file)
+    tmpl001 = [v for v in violations if v.code == "TMPL001"]
+    assert len(tmpl001) == 1, f"the <input> sharing the marker's line must still be reported, got: {violations}"
+    assert tmpl001[0].exempted is False
+
+
+def test_real_element_on_the_same_line_as_a_marker_meant_for_the_next_line_is_still_reported(
+    tmp_path, lint, monkeypatch
+):
+    """codex finding: `<button>x</button> {# tmpl-allow TMPL002: for the next one #}` - the
+    marker is meant to exempt a DIFFERENT button on the line below, but sharing its line with a
+    real button silently hid that real button entirely."""
+    feature_file = _write_feature_file(
+        tmp_path,
+        lint,
+        monkeypatch,
+        '<button type="button">x</button> {# tmpl-allow TMPL002: for the next one #}\n'
+        '<button @click="y = true">Open</button>\n',
+    )
+
+    violations = lint.scan_file(feature_file)
+    tmpl002_by_line = {v.line: v for v in violations if v.code == "TMPL002"}
+    assert 1 in tmpl002_by_line, f"the button sharing the marker's own line must still be reported, got: {violations}"
+    assert tmpl002_by_line[1].exempted is False
+    assert 2 in tmpl002_by_line
+    assert tmpl002_by_line[2].exempted is False, "the marker was never clean, so nothing below it is exempted either"
+
+
+def test_second_matching_element_on_an_exempted_line_is_not_also_exempted(tmp_path, lint, monkeypatch):
+    """codex finding: two raw <button>s on the one line below a marker used to collapse into a
+    single Violation record (search() fires once per line regardless of match count), so
+    exempting that record silently approved both buttons from one marker meant for one."""
+    feature_file = _write_feature_file(
+        tmp_path,
+        lint,
+        monkeypatch,
+        "{# tmpl-allow TMPL002: only the first one #}\n"
+        '<button type="button">A</button><button type="button">B</button>\n',
+    )
+
+    violations = lint.scan_file(feature_file)
+    tmpl002 = [v for v in violations if v.code == "TMPL002"]
+    assert len(tmpl002) == 2, f"both buttons must be reported as separate records, got: {violations}"
+    assert tmpl002[0].exempted is True
+    assert tmpl002[1].exempted is False, "only the first matching element on the line may be exempted"

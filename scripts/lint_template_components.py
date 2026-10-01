@@ -90,7 +90,13 @@ _RAW_TEXTAREA_RE = re.compile(r"<textarea\b", re.IGNORECASE)
 # violating element. Per-line (not file-level like TMPL009's allowlist) because a single file can
 # have both legitimate blockers to fix and legitimate exceptions on different lines - a file-level
 # allowlist would exempt every future raw element in the file, not just the one it was written for.
-_TMPL_ALLOW_RE = re.compile(r"\{#\s*tmpl-allow\s+(TMPL\d{3})\s*:\s*(.*?)\s*#\}")
+#
+# The reason group excludes "#" entirely, not just "#}" - a plain .*? would backtrack PAST the
+# first marker's own closing #} to satisfy fullmatch() against a line holding two markers back to
+# back, silently absorbing the second marker's "{# tmpl-allow ... #}" into the first one's reason
+# text instead of failing to match. Django's own {# #} syntax can't contain "#}" in a comment
+# either way, so excluding "#" costs nothing a real reason would ever need.
+_TMPL_ALLOW_RE = re.compile(r"\{#\s*tmpl-allow\s+(TMPL\d{3})\s*:\s*([^#]*?)\s*#\}")
 
 # TMPL005: Raw semantic color classes used as status indicators
 _SEMANTIC_COLOR_RE = re.compile(r"\b(bg|text)-(green|red|yellow|blue|orange|purple|pink)-\d{2,3}\b")
@@ -178,38 +184,44 @@ def load_component_svg_allowlist() -> set[str]:
 
 
 def _find_tmpl_allow_markers(lines: list[str], path: Path) -> tuple[dict[int, tuple[str, str]], list[Violation]]:
-    """Scan every line for `{# tmpl-allow CODE: reason #}` marker(s).
+    """Scan every line for a `{# tmpl-allow CODE: reason #}` marker.
 
-    Returns (markers, meta_violations): `markers` maps the marker's own 1-indexed line number to
-    (code, reason), for lookup by the line directly below it. A marker with an empty reason is
-    never added to `markers` (it exempts nothing) and instead produces a TMPL_ALLOW_NO_REASON
-    blocker in `meta_violations` - require a reason rather than silently accepting a blank one.
-    Two or more markers on the same line are rejected the same way (TMPL_ALLOW_NO_REASON), since
-    the spec is one marker exempting the one element directly below it - `.search()` would
-    otherwise validate only the first and silently ignore the rest.
+    Returns (markers, meta_violations). `markers` maps a CLEAN marker line's 1-indexed number to
+    (code, reason), for lookup by the line directly below it. A line counts as a clean marker
+    only if the marker is its entire stripped content - bot review on the first version of this
+    mechanism found that `.search()` treated any line CONTAINING a marker as marker-only, so
+    `<input> {# tmpl-allow TMPL002: reason #}` silently skipped scanning its own `<input>`, and
+    `<button>x</button> {# tmpl-allow TMPL002: for the next one #}` silently skipped its own real
+    `<button>` too. `scan_file` only skips feature-element scanning on a line present in
+    `markers` (i.e. a clean one) - a merely marker-ish line (marker text sharing the line with
+    anything else) is still scanned normally, so real content sharing that line is still reported.
+
+    A marker with an empty reason, or marker-shaped text sharing a line with anything else
+    (including a second marker), is never added to `markers` - it exempts nothing - and instead
+    produces a TMPL_ALLOW_NO_REASON blocker in `meta_violations`.
     """
     markers: dict[int, tuple[str, str]] = {}
     meta_violations: list[Violation] = []
     for line_no, raw_line in enumerate(lines, start=1):
-        matches = list(_TMPL_ALLOW_RE.finditer(raw_line))
-        if not matches:
+        if not _TMPL_ALLOW_RE.search(raw_line):
             continue
-        if len(matches) > 1:
-            codes = ", ".join(m.group(1) for m in matches)
+
+        clean_match = _TMPL_ALLOW_RE.fullmatch(raw_line.strip())
+        if clean_match is None:
             meta_violations.append(
                 Violation(
                     "TMPL_ALLOW_NO_REASON",
                     SEVERITY_BLOCKER,
                     path,
                     line_no,
-                    f"multiple tmpl-allow markers on one line ({codes}) - one marker exempts one "
-                    "element; split them across separate lines",
+                    "tmpl-allow marker must be the only content on its line (found other text, "
+                    "or more than one marker, sharing the line) - split them across separate lines",
                     snippet=raw_line.strip()[:120],
                 )
             )
             continue
-        match = matches[0]
-        code, reason = match.group(1), match.group(2).strip()
+
+        code, reason = clean_match.group(1), clean_match.group(2).strip()
         if not reason:
             meta_violations.append(
                 Violation(
@@ -257,16 +269,27 @@ def scan_file(path: Path) -> list[Violation]:
 
     for line_no, raw_line in enumerate(lines, start=1):
         line = raw_line.strip()
-        # A tmpl-allow marker's own reason text is free-form prose, not template code - if it
-        # happens to mention a raw element ("needed for <button>" was codex's example), scanning
-        # the marker's own line would misfire a second, unexempted violation on the comment
-        # itself, and a marker directly above THAT could wrongly "consume" it as if it were real.
-        is_tmpl_allow_marker_line = bool(_TMPL_ALLOW_RE.search(raw_line))
+        # Skip feature-element scanning ONLY on a CLEAN marker line (the marker is its entire
+        # content) - a marker's own reason text is free-form prose, not template code, and could
+        # otherwise self-match ("needed for <button>" was one review finding). A merely
+        # marker-ish line - marker text sharing the line with something else - must still be
+        # scanned normally, or the real content sharing that line goes unreported (the other
+        # review finding: `<input> {# tmpl-allow TMPL002: reason #}` silently hid its own <input>).
+        is_clean_tmpl_allow_marker_line = line_no in tmpl_allow_markers
 
         # ── Feature template checks (TMPL001-005, TMPL008) ─────────────────────
-        if is_feature and not is_tmpl_allow_marker_line:
-            if _RAW_INPUT_RE.search(raw_line):
-                exempted, reason = _exemption_for(tmpl_allow_markers, consumed_marker_lines, line_no, "TMPL001")
+        if is_feature and not is_clean_tmpl_allow_marker_line:
+            # Bot review: one marker exempts at most the FIRST matching element on the line below
+            # it - two raw <button>s sharing a line used to collapse into a single Violation
+            # (search() only ever fires once per line regardless of match count), so exempting
+            # that one record silently approved both. Enumerating every match keeps a second,
+            # un-exempted element on the same line reported as a real, separate blocker.
+            for index, _match in enumerate(_RAW_INPUT_RE.finditer(raw_line)):
+                exempted, reason = (
+                    _exemption_for(tmpl_allow_markers, consumed_marker_lines, line_no, "TMPL001")
+                    if index == 0
+                    else (False, "")
+                )
                 violations.append(
                     Violation(
                         "TMPL001",
@@ -280,8 +303,12 @@ def scan_file(path: Path) -> list[Violation]:
                     )
                 )
 
-            if _RAW_BUTTON_RE.search(raw_line):
-                exempted, reason = _exemption_for(tmpl_allow_markers, consumed_marker_lines, line_no, "TMPL002")
+            for index, _match in enumerate(_RAW_BUTTON_RE.finditer(raw_line)):
+                exempted, reason = (
+                    _exemption_for(tmpl_allow_markers, consumed_marker_lines, line_no, "TMPL002")
+                    if index == 0
+                    else (False, "")
+                )
                 violations.append(
                     Violation(
                         "TMPL002",
@@ -295,8 +322,12 @@ def scan_file(path: Path) -> list[Violation]:
                     )
                 )
 
-            if _RAW_SELECT_RE.search(raw_line):
-                exempted, reason = _exemption_for(tmpl_allow_markers, consumed_marker_lines, line_no, "TMPL003")
+            for index, _match in enumerate(_RAW_SELECT_RE.finditer(raw_line)):
+                exempted, reason = (
+                    _exemption_for(tmpl_allow_markers, consumed_marker_lines, line_no, "TMPL003")
+                    if index == 0
+                    else (False, "")
+                )
                 violations.append(
                     Violation(
                         "TMPL003",
@@ -310,8 +341,12 @@ def scan_file(path: Path) -> list[Violation]:
                     )
                 )
 
-            if _RAW_TEXTAREA_RE.search(raw_line):
-                exempted, reason = _exemption_for(tmpl_allow_markers, consumed_marker_lines, line_no, "TMPL004")
+            for index, _match in enumerate(_RAW_TEXTAREA_RE.finditer(raw_line)):
+                exempted, reason = (
+                    _exemption_for(tmpl_allow_markers, consumed_marker_lines, line_no, "TMPL004")
+                    if index == 0
+                    else (False, "")
+                )
                 violations.append(
                     Violation(
                         "TMPL004",
