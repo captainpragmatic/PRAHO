@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from django.utils.functional import _StrPromise
 
 from apps.common.constants import FILE_SIZE_CONVERSION_FACTOR
-from apps.ui.attributes import serialize_button_attributes
+from apps.ui.attributes import sanitize_data_attrs, serialize_button_attributes
 
 register = template.Library()
 
@@ -89,6 +89,19 @@ class InputConfig:
     html_id: str | None = None
     options: list[dict[str, Any]] | None = None
     romanian_validation: bool = True
+    # These are all already read by components/input.html ({% if min %}, {% if rows %}, ...) -
+    # they were missing here, so passing any of them silently dropped the attribute instead of
+    # raising, since **kwargs only sets a field when hasattr(config, key) is already True.
+    min: str | int | None = None
+    max: str | int | None = None
+    step: str | int | None = None
+    maxlength: int | None = None
+    pattern: str | None = None
+    autocomplete: str | None = None
+    autofocus: bool = False
+    rows: int | None = None
+    multiple: bool = False
+    data_attrs: dict[str, Any] | None = None
 
 
 @dataclass
@@ -281,9 +294,20 @@ def input_field(
         "hx_trigger": htmx.hx_trigger,
         "hx_target": htmx.hx_target,
         "hx_swap": htmx.hx_swap,
+        "hx_include": htmx.hx_include,
         "options": config.options,
         "romanian_validation": config.romanian_validation,
         "has_error": bool(config.error),
+        "min": config.min,
+        "max": config.max,
+        "step": config.step,
+        "maxlength": config.maxlength,
+        "pattern": config.pattern,
+        "autocomplete": config.autocomplete,
+        "autofocus": config.autofocus,
+        "rows": config.rows,
+        "multiple": config.multiple,
+        "data_attrs": sanitize_data_attrs(config.data_attrs),
     }
 
 
