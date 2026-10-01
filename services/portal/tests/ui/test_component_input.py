@@ -201,6 +201,25 @@ class InputConstraintAttributeTests(SimpleTestCase):
         result = _render('{% input_field "tags" input_type="select" multiple=True %}')
         self.assertIn("multiple", result)
 
+    def test_multiple_renders_on_file_input(self) -> None:
+        """multiple was only wired into the <select> branch - a file input's own `multiple`
+        was silently dropped even though InputConfig already had the field."""
+        result = _render('{% input_field "attachments" input_type="file" multiple=True %}')
+        self.assertIn("multiple", result)
+
+    def test_accept_renders_on_file_input(self) -> None:
+        result = _render('{% input_field "attachments" input_type="file" accept=".pdf,.png" %}')
+        self.assertIn('accept=".pdf,.png"', result)
+
+    def test_aria_label_renders(self) -> None:
+        result = _render('{% input_field "attachments" input_type="file" aria_label="Attach files" %}')
+        self.assertIn('aria-label="Attach files"', result)
+
+    def test_accept_and_aria_label_omitted_render_no_attribute(self) -> None:
+        result = _render('{% input_field "f" input_type="file" %}')
+        self.assertNotIn("accept=", result)
+        self.assertNotIn("aria-label=", result)
+
     def test_data_attrs_render_as_individual_data_attributes(self) -> None:
         result = _render('{% input_field "f" data_attrs=attrs %}', {"attrs": {"testid": "f-input"}})
         self.assertIn('data-testid="f-input"', result)
