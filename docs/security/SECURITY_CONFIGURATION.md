@@ -37,9 +37,8 @@ HMAC_SECRET="portal-to-platform-hmac-secret"
 # Generate: python -c "import secrets; print(secrets.token_urlsafe(32))"
 PLATFORM_TO_PORTAL_WEBHOOK_SECRET="platform-to-portal-webhook-hmac-secret"
 
-# Database Cache (default, no Redis required)
-# Redis is optional — Platform uses Django's DatabaseCache backend by default
-REDIS_URL="redis://localhost:6379/0"
+# Cache: the Platform uses Django's DatabaseCache (ADR-0020). Redis is not
+# supported, and production settings refuse to start if REDIS_URL is set.
 
 # Email Security
 EMAIL_HOST="smtp.your-provider.com"

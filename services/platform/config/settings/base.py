@@ -689,31 +689,6 @@ Q_CLUSTER = {
 CACHE_VERSION = int(os.environ.get("CACHE_VERSION", "1"))
 
 # ===============================================================================
-# REDIS CACHE CONFIGURATION (Production) 🔄
-# ===============================================================================
-
-# Redis URL for caching (if available, otherwise falls back to database cache)
-REDIS_URL = os.environ.get("REDIS_URL")
-
-# Redis cache configuration (used when REDIS_URL is set)
-REDIS_CACHE_CONFIG = {
-    "BACKEND": "django.core.cache.backends.redis.RedisCache",
-    "LOCATION": REDIS_URL,
-    "OPTIONS": {
-        "CLIENT_CLASS": "django_redis.client.DefaultClient",
-        "SOCKET_CONNECT_TIMEOUT": 5,
-        "SOCKET_TIMEOUT": 5,
-        "CONNECTION_POOL_KWARGS": {
-            "max_connections": 50,
-            "retry_on_timeout": True,
-        },
-        "COMPRESSOR": "django_redis.compressors.zlib.ZlibCompressor",
-    },
-    "KEY_PREFIX": "praho",
-    "VERSION": CACHE_VERSION,
-}
-
-# ===============================================================================
 # DRF THROTTLING CONFIGURATION 🚦
 # ===============================================================================
 

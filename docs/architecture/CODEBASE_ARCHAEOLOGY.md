@@ -27,7 +27,7 @@ This archaeological analysis reveals a codebase undergoing rapid, intentional ev
 **Fossil Evidence:**
 - `celery_task_id` field renamed to `task_id` in migration `0007_rename_celery_task_id_to_task_id.py`
 - `django-rq` commented out in `config/urls.py:62`
-- `.env.example` still contains `REDIS_URL=redis://localhost:6379/0`
+- `.env.example` once contained `REDIS_URL=redis://localhost:6379/0`; the matching prod settings branch was removed in #558 and production now refuses the variable
 - Tests explicitly check Redis is NOT present (`test_docker_services.py:94`)
 
 ---

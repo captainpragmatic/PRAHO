@@ -278,54 +278,29 @@ DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "PRAHO Platform <norep
 SERVER_EMAIL = os.environ.get("SERVER_EMAIL", DEFAULT_FROM_EMAIL)
 
 # ===============================================================================
-# CACHE CONFIGURATION (Redis for Production - with fallback to Database)
+# CACHE CONFIGURATION (Database cache, ADR-0020)
 # ===============================================================================
 
-# Use Redis for production caching if available
-if REDIS_URL:
-    CACHES = {
-        "default": {
-            "BACKEND": "django.core.cache.backends.redis.RedisCache",
-            "LOCATION": REDIS_URL,
-            "OPTIONS": {
-                "CLIENT_CLASS": "django_redis.client.DefaultClient",
-                "SOCKET_CONNECT_TIMEOUT": 5,
-                "SOCKET_TIMEOUT": 5,
-                "CONNECTION_POOL_KWARGS": {
-                    "max_connections": 50,
-                    "retry_on_timeout": True,
-                },
-                "COMPRESSOR": "django_redis.compressors.zlib.ZlibCompressor",
-            },
-            "KEY_PREFIX": "praho",
-            "VERSION": CACHE_VERSION,
-            "TIMEOUT": 3600,  # 1 hour default
-        },
-        # Separate cache for sessions (more persistent)
-        "sessions": {
-            "BACKEND": "django.core.cache.backends.redis.RedisCache",
-            "LOCATION": REDIS_URL,
-            "OPTIONS": {
-                "CLIENT_CLASS": "django_redis.client.DefaultClient",
-                "db": 1,  # Separate Redis DB for sessions
-            },
-            "KEY_PREFIX": "praho_session",
-            "TIMEOUT": 86400,  # 24 hours for sessions
-        },
-    }
-    # Use Redis for sessions
-    SESSION_CACHE_ALIAS = "sessions"
-else:
-    # Fallback to database cache
-    CACHES["default"].update(
-        {
-            "OPTIONS": {
-                "MAX_ENTRIES": 50000,  # Higher limit for production
-                "CULL_FREQUENCY": 4,  # More aggressive culling
-            },
-            "TIMEOUT": 3600,  # 1 hour timeout for production
-        }
+# Redis is not a supported backend: no client ships with the Platform and rate-limit
+# counters assume the shared database store. Refuse the variable rather than half-honour
+# it. An empty value is treated as unset, so a compose ``${REDIS_URL:-}`` stays harmless.
+if os.environ.get("REDIS_URL"):
+    from django.core.exceptions import ImproperlyConfigured
+
+    raise ImproperlyConfigured(
+        "REDIS_URL is set, but Redis is not a supported cache backend (ADR-0020). "
+        "Unset it: the Platform uses the database cache."
     )
+
+CACHES["default"].update(
+    {
+        "OPTIONS": {
+            "MAX_ENTRIES": 50000,  # Higher limit for production
+            "CULL_FREQUENCY": 4,  # More aggressive culling
+        },
+        "TIMEOUT": 3600,  # 1 hour timeout for production
+    }
+)
 
 # ===============================================================================
 # STATIC FILES (Production)
