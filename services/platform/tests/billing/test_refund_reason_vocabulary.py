@@ -18,6 +18,7 @@ day the vocabularies diverged.
 
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 
@@ -30,16 +31,25 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 
 # The selects whose value actually becomes ``Refund.reason``, identified by element id
 # because the *names* do not distinguish them — all five are ``name="refund_reason"``.
-#
-# The portal's is included and is the subtle one: despite being called
-# "invoice_refund_request", ``billing:request_refund`` →
-# ``InvoiceViewService.request_refund`` → ``api_client.process_refund`` → the platform's
-# ``api_process_refund`` → ``RefundService.refund_invoice``. It writes a real refund.
 REFUND_REASON_SELECTS = (
     ("services/platform/templates/billing/invoice_detail.html", "invoice_refund_reason"),
     ("services/platform/templates/orders/order_detail.html", "refund_reason"),
-    ("services/portal/templates/billing/invoice_detail.html", "invoice_refund_request_reason"),
 )
+
+# The portal's refund select also writes a real refund, and is the subtle one: despite being
+# called "invoice_refund_request", ``billing:request_refund`` →
+# ``InvoiceViewService.request_refund`` → ``api_client.process_refund`` → the platform's
+# ``api_process_refund`` → ``RefundService.refund_invoice``.
+#
+# Its options are not literal <option> tags: the select is a ``{% input_field %}`` fed from a
+# view constant, so the vocabulary lives in Python. It is read as source text — the platform
+# cannot import portal code — and the template/view wiring is asserted separately, so the scan
+# can never quietly check a constant the select no longer renders.
+PORTAL_REFUND_TEMPLATE = "services/portal/templates/billing/invoice_detail.html"
+PORTAL_REFUND_SELECT_ID = "invoice_refund_request_reason"
+PORTAL_REFUND_VIEWS = "services/portal/apps/billing/views.py"
+PORTAL_REFUND_CONSTANT = "REFUND_REASON_CHOICES"
+PORTAL_REFUND_CONTEXT_KEY = "refund_reason_choices"
 
 # The selects that look identical but feed a different domain: they POST to
 # ``*_refund_request``, which opens a support ticket and never creates a Refund. Their values
@@ -53,10 +63,6 @@ TICKET_REASON_SELECTS = (
      "services/platform/apps/orders/views.py"),
 )
 
-# Canary: the newest select brought into the scan — the portal's, missed on the first pass
-# over this bug because it lives in the other service.
-NEWEST_SCANNED_SELECT = REFUND_REASON_SELECTS[2]
-
 _OPTION = re.compile(r'<option value="([^"]*)"')
 
 
@@ -64,6 +70,30 @@ def _select_options(relative_path: str, select_id: str) -> set[str]:
     html = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
     start = html.index(f'id="{select_id}"')
     return {value for value in _OPTION.findall(html[start : html.index("</select>", start)]) if value}
+
+
+def _constant_choice_values(relative_path: str, constant: str) -> set[str]:
+    """The ``"value"`` entries of a module-level list-of-dicts choices constant, read via ast."""
+    tree = ast.parse((REPO_ROOT / relative_path).read_text(encoding="utf-8"))
+    for node in tree.body:
+        if isinstance(node, ast.AnnAssign):
+            target, value = node.target, node.value
+        elif isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target, value = node.targets[0], node.value
+        else:
+            continue
+        if isinstance(target, ast.Name) and target.id == constant and isinstance(value, ast.List):
+            return {
+                entry_value.value
+                for entry in value.elts
+                if isinstance(entry, ast.Dict)
+                for key, entry_value in zip(entry.keys, entry.values, strict=True)
+                if isinstance(key, ast.Constant)
+                and key.value == "value"
+                and isinstance(entry_value, ast.Constant)
+                and entry_value.value
+            }
+    raise AssertionError(f"{relative_path} has no list constant named {constant}")
 
 
 def _reason_titles_keys(relative_path: str) -> set[str]:
@@ -88,6 +118,11 @@ class RefundReasonVocabularyTests(SimpleTestCase):
             if unknown := options - valid:
                 offending[f"{template}#{select_id}"] = unknown
 
+        portal_options = _constant_choice_values(PORTAL_REFUND_VIEWS, PORTAL_REFUND_CONSTANT)
+        scanned += len(portal_options)
+        if unknown := portal_options - valid:
+            offending[f"{PORTAL_REFUND_VIEWS}#{PORTAL_REFUND_CONSTANT}"] = unknown
+
         self.assertEqual(
             offending,
             {},
@@ -99,7 +134,24 @@ class RefundReasonVocabularyTests(SimpleTestCase):
         )
         # Structural-Helper Integrity: a scan that matched nothing must fail, not pass.
         self.assertGreaterEqual(scanned, 25)
-        self.assertTrue(_select_options(*NEWEST_SCANNED_SELECT))
+        # Canary: the portal's select is the one missed on the first pass over this bug, because
+        # it lives in the other service.
+        self.assertTrue(portal_options)
+
+    def test_portal_refund_select_renders_the_scanned_constant(self) -> None:
+        """The scan above reads the portal's vocabulary from a Python constant. That proves
+        nothing unless the refund <select> is actually rendered from it: the template must feed
+        the select from the context key, and the view must bind that key to the constant."""
+        template = (REPO_ROOT / PORTAL_REFUND_TEMPLATE).read_text(encoding="utf-8")
+        select_tag = next(
+            (line for line in template.splitlines() if f'html_id="{PORTAL_REFUND_SELECT_ID}"' in line),
+            "",
+        )
+        self.assertIn("{% input_field", select_tag, msg="the portal refund select is no longer an input_field")
+        self.assertIn(f"options={PORTAL_REFUND_CONTEXT_KEY}", select_tag)
+
+        views = (REPO_ROOT / PORTAL_REFUND_VIEWS).read_text(encoding="utf-8")
+        self.assertIn(f'"{PORTAL_REFUND_CONTEXT_KEY}": {PORTAL_REFUND_CONSTANT}', views)
 
     def test_ticket_request_selects_still_match_their_own_vocabulary(self) -> None:
         """The look-alike selects answer to a different map, and must keep doing so.
