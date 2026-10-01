@@ -11,6 +11,7 @@ Tests cover:
 - Edge cases and error handling
 """
 
+from datetime import UTC, datetime
 from unittest.mock import Mock, patch
 
 from django.core.cache import cache
@@ -210,6 +211,21 @@ class ANAFQuotaTrackerTestCase(TestCase):
         self.assertIn("lista_simple", key)
         self.assertIn("12345678", key)
         self.assertIn("20240101", key)
+
+    def test_default_cache_key_follows_the_romanian_calendar_day(self):
+        """The budget expires at Romanian midnight (`_seconds_until_midnight`), so the key it is
+        counted under must roll over at the same instant. Keyed on the UTC date it rolled over at
+        02:00/03:00 Bucharest as well - two budgets inside one Romanian day."""
+        just_after_local_midnight = datetime(2026, 9, 30, 21, 30, tzinfo=UTC)  # 1 Oct 00:30 Bucharest
+        late_local_evening = datetime(2026, 10, 1, 20, 0, tzinfo=UTC)  # 1 Oct 23:00 Bucharest
+
+        keys = []
+        for instant in (just_after_local_midnight, late_local_evening):
+            with patch("django.utils.timezone.now", return_value=instant):
+                keys.append(self.tracker._get_cache_key(QuotaEndpoint.LIST_SIMPLE, "12345678"))
+
+        self.assertEqual(keys[0], keys[1])
+        self.assertTrue(keys[0].endswith(":20261001"), keys[0])
 
     def test_cache_key_generation_per_message(self):
         """Test cache key generation for per-message quotas."""

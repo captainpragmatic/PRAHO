@@ -159,7 +159,7 @@ class ANAFQuotaTracker:
     ) -> str:
         """Generate cache key for quota tracking."""
         if date_str is None:
-            date_str = timezone.now().strftime("%Y%m%d")
+            date_str = timezone.now().astimezone(ROMANIA_TIMEZONE).strftime("%Y%m%d")
 
         if message_id and endpoint in (QuotaEndpoint.STATUS, QuotaEndpoint.DOWNLOAD):
             # Per-message quotas
