@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from rest_framework.metadata import SimpleMetadata
-from rest_framework.request import Request
-from rest_framework.views import APIView
+
+if TYPE_CHECKING:
+    # Annotation-only. DRF resolves DEFAULT_METADATA_CLASS while rest_framework.views is
+    # still being defined, so importing APIView here at runtime is a circular import.
+    from rest_framework.request import Request
+    from rest_framework.views import APIView
 
 
 class NoDocstringMetadata(SimpleMetadata):  # type: ignore[misc]  # DRF metadata base is untyped
