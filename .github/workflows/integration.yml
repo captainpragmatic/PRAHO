@@ -71,7 +71,7 @@ jobs:
 
     - name: Template design-system lint
       run: make lint-templates
-      continue-on-error: true  # TODO: fix 78 blockers, then make blocking
+      continue-on-error: true  # TODO: fix 90 blockers, then make blocking
 
     - name: Install semgrep for security scanning
       run: |
