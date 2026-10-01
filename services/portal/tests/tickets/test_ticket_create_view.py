@@ -97,6 +97,21 @@ class TicketCreatePriorityDefaultTests(TestCase):
         self.assertEqual(_selected_value(content, "priority"), "high")
         self.assertEqual(_selected_value(content, "category"), "hosting")
 
+    def test_validation_error_rerender_falls_back_to_normal_for_an_unrecognized_priority(self) -> None:
+        """codex review: "urgent" was a real <option> before this swap's TICKET_PRIORITY_OPTIONS
+        replaced it, and an empty string is what a stripped/blank form field submits. The old
+        template's <option value="normal"> carried `{% if priority != low/high/critical %}` -
+        selected for anything else, including both of these. input_field selects by exact value
+        match, so passing either straight through would select nothing and the browser would
+        default to the first option (low), not normal."""
+        for submitted in ("urgent", "", "not-a-real-priority"):
+            with self.subTest(submitted=submitted):
+                response = self.client.post(
+                    reverse("tickets:create"),
+                    {"title": "", "description": "x", "priority": submitted, "category": ""},
+                )
+                self.assertEqual(_selected_value(response.content.decode(), "priority"), "normal")
+
     def test_validation_error_rerender_preserves_typed_description(self) -> None:
         response = self.client.post(
             reverse("tickets:create"),
@@ -125,3 +140,16 @@ class TicketCreatePriorityDefaultTests(TestCase):
         content = response.content.decode()
         self.assertEqual(_selected_value(content, "priority"), "critical")
         self.assertEqual(_selected_value(content, "category"), "technical")
+
+    @patch("apps.tickets.views.tickets_api.create_ticket")
+    def test_api_error_rerender_falls_back_to_normal_for_an_unrecognized_priority(self, mock_create) -> None:
+        from apps.tickets.services import PlatformAPIError  # noqa: PLC0415
+
+        mock_create.side_effect = PlatformAPIError("boom", status_code=503)
+
+        response = self.client.post(
+            reverse("tickets:create"),
+            {"title": "Still broken", "description": "x", "priority": "urgent", "category": ""},
+        )
+
+        self.assertEqual(_selected_value(response.content.decode(), "priority"), "normal")

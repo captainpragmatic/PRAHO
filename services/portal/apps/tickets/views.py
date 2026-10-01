@@ -84,6 +84,17 @@ TICKET_PRIORITY_OPTIONS = [
     {"value": "high", "label": gettext_lazy("High")},
     {"value": "critical", "label": gettext_lazy("Critical")},
 ]
+_VALID_TICKET_PRIORITIES = {opt["value"] for opt in TICKET_PRIORITY_OPTIONS}
+
+
+def _normalized_ticket_priority(raw: str) -> str:
+    """Match the template's old fallback: anything other than low/high/critical selected
+    "normal", including a submitted value of "urgent" (a real option before this swap's
+    TICKET_PRIORITY_OPTIONS replaced it) or an empty/garbage one. input_field selects by exact
+    value match, so an unrecognized value must be normalized here or the error re-render would
+    select nothing and the browser would default to whichever option renders first (low)."""
+    return raw if raw in _VALID_TICKET_PRIORITIES else "normal"
+
 
 # Allowlist for the ?status= query param ("" = All tab). The value is echoed
 # into rendered context and forwarded to the platform API, and the shared tab
@@ -285,7 +296,7 @@ def ticket_create(request: HttpRequest) -> HttpResponse:
                 {
                     "title": title,
                     "description": description,
-                    "priority": priority,
+                    "priority": _normalized_ticket_priority(priority),
                     "category": category,
                     "service_id": service_id_str,
                     "service_name": service_name,
@@ -336,7 +347,7 @@ def ticket_create(request: HttpRequest) -> HttpResponse:
                 {
                     "title": title,
                     "description": description,
-                    "priority": priority,
+                    "priority": _normalized_ticket_priority(priority),
                     "category": category,
                     "service_id": service_id_str,
                     "service_name": service_name,
