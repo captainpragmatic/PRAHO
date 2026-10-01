@@ -79,6 +79,7 @@ providing a historical record of why the system is built the way it is.
 | [ADR-0048](ADR-0048-external-invoice-issuer.md) | External Invoice Issuer (SmartBill) | Accepted | 2026-09-22 |
 | [ADR-0049](ADR-0049-reverse-charge-requires-vies-evidence.md) | Reverse Charge Requires VIES Evidence | Accepted | 2026-09-27 |
 | [ADR-0050](ADR-0050-portal-infrastructure-tables.md) | Portal Infrastructure Tables | Accepted | 2026-09-28 |
+| [ADR-0051](ADR-0051-hosting-account-enabled-state-ownership.md) | Hosting Account Enabled-State Ownership | Proposed | 2026-10-01 |
 
 ### 🟡 Partially Superseded
 
@@ -195,8 +196,8 @@ Billing Ownership
 
 ## Statistics
 
-- **Total ADRs**: 50 (ADR-0001 through ADR-0050)
+- **Total ADRs**: 51 (ADR-0001 through ADR-0051)
 - **Active**: 39 (Accepted + Implemented)
 - **Partially Superseded**: 1
 - **Superseded / Historical**: 5
-- **Next available**: ADR-0051
+- **Next available**: ADR-0052

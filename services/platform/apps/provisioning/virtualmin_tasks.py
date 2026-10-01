@@ -22,6 +22,7 @@ from apps.audit.services import AuditContext, AuditEventData, AuditService
 from apps.common.types import Retriability, retriability_of
 from apps.provisioning.models import Service
 
+from .domain_veto import domain_disables_hosting, exclude_domain_disabled
 from .security_utils import (
     IdempotencyManager,
     ProvisioningErrorClassifier,
@@ -1175,7 +1176,8 @@ def reconcile_virtualmin_service_state(  # noqa: PLR0911  # Convergence matrix: 
     propagated; reactivation was silently absorbed).
 
     active + no account      -> auto-provision (kill-switch gated, ADR-0019)
-    active + suspended acct  -> unsuspend
+    active + suspended acct  -> unsuspend, unless a bound domain disables
+                                hosting (#566, ADR-0051): then leave it off
     suspended/terminated/expired + active acct -> suspend (never delete —
     deletion stays protected/manual)
     """
@@ -1203,6 +1205,9 @@ def reconcile_virtualmin_service_state(  # noqa: PLR0911  # Convergence matrix: 
             _trigger_automatic_virtualmin_provisioning(service)
             return {"success": True, "action": "provisioning_triggered"}
         if account.status == "suspended":
+            if domain_disables_hosting(account):
+                logger.info("⏭️ [VirtualminTask] Domain disables hosting; leaving %s suspended", account.domain)
+                return {"success": True, "action": "domain_disabled"}
             result = VirtualminProvisioningService(account.server).unsuspend_account(account)
             if result.is_err():
                 return {"success": False, "action": "unsuspend", "error": str(result.unwrap_err())}
@@ -1255,10 +1260,14 @@ def reconcile_divergent_services_task() -> dict[str, Any]:
         "service_id", flat=True
     )[:50]:
         divergent_ids.add(str(sid))
-    # (b) active Service with a suspended account
-    for sid in VirtualminAccount.objects.filter(status="suspended", service__status="active").values_list(
-        "service_id", flat=True
-    )[:50]:
+    # (b) active Service with a suspended account. Accounts held off by their domain
+    # are excluded before the cap: they are not divergent, and re-queuing them every
+    # run would starve the accounts that are (#566).
+    for sid in (
+        exclude_domain_disabled(VirtualminAccount.objects.filter(status="suspended", service__status="active"))
+        .order_by("pk")
+        .values_list("service_id", flat=True)[:50]
+    ):
         divergent_ids.add(str(sid))
     # (c) active hosting Service whose original on_commit enqueue was lost
     # before any VirtualminAccount row existed. Apply the hosting predicates
