@@ -19,6 +19,7 @@ import io
 import logging
 import secrets
 import string
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, Union, cast
 
 import pyotp
@@ -1063,6 +1064,11 @@ class MFAService:
         return True
 
     @staticmethod
+    def _reset_rate_limit(user: "User") -> None:
+        """Give back the attempt budget after a verified login, so honest logins never drain it."""
+        cache.delete(f"mfa_attempts:{user.id}")
+
+    @staticmethod
     def _get_available_methods(user: "User") -> list[str]:
         """Get list of available MFA methods for user"""
         methods = []
@@ -1077,6 +1083,47 @@ class MFAService:
             methods.append("webauthn")
 
         return methods
+
+
+# ===============================================================================
+# LOGIN SECOND FACTOR (shared by every login path)
+# ===============================================================================
+
+
+@dataclass(frozen=True)
+class SecondFactorResult:
+    """Outcome of one login second-factor check.
+
+    rate_limited means the per-user attempt budget was exhausted and the code was never
+    checked; it is still a failure and has already been charged to the lockout.
+    """
+
+    accepted: bool
+    method: Literal["totp", "backup_code"] | None
+    rate_limited: bool
+
+
+def verify_login_second_factor(locked_user: "User", code: str, request: HttpRequest | None) -> SecondFactorResult:
+    """Check a TOTP or backup code at login; a failure counts toward the account lockout.
+
+    Shared by portal_login_api, obtain_token and the staff web mfa_verify, so every login
+    path accepts exactly the same codes. The caller holds select_for_update on locked_user
+    inside the transaction it lets commit on failure, because the failed attempt is meant to
+    count: reaching this check took the correct password, so the failure is attributable.
+    """
+    if not transaction.get_connection().in_atomic_block:
+        raise RuntimeError("verify_login_second_factor needs the caller's row lock inside a transaction")
+
+    if code:
+        outcome = MFAService.verify_mfa_code(locked_user, code, request)
+        if outcome["success"]:
+            MFAService._reset_rate_limit(locked_user)
+            return SecondFactorResult(accepted=True, method=outcome["method"], rate_limited=False)
+        rate_limited = bool(outcome["rate_limited"])
+    else:
+        rate_limited = False
+    locked_user.increment_failed_login_attempts()
+    return SecondFactorResult(accepted=False, method=None, rate_limited=rate_limited)
 
 
 # ===============================================================================

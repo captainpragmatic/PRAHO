@@ -50,7 +50,7 @@ from apps.common.performance.rate_limiting import (
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.validators import log_security_event
 from apps.customers.models import Customer
-from apps.users.mfa import MFAService
+from apps.users.mfa import MFAService, verify_login_second_factor
 from apps.users.models import APIToken, CustomerMembership, User, UserProfile
 from apps.users.services import APITokenService, SessionSecurityService
 
@@ -88,20 +88,6 @@ def _charge_login_failure(forwarded_ip: str | None) -> None:
     """Charge the per-client login failure budget; successful logins never count."""
     if forwarded_ip is not None:
         fixed_window_limited(f"login_ip:{forwarded_ip}", settings.THROTTLE_RATES["auth_login_ip"])
-
-
-def _second_factor_accepted(locked_user: User, code: str, request: HttpRequest) -> bool:
-    """Verify a TOTP or backup code for an enrolled user; a failure counts toward the lockout.
-
-    Shared by portal_login_api and obtain_token so both accept exactly the same codes. The
-    caller holds select_for_update on locked_user and must let its transaction commit on
-    failure, because the failed attempt is meant to count. A failure here is attributable:
-    reaching it took the correct password.
-    """
-    if code and MFAService.verify_mfa_code(locked_user, code, request)["success"]:
-        return True
-    locked_user.increment_failed_login_attempts()
-    return False
 
 
 @csrf_exempt  # nosemgrep: no-csrf-exempt — HMAC-authenticated inter-service endpoint
@@ -163,7 +149,7 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911 -- 
         if user.two_factor_enabled:
             with transaction.atomic():
                 user = User.objects.select_for_update().get(pk=user.pk)
-                if not _second_factor_accepted(user, str(data.get("mfa_token", "")), request):
+                if not verify_login_second_factor(user, str(data.get("mfa_token", "")), request).accepted:
                     _charge_login_failure(forwarded_ip)
                     return JsonResponse({"success": False, "error": "Invalid authentication code"}, status=401)
 
@@ -314,8 +300,9 @@ def _issue_token_under_lock(
             )
             return refused
         # A password alone must never yield a token for an enrolled account (#565).
-        if user.two_factor_enabled and not _second_factor_accepted(
-            user, str(request.data.get("mfa_token", "")), request
+        if (
+            user.two_factor_enabled
+            and not verify_login_second_factor(user, str(request.data.get("mfa_token", "")), request).accepted
         ):
             logger.warning(  # nosemgrep: python-logger-credential-disclosure — literal log message, no secrets
                 "[Auth] Token request failed the second factor — ip=%s", client_ip
