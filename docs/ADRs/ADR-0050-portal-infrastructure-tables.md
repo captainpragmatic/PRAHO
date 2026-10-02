@@ -14,6 +14,10 @@ Portal already stores server-side sessions in SQLite. Migrating every installed
 app also runs historical billing migrations that create and remove business
 tables. Deployment must target the infrastructure apps explicitly.
 
+> Update (ADR-0052): the migration reset removed those historical billing
+> migrations, so the Portal now has no migration that touches business tables.
+> Deployment still targets the infrastructure apps explicitly.
+
 ## Decision
 
 The Portal database may contain sessions and explicitly named infrastructure

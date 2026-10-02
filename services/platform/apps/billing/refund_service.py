@@ -79,7 +79,7 @@ def _choice_value(
     if raw is None or raw == "":
         # An absent key and an empty one mean the same thing. The portal's refund client
         # declares `reason: str = ""`, so without this an empty string reaches a choices
-        # column as a value nothing can display — the case migration 0048 has to repair.
+        # column as a value nothing can display — the case the old history's migration 0048 repaired.
         return default
     if isinstance(raw, enum_type):
         return str(raw.value)
@@ -2718,7 +2718,7 @@ class RefundQueryService:
             if entity_type not in ["order", "invoice"]:
                 return Err("Invalid entity type")
 
-            # Query the Refund model — sole source of truth after migration 0024
+            # Query the Refund model — the sole source of truth for refunds
             if entity_type == "order":
                 refunds_qs = Refund.objects.filter(order__id=entity_id)
             else:  # invoice

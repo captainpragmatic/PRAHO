@@ -1384,7 +1384,7 @@ class DomainOrderService:
         #
         # domain_name was canonicalized (strip+lower) after validation above, matching
         # Domain.name's stored form: #442 made canonicalization structural — save() and the
-        # bulk-path queryset canonicalize every write, migration 0006 fixed legacy rows.
+        # bulk-path queryset canonicalize every write, the old history's migration 0006 fixed legacy rows.
         existing_domain: Domain | None = None
         if action == "renew":
             existing_domain = (

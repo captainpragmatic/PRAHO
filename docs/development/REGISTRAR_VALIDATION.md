@@ -103,9 +103,10 @@ hourly, or daily after 72 hours. Due timestamps keep old unresolved rows from
 starving newer work. A not-found read never deletes an uncertain registration.
 Only explicit rejection can release a newly attempted registration's name.
 
-Migration 0009 keeps old intent keys null, backfills acceptance from existing
-references, and returns prior timeout/reference-bearing failures to submitted
-review. It does not invent completion or replay any request. Legacy pending
+Before the migration reset (ADR-0052), migration 0009 kept old intent keys null,
+backfilled acceptance from existing references, and returned prior
+timeout/reference-bearing failures to submitted review. It did not invent
+completion or replay any request. Legacy pending
 Domain rows acquire conservative review operations on the next sweep. Pending
 contact work is not automatically retried. Only a never-dispatched nameserver
 setup step may resume automatically after confirmed registration.

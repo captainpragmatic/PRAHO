@@ -373,8 +373,8 @@ class DomainQuerySet(models.QuerySet["Domain"]):
     also behind related managers like ``customer.domains``) closes every ORM path.
 
     ``Domain._base_manager`` intentionally stays a plain Manager: it is the escape
-    hatch the migration tests use to seed legacy-shaped rows. Raw SQL likewise
-    bypasses this layer — migration 0006 is the recovery for any such row.
+    hatch tests use to seed legacy-shaped rows. Raw SQL likewise bypasses this
+    layer; the old history's migration 0006 repaired such rows (ADR-0052).
     """
 
     def update(self, **kwargs: Any) -> int:
@@ -526,7 +526,7 @@ class Domain(ConcurrentTransitionMixin, models.Model):
 
         The service call sites already lowercase on the way in; doing it here makes the
         invariant structural rather than a convention every future writer (admin, data
-        import, direct ORM) has to remember. Migration 0006 canonicalizes existing rows;
+        import, direct ORM) has to remember. The old history's migration 0006 canonicalized existing rows;
         DomainQuerySet covers the bulk paths that never call save().
 
         When canonicalization actually changes the name and the caller passed

@@ -846,7 +846,7 @@ class Command(BaseCommand):
         """Create Product objects and ProductPrice objects based on existing ServicePlans with new pricing model"""
         service_plans = ServicePlan.objects.all()
 
-        # RON exists from migration 0046 (seed) / billing foundation; get_or_create is
+        # RON exists from the billing 0004 currency seed; get_or_create is
         # idempotent and avoids a PK collision with the seeded row.
         ron_currency, created = Currency.objects.get_or_create(
             code="RON", defaults={"name": "Romanian Leu", "symbol": "lei"}
