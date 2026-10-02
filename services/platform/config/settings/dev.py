@@ -222,7 +222,7 @@ EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 DEFAULT_FROM_EMAIL = "dev@pragmatichost.com"
 
 # ===============================================================================
-# CACHE (Dummy cache for development)
+# CACHE (in-memory LocMemCache for development; staging/prod use the database cache)
 # ===============================================================================
 
 # Override CACHES for development with in-memory cache
