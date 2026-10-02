@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Staff with two-factor authentication enrolled are now asked for their code at the web
+  login. The password alone used to sign them in, because the step that hands a login over
+  to the code page was never wired (#590). The code page now uses the same check as the API
+  logins, so a code cannot be replayed, wrong codes count toward the account lockout, and a
+  login that waits more than five minutes, or whose account changes in between, starts over.
+  Sessions granted before this change are not revoked by it.
+- A password reset link no longer turns two-factor authentication off. The web reset cleared
+  the authenticator secret and backup codes, so the link alone led to a login with no second
+  factor. Turning 2FA off and regenerating backup codes on the web now need the password and
+  a current code, as they already did through the API (#595).
+- WebAuthn checks now refuse instead of accepting. Without a verification library they
+  accepted any request that named a registered key, and they trusted a challenge and a
+  signature counter sent by the client. Nothing used them for login yet (#596).
+- Two failed logins arriving at the same moment both count toward the lockout. One of them
+  could be lost before. A correct second-factor code now also restores that account's
+  allowance of code attempts, so several honest logins in a row are not refused.
 - An unauthenticated caller can no longer lock other people's accounts. Five wrong passwords
   sent to the public token endpoint used to lock that account for up to four hours across
   every login path, with no credentials needed. That endpoint no longer drives the lockout

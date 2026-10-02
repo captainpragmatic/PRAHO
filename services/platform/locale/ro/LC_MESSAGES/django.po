@@ -20241,3 +20241,18 @@ msgstr "DD/MM/YYYY — 23/11/2026"
 
 msgid "MM/DD/YYYY — 11/23/2026"
 msgstr "MM/DD/YYYY — 11/23/2026"
+
+msgid "Your sign-in expired or your account changed. Please sign in again."
+msgstr "Conectarea a expirat sau contul s-a modificat. Conectați-vă din nou."
+
+msgid "Account temporarily locked for security reasons. Please try again later."
+msgstr "Contul este temporar blocat din motive de securitate. Încercați din nou mai târziu."
+
+msgid "Authentication or backup code"
+msgstr "Cod de autentificare sau de rezervă"
+
+msgid "Enter the 6-digit code from your authenticator app, or one of your 8-digit backup codes"
+msgstr "Introduceți codul de 6 cifre din aplicația de autentificare sau unul dintre codurile de rezervă de 8 cifre"
+
+msgid "Cancel and sign in again"
+msgstr "Anulați și conectați-vă din nou"
