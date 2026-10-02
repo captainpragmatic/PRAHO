@@ -334,8 +334,9 @@ def _issue_token_under_lock(
         )
         if result.is_err():
             # Nothing was issued, so nothing this request did may stick: a spent backup code
-            # comes back and the counter reset is undone. A TOTP code stays spent, because
-            # its replay marker lives in the cache; the caller waits for the next one.
+            # comes back and the counter reset is undone. Under the configured DatabaseCache the
+            # TOTP replay marker is written on this same connection, so it rolls back too and the
+            # code stays usable once; only a cache on a separate store would keep it spent.
             transaction.set_rollback(True)
             return Response({"error": result.unwrap_err()}, status=status.HTTP_400_BAD_REQUEST)
     issued = result.unwrap()

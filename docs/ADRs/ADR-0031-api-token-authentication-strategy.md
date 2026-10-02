@@ -264,7 +264,9 @@ transaction on the locked user row that re-reads the password hash, the lock and
 state and the 2FA flag, verifies the code and issues the token. A wrong or missing code
 counts toward the account lockout, unlike a wrong password, because reaching it took the
 correct password. If issuance is refused (the live-token cap), the transaction rolls back
-and a backup code is not spent; a TOTP code stays spent because its replay marker is cached.
+and a backup code is not spent. A TOTP code is also not spent under the configured
+DatabaseCache, whose replay-marker write shares the rolled-back transaction; only a cache backed
+by a separate store (LocMem, Redis) would leave it spent. No token is issued either way.
 
 Unattended scripts obtain a token once, interactively, with a current code, and store the
 token. They should never store the password.
