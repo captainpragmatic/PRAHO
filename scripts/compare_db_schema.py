@@ -282,8 +282,25 @@ def dump_pg(dsn: str) -> Document:
     return {"kind": "postgresql", "source": _redact_dsn(dsn), "sections": dict(sections)}
 
 
+_REDACTED = "***"
+
+
 def _redact_dsn(dsn: str) -> str:
-    return re.sub(r"password=\S+", "password=***", re.sub(r"://([^:@/]+):[^@]+@", r"://\1:***@", dsn))
+    """The DSN without its password, parsed by libpq itself so no quoting form can leak it.
+
+    A regex stops at the first space and leaks the rest of a quoted keyword password; libpq's own
+    parser understands URLs, quoted keyword values and escapes. Anything it cannot parse is
+    withheld entirely rather than partially redacted.
+    """
+    from psycopg import conninfo  # optional dependency, only needed for PostgreSQL dumps
+
+    try:
+        params = conninfo.conninfo_to_dict(dsn)
+    except Exception:  # an unparseable DSN is withheld, never echoed
+        return "<unparseable DSN withheld>"
+    if "password" in params:
+        params["password"] = _REDACTED
+    return conninfo.make_conninfo(**params)
 
 
 # --------------------------------------------------------------------------- SQLite
