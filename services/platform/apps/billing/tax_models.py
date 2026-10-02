@@ -131,7 +131,7 @@ class TaxRule(models.Model):
     def is_active(self, date: date | None = None) -> bool:
         """Check if tax rule is active on given date"""
         if date is None:
-            date = timezone.now().date()
+            date = timezone.localdate()  # the Romanian calendar date, not the UTC one
 
         if date < self.valid_from:
             return False
@@ -142,7 +142,7 @@ class TaxRule(models.Model):
     def get_active_rate(cls, country_code: str, tax_type: str = "vat", date: date | None = None) -> Decimal:
         """Get active tax rate for country and date"""
         if date is None:
-            date = timezone.now().date()
+            date = timezone.localdate()  # the Romanian calendar date, not the UTC one
 
         try:
             rule = (

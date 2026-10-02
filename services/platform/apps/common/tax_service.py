@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime, time, timedelta
 from decimal import ROUND_HALF_EVEN, Decimal
 from enum import Enum
 from typing import Any, ClassVar, TypedDict
@@ -223,11 +224,24 @@ class TaxConfiguration:
         # Cache the rate. A rate borrowed from the supplier as a fail-safe is NOT
         # cached under the customer's code: a later TaxRule change invalidates only
         # the supplier's key, which would leave the alias serving a superseded rate.
-        if not used_supplier_fallback:
-            cache.set(cache_key, str(rate), cls.CACHE_TIMEOUT)
+        timeout = cls._cache_timeout()
+        if not used_supplier_fallback and timeout > 0:
+            cache.set(cache_key, str(rate), timeout)
         logger.info(f"💰 [TaxService] Loaded rate for {country_code}: {rate}%")
 
         return rate / 100 if as_decimal else rate
+
+    @classmethod
+    def _cache_timeout(cls) -> int:
+        """Seconds a looked-up rate may be cached: never past the next local midnight.
+
+        The cache key has no date, so a rate cached late on the last day of a rate period
+        would otherwise be served after the next period started. Compared as instants, so a
+        DST change cannot stretch or shrink the window.
+        """
+        now = timezone.now()
+        next_midnight = timezone.make_aware(datetime.combine(timezone.localdate(now) + timedelta(days=1), time.min))
+        return min(cls.CACHE_TIMEOUT, int(next_midnight.timestamp() - now.timestamp()))
 
     @classmethod
     def _get_rate_from_database(cls, country_code: str) -> Decimal | None:
@@ -237,7 +251,8 @@ class TaxConfiguration:
                 TaxRule,  # Circular: cross-app  # Deferred: avoids circular import
             )
 
-            today = timezone.now().date()
+            # A rule is in force for a Romanian calendar date; the UTC date lags it by up to three hours.
+            today = timezone.localdate()
             rule = (
                 TaxRule.objects.filter(country_code=country_code.upper(), tax_type="vat", valid_from__lte=today)
                 .filter(models.Q(valid_to__isnull=True) | models.Q(valid_to__gte=today))
