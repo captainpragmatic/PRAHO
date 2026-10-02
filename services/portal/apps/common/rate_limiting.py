@@ -19,6 +19,14 @@ from django.utils.translation import gettext as _
 
 from apps.common import counters
 from apps.common.request_ip import get_safe_client_ip
+from apps.common.store_unavailable import (
+    STORE_UNAVAILABLE_RETRY_AFTER_SECONDS,
+    STORE_UNAVAILABLE_STATUS,
+    store_unavailable_json,
+    store_unavailable_message,
+    store_unavailable_response,
+    wants_json,
+)
 
 logger = logging.getLogger(__name__)
 _proxy_warning_logged = False
@@ -131,9 +139,7 @@ class AuthenticationRateLimitMiddleware:
             except Exception:
                 logger.exception("🔥 [RateLimit] Counter store unavailable after authentication")
                 self._uniform_response_delay(start_time)
-                return self._rate_limit_response(
-                    request, _("Service temporarily unavailable. Please try again later."), 300, 503
-                )
+                return self._store_unavailable_response(request)
 
         # Apply uniform response timing to prevent timing attacks
         self._uniform_response_delay(start_time)
@@ -167,9 +173,7 @@ class AuthenticationRateLimitMiddleware:
                     )
         except Exception:
             logger.exception("🔥 [RateLimit] Password reset limiter unavailable")
-            return self._rate_limit_response(
-                request, _("Service temporarily unavailable. Please try again later."), 60, 503
-            )
+            return self._store_unavailable_response(request)
         return None
 
     def _password_reset_budgets(self, request: HttpRequest) -> list[tuple[str, int, int]]:
@@ -210,8 +214,7 @@ class AuthenticationRateLimitMiddleware:
             return None
         except Exception as e:
             logger.error("🔥 [RateLimit] Rate limiting check failed: %s", e)
-            error_msg = _("Service temporarily unavailable. Please try again later.")
-            return self._rate_limit_response(request, error_msg, 300, 503)
+            return self._store_unavailable_response(request)
 
     def _check_reauth_budget(self, request: HttpRequest) -> HttpResponse | None:
         """MFA re-authentication failures are budgeted per session user, never per address."""
@@ -259,12 +262,25 @@ class AuthenticationRateLimitMiddleware:
 
     def _is_api_or_htmx_request(self, request: HttpRequest) -> bool:
         """Check if this is an API/HTMX request (expects JSON) vs browser form submission."""
-        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
-            return True
-        if request.headers.get("HX-Request") == "true":
-            return True
-        accept = request.headers.get("Accept", "")
-        return "application/json" in accept and "text/html" not in accept
+        return wants_json(request)
+
+    def _store_unavailable_response(self, request: HttpRequest) -> HttpResponse:
+        """The shared store-failure contract (#554). A recovery page re-renders its form rather than redirecting."""
+        recovery = request.path.startswith("/password-reset/")
+        if recovery and not wants_json(request):
+            return self._rate_limit_response(
+                request, store_unavailable_message(), STORE_UNAVAILABLE_RETRY_AFTER_SECONDS, STORE_UNAVAILABLE_STATUS
+            )
+        response = store_unavailable_response(request, "users:login")
+        if recovery:
+            self._apply_recovery_headers(request, response, STORE_UNAVAILABLE_RETRY_AFTER_SECONDS)
+        return response
+
+    def _apply_recovery_headers(self, request: HttpRequest, response: HttpResponse, retry_after: int) -> None:
+        response["Retry-After"] = str(retry_after)
+        token_free = request.path in {"/password-reset/", "/password-reset/confirm/"}
+        response["Referrer-Policy"] = "same-origin" if token_free else "no-referrer"
+        add_never_cache_headers(response)
 
     def _rate_limit_response(
         self, request: HttpRequest, error_msg: str, retry_after: int, status_code: int
@@ -295,10 +311,7 @@ class AuthenticationRateLimitMiddleware:
             messages.error(request, error_msg)
             return redirect("users:login")
         if recovery:
-            response["Retry-After"] = str(retry_after)
-            token_free = request.path in {"/password-reset/", "/password-reset/confirm/"}
-            response["Referrer-Policy"] = "same-origin" if token_free else "no-referrer"
-            add_never_cache_headers(response)
+            self._apply_recovery_headers(request, response, retry_after)
         return response
 
     def _record_reauth_attempt(self, request: HttpRequest) -> None:
@@ -511,9 +524,10 @@ class APIRateLimitMiddleware:
             return None  # Rate limits not exceeded
 
         except Exception:
-            # Fail-closed: matches AuthenticationRateLimitMiddleware behavior
+            # Fail-closed with the shared store-failure contract (#554). These paths include browser pages,
+            # so a redirect would loop; the limiter's 429s are JSON for every caller too.
             logger.error("🔥 [APIRateLimit] Counter store error; denying request")
-            return JsonResponse({"error": _("Service temporarily unavailable")}, status=503)
+            return store_unavailable_json()
 
     def _is_cart_mutation(self, request: HttpRequest) -> bool:
         """Check if request is a cart mutation endpoint"""
