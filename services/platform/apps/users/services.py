@@ -1196,8 +1196,13 @@ class SessionSecurityService:
         logger.warning(f"🔄 [SessionSecurity] Session rotated for {user.email} after 2FA change")
 
     @classmethod
-    def cleanup_2fa_secrets_on_recovery(cls, user: User, request_ip: str | None = None) -> None:
-        """🔒 Clean up 2FA secrets during account recovery"""
+    def secure_account_after_password_reset(cls, user: User, request_ip: str | None = None) -> None:
+        """🔒 Revoke every session after a password reset, keeping enrolled MFA.
+
+        A reset link proves control of the mailbox, not of the second factor, so the factor
+        stays (as in the API reset). The credential version still rotates, which signs out
+        every existing session.
+        """
         if not user:
             return
 
@@ -1209,9 +1214,9 @@ class SessionSecurityService:
         cls._invalidate_all_user_sessions(user.id)
 
         # Log security event
-        log_security_event("2fa_secrets_cleared_recovery", {"user_id": user.id, "email": user.email}, request_ip)
+        log_security_event("sessions_revoked_password_reset", {"user_id": user.id, "email": user.email}, request_ip)
 
-        logger.warning(f"🔐 [SessionSecurity] 2FA secrets cleared for {user.email} during recovery")
+        logger.warning(f"🔐 [SessionSecurity] Sessions revoked for {user.email} after a password reset")
 
     @classmethod
     def update_session_timeout(cls, request: HttpRequest) -> None:

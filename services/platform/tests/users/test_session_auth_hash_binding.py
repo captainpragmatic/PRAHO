@@ -294,7 +294,10 @@ class SessionAuthHashBindingTests(HMACTestMixin, TestCase):
         browser = Client()
         browser.force_login(self.user)
         old_key = browser.session.session_key
-        response = browser.post(reverse("users:mfa_disable"), {"password": self.password})
+        response = browser.post(
+            reverse("users:mfa_disable"),
+            {"password": self.password, "token": pyotp.TOTP(self.user.two_factor_secret).now()},
+        )
         self.assertRedirects(response, reverse("users:user_profile"), fetch_redirect_response=False)
         self.user.refresh_from_db()
         new_hash = self.user.get_session_auth_hash()
@@ -355,11 +358,13 @@ class SessionAuthHashBindingTests(HMACTestMixin, TestCase):
                     self.assertTrue(MFAService.disable_all_mfa_methods(request, self.user)["success"])
                     self.assertFalse(WebAuthnCredential.objects.filter(pk=credential.pk).exists())
                 else:
-                    SessionSecurityService.cleanup_2fa_secrets_on_recovery(self.user)
+                    SessionSecurityService.secure_account_after_password_reset(self.user)
                 fresh = User.objects.get(pk=self.user.pk)
-                self.assertFalse(fresh.two_factor_enabled)
-                self.assertEqual(fresh.two_factor_secret, "")
-                self.assertEqual(fresh.backup_tokens, [])
+                # A password reset keeps enrolled 2FA (#595); disabling everything does not.
+                self.assertEqual(fresh.two_factor_enabled, action == "recover")
+                if action == "disable_all":
+                    self.assertEqual(fresh.two_factor_secret, "")
+                    self.assertEqual(fresh.backup_tokens, [])
                 self.assertNotEqual(fresh.get_session_auth_hash(), old_hash)
                 self.assertEqual(self.validate_session(old_hash).status_code, 401)
                 self.assertEqual(self.validate_session(fresh.get_session_auth_hash()).status_code, 200)

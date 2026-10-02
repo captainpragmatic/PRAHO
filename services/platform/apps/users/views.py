@@ -457,8 +457,8 @@ class SecurePasswordResetConfirmView(PasswordResetConfirmView):
                 status="account_lockout_reset",
             )
 
-        # 🔒 Clean up 2FA secrets and rotate sessions for security
-        SessionSecurityService.cleanup_2fa_secrets_on_recovery(user, get_safe_client_ip(self.request))
+        # 🔒 Sign out every session; enrolled MFA is kept, as in the API reset (#595)
+        SessionSecurityService.secure_account_after_password_reset(user, get_safe_client_ip(self.request))
 
         return super().form_valid(form)
 
@@ -830,9 +830,24 @@ def mfa_backup_codes(request: HttpRequest) -> HttpResponse:
     )
 
 
+def _confirm_both_factors(request: HttpRequest, locked_user: User) -> str | None:
+    """Check the posted password and a current second factor; return an error, or None.
+
+    Mirrors the API's MFADisableSerializer: the caller holds select_for_update on the user,
+    and a wrong code is not charged to the login lockout, as on the API.
+    """
+    password = request.POST.get("password", "")
+    if not password or not locked_user.check_password(password):
+        return _("Invalid password.")
+    token = request.POST.get("token", "").strip()
+    if not locked_user.two_factor_enabled or not MFAService.verify_mfa_code(locked_user, token, request)["success"]:
+        return _("Invalid verification code.")
+    return None
+
+
 @login_required
 def mfa_regenerate_backup_codes(request: HttpRequest) -> HttpResponse:
-    """Regenerate backup codes for 2FA"""
+    """Regenerate backup codes for 2FA; needs the password and a current second factor (#595)."""
     # User is guaranteed to be authenticated due to @login_required
     user = cast(User, request.user)
     if not user.two_factor_enabled:
@@ -840,7 +855,15 @@ def mfa_regenerate_backup_codes(request: HttpRequest) -> HttpResponse:
         return redirect("users:user_profile")
 
     if request.method == "POST":
-        backup_codes = user.generate_backup_codes()
+        with transaction.atomic():
+            locked_user = User.objects.select_for_update().get(pk=user.pk)
+            error = _confirm_both_factors(request, locked_user)
+            backup_codes = locked_user.generate_backup_codes() if error is None else []
+        if error is not None:
+            messages.error(request, error)
+            return render(
+                request, "users/mfa_regenerate_backup_codes.html", {"backup_count": len(locked_user.backup_tokens)}
+            )
         # A 2FA change rotates the acting session's key, as enable and disable do. Only this
         # session: the codes are not part of the session auth hash and the credential version
         # does not change, so signing out other sessions here could not be relied on.
@@ -855,7 +878,7 @@ def mfa_regenerate_backup_codes(request: HttpRequest) -> HttpResponse:
 
 @login_required
 def mfa_disable(request: HttpRequest) -> HttpResponse:
-    """Disable 2FA for user account"""
+    """Disable 2FA; needs the password and a current second factor (#595)."""
     # User is guaranteed to be authenticated due to @login_required
     user = cast(User, request.user)
     if not user.two_factor_enabled:
@@ -863,17 +886,19 @@ def mfa_disable(request: HttpRequest) -> HttpResponse:
         return redirect("users:user_profile")
 
     if request.method == "POST":
-        # Verify current password for security
-        password = request.POST.get("password")
-        if not password or not user.check_password(password):
-            messages.error(request, _("Invalid password."))
+        # The password and a current second factor, as the API requires (#595)
+        with transaction.atomic():
+            locked_user = User.objects.select_for_update().get(pk=user.pk)
+            error = _confirm_both_factors(request, locked_user)
+            if error is None:
+                MFAService.disable_totp(locked_user, request=request)
+        if error is not None:
+            messages.error(request, error)
             return render(request, "users/mfa_disable.html")
-
-        MFAService.disable_totp(user, request=request)
 
         # 🔒 Rotate session for security after disabling 2FA
         SessionSecurityService.rotate_session_on_2fa_change(request)
-        update_session_auth_hash(request, user)
+        update_session_auth_hash(request, locked_user)
 
         # Log the action
         UserLoginLog.objects.create(

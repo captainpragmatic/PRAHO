@@ -650,6 +650,10 @@ class MFAService:
 
         "rotate" bumps the version without touching the TOTP fields: a WebAuthn credential was
         added or removed, which changes what the account accepts as a second factor.
+
+        "recover" (a password reset) bumps the version but keeps enrolled MFA, as the API reset
+        does: a reset link proves control of the mailbox, not of the second factor. Only a
+        leftover secret on an account without 2FA is dropped.
         """
         from .models import UserCredentialVersion  # noqa: PLC0415
 
@@ -663,7 +667,11 @@ class MFAService:
             credential_version, _created = UserCredentialVersion.objects.select_for_update().get_or_create(
                 user_id=user.pk
             )
-            if action != "rotate":
+            if action == "recover":
+                if not locked_user.two_factor_enabled:
+                    user.two_factor_secret = ""
+                    user.save(update_fields=["_two_factor_secret"])
+            elif action != "rotate":
                 user.two_factor_enabled = action == "enable"
                 if action != "enable":
                     user.two_factor_secret = ""

@@ -11,6 +11,9 @@ old worker left unindexed.
 
 from __future__ import annotations
 
+from typing import Any
+
+import pyotp
 from django.contrib.sessions.backends.base import SessionBase
 from django.test import Client, TestCase
 from django.urls import reverse
@@ -24,6 +27,7 @@ class BackupCodeRegenerationSessionTests(TestCase):
     def setUp(self) -> None:
         self.user = User.objects.create_user(email="codes@example.ro", password=PASSWORD)
         self.user.two_factor_enabled = True
+        self.user.two_factor_secret = pyotp.random_base32()
         self.user.save()
         self.acting = Client()
         self.acting.force_login(self.user)
@@ -37,10 +41,17 @@ class BackupCodeRegenerationSessionTests(TestCase):
     def is_signed_in(self, client: Client) -> bool:
         return client.get(reverse("users:user_profile")).status_code == 200
 
+    def regenerate(self) -> Any:
+        # Regeneration needs the password and a current second factor (#595).
+        return self.acting.post(
+            reverse("users:mfa_regenerate_backup_codes"),
+            {"password": PASSWORD, "token": pyotp.TOTP(self.user.two_factor_secret).now()},
+        )
+
     def test_post_cycles_the_acting_session_key(self) -> None:
         before = self.session_key(self.acting)
 
-        response = self.acting.post(reverse("users:mfa_regenerate_backup_codes"))
+        response = self.regenerate()
 
         self.assertRedirects(response, reverse("users:mfa_backup_codes"), fetch_redirect_response=False)
         self.assertNotEqual(self.session_key(self.acting), before, "the acting session key was not cycled")
@@ -50,7 +61,7 @@ class BackupCodeRegenerationSessionTests(TestCase):
 
     def test_other_sessions_are_left_alone(self) -> None:
         other_key = self.session_key(self.other)
-        self.acting.post(reverse("users:mfa_regenerate_backup_codes"))
+        self.regenerate()
         self.assertEqual(self.session_key(self.other), other_key)
         self.assertTrue(self.is_signed_in(self.other))
 

@@ -447,12 +447,12 @@ class SessionSecurityServiceTest(BaseServiceTestCase):
 
             mock_rotate.assert_called_once_with(request)
 
-    def test_cleanup_2fa_secrets_on_recovery(self) -> None:
-        """Test cleanup of 2FA secrets on recovery"""
-        with patch('apps.users.services.SessionSecurityService.cleanup_2fa_secrets_on_recovery') as mock_cleanup:
+    def test_secure_account_after_password_reset(self) -> None:
+        """Test the post-reset account securing call"""
+        with patch('apps.users.services.SessionSecurityService.secure_account_after_password_reset') as mock_cleanup:
             mock_cleanup.return_value = None
 
-            SessionSecurityService.cleanup_2fa_secrets_on_recovery(self.user, '127.0.0.1')
+            SessionSecurityService.secure_account_after_password_reset(self.user, '127.0.0.1')
 
             mock_cleanup.assert_called_once_with(self.user, '127.0.0.1')
 
