@@ -12,6 +12,7 @@ from typing import Any, ClassVar
 
 from django.conf import settings
 from django.contrib import messages
+from django.contrib.messages.storage import default_storage
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.utils.cache import add_never_cache_headers
@@ -448,6 +449,10 @@ class APIRateLimitMiddleware:
     ]
 
     # API paths that should be rate limited
+    # Where a browser navigation lands when the store is down. It must stay outside API_PATHS, or the
+    # redirected request would fail in this middleware again.
+    STORE_UNAVAILABLE_REDIRECT = "/dashboard/"
+
     API_PATHS: ClassVar[list[str]] = [
         "/api/",
         "/billing/",
@@ -482,7 +487,7 @@ class APIRateLimitMiddleware:
         """Check if request is for an API endpoint"""
         return any(request.path.startswith(path) for path in self.API_PATHS)
 
-    def _check_api_rate_limits(self, request: HttpRequest) -> JsonResponse | None:
+    def _check_api_rate_limits(self, request: HttpRequest) -> HttpResponse | None:
         """Check API rate limits"""
         try:
             client_ip = self._get_client_ip(request)
@@ -524,10 +529,23 @@ class APIRateLimitMiddleware:
             return None  # Rate limits not exceeded
 
         except Exception:
-            # Fail-closed with the shared store-failure contract (#554). These paths include browser pages,
-            # so a redirect would loop; the limiter's 429s are JSON for every caller too.
+            # Fail-closed with the shared store-failure contract (#554).
             logger.error("🔥 [APIRateLimit] Counter store error; denying request")
-            return store_unavailable_json()
+            if wants_json(request):
+                return store_unavailable_json()
+            return self._browser_store_unavailable(request)
+
+    def _browser_store_unavailable(self, request: HttpRequest) -> HttpResponse:
+        """Notice and redirect for a page navigation.
+
+        This middleware runs before MessageMiddleware, so it stores the notice itself and writes it to the
+        response, which MessageMiddleware would otherwise do on the way out.
+        """
+        storage = default_storage(request)
+        storage.add(messages.ERROR, store_unavailable_message())
+        response = redirect(self.STORE_UNAVAILABLE_REDIRECT)
+        storage.update(response)
+        return response
 
     def _is_cart_mutation(self, request: HttpRequest) -> bool:
         """Check if request is a cart mutation endpoint"""

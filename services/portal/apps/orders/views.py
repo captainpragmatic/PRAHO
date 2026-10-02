@@ -451,12 +451,19 @@ def _create_and_process_order(request: HttpRequest, ctx: CheckoutContext) -> Htt
 
             # Retain the reservation once Platform has created the order, including
             # when publishing the result fails. Platform also receives the same key.
-            if not counters.complete(
-                idem_cache_key,
-                claim_token,
-                str(order_id or "__processed__"),
-                retain_seconds=CHECKOUT_REPLAY_RETENTION_SECONDS,
-            ):
+            try:
+                completed = counters.complete(
+                    idem_cache_key,
+                    claim_token,
+                    str(order_id or "__processed__"),
+                    retain_seconds=CHECKOUT_REPLAY_RETENTION_SECONDS,
+                )
+            except DatabaseError:
+                # The order exists and keeps its Platform idempotency key, so a retry after the claim
+                # lease resolves to the same order rather than a second one.
+                logger.exception("🔥 [Orders] Checkout result store unavailable: %s", idem_cache_key)
+                return store_unavailable_response(request, "orders:checkout")
+            if not completed:
                 logger.warning("🚨 [Orders] Checkout claim expired before completion: %s", idem_cache_key)
                 return _checkout_conflict(
                     request, _("Your order is being processed. Please check your orders list."), 409

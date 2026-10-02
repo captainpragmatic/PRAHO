@@ -14,6 +14,7 @@ from collections.abc import Callable
 from unittest.mock import patch
 
 from django.contrib.messages import get_messages
+from django.contrib.messages.storage import default_storage
 from django.contrib.sessions.backends.cache import SessionStore
 from django.core.cache import cache
 from django.db import OperationalError
@@ -55,21 +56,26 @@ class StoreUnavailableContractTests(TestCase):
         self.enterContext(patch("apps.api_client.services.portal_request", side_effect=self.platform))
 
     def platform(self, **kwargs: object) -> Response:
-        """Only the catalog lookup is reachable: every arm fails before preflight or order creation."""
+        """The catalog, preflight and create calls a checkout makes before it publishes its result."""
         url = str(kwargs["url"])
-        if "/products/" not in url:
-            raise AssertionError(f"Unexpected Platform request: {url}")
-        response = Response()
-        response.status_code = 200
-        response._content = json.dumps(
-            {
+        body: dict[str, object]
+        if "/products/" in url:
+            body = {
                 "slug": "shared-hosting",
                 "is_active": True,
                 "requires_domain": False,
                 "selling_currency": "RON",
                 "currency_revision": 1,
             }
-        ).encode()
+        elif url.endswith("/preflight/"):
+            body = {"success": True, "errors": []}
+        elif url.endswith("/create/"):
+            body = {"order": {"id": ORDER_ID, "order_number": "ORD-554", "status": "draft"}}
+        else:
+            raise AssertionError(f"Unexpected Platform request: {url}")
+        response = Response()
+        response.status_code = 200
+        response._content = json.dumps(body).encode()
         response.headers["Content-Type"] = "application/json"
         return response
 
@@ -141,6 +147,10 @@ class StoreUnavailableContractTests(TestCase):
     def checkout_claim(self, **headers: str) -> HttpResponse:
         return self.checkout("claim", with_cart=True, **headers)
 
+    def checkout_completion(self, **headers: str) -> HttpResponse:
+        """The Platform order exists; only publishing it on the claim fails."""
+        return self.checkout("complete", with_cart=True, **headers)
+
     def confirm_payment(self, **headers: str) -> HttpResponse:
         self.customer_session(with_cart=False)
         body = json.dumps({"payment_intent_id": "pi_storecontract554", "order_id": ORDER_ID})
@@ -184,6 +194,7 @@ class StoreUnavailableContractTests(TestCase):
             "password reset limiter": self.password_reset,
             "checkout replay lookup": self.checkout_replay,
             "checkout claim": self.checkout_claim,
+            "checkout completion": self.checkout_completion,
         }
         for name, arm in arms.items():
             with self.subTest(arm=name):
@@ -210,3 +221,52 @@ class StoreUnavailableContractTests(TestCase):
 
     def test_browser_checkout_claim_gets_a_notice_and_the_checkout_page(self) -> None:
         self.assert_browser_notice(self.checkout_claim())
+
+    def test_browser_checkout_completion_gets_a_notice_and_the_checkout_page(self) -> None:
+        self.assert_browser_notice(self.checkout_completion())
+
+
+@override_settings(
+    RATE_LIMITING_ENABLED=True,
+    SESSION_ENGINE="django.contrib.sessions.backends.cache",
+    CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache", "LOCATION": "store-browser"}},
+)
+class APILimiterBrowserNavigationTests(TestCase):
+    """The API limiter covers whole page trees, so a browser navigation must not be answered with JSON.
+
+    It runs before MessageMiddleware, and every page under its paths re-enters it, so the notice has to be
+    stored by the limiter itself and the redirect has to leave the limited paths.
+    """
+
+    def setUp(self) -> None:
+        self.enterContext(override_settings(DEBUG=False))
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def notices_after(self, response: HttpResponse) -> list[str]:
+        request = RequestFactory().get(response["Location"])
+        request.COOKIES = {name: morsel.value for name, morsel in self.client.cookies.items()}
+        request.session = self.client.session
+        return [str(message) for message in default_storage(request)]
+
+    def test_page_navigation_gets_a_notice_and_a_page_outside_the_limiter(self) -> None:
+        for method in ("get", "post"):
+            with self.subTest(method=method):
+                self.client.cookies.clear()  # An unread notice from the previous method would count here.
+                with patch("apps.common.counters.increment", side_effect=store_down()):
+                    response = getattr(self.client, method)("/order/checkout/", HTTP_ACCEPT="text/html")
+                self.assertEqual(response.status_code, 302, response.content)
+                location = response["Location"]
+                self.assertFalse(
+                    APIRateLimitMiddleware(lambda request: HttpResponse())._is_api_endpoint(
+                        RequestFactory().get(location)
+                    ),
+                    f"{location} is behind the same limiter and would loop",
+                )
+                self.assertEqual(self.notices_after(response), [store_unavailable_message()])
+
+    def test_json_callers_still_get_the_json_contract(self) -> None:
+        with patch("apps.common.counters.increment", side_effect=store_down()):
+            response = self.client.get("/order/checkout/", HTTP_HX_REQUEST="true")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(json.loads(response.content)["error"], store_unavailable_message())
