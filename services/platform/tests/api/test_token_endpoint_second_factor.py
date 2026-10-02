@@ -17,8 +17,10 @@ from unittest.mock import patch
 import pyotp
 from django.contrib.auth import authenticate
 from django.core.cache import cache
+from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.utils import timezone
+from freezegun import freeze_time
 
 from apps.users.mfa import TOTPService
 from apps.users.models import APIToken, User
@@ -185,3 +187,71 @@ class TokenEndpointSecondFactorTests(TestCase):
         status_code, payload = self.post(email=plain.email)
         self.assertEqual(status_code, 200, payload)
         self.assertEqual(APIToken.objects.filter(user=plain).count(), 1)
+
+
+LOCMEM_CACHE = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
+
+
+# The configured cache, not the LocMem stand-in above. Which store holds the TOTP replay
+# marker decides whether a refused issuance spends the code, so this class needs the real one.
+@override_settings(
+    CACHES={
+        "default": {
+            "BACKEND": "django.core.cache.backends.db.DatabaseCache",
+            "LOCATION": "test_token_totp_cache",
+            "TIMEOUT": 300,
+        }
+    },
+    RATE_LIMITING_ENABLED=True,
+    API_TOKEN_MAX_ACTIVE_PER_USER=1,
+)
+class RefusedIssuanceTOTPReplayTests(TestCase):
+    """A token refused at the live-token cap leaves the TOTP code usable once (ADR-0031).
+
+    The replay marker is a cache write. Under DatabaseCache it runs on the default
+    connection inside the issuance transaction, so set_rollback(True) discards it along
+    with the rest of the refused request. A cache on a separate store keeps the marker.
+    """
+
+    url = "/api/users/token/"
+
+    def setUp(self) -> None:
+        call_command("createcachetable", verbosity=0)
+        cache.clear()
+        self.addCleanup(cache.clear)
+        self.user = User.objects.create_user(email="totp-quota@example.ro", password=PASSWORD)
+        self.secret = TOTPService.generate_secret()
+        self.user.two_factor_secret = self.secret
+        self.user.two_factor_enabled = True
+        self.user.save()
+        self.existing = APITokenService.issue_token(user=self.user, name="existing").unwrap().token
+
+    def post(self, code: str) -> tuple[int, dict[str, object]]:
+        body = {"email": self.user.email, "password": PASSWORD, "mfa_token": code}
+        response = self.client.post(self.url, body, content_type="application/json")
+        return response.status_code, response.json()
+
+    def refuse_at_the_cap_then_retry(self) -> tuple[int, dict[str, object]]:
+        # One frozen instant: both requests carry the same code inside the same TOTP step.
+        with freeze_time("2026-10-02 10:00:05"):
+            code = pyotp.TOTP(self.secret).now()
+            status_code, payload = self.post(code)
+            self.assertEqual(status_code, 400, payload)
+            self.assertEqual(list(APIToken.objects.filter(user=self.user)), [self.existing])
+
+            self.existing.delete()  # frees the one slot; the cache is left as it is
+            return self.post(code)
+
+    def test_the_same_totp_code_works_after_a_refused_issuance(self) -> None:
+        status_code, payload = self.refuse_at_the_cap_then_retry()
+        self.assertEqual(status_code, 200, payload)
+        self.assertEqual(APIToken.objects.filter(user=self.user).count(), 1)
+
+    @override_settings(CACHES=LOCMEM_CACHE)
+    def test_a_separate_store_cache_keeps_the_refused_code_spent(self) -> None:
+        # Control for the test above: with the marker outside the transaction, the retry
+        # is a replay. Without this, the test above would also pass if the marker were
+        # never written at all.
+        status_code, payload = self.refuse_at_the_cap_then_retry()
+        self.assertEqual((status_code, payload), (401, {"error": "Invalid credentials"}))
+        self.assertFalse(APIToken.objects.filter(user=self.user).exists())
