@@ -3,7 +3,9 @@
 from datetime import UTC, datetime
 from unittest.mock import patch
 
+from django.db import connection
 from django.test import TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from lxml import etree
 
@@ -140,7 +142,7 @@ class StaffCurrencySummaryTests(TestCase):
 
 
 class MonthlyRevenueCutoffTests(TestCase):
-    """"This month" is the Romanian calendar month, and it starts at local midnight on the 1st.
+    """The current month is the Romanian calendar month, and it starts at local midnight on the 1st.
 
     The cutoff used to be `timezone.now().replace(day=1)` - the current UTC instant with only the day
     changed. On the 1st (UTC) that is "right now", so every invoice created earlier the same day fell
@@ -177,3 +179,18 @@ class MonthlyRevenueCutoffTests(TestCase):
             totals = _calculate_monthly_revenue(Customer.objects.filter(pk=self.customer.pk))
 
         self.assertEqual(totals, {"RON": 1200})
+
+    def test_cutoff_compares_the_raw_timestamp_so_the_index_still_applies(self) -> None:
+        """The cutoff must be a timestamp compared directly with created_at.
+
+        Wrapping created_at in a date conversion (created_at__date) is correct but makes the
+        database evaluate the conversion on every invoice, so the (customer, -created_at) index
+        cannot bound the scan and the staff dashboard degrades as invoice history grows.
+        """
+        with patch("django.utils.timezone.now", return_value=self.NOW), CaptureQueriesContext(connection) as queries:
+            _calculate_monthly_revenue(Customer.objects.filter(pk=self.customer.pk))
+
+        revenue_sql = next(q["sql"] for q in queries.captured_queries if "SUM(" in q["sql"].upper())
+        self.assertNotIn("django_datetime_cast_date", revenue_sql)
+        self.assertNotIn("::date", revenue_sql.lower())
+        self.assertRegex(revenue_sql, r'"created_at" >= ')
