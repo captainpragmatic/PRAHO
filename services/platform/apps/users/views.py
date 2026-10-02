@@ -117,7 +117,7 @@ def _redirect(request: HttpRequest, url: str) -> HttpResponse:
     return redirect(url)
 
 
-def _start_second_factor(request: HttpRequest, user: User, form: LoginForm) -> HttpResponse:
+def _start_second_factor(request: HttpRequest, user: User, form: LoginForm, backend: str) -> HttpResponse:
     """Stop an enrolled user's login at the password and hand it to mfa_verify.
 
     No session is established and the failure counter is left alone: both happen only
@@ -133,7 +133,7 @@ def _start_second_factor(request: HttpRequest, user: User, form: LoginForm) -> H
         "next": next_url,
         # Binds the pending login to the credentials it was started with.
         "auth_hash": user.get_session_auth_hash(),
-        "backend": str(getattr(user, "backend", "")),
+        "backend": backend,
     }
     UserLoginLog.objects.create(
         user=user,
@@ -211,28 +211,31 @@ def _handle_successful_login(request: HttpRequest, user: User, form: LoginForm) 
 
         return redirect("users:login")
 
-    # Enrolled staff stop here: the password alone must never establish a session (#590).
-    if user.two_factor_enabled:
-        return _start_second_factor(request, user, form)
+    backend = str(getattr(user, "backend", ""))
+    # Decide on the locked, freshly read row: an enrolment, deactivation, lockout or password
+    # change that landed after authenticate() must not be missed, and login() must bind the
+    # session to the credential version that row holds.
+    with transaction.atomic():
+        locked_user = User.objects.select_for_update().get(pk=user.pk)
+        still_valid = (
+            locked_user.password == user.password
+            and locked_user.is_active
+            and not locked_user.is_account_locked()
+            and locked_user.is_staff_user
+        )
+        # Enrolled staff stop at the password: it must never establish a session (#590).
+        password_only = still_valid and not locked_user.two_factor_enabled
+        if password_only:
+            request.session.pop(PRE_2FA_SESSION_KEY, None)
+            _log_user_login(request, locked_user, "success")  # also resets the failure counter
+            login(request, locked_user, backend=backend)
 
-    # Staff user - proceed with normal login flow
-    request.session.pop(PRE_2FA_SESSION_KEY, None)
-    # Reset failed attempts and log success
-    user.reset_failed_login_attempts()
-
-    # Update login tracking
-    user.last_login_ip = get_safe_client_ip(request)
-    user.save(update_fields=["last_login_ip"])
-
-    # Log successful login
-    UserLoginLog.objects.create(
-        user=user,
-        ip_address=get_safe_client_ip(request),
-        user_agent=request.META.get("HTTP_USER_AGENT", ""),
-        status="success",
-    )
-
-    login(request, user)
+    if not still_valid:
+        messages.error(request, _("Incorrect email or password."))
+        return render(request, "users/login.html", {"form": form})
+    if not password_only:
+        return _start_second_factor(request, locked_user, form, backend)
+    user = locked_user
 
     # Remember me handling and secure session timeout
     remember = bool(form.cleaned_data.get("remember_me"))
