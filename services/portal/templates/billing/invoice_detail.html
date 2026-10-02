@@ -28,9 +28,8 @@
 
         <!-- Customer Refund Request Button -->
         {% if invoice.status == "paid" %}
-          <button data-action="modal-open" data-modal-target="#invoiceRefundRequestModal" class="inline-flex items-center justify-center rounded-md border border-transparent bg-blue-600 px-3 sm:px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700">
-            {% icon "receipt" size="sm" css_class="text-white" %} {% trans "Request Refund" %}
-          </button>
+          {% trans "Request Refund" as refund_request_btn_label %}
+          {% button refund_request_btn_label data_action="modal-open" attrs='data-modal-target="#invoiceRefundRequestModal"' icon="receipt" variant="info" %}
         {% endif %}
 
         <a href="{% url 'billing:invoices_list' %}"
@@ -287,32 +286,15 @@
           </p>
 
           <div class="mb-4">
-            <label for="invoice_refund_request_reason" class="block text-sm font-medium text-slate-400 mb-2">
-              {% trans "Refund Reason" %} <span class="text-red-400">*</span>
-            </label>
-            <select id="invoice_refund_request_reason" name="refund_reason" required
-                    class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500">
-              <option value="">{% trans "Please select a reason..." %}</option>
-              <option value="customer_request">{% trans "General Customer Request" %}</option>
-              <option value="service_failure">{% trans "Service Not Working" %}</option>
-              <option value="quality_issue">{% trans "Quality Not As Expected" %}</option>
-              <option value="technical_issue">{% trans "Technical Problems" %}</option>
-              <option value="cancellation">{% trans "Want to Cancel Service" %}</option>
-              <option value="duplicate_payment">{% trans "Duplicate Invoice" %}</option>
-              <option value="billing_error">{% trans "Billing Error" %}</option>
-              <option value="policy_violation">{% trans "Service Policy Issue" %}</option>
-              <option value="unsatisfied_service">{% trans "Not Satisfied with Service" %}</option>
-              <option value="other">{% trans "Other Reason" %}</option>
-            </select>
+            {% trans "Refund Reason" as refund_reason_label %}
+            {% trans "Please select a reason..." as refund_reason_placeholder %}
+            {% input_field "refund_reason" input_type="select" label=refund_reason_label required=True html_id="invoice_refund_request_reason" placeholder=refund_reason_placeholder options=refund_reason_choices %}
           </div>
 
           <div class="mb-4">
-            <label for="invoice_refund_request_notes" class="block text-sm font-medium text-slate-400 mb-2">
-              {% trans "Details" %} <span class="text-red-400">*</span>
-            </label>
-            <textarea id="invoice_refund_request_notes" name="refund_notes" rows="4" required
-                      class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
-                      placeholder="{% trans 'Please provide details about your refund request. The more information you provide, the faster we can process your request.' %}"></textarea>
+            {% trans "Details" as refund_notes_label %}
+            {% trans "Please provide details about your refund request. The more information you provide, the faster we can process your request." as refund_notes_placeholder %}
+            {% input_field "refund_notes" input_type="textarea" label=refund_notes_label required=True rows=4 html_id="invoice_refund_request_notes" placeholder=refund_notes_placeholder %}
             <p class="text-xs text-slate-500 mt-1">
               {% trans "Include details like what went wrong, when the issue occurred, or any relevant information." %}
             </p>
@@ -334,14 +316,10 @@
         </div>
 
         <div class="px-6 py-4 bg-slate-900 flex justify-end space-x-3">
-          <button type="button" data-action="modal-close" data-modal-target="#invoiceRefundRequestModal"
-                  class="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white">
-            {% trans "Cancel" %}
-          </button>
-          <button type="submit"
-                  class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg border border-transparent bg-blue-600 text-white hover:bg-blue-700 focus:ring-2 focus:ring-blue-500">
-            {% icon "receipt" size="sm" css_class="text-white" %} {% trans "Submit Request" %}
-          </button>
+          {% trans "Cancel" as refund_cancel_btn_label %}
+          {% button refund_cancel_btn_label data_action="modal-close" attrs='data-modal-target="#invoiceRefundRequestModal"' variant="secondary" %}
+          {% trans "Submit Request" as refund_submit_btn_label %}
+          {% button refund_submit_btn_label type="submit" icon="receipt" variant="info" %}
         </div>
       </form>
     </div>
