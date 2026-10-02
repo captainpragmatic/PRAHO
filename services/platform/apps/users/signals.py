@@ -8,6 +8,7 @@ from typing import Any
 
 from django.conf import settings
 from django.contrib.auth.signals import user_logged_in, user_logged_out, user_login_failed
+from django.db import transaction
 from django.db.models.signals import post_save, pre_delete
 from django.dispatch import receiver
 from django.http import HttpRequest
@@ -195,7 +196,10 @@ def log_user_login(sender: Any, request: HttpRequest, user: User, **kwargs: Any)
                 "session_exists": bool(request.session.session_key),
             },
         )
-        AuthenticationAuditService.log_login_success(auth_event_data)
+        # login() runs inside the transaction that decided it. Without its own savepoint, a failed
+        # audit insert would abort that transaction on PostgreSQL even though the error is caught.
+        with transaction.atomic():
+            AuthenticationAuditService.log_login_success(auth_event_data)
 
         logger.info(f"✅ [Auth Signal] Login success logged for {user.email} via {authentication_method}")
 
