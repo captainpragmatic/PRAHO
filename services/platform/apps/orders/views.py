@@ -12,7 +12,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    pass
+    from apps.products.models import ProductPrice
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -38,6 +38,7 @@ from apps.billing.fiscal_identity import billing_country_code
 from apps.billing.refund_service import RefundData, RefundService
 from apps.common.decorators import billing_staff_api_required, staff_required_strict
 from apps.common.mixins import get_search_context
+from apps.common.request_ip import get_safe_client_ip
 from apps.common.utils import json_error, json_success
 from apps.common.validators import log_security_event
 from apps.customers.models import Customer
@@ -57,10 +58,8 @@ logger = logging.getLogger(__name__)
 # Constants for validation and limits
 _DEFAULT_MAX_SEARCH_QUERY_LENGTH = 100
 MAX_SEARCH_QUERY_LENGTH = _DEFAULT_MAX_SEARCH_QUERY_LENGTH
-_DEFAULT_MAX_PRICE_OVERRIDE_CENTS = 100_000_000  # 1 million EUR in cents
-MAX_PRICE_OVERRIDE_CENTS = _DEFAULT_MAX_PRICE_OVERRIDE_CENTS
+_DEFAULT_MAX_PRICE_OVERRIDE_CENTS = 50_000_000  # Matches the catalog default (#542)
 _DEFAULT_MAX_PRICE_OVERRIDE_MULTIPLIER = 10
-MAX_PRICE_OVERRIDE_MULTIPLIER = _DEFAULT_MAX_PRICE_OVERRIDE_MULTIPLIER
 # H3: Roles that can approve/reject orders under review
 _REVIEW_APPROVE_ROLES = frozenset({"admin", "billing"})
 
@@ -148,7 +147,12 @@ def _sanitize_search_query(query: str) -> str:
 
 
 def _validate_manual_price_override(
-    manual_price_cents: int, product_price_cents: int, user: User, context: str = ""
+    manual_price_cents: int,
+    product_price_cents: int | None,
+    user: User,
+    context: str = "",
+    *,
+    minimum_cents: int = 1,
 ) -> tuple[bool, str]:
     """🔒 Validate manual price override for security"""
     if not getattr(user, "is_staff_user", False):
@@ -158,38 +162,130 @@ def _validate_manual_price_override(
         return False, "Insufficient permissions for price override"
 
     # Check for specific financial permissions (staff role required)
-    if not (user.is_superuser or getattr(user, "staff_role", "") in ["admin", "billing"]):
+    if not user.can_manage_financial_data:
         logger.warning(
             f"⛔ [Orders] Price Security: Staff user {getattr(user, 'id', 'Unknown')} ({getattr(user, 'email', 'Unknown')}) lacks financial permissions for price override in context: {context}"
         )
         return False, "Insufficient permissions for price override"
 
     # Check minimum price
-    if manual_price_cents < 1:
+    if manual_price_cents < minimum_cents:
         logger.warning(
             f"⚠️ [Orders] Invalid price override attempt (too low): {manual_price_cents} by {user.email} in context: {context}"
         )
-        return False, "Price must be at least 1 cents"
+        return False, f"Price must be at least {minimum_cents} cents"
 
     # Check absolute maximum price limit
-    if manual_price_cents > MAX_PRICE_OVERRIDE_CENTS:
+    max_cents = get_max_price_override_cents()
+    if manual_price_cents > max_cents:
         logger.warning(
             f"⚠️ [Orders] Blocked extremely high price override: {manual_price_cents} by {user.email} in context: {context}"
         )
-        return False, f"Price cannot exceed {MAX_PRICE_OVERRIDE_CENTS} cents"
+        return False, f"Price cannot exceed {max_cents} cents"
 
-    # Check if override is within reasonable bounds (10x original)
-    if manual_price_cents > product_price_cents * MAX_PRICE_OVERRIDE_MULTIPLIER:
+    # Check the configured multiplier when a positive catalog reference is available
+    multiplier = get_max_price_override_multiplier()
+    if (
+        product_price_cents is not None
+        and product_price_cents > 0
+        and manual_price_cents > product_price_cents * multiplier
+    ):
         logger.warning(
-            f"🚨 [Orders] Price Security: Excessive price override {manual_price_cents} (max {product_price_cents * 10}) by user {user.id} ({user.email}) in context: {context}"
+            f"🚨 [Orders] Price Security: Excessive price override {manual_price_cents} "
+            f"(max {product_price_cents * multiplier}) by user {user.id} ({user.email}) in context: {context}"
         )
-        return False, "Price override cannot exceed 10x original price"
+        return False, f"Price override cannot exceed {multiplier}x original price"
 
     # Log successful validation
     logger.info(
         f"✅ [Orders] Price Override: {manual_price_cents} cents (original: {product_price_cents} cents) by user {user.id} ({user.email}) in context: {context}"
     )
     return True, ""
+
+
+def _catalog_reference_cents(product_price: ProductPrice | None, billing_period: str) -> tuple[int | None, int]:
+    """Return catalog unit and setup prices for the requested billing period."""
+    if product_price is None:
+        return None, 0
+
+    unit: int | None
+    try:
+        unit = product_price.get_price_cents_for_period(billing_period)
+    except ValueError:
+        unit = None
+
+    return unit, product_price.setup_cents
+
+
+_ITEM_PRICE_FIELDS = frozenset({"unit_price_cents", "setup_cents"})
+
+
+def _validate_item_price_overrides(
+    item: OrderItem,
+    reference: tuple[int | None, int],
+    request: HttpRequest,
+    *,
+    checked: frozenset[str],
+    context: str,
+) -> tuple[HttpResponse | None, dict[str, int]]:
+    """Validate the checked price fields against their catalog references.
+
+    A checked field whose value differs from its reference is an override; a unit price with no
+    catalog reference always is. Returns the accepted overrides for the audit record.
+    """
+    user = request.user
+    if not isinstance(user, User):
+        return json_error("Insufficient permissions for price override"), {}
+
+    overrides: dict[str, int] = {}
+    if "unit_price_cents" in checked and (reference[0] is None or item.unit_price_cents != reference[0]):
+        valid, message = _validate_manual_price_override(
+            item.unit_price_cents, reference[0], user, context, minimum_cents=1
+        )
+        if not valid:
+            return json_error(message), {}
+        overrides["unit_price_cents"] = item.unit_price_cents
+
+    if "setup_cents" in checked and item.setup_cents != reference[1]:
+        valid, message = _validate_manual_price_override(item.setup_cents, reference[1], user, context, minimum_cents=0)
+        if not valid:
+            return json_error(message), {}
+        overrides["setup_cents"] = item.setup_cents
+
+    return None, overrides
+
+
+def _audit_price_overrides(
+    item: OrderItem,
+    reference: tuple[int | None, int],
+    overrides: dict[str, int],
+    request: HttpRequest,
+) -> None:
+    """Record accepted overrides within the caller's transaction."""
+    if not overrides:
+        return
+
+    from apps.audit.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        AuditContext,
+        BusinessEventData,
+        OrdersAuditService,
+    )
+
+    user = request.user
+    if not isinstance(user, User):
+        raise TypeError("Price override auditing requires an authenticated User")
+
+    OrdersAuditService.log_order_item_event(
+        BusinessEventData(
+            event_type="order_pricing_updated",
+            business_object=item,
+            user=user,
+            context=AuditContext(user=user, ip_address=get_safe_client_ip(request)),
+            old_values={"catalog_unit_price_cents": reference[0], "catalog_setup_cents": reference[1]},
+            new_values={k: int(v) for k, v in overrides.items()},
+            description=f"Price overrides for order item {item.pk}",
+        )
+    )
 
 
 # ===============================================================================
@@ -1299,46 +1395,30 @@ def _process_order_item_creation(
 
             # Get product and pricing information
             product = item.product
+            reference = _catalog_reference_cents(
+                product.get_price_for_period(order.currency.code, item.billing_period), item.billing_period
+            )
 
-            # INDUSTRY STANDARD PRICING LOGIC:
-            # 1. Use manual override prices if provided
-            # 2. Fall back to product default prices
-            # 3. Error only if both are missing
+            if not item.unit_price_cents or item.unit_price_cents <= 0:
+                if reference[0] is None:
+                    return json_error(
+                        f"No pricing available for {product.name} in {order.currency.code}. Please enter a manual price."
+                    )
+                item.unit_price_cents = reference[0]
+                logger.info(f"💰 [Orders] Using product default unit price: {reference[0]} cents")
 
-            # Check if user provided manual pricing (form data takes precedence)
-            manual_unit_price = item.unit_price_cents
-            manual_setup_price = item.setup_cents
+            if item.setup_cents is None:
+                item.setup_cents = reference[1]
 
-            # Get product default pricing for this billing period
-            product_price = product.get_price_for_period(order.currency.code, item.billing_period)
-
-            # Apply pricing hierarchy: Manual Override > Product Default > Error
-            if manual_unit_price and manual_unit_price > 0:
-                # User provided manual unit price - use it (OVERRIDE)
-                item.unit_price_cents = manual_unit_price
-                logger.info(f"💰 [Orders] Using manual override unit price: {manual_unit_price} cents")
-            elif product_price:
-                # No manual price - use product default
-                item.unit_price_cents = product_price.amount_cents
-                logger.info(f"💰 [Orders] Using product default unit price: {product_price.amount_cents} cents")
-            else:
-                # Neither manual nor product price available
-                return json_error(
-                    f"No pricing available for {product.name} in {order.currency.code}. Please enter a manual price."
-                )
-
-            # Same logic for setup fee
-            if manual_setup_price is not None and manual_setup_price >= 0:
-                # User provided manual setup fee (including 0) - use it
-                item.setup_cents = manual_setup_price
-                logger.info(f"🛠️ [Orders] Using manual override setup fee: {manual_setup_price} cents")
-            elif product_price:
-                # No manual setup fee - use product default
-                item.setup_cents = product_price.setup_cents
-                logger.info(f"🛠️ [Orders] Using product default setup fee: {product_price.setup_cents} cents")
-            else:
-                # No product price, default setup to 0
-                item.setup_cents = 0
+            price_error, overrides = _validate_item_price_overrides(
+                item,
+                reference,
+                request,
+                checked=_ITEM_PRICE_FIELDS,
+                context=f"order_item_create:{order.order_number}",
+            )
+            if price_error:
+                return price_error
 
             # Calculate VAT for Romanian customers
             tax_rate = _get_vat_rate_for_order(order)
@@ -1346,6 +1426,7 @@ def _process_order_item_creation(
 
             # Save the item (totals will be calculated in save method)
             item.save()
+            _audit_price_overrides(item, reference, overrides, request)
 
             # Recalculate order totals
             order.calculate_totals()
@@ -1474,56 +1555,37 @@ def _render_order_item_form(
 
 
 def _handle_unit_price_update(
-    updated_item: Any, form: ModelForm[Any], product_price: Any, product_changed: bool, billing_period_changed: bool
-) -> HttpResponse | None:
-    """Handle unit price update logic with validation"""
-    manual_unit_price_changed = "unit_price_cents" in form.changed_data
-
-    if manual_unit_price_changed:
-        # Security check: Validate price override limits
-        if product_price and updated_item.unit_price_cents > 0:
-            base_price = product_price.monthly_price_cents
-            if base_price > 0:  # Avoid division by zero
-                price_ratio = updated_item.unit_price_cents / base_price
-                if price_ratio > MAX_PRICE_OVERRIDE_MULTIPLIER:  # More than 10x the base price
-                    return json_error(
-                        f"Price override cannot exceed {MAX_PRICE_OVERRIDE_MULTIPLIER}x the base product price"
-                    )
-
-        # User explicitly changed unit price - use their value (MANUAL OVERRIDE)
+    updated_item: OrderItem,
+    form: ModelForm[OrderItem],
+    reference: tuple[int | None, int],
+    pricing_basis_changed: bool,
+) -> None:
+    """Use the catalog unit price when the pricing basis changes without a manual edit."""
+    if "unit_price_cents" in form.changed_data:
         logger.info(f"💰 [Orders] Using manual override unit price: {updated_item.unit_price_cents} cents")
-    elif product_changed or billing_period_changed:
-        # Product or billing period changed - auto-update from product if available
-        if product_price:
-            updated_item.unit_price_cents = product_price.amount_cents
-            logger.info(f"💰 [Orders] Auto-updated unit price from product: {product_price.amount_cents} cents")
+    elif pricing_basis_changed:
+        if reference[0] is not None:
+            updated_item.unit_price_cents = reference[0]
+            logger.info(f"💰 [Orders] Auto-updated unit price from product: {reference[0]} cents")
         else:
-            # No product pricing - keep existing price but warn
             logger.warning(
-                f"⚠️ [Orders] No product pricing available for {updated_item.product.name}, keeping existing price: {updated_item.unit_price_cents} cents"
+                f"⚠️ [Orders] No product pricing available for {updated_item.product.name}, "
+                f"keeping existing price: {updated_item.unit_price_cents} cents"
             )
-    return None
 
 
 def _handle_setup_fee_update(
-    updated_item: Any, form: ModelForm[Any], product_price: Any, product_changed: bool, billing_period_changed: bool
+    updated_item: OrderItem,
+    form: ModelForm[OrderItem],
+    reference: tuple[int | None, int],
+    pricing_basis_changed: bool,
 ) -> None:
-    """Handle setup fee update logic"""
-    manual_setup_changed = "setup_cents" in form.changed_data
-
-    if manual_setup_changed:
-        # User explicitly changed setup fee - use their value
+    """Use the catalog setup fee when the pricing basis changes without a manual edit."""
+    if "setup_cents" in form.changed_data:
         logger.info(f"🛠️ [Orders] Using manual override setup fee: {updated_item.setup_cents} cents")
-    elif product_changed or billing_period_changed:
-        # Product or billing period changed - auto-update from product if available
-        if product_price:
-            updated_item.setup_cents = product_price.setup_cents
-            logger.info(f"🛠️ [Orders] Auto-updated setup fee from product: {product_price.setup_cents} cents")
-        else:
-            # No product pricing - keep existing setup fee
-            logger.warning(
-                f"⚠️ [Orders] No product pricing available for setup fee, keeping existing: {updated_item.setup_cents} cents"
-            )
+    elif pricing_basis_changed:
+        updated_item.setup_cents = reference[1]
+        logger.info(f"🛠️ [Orders] Auto-updated setup fee from product: {reference[1]} cents")
 
 
 def _process_order_item_update(form: ModelForm[Any], order: Order, pk: uuid.UUID, request: HttpRequest) -> HttpResponse:
@@ -1541,7 +1603,14 @@ def _process_order_item_update(form: ModelForm[Any], order: Order, pk: uuid.UUID
 
             # Check what fields were changed
             product_changed = "product" in form.changed_data
-            billing_period_changed = "billing_period" in form.changed_data
+            original_config = form.initial.get("config")
+            original_period = (
+                str(original_config.get("billing_period", "monthly"))
+                if isinstance(original_config, dict)
+                else "monthly"
+            )
+            billing_period_changed = updated_item.billing_period != original_period
+            pricing_basis_changed = product_changed or billing_period_changed
 
             # INDUSTRY STANDARD PRICING LOGIC FOR UPDATES:
             # 1. If user manually changed prices - use those (OVERRIDE)
@@ -1552,15 +1621,22 @@ def _process_order_item_update(form: ModelForm[Any], order: Order, pk: uuid.UUID
             # Get product default pricing for reference
             product_price = product.get_price_for_period(order.currency.code, updated_item.billing_period)
 
-            # Handle unit price logic using helper function
-            price_error = _handle_unit_price_update(
-                updated_item, form, product_price, product_changed, billing_period_changed
+            reference = _catalog_reference_cents(product_price, updated_item.billing_period)
+
+            _handle_unit_price_update(updated_item, form, reference, pricing_basis_changed)
+            _handle_setup_fee_update(updated_item, form, reference, pricing_basis_changed)
+
+            price_error, overrides = _validate_item_price_overrides(
+                updated_item,
+                reference,
+                request,
+                checked=_ITEM_PRICE_FIELDS
+                if pricing_basis_changed
+                else _ITEM_PRICE_FIELDS.intersection(form.changed_data),
+                context=f"order_item_edit:{order.order_number}",
             )
             if price_error:
                 return price_error
-
-            # Handle setup fee logic using helper function
-            _handle_setup_fee_update(updated_item, form, product_price, product_changed, billing_period_changed)
 
             # Recalculate VAT if customer-related or product changed
             if product_changed or billing_period_changed:
@@ -1569,6 +1645,7 @@ def _process_order_item_update(form: ModelForm[Any], order: Order, pk: uuid.UUID
 
             # Save the updated item (totals will be calculated in save method)
             updated_item.save()
+            _audit_price_overrides(updated_item, reference, overrides, request)
 
             # Recalculate order totals
             order.calculate_totals()

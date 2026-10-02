@@ -22,7 +22,6 @@
 
 notifications.max_name_length
 notifications.max_template_size
-orders.max_price_override_cents
 orders.max_search_query_length
 products.max_json_content_size
 products.max_price_cents

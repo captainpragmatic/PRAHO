@@ -269,7 +269,7 @@ class PriceTamperingSecurityTests(OrderSecurityTestCase):
             context="test"
         )
         self.assertFalse(is_valid)
-        self.assertIn("Price cannot exceed 100000000 cents", error_msg)
+        self.assertIn("Price cannot exceed 50000000 cents", error_msg)
 
     def test_manual_price_validation_multiplier_limit(self) -> None:
         """🚨 Test price override multiplier limits"""
@@ -561,11 +561,10 @@ class SecurityRegressionTests(OrderSecurityTestCase):
         ]
 
         for attempt in bypass_attempts:
-            with self.subTest(attempt=attempt):
-                with self.assertLogs('apps.orders.views', level='WARNING'):
-                    sanitized = _sanitize_search_query(attempt)
-                    # All should be blocked
-                    self.assertEqual(sanitized, "")
+            with self.subTest(attempt=attempt), self.assertLogs('apps.orders.views', level='WARNING'):
+                sanitized = _sanitize_search_query(attempt)
+                # All should be blocked
+                self.assertEqual(sanitized, "")
 
     def test_price_validation_cannot_be_bypassed(self) -> None:
         """💰 Regression test: Price validation must not be bypassable"""
@@ -628,6 +627,6 @@ class SecurityRegressionTests(OrderSecurityTestCase):
         ]
 
         for event_func in security_events:
-            with self.subTest(event=event_func.__name__ if hasattr(event_func, '__name__') else str(event_func)):
-                with self.assertLogs('apps.orders.views', level='WARNING'):
-                    event_func()  # Should always produce at least a warning log
+            event = event_func.__name__ if hasattr(event_func, '__name__') else str(event_func)
+            with self.subTest(event=event), self.assertLogs('apps.orders.views', level='WARNING'):
+                event_func()  # Should always produce at least a warning log
