@@ -70,6 +70,9 @@ class ButtonConfig:
     data_copy: str = ""
     data_invoke: str = ""
     data_confirm: str = ""
+    # button.html already reads {% if button_id %} on the <button> branch - missing here, so
+    # it was silently dropped the same way the InputConfig fields above were.
+    button_id: str | None = None
 
 
 @dataclass
@@ -104,6 +107,15 @@ class InputConfig:
     rows: int | None = None
     multiple: bool = False
     data_attrs: dict[str, Any] | None = None
+    # file inputs need both - neither was read by the plain <input> branch (multiple was only
+    # wired for <select>) or had a dataclass field at all (accept, aria_label).
+    accept: str | None = None
+    aria_label: str | None = None
+    # input.html's own wrapper <div> already reads {% if container_class %} (CheckboxConfig
+    # already has this field; InputConfig never did) - without it, a hidden file input still
+    # gets a plain space-y-2 wrapper div that renders as a visible, empty flex child wherever
+    # the caller's own layout expects nothing to be there.
+    container_class: str = ""
 
 
 @dataclass
@@ -244,6 +256,7 @@ def button(
         "data_copy": config.data_copy,
         "data_invoke": config.data_invoke,
         "data_confirm": config.data_confirm,
+        "button_id": config.button_id,
     }
 
 
@@ -312,6 +325,9 @@ def input_field(
         "rows": config.rows,
         "multiple": config.multiple,
         "data_attrs": sanitize_data_attrs(config.data_attrs),
+        "accept": config.accept,
+        "aria_label": config.aria_label,
+        "container_class": config.container_class,
     }
 
 

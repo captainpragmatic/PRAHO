@@ -201,6 +201,37 @@ class InputConstraintAttributeTests(SimpleTestCase):
         result = _render('{% input_field "tags" input_type="select" multiple=True %}')
         self.assertIn("multiple", result)
 
+    def test_multiple_renders_on_file_input(self) -> None:
+        """multiple was only wired into the <select> branch - a file input's own `multiple`
+        was silently dropped even though InputConfig already had the field."""
+        result = _render('{% input_field "attachments" input_type="file" multiple=True %}')
+        self.assertIn("multiple", result)
+
+    def test_accept_renders_on_file_input(self) -> None:
+        result = _render('{% input_field "attachments" input_type="file" accept=".pdf,.png" %}')
+        self.assertIn('accept=".pdf,.png"', result)
+
+    def test_aria_label_renders(self) -> None:
+        result = _render('{% input_field "attachments" input_type="file" aria_label="Attach files" %}')
+        self.assertIn('aria-label="Attach files"', result)
+
+    def test_accept_and_aria_label_omitted_render_no_attribute(self) -> None:
+        result = _render('{% input_field "f" input_type="file" %}')
+        self.assertNotIn("accept=", result)
+        self.assertNotIn("aria-label=", result)
+
+    def test_container_class_overrides_default_wrapper_class(self) -> None:
+        """CheckboxConfig already had container_class; InputConfig didn't, so a hidden file
+        input still got the default space-y-2 wrapper div - a visible, empty flex child
+        wherever the caller's own layout expected nothing there."""
+        result = _render('{% input_field "attachments" input_type="file" container_class="hidden" %}')
+        self.assertIn('<div class="hidden">', result)
+        self.assertNotIn("space-y-2", result)
+
+    def test_container_class_omitted_keeps_the_default(self) -> None:
+        result = _render('{% input_field "f" %}')
+        self.assertIn('<div class="space-y-2">', result)
+
     def test_data_attrs_render_as_individual_data_attributes(self) -> None:
         result = _render('{% input_field "f" data_attrs=attrs %}', {"attrs": {"testid": "f-input"}})
         self.assertIn('data-testid="f-input"', result)
