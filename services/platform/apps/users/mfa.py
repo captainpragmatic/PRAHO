@@ -367,19 +367,18 @@ class WebAuthnService:
     🔐 WebAuthn/Passkeys Service
 
     Handles FIDO2/WebAuthn authentication for passwordless login.
-    Currently a framework for future implementation.
+    Unfinished scaffolding that fails closed (#596): without a verification library every
+    verification is refused, and no login path calls it yet.
     """
 
     @staticmethod
-    def is_supported() -> bool:
-        """
-        Check if WebAuthn is supported and configured
+    def _library_provides(function_name: str) -> bool:
+        return webauthn is not None and hasattr(webauthn, function_name)
 
-        Returns:
-            False for now, True when implemented
-        """
-        # Minimal support via local model; verification library may be absent
-        return True
+    @staticmethod
+    def is_supported() -> bool:
+        """True only when a WebAuthn verification library is importable."""
+        return WebAuthnService._library_provides("verify_authentication_response")
 
     @staticmethod
     def generate_registration_options(request: HttpRequest, user: "User") -> dict[str, Any]:
@@ -417,58 +416,13 @@ class WebAuthnService:
 
     @staticmethod
     def verify_registration(user: "User", credential_data: dict[str, Any]) -> bool:
+        """Refuse: a structure check proves nothing about the key (#596).
+
+        It used to store any well-formed payload with public_key="unknown". Registration
+        goes through verify_registration_response, which needs a verification library.
         """
-        Verify and store a new WebAuthn credential
-
-        Args:
-            user: User registering the credential
-            credential_data: WebAuthn credential data
-
-        Returns:
-            True if credential was successfully registered
-        """
-        if not WebAuthnService.is_supported():
-            logger.warning(f"📱 [WebAuthn] Registration attempted but not supported for {user.email}")
-            return False
-
-        try:
-            # Validate required credential fields
-            credential_id = credential_data.get("id")
-            public_key = credential_data.get("response", {}).get("publicKey") or credential_data.get("publicKey")
-
-            if not credential_id:
-                logger.error("📱 [WebAuthn] Missing credential ID in registration data")
-                return False
-
-            # Check if credential already exists for this user
-            if WebAuthnCredential.objects.filter(user=user, credential_id=credential_id).exists():
-                logger.warning(f"📱 [WebAuthn] Credential {credential_id[:20]}... already registered for {user.email}")
-                return False
-
-            # Store the credential; the binding rotates because the account now accepts a new factor.
-            with transaction.atomic():
-                MFAService.apply_state_change(user, action="rotate")
-                WebAuthnCredential.objects.create(
-                    user=user,
-                    credential_id=credential_id,
-                    public_key=public_key or "unknown",
-                    credential_type=credential_data.get("type", "public-key"),
-                    name=credential_data.get("name", "WebAuthn Credential"),
-                    device_type=credential_data.get("authenticatorAttachment", ""),
-                    aaguid=credential_data.get("aaguid", ""),
-                    sign_count=credential_data.get("signCount", 0),
-                    backup_eligible=credential_data.get("backupEligible", False),
-                    backup_state=credential_data.get("backupState", False),
-                    user_verified=credential_data.get("userVerified", False),
-                    is_active=True,
-                )
-
-            logger.info(f"✅ [WebAuthn] Credential registered for {user.email}")
-            return True
-
-        except Exception as e:
-            logger.error(f"🔥 [WebAuthn] Failed to register credential for {user.email}: {e}")
-            return False
+        logger.warning(f"📱 [WebAuthn] Unverified registration refused for {user.email}")
+        return False
 
     @staticmethod
     def generate_authentication_options(request: HttpRequest, user: "User") -> dict[str, Any]:
@@ -492,62 +446,44 @@ class WebAuthnService:
         return options
 
     @staticmethod
-    def verify_authentication(  # noqa: PLR0911  # Complexity: multi-step business logic
-        user: "User", authentication_data: dict[str, Any]
-    ) -> bool:  # Complexity: multi-step workflow  # Complexity: multi-step business logic
+    def verify_authentication(request: HttpRequest, user: "User", authentication_data: dict[str, Any]) -> bool:
         """
-        Verify WebAuthn authentication
+        Verify a WebAuthn assertion against the challenge this server issued.
 
-        Args:
-            user: User to authenticate
-            authentication_data: WebAuthn authentication data
-
-        Returns:
-            True if authentication is valid
+        Fails closed: no stored challenge, no verification library, an unverified result or a
+        signature counter that did not advance all refuse. The challenge is popped from the
+        session, so each one is single-use, and the new counter comes from the verified result,
+        never from the client.
         """
-        if not WebAuthnService.is_supported():
+        challenge = request.session.pop("webauthn_challenge", None)
+        if not challenge or not WebAuthnService.is_supported():
             return False
 
         try:
             credential_id = authentication_data.get("id")
-            if not credential_id:
-                logger.error("📱 [WebAuthn] Missing credential ID in authentication data")
+            credential = WebAuthnCredential.objects.filter(
+                user=user, credential_id=credential_id, is_active=True
+            ).first()
+            if not credential_id or credential is None:
+                logger.warning(f"📱 [WebAuthn] Unknown credential for {user.email}")
                 return False
 
-            # Find the credential
-            try:
-                credential = WebAuthnCredential.objects.get(user=user, credential_id=credential_id, is_active=True)
-            except WebAuthnCredential.DoesNotExist:
-                logger.warning(f"📱 [WebAuthn] Credential not found for {user.email}: {credential_id[:20]}...")
+            result = webauthn.verify_authentication_response(
+                authentication_data,
+                expected_credential_public_key=credential.public_key,
+                expected_challenge=challenge,
+            )
+            new_sign_count = result.get("new_sign_count") if result and result.get("verified") else None
+            if type(new_sign_count) is not int:
+                logger.warning(f"📱 [WebAuthn] Authentication verification failed for {user.email}")
+                return False
+            if credential.sign_count > 0 and new_sign_count <= credential.sign_count:
+                logger.error(f"📱 [WebAuthn] Signature counter did not advance for {user.email}")
                 return False
 
-            # Verify signature counter to prevent replay attacks
-            client_sign_count = authentication_data.get("signCount", 0)
-            if client_sign_count <= credential.sign_count and credential.sign_count > 0:
-                logger.error(
-                    f"📱 [WebAuthn] Signature counter replay detected for {user.email}: "
-                    f"client={client_sign_count}, stored={credential.sign_count}"
-                )
-                return False
-
-            # If webauthn library is available, use it for proper verification
-            if webauthn is not None and hasattr(webauthn, "verify_authentication_response"):
-                try:
-                    result = webauthn.verify_authentication_response(
-                        authentication_data,
-                        expected_credential_public_key=credential.public_key,
-                        expected_challenge=authentication_data.get("challenge"),
-                    )
-                    if not result or not result.get("verified"):
-                        logger.warning(f"📱 [WebAuthn] Authentication verification failed for {user.email}")
-                        return False
-                except Exception as verify_error:
-                    logger.error(f"📱 [WebAuthn] Verification error: {verify_error}")
-                    return False
-
-            # Update credential usage
-            credential.mark_as_used()
-
+            credential.sign_count = new_sign_count
+            credential.last_used = timezone.now()
+            credential.save(update_fields=["last_used", "sign_count"])
             logger.info(f"✅ [WebAuthn] Authentication verified for {user.email}")
             return True
 
@@ -582,36 +518,30 @@ class WebAuthnService:
     ) -> dict[str, Any]:
         """Verify a registration response and persist a credential.
 
-        This is a minimal shim that integrates with a patched `webauthn` module in tests.
+        A minimal shim around a `webauthn` verification library (patched in tests). Without
+        the library, a server-issued challenge or a verified public key, nothing is stored.
         """
+        refused: dict[str, Any] = {"success": False, "error": "Registration verification failed"}
+        # Single-use, and only ever the challenge this server issued (#596).
+        challenge = request.session.pop("webauthn_challenge", None)
+        if not challenge or not WebAuthnService._library_provides("verify_registration_response"):
+            return refused
         try:
-            verified = False
-            result: dict[str, Any] | None = None
-            if webauthn is not None and hasattr(webauthn, "verify_registration_response"):
-                result = webauthn.verify_registration_response(
-                    registration_data, challenge=request.session.get("webauthn_challenge")
-                )
-                verified = bool(result and result.get("verified"))
-
-            if not verified and not result and request.user.is_authenticated:
-                # Fallback: basic structure check
-                verified = WebAuthnService.verify_registration(request.user, registration_data)
-
-            if not verified:
-                return {"success": False, "error": "Registration verification failed"}
-
+            result = webauthn.verify_registration_response(registration_data, challenge=challenge)
+            public_key = result.get("credential_public_key") if result and result.get("verified") else None
+            if isinstance(public_key, bytes):
+                public_key = base64.b64encode(public_key).decode()
             credential_id = registration_data.get("id")
-            public_key_b64 = (result or {}).get("credential_public_key")
-            if isinstance(public_key_b64, bytes):
-                public_key_b64 = base64.b64encode(public_key_b64).decode()
+            if not public_key or not isinstance(public_key, str) or not credential_id:
+                return refused
 
             with transaction.atomic():
                 cred = WebAuthnCredential.objects.create(
                     user=cast("User", request.user),
-                    credential_id=credential_id or "",
-                    public_key=public_key_b64 or "unknown",
+                    credential_id=credential_id,
+                    public_key=public_key,
                     name=device_name,
-                    sign_count=int((result or {}).get("sign_count") or 0),
+                    sign_count=int(result.get("sign_count") or 0),
                     is_active=True,
                 )
                 MFAService.apply_state_change(cred.user, action="rotate")

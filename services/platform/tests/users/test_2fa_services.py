@@ -368,10 +368,13 @@ class WebAuthnServiceTestCase(TestCase):
         self.request.session = SessionStore()
 
     def test_is_supported(self):
-        """Test WebAuthn support check"""
-        # WebAuthn is supported with basic local model storage
-        result = WebAuthnService.is_supported()
-        self.assertTrue(result)
+        """Without a verification library WebAuthn is not supported (#596).
+
+        This asserted True on the strength of "basic local model storage", which is how the
+        service came to accept assertions it could not verify.
+        """
+        with patch("apps.users.mfa.webauthn", None):
+            self.assertFalse(WebAuthnService.is_supported())
 
     def test_generate_registration_options(self):
         """Test WebAuthn registration options"""
@@ -397,7 +400,7 @@ class WebAuthnServiceTestCase(TestCase):
     def test_verify_authentication_not_implemented(self):
         """Test WebAuthn authentication verification (not implemented)"""
         auth_data = {"test": "data"}
-        result = WebAuthnService.verify_authentication(self.user, auth_data)
+        result = WebAuthnService.verify_authentication(self.request, self.user, auth_data)
         self.assertFalse(result)
 
 
