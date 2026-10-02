@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
-from django.db import DatabaseError, models, transaction
+from django.db import DatabaseError, InterfaceError, models, transaction
 from django.db.models import Count, Q
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -1015,7 +1015,7 @@ def provider_create(request: HttpRequest) -> HttpResponse:
                 user=request.user if request.user.is_authenticated else None, request=request
             )
             InfrastructureAuditService.log_provider_created(provider, audit_ctx)
-        except (DatabaseError, OSError):
+        except (DatabaseError, InterfaceError, OSError):
             logger.warning("⚠️ [Audit] Failed to log provider creation for %s", provider.name, exc_info=True)
 
         messages.success(request, f"Provider '{provider.name}' created successfully.")
@@ -1081,7 +1081,7 @@ def provider_edit(request: HttpRequest, pk: int) -> HttpResponse:
                 user=request.user if request.user.is_authenticated else None, request=request
             )
             InfrastructureAuditService.log_provider_updated(provider, old_values, audit_ctx)
-        except (DatabaseError, OSError):
+        except (DatabaseError, InterfaceError, OSError):
             logger.warning("⚠️ [Audit] Failed to log provider update for %s", provider.name, exc_info=True)
 
         messages.success(request, f"Provider '{provider.name}' updated successfully.")
@@ -1226,7 +1226,7 @@ def region_toggle(request: HttpRequest, pk: int) -> HttpResponse:
             user=request.user if request.user.is_authenticated else None, request=request
         )
         InfrastructureAuditService.log_region_toggled(region, audit_ctx)
-    except (DatabaseError, OSError):
+    except (DatabaseError, InterfaceError, OSError):
         logger.warning("⚠️ [Audit] Failed to log region toggle for %s", region.name, exc_info=True)
 
     action = "enabled" if region.is_active else "disabled"

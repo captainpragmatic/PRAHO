@@ -222,18 +222,17 @@ EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 DEFAULT_FROM_EMAIL = "dev@pragmatichost.com"
 
 # ===============================================================================
-# CACHE (Dummy cache for development)
+# CACHE (in-memory LocMemCache for development; staging/prod use the database cache)
 # ===============================================================================
 
-if os.environ.get("USE_REDIS") != "true":
-    # Override CACHES for development with in-memory cache
-    CACHES = {
-        "default": {
-            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-            "LOCATION": "praho-cache",
-        }
+# Override CACHES for development with in-memory cache
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "praho-cache",
     }
-    # The indexed database session backend is inherited from base settings.
+}
+# The indexed database session backend is inherited from base settings.
 
 # ===============================================================================
 # LOGGING CONFIGURATION - Enhanced with Request ID Tracing

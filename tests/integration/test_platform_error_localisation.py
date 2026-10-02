@@ -2,7 +2,7 @@
 
 The platform wraps its preflight messages in gettext, but renders them with str() while
 serving an HMAC request, where no customer language is active. They therefore reach the
-portal in English. The portal finishes the translation in localise_platform_error()
+portal in English. The portal finishes the translation in _localise_platform_error()
 (services/portal/apps/orders/views.py) by looking each received string up as a msgid.
 
 That works only while the two sides agree on the exact literal, and nothing at runtime
@@ -102,7 +102,7 @@ def test_every_actionable_platform_message_has_a_romanian_translation() -> None:
     while the portal receives the already-formatted string, so a msgid lookup cannot
     match by construction. They report internal catalogue inconsistencies (a product
     went inactive, a price snapshot is missing) that a customer cannot act on anyway,
-    and localise_platform_error passes them through in English rather than dropping them.
+    and _localise_platform_error passes them through in English rather than dropping them.
     """
     with PORTAL_MO.open("rb") as handle:
         catalogue = gettext_module.GNUTranslations(handle)
@@ -114,4 +114,71 @@ def test_every_actionable_platform_message_has_a_romanian_translation() -> None:
         "these platform order errors reach a Romanian customer in English; add each to "
         "services/portal/locale/ro/LC_MESSAGES/django.po and run msgfmt:\n  "
         + "\n  ".join(repr(s) for s in untranslated)
+    )
+
+
+PORTAL_VIEWS = REPO_ROOT / "services" / "portal" / "apps" / "orders" / "views.py"
+
+
+def _portal_profile_keywords() -> tuple[str, ...]:
+    """The portal's _PROFILE_KEYWORDS tuple, read from source for the same reason as above."""
+    tree = ast.parse(PORTAL_VIEWS.read_text(encoding="utf-8"))
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "_PROFILE_KEYWORDS" for target in node.targets
+        ):
+            value = ast.literal_eval(node.value)
+            assert isinstance(value, tuple) and value
+            return value
+    raise AssertionError("services/portal/apps/orders/views.py no longer defines _PROFILE_KEYWORDS")
+
+
+def _platform_profile_messages() -> set[str]:
+    """The messages preflight emits for a missing billing-profile field.
+
+    They are the second element of each pair in preflight's ``required_fields`` table,
+    which is what makes them profile errors on the platform side.
+    """
+    tree = ast.parse(PREFLIGHT.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "required_fields" for target in node.targets)
+            and isinstance(node.value, ast.List)
+        ):
+            found = set()
+            for pair in node.value.elts:
+                assert isinstance(pair, ast.Tuple) and len(pair.elts) == 2
+                call = pair.elts[1]
+                assert isinstance(call, ast.Call) and isinstance(call.args[0], ast.Constant)
+                found.add(call.args[0].value)
+            return found
+    raise AssertionError("preflight.py no longer defines its required_fields table")
+
+
+def _classifies_as_profile_error(message: str, keywords: tuple[str, ...]) -> bool:
+    # Mirrors _is_profile_error in services/portal/apps/orders/views.py.
+    return any(keyword in message.lower() for keyword in keywords)
+
+
+def test_profile_errors_still_trigger_the_profile_prompt() -> None:
+    """The portal shows the profile-completion prompt by keyword-matching the platform's
+    English text (#567). A reword such as "Please provide your county/state" to "Region is
+    required" would stop the prompt while every other test stayed green, so the
+    classification is asserted here in both directions.
+    """
+    keywords = _portal_profile_keywords()
+    profile = _platform_profile_messages()
+    others = {s for s in _platform_preflight_literals() if "{" not in s} - profile
+
+    assert len(profile) >= 7, f"expected the billing-profile messages, found {sorted(profile)}"
+    missed = sorted(s for s in profile if not _classifies_as_profile_error(s, keywords))
+    assert not missed, (
+        "these profile errors no longer match _PROFILE_KEYWORDS, so the customer is not "
+        "prompted to complete their profile:\n  " + "\n  ".join(repr(s) for s in missed)
+    )
+    misrouted = sorted(s for s in others if _classifies_as_profile_error(s, keywords))
+    assert not misrouted, (
+        "these non-profile errors match _PROFILE_KEYWORDS, so the customer sees a generic "
+        "profile prompt instead of the reason:\n  " + "\n  ".join(repr(s) for s in misrouted)
     )

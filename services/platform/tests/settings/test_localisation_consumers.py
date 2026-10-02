@@ -4,12 +4,14 @@ from datetime import UTC, datetime
 from unittest.mock import patch
 
 from django.core.cache import cache
+from django.db import DatabaseError, InterfaceError
 from django.template import Context, Template
 from django.template.loader import render_to_string
-from django.test import RequestFactory, TestCase, override_settings
+from django.test import RequestFactory, SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 from django.utils.translation import override
 
+from apps.common.localisation import LocalisationDefaults
 from apps.common.localisation_services import get_localisation_defaults, get_request_localisation
 from apps.customers.forms import CustomerAddressForm, CustomerCreationForm, CustomerEditForm
 from apps.customers.models import CustomerAddress
@@ -86,8 +88,14 @@ class LocalisationConsumerTests(TestCase):
         address.country = "France"
         address.save(update_fields=["country"])
         CustomerAddress.objects.create(
-            customer=customer, is_billing=True, is_primary=False, country="Italy",
-            address_line1="Example 1", city="Rome", county="Rome", postal_code="00100",
+            customer=customer,
+            is_billing=True,
+            is_primary=False,
+            country="Italy",
+            address_line1="Example 1",
+            city="Rome",
+            county="Rome",
+            postal_code="00100",
         )
         form = CustomerEditForm(customer)
         self.assertEqual(form["country"].value(), "France")
@@ -104,8 +112,15 @@ class LocalisationConsumerTests(TestCase):
         request.user = self.staff
         rendered = render_to_string(
             "audit/partials/gdpr_export_requests_list.html",
-            {"export_requests": [{"id": "00000000-0000-0000-0000-000000000001", "status": "processing",
-                                  "requested_at": datetime(2025, 12, 31, 22, 30, tzinfo=UTC)}]},
+            {
+                "export_requests": [
+                    {
+                        "id": "00000000-0000-0000-0000-000000000001",
+                        "status": "processing",
+                        "requested_at": datetime(2025, 12, 31, 22, 30, tzinfo=UTC),
+                    }
+                ]
+            },
             request=request,
         )
         self.assertIn('title="2025-12-31 22:30:00"', rendered)
@@ -213,3 +228,15 @@ class LocalisationConsumerTests(TestCase):
             ("system.customer_date_format", "%n"),
         ):
             self.assertTrue(SettingsService.update_setting(key, value).is_err())
+
+
+class LocalisationDefaultsFallbackTests(SimpleTestCase):
+    def test_unavailable_settings_fall_back_to_catalog_defaults(self) -> None:
+        # #548: InterfaceError (closed or unusable connection) is a sibling of DatabaseError,
+        # so naming DatabaseError alone let the likeliest outage 500 every staff page.
+        for exc in (DatabaseError("settings table unreachable"), InterfaceError("connection already closed")):
+            with (
+                self.subTest(exc=type(exc).__name__),
+                patch("apps.settings.services.SettingsService.get_setting", side_effect=exc),
+            ):
+                self.assertEqual(get_localisation_defaults(), LocalisationDefaults())

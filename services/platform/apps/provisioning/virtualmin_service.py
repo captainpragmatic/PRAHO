@@ -25,6 +25,7 @@ from django.utils.translation import gettext_lazy as _
 
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 
+from .domain_veto import domain_disables_hosting
 from .placement import order_placement_candidates
 from .security_utils import IdempotencyManager
 from .virtualmin_backup_service import BackupConfig, RestoreConfig
@@ -1206,6 +1207,13 @@ class VirtualminProvisioningService:
 
             reconcile_virtualmin_service_state_async(str(account.service_id))
             return Err(f"Job superseded by current service state '{service_status}'")
+
+        # Same veto as the reconciler (#566): an unsuspend retry must not re-enable an
+        # account its bound domain is holding off. Terminal — retrying cannot change it.
+        if job.operation == "unsuspend_domain" and domain_disables_hosting(account):
+            job.mark_failed("Superseded: a bound domain disables hosting")
+            VirtualminProvisioningJob.terminalize(job.pk)
+            return Err("Job superseded: a bound domain disables hosting")
 
         if job.operation == "delete_domain" and account.protected_from_deletion:
             job.mark_failed("Account is protected from deletion")

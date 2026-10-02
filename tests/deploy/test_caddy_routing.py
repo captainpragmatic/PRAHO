@@ -59,6 +59,9 @@ PUBLIC_API_VIEWS = {
     "support_categories_api",
 }
 STAFF_SESSION_PREFIXES = ["/api/customers/"]
+# Equal to Django's DATA_UPLOAD_MAX_MEMORY_SIZE (10485760). That limit excludes file uploads,
+# so the equivalence holds only because no public Platform route accepts multipart files.
+PLATFORM_PUBLIC_BODY_CAP = "10MiB"
 SHARED_PATHS = ("/dashboard/", "/billing/", "/tickets/", "/i18n/", "/cookie-policy/", "/auth/login/")
 PUBLIC_ROUTES = (
     ("GET", "/api/users/health/"),
@@ -184,6 +187,8 @@ def _assert_contract(name: str, source: str, allowed: list[str] | None = None) -
         assert all(target.endswith(":8700") for target in _proxy_targets(platform))
         for public in handles[:5]:
             assert len(_proxy_targets(public.children)) == 1
+            # Unauthenticated handles must not stream an unbounded body into a worker.
+            _one(_one(public.children, "request_body").children, "max_size", PLATFORM_PUBLIC_BODY_CAP)
             assert not any(node.words[0].startswith("@") for node in _walk(public.children))
         assert not any(node.words[0] in {"handle_path", "reverse_proxy"} for node in platform)
         staff = handles[-1].children
@@ -431,11 +436,16 @@ def _request(  # noqa: PLR0913  # Explicit transport, host, path and request dat
 
 
 @contextmanager
-def _running_edge(name: str, tmp_path: Path) -> Iterator[tuple[str, str, str]]:
+def _running_edge(name: str, tmp_path: Path, *, upstream_reads_body: bool = False) -> Iterator[tuple[str, str, str]]:
     suffix = uuid4().hex[:12]
     network, edge, peer = (f"routing-{suffix}-{part}" for part in ("net", "edge", "peer"))
     config = tmp_path / "Caddyfile"
-    config.write_text(_http_fixture(_config(name)))
+    fixture = _http_fixture(_config(name))
+    if upstream_reads_body:
+        # The default responder answers without reading the body, so the proxy never hits a
+        # request_body cap. Django reads it; consuming it here is what makes the cap observable.
+        fixture = fixture.replace('respond "platform {method} {uri}" 200', 'respond "{http.request.body}" 200')
+    config.write_text(fixture)
     _docker_ok("network", "create", network)
     try:
         _docker_ok(
@@ -528,3 +538,51 @@ def test_live_routing_spoofed_headers_and_published_port(name: str, tmp_path: Pa
                 assert not ipaddress.ip_address(remote).is_loopback, f"{address} presented loopback peer {remote}"
                 assert status == 403, (address, headers, remote)
                 print(f"{name}: {address} observed peer {remote}; status={status}; headers={headers}")
+
+
+def test_platform_public_body_cap_matches_django_upload_limit() -> None:
+    """The edge cap and Django's own limit must move together, or one silently wins."""
+    tree = ast.parse(_read("services/platform/config/settings/base.py"))
+    limits = [
+        node.value
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "DATA_UPLOAD_MAX_MEMORY_SIZE" for target in node.targets)
+    ]
+    assert len(limits) == 1 and isinstance(limits[0], ast.Constant)
+    assert PLATFORM_PUBLIC_BODY_CAP == "10MiB"
+    assert limits[0].value == 10 * 1024 * 1024
+
+
+def _post_size(peer: str, edge: str, path: str, size: int) -> int:
+    """POST ``size`` bytes to the Platform host from the peer and return the final status."""
+    # Not NUL bytes: busybox wget sends --post-file as a C string, so a NUL body posts nothing.
+    _docker_ok("exec", peer, "sh", "-c", f"head -c {size} /dev/zero | tr '\\0' a > /tmp/body")
+    result = _docker(
+        "exec",
+        peer,
+        "wget",
+        "-S",
+        "-O",
+        "/dev/null",
+        "-T",
+        "15",
+        "--header",
+        f"Host: {PLATFORM_HOST}",
+        "--post-file=/tmp/body",
+        f"http://{edge}{path}",
+    )
+    statuses = re.findall(r"HTTP/1\.[01] (\d+)", result.stderr)
+    assert statuses, result.stdout + result.stderr
+    return int(statuses[-1])
+
+
+@pytest.mark.docker
+@pytest.mark.parametrize("name", [name for name in CONFIGS if name != "portal"])
+def test_live_platform_public_body_cap(name: str, tmp_path: Path, docker_daemon: None) -> None:
+    """At the cap a public POST is proxied; one byte over, the edge refuses it with 413."""
+    limit = 10 * 1024 * 1024
+    with _running_edge(name, tmp_path, upstream_reads_body=True) as (edge, peer, _published):
+        for path in ("/integrations/webhooks/stripe/", "/api/users/login/"):
+            assert _post_size(peer, edge, path, limit) == 200, path
+            assert _post_size(peer, edge, path, limit + 1) == 413, path

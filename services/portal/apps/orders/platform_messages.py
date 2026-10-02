@@ -1,6 +1,6 @@
 """Order errors the PLATFORM emits, declared here so they survive extraction.
 
-localise_platform_error() (see views.py) translates these by looking each received
+_localise_platform_error() (see views.py) translates these by looking each received
 string up as a msgid. The catalogue entries therefore have to exist in the portal's
 own django.po — but `make i18n-extract` runs makemessages against portal source only,
 and msgmerge marks any entry it cannot find there as obsolete (`#~ msgid`), which

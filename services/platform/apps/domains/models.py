@@ -425,6 +425,11 @@ class Domain(ConcurrentTransitionMixin, models.Model):
         ("cancelled", _("❌ Cancelled")),
     )
 
+    # Statuses in which the domain holds its hosting account disabled (#566, ADR-0051).
+    # Deliberately narrower than "not active": a pending or in-transfer domain must not
+    # block re-enabling hosting for a reactivated service.
+    HOSTING_DISABLING_STATUSES: ClassVar[frozenset[str]] = frozenset({"expired", "suspended", "cancelled"})
+
     # Core domain information
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=255, unique=True, help_text=_("Full domain name (e.g., 'example.com')"))

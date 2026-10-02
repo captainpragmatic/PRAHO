@@ -29,6 +29,7 @@ _PROD_ENV = {
     "PLATFORM_TO_PORTAL_WEBHOOK_SECRET": "test-only-webhook-secret-for-logging-tests",
     "CREDENTIAL_VAULT_MASTER_KEY": "dGVzdC1vbmx5LXZhdWx0LWtleS1mb3ItbG9nZ2luZy10ZXN0cw==",
     "SENTRY_DSN": "",  # Disable Sentry during test imports (placeholder in .env triggers BadDsn)
+    "REDIS_URL": "",  # Prod refuses a set REDIS_URL (ADR-0020); a host export must not leak in
 }
 
 

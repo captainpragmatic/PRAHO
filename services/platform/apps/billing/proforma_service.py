@@ -575,6 +575,8 @@ class ProformaPaymentService:
                     actor_type="system",
                 )
             except (OSError, DatabaseError, RuntimeError):
+                # narrow-db-catch: inside the conversion transaction; on an unusable connection the
+                # conversion cannot commit, so InterfaceError must abort it rather than be logged past.
                 # SFH-3 + H4 fix: Catch infra errors only — let code bugs
                 # (TypeError, AttributeError) propagate so they surface in CI/Sentry.
                 logger.error(

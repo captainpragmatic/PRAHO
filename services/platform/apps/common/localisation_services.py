@@ -6,7 +6,7 @@ import logging
 from typing import Any
 
 from django.core.exceptions import ObjectDoesNotExist
-from django.db import DatabaseError
+from django.db import DatabaseError, InterfaceError
 from django.http import HttpRequest
 
 from apps.common.localisation import (
@@ -33,7 +33,7 @@ def get_localisation_defaults() -> LocalisationDefaults:
                 "customer_date_format": SettingsService.get_setting("system.customer_date_format"),
             }
         )
-    except DatabaseError:
+    except (DatabaseError, InterfaceError):
         logger.warning("[Localisation] Settings unavailable; using catalog defaults")
         return LocalisationDefaults()
 

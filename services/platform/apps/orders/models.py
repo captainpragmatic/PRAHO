@@ -518,6 +518,7 @@ class Order(ConcurrentTransitionMixin, models.Model):
                 else:
                     _apply(committed_discount, persist=True)
         except (NotSupportedError, DatabaseError):
+            # narrow-db-catch: the fallback below persists too, so it cannot help on an unusable connection.
             # Deliberately BROADER than the sibling fallback in `_locked_latest_order_number`,
             # and the difference is the caller, not the risk. That helper propagates into
             # `Order.save()`, where a real DatabaseError surfaces to the request or task — so

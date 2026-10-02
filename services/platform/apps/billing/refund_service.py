@@ -1309,53 +1309,60 @@ class RefundService:
             # operation, not an assumed platform default.
             currency = payment.currency if payment else (order.currency if order else invoice.currency)
 
-            refund = Refund.objects.create(
-                id=refund_id,
-                customer=order.customer if order else invoice.customer,
-                order=order,
-                invoice=invoice,
-                payment=payment,
-                amount_cents=refund_amount_cents,
-                currency=currency,
-                original_amount_cents=original_cents,
-                refund_type=_choice_value(
-                    refund_data.get("refund_type") if refund_data else None,
-                    "full",
-                    enum_type=RefundType,
-                    allowed=_REFUND_TYPE_VALUES,
-                ),
-                reason=_choice_value(
-                    refund_data.get("reason") if refund_data else None,
-                    "customer_request",
-                    enum_type=RefundReason,
-                ),
-                reason_description=str(refund_data.get("notes", "")) if refund_data else "",
-                reference_number=refund_data.get("reference", f"REF-{refund_id}")
-                if refund_data
-                else f"REF-{refund_id}",
-                status="pending",
-                gateway_refund_id=gateway_refund_id,
-                created_by=actor,
-            )
-
-            # Create status history (ADR-0016: audit trail must not be silently dropped).
-            # The savepoint keeps a caught history-write error from poisoning the caller's
-            # transaction; this helper serves both pre-gateway intents and convergence.
-            try:
-                with transaction.atomic():
-                    RefundStatusHistory.objects.create(
-                        refund=refund,
-                        previous_status="",
-                        new_status="pending",
-                        change_reason="Refund initiated",
-                        changed_by=actor,
-                    )
-            except DatabaseError:
-                logger.warning(
-                    "Failed to create refund status history for refund_id=%s — audit trail gap",
-                    refund.pk,
-                    exc_info=True,
+            # One savepoint for the row and its history: every Err exit below then leaves
+            # nothing behind. Callers return the Err normally from their own atomic block,
+            # which would otherwise COMMIT a Refund row the caller was told had failed.
+            with transaction.atomic():
+                refund = Refund.objects.create(
+                    id=refund_id,
+                    customer=order.customer if order else invoice.customer,
+                    order=order,
+                    invoice=invoice,
+                    payment=payment,
+                    amount_cents=refund_amount_cents,
+                    currency=currency,
+                    original_amount_cents=original_cents,
+                    refund_type=_choice_value(
+                        refund_data.get("refund_type") if refund_data else None,
+                        "full",
+                        enum_type=RefundType,
+                        allowed=_REFUND_TYPE_VALUES,
+                    ),
+                    reason=_choice_value(
+                        refund_data.get("reason") if refund_data else None,
+                        "customer_request",
+                        enum_type=RefundReason,
+                    ),
+                    reason_description=str(refund_data.get("notes", "")) if refund_data else "",
+                    reference_number=refund_data.get("reference", f"REF-{refund_id}")
+                    if refund_data
+                    else f"REF-{refund_id}",
+                    status="pending",
+                    gateway_refund_id=gateway_refund_id,
+                    created_by=actor,
                 )
+
+                # Create status history (ADR-0016: audit trail must not be silently dropped).
+                # The inner savepoint keeps a caught history-write error from poisoning the
+                # caller's transaction; this helper serves both pre-gateway intents and
+                # convergence.
+                try:
+                    with transaction.atomic():
+                        RefundStatusHistory.objects.create(
+                            refund=refund,
+                            previous_status="",
+                            new_status="pending",
+                            change_reason="Refund initiated",
+                            changed_by=actor,
+                        )
+                except DatabaseError:
+                    # narrow-db-catch: InterfaceError is not tolerated as an audit gap; it escapes the
+                    # outer savepoint, which discards the refund row, and returns a retriable Err below.
+                    logger.warning(
+                        "Failed to create refund status history for refund_id=%s — audit trail gap",
+                        refund.pk,
+                        exc_info=True,
+                    )
 
             return Ok(refund)
 

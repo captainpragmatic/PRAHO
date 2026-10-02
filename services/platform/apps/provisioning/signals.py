@@ -375,8 +375,10 @@ def handle_service_virtualmin_reconciliation(
     Reconcile-not-command: the task reads the COMMITTED Service+account
     state and converges Virtualmin to it, so stale commands and
     multi-transition ordering races cannot occur; duplicate enqueues are
-    harmless. Enqueue happens on_commit — suspension/reactivation callers
-    hold open atomics, and work for a rolled-back transition must never run.
+    harmless. Enqueue happens on_commit so work for a rolled-back transition
+    never runs. That does not assume an open atomic: a caller saving in
+    autocommit has already committed, and on_commit then runs immediately.
+    Either way the task only ever sees committed state.
     """
     if kwargs.get("raw"):
         return  # loaddata fixtures must never trigger real provisioning

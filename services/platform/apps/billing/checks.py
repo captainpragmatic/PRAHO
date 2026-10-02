@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from django.core.checks import Error, Tags, register
-from django.db import DatabaseError, connections, router
+from django.db import DatabaseError, InterfaceError, connections, router
 from django.utils import timezone
 
 
@@ -53,7 +53,7 @@ def check_billing_default_currency(*, databases: Sequence[str] | None = None, **
         ]
     except (AttributeError, TypeError):
         return [Error("billing.default_currency must be a supported currency-code string.", id="billing.E001")]
-    except DatabaseError:
+    except (DatabaseError, InterfaceError):
         return [
             Error(
                 "billing.default_currency could not be validated against the policy and FX-rate database.",
