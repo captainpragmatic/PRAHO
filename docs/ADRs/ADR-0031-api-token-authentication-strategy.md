@@ -1,7 +1,7 @@
 # ADR-0031: API Token Authentication Strategy
 
 **Status:** Accepted
-**Date:** 2026-03-06 (updated 2026-07-24)
+**Date:** 2026-03-06 (updated 2026-10-01)
 **Authors:** Development Team
 **Related:** ADR-0017 (Portal Auth Fail-Open), ADR-0024 (User Role Clarification)
 **Gap tracking:** [Issue #77 — close ADR-0031 token authentication gaps](https://github.com/captainpragmatic/PRAHO/issues/77)
@@ -17,7 +17,7 @@ against it:
 |----------|-----------|--------|
 | Portal service (backend) | HMAC-signed `X-User-Context` requests | Production-ready |
 | Platform web UI (staff) | Django session cookies | Production-ready |
-| Scripts, CLI tools, automation | DRF opaque bearer tokens | Production-ready |
+| Scripts, CLI tools, automation | Opaque bearer tokens (`APIToken`) | Issuance works; use is blocked by the HMAC gate (Gap 1, #569) |
 
 This ADR covers the third category: **API token authentication for direct API consumers**
 such as operator scripts, future CLI tools, and future mobile clients.
@@ -49,11 +49,15 @@ class Token(models.Model):
 
 ### `obtain_token` — What Works
 
-- Accepts `POST` with `{"email": "...", "password": "..."}` body
+- Accepts `POST` with `{"email": "...", "password": "..."}` body, plus `"mfa_token"` (a
+  current TOTP code or an unused backup code) when the account has 2FA enabled (#565)
 - Calls `authenticate()` — runs through Django auth backends
-- Integrates with account lockout: increments `User.failed_login_attempts` on failure,
-  resets on success, rejects if `user.is_account_locked()` returns `True`
-- Throttled at 5 requests/minute via `AuthThrottle(AnonRateThrottle)`
+- Account lockout: rejects if `user.is_account_locked()` returns `True` and resets the
+  counter on success. Since #568 a wrong password does **not** increment
+  `User.failed_login_attempts`: the endpoint is public, so that let anyone lock any account
+  whose address they knew. A per-address throttle replaced it.
+- Throttled by `AuthThrottle` (`auth`, 10/minute per client) and
+  `TokenRequestAccountThrottle` (`token_request`, 5/minute per submitted address)
 - Returns `{"token": "<key>", "user_id": <id>, "email": "<email>"}`
 - Logs authentication events with masked email (`_mask_email()`)
 
@@ -65,7 +69,12 @@ class Token(models.Model):
 - Self-revocation only: the body is ignored; you cannot revoke another user's token
 - No throttle (low risk — requires a valid token to call)
 
-### How to Use Today (Script / CLI)
+### Intended Script / CLI Usage
+
+> **Not usable as written today (#569).** Every `/api/` route except token issuance sits
+> behind the Portal's HMAC gate, so steps 2 and 3 are rejected without the shared
+> signature that only the Portal holds. The example shows the intended shape; see Gap 1
+> and "Current limitations" below.
 
 ```bash
 # 1. Obtain token (use a dedicated service-account staff user, minimal role)
@@ -218,6 +227,50 @@ mechanism is authoritative. `tests/api/test_api_token_auth.py::StrayAuthorizatio
 locks this in; the CI auth-coverage test (`public_api_endpoint` marker) enforces that every
 API view has an explicit auth posture.
 
+### Current limitations (#569)
+
+Token authentication is a project default, but every `/api/` route that accepts a token
+also sits behind the inter-service HMAC gate. Only `POST /api/users/token/` is public. A
+token holder without the Portal's signing secret can therefore obtain a key but cannot use
+it, introspect it (`GET /api/users/token/me/`) or revoke it (`DELETE
+/api/users/token/revoke/`). `tests/api/test_token_auth_requires_hmac.py` asserts this shape
+and fails the build if a token-accepting route becomes reachable without the signature.
+
+Whether to open these routes to bare-token callers is an open product decision (#569).
+Before any route is opened:
+
+1. Token issuance verifies the second factor for accounts that have one. **Done (#565).**
+2. Tokens issued before that change, which a password alone could mint, must be revoked or
+   rejected. Token authentication checks the key, the user's active flag and expiry, not
+   how the key was obtained, and a server default can issue keys that never expire.
+3. The staff web login must enforce the second factor. A staff session can mint tokens at
+   `/settings/api-tokens/`, and today that session is granted on a password alone.
+4. The tripwire's expected set must be updated deliberately, with a reviewer attached.
+
+Residual on the issuance endpoint after #565: refusals all share the wrong-password body,
+but not its timing. With the correct password, a 2FA account goes on to verify the code,
+and an 8-digit code is checked against every stored backup-code hash, so a slow refusal
+can confirm the password. Before #565 the correct password simply returned a token, so
+this is narrower, and `TokenRequestAccountThrottle` limits sampling to 5 per minute per
+address. Equalising the timing is open work.
+
+### Second factor at issuance (#565)
+
+`POST /api/users/token/` requires `mfa_token` for an account with 2FA enabled and verifies
+it through the same helper as the Portal login (`_second_factor_accepted`), so both accept
+the same TOTP and backup codes with the same rate limit and replay protection. Request
+parameters are validated before any credential work. The password check is followed by one
+transaction on the locked user row that re-reads the password hash, the lock and active
+state and the 2FA flag, verifies the code and issues the token. A wrong or missing code
+counts toward the account lockout, unlike a wrong password, because reaching it took the
+correct password. If issuance is refused (the live-token cap), the transaction rolls back
+and a backup code is not spent. A TOTP code is also not spent under the configured
+DatabaseCache, whose replay-marker write shares the rolled-back transaction; only a cache backed
+by a separate store (LocMem, Redis) would leave it spent. No token is issued either way.
+
+Unattended scripts obtain a token once, interactively, with a current code, and store the
+token. They should never store the password.
+
 ### Implemented: Gap 7 (web UI for token management)
 
 Authenticated staff can manage only their own active tokens at
@@ -260,7 +313,8 @@ logs, templates rendered later, or audit events.
   requests get 400s, descriptions are bounded, and names cannot inject control
   characters into security logs
 - Token lifecycle reaches the immutable audit trail (ADR-0016)
-- Account lockout integration preserved from original implementation
+- Locked accounts are refused at issuance; on the public endpoint a per-address throttle replaces
+  wrong-password lockout, so strangers cannot lock accounts (#568)
 - Staff can create, inspect, and independently revoke their own tokens without shell access
 
 ### Negative
@@ -286,7 +340,7 @@ auth).
 
 | Gap | Description | Status | Closed by |
 | --- | ----------- | ------ | --------- |
-| 1 | `verify_token` broken for token consumers | Closed | `GET /api/users/token/me/` endpoint (prior work) |
+| 1 | `verify_token` broken for token consumers | **Open** (#569) | `GET /api/users/token/me/` exists, but like `token/revoke/` it sits behind the HMAC gate, so a bare-token caller still cannot introspect or revoke. Opening them is a pending product decision; prerequisites under "Current limitations" |
 | 2 | No token expiry | Closed | Default 90-day TTL on issuance, `HashedTokenAuthentication` expiry check, daily scheduled purge; startup checks (`security.E062/E063/E064`) keep issuance policy coherent |
 | 3 | No `last_used_at` tracking | Closed | `APIToken.last_used_at` field, updated at 5-min intervals (SQL-side condition) |
 | 4 | One token per user (OneToOneField) | Closed | `APIToken` uses `ForeignKey(User)` — multiple tokens, capped by `API_TOKEN_MAX_ACTIVE_PER_USER` (default 20) |

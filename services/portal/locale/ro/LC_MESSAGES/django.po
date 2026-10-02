@@ -1191,8 +1191,8 @@ msgid "Enter your new password"
 msgstr "Introduceți parola nouă"
 
 #: apps/users/forms.py:592
-msgid "Choose a strong password with at least 8 characters."
-msgstr "Alegeți o parolă puternică cu cel puțin 8 caractere."
+msgid "Choose a strong password with at least 12 characters."
+msgstr "Alegeți o parolă puternică cu cel puțin 12 caractere."
 
 #: apps/users/forms.py:596
 msgid "Confirm New Password"
@@ -1209,10 +1209,6 @@ msgstr "Reintroduceți parola nouă pentru a confirma."
 #: apps/users/forms.py:613
 msgid "New password and confirmation don't match."
 msgstr "Parola nouă și confirmarea nu se potrivesc."
-
-#: apps/users/forms.py:616
-msgid "Password must be at least 8 characters long."
-msgstr "Parola trebuie să aibă cel puțin 8 caractere."
 
 #: apps/users/forms.py:628 apps/users/forms.py:808
 #: templates/users/company_profile.html:78
@@ -4885,8 +4881,8 @@ msgid "Password Security Tips"
 msgstr "Sfaturi de securitate a parolei"
 
 #: templates/users/change_password.html:92
-msgid "Use at least 8 characters"
-msgstr "Utilizați cel puțin 8 caractere"
+msgid "Use at least 12 characters"
+msgstr "Utilizați cel puțin 12 caractere"
 
 #: templates/users/change_password.html:93
 msgid "Include uppercase and lowercase letters"

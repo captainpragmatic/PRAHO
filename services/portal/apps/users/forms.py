@@ -24,7 +24,6 @@ CNP_LENGTH = 13  # Romanian Personal Numeric Code length
 
 # Password validation constants
 REGISTRATION_PASSWORD_MIN_LENGTH = 12
-CHANGE_PASSWORD_MIN_LENGTH = 8
 
 MIN_NAME_LENGTH = 3
 MIN_NAME_PARTS = 2
@@ -645,7 +644,7 @@ class ChangePasswordForm(forms.Form):
                 "autocomplete": "new-password",
             }
         ),
-        help_text=_("Choose a strong password with at least 8 characters."),
+        help_text=_("Choose a strong password with at least 12 characters."),
     )
 
     confirm_password = forms.CharField(
@@ -669,8 +668,8 @@ class ChangePasswordForm(forms.Form):
         if new_password and confirm_password and new_password != confirm_password:
             raise ValidationError(_("New password and confirmation don't match."))
 
-        if new_password and len(new_password) < CHANGE_PASSWORD_MIN_LENGTH:
-            raise ValidationError(_("Password must be at least 8 characters long."))
+        if new_password and len(new_password) < REGISTRATION_PASSWORD_MIN_LENGTH:
+            raise ValidationError(_("Password must be at least 12 characters long."))
 
         return cleaned_data
 

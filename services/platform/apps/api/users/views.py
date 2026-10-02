@@ -90,6 +90,20 @@ def _charge_login_failure(forwarded_ip: str | None) -> None:
         fixed_window_limited(f"login_ip:{forwarded_ip}", settings.THROTTLE_RATES["auth_login_ip"])
 
 
+def _second_factor_accepted(locked_user: User, code: str, request: HttpRequest) -> bool:
+    """Verify a TOTP or backup code for an enrolled user; a failure counts toward the lockout.
+
+    Shared by portal_login_api and obtain_token so both accept exactly the same codes. The
+    caller holds select_for_update on locked_user and must let its transaction commit on
+    failure, because the failed attempt is meant to count. A failure here is attributable:
+    reaching it took the correct password.
+    """
+    if code and MFAService.verify_mfa_code(locked_user, code, request)["success"]:
+        return True
+    locked_user.increment_failed_login_attempts()
+    return False
+
+
 @csrf_exempt  # nosemgrep: no-csrf-exempt — HMAC-authenticated inter-service endpoint
 @require_http_methods(["POST"])
 @require_portal_authentication
@@ -149,9 +163,7 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911 -- 
         if user.two_factor_enabled:
             with transaction.atomic():
                 user = User.objects.select_for_update().get(pk=user.pk)
-                token = str(data.get("mfa_token", ""))
-                if not token or not MFAService.verify_mfa_code(user, token, request)["success"]:
-                    user.increment_failed_login_attempts()
+                if not _second_factor_accepted(user, str(data.get("mfa_token", "")), request):
                     _charge_login_failure(forwarded_ip)
                     return JsonResponse({"success": False, "error": "Invalid authentication code"}, status=401)
 
@@ -229,10 +241,11 @@ def user_info_api(request: HttpRequest, customer: Customer) -> Response:
 
 
 def _authenticate_token_request(request: HttpRequest) -> User | Response:
-    """Validate email/password credentials for obtain_token.
+    """Check the email and password for obtain_token.
 
-    Returns the authenticated user, or the error Response the view should
-    return verbatim. Lockout counters are incremented/reset here.
+    Returns the authenticated user, or the error Response the view should return
+    verbatim. The second factor and the lockout reset are checked afterwards by
+    _issue_token_under_lock, on a locked and freshly read row.
     """
     email = request.data.get("email")
     password = request.data.get("password")
@@ -243,11 +256,12 @@ def _authenticate_token_request(request: HttpRequest) -> User | Response:
 
     client_ip = get_safe_client_ip(request)
 
-    # Authenticate user.
-    # Timing note: authenticate() runs Argon2 hashing (~100-200ms) which dominates
-    # response time.  The DB writes for lockout increment/reset add <5ms variance.
-    # Combined with AuthThrottle (5/min), statistical timing analysis is impractical.
-    # Portal callers additionally pad via PLATFORM_API_AUTH_MIN_DURATION_SECONDS.
+    # Timing is NOT uniform past this point. With the correct password, an account with
+    # 2FA goes on to verify the code, and an 8-digit code is checked against every stored
+    # backup-code hash, so a slow refusal can confirm the password even though the body
+    # is the same. That is narrower than before #565, when the correct password simply
+    # returned a token, and TokenRequestAccountThrottle caps sampling at 5/min per
+    # address. ADR-0031 "Current limitations" records it.
     user = authenticate(request, username=email, password=password)
 
     if user is None:
@@ -277,12 +291,68 @@ def _authenticate_token_request(request: HttpRequest) -> User | Response:
         )
         return Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
 
-    # Success: reset lockout counter
-    user.failed_login_attempts = 0
-    user.account_locked_until = None
-    user.save(update_fields=["failed_login_attempts", "account_locked_until"])
-
     return user
+
+
+def _issue_token_under_lock(
+    request: HttpRequest, authenticated: User, params: TokenObtainRequestSerializer
+) -> Response:
+    """Check the second factor and issue the token in one transaction on the locked user row.
+
+    Everything that decides whether a token may be issued is re-read under the lock, so a
+    password change, a lockout or a 2FA enrolment that lands after authenticate() cannot
+    be skipped. Refusals use the wrong-password body: anything more specific would confirm
+    the password to anyone who can reach this public endpoint.
+    """
+    client_ip = get_safe_client_ip(request)
+    refused = Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+    with transaction.atomic():
+        user = User.objects.select_for_update().get(pk=authenticated.pk)
+        if user.password != authenticated.password or user.is_account_locked() or not user.is_active:
+            logger.warning(  # nosemgrep: python-logger-credential-disclosure — literal log message, no secrets
+                "[Auth] Token request refused, account changed during the request — ip=%s", client_ip
+            )
+            return refused
+        # A password alone must never yield a token for an enrolled account (#565).
+        if user.two_factor_enabled and not _second_factor_accepted(
+            user, str(request.data.get("mfa_token", "")), request
+        ):
+            logger.warning(  # nosemgrep: python-logger-credential-disclosure — literal log message, no secrets
+                "[Auth] Token request failed the second factor — ip=%s", client_ip
+            )
+            return refused  # the transaction commits, so the failed attempt counts
+
+        user.failed_login_attempts = 0
+        user.account_locked_until = None
+        user.save(update_fields=["failed_login_attempts", "account_locked_until"])
+
+        result = APITokenService.issue_token(
+            user=user,
+            name=params.validated_data["name"],
+            description=params.validated_data["description"],
+            ttl_days=params.validated_data.get("ttl_days"),
+        )
+        if result.is_err():
+            # Nothing was issued, so nothing this request did may stick: a spent backup code
+            # comes back and the counter reset is undone. Under the configured DatabaseCache the
+            # TOTP replay marker is written on this same connection, so it rolls back too and the
+            # code stays usable once; only a cache on a separate store would keep it spent.
+            transaction.set_rollback(True)
+            return Response({"error": result.unwrap_err()}, status=status.HTTP_400_BAD_REQUEST)
+    issued = result.unwrap()
+    token = issued.token
+
+    return Response(
+        {
+            "token": issued.raw_key,
+            "user_id": user.id,
+            "email": user.email,
+            "key_prefix": token.key_prefix,
+            "name": token.name,
+            "description": token.description,
+            "expires_at": token.expires_at.isoformat() if token.expires_at else None,
+        }
+    )
 
 
 @public_api_endpoint
@@ -301,6 +371,7 @@ def obtain_token(request: HttpRequest) -> Response:
     {
         "email": "user@example.com",
         "password": "password",
+        "mfa_token": "123456",   # required when the account has 2FA: TOTP or backup code
         "name": "ci-pipeline",   # optional label
         "description": "Production deploys",  # optional purpose
         "ttl_days": 30           # optional, clamped to [1, API_TOKEN_MAX_TTL_DAYS]
@@ -317,11 +388,9 @@ def obtain_token(request: HttpRequest) -> Response:
         "expires_at": "<iso-8601 or null>"
     }
     """
-    user_or_error = _authenticate_token_request(request)
-    if isinstance(user_or_error, Response):
-        return user_or_error
-    user = user_or_error
-
+    # Parameters first, before any credential work: a parameter error that only answered
+    # after a correct password would confirm the password, and one found after the second
+    # factor would waste a spent backup code.
     params = TokenObtainRequestSerializer(data=request.data)
     if not params.is_valid():
         return Response(
@@ -329,28 +398,10 @@ def obtain_token(request: HttpRequest) -> Response:
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    result = APITokenService.issue_token(
-        user=user,
-        name=params.validated_data["name"],
-        description=params.validated_data["description"],
-        ttl_days=params.validated_data.get("ttl_days"),
-    )
-    if result.is_err():
-        return Response({"error": result.unwrap_err()}, status=status.HTTP_400_BAD_REQUEST)
-    issued = result.unwrap()
-    token = issued.token
-
-    return Response(
-        {
-            "token": issued.raw_key,
-            "user_id": user.id,
-            "email": user.email,
-            "key_prefix": token.key_prefix,
-            "name": token.name,
-            "description": token.description,
-            "expires_at": token.expires_at.isoformat() if token.expires_at else None,
-        }
-    )
+    user_or_error = _authenticate_token_request(request)
+    if isinstance(user_or_error, Response):
+        return user_or_error
+    return _issue_token_under_lock(request, user_or_error, params)
 
 
 @api_view(["DELETE"])
@@ -379,8 +430,10 @@ def token_info(request: HttpRequest) -> Response:
     Authorization: Bearer <key>   (or Token <key>)
 
     Designed for CLI tools and scripts to confirm their token is valid and
-    see which user it belongs to. Uses HashedTokenAuthentication only — no
-    HMAC or session required.
+    see which user it belongs to. The view authenticates with
+    HashedTokenAuthentication only, but the route is not public: the
+    inter-service HMAC gate still runs first, so a bare token is rejected
+    today (#569, ADR-0031 "Current limitations").
     """
     user = cast(User, request.user)
     token: APIToken = request.auth

@@ -5,7 +5,7 @@ This module provides secure IP detection that respects trusted proxy configurati
 preventing IP spoofing attacks that could bypass rate limiting and poison audit logs.
 
 Security approach:
-- Uses django-ipware for robust proxy-aware IP detection
+- Resolves the client from X-Forwarded-For/X-Real-IP, right to left past trusted proxies
 - Respects IPWARE_TRUSTED_PROXY_LIST setting for environment-specific configuration
 - Falls back safely to prevent complete failures
 - Suitable for rate limiting, audit logging, and security controls
@@ -19,17 +19,9 @@ Usage:
 """
 
 import ipaddress
-from typing import Any
 
 from django.conf import settings
 from django.http import HttpRequest
-
-try:
-    from ipware import get_client_ip
-except ImportError:  # pragma: no cover
-    # Fallback if django-ipware is not installed
-    def get_client_ip(request: HttpRequest, **kwargs: Any) -> tuple[str, bool]:
-        return request.META.get("REMOTE_ADDR", "127.0.0.1"), False
 
 
 def _is_trusted_proxy(ip: str, trusted_proxies: list[str]) -> bool:

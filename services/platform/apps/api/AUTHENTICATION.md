@@ -34,9 +34,14 @@ Notes:
 - **Setup**: Automatic for logged-in users
 
 ### 2. **Token Authentication** 🎫
-- **Use case**: Portal service, mobile apps, CLI tools
+- **Use case**: Intended for CLI tools and scripts
 - **Method**: Authorization header with token
 - **Setup**: Obtain token via API endpoint
+
+> **Not usable with a bare token today (#569).** Only `POST /api/users/token/` is public.
+> Every other `/api/` route, including `token/me/` and `token/revoke/`, sits behind the
+> Portal's HMAC gate, so a request carrying only a token is rejected before the view runs.
+> The examples below show the intended shape. See ADR-0031, "Current limitations".
 
 ## Getting API Tokens
 
@@ -47,9 +52,14 @@ Content-Type: application/json
 
 {
     "email": "user@example.com",
-    "password": "your-password"
+    "password": "your-password",
+    "mfa_token": "123456"
 }
 ```
+
+`mfa_token` is required when the account has two-factor authentication enabled: a current
+TOTP code or an unused backup code. Every refusal returns the same `401 Invalid
+credentials` body, whether the password or the code was wrong.
 
 **Response:**
 ```json
@@ -70,7 +80,7 @@ curl -H "Authorization: Token 9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b" \
 
 ### **Verify Token**
 ```bash
-GET /api/users/token/verify/
+GET /api/users/token/me/
 Authorization: Token 9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b
 ```
 
@@ -79,9 +89,14 @@ Authorization: Token 9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b
 {
     "user_id": 123,
     "email": "user@example.com",
-    "is_staff": false,
-    "accessible_customers": [1, 2, 3],
-    "full_name": "John Doe"
+    "staff_role": "",
+    "is_active": true,
+    "token_name": "ci-pipeline",
+    "token_description": "Production deploys",
+    "key_prefix": "9944b091",
+    "created_at": "2026-10-01T09:00:00+00:00",
+    "expires_at": "2026-12-30T09:00:00+00:00",
+    "last_used_at": null
 }
 ```
 
@@ -115,8 +130,9 @@ Authorization: Token 9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b
 | **Anonymous** | 100/hour | Public endpoints only |
 | **Authenticated** | 1000/hour | General API usage |
 | **Burst** | 60/min | Search/autocomplete |
-| **Auth endpoints** | 5/min | Login/token requests |
-| **All credential endpoints** | Account lockout | `/users/login/`, `/api/users/token/`, `/api/users/login/` |
+| **Auth endpoints** | 10/min per client (`auth`) | Login/token requests |
+| **Token requests** | 5/min per submitted address (`token_request`) | `/api/users/token/` |
+| **Credential endpoints** | Account lockout | `/users/login/`, `/api/users/login/`. `/api/users/token/` refuses locked accounts; a wrong password does not count toward the lock (it is public), a failed second factor does |
 
 ### **Rate Limit Headers**
 API responses include rate limit information:
