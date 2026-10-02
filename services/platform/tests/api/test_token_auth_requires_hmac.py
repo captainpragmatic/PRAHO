@@ -1,15 +1,16 @@
 """A view that accepts an API token must also require the service-to-service signature.
 
-The public token endpoint issues a key valid for `API_TOKEN_DEFAULT_TTL_DAYS` (90) after
-checking only an email and password. Its sibling `portal_login_api` verifies a second
-factor when the account has one enabled; this path does not. So a password obtained by
-phishing or reuse yields a 90-day key even for an account with two-factor turned on.
+The public token endpoint issues a key valid for `API_TOKEN_DEFAULT_TTL_DAYS` (90). Until
+#565 it checked only an email and password, so a password obtained by phishing or reuse
+yielded a 90-day key even for an account with two-factor turned on. It now verifies the
+second factor the same way `portal_login_api` does.
 
-That gap is currently harmless, and this test is what keeps it that way — but not for the
-reason it first appears. Token authentication is a project DEFAULT, so most DRF views
+This guard stays, because the second factor at issuance is not the only precondition for
+letting a bare token in. Token authentication is a project DEFAULT, so most DRF views
 accept a key; what makes a key unspendable from outside is that those views all sit
-behind the HMAC gate. The moment a view accepts token authentication WITHOUT that gate,
-the missing second factor turns into account takeover.
+behind the HMAC gate. Keys minted before #565 never passed a second factor, and the staff
+web UI can still mint keys from a session that did not either. ADR-0031 "Current
+limitations" lists what has to be true before any token-accepting view loses the gate.
 
 Six public endpoints were in exactly that position and are fixed alongside this test. They
 inherited the default classes, so a caller could authenticate to them with any valid key.
@@ -25,8 +26,7 @@ Nothing in the code says so, and the endpoint's own docstring cannot enforce it.
 test is the enforcement: it fails the build the day that precondition stops holding,
 rather than leaving it to be remembered during review.
 
-Deliberately a precondition guard, not a fix. Adding a second factor to a documented
-public endpoint changes its contract and belongs in its own change.
+Deliberately a precondition guard, not a fix.
 """
 
 from __future__ import annotations

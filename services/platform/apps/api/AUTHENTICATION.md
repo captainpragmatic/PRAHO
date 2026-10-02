@@ -52,9 +52,14 @@ Content-Type: application/json
 
 {
     "email": "user@example.com",
-    "password": "your-password"
+    "password": "your-password",
+    "mfa_token": "123456"
 }
 ```
+
+`mfa_token` is required when the account has two-factor authentication enabled: a current
+TOTP code or an unused backup code. Every refusal returns the same `401 Invalid
+credentials` body, whether the password or the code was wrong.
 
 **Response:**
 ```json
@@ -127,7 +132,7 @@ Authorization: Token 9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b
 | **Burst** | 60/min | Search/autocomplete |
 | **Auth endpoints** | 10/min per client (`auth`) | Login/token requests |
 | **Token requests** | 5/min per submitted address (`token_request`) | `/api/users/token/` |
-| **Credential endpoints** | Account lockout | `/users/login/`, `/api/users/login/`. `/api/users/token/` refuses locked accounts but a wrong password does not count toward the lock (it is public) |
+| **Credential endpoints** | Account lockout | `/users/login/`, `/api/users/login/`. `/api/users/token/` refuses locked accounts; a wrong password does not count toward the lock (it is public), a failed second factor does |
 
 ### **Rate Limit Headers**
 API responses include rate limit information:

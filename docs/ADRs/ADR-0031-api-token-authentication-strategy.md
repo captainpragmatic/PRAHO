@@ -49,7 +49,8 @@ class Token(models.Model):
 
 ### `obtain_token` — What Works
 
-- Accepts `POST` with `{"email": "...", "password": "..."}` body
+- Accepts `POST` with `{"email": "...", "password": "..."}` body, plus `"mfa_token"` (a
+  current TOTP code or an unused backup code) when the account has 2FA enabled (#565)
 - Calls `authenticate()` — runs through Django auth backends
 - Account lockout: rejects if `user.is_account_locked()` returns `True` and resets the
   counter on success. Since #568 a wrong password does **not** increment
@@ -238,13 +239,35 @@ and fails the build if a token-accepting route becomes reachable without the sig
 Whether to open these routes to bare-token callers is an open product decision (#569).
 Before any route is opened:
 
-1. Token issuance must verify the second factor for accounts that have one (#565).
+1. Token issuance verifies the second factor for accounts that have one. **Done (#565).**
 2. Tokens issued before that change, which a password alone could mint, must be revoked or
    rejected. Token authentication checks the key, the user's active flag and expiry, not
    how the key was obtained, and a server default can issue keys that never expire.
 3. The staff web login must enforce the second factor. A staff session can mint tokens at
    `/settings/api-tokens/`, and today that session is granted on a password alone.
 4. The tripwire's expected set must be updated deliberately, with a reviewer attached.
+
+Residual on the issuance endpoint after #565: refusals all share the wrong-password body,
+but not its timing. With the correct password, a 2FA account goes on to verify the code,
+and an 8-digit code is checked against every stored backup-code hash, so a slow refusal
+can confirm the password. Before #565 the correct password simply returned a token, so
+this is narrower, and `TokenRequestAccountThrottle` limits sampling to 5 per minute per
+address. Equalising the timing is open work.
+
+### Second factor at issuance (#565)
+
+`POST /api/users/token/` requires `mfa_token` for an account with 2FA enabled and verifies
+it through the same helper as the Portal login (`_second_factor_accepted`), so both accept
+the same TOTP and backup codes with the same rate limit and replay protection. Request
+parameters are validated before any credential work. The password check is followed by one
+transaction on the locked user row that re-reads the password hash, the lock and active
+state and the 2FA flag, verifies the code and issues the token. A wrong or missing code
+counts toward the account lockout, unlike a wrong password, because reaching it took the
+correct password. If issuance is refused (the live-token cap), the transaction rolls back
+and a backup code is not spent; a TOTP code stays spent because its replay marker is cached.
+
+Unattended scripts obtain a token once, interactively, with a current code, and store the
+token. They should never store the password.
 
 ### Implemented: Gap 7 (web UI for token management)
 
