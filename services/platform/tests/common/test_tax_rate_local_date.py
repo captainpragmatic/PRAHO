@@ -64,3 +64,21 @@ class CachedRateExpiresAtLocalMidnightTests(_RateChangeFixture):
             # 00:15 Bucharest on 1 August: past local midnight, yet inside a one-hour cache window.
             clock.move_to("2025-07-31 21:15:00")
             self.assertEqual(TaxService.get_vat_rate("RO"), Decimal("21"))
+
+    def test_a_lookup_that_crosses_midnight_does_not_cache_yesterdays_rate(self) -> None:
+        """The rule is chosen for the date the lookup started on; the cache must expire with that
+        date, not with a deadline read after the query, which could already belong to the next day."""
+        original_lookup = TaxService._get_rate_from_database
+
+        with freeze_time("2025-07-31 20:59:59") as clock:  # 23:59:59 Bucharest, 31 July
+
+            def lookup_then_cross_midnight(*args: object, **kwargs: object) -> object:
+                rate = original_lookup(*args, **kwargs)
+                clock.move_to("2025-07-31 21:00:01")  # 00:00:01 Bucharest, 1 August
+                return rate
+
+            with patch.object(TaxService, "_get_rate_from_database", side_effect=lookup_then_cross_midnight):
+                self.assertEqual(TaxService.get_vat_rate("RO"), Decimal("19"))
+
+            clock.move_to("2025-07-31 21:05:00")  # 00:05 Bucharest, 1 August
+            self.assertEqual(TaxService.get_vat_rate("RO"), Decimal("21"))
