@@ -1,16 +1,10 @@
 """Promised renewal value cannot be spent in a different monetary unit."""
 
-from importlib import import_module
-from types import SimpleNamespace
 
-from django.apps import apps
 from django.core.exceptions import ValidationError
-from django.db import connection
 from django.test import TestCase
 
 from apps.billing.models import Currency
-from apps.orders.models import Order, OrderItem
-from apps.promotions.models import RenewalBenefit
 from apps.promotions.renewals import reserve_cycle, settle_cycle
 from tests.promotions import test_renewals as renewal_fixtures
 
@@ -28,33 +22,6 @@ class RenewalBenefitCurrencyTests(TestCase):
             self.benefit.save()
         self.benefit.refresh_from_db()
         self.assertEqual((self.benefit.currency_id, self.benefit.remaining_cents), ("RON", 2000))
-
-    def test_backfill_keeps_original_order_currency_and_exact_value(self) -> None:
-        RenewalBenefit.objects.filter(pk=self.benefit.pk).update(
-            currency=None, currency_hold_reason="Pending migration",
-        )
-        migration = import_module("apps.promotions.migrations.0007_renewalbenefit_currency")
-        migration.backfill_benefit_currency(apps, SimpleNamespace(connection=connection))
-        self.benefit.refresh_from_db()
-        self.assertEqual((self.benefit.currency_id, self.benefit.remaining_cents), ("RON", 2000))
-        self.assertEqual(self.benefit.currency_hold_reason, "")
-
-    def test_backfill_holds_conflicting_original_order_links(self) -> None:
-        item = self.benefit.order_item
-        different_order = Order.objects.create(customer=self.subscription.customer, currency=self.eur)
-        different_item = OrderItem.objects.create(
-            order=different_order, product=item.product, product_name=item.product_name,
-            product_type=item.product_type, quantity=1, unit_price_cents=1000,
-        )
-        RenewalBenefit.objects.filter(pk=self.benefit.pk).update(
-            order_item=different_item, currency=None, currency_hold_reason="Pending migration",
-        )
-        migration = import_module("apps.promotions.migrations.0007_renewalbenefit_currency")
-        migration.backfill_benefit_currency(apps, SimpleNamespace(connection=connection))
-        self.benefit.refresh_from_db()
-        self.assertIsNone(self.benefit.currency_id)
-        self.assertTrue(self.benefit.currency_hold_reason)
-        self.assertEqual(self.benefit.remaining_cents, 2000)
 
     def test_euro_cycle_cannot_consume_ron_promise(self) -> None:
         self.subscription.currency = self.eur

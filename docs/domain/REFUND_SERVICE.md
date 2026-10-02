@@ -244,9 +244,9 @@ document (`order` or `invoice`), may link to the authoritative `payment`, and
 stores amount, currency, reason, local FSM status, the unique
 `gateway_refund_id`, and gateway metadata.
 
-Migration `billing.0037_refund_gateway_id_unique` fails closed if existing
-non-empty gateway IDs are duplicated. Operators must reconcile those ledger
-rows before deploying the constraint.
+Billing's initial migrations create the unique `gateway_refund_id` constraint.
+Before the migration reset (ADR-0052), `billing.0037_refund_gateway_id_unique`
+added it to existing databases and failed closed on duplicated non-empty IDs.
 
 ### Legacy Order Metadata
 

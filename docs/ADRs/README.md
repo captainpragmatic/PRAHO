@@ -13,7 +13,7 @@ providing a historical record of why the system is built the way it is.
 ## How to Create a New ADR
 
 1. Create a new file: `ADR-XXXX-short-descriptive-title.md`
-2. Use the next available number (currently: **ADR-0051**)
+2. Use the next available number (currently: **ADR-0053**)
 3. Follow the standard format: Status, Date, Authors, Context, Decision, Consequences
 4. Set status to **Proposed** initially, then update to **Accepted** after team review
 
@@ -80,6 +80,7 @@ providing a historical record of why the system is built the way it is.
 | [ADR-0049](ADR-0049-reverse-charge-requires-vies-evidence.md) | Reverse Charge Requires VIES Evidence | Accepted | 2026-09-27 |
 | [ADR-0050](ADR-0050-portal-infrastructure-tables.md) | Portal Infrastructure Tables | Accepted | 2026-09-28 |
 | [ADR-0051](ADR-0051-hosting-account-enabled-state-ownership.md) | Hosting Account Enabled-State Ownership | Proposed | 2026-10-01 |
+| [ADR-0052](ADR-0052-disposable-databases-and-migration-reset.md) | All Databases Are Disposable Until the First One That Must Be Preserved | Accepted | 2026-10-02 |
 
 ### 🟡 Partially Superseded
 
@@ -181,6 +182,7 @@ Billing Ownership
 - [ADR-0010](ADR-0010-django-admin-type-annotations.md) — Admin type annotations
 - [ADR-0013](ADR-0013-uv-package-manager-migration.md) — uv package manager
 - [ADR-0037](ADR-0037-psycopg-v3-migration.md) — psycopg v3 PostgreSQL adapter
+- [ADR-0052](ADR-0052-disposable-databases-and-migration-reset.md) — Disposable databases, migration reset, append-only history afterwards
 
 ### 💰 Business & Domain
 - [ADR-0019](ADR-0019-virtualmin-automatic-provisioning.md) — VirtualMin provisioning
@@ -196,8 +198,8 @@ Billing Ownership
 
 ## Statistics
 
-- **Total ADRs**: 51 (ADR-0001 through ADR-0051)
-- **Active**: 39 (Accepted + Implemented)
+- **Total ADRs**: 52 (ADR-0001 through ADR-0052)
+- **Active**: 40 (Accepted + Implemented)
 - **Partially Superseded**: 1
 - **Superseded / Historical**: 5
-- **Next available**: ADR-0052
+- **Next available**: ADR-0053

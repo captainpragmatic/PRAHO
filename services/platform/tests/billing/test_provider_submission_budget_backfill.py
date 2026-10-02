@@ -24,9 +24,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from django.db import connection
-from django.db.migrations.executor import MigrationExecutor
-from django.test import TestCase, TransactionTestCase
+from django.test import TestCase
 from django.urls import reverse
 
 from apps.billing.invoice_models import ISSUER_SMARTBILL, Currency, Invoice
@@ -34,10 +32,6 @@ from apps.billing.issuers.models import MAX_SUBMISSIONS, IssuanceState, Provider
 from apps.billing.issuers.tasks import sweep_pending_issuances
 from tests.factories.billing_factories import CustomerFactory, InvoiceLineFactory
 from tests.factories.core_factories import create_admin_user
-from tests.helpers.migrations import restore_to_leaf
-
-MIGRATE_FROM = ("billing", "0056_repair_credit_note_document_types")
-MIGRATION_UNDER_TEST = ("billing", "0057_backfill_provider_submission_budget")
 
 
 class CappedPendingRowIsVisibleTests(TestCase):
@@ -114,86 +108,3 @@ class CappedPendingRowIsVisibleTests(TestCase):
 
         self.assertEqual(result["exhausted"], 0)
         self.assertEqual(result["queued"] + result["skipped"], 1)
-
-
-class SubmissionBudgetBackfillMigrationTest(TransactionTestCase):
-    """A deployment that already applied 0055 holds the zeroed rows right now."""
-
-    def tearDown(self) -> None:
-        restore_to_leaf("billing")
-        super().tearDown()
-
-    def _seed(self, rows: list[dict[str, object]]) -> list[object]:
-        executor = MigrationExecutor(connection)
-        executor.migrate([MIGRATE_FROM])
-        old = executor.loader.project_state([MIGRATE_FROM]).apps
-
-        customer_model = old.get_model("customers", "Customer")
-        currency_model = old.get_model("billing", "Currency")
-        invoice_model = old.get_model("billing", "Invoice")
-        issuance_model = old.get_model("billing", "ProviderIssuance")
-
-        customer = customer_model.objects.create(
-            name="Test Co", customer_type="company", company_name="Test Co", status="active"
-        )
-        currency, _ = currency_model.objects.get_or_create(
-            code="RON", defaults={"symbol": "L", "decimals": 2, "name": "Romanian Leu"}
-        )
-
-        pks = []
-        for index, row in enumerate(rows):
-            invoice = invoice_model.objects.create(
-                customer=customer,
-                currency=currency,
-                number=row.get("number"),
-                status="draft",
-                subtotal_cents=10000,
-                tax_cents=2100,
-                total_cents=12100,
-                bill_to_name="Test Co",
-                bill_to_country="RO",
-                issuer_provider="smartbill",
-            )
-            issuance = issuance_model.objects.create(
-                invoice=invoice,
-                provider="smartbill",
-                state=row.get("state", "failed"),
-                attempts=row["attempts"],
-                submissions=row.get("submissions", 0),
-                request_hash=f"hash{index}",
-            )
-            pks.append(issuance.pk)
-        return pks
-
-    def _submissions_after_migration(self, pks: list[object]) -> list[int]:
-        MigrationExecutor(connection).migrate([MIGRATION_UNDER_TEST])
-        new = MigrationExecutor(connection).loader.project_state([MIGRATION_UNDER_TEST]).apps
-        model = new.get_model("billing", "ProviderIssuance")
-        return [int(model.objects.get(pk=pk).submissions) for pk in pks]
-
-    def test_a_row_over_the_cap_is_capped_not_multiplied(self) -> None:
-        pks = self._seed([{"attempts": 7}])
-
-        self.assertEqual(self._submissions_after_migration(pks), [MAX_SUBMISSIONS])
-
-    def test_a_row_under_the_cap_carries_its_own_count(self) -> None:
-        pks = self._seed([{"attempts": 2}])
-
-        self.assertEqual(self._submissions_after_migration(pks), [2])
-
-    def test_a_row_that_never_attempted_stays_at_zero(self) -> None:
-        pks = self._seed([{"attempts": 0}])
-
-        self.assertEqual(self._submissions_after_migration(pks), [0])
-
-    def test_a_numbered_row_is_left_alone(self) -> None:
-        """It already has its document; spending its budget would only hide it."""
-        pks = self._seed([{"attempts": 5, "number": "FCT-000802", "state": "issued"}])
-
-        self.assertEqual(self._submissions_after_migration(pks), [0])
-
-    def test_a_row_with_a_real_count_is_not_overwritten(self) -> None:
-        """Re-running must be stable, and must never lower a genuine count."""
-        pks = self._seed([{"attempts": 9, "submissions": 1}])
-
-        self.assertEqual(self._submissions_after_migration(pks), [1])

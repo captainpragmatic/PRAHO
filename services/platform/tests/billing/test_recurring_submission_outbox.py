@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import importlib
 import uuid
 from datetime import timedelta
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from django.apps import apps as django_apps
 from django.db import IntegrityError, connection, connections, transaction
 from django.test import TestCase
 from django.utils import timezone
@@ -215,64 +212,6 @@ class RecurringSubmissionStateTestCase(_SubscriptionInvoicePaymentFixture, TestC
                 claimed_at=timezone.now(),
                 attempt_count=1,
             )
-
-    def test_migration_quarantines_unbound_attempts_and_recovers_all_bound_unfinished_work(self) -> None:
-        unbound = Payment.objects.create(
-            customer=self.customer,
-            invoice=self.invoice,
-            payment_method="stripe",
-            amount_cents=self.invoice.total_cents,
-            currency=self.currency,
-            status="pending",
-            idempotency_key=f"invoice:{self.invoice.id}:stripe:legacy-unbound",
-            meta={"source": "recurring_billing"},
-        )
-        bound = Payment.objects.create(
-            customer=self.customer,
-            invoice=self.invoice,
-            payment_method="stripe",
-            amount_cents=self.invoice.total_cents,
-            currency=self.currency,
-            status="pending",
-            gateway_txn_id="pi_legacy_bound_335",
-            idempotency_key=f"invoice:{self.invoice.id}:stripe:legacy-bound",
-            meta={"source": "recurring_billing"},
-        )
-        now = timezone.now()
-        legacy_subscription = self._create_aligned_subscription("LEGACY-CONVERSION", now)
-        preparation = RecurringBillingOrchestrator.prepare_due_proformas(as_of=now)
-        self.assertEqual(preparation["proformas_created"], 1, preparation)
-        legacy_proforma = legacy_subscription.billing_cycles.get().proforma
-        succeeded_unconverted = Payment.objects.create(
-            customer=self.customer,
-            proforma=legacy_proforma,
-            payment_method="stripe",
-            amount_cents=legacy_proforma.total_cents,
-            currency=self.currency,
-            status="succeeded",
-            gateway_txn_id="pi_legacy_succeeded_unconverted_409",
-            idempotency_key=f"proforma:{legacy_proforma.id}:stripe:legacy-succeeded",
-            meta={"source": "recurring_billing"},
-        )
-        migration = importlib.import_module("apps.billing.migrations.0044_recurring_payment_submission")
-
-        migration.backfill_unfinished_recurring_submissions(
-            django_apps,
-            SimpleNamespace(connection=SimpleNamespace(alias="default")),
-        )
-
-        unbound.refresh_from_db()
-        bound.refresh_from_db()
-        succeeded_unconverted.refresh_from_db()
-        self.assertEqual(unbound.recurring_submission.state, RecurringPaymentSubmission.State.MANUAL_REVIEW)
-        self.assertEqual(bound.recurring_submission.state, RecurringPaymentSubmission.State.SUBMITTED)
-        self.assertEqual(
-            succeeded_unconverted.recurring_submission.state,
-            RecurringPaymentSubmission.State.SUBMITTED,
-        )
-        self.assertIsNone(unbound.recurring_submission.submitted_at)
-        self.assertIsNotNone(bound.recurring_submission.submitted_at)
-        self.assertIsNotNone(succeeded_unconverted.recurring_submission.submitted_at)
 
 
 class RecurringReconciliationLockScopeTests(TestCase):

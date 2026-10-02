@@ -981,7 +981,7 @@ class CouponRedemptionReveralTests(TestCase):
 
     def test_reversal_without_snapshot_decrements_no_campaign(self):
         """A legacy-shaped row with no snapshot must not guess a campaign to
-        decrement — the 0003 data migration makes the snapshot authoritative,
+        decrement — the snapshot is authoritative (the old history backfilled it),
         so a NULL snapshot means 'nothing provably charged'."""
         result = CouponService.apply_coupon(code="REVERSAL", order=self.order, customer=self.customer)
         self.assertTrue(result.success)
@@ -995,26 +995,6 @@ class CouponRedemptionReveralTests(TestCase):
         self.assertEqual(self.campaign.spent_cents, 2000)
         # ...but coupon usage counters are still restored.
         self.assertEqual(self.coupon.total_uses, 0)
-
-    def test_migration_backfills_snapshot_from_current_coupon_campaign(self):
-        """0003's data function fills applied rows' snapshot from the coupon's
-        current campaign — the best available approximation at migration time."""
-        import importlib  # noqa: PLC0415  # migration-module import is test-local by design
-
-        from django.db import connection  # noqa: PLC0415
-        from django.db.migrations.loader import MigrationLoader  # noqa: PLC0415
-
-        result = CouponService.apply_coupon(code="REVERSAL", order=self.order, customer=self.customer)
-        self.assertTrue(result.success)
-        CouponRedemption.objects.filter(pk=result.redemption_id).update(charged_campaign_id=None)
-
-        module = importlib.import_module("apps.promotions.migrations.0003_couponredemption_charged_campaign")
-        loader = MigrationLoader(connection)
-        state = loader.project_state(("promotions", "0003_couponredemption_charged_campaign"))
-        module.backfill_charged_campaign(state.apps, None)
-
-        redemption = CouponRedemption.objects.get(pk=result.redemption_id)
-        self.assertEqual(redemption.charged_campaign_id, self.campaign.pk)
 
     def test_concurrent_reversal_decrements_counters_exactly_once(self):
         """#421: two removals racing the same redemption must not double-decrement.

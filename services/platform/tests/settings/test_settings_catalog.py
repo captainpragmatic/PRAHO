@@ -1,10 +1,9 @@
 """
-Catalog, curation-migration, maintenance-gate, and guardrail-plumbing tests (C2).
+Catalog, maintenance-gate, and guardrail-plumbing tests (C2).
 """
 
 from __future__ import annotations
 
-import importlib
 import tempfile
 from io import StringIO
 from pathlib import Path
@@ -14,15 +13,87 @@ from django.http import HttpResponse
 from django.test import RequestFactory, TestCase, override_settings
 
 from apps.common.checks import get_max_session_age_seconds
-from apps.common.encryption import decrypt_value, encrypt_value, is_encrypted
 from apps.common.middleware import MaintenanceModeMiddleware
-from apps.settings.catalog import CATALOG, CATALOG_BY_KEY, GROUPS_BY_SLUG, SettingDef
+from apps.settings.catalog import CATALOG, CATALOG_BY_KEY, GROUPS_BY_SLUG
 from apps.settings.key_scan import extract_catalog_defaults, extract_string_literals
 from apps.settings.models import SystemSetting
 from apps.settings.services import SettingsService
 from tests.factories.core_factories import create_staff_user
 
-_MIGRATION = importlib.import_module("apps.settings.migrations.0003_curate_catalog_rows")
+# Keys the catalog curation retired. Recorded here so the catalog can never
+# quietly re-adopt one; the curation itself left with the migration reset.
+RETIRED_KEYS = frozenset(
+    {
+        "billing.negative_balance_threshold",
+        "billing.payment_grace_period_days",
+        "billing.payment_retry_attempts",
+        "billing.payment_retry_delay_hours",
+        "billing.vat_rate",
+        "domains.auto_renewal_enabled",
+        "domains.max_per_package",
+        "domains.max_subdomains_per_domain",
+        "domains.registration_enabled",
+        "domains.renewal_notice_days",
+        "gdpr.audit_log_retention_years",
+        "gdpr.data_retention_years",
+        "gdpr.export_retention_days",
+        "gdpr.log_retention_months",
+        "integrations.api_connection_timeout_seconds",
+        "integrations.api_request_timeout_seconds",
+        "integrations.webhook_batch_size",
+        "integrations.webhook_retry_attempts",
+        "integrations.webhook_timeout_seconds",
+        "monitoring.alert_cooldown_minutes",
+        "monitoring.cpu_warning_threshold",
+        "monitoring.disk_warning_threshold",
+        "monitoring.health_check_interval_minutes",
+        "monitoring.memory_warning_threshold",
+        "node_deployment.auto_registration",
+        "node_deployment.cost_tracking_enabled",
+        "node_deployment.default_environment",
+        "node_deployment.default_provider",
+        "node_deployment.default_region",
+        "node_deployment.timeout_ansible_playbook",
+        "node_deployment.timeout_terraform_apply",
+        "node_deployment.timeout_validation",
+        "notifications.digest_frequency_hours",
+        "notifications.email_enabled",
+        "notifications.max_history",
+        "notifications.sms_enabled",
+        "provisioning.auto_setup_enabled",
+        "provisioning.default_bandwidth_quota_gb",
+        "provisioning.default_disk_quota_gb",
+        "provisioning.max_email_accounts_per_package",
+        "provisioning.setup_timeout_minutes",
+        "provisioning.suspend_timeout_minutes",
+        "provisioning.terminate_timeout_minutes",
+        "security.api_burst_limit",
+        "security.rate_limit_per_hour",
+        "security.require_2fa_for_admin",
+        "security.session_validation_rate_limit",
+        "system.backup_retention_days",
+        "tickets.auto_escalation_hours",
+        "tickets.max_attachments_per_ticket",
+        "tickets.max_reassignments",
+        "tickets.sla_critical_response_hours",
+        "tickets.sla_high_response_hours",
+        "tickets.sla_low_response_hours",
+        "tickets.sla_standard_response_hours",
+        "ui.default_page_size",
+        "ui.max_attachment_size_mb",
+        "ui.max_page_size",
+        "ui.min_page_size",
+        "users.account_lockout_duration_minutes",
+        "users.backup_code_count",
+        "users.login_rate_limit_per_hour",
+        "users.max_login_attempts",
+        "users.mfa_required_for_staff",
+        "users.session_timeout_minutes",
+        "virtualmin.api_endpoint_path",
+        "virtualmin.ssh_username",
+        "virtualmin.use_ssl",
+    }
+)
 
 VALID_DATA_TYPES = {"string", "integer", "boolean", "decimal", "list", "json"}
 VALID_INPUT_KINDS = {"text", "number", "toggle", "select", "chips", "json", "secret"}
@@ -94,66 +165,14 @@ class CatalogIntegrityTests(TestCase):
         self.assertNotIn("security.welcome_invite_limit_per_user_per_hour", CATALOG_BY_KEY)
 
     def test_retired_keys_are_not_in_catalog(self) -> None:
-        overlap = set(_MIGRATION.RETIRED_KEYS) & set(CATALOG_BY_KEY)
+        overlap = set(RETIRED_KEYS) & set(CATALOG_BY_KEY)
         self.assertEqual(overlap, set())
 
     def test_known_decoys_are_gone(self) -> None:
         """billing.vat_rate (TaxRule owns VAT) and the env-gated flags must stay retired."""
         for key in ("billing.vat_rate", "billing.payment_grace_period_days", "users.max_login_attempts"):
             self.assertNotIn(key, CATALOG_BY_KEY)
-            self.assertIn(key, _MIGRATION.RETIRED_KEYS)
-
-
-class CurationMigrationTests(TestCase):
-    """The reconciliation helper applies catalog metadata to historical rows."""
-
-    def _reconcile(self, setting: SystemSetting, definition: SettingDef) -> list[str]:
-        return _MIGRATION._reconcile_row(setting, definition, encrypt_value, decrypt_value, is_encrypted)
-
-    def test_plain_to_sensitive_transition_encrypts(self) -> None:
-        setting = SystemSetting.objects.create(
-            key="integrations.stripe_secret_key",
-            name="x",
-            description="x",
-            category="integrations",
-            value="sk_live_plaintext",
-            default_value="",
-            data_type="string",
-            is_sensitive=False,
-        )
-        # Bypass model save encryption to simulate a mislabeled historical row
-        SystemSetting.objects.filter(pk=setting.pk).update(value="sk_live_plaintext", is_sensitive=False)
-        setting.refresh_from_db()
-
-        changed = self._reconcile(setting, CATALOG_BY_KEY["integrations.stripe_secret_key"])
-
-        self.assertIn("value", changed)
-        self.assertTrue(setting.is_sensitive)
-        self.assertTrue(is_encrypted(str(setting.value)))
-        self.assertNotIn("sk_live_plaintext", str(setting.value))
-
-    def test_sensitive_to_plain_transition_decrypts(self) -> None:
-        encrypted = encrypt_value("praho/nodes/")
-        setting = SystemSetting.objects.create(
-            key="node_deployment.terraform_s3_key_prefix",
-            name="x",
-            description="x",
-            category="node_deployment",
-            value=encrypted,
-            default_value="praho/nodes/",
-            data_type="string",
-            is_sensitive=False,
-        )
-        SystemSetting.objects.filter(pk=setting.pk).update(is_sensitive=True)
-        setting.refresh_from_db()
-
-        definition = CATALOG_BY_KEY["node_deployment.terraform_s3_key_prefix"]
-        self.assertFalse(definition.sensitive)
-        changed = self._reconcile(setting, definition)
-
-        self.assertIn("value", changed)
-        self.assertFalse(setting.is_sensitive)
-        self.assertEqual(setting.value, "praho/nodes/")
+            self.assertIn(key, RETIRED_KEYS)
 
 
 class MaintenanceModeMiddlewareTests(TestCase):

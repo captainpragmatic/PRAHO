@@ -1,13 +1,10 @@
-"""Production order, invoice, signal, migration, and backfill paths require evidence."""
+"""Production order, invoice, signal, and backfill paths require evidence."""
 
-from importlib import import_module
 from io import StringIO
 from unittest.mock import call, patch
 
-from django.apps import apps
 from django.core.cache import cache
 from django.core.management import call_command
-from django.db import connection
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
@@ -131,14 +128,6 @@ class VIESGatePathTests(TestCase):
                     call_command("validate_vat_numbers", "--blocked-orders", stdout=output)
                 self.assertIn("Blocked orders: 1", output.getvalue())
                 self.assertIn(str(order.pk), output.getvalue())
-
-    def test_migration_clears_stale_human_flag(self) -> None:
-        CustomerTaxProfile.objects.filter(pk=self.profile.pk).update(vies_verification_status="pending")
-        migration = import_module("apps.customers.migrations.0022_clear_unverified_reverse_charge")
-        self.assertEqual(CustomerTaxProfile._meta.db_table, "customer_tax_profiles")
-        migration.clear_unverified_reverse_charge(apps, connection.schema_editor())
-        self.profile.refresh_from_db()
-        self.assertFalse(self.profile.reverse_charge_eligible)
 
     def test_command_reports_blocked_order_and_enqueues_only_unverified_eu_profiles(self) -> None:
         CustomerTaxProfile.objects.filter(pk=self.profile.pk).update(vies_verification_status="pending")

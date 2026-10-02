@@ -18,8 +18,8 @@ by `repairable_statuses()` - `{draft, queued, error}` - none of which is in the 
 `efactura_claim_state_consistent` guarantees at the database level that anything other than
 `uploading` holds no claim. So neither arm of the guard can fire on this path.
 
-Migration `0056` performs the same repair for rows that existed before it, and left their bytes
-behind too, so `0058` blanks them.
+The old history's migrations `0056` and `0058` repaired rows that existed before this fix and
+blanked the bytes they left behind.
 """
 
 from __future__ import annotations
@@ -27,9 +27,7 @@ from __future__ import annotations
 import uuid
 from decimal import Decimal
 
-from django.db import connection
-from django.db.migrations.executor import MigrationExecutor
-from django.test import TestCase, TransactionTestCase
+from django.test import TestCase
 from django.utils import timezone
 
 from apps.billing.efactura.models import EFacturaDocument, EFacturaDocumentType, EFacturaStatus
@@ -41,10 +39,6 @@ from apps.billing.invoice_models import (
     Invoice,
 )
 from tests.factories.billing_factories import CustomerFactory, InvoiceLineFactory
-from tests.helpers.migrations import restore_to_leaf
-
-MIGRATE_FROM = ("billing", "0057_backfill_provider_submission_budget")
-MIGRATION_UNDER_TEST = ("billing", "0058_clear_credit_note_xml_built_by_the_wrong_builder")
 
 # Recognisably an ordinary invoice: the root element is what the wrong builder emits.
 WRONG_BUILDER_XML = '<?xml version="1.0"?><Invoice><ID>CN-000960</ID></Invoice>'
@@ -159,88 +153,3 @@ class StaleCreditNoteXmlRuntimeTests(TestCase):
         EFacturaService()._get_or_create_document(credit_note)
 
         self.assertEqual(EFacturaDocument.objects.get(pk=document.pk).xml_content, WRONG_BUILDER_XML)
-
-
-class StaleCreditNoteXmlMigrationTest(TransactionTestCase):
-    """0056 already repaired the label on rows that existed before it, and kept the bytes."""
-
-    def tearDown(self) -> None:
-        restore_to_leaf("billing")
-        super().tearDown()
-
-    def _seed(self, *, status: str, document_kind: str, document_type: str) -> object:
-        executor = MigrationExecutor(connection)
-        executor.migrate([MIGRATE_FROM])
-        old = executor.loader.project_state([MIGRATE_FROM]).apps
-
-        customer_model = old.get_model("customers", "Customer")
-        currency_model = old.get_model("billing", "Currency")
-        invoice_model = old.get_model("billing", "Invoice")
-        document_model = old.get_model("billing", "EFacturaDocument")
-
-        customer = customer_model.objects.create(
-            name="Test Co", customer_type="company", company_name="Test Co", status="active"
-        )
-        currency, _ = currency_model.objects.get_or_create(
-            code="RON", defaults={"symbol": "L", "decimals": 2, "name": "Romanian Leu"}
-        )
-        sign = -1 if document_kind == "credit_note" else 1
-        original = invoice_model.objects.create(
-            customer=customer,
-            currency=currency,
-            number="FCT-000960",
-            status="issued",
-            subtotal_cents=10000,
-            tax_cents=2100,
-            total_cents=12100,
-            bill_to_name="Test Co",
-            bill_to_country="RO",
-        )
-        subject = invoice_model.objects.create(
-            customer=customer,
-            currency=currency,
-            number="CN-000960",
-            status="issued",
-            document_kind=document_kind,
-            reverses_invoice=original if document_kind == "credit_note" else None,
-            subtotal_cents=10000 * sign,
-            tax_cents=2100 * sign,
-            total_cents=12100 * sign,
-            bill_to_name="Test Co",
-            bill_to_country="RO",
-        )
-        document = document_model.objects.create(
-            invoice=subject,
-            document_type=document_type,
-            status=status,
-            environment="test",
-            xml_content=WRONG_BUILDER_XML,
-            xml_hash="a" * 64,
-            xml_generated_at=timezone.now(),
-        )
-        return document.pk
-
-    def _document_after_migration(self, pk: object) -> object:
-        MigrationExecutor(connection).migrate([MIGRATION_UNDER_TEST])
-        new = MigrationExecutor(connection).loader.project_state([MIGRATION_UNDER_TEST]).apps
-        return new.get_model("billing", "EFacturaDocument").objects.get(pk=pk)
-
-    def test_an_unsent_credit_note_document_loses_its_bytes(self) -> None:
-        pk = self._seed(status="draft", document_kind="credit_note", document_type="credit_note")
-
-        document = self._document_after_migration(pk)
-
-        self.assertEqual(document.xml_content, "")
-        self.assertEqual(document.xml_hash, "")
-        self.assertIsNone(document.xml_generated_at)
-
-    def test_a_sent_credit_note_document_keeps_its_bytes(self) -> None:
-        pk = self._seed(status="accepted", document_kind="credit_note", document_type="credit_note")
-
-        self.assertEqual(self._document_after_migration(pk).xml_content, WRONG_BUILDER_XML)
-
-    def test_an_ordinary_invoices_document_keeps_its_bytes(self) -> None:
-        """Only the credit-note builder was ever in question."""
-        pk = self._seed(status="draft", document_kind="invoice", document_type="invoice")
-
-        self.assertEqual(self._document_after_migration(pk).xml_content, WRONG_BUILDER_XML)

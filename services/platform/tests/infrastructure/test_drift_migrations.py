@@ -1,17 +1,14 @@
 """
-Tests for the drift dedup data migration (0003).
+Tests for the drift-state uniqueness constraints.
 
-The RunPython step is imported and exercised directly against the live app
-registry — the survivor-selection policy (keep the report owning the most
-advanced open request) guards real approval work and must not regress.
+The constraints guard real approval work and must hold at the database:
+one open report per drifted field, one open remediation request per report,
+and one in-progress remediation per deployment.
 """
 
 from __future__ import annotations
 
-import importlib
-
-from django.apps import apps as django_apps
-from django.db import IntegrityError, connection, transaction
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 
 from apps.infrastructure.models import (
@@ -25,13 +22,9 @@ from apps.infrastructure.models import (
     PanelType,
 )
 
-_migration = importlib.import_module(
-    "apps.infrastructure.migrations.0003_driftremediationrequest_execution_claimed_at_and_more"
-)
-
 
 class _DriftDataTestBase(TestCase):
-    """Shared fixtures for the migration-dedup and constraint tests."""
+    """Shared fixtures for the constraint tests."""
 
     def setUp(self) -> None:
         self.provider = CloudProvider.objects.create(
@@ -109,98 +102,8 @@ class _DriftDataTestBase(TestCase):
             status=status,
         )
 
-
-class TestDedupDriftMigration(_DriftDataTestBase):
-    """Exercise _dedup_drift_state survivor selection and normalization.
-
-    The fixtures deliberately contain duplicates that can only exist BEFORE
-    migration 0004's partial-unique constraints, so those constraints are
-    dropped for this class (SQLite DDL is transactional — the test rollback
-    restores them).
-    """
-
-    def setUp(self) -> None:
-        super().setUp()
-        # Partial unique constraints are implemented as partial unique indexes
-        # on SQLite and PostgreSQL alike; DROP INDEX is transactional DDL, so
-        # the test rollback restores them.
-        with connection.cursor() as cursor:
-            for model in (DriftReport, DriftRemediationRequest):
-                for constraint in model._meta.constraints:
-                    cursor.execute(f'DROP INDEX IF EXISTS "{constraint.name}"')
-
-    def _run(self) -> None:
-        _migration._dedup_drift_state(django_apps, None)
-
-    def test_survivor_is_report_with_most_advanced_open_request(self):
-        oldest = self._report()
-        middle = self._report()
-        newest = self._report()
-        approved = self._request(middle, "approved")
-        pending = self._request(newest, "pending_approval")
-
-        self._run()
-
-        middle.refresh_from_db()
-        self.assertFalse(middle.resolved)
-        for loser in (oldest, newest):
-            loser.refresh_from_db()
-            self.assertTrue(loser.resolved)
-            self.assertEqual(loser.resolution_type, "superseded")
-        pending.refresh_from_db()
-        self.assertEqual(pending.status, "superseded")
-        approved.refresh_from_db()
-        self.assertEqual(approved.status, "approved")
-
-    def test_duplicate_in_progress_requests_reduced_to_newest(self):
-        report = self._report()
-        older = self._request(report, "in_progress")
-        newer = self._request(report, "in_progress")
-
-        self._run()
-
-        older.refresh_from_db()
-        newer.refresh_from_db()
-        self.assertEqual(older.status, "failed")
-        self.assertIn("dedup migration", older.error_message)
-        self.assertEqual(newer.status, "in_progress")
-
-    def test_one_open_request_per_report_keeps_most_advanced(self):
-        report = self._report()
-        pending = self._request(report, "pending_approval")
-        scheduled = self._request(report, "scheduled")
-
-        self._run()
-
-        pending.refresh_from_db()
-        scheduled.refresh_from_db()
-        self.assertEqual(pending.status, "superseded")
-        self.assertEqual(scheduled.status, "scheduled")
-
-    def test_consecutive_network_reports_normalized_to_stable_name(self):
-        report = self._report(field_name="network_unreachable_consecutive", severity="critical")
-
-        self._run()
-
-        report.refresh_from_db()
-        self.assertEqual(report.field_name, "network_unreachable")
-        self.assertEqual(report.severity, "critical")
-
-    def test_unfixable_open_requests_become_manual_intervention(self):
-        ip_report = self._report(field_name="ipv4_address")
-        type_report = self._report(field_name="server_type")
-        ip_request = self._request(ip_report, "pending_approval")
-        type_request = self._request(type_report, "pending_approval")
-
-        self._run()
-
-        ip_request.refresh_from_db()
-        type_request.refresh_from_db()
-        self.assertEqual(ip_request.action_type, "manual_intervention")
-        self.assertEqual(type_request.action_type, "apply_desired")
-
 class TestDriftConstraints(_DriftDataTestBase):
-    """The 0004 partial-unique constraints are live and enforce the invariants."""
+    """The partial-unique constraints are live and enforce the invariants."""
 
     def test_open_report_uniqueness_enforced_by_database(self):
         """The partial unique constraint is the backstop against scan races."""

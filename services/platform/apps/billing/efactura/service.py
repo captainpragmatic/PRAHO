@@ -127,7 +127,7 @@ def _repair_stale_document_type(document: EFacturaDocument, invoice: Invoice) ->
     # ways silently rerouted it, which two existing tests caught.
     #
     # Written as the whole predicate rather than the type check alone, to read identically
-    # to migration 0056's. The kind half cannot change an outcome today - for an ordinary
+    # to the old history's migration 0056. The kind half cannot change an outcome today - for an ordinary
     # invoice the expected type already equals the stored one - so mutation cannot kill it;
     # it is here so the two statements of one rule stay legible side by side.
     stale_credit_note = (

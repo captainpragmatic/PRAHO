@@ -1,7 +1,6 @@
 """Session persistence, rotation, reconciliation, and indexed revocation."""
 
 from datetime import timedelta
-from importlib import import_module
 from io import StringIO
 from unittest.mock import patch
 
@@ -13,8 +12,6 @@ from django.contrib.sessions.backends.db import SessionStore as LegacySessionSto
 from django.contrib.sessions.middleware import SessionMiddleware
 from django.contrib.sessions.models import Session
 from django.core.management import call_command
-from django.db import connection
-from django.db.migrations.loader import MigrationLoader
 from django.db.models.signals import post_delete
 from django.http import HttpRequest, HttpResponse
 from django.test import RequestFactory, TestCase, override_settings
@@ -317,45 +314,3 @@ class SessionIndexTests(TestCase):
                 self.assertFalse(Session.objects.filter(session_key=expired.session_key).exists())
                 self.assertFalse(UserSession.objects.filter(session_key=expired.session_key).exists())
                 self.assertTrue(UserSession.objects.filter(user=self.user, session_key=legacy.session_key).exists())
-
-    def test_backfill_migration_indexes_seeded_sessions_in_multiple_batches(self) -> None:
-        module = import_module("apps.users.migrations.0007_usersession")
-        migration = module.Migration("0007_usersession", "users")
-        loader = MigrationLoader(connection)
-        state = loader.project_state([("users", "0007_usersession")])
-        decoder = LegacySessionStore()
-        sessions = [
-            Session(
-                session_key=f"backfill{number:032d}",
-                session_data=decoder.encode({"_auth_user_id": str(self.user.pk)}),
-                expire_date=self.user.date_joined + timedelta(days=-1 if number == 0 else 1),
-            )
-            for number in range(501)
-        ]
-        Session.objects.bulk_create(sessions)
-        for key, data in (
-            ("anonymous", {}),
-            ("missing-user", {"_auth_user_id": str(self.user.pk + 100000)}),
-            ("invalid-id", {"_auth_user_id": "invalid"}),
-        ):
-            Session.objects.create(
-                session_key=key,
-                session_data=decoder.encode(data),
-                expire_date=self.user.date_joined + timedelta(days=1),
-            )
-        Session.objects.create(
-            session_key="corrupt",
-            session_data="invalid-signature",
-            expire_date=self.user.date_joined + timedelta(days=1),
-        )
-        schema_editor = connection.schema_editor(atomic=False)
-
-        migration.operations[-1].database_forwards("users", schema_editor, state, state)
-
-        self.assertEqual(
-            set(UserSession.objects.filter(user=self.user).values_list("session_key", flat=True)),
-            {session.session_key for session in sessions},
-        )
-        self.assertEqual(UserSession.objects.count(), 501)
-        migration.operations[-1].database_forwards("users", schema_editor, state, state)
-        self.assertEqual(UserSession.objects.count(), 501)

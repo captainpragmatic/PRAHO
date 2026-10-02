@@ -104,6 +104,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Deleting a Virtualmin account, and clearing the deletion-protection flag that guards it, now
   require an administrator rather than any staff member.
+- The database migration history starts again from fresh initial migrations (ADR-0052). There
+  is no production or staging database, so the 152 old migrations and their data repairs were
+  dropped rather than squashed. Delete and recreate every local development and E2E database:
+  an old database would look up to date to Django while its tables differ. A fresh install now
+  names the RON currency "Romanian Leu" instead of leaving it blank.
 
 ---
 

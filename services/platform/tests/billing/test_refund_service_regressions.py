@@ -3,7 +3,6 @@ Comprehensive coverage tests for apps.billing.refund_service
 Targets all uncovered lines/branches to maximize coverage.
 """
 
-import importlib
 import uuid
 from datetime import timedelta
 from decimal import Decimal
@@ -11,7 +10,6 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-from django.apps import apps as django_apps
 from django.test import TestCase
 from django.utils import timezone
 
@@ -1876,359 +1874,6 @@ class TestRefundQueryService(TestCase):
         assert any(ref.get("processed_at") is not None for ref in refunds)
 
 
-# ===========================================================================
-# Migration 0024 — backfill Refund rows from legacy meta["refunds"] JSON
-# ===========================================================================
-class TestBackfillRefundsFromMeta(TestCase):
-    """Test 0024 migration: backfill Refund rows from legacy meta.refunds JSON."""
-
-    @classmethod
-    def setUpTestData(cls):
-        cls.customer = _make_customer()
-        cls.currency = _make_currency()
-
-    def _forward(self):
-        # Migration modules with a leading digit cannot be imported via a normal
-        # import statement.  importlib handles the dotted path correctly.
-        mod = importlib.import_module("apps.billing.migrations.0024_backfill_refunds_from_meta")
-        mod.backfill_refunds_from_meta(django_apps, None)
-
-    def _corrective_forward(self):
-        mod = importlib.import_module("apps.billing.migrations.0041_recover_remaining_legacy_refunds")
-        mod.recover_remaining_legacy_refunds(django_apps, None)
-
-    def test_backfill_does_not_double_consume_a_gateway_id_row(self):
-        """One completed gateway-ID row must satisfy only its own ID entry: a
-        distinct same-amount no-ID entry still gets its own Refund row."""
-        order = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
-        Refund.objects.create(
-            customer=self.customer,
-            order=order,
-            amount_cents=3000,
-            currency=self.currency,
-            original_amount_cents=10000,
-            status="completed",
-            gateway_refund_id="gw_double_consume",
-            reference_number="REF-DOUBLE-CONSUME",
-        )
-        Order.objects.filter(pk=order.pk).update(
-            meta={
-                "refunds": [
-                    {"amount_cents": 3000, "reason": "customer_request", "refund_id": "gw_double_consume"},
-                    {"amount_cents": 3000, "reason": "customer_request"},
-                ]
-            }
-        )
-
-        self._forward()
-
-        refunds = list(Refund.objects.filter(order=order).order_by("created_at"))
-        assert len(refunds) == 2, "the no-ID legacy entry must create its own row"
-        assert sum(r.amount_cents for r in refunds) == 6000
-        order.refresh_from_db()
-        assert "refunds" not in order.meta
-
-    def test_backfill_creates_refund_rows_for_order(self):
-        """Legacy meta.refunds entries on an Order are converted to Refund model rows."""
-        order = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
-        Order.objects.filter(pk=order.pk).update(
-            meta={"refunds": [{"amount_cents": 3000, "reason": "customer_request", "refund_id": "gw_abc123"}]}
-        )
-
-        self._forward()
-
-        refunds = list(Refund.objects.filter(order=order))
-        assert len(refunds) == 1
-        r = refunds[0]
-        assert r.amount_cents == 3000
-        assert r.status == "completed"
-        assert r.refund_type == "partial"
-        assert r.reason == "customer_request"
-        assert r.gateway_refund_id == "gw_abc123"
-        assert r.reference_number.startswith("LEGACY-")
-        assert r.currency == self.currency
-        assert r.original_amount_cents == 10000
-
-        order.refresh_from_db()
-        assert "refunds" not in order.meta
-
-    def test_backfill_creates_refund_rows_for_invoice(self):
-        """Legacy meta.refunds entries on an Invoice are converted to Refund model rows."""
-        inv = _make_invoice(self.customer, self.currency, status="paid", total_cents=8000)
-        Invoice.objects.filter(pk=inv.pk).update(
-            meta={"refunds": [{"amount_cents": 2000, "reason": "dispute"}]}
-        )
-
-        self._forward()
-
-        refunds = list(Refund.objects.filter(invoice=inv))
-        assert len(refunds) == 1
-        assert refunds[0].amount_cents == 2000
-        assert refunds[0].reason == "dispute"
-        assert refunds[0].reference_number.startswith("LEGACY-")
-
-        inv.refresh_from_db()
-        assert "refunds" not in inv.meta
-
-    def test_backfill_dedupes_existing_refunds(self):
-        """If a matching Refund row already exists (same order + amount_cents), no duplicate is created."""
-        order = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
-        Order.objects.filter(pk=order.pk).update(
-            meta={"refunds": [{"amount_cents": 5000, "reason": "customer_request"}]}
-        )
-        Refund.objects.create(
-            customer=self.customer,
-            order=order,
-            amount_cents=5000,
-            currency=self.currency,
-            original_amount_cents=10000,
-            reference_number=f"REF-{uuid.uuid4().hex[:8]}",
-            reason="customer_request",
-            status="completed",
-        )
-
-        self._forward()
-
-        assert Refund.objects.filter(order=order).count() == 1
-
-    def test_backfill_preserves_two_same_amount_refunds_without_gateway_ids(self):
-        """Same-amount legacy refunds are distinct financial events, not duplicates."""
-        order = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
-        Order.objects.filter(pk=order.pk).update(
-            meta={
-                "refunds": [
-                    {"amount_cents": 2500, "reason": "customer_request"},
-                    {"amount_cents": 2500, "reason": "customer_request"},
-                ]
-            }
-        )
-
-        self._forward()
-
-        assert Refund.objects.filter(order=order, amount_cents=2500).count() == 2
-
-    def test_backfill_reconciles_legacy_multiplicity_with_preexisting_rows(self):
-        """One existing row consumes one, rather than every, same-amount legacy entry."""
-        order = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
-        Order.objects.filter(pk=order.pk).update(
-            meta={
-                "refunds": [
-                    {"amount_cents": 2500, "reason": "customer_request"},
-                    {"amount_cents": 2500, "reason": "customer_request"},
-                ]
-            }
-        )
-        Refund.objects.create(
-            customer=self.customer,
-            order=order,
-            amount_cents=2500,
-            currency=self.currency,
-            original_amount_cents=10000,
-            reference_number=f"REF-{uuid.uuid4().hex[:8]}",
-            reason="customer_request",
-            status="completed",
-        )
-
-        self._forward()
-
-        assert Refund.objects.filter(order=order, amount_cents=2500).count() == 2
-
-    def test_backfill_does_not_reconcile_against_unsettled_same_amount_row(self):
-        """A failed attempt is not evidence that the historical refund settled."""
-        order = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
-        Order.objects.filter(pk=order.pk).update(
-            meta={"refunds": [{"amount_cents": 2500, "reason": "customer_request"}]}
-        )
-        Refund.objects.create(
-            customer=self.customer,
-            order=order,
-            amount_cents=2500,
-            currency=self.currency,
-            original_amount_cents=10000,
-            reference_number=f"REF-{uuid.uuid4().hex[:8]}",
-            reason="customer_request",
-            status="failed",
-        )
-
-        self._forward()
-
-        assert Refund.objects.filter(order=order, amount_cents=2500).count() == 2
-        assert Refund.objects.filter(order=order, amount_cents=2500, status="completed").count() == 1
-        order.refresh_from_db()
-        assert "refunds" not in order.meta
-
-    def test_backfill_does_not_reconcile_gateway_id_against_unsettled_row(self):
-        """A gateway ID on a failed attempt must not erase completed legacy evidence."""
-        order = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
-        conflicted_entry = {
-            "amount_cents": 2500,
-            "reason": "customer_request",
-            "refund_id": "re_legacy_settled",
-        }
-        Order.objects.filter(pk=order.pk).update(
-            meta={
-                "refunds": [
-                    conflicted_entry,
-                    {
-                        "amount_cents": 1000,
-                        "reason": "customer_request",
-                        "refund_id": "re_independent",
-                    },
-                ]
-            }
-        )
-        Refund.objects.create(
-            customer=self.customer,
-            order=order,
-            amount_cents=2500,
-            currency=self.currency,
-            original_amount_cents=10000,
-            reference_number=f"REF-{uuid.uuid4().hex[:8]}",
-            gateway_refund_id="re_legacy_settled",
-            reason="customer_request",
-            status="failed",
-        )
-
-        self._forward()
-
-        assert Refund.objects.filter(order=order, gateway_refund_id="re_legacy_settled").count() == 1
-        assert not Refund.objects.filter(order=order, gateway_refund_id="re_legacy_settled", status="completed").exists()
-        assert Refund.objects.filter(order=order, gateway_refund_id="re_independent", status="completed").exists()
-        order.refresh_from_db()
-        assert order.meta["refunds"] == [conflicted_entry]
-
-    def test_corrective_migration_reconciles_meta_left_by_applied_migration(self):
-        """The forward repair reprocesses evidence that 0024 left behind."""
-        order = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
-        Order.objects.filter(pk=order.pk).update(
-            meta={"refunds": [{"amount_cents": 2500, "reason": "customer_request"}]}
-        )
-        Refund.objects.create(
-            customer=self.customer,
-            order=order,
-            amount_cents=2500,
-            currency=self.currency,
-            original_amount_cents=10000,
-            reference_number=f"REF-{uuid.uuid4().hex[:8]}",
-            reason="customer_request",
-            status="completed",
-        )
-
-        self._corrective_forward()
-
-        assert Refund.objects.filter(order=order, amount_cents=2500).count() == 1
-        order.refresh_from_db()
-        assert "refunds" not in order.meta
-
-        self._corrective_forward()
-
-        assert Refund.objects.filter(order=order, amount_cents=2500).count() == 1
-
-    def test_backfill_retains_malformed_evidence_for_manual_recovery(self):
-        """A valid entry can migrate without erasing an adjacent malformed one."""
-        order = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
-        malformed = {"reason": "missing_amount"}
-        Order.objects.filter(pk=order.pk).update(
-            meta={
-                "refunds": [
-                    {"amount_cents": 2500, "reason": "customer_request"},
-                    malformed,
-                ]
-            }
-        )
-
-        self._forward()
-
-        assert Refund.objects.filter(order=order, amount_cents=2500).count() == 1
-        order.refresh_from_db()
-        assert order.meta["refunds"] == [malformed]
-
-    def test_backfill_isolates_one_entity_failure_and_continues(self):
-        """A failed row must not poison the migration transaction for later entities."""
-        failed_order = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
-        recoverable_order = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
-        for order in (failed_order, recoverable_order):
-            Order.objects.filter(pk=order.pk).update(
-                meta={"refunds": [{"amount_cents": 2500, "reason": "customer_request"}]}
-            )
-
-        collision_order = _make_order(self.customer, self.currency, status="completed", total_cents=1000)
-        Refund.objects.create(
-            customer=self.customer,
-            order=collision_order,
-            amount_cents=1000,
-            currency=self.currency,
-            original_amount_cents=1000,
-            reference_number="LEGACY-deadbeefdead",
-            reason="customer_request",
-        )
-        migration = importlib.import_module("apps.billing.migrations.0024_backfill_refunds_from_meta")
-        fake_uuid_module = MagicMock()
-        fake_uuid_module.uuid4.side_effect = [
-            uuid.UUID("deadbeef-dead-beef-dead-beefdeadbeef"),
-            uuid.UUID("cafebabe-cafe-babe-cafe-babecafebabe"),
-        ]
-        with patch.object(
-            migration,
-            "uuid",
-            fake_uuid_module,
-        ):
-            migration.backfill_refunds_from_meta(django_apps, None)
-
-        assert (
-            Refund.objects.filter(
-                order__in=[failed_order, recoverable_order],
-                amount_cents=2500,
-            ).count()
-            == 1
-        )
-
-    def test_backfill_handles_malformed_meta(self):
-        """Malformed meta.refunds entries (missing amount_cents) are skipped without aborting."""
-        order = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
-        Order.objects.filter(pk=order.pk).update(
-            meta={"refunds": [{"bad": "data", "no_amount": True}]}
-        )
-
-        self._forward()
-
-        assert Refund.objects.filter(order=order).count() == 0
-
-    def test_backfill_handles_non_dict_entry(self):
-        """Non-dict entries inside meta.refunds are skipped without aborting."""
-        order = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
-        Order.objects.filter(pk=order.pk).update(
-            meta={"refunds": ["not-a-dict", 42, None]}
-        )
-
-        self._forward()
-
-        assert Refund.objects.filter(order=order).count() == 0
-
-    def test_backfill_ignores_entities_without_meta_refunds(self):
-        """Orders with no meta.refunds key are untouched."""
-        order = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
-        Order.objects.filter(pk=order.pk).update(meta={"other_key": "value"})
-
-        initial_count = Refund.objects.count()
-        self._forward()
-
-        assert Refund.objects.count() == initial_count
-
-    def test_backfill_reason_fallback_for_invalid_value(self):
-        """An unrecognised reason value is normalised to customer_request."""
-        order = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
-        Order.objects.filter(pk=order.pk).update(
-            meta={"refunds": [{"amount_cents": 1000, "reason": "totally_made_up_reason"}]}
-        )
-
-        self._forward()
-
-        refunds = list(Refund.objects.filter(order=order))
-        assert len(refunds) == 1
-        assert refunds[0].reason == "customer_request"
-
-
 class TestOrderRefundInvoiceLinkage(TestCase):
     """Settlement of an order refund must project the ORDER-linked invoice
     (review of #388): a payment matched via meta['order_id'] can legally carry
@@ -2356,7 +2001,7 @@ class TestRefundRecordProvenance(TestCase):
         """The portal's refund client declares ``reason: str = ""``.
 
         Without folding empty to the default, that empty string reaches a choices column as a
-        value nothing can display — the case migration 0048 exists to repair.
+        value nothing can display — the case the old history's migration 0048 repaired.
         """
         params = self._params(refund_data={"refund_type": "", "reason": ""})
 
@@ -2450,8 +2095,8 @@ class TestLegacyRefundTypeCrossesTheDeployment(TestCase):
 
     So a row left in ``pending`` across this deployment can hold ``""`` while the new probe
     searches ``"full"``. The retry finds nothing, reserves a second intent, and issues a
-    second gateway refund against the same payment. Migration 0048 canonicalizes the stored
-    values rather than teaching the probe to match both spellings.
+    second gateway refund against the same payment. The old history's migration 0048
+    canonicalized the stored values rather than teaching the probe to match both spellings.
     """
 
     def setUp(self):
@@ -2488,34 +2133,5 @@ class TestLegacyRefundTypeCrossesTheDeployment(TestCase):
 
         self.assertIsNone(
             self._probe().unwrap(),
-            msg="If this ever passes, the premise of migration 0048's refund_type backfill is gone.",
+            msg="If this ever passes, the premise of the historical refund_type backfill is gone.",
         )
-
-    def test_the_migration_backfill_restores_visibility(self) -> None:
-        import importlib  # noqa: PLC0415
-
-        migration = importlib.import_module("apps.billing.migrations.0048_alter_refund_reason")
-        legacy = self._legacy_intent("")
-        self.assertIsNone(self._probe().unwrap())
-
-        migration._canonicalize(Refund, "refund_type", migration.REFUND_TYPE_ALIASES)
-
-        legacy.refresh_from_db()
-        self.assertEqual(legacy.refund_type, "full")
-        self.assertEqual(
-            self._probe().unwrap(),
-            legacy,
-            msg="The retry still cannot see the in-flight refund — it would reserve a second one.",
-        )
-
-    def test_every_alias_maps_a_non_canonical_value_onto_a_real_choice(self) -> None:
-        import importlib  # noqa: PLC0415
-
-        migration = importlib.import_module("apps.billing.migrations.0048_alter_refund_reason")
-        valid = {value for value, _label in Refund.TYPE_CHOICES}
-
-        self.assertTrue(migration.REFUND_TYPE_ALIASES)
-        for stored, canonical in migration.REFUND_TYPE_ALIASES.items():
-            with self.subTest(stored=stored):
-                self.assertNotIn(stored, valid, msg=f"{stored!r} is valid — the backfill would corrupt it.")
-                self.assertIn(canonical, valid)

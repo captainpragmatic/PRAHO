@@ -50,9 +50,10 @@ DATABASES = {
 # ===============================================================================
 # RE-ENABLE MIGRATIONS
 # ===============================================================================
-# test.py uses DisableMigrations (syncdb from models) for SQLite speed.
-# PostgreSQL CI needs real migrations to create named indexes, partial
-# constraints, and RunSQL operations that syncdb skips.
+# test.py defines DisableMigrations but never assigns MIGRATION_MODULES, so
+# both settings run the real migrations. Keep this guard anyway: PostgreSQL CI
+# needs them for the named indexes, partial constraints, and the hand-written
+# indexes, trigger and seeds that only migrations create (ADR-0052).
 if "MIGRATION_MODULES" in dir():
     del MIGRATION_MODULES  # noqa: F821
 

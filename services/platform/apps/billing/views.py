@@ -2268,7 +2268,7 @@ def api_process_refund(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911  
 
         amount_cents = data.get("amount_cents")
         # "API refund request" was never a REASON_CHOICES value, so every API refund that
-        # omitted a reason persisted an invalid one (migration 0048 repairs those rows).
+        # omitted a reason persisted an invalid one (the old history's migration 0048 repaired them).
         reason = data.get("reason", "customer_request")
 
         payment_invoice = payment.invoice
@@ -2638,8 +2638,8 @@ def provider_reconciliation_queue(request: HttpRequest) -> HttpResponse:
 
     That derivation reads `pending` as well as `failed`. It read `failed` alone while that
     was the only state a capped row could be in - `_finalize` spends the budget and always
-    leaves a terminal state behind. Migration 0057 backfills budgets spent before the column
-    existed, and `attempts` cannot say which state the spending ended in, so a capped
+    leaves a terminal state behind. The old history's migration 0057 backfilled budgets spent
+    before the column existed, and `attempts` cannot say which state the spending ended in, so a capped
     `pending` row is now reachable. Listing it is the point of deriving this set rather than
     storing it.
     """

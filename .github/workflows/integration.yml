@@ -168,6 +168,8 @@ jobs:
         PYTHONPATH="$PWD" "$UV_PROJECT_ENVIRONMENT/bin/python" manage.py test \
           tests.api.test_api_token_concurrency.APITokenPostgresConcurrencyTests \
           tests.domains.test_durable_operations \
+          tests.customers.test_payment_method_encryption_trigger \
+          tests.common.test_migration_db_objects \
           --settings=config.settings.ci --verbosity=2
 
     - name: Service isolation security tests (make test-security)

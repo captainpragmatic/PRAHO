@@ -10,7 +10,7 @@ PRAHO owns subscriptions, periods, proformas, invoices, taxes, usage rating, ret
 
 ## Rollout Checklist
 
-1. Apply migrations through billing migration `0045`, customers migration `0021`, and settings migration `0006`.
+1. Apply all platform migrations.
 2. Verify every active or suspended auto-renew service has exactly one linked PRAHO subscription. Scheduler setup refuses to replace the legacy renewal engine while any such service is unmanaged; migrate those services from their authoritative service price, currency, billing cycle, and paid-through date first.
 3. Run `python manage.py setup_dunning_policies` and verify exactly one active default payment-retry policy exists.
    Billing administrators can review and edit the live retry cadence and dunning-email switch from

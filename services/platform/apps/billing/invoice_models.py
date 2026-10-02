@@ -647,8 +647,8 @@ class Invoice(models.Model):
         something it can produce and is therefore not evidence it vouched for. This
         is how ``issue()`` honours a rate frozen earlier at the reversible conversion moment,
         so a later ``FXRate`` row can never change an issued invoice's RON VAT. A partial
-        legacy value (a bare ``exchange_to_ron`` from before migration 0039 added the
-        provenance fields) is NOT complete evidence: it is discarded and a fresh provenanced
+        legacy value (a bare ``exchange_to_ron`` from before the old history's migration 0039
+        added the provenance fields) is NOT complete evidence: it is discarded and a fresh provenanced
         snapshot is resolved at ``tax_point_date`` (fail-closed if none resolves), so the
         invoice never locks with legally incomplete FX evidence.
         """

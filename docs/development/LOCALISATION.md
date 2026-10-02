@@ -87,8 +87,7 @@ platform settings access and portal API access remain separate.
 
 ## Deployment and verification
 
-1. Deploy the platform and apply users migration `0006_localisation_inheritance`.
-   It alters field metadata/defaults and preserves stored profile values.
+1. Deploy the platform and apply its migrations.
 2. Run `setup_default_settings --category localisation` without `--force`.
    Consumers have catalog fallbacks even before the rows are synced.
 3. Deploy the portal. Check the Localisation group, both profile forms, date

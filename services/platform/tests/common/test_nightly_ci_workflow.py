@@ -91,6 +91,9 @@ class NightlyPostgresConcurrencyWorkflowTests(SimpleTestCase):
         command = api_token_step["run"]
         self.assertIn(_API_TOKEN_CONCURRENCY_TEST_CLASS, command)
         self.assertIn("tests.domains.test_durable_operations", command)
+        # Migration-only database objects: the trigger and the PostgreSQL indexes.
+        self.assertIn("tests.customers.test_payment_method_encryption_trigger", command)
+        self.assertIn("tests.common.test_migration_db_objects", command)
         self.assertIn("--settings=config.settings.ci", command)
         self.assertNotIn("config.settings.test", command)
         self.assertNotIn("--parallel", command)

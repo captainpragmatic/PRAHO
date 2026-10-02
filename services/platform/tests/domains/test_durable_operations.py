@@ -4,12 +4,10 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
-from importlib import import_module
 from threading import Barrier, Event
 from unittest import skipUnless
 from unittest.mock import patch
 
-from django.apps import apps
 from django.core.cache import cache
 from django.db import IntegrityError, close_old_connections, connection, transaction
 from django.test import TransactionTestCase, override_settings
@@ -226,40 +224,6 @@ class DurableOperationTests(IntentFixture, TransactionTestCase):
         self.assertEqual(op.state, "submitted")
         self.assertIsNotNone(op.review_required_at)
         self.assertGreater(op.next_retry_at, timezone.now() + timedelta(hours=23))
-
-    def test_migration_retains_acceptance_and_resurrects_timeout_without_inventing_keys(self) -> None:
-        timeout = DomainOperation.objects.create(
-            domain=self.domain,
-            registrar=self.registrar,
-            operation_type="renew",
-            state="failed",
-            error_message="unconfirmed after 72h — investigate at the registrar",
-        )
-        accepted = DomainOperation.objects.create(
-            domain=self.domain,
-            registrar=self.registrar,
-            operation_type="register",
-            registrar_operation_id="/v5/reference",
-            state="failed",
-        )
-        rejected = DomainOperation.objects.create(
-            domain=self.domain,
-            registrar=self.registrar,
-            operation_type="renew",
-            state="failed",
-            error_message="auth_failed",
-        )
-        migration = import_module("apps.domains.migrations.0009_domainoperation_durable_intent")
-        with connection.schema_editor() as editor:
-            migration.preserve_uncertain_operations(apps, editor)
-        for operation in (timeout, accepted):
-            operation.refresh_from_db()
-            self.assertEqual(operation.state, "submitted")
-            self.assertIsNone(operation.intent_key)
-            self.assertIsNotNone(operation.review_required_at)
-        self.assertIsNotNone(accepted.accepted_at)
-        rejected.refresh_from_db()
-        self.assertEqual(rejected.state, "failed")
 
     def test_stale_preflight_after_completed_intent_does_not_send_another_renewal(self) -> None:
         expiry = self.expiry + timedelta(days=365)
