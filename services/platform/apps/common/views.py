@@ -2,7 +2,7 @@
 # DASHBOARD VIEW - MAIN PRAHO Platform OVERVIEW
 # ===============================================================================
 
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 
 from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth.decorators import login_required
@@ -121,10 +121,12 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
 
 def _calculate_monthly_revenue(customers: QuerySet[Customer]) -> dict[str, int]:
     """Keep each paid invoice's recorded monetary unit in the monthly summary."""
-    current_month = timezone.now().replace(day=1)
+    # Local midnight on the 1st as an aware instant: compared directly with created_at so the
+    # (customer, -created_at) index can bound the scan, unlike a per-row created_at__date cast.
+    month_start = timezone.make_aware(datetime.combine(timezone.localdate().replace(day=1), time.min))
 
     monthly_totals = (
-        Invoice.objects.filter(customer__in=customers, created_at__gte=current_month, status="paid")
+        Invoice.objects.filter(customer__in=customers, created_at__gte=month_start, status="paid")
         .order_by("currency_id")
         .values("currency_id")
         .annotate(currency_total_cents=Sum("total_cents"))

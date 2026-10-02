@@ -11,6 +11,7 @@ Tests cover:
 - Edge cases and error handling
 """
 
+from datetime import UTC, datetime
 from unittest.mock import Mock, patch
 
 from django.core.cache import cache
@@ -31,8 +32,7 @@ class QuotaEndpointTestCase(TestCase):
 
     def test_all_endpoints_defined(self):
         """Test all expected endpoints are defined."""
-        expected = ["upload", "stare", "lista_simple", "lista_paginated",
-                    "descarcare", "validare", "convert_pdf"]
+        expected = ["upload", "stare", "lista_simple", "lista_paginated", "descarcare", "validare", "convert_pdf"]
         actual = [e.value for e in QuotaEndpoint]
         self.assertEqual(set(expected), set(actual))
 
@@ -211,6 +211,21 @@ class ANAFQuotaTrackerTestCase(TestCase):
         self.assertIn("12345678", key)
         self.assertIn("20240101", key)
 
+    def test_default_cache_key_follows_the_romanian_calendar_day(self):
+        """The budget expires at Romanian midnight (`_seconds_until_midnight`), so the key it is
+        counted under must roll over at the same instant. Keyed on the UTC date it rolled over at
+        02:00/03:00 Bucharest as well - two budgets inside one Romanian day."""
+        just_after_local_midnight = datetime(2026, 9, 30, 21, 30, tzinfo=UTC)  # 1 Oct 00:30 Bucharest
+        late_local_evening = datetime(2026, 10, 1, 20, 0, tzinfo=UTC)  # 1 Oct 23:00 Bucharest
+
+        keys = []
+        for instant in (just_after_local_midnight, late_local_evening):
+            with patch("django.utils.timezone.now", return_value=instant):
+                keys.append(self.tracker._get_cache_key(QuotaEndpoint.LIST_SIMPLE, "12345678"))
+
+        self.assertEqual(keys[0], keys[1])
+        self.assertTrue(keys[0].endswith(":20261001"), keys[0])
+
     def test_cache_key_generation_per_message(self):
         """Test cache key generation for per-message quotas."""
         key = self.tracker._get_cache_key(
@@ -261,29 +276,21 @@ class ANAFQuotaTrackerTestCase(TestCase):
 
     def test_can_call_when_under_limit(self):
         """Test can_call returns True when under limit."""
-        self.assertTrue(
-            self.tracker.can_call(QuotaEndpoint.STATUS, "12345678", "msg-123")
-        )
+        self.assertTrue(self.tracker.can_call(QuotaEndpoint.STATUS, "12345678", "msg-123"))
 
     def test_can_call_when_at_limit(self):
         """Test can_call returns False when at limit."""
         # Fill up to limit (100 for STATUS)
-        cache_key = self.tracker._get_cache_key(
-            QuotaEndpoint.STATUS, "12345678", "msg-123"
-        )
+        cache_key = self.tracker._get_cache_key(QuotaEndpoint.STATUS, "12345678", "msg-123")
         counters.increment(cache_key, self.tracker._seconds_until_midnight(), delta=100)
         self.assertEqual(counters.peek(cache_key), 100)
 
-        self.assertFalse(
-            self.tracker.can_call(QuotaEndpoint.STATUS, "12345678", "msg-123")
-        )
+        self.assertFalse(self.tracker.can_call(QuotaEndpoint.STATUS, "12345678", "msg-123"))
 
     def test_can_call_no_limit_endpoint(self):
         """Test can_call always True for no-limit endpoints."""
         # UPLOAD has no limit
-        self.assertTrue(
-            self.tracker.can_call(QuotaEndpoint.UPLOAD, "12345678")
-        )
+        self.assertTrue(self.tracker.can_call(QuotaEndpoint.UPLOAD, "12345678"))
 
     def test_get_status(self):
         """Test getting quota status."""
@@ -291,34 +298,26 @@ class ANAFQuotaTrackerTestCase(TestCase):
         self.tracker.increment(QuotaEndpoint.STATUS, "12345678", "msg-123")
         self.tracker.increment(QuotaEndpoint.STATUS, "12345678", "msg-123")
 
-        status = self.tracker.get_status(
-            QuotaEndpoint.STATUS, "12345678", "msg-123"
-        )
+        status = self.tracker.get_status(QuotaEndpoint.STATUS, "12345678", "msg-123")
         self.assertEqual(status.current, 2)
         self.assertEqual(status.limit, 100)
         self.assertEqual(status.remaining, 98)
 
     def test_check_and_increment_success(self):
         """Test check_and_increment when under limit."""
-        status = self.tracker.check_and_increment(
-            QuotaEndpoint.STATUS, "12345678", "msg-123"
-        )
+        status = self.tracker.check_and_increment(QuotaEndpoint.STATUS, "12345678", "msg-123")
         self.assertEqual(status.current, 1)
         self.assertFalse(status.is_exceeded)
 
     def test_check_and_increment_raises_when_exceeded(self):
         """Test check_and_increment raises when quota exceeded."""
         # Fill to limit
-        cache_key = self.tracker._get_cache_key(
-            QuotaEndpoint.STATUS, "12345678", "msg-123"
-        )
+        cache_key = self.tracker._get_cache_key(QuotaEndpoint.STATUS, "12345678", "msg-123")
         counters.increment(cache_key, self.tracker._seconds_until_midnight(), delta=100)
         self.assertEqual(counters.peek(cache_key), 100)
 
         with self.assertRaises(QuotaExceededError) as context:
-            self.tracker.check_and_increment(
-                QuotaEndpoint.STATUS, "12345678", "msg-123"
-            )
+            self.tracker.check_and_increment(QuotaEndpoint.STATUS, "12345678", "msg-123")
 
         self.assertEqual(context.exception.current, 100)
         self.assertEqual(context.exception.limit, 100)
@@ -350,9 +349,7 @@ class ANAFQuotaTrackerTestCase(TestCase):
         """Test global minute rate limit."""
         # Mock global limit check
         with patch.object(self.tracker, "_check_global_limit", return_value=False):
-            self.assertFalse(
-                self.tracker.can_call(QuotaEndpoint.STATUS, "12345678")
-            )
+            self.assertFalse(self.tracker.can_call(QuotaEndpoint.STATUS, "12345678"))
 
 
 @override_settings(CACHES=LOCMEM_TEST_CACHE)
@@ -365,6 +362,7 @@ class ANAFQuotaTrackerDecoratorTestCase(TestCase):
 
     def test_rate_limited_decorator_allows_call(self):
         """Test decorator allows call when under limit."""
+
         @self.tracker.rate_limited(QuotaEndpoint.STATUS)
         def check_status(cui: str, message_id: str) -> str:
             return "success"
@@ -375,9 +373,7 @@ class ANAFQuotaTrackerDecoratorTestCase(TestCase):
     def test_rate_limited_decorator_raises_when_exceeded(self):
         """Test decorator raises when quota exceeded."""
         # Fill to limit
-        cache_key = self.tracker._get_cache_key(
-            QuotaEndpoint.STATUS, "12345678", "msg-123"
-        )
+        cache_key = self.tracker._get_cache_key(QuotaEndpoint.STATUS, "12345678", "msg-123")
         counters.increment(cache_key, self.tracker._seconds_until_midnight(), delta=100)
         self.assertEqual(counters.peek(cache_key), 100)
 
@@ -390,6 +386,7 @@ class ANAFQuotaTrackerDecoratorTestCase(TestCase):
 
     def test_rate_limited_decorator_extracts_args(self):
         """Test decorator extracts CUI from positional args."""
+
         @self.tracker.rate_limited(QuotaEndpoint.STATUS)
         def check_status(cui: str, message_id: str) -> str:
             return "success"
@@ -399,9 +396,7 @@ class ANAFQuotaTrackerDecoratorTestCase(TestCase):
         self.assertEqual(result, "success")
 
         # Check usage was incremented
-        usage = self.tracker.get_current_usage(
-            QuotaEndpoint.STATUS, "12345678", "msg-123"
-        )
+        usage = self.tracker.get_current_usage(QuotaEndpoint.STATUS, "12345678", "msg-123")
         self.assertEqual(usage, 1)
 
 
@@ -416,12 +411,8 @@ class ANAFQuotaTrackerEdgeCasesTestCase(TestCase):
     def test_message_id_only_applies_to_specific_endpoints(self):
         """Test message_id is only used for STATUS and DOWNLOAD."""
         # For LIST_SIMPLE, message_id should not affect key
-        key1 = self.tracker._get_cache_key(
-            QuotaEndpoint.LIST_SIMPLE, "12345678", None, "20240101"
-        )
-        key2 = self.tracker._get_cache_key(
-            QuotaEndpoint.LIST_SIMPLE, "12345678", "msg-123", "20240101"
-        )
+        key1 = self.tracker._get_cache_key(QuotaEndpoint.LIST_SIMPLE, "12345678", None, "20240101")
+        key2 = self.tracker._get_cache_key(QuotaEndpoint.LIST_SIMPLE, "12345678", "msg-123", "20240101")
         # Keys should be the same (message_id ignored)
         self.assertEqual(key1, key2)
 
@@ -430,12 +421,8 @@ class ANAFQuotaTrackerEdgeCasesTestCase(TestCase):
         self.tracker.increment(QuotaEndpoint.STATUS, "12345678", "msg-1")
         self.tracker.increment(QuotaEndpoint.STATUS, "12345678", "msg-2")
 
-        usage1 = self.tracker.get_current_usage(
-            QuotaEndpoint.STATUS, "12345678", "msg-1"
-        )
-        usage2 = self.tracker.get_current_usage(
-            QuotaEndpoint.STATUS, "12345678", "msg-2"
-        )
+        usage1 = self.tracker.get_current_usage(QuotaEndpoint.STATUS, "12345678", "msg-1")
+        usage2 = self.tracker.get_current_usage(QuotaEndpoint.STATUS, "12345678", "msg-2")
 
         self.assertEqual(usage1, 1)
         self.assertEqual(usage2, 1)
@@ -459,9 +446,19 @@ class ANAFQuotaTrackerEdgeCasesTestCase(TestCase):
     def test_seconds_until_midnight(self):
         """Test seconds until midnight calculation."""
         seconds = self.tracker._seconds_until_midnight()
-        # Should be between 0 and 86400 (24 hours)
+        # Between 0 and 25 hours: the October fall-back day in Bucharest is 25 hours long
         self.assertGreaterEqual(seconds, 0)
-        self.assertLessEqual(seconds, 86400)
+        self.assertLessEqual(seconds, 25 * 3600)
+
+    def test_counter_outlives_the_whole_fall_back_day(self):
+        """Subtracting two datetimes that share a ZoneInfo is wall-clock arithmetic and ignores
+        the offset change. At 00:30 on 25 Oct 2026 that gave 23h30m, so the counter expired at
+        23:00 while the key still named the 25th, and the last hour of the day had a fresh budget."""
+        half_past_midnight = datetime(2026, 10, 24, 21, 30, tzinfo=UTC)  # 00:30 EEST, 25 Oct
+        with patch("django.utils.timezone.now", return_value=half_past_midnight):
+            seconds = self.tracker._seconds_until_midnight()
+
+        self.assertEqual(seconds, 24 * 3600 + 30 * 60)  # midnight is 26 Oct 00:00 EET = 22:00Z
 
     def test_concurrent_increments(self):
         """Test handling concurrent increment attempts."""
@@ -469,9 +466,7 @@ class ANAFQuotaTrackerEdgeCasesTestCase(TestCase):
         for _ in range(10):
             self.tracker.increment(QuotaEndpoint.STATUS, "12345678", "msg-123")
 
-        usage = self.tracker.get_current_usage(
-            QuotaEndpoint.STATUS, "12345678", "msg-123"
-        )
+        usage = self.tracker.get_current_usage(QuotaEndpoint.STATUS, "12345678", "msg-123")
         self.assertEqual(usage, 10)
 
     def test_cache_version_isolation(self) -> None:

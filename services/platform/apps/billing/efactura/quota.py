@@ -159,7 +159,7 @@ class ANAFQuotaTracker:
     ) -> str:
         """Generate cache key for quota tracking."""
         if date_str is None:
-            date_str = timezone.now().strftime("%Y%m%d")
+            date_str = timezone.now().astimezone(ROMANIA_TIMEZONE).strftime("%Y%m%d")
 
         if message_id and endpoint in (QuotaEndpoint.STATUS, QuotaEndpoint.DOWNLOAD):
             # Per-message quotas
@@ -318,8 +318,8 @@ class ANAFQuotaTracker:
         """Get seconds until midnight Romanian time."""
         now = timezone.now().astimezone(ROMANIA_TIMEZONE)
         tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-        delta = tomorrow - now
-        return int(delta.total_seconds())
+        # Same-tzinfo subtraction is wall-clock and ignores the DST offset change; compare instants.
+        return int(tomorrow.timestamp() - now.timestamp())
 
     def get_all_quotas(self, cui: str) -> dict[str, QuotaStatus]:
         """Get status of all quotas for a CUI."""

@@ -1,11 +1,18 @@
 """Staff summary cards show currency-specific totals, including fractional units."""
 
+from datetime import UTC, datetime
+from unittest.mock import patch
+
+from django.db import connection
 from django.test import TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from lxml import etree
 
 from apps.billing.currency_policy import get_selling_currency_policy
 from apps.billing.models import Currency, Invoice, Payment, ProformaInvoice
+from apps.common.views import _calculate_monthly_revenue
+from apps.customers.models import Customer
 from apps.provisioning.service_models import ServicePlan, ServicePlanPrice
 from apps.settings.models import SystemSetting
 from apps.users.models import User
@@ -132,3 +139,58 @@ class StaffCurrencySummaryTests(TestCase):
         self.assertContains(response, "Price unavailable")
         self.assertNotContains(response, "51.23")
         self.assertNotContains(response, "84.56")
+
+
+class MonthlyRevenueCutoffTests(TestCase):
+    """The current month is the Romanian calendar month, and it starts at local midnight on the 1st.
+
+    The cutoff used to be `timezone.now().replace(day=1)` - the current UTC instant with only the day
+    changed. On the 1st (UTC) that is "right now", so every invoice created earlier the same day fell
+    before it and the card showed nothing; on every other day it silently dropped the first hours of
+    the 1st. Zeroing the UTC time is not enough either: the dashboard serves a Romanian business, and
+    an invoice created at 01:30 on 1 October in Bucharest is still 30 September in UTC.
+    """
+
+    NOW = datetime(2026, 10, 1, 8, 0, tzinfo=UTC)  # 1 October, 11:00 in Bucharest
+
+    @classmethod
+    def setUpTestData(cls) -> None:
+        cls.customer = CustomerFactory()
+        cls.ron = Currency.objects.get_or_create(code="RON", defaults={"symbol": "RON"})[0]
+        created = {
+            "same-utc-day": (datetime(2026, 10, 1, 5, 0, tzinfo=UTC), 1000),
+            "bucharest-first": (datetime(2026, 9, 30, 22, 30, tzinfo=UTC), 200),  # 1 Oct 01:30 local
+            "previous-month": (datetime(2026, 9, 30, 20, 0, tzinfo=UTC), 30),  # 30 Sep 23:00 local
+        }
+        for index, (label, (created_at, amount)) in enumerate(created.items()):
+            invoice = Invoice.objects.create(
+                customer=cls.customer,
+                currency=cls.ron,
+                number=f"INV-CUTOFF-{index}-{label}",
+                status="paid",
+                subtotal_cents=amount,
+                total_cents=amount,
+                due_at=cls.NOW,
+            )
+            Invoice.objects.filter(pk=invoice.pk).update(created_at=created_at)
+
+    def test_current_month_is_the_local_calendar_month_from_its_first_moment(self) -> None:
+        with patch("django.utils.timezone.now", return_value=self.NOW):
+            totals = _calculate_monthly_revenue(Customer.objects.filter(pk=self.customer.pk))
+
+        self.assertEqual(totals, {"RON": 1200})
+
+    def test_cutoff_compares_the_raw_timestamp_so_the_index_still_applies(self) -> None:
+        """The cutoff must be a timestamp compared directly with created_at.
+
+        Wrapping created_at in a date conversion (created_at__date) is correct but makes the
+        database evaluate the conversion on every invoice, so the (customer, -created_at) index
+        cannot bound the scan and the staff dashboard degrades as invoice history grows.
+        """
+        with patch("django.utils.timezone.now", return_value=self.NOW), CaptureQueriesContext(connection) as queries:
+            _calculate_monthly_revenue(Customer.objects.filter(pk=self.customer.pk))
+
+        revenue_sql = next(q["sql"] for q in queries.captured_queries if "SUM(" in q["sql"].upper())
+        self.assertNotIn("django_datetime_cast_date", revenue_sql)
+        self.assertNotIn("::date", revenue_sql.lower())
+        self.assertRegex(revenue_sql, r'"created_at" >= ')

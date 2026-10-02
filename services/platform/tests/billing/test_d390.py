@@ -25,7 +25,7 @@ from apps.billing.d390 import (
     render_reconciliation_csv,
     validate_d390_xml,
 )
-from apps.billing.ec_sales_service import ReportingPeriod, aggregate_ec_services
+from apps.billing.ec_sales_service import ReportingPeriod, _vies_problems, aggregate_ec_services
 from apps.billing.invoice_models import Invoice, InvoiceLine
 from apps.billing.models import Currency, FXRate, Payment
 from apps.billing.refund_models import Refund
@@ -358,12 +358,31 @@ class ECSalesAggregationTests(D390FixtureMixin, TestCase):
         invoice.save()
         self.assert_blocked("conflicting_vat_validation")
 
-    def test_captured_inactive_vies_result_requires_review(self):
+    def test_incomplete_vies_proof_requires_review(self):
         invoice = self.make_invoice(issue=False)
-        invoice.vat_evidence["vies"] = {"is_valid": True, "is_active": False, "source": "vies"}
+        invoice.vat_evidence["vies"] = {"is_valid": True, "source": "vies"}
         invoice.issue()
         invoice.save()
         self.assert_blocked("conflicting_vat_validation")
+
+    def test_vies_proof_is_judged_on_validity_not_its_mirrored_is_active_flag(self):
+        """VIES returns one signal, `valid`; `VATValidation.is_active` is only ever written as a copy
+        of it (`billing/tasks.py`, `"is_active": is_valid`). A separate `is_active` check restated
+        the validity check that runs just before it and could never report on its own (#556)."""
+        invoice = self.make_invoice(issue=False)
+        for is_active in (True, False):
+            with self.subTest(is_active=is_active):
+                invoice.vat_evidence["vies"] = {
+                    "country_code": "DE",
+                    "vat_number": "136695976",
+                    "is_valid": True,
+                    "is_active": is_active,
+                    "source": "vies",
+                    "validated_at": "2026-08-15T11:00:00+00:00",
+                    "expires_at": None,
+                    "consultation_reference": "WAPIAAAAX1",
+                }
+                self.assertEqual(_vies_problems(invoice), [])
 
     def test_missing_invoice_lines_are_a_document_exception(self):
         invoice = self.make_invoice(issue=False)
