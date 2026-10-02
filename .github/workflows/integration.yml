@@ -170,6 +170,11 @@ jobs:
           tests.domains.test_durable_operations \
           tests.customers.test_payment_method_encryption_trigger \
           tests.common.test_migration_db_objects \
+          tests.users.test_lockout_counter_concurrency \
+          tests.users.test_staff_login_second_factor_concurrency \
+          tests.users.test_staff_login_enrollment_race \
+          tests.users.test_login_audit_failure_keeps_the_login \
+          tests.api.test_token_second_factor_concurrency \
           --settings=config.settings.ci --verbosity=2
 
     - name: Service isolation security tests (make test-security)
