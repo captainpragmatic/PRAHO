@@ -99,6 +99,7 @@ class NightlyPostgresConcurrencyWorkflowTests(SimpleTestCase):
         self.assertIn("tests.users.test_staff_login_second_factor_concurrency", command)
         self.assertIn("tests.users.test_staff_login_enrollment_race", command)
         self.assertIn("tests.users.test_login_audit_failure_keeps_the_login", command)
+        self.assertIn("tests.users.test_mfa_audit_isolation", command)
         self.assertIn("tests.api.test_token_second_factor_concurrency", command)
         self.assertIn("--settings=config.settings.ci", command)
         self.assertNotIn("config.settings.test", command)

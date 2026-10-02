@@ -779,6 +779,20 @@ class MFAService:
             raise
 
     @staticmethod
+    def _log_2fa_event_isolated(audit_request: TwoFactorAuditRequest) -> None:
+        """Audit a second-factor attempt without letting the audit decide or break it.
+
+        Runs in its own savepoint: a failed insert must not abort the caller's transaction
+        (PostgreSQL would refuse every later statement), and an audit failure must never turn
+        an accepted code into a rejected one after a backup code has already been consumed.
+        """
+        try:
+            with transaction.atomic():
+                AuditService.log_2fa_event(audit_request)
+        except Exception:
+            logger.exception("🔥 [MFA] 2FA audit write failed; the verification result stands")
+
+    @staticmethod
     def verify_mfa_code(user: "User", code: str, request: HttpRequest | None = None) -> dict[str, Any]:
         """
         🔍 Verify MFA code (TOTP or backup code) with enhanced security and audit logging
@@ -829,7 +843,7 @@ class MFAService:
                     )
 
                     # 📊 Audit backup code usage
-                    AuditService.log_2fa_event(
+                    MFAService._log_2fa_event_isolated(
                         TwoFactorAuditRequest(
                             event_type="2fa_backup_code_used",
                             user=user,
@@ -846,7 +860,7 @@ class MFAService:
 
             # 📊 Audit verification attempt
             event_type = "2fa_verification_success" if result["success"] else "2fa_verification_failed"
-            AuditService.log_2fa_event(
+            MFAService._log_2fa_event_isolated(
                 TwoFactorAuditRequest(
                     event_type=event_type,
                     user=user,
