@@ -2,11 +2,8 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
-from importlib import import_module
 from threading import Barrier, Event
-from types import SimpleNamespace
 
-from django.apps import apps
 from django.core.exceptions import ValidationError
 from django.db import close_old_connections, connection, connections, transaction
 from django.test import TestCase, TransactionTestCase
@@ -109,30 +106,6 @@ class CurrencyBoundCreditTests(TestCase):
         ])
         self.assertEqual(CreditLedger.balances_for_customer(self.customer), {"EUR": 1200})
         self.assertEqual(UsageInvoiceService()._get_customer_credit_balance(self.customer, self.eur), 0)
-
-    def test_backfill_uses_payment_evidence_and_holds_missing_or_conflicting_history(self) -> None:
-        source = self.invoice(self.eur, "EUR-LEGACY-CREDIT")
-        Invoice.objects.filter(pk=source.pk).update(locked_at=timezone.now())
-        payment = Payment.objects.create(customer=self.customer, currency=self.eur, amount_cents=2000)
-        ron_payment = Payment.objects.create(customer=self.customer, currency=self.ron, amount_cents=2000)
-        credit_entries = [
-            CreditLedger(customer=self.customer, payment=payment, delta_cents=1234, reason="Payment evidence"),
-            CreditLedger(customer=self.customer, invoice=source, delta_cents=5678, reason="Invoice evidence"),
-            CreditLedger(customer=self.customer, delta_cents=900, reason="No evidence"),
-            CreditLedger(customer=self.customer, invoice=source, payment=ron_payment,
-                         delta_cents=321, reason="Conflicting evidence"),
-        ]
-        for credit in credit_entries:
-            credit.currency_hold_reason = "Pending historical migration"
-        CreditLedger.objects.bulk_create(credit_entries)
-        migrate = import_module("apps.billing.migrations.0060_currency_bound_balances")
-        migrate.backfill_currency_identities(apps, SimpleNamespace(connection=connection))
-        for credit in credit_entries:
-            credit.refresh_from_db()
-        self.assertEqual([credit.currency_id for credit in credit_entries], ["EUR", "EUR", None, None])
-        self.assertEqual([credit.delta_cents for credit in credit_entries], [1234, 5678, 900, 321])
-        self.assertTrue(credit_entries[2].currency_hold_reason)
-        self.assertTrue(credit_entries[3].currency_hold_reason)
 
 
 class UsageInvoiceCurrencyIsolationTests(TestCase):
@@ -245,39 +218,6 @@ class GrandfatheringCurrencyTests(TestCase):
         self.assertTrue(result.is_err())
         self.assertIn("price protection needs review", result.unwrap_err())
         self.assertTrue(PriceGrandfathering.objects.get(customer=self.customer).is_active)
-
-    def test_grandfather_backfill_uses_original_document_and_holds_missing_evidence(self) -> None:
-        subscription = make_subscription(self.customer, self.product, self.ron)
-        now = timezone.now()
-        invoice = Invoice.objects.create(
-            customer=self.customer, currency=self.ron, number="PROMISE-SOURCE",
-            subtotal_cents=1500, total_cents=1500, due_at=now,
-        )
-        Invoice.objects.filter(pk=invoice.pk).update(locked_at=now)
-        BillingCycle.objects.create(
-            subscription=subscription, invoice=invoice, period_start=now,
-            period_end=now + timezone.timedelta(days=30),
-        )
-        other_product = make_product(suffix="-unknown-promise")
-        promises = [
-            PriceGrandfathering(
-                customer=self.customer, product=product, locked_price_cents=1500,
-                original_price_cents=1500, current_product_price_cents=2000, reason="Legacy promise",
-                currency_hold_reason="Pending historical migration",
-            )
-            for product in (self.product, other_product)
-        ]
-        PriceGrandfathering.objects.bulk_create(promises)
-        migrate = import_module("apps.billing.migrations.0060_currency_bound_balances")
-        migrate.backfill_currency_identities(apps, SimpleNamespace(connection=connection))
-        for promise in promises:
-            promise.refresh_from_db()
-        self.assertEqual(promises[0].currency_id, "RON")
-        self.assertEqual(promises[0].currency_hold_reason, "")
-        self.assertIsNone(promises[1].currency_id)
-        self.assertIn("retain existing subscription protection", promises[1].currency_hold_reason)
-        self.assertTrue(promises[1].is_active)
-        self.assertEqual([promise.locked_price_cents for promise in promises], [1500, 1500])
 
 
 class ConcurrentUsageCreditTests(TransactionTestCase):

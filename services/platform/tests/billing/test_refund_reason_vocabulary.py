@@ -10,7 +10,7 @@ Six of those terms are now real choices. Three were different spellings of choic
 already existed (``dispute_resolution``≡``dispute``, ``cancellation_request``≡``cancellation``,
 ``duplicate_invoice``/``duplicate_order``≡``duplicate_payment``) — adding both spellings would
 have put synonym pairs in a choices field and split every future report across them, so the
-templates were corrected and migration 0048 repairs the stored rows.
+templates were corrected and the old history's migration 0048 repaired the stored rows.
 
 The template scan below is the durable part: it is the test that would have caught this on the
 day the vocabularies diverged.
@@ -175,31 +175,3 @@ class RefundReasonVocabularyTests(SimpleTestCase):
             {member.value for member in RefundReason},
             {value for value, _label in Refund.REASON_CHOICES},
         )
-
-    def test_the_backfill_only_rewrites_values_that_were_never_valid(self) -> None:
-        """Migration 0048 must repair bad rows without touching correct ones.
-
-        The mapping is one-way by construction: every key is a spelling the column should
-        never have held, and every target is a real choice. If a key were also a valid
-        choice the migration would be rewriting good data.
-        """
-        import importlib  # noqa: PLC0415
-
-        migration = importlib.import_module("apps.billing.migrations.0048_alter_refund_reason")
-        valid = {value for value, _label in Refund.REASON_CHOICES}
-
-        self.assertTrue(migration.REASON_ALIASES, msg="The alias map is empty; the backfill does nothing.")
-        for stored, canonical in migration.REASON_ALIASES.items():
-            with self.subTest(stored=stored):
-                self.assertNotIn(stored, valid, msg=f"{stored!r} is a valid choice — the backfill would corrupt it.")
-                self.assertIn(canonical, valid, msg=f"{stored!r} maps to {canonical!r}, which is not a valid choice.")
-
-    def test_the_spellings_the_templates_used_to_offer_are_all_covered(self) -> None:
-        """Fix Completeness: each corrected template value needs a backfill entry, or the rows
-        already written under it stay unreadable forever."""
-        import importlib  # noqa: PLC0415
-
-        migration = importlib.import_module("apps.billing.migrations.0048_alter_refund_reason")
-
-        for retired in ("dispute_resolution", "duplicate_invoice", "duplicate_order", "cancellation_request"):
-            self.assertIn(retired, migration.REASON_ALIASES)

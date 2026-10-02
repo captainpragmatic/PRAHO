@@ -21,7 +21,7 @@ from apps.billing.services import ProformaConversionService
 from apps.customers.models import Customer
 
 # The seed migration's module name starts with a digit, so import it by string.
-_seed_migration = import_module("apps.billing.migrations.0047_seed_supported_currencies")
+_seed_migration = import_module("apps.billing.migrations.0004_seed_supported_currencies")
 
 
 class ForeignCurrencyConversionE2ETests(TestCase):
@@ -102,7 +102,7 @@ class ForeignCurrencyConversionFailClosedTests(TestCase):
 
 
 class SeedCurrenciesMigrationTests(TestCase):
-    """The 0046 seed callback is idempotent and preserves existing metadata (#103)."""
+    """The currency seed callback is idempotent and preserves existing metadata (#103)."""
 
     def test_seed_currencies_is_idempotent_and_preserves_metadata(self) -> None:
         # A pre-existing EUR row with custom metadata must NOT be overwritten by the seed.

@@ -21,9 +21,7 @@ from __future__ import annotations
 import uuid
 from decimal import Decimal
 
-from django.db import connection
-from django.db.migrations.executor import MigrationExecutor
-from django.test import TestCase, TransactionTestCase
+from django.test import TestCase
 from django.utils import timezone
 
 from apps.billing.efactura.models import EFacturaDocument, EFacturaDocumentType, EFacturaStatus
@@ -35,10 +33,6 @@ from apps.billing.invoice_models import (
     Invoice,
 )
 from tests.factories.billing_factories import CustomerFactory, InvoiceLineFactory
-from tests.helpers.migrations import restore_to_leaf
-
-MIGRATE_FROM = ("billing", "0055_providerissuance_submissions")
-MIGRATION_UNDER_TEST = ("billing", "0056_repair_credit_note_document_types")
 
 
 class StaleDocumentTypeRuntimeRepairTests(TestCase):
@@ -173,71 +167,3 @@ class StaleDocumentTypeRuntimeRepairTests(TestCase):
         returned = EFacturaService()._get_or_create_document(invoice)
 
         self.assertEqual(returned.document_type, EFacturaDocumentType.INVOICE.value)
-
-
-class StaleDocumentTypeMigrationTest(TransactionTestCase):
-    """A deployment that already holds such rows cannot wait for the runtime path."""
-
-    def tearDown(self) -> None:
-        restore_to_leaf("billing")
-        super().tearDown()
-
-    def _seed_at(self, state: str) -> object:
-        executor = MigrationExecutor(connection)
-        executor.migrate([MIGRATE_FROM])
-        old = executor.loader.project_state([MIGRATE_FROM]).apps
-
-        customer_model = old.get_model("customers", "Customer")
-        currency_model = old.get_model("billing", "Currency")
-        invoice_model = old.get_model("billing", "Invoice")
-        document_model = old.get_model("billing", "EFacturaDocument")
-
-        customer = customer_model.objects.create(
-            name="Test Co", customer_type="company", company_name="Test Co", status="active"
-        )
-        currency, _ = currency_model.objects.get_or_create(
-            code="RON", defaults={"symbol": "L", "decimals": 2, "name": "Romanian Leu"}
-        )
-        original = invoice_model.objects.create(
-            customer=customer,
-            currency=currency,
-            number="FCT-000950",
-            status="issued",
-            subtotal_cents=10000,
-            tax_cents=2100,
-            total_cents=12100,
-            bill_to_name="Test Co",
-            bill_to_country="RO",
-        )
-        credit_note = invoice_model.objects.create(
-            customer=customer,
-            currency=currency,
-            number="CN-000950",
-            status="issued",
-            document_kind="credit_note",
-            reverses_invoice=original,
-            subtotal_cents=-10000,
-            tax_cents=-2100,
-            total_cents=-12100,
-            bill_to_name="Test Co",
-            bill_to_country="RO",
-        )
-        document = document_model.objects.create(
-            invoice=credit_note, document_type="invoice", status=state, environment="test"
-        )
-        return document.pk
-
-    def _document_type_after_migration(self, pk: object) -> str:
-        MigrationExecutor(connection).migrate([MIGRATION_UNDER_TEST])
-        new = MigrationExecutor(connection).loader.project_state([MIGRATION_UNDER_TEST]).apps
-        return str(new.get_model("billing", "EFacturaDocument").objects.get(pk=pk).document_type)
-
-    def test_an_unsubmitted_row_is_repaired(self) -> None:
-        pk = self._seed_at("draft")
-
-        self.assertEqual(self._document_type_after_migration(pk), "credit_note")
-
-    def test_a_submitted_row_is_left_as_filed(self) -> None:
-        pk = self._seed_at("accepted")
-
-        self.assertEqual(self._document_type_after_migration(pk), "invoice")

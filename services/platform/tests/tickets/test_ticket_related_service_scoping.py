@@ -1,9 +1,6 @@
 """Customer ticket service links must stay within the authenticated customer."""
 
-from importlib import import_module
 
-from django.apps import apps
-from django.db import connection
 from django.test import TestCase, override_settings
 
 from apps.billing.models import Currency
@@ -90,15 +87,3 @@ class TicketRelatedServiceScopingTests(HMACTestMixin, TestCase):
         data = response.json()["data"]["ticket"]
         self.assertIsNone(data["related_service"])
         self.assertEqual(data["related_service_name"], "")
-
-    def test_migration_unlinks_foreign_services(self) -> None:
-        foreign_ticket = Ticket.objects.create(
-            customer=self.customer, related_service=self.other_service, title="Foreign", description="Legacy"
-        )
-        own_ticket = Ticket.objects.create(
-            customer=self.customer, related_service=self.service, title="Own", description="Valid"
-        )
-        migration = import_module("apps.tickets.migrations.0005_unlink_foreign_services")
-        migration.unlink_foreign_services(apps, connection.schema_editor())
-        self.assertIsNone(Ticket.objects.get(pk=foreign_ticket.pk).related_service_id)
-        self.assertEqual(Ticket.objects.get(pk=own_ticket.pk).related_service_id, self.service.pk)
