@@ -270,3 +270,15 @@ class APILimiterBrowserNavigationTests(TestCase):
             response = self.client.get("/order/checkout/", HTTP_HX_REQUEST="true")
         self.assertEqual(response.status_code, 503)
         self.assertEqual(json.loads(response.content)["error"], store_unavailable_message())
+
+    def test_a_probe_without_an_html_accept_still_gets_503(self) -> None:
+        """Health checks and load-balancer probes send no Accept header or */*. A redirect would
+        read as "up" to many of them while the counter store is down, so only an explicit
+        text/html page load is treated as a browser navigation."""
+        for accept in (None, "*/*"):
+            with self.subTest(accept=accept):
+                headers = {} if accept is None else {"HTTP_ACCEPT": accept}
+                with patch("apps.common.counters.increment", side_effect=store_down()):
+                    response = self.client.get("/order/checkout/", **headers)
+                self.assertEqual(response.status_code, 503, response.content)
+                self.assertEqual(response["Retry-After"], str(STORE_UNAVAILABLE_RETRY_AFTER_SECONDS))

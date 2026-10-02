@@ -531,7 +531,9 @@ class APIRateLimitMiddleware:
         except Exception:
             # Fail-closed with the shared store-failure contract (#554).
             logger.error("🔥 [APIRateLimit] Counter store error; denying request")
-            if wants_json(request):
+            # Only an explicit HTML page load is redirected. A caller without text/html in Accept
+            # (health checks, load-balancer probes, scripts) keeps the 503 a redirect would hide.
+            if wants_json(request) or "text/html" not in request.headers.get("Accept", ""):
                 return store_unavailable_json()
             return self._browser_store_unavailable(request)
 
