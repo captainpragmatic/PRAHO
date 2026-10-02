@@ -258,3 +258,9 @@ class InputHxSyncAndIndicatorTests(SimpleTestCase):
         self.assertIn('hx-sync="closest form:abort"', result)
         result = _render('{% input_field "f" input_type="textarea" hx_get="/x/" hx_sync="closest form:abort" %}')
         self.assertIn('hx-sync="closest form:abort"', result)
+
+    def test_hx_indicator_renders_on_input_and_textarea(self) -> None:
+        result = _render('{% input_field "f" hx_get="/x/" hx_indicator="#spinner" %}')
+        self.assertIn('hx-indicator="#spinner"', result)
+        result = _render('{% input_field "f" input_type="textarea" hx_get="/x/" hx_indicator="#spinner" %}')
+        self.assertIn('hx-indicator="#spinner"', result)

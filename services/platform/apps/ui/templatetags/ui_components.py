@@ -48,6 +48,7 @@ class HTMXAttributes:
     hx_push_url: str | None = None
     hx_select: str | None = None
     hx_include: str | None = None
+    hx_sync: str | None = None
     hx_boost: bool = False
 
 
@@ -301,6 +302,9 @@ def input_field(
         "hx_trigger": htmx.hx_trigger,
         "hx_target": htmx.hx_target,
         "hx_swap": htmx.hx_swap,
+        "hx_include": htmx.hx_include,
+        "hx_sync": htmx.hx_sync,
+        "hx_indicator": htmx.hx_indicator,
         "options": config.options,
         "romanian_validation": config.romanian_validation,
         "has_error": bool(config.error),
