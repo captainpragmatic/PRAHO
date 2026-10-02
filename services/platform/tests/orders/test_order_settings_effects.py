@@ -1,12 +1,11 @@
 """The `orders.*` settings whose effect nothing asserted.
 
-Three of the seven settings in the `orders` group are unreachable - `max_price_override_cents`,
-`max_price_override_multiplier` and `max_payment_failures_before_fail` are read only by getters that
-have no caller, recorded in `scripts/settings_inert_baseline.txt`. There is no effect to test until
-they are wired, and writing a test against the getter would misrepresent that.
+`max_payment_failures_before_fail` is read only by a getter that has no caller, recorded in
+`scripts/settings_inert_baseline.txt`. There is no effect to test until it is wired, and writing a test
+against the getter would misrepresent that.
 
-The four that ARE wired are covered here, each through the decision it changes rather than through
-the getter that reads it:
+The wired ones are covered here, each through the decision it changes rather than through the getter
+that reads it:
 
 * `card_timeout_hours` and `bank_transfer_timeout_hours` decide when an unpaid order is cancelled.
   `test_order_timeout.py` proves the payment-method split (#222) against the shipped defaults; these
@@ -19,6 +18,8 @@ the getter that reads it:
   `get_integer_setting` to 999_999 to prove the clamp, which cannot happen through the settings UI -
   the catalog validation caps the key at 10. Both layers are asserted here, because a clamp with no
   reachable input is only defence in depth if the validation genuinely holds.
+* `max_price_override_cents` and `max_price_override_multiplier` bound a staff manual price on an
+  order item (#542). They are asserted through the add-item endpoint refusing the price.
 """
 
 from __future__ import annotations
@@ -41,15 +42,19 @@ from apps.orders.tasks import (
     get_max_paid_order_confirmation_failures,
     process_pending_orders,
 )
+from apps.orders.views import get_max_price_override_cents, get_max_price_override_multiplier
 from apps.products.models import Product
 from apps.provisioning.models import ServicePlan
 from apps.settings.services import SettingsService
 from tests.helpers.fsm_helpers import force_status
+from tests.orders.test_price_override_enforcement import PriceOverrideTestBase
 
 CARD_TIMEOUT_KEY = "orders.card_timeout_hours"
 BANK_TIMEOUT_KEY = "orders.bank_transfer_timeout_hours"
 REVIEW_THRESHOLD_KEY = "orders.review_threshold_cents"
 CONFIRMATION_FAILURES_KEY = "orders.max_paid_order_confirmation_failures"
+MAX_OVERRIDE_CENTS_KEY = "orders.max_price_override_cents"
+MAX_OVERRIDE_MULTIPLIER_KEY = "orders.max_price_override_multiplier"
 
 
 class OrderSettingEffectBase(TestCase):
@@ -293,3 +298,35 @@ class ConfirmationFailureLimitSettingEffectTests(OrderSettingEffectBase):
         result = SettingsService.update_setting(CONFIRMATION_FAILURES_KEY, 0)
         self.assertTrue(result.is_err(), "validation must reject a limit below the catalog minimum")
         self.assertGreaterEqual(get_max_paid_order_confirmation_failures(), 1)
+
+
+class PriceOverrideLimitSettingEffectTests(PriceOverrideTestBase):
+    """The configured cap and multiplier, not module constants, decide whether a manual price is refused (#542)."""
+
+    def set_value(self, key: str, value: int) -> None:
+        with self.captureOnCommitCallbacks(execute=True):
+            result = SettingsService.update_setting(key, value)
+        self.assertTrue(result.is_ok(), result)
+
+    def test_the_catalog_default_cap_is_what_the_validator_reads(self) -> None:
+        self.assertEqual(SettingsService.DEFAULT_SETTINGS[MAX_OVERRIDE_CENTS_KEY], 50_000_000)
+        self.assertEqual(get_max_price_override_cents(), 50_000_000)
+        self.assertEqual(get_max_price_override_multiplier(), 10)
+
+    def test_lowering_the_multiplier_refuses_an_override_the_default_would_allow(self) -> None:
+        self.set_value(MAX_OVERRIDE_MULTIPLIER_KEY, 2)
+        before = self.totals()
+        response = self.create_item(self.billing, unit=3_000)
+        self.assert_rejected(response, "Price override cannot exceed 2x original price")
+        self.assertFalse(self.order.items.exists())
+        self.assertEqual(self.totals(), before)
+        self.assertEqual(self.create_item(self.billing, unit=2_000).status_code, 302)
+
+    def test_lowering_the_cap_refuses_an_override_the_default_would_allow(self) -> None:
+        self.set_value(MAX_OVERRIDE_CENTS_KEY, 2_500)
+        before = self.totals()
+        response = self.create_item(self.billing, unit=3_000)
+        self.assert_rejected(response, "Price cannot exceed 2500 cents")
+        self.assertFalse(self.order.items.exists())
+        self.assertEqual(self.totals(), before)
+        self.assertEqual(self.create_item(self.billing, unit=2_500).status_code, 302)

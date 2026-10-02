@@ -221,6 +221,28 @@ class CounterStoreTests(TestCase):
         self.clock.return_value = 10_060
         self.assertIsNone(counters.lookup("empty-result"))
 
+    def test_completion_can_retain_the_result_beyond_the_claim_lease(self) -> None:
+        self.assertTrue(counters.claim("retained", 300, "owner"))
+        self.clock.return_value = 10_100
+        self.assertTrue(counters.complete("retained", "owner", "order-1", retain_seconds=86_400))
+        self.assertEqual(Counter.objects.get(key="retained").expires_at, 96_500)
+        self.clock.return_value = 10_300
+        self.assertEqual(counters.lookup("retained"), "order-1")
+        self.assertFalse(counters.claim("retained", 300, "intruder"))
+        self.clock.return_value = 96_500
+        self.assertIsNone(counters.lookup("retained"))
+
+    def test_retention_never_shortens_the_lease_or_revives_a_lost_claim(self) -> None:
+        self.assertTrue(counters.claim("short", 300, "owner"))
+        self.assertTrue(counters.complete("short", "owner", "done", retain_seconds=10))
+        self.assertEqual(Counter.objects.get(key="short").expires_at, 10_300)
+        self.assertTrue(counters.claim("held", 60, "owner"))
+        self.assertFalse(counters.complete("held", "other", "stolen", retain_seconds=86_400))
+        self.assertEqual(Counter.objects.get(key="held").expires_at, 10_060)
+        self.clock.return_value = 10_060
+        self.assertFalse(counters.complete("held", "owner", "late", retain_seconds=86_400))
+        self.assertEqual(Counter.objects.get(key="held").expires_at, 10_060)
+
     def test_claim_value_length_is_consistent_across_backends(self) -> None:
         owner = "t" * 255
         result = "r" * 255

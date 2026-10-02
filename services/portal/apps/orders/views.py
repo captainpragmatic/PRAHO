@@ -37,6 +37,7 @@ from apps.common import counters
 from apps.common.decorators import require_billing_access
 from apps.common.rate_limit_feedback import get_rate_limit_message, is_rate_limited_error
 from apps.common.request_ip import get_safe_client_ip
+from apps.common.store_unavailable import store_unavailable_json, store_unavailable_response
 
 from .security import OrderSecurityHardening
 from .services import (
@@ -157,6 +158,11 @@ def _parse_total_cents(order_total: str) -> int:
 
 ALLOWED_PAYMENT_METHODS = frozenset({"bank_transfer", "card"})
 
+# The checkout claim's lease only has to outlast one Platform round trip, but the order id it publishes
+# must answer a resubmitted checkout for as long as that cart could still be resubmitted (#551).
+CHECKOUT_CLAIM_LEASE_SECONDS = 300
+CHECKOUT_REPLAY_RETENTION_SECONDS = GDPRCompliantCartSession.CART_EXPIRY_HOURS * 3600
+
 
 @dataclasses.dataclass
 class CheckoutContext:
@@ -240,7 +246,7 @@ def _validate_checkout_request(request: HttpRequest) -> "CheckoutContext | HttpR
             completed = counters.lookup(f"orders:idempotency:{customer_id}:{idempotency_key}")
         except DatabaseError:
             logger.exception("🔥 [Orders] Checkout replay store unavailable")
-            return _checkout_conflict(request, _("Service temporarily unavailable"), 503)
+            return store_unavailable_response(request, "orders:checkout")
         if completed:
             try:
                 order_id = uuid.UUID(completed)
@@ -358,8 +364,13 @@ def _create_and_process_order(request: HttpRequest, ctx: CheckoutContext) -> Htt
         idem_cache_key = f"orders:idempotency:{ctx.customer_id}:{ctx.idempotency_key}"
 
         claim_token = uuid.uuid4().hex
-        if not counters.claim(idem_cache_key, 300, claim_token):
-            completed_order_id = counters.lookup(idem_cache_key)
+        try:
+            claimed = counters.claim(idem_cache_key, CHECKOUT_CLAIM_LEASE_SECONDS, claim_token)
+            completed_order_id = None if claimed else counters.lookup(idem_cache_key)
+        except DatabaseError:
+            logger.exception("🔥 [Orders] Checkout claim store unavailable: %s", idem_cache_key)
+            return store_unavailable_response(request, "orders:checkout")
+        if not claimed:
             if completed_order_id:
                 try:
                     uuid.UUID(completed_order_id)
@@ -440,7 +451,19 @@ def _create_and_process_order(request: HttpRequest, ctx: CheckoutContext) -> Htt
 
             # Retain the reservation once Platform has created the order, including
             # when publishing the result fails. Platform also receives the same key.
-            if not counters.complete(idem_cache_key, claim_token, str(order_id or "__processed__")):
+            try:
+                completed = counters.complete(
+                    idem_cache_key,
+                    claim_token,
+                    str(order_id or "__processed__"),
+                    retain_seconds=CHECKOUT_REPLAY_RETENTION_SECONDS,
+                )
+            except DatabaseError:
+                # The order exists and keeps its Platform idempotency key, so a retry after the claim
+                # lease resolves to the same order rather than a second one.
+                logger.exception("🔥 [Orders] Checkout result store unavailable: %s", idem_cache_key)
+                return store_unavailable_response(request, "orders:checkout")
+            if not completed:
                 logger.warning("🚨 [Orders] Checkout claim expired before completion: %s", idem_cache_key)
                 return _checkout_conflict(
                     request, _("Your order is being processed. Please check your orders list."), 409
@@ -1376,7 +1399,7 @@ def payment_success_webhook(request: HttpRequest) -> JsonResponse:
         verified = _verify_platform_webhook(request, token)
     except DatabaseError:
         logger.exception("🔥 [Webhook] Replay store unavailable")
-        return JsonResponse({"error": _("Service temporarily unavailable")}, status=503)
+        return store_unavailable_json()
     if not verified:
         logger.warning("🚨 [Webhook] Invalid platform signature or replay; request rejected")
         return JsonResponse({"error": _("Unauthorized")}, status=401)
@@ -1460,7 +1483,12 @@ def confirm_payment(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911, PLR
         # 🔒 SECURITY: Idempotency guard — prevent double-processing of same payment
         idem_key = f"confirm_payment:{customer_id}:{payment_intent_id}"
         claim_token = uuid.uuid4().hex
-        if not counters.claim(idem_key, 300, claim_token):
+        try:
+            claimed = counters.claim(idem_key, 300, claim_token)
+        except DatabaseError:
+            logger.exception("🔥 [Orders] Payment claim store unavailable: %s", idem_key)
+            return store_unavailable_json()
+        if not claimed:
             logger.warning("⚠️ [Orders] Duplicate confirm_payment blocked: %s", idem_key)
             # Return 200 with success:true — from the customer's perspective the payment
             # IS being processed.  A 409 would trigger the error path in the frontend JS
