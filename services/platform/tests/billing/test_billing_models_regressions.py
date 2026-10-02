@@ -290,9 +290,8 @@ class TaxRuleModelAdditionalTestCase(TestCase):
     def test_tax_rule_is_active_default_today(self):
         """Test TaxRule.is_active() with default today's date"""
         with patch('django.utils.timezone.now') as mock_now:
-            # Create a mock datetime object with date() method
-            from datetime import datetime
-            mock_now.return_value = datetime(2024, 6, 15, 12, 0, 0)
+            # timezone.now() is always aware under USE_TZ; a naive value here was unrealistic.
+            mock_now.return_value = datetime(2024, 6, 15, 12, 0, 0, tzinfo=UTC)
 
             self.assertTrue(self.tax_rule.is_active())
 

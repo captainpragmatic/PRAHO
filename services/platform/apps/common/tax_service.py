@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import date, datetime, time, timedelta
 from decimal import ROUND_HALF_EVEN, Decimal
 from enum import Enum
 from typing import Any, ClassVar, TypedDict
@@ -179,6 +180,9 @@ class TaxConfiguration:
         if country_code in ["ROMANIA", "ROMÂNIA"]:
             country_code = "RO"
 
+        # One date for the whole lookup: the rule is chosen for it, and the cache expires with it.
+        lookup_date = timezone.localdate()
+
         # Check cache first
         cache_key = f"{cls.CACHE_KEY_PREFIX}:{country_code}"
         cached_rate = cache.get(cache_key)
@@ -187,7 +191,7 @@ class TaxConfiguration:
             return Decimal(cached_rate) / 100 if as_decimal else Decimal(cached_rate)
 
         # Try to get from database (if model exists)
-        rate = cls._get_rate_from_database(country_code)
+        rate = cls._get_rate_from_database(country_code, lookup_date)
 
         # Fall back to settings
         if rate is None:
@@ -213,31 +217,47 @@ class TaxConfiguration:
             if supplier_country != country_code:
                 # Same lookup chain as above - a runtime-configured supplier rate must
                 # win over the hardcoded table. Decimal(0) is falsy, so test for None.
-                for source in (cls._get_rate_from_database, cls._get_rate_from_settings):
-                    if (candidate := source(supplier_country)) is not None:
-                        rate = candidate
-                        break
+                candidate = cls._get_rate_from_database(supplier_country, lookup_date)
+                if candidate is None:
+                    candidate = cls._get_rate_from_settings(supplier_country)
+                if candidate is not None:
+                    rate = candidate
             if rate is None:
                 rate = cls.DEFAULT_VAT_RATES.get(supplier_country, cls.DEFAULT_VAT_RATES["RO"])
 
         # Cache the rate. A rate borrowed from the supplier as a fail-safe is NOT
         # cached under the customer's code: a later TaxRule change invalidates only
         # the supplier's key, which would leave the alias serving a superseded rate.
-        if not used_supplier_fallback:
-            cache.set(cache_key, str(rate), cls.CACHE_TIMEOUT)
+        timeout = cls._cache_timeout(lookup_date)
+        if not used_supplier_fallback and timeout > 0:
+            cache.set(cache_key, str(rate), timeout)
         logger.info(f"💰 [TaxService] Loaded rate for {country_code}: {rate}%")
 
         return rate / 100 if as_decimal else rate
 
     @classmethod
-    def _get_rate_from_database(cls, country_code: str) -> Decimal | None:
-        """Get VAT rate from TaxRule model as percentage (e.g., 21.0)."""
+    def _cache_timeout(cls, lookup_date: date) -> int:
+        """Seconds a rate chosen for lookup_date may be cached: never past the end of that date.
+
+        The cache key has no date, so a rate cached late on the last day of a rate period would
+        otherwise be served after the next period started. The deadline is the midnight that ends
+        the date the rule was chosen for, not one read after the query, which could already
+        belong to the next day. Compared as instants, so a DST change cannot shift it; zero or
+        less means the date is over and the rate must not be cached at all.
+        """
+        end_of_lookup_date = timezone.make_aware(datetime.combine(lookup_date + timedelta(days=1), time.min))
+        return min(cls.CACHE_TIMEOUT, int(end_of_lookup_date.timestamp() - timezone.now().timestamp()))
+
+    @classmethod
+    def _get_rate_from_database(cls, country_code: str, on_date: date | None = None) -> Decimal | None:
+        """Get the VAT rate in force on on_date (default: today, Romanian calendar) as a percentage."""
         try:
             from apps.billing.tax_models import (  # noqa: PLC0415  # Deferred: avoids circular import
                 TaxRule,  # Circular: cross-app  # Deferred: avoids circular import
             )
 
-            today = timezone.now().date()
+            # A rule is in force for a Romanian calendar date; the UTC date lags it by up to three hours.
+            today = on_date if on_date is not None else timezone.localdate()
             rule = (
                 TaxRule.objects.filter(country_code=country_code.upper(), tax_type="vat", valid_from__lte=today)
                 .filter(models.Q(valid_to__isnull=True) | models.Q(valid_to__gte=today))
