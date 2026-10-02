@@ -23,7 +23,7 @@ from django.utils import timezone
 
 from apps.audit.models import AuditEvent
 from apps.users.mfa import TOTPService
-from apps.users.models import User, UserLoginLog
+from apps.users.models import APIToken, User, UserLoginLog
 from apps.users.services import SessionSecurityService
 from apps.users.views import PRE_2FA_SESSION_KEY, PRE_2FA_TTL_SECONDS, _complete_pending_login, _PendingLogin
 
@@ -335,3 +335,42 @@ class StaffLoginSecondFactorTests(TestCase):
         self.password_step(plain)
         self.assertEqual(self.authenticated_id(), str(plain.pk))
         self.assertNotIn(PRE_2FA_SESSION_KEY, self.client.session)
+
+
+# Same overrides as tests/api/test_token_endpoint_second_factor.py: the token endpoint's
+# throttles are live, and the replay marker needs a real cache.
+@override_settings(CACHES=settings.LOCMEM_TEST_CACHE, RATE_LIMITING_ENABLED=True)
+class CrossChannelReplayTests(TestCase):
+    """One TOTP code is good for one login, whichever channel spends it first."""
+
+    def setUp(self) -> None:
+        cache.clear()
+        self.addCleanup(cache.clear)
+        self.user = User.objects.create_user(
+            email="cross-channel@example.ro", password=PASSWORD, is_staff=True, staff_role="support"
+        )
+        self.secret = TOTPService.generate_secret()
+        self.user.two_factor_secret = self.secret
+        self.user.two_factor_enabled = True
+        self.user.save()
+        self.code = pyotp.TOTP(self.secret).now()
+
+    def web_login(self, client: Client) -> Any:
+        client.post(reverse("users:login"), {"email": self.user.email, "password": PASSWORD})
+        return client.post(reverse("users:mfa_verify"), {"token": self.code})
+
+    def api_token(self) -> Any:
+        body = {"email": self.user.email, "password": PASSWORD, "mfa_token": self.code}
+        return Client().post("/api/users/token/", body, content_type="application/json")
+
+    def test_code_spent_on_the_web_is_refused_by_the_token_endpoint(self) -> None:
+        web = Client()
+        self.assertEqual(self.web_login(web)["Location"], reverse("dashboard"))
+        self.assertEqual(self.api_token().status_code, 401)
+        self.assertFalse(APIToken.objects.filter(user=self.user).exists())
+
+    def test_code_spent_on_the_token_endpoint_is_refused_on_the_web(self) -> None:
+        self.assertEqual(self.api_token().status_code, 200)
+        web = Client()
+        self.web_login(web)
+        self.assertNotIn("_auth_user_id", web.session, "a TOTP code spent on the API logged in on the web")
