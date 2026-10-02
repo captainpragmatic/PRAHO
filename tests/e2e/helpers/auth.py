@@ -25,6 +25,15 @@ from tests.e2e.helpers.constants import (
     is_login_url,
 )
 
+# A staff login without ?next lands here. Checking for it, rather than for "left the
+# login page", makes a login stuck at the second-factor step fail loudly.
+PLATFORM_DASHBOARD_PATH = "/dashboard/"
+
+
+def _on_platform_dashboard(page: Page) -> bool:
+    return urlsplit(page.url).path == PLATFORM_DASHBOARD_PATH
+
+
 # ===============================================================================
 # COOKIE CONSENT
 # ===============================================================================
@@ -118,8 +127,8 @@ def login_platform_user(page: Page, email: str | None = None, password: str | No
                 continue
             return False
 
-        # Already authenticated (redirected away from login page)
-        if PLATFORM_LOGIN_URL not in page.url:
+        # Already authenticated (login_view redirects to the dashboard)
+        if _on_platform_dashboard(page):
             print(f"✅ Already logged in to platform as {email}")
             return True
 
@@ -138,7 +147,7 @@ def login_platform_user(page: Page, email: str | None = None, password: str | No
             # Click submit and wait for navigation with longer timeout
             page.click('button[type="submit"]')
             try:
-                page.wait_for_url(lambda url: PLATFORM_LOGIN_URL not in url, timeout=15000)
+                page.wait_for_url(lambda url: urlsplit(url).path == PLATFORM_DASHBOARD_PATH, timeout=15000)
             except Exception:
                 # Fallback: wait for networkidle and check manually
                 page.wait_for_load_state("networkidle", timeout=8000)
@@ -149,9 +158,8 @@ def login_platform_user(page: Page, email: str | None = None, password: str | No
                 continue
             return False
 
-        # Check we left the login page
-        if PLATFORM_LOGIN_URL not in page.url:
-            # Verify we're actually on a dashboard/authenticated page
+        # Landing anywhere but the dashboard (the 2FA step included) is a failed login
+        if _on_platform_dashboard(page):
             page.wait_for_load_state("networkidle", timeout=5000)
             print(f"✅ Successfully logged in to platform as {email}")
             return True

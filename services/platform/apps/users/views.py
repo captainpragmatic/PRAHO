@@ -6,6 +6,7 @@ Romanian-localized authentication and profile forms.
 import logging
 import secrets
 import time
+from dataclasses import dataclass
 from typing import Any, cast
 
 import pyotp
@@ -27,6 +28,7 @@ from django.forms import Form
 from django.http import HttpRequest, HttpResponse, HttpResponseBase, JsonResponse
 from django.shortcuts import redirect, render, resolve_url
 from django.urls import reverse, reverse_lazy
+from django.utils.crypto import constant_time_compare
 from django.utils.decorators import method_decorator
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.translation import gettext as _
@@ -35,7 +37,7 @@ from django.views.decorators.http import require_http_methods
 from django.views.generic import DetailView, ListView
 
 from apps.audit.services import AuthenticationAuditService, LogoutEventData
-from apps.common.constants import BACKUP_CODE_LENGTH, BACKUP_CODE_LOW_WARNING_THRESHOLD
+from apps.common.constants import BACKUP_CODE_LOW_WARNING_THRESHOLD
 from apps.common.rate_limiting import rate_limit
 from apps.common.request_ip import get_safe_client_ip
 
@@ -45,7 +47,7 @@ from .forms import (
     TwoFactorVerifyForm,
     UserProfileForm,
 )
-from .mfa import MFAService, TOTPService
+from .mfa import LOGIN_METHOD_REQUEST_ATTR, MFAService, TOTPService, verify_login_second_factor
 from .models import CustomerMembership, User, UserLoginLog, UserProfile
 from .services import SessionSecurityService
 
@@ -89,6 +91,98 @@ def _handle_account_lockout(
         return None, None
 
 
+# The password step of an enrolled staff login parks its state here until mfa_verify.
+PRE_2FA_SESSION_KEY = "pre_2fa"
+PRE_2FA_TTL_SECONDS = 300
+
+
+@dataclass(frozen=True)
+class _PendingLogin:
+    """A login that passed the password step and still owes the second factor."""
+
+    user_id: int
+    issued_at: int
+    remember_me: bool
+    next: str
+    auth_hash: str
+    backend: str
+
+
+def _redirect(request: HttpRequest, url: str) -> HttpResponse:
+    """Redirect, with a full-page HX-Redirect for HTMX requests."""
+    if request.headers.get("HX-Request"):
+        response = HttpResponse()
+        response["HX-Redirect"] = url
+        return response
+    return redirect(url)
+
+
+def _start_second_factor(request: HttpRequest, user: User, form: LoginForm) -> HttpResponse:
+    """Stop an enrolled user's login at the password and hand it to mfa_verify.
+
+    No session is established and the failure counter is left alone: both happen only
+    once the second factor passes.
+    """
+    next_url = _get_safe_redirect_target(request, fallback="dashboard")
+    # A fresh key, so the pending state never rides on the pre-authentication session ID.
+    request.session.cycle_key()
+    request.session[PRE_2FA_SESSION_KEY] = {
+        "user_id": user.pk,
+        "issued_at": int(time.time()),
+        "remember_me": bool(form.cleaned_data.get("remember_me")),
+        "next": next_url,
+        # Binds the pending login to the credentials it was started with.
+        "auth_hash": user.get_session_auth_hash(),
+        "backend": str(getattr(user, "backend", "")),
+    }
+    UserLoginLog.objects.create(
+        user=user,
+        ip_address=get_safe_client_ip(request),
+        user_agent=request.META.get("HTTP_USER_AGENT", ""),
+        status="password_ok_2fa_pending",
+    )
+    return _redirect(request, reverse("users:mfa_verify"))
+
+
+def _read_pending_login(request: HttpRequest) -> _PendingLogin | None:
+    """Return the pending login if it is well formed and still fresh, else None."""
+    raw = request.session.get(PRE_2FA_SESSION_KEY)
+    if not isinstance(raw, dict):
+        return None
+    user_id, issued_at = raw.get("user_id"), raw.get("issued_at")
+    remember_me, next_url = raw.get("remember_me"), raw.get("next")
+    auth_hash, backend = raw.get("auth_hash"), raw.get("backend")
+    well_formed = (
+        type(user_id) is int
+        and type(issued_at) is int
+        and isinstance(remember_me, bool)
+        and isinstance(next_url, str)
+        and isinstance(auth_hash, str)
+        and isinstance(backend, str)
+    )
+    if not well_formed:
+        return None
+    pending = _PendingLogin(
+        user_id=cast(int, user_id),
+        issued_at=cast(int, issued_at),
+        remember_me=cast(bool, remember_me),
+        next=cast(str, next_url),
+        auth_hash=cast(str, auth_hash),
+        backend=cast(str, backend),
+    )
+    age = int(time.time()) - pending.issued_at
+    usable = (
+        0 <= age <= PRE_2FA_TTL_SECONDS
+        and pending.backend in settings.AUTHENTICATION_BACKENDS
+        and url_has_allowed_host_and_scheme(
+            url=pending.next,
+            allowed_hosts={request.get_host()},
+            require_https=getattr(settings, "USE_HTTPS", False),
+        )
+    )
+    return pending if usable else None
+
+
 def _handle_successful_login(request: HttpRequest, user: User, form: LoginForm) -> HttpResponse:
     """Handle successful login logic - staff only on platform"""
     # Check if user is staff - customers must use portal
@@ -117,7 +211,12 @@ def _handle_successful_login(request: HttpRequest, user: User, form: LoginForm) 
 
         return redirect("users:login")
 
+    # Enrolled staff stop here: the password alone must never establish a session (#590).
+    if user.two_factor_enabled:
+        return _start_second_factor(request, user, form)
+
     # Staff user - proceed with normal login flow
+    request.session.pop(PRE_2FA_SESSION_KEY, None)
     # Reset failed attempts and log success
     user.reset_failed_login_attempts()
 
@@ -573,7 +672,7 @@ def mfa_setup_webauthn(request: HttpRequest) -> HttpResponse:
     return redirect("users:mfa_setup_totp")
 
 
-def _handle_2fa_rate_limit(request: HttpRequest, user: User) -> HttpResponse | None:
+def _handle_2fa_rate_limit(request: HttpRequest, pending_email: str) -> HttpResponse | None:
     """Handle rate limiting for 2FA verification."""
     if getattr(request, "limited", False) and not getattr(settings, "TESTING", False):
         # Audit logging handled by @rate_limit decorator
@@ -581,23 +680,10 @@ def _handle_2fa_rate_limit(request: HttpRequest, user: User) -> HttpResponse | N
         return render(
             request,
             "users/mfa_verify.html",
-            {"form": TwoFactorVerifyForm(request.POST), "user": user},
+            {"form": TwoFactorVerifyForm(request.POST), "pending_email": pending_email},
             status=429,
         )
     return None
-
-
-def _verify_2fa_token(user: User, token: str) -> tuple[bool, bool]:
-    """Verify 2FA token (TOTP or backup code)."""
-    # Try TOTP code first
-    totp_valid = pyotp.TOTP(user.two_factor_secret).verify(token)
-    backup_code_valid = False
-
-    # If TOTP fails, try backup code (8 digits)
-    if not totp_valid and len(token) == BACKUP_CODE_LENGTH and token.isdigit():
-        backup_code_valid = user.verify_backup_code(token)
-
-    return totp_valid, backup_code_valid
 
 
 def _handle_backup_code_warnings(request: HttpRequest, user: User) -> None:
@@ -614,57 +700,110 @@ def _handle_backup_code_warnings(request: HttpRequest, user: User) -> None:
         messages.info(request, _("Backup code used. You have {count} codes remaining.").format(count=remaining_codes))
 
 
+def _abandon_pending_login(request: HttpRequest) -> HttpResponse:
+    """Drop the half-finished login and send the browser back to the password step."""
+    request.session.pop(PRE_2FA_SESSION_KEY, None)
+    return _redirect(request, reverse("users:login"))
+
+
+def _pending_login_still_valid(user: User, pending: _PendingLogin) -> bool:
+    """Re-check, on the locked row, everything the password step relied on."""
+    return (
+        user.is_active
+        and not user.is_account_locked()
+        and user.is_staff_user
+        and user.two_factor_enabled
+        and constant_time_compare(user.get_session_auth_hash(), pending.auth_hash)
+    )
+
+
+def _verify_pending_login(request: HttpRequest, pending: _PendingLogin, token: str) -> tuple[str, str | None]:
+    """Check the code for the pending user and finish the login on success.
+
+    Returns (outcome, method). The transaction is kept narrow: lock, re-check, verify,
+    count or reset, login(). It always returns normally, so a failed attempt commits and
+    counts toward the lockout.
+    """
+    with transaction.atomic():
+        user = User.objects.select_for_update().filter(pk=pending.user_id).first()
+        if user is None or not _pending_login_still_valid(user, pending):
+            return "abandon", None
+        result = verify_login_second_factor(user, token, request)
+        if not result.accepted:
+            _log_user_login(request, user, "failed_2fa")
+            if user.is_account_locked():
+                return "locked", None
+            return ("rate_limited" if result.rate_limited else "invalid"), None
+        _log_user_login(request, user, "success")  # also resets the failure counter
+        # Read by the user_logged_in audit handler.
+        setattr(request, LOGIN_METHOD_REQUEST_ATTR, f"2fa_{result.method}")
+        login(request, user, backend=pending.backend)
+        return "success", result.method
+
+
+def _complete_pending_login(request: HttpRequest, pending: _PendingLogin, token: str) -> HttpResponse | None:
+    """Run the second step; return the response, or None to show the form again."""
+    try:
+        outcome, method = _verify_pending_login(request, pending, token)
+        if outcome == "success":
+            request.session.pop(PRE_2FA_SESSION_KEY, None)
+            if pending.remember_me:
+                request.session["remember_me"] = True
+            else:
+                request.session.pop("remember_me", None)
+            SessionSecurityService.update_session_timeout(request)
+    except Exception:
+        # Never leave a half-finished authenticated session behind.
+        if request.user.is_authenticated:
+            logout(request)
+        raise
+
+    if outcome == "abandon":
+        messages.error(request, _("Your sign-in expired or your account changed. Please sign in again."))
+        return _abandon_pending_login(request)
+    if outcome == "locked":
+        messages.error(request, _("Account temporarily locked for security reasons. Please try again later."))
+        return _abandon_pending_login(request)
+    if outcome == "rate_limited":
+        messages.error(request, _("Too many verification attempts. Please wait and try again."))
+        return None
+    if outcome == "invalid":
+        messages.error(request, _("The 2FA code or backup code is invalid."))
+        return None
+
+    user = cast(User, request.user)
+    if method == "backup_code":
+        _handle_backup_code_warnings(request, user)
+    messages.success(request, _("Welcome, {user_full_name}!").format(user_full_name=user.get_full_name()))
+    return _redirect(request, pending.next)
+
+
 @rate_limit(key="ip", rate="15/m", method="POST")
 def mfa_verify(request: HttpRequest) -> HttpResponse:
-    """Verify 2FA token during login"""
-    user_id = request.session.get("pre_2fa_user_id")
-    if not user_id:
-        return redirect("users:login")
+    """Second step of the staff login: check the code for the pending user, then log in."""
+    if request.user.is_authenticated:
+        request.session.pop(PRE_2FA_SESSION_KEY, None)
+        return redirect("dashboard")
 
-    try:
-        user = User.objects.get(id=user_id)
-    except User.DoesNotExist:
-        request.session.pop("pre_2fa_user_id", None)
-        return redirect("users:login")
+    pending = _read_pending_login(request)
+    pending_user = User.objects.filter(pk=pending.user_id).first() if pending else None
+    if pending is None or pending_user is None:
+        return _abandon_pending_login(request)
 
     if request.method == "POST":
-        # Check rate limiting
-        rate_limit_response = _handle_2fa_rate_limit(request, user)
+        rate_limit_response = _handle_2fa_rate_limit(request, pending_user.email)
         if rate_limit_response:
             return rate_limit_response
 
         form = TwoFactorVerifyForm(request.POST)
         if form.is_valid():
-            token = form.cleaned_data["token"]
-            totp_valid, backup_code_valid = _verify_2fa_token(user, token)
-
-            if totp_valid or backup_code_valid:
-                # Complete login
-                login(request, user)
-                request.session.pop("pre_2fa_user_id", None)
-
-                # Log which method was used
-                method = "totp" if totp_valid else "backup_code"
-                _log_user_login(request, user, f"success_2fa_{method}")
-
-                if backup_code_valid:
-                    _handle_backup_code_warnings(request, user)
-
-                # Only show welcome message for staff users since customers will be blocked by middleware
-                if user.is_staff_user:
-                    messages.success(
-                        request, _("Welcome, {user_full_name}!").format(user_full_name=user.get_full_name())
-                    )
-
-                next_url = _get_safe_redirect_target(request, fallback="dashboard")
-                return redirect(next_url)
-            else:
-                _log_user_login(request, user, "failed_2fa")
-                messages.error(request, _("The 2FA code or backup code is invalid."))
+            response = _complete_pending_login(request, pending, form.cleaned_data["token"])
+            if response is not None:
+                return response
     else:
         form = TwoFactorVerifyForm()
 
-    return render(request, "users/mfa_verify.html", {"form": form, "user": user})
+    return render(request, "users/mfa_verify.html", {"form": form, "pending_email": pending_user.email})
 
 
 @login_required

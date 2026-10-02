@@ -22,6 +22,7 @@ from apps.audit.services import (
     LogoutEventData,
 )
 
+from .mfa import LOGIN_METHOD_REQUEST_ATTR
 from .models import User, UserProfile
 
 logger = logging.getLogger(__name__)
@@ -180,16 +181,8 @@ def log_user_login(sender: Any, request: HttpRequest, user: User, **kwargs: Any)
     It works in conjunction with view-level logging to provide comprehensive coverage.
     """
     try:
-        # Determine authentication method based on session data
-        authentication_method = "password"
-
-        # Check if this was a 2FA login completion
-        if request.session.get("pre_2fa_user_id"):
-            # This was a 2FA verification completion
-            authentication_method = "2fa_totp"  # Default to TOTP, will be refined in view
-            # Clean up 2FA session marker
-            if "pre_2fa_user_id" in request.session:
-                del request.session["pre_2fa_user_id"]
+        # mfa_verify names the second factor it accepted; every other login is password-only.
+        authentication_method = str(getattr(request, LOGIN_METHOD_REQUEST_ATTR, "") or "password")
 
         # Log the successful login
         auth_event_data = AuthenticationEventData(

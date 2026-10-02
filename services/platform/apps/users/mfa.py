@@ -1090,6 +1090,11 @@ class MFAService:
 # ===============================================================================
 
 
+# The staff web login sets this request attribute to "2fa_totp" or "2fa_backup_code" just
+# before login(); the user_logged_in audit handler reads it as the authentication method.
+LOGIN_METHOD_REQUEST_ATTR = "_praho_2fa_method"
+
+
 @dataclass(frozen=True)
 class SecondFactorResult:
     """Outcome of one login second-factor check.

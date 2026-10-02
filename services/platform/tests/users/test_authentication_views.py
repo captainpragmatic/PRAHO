@@ -404,20 +404,26 @@ class TwoFactorViewsTest(BaseViewTestCase):
         self.assertEqual(response.status_code, 302)  # Redirect
 
     def test_two_factor_verify_get_2fa_enabled(self) -> None:
-        """Test 2FA verify page when 2FA is enabled (requires session setup)"""
-        self.user.two_factor_enabled = True
-        self.user.two_factor_secret = 'TESTBASE32SECRET'
-        self.user.save()
+        """An enrolled staff user's password step leads to the 2FA page, not into the app.
 
-        # Set up session for 2FA verification flow (normally done during login)
-        session = self.client.session
-        session['pre_2fa_user_id'] = str(self.user.id)
-        session.save()
+        This used to seed the pending-login session key by hand ("normally done during
+        login"), which hid that the login never set it (#590). It now gets there through
+        the real password POST.
+        """
+        self.staff_user.two_factor_enabled = True
+        self.staff_user.two_factor_secret = pyotp.random_base32()
+        self.staff_user.save()
+
+        response = self.client.post(
+            reverse('users:login'), {'email': self.staff_user.email, 'password': 'staffpass123'}
+        )
+        self.assertRedirects(response, reverse('users:mfa_verify'), fetch_redirect_response=False)
+        self.assertNotIn('_auth_user_id', self.client.session)
 
         response = self.client.get(reverse('users:mfa_verify'))
         self.assertEqual(response.status_code, 200)
-        # Check for 2FA-related content instead of specific "verification" text
         self.assertContains(response, 'Two-Factor')
+        self.assertContains(response, self.staff_user.email)
 
     def test_two_factor_backup_codes_get(self) -> None:
         """Test backup codes view GET"""
