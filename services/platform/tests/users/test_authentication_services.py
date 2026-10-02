@@ -447,14 +447,30 @@ class SessionSecurityServiceTest(BaseServiceTestCase):
 
             mock_rotate.assert_called_once_with(request)
 
-    def test_cleanup_2fa_secrets_on_recovery(self) -> None:
-        """Test cleanup of 2FA secrets on recovery"""
-        with patch('apps.users.services.SessionSecurityService.cleanup_2fa_secrets_on_recovery') as mock_cleanup:
-            mock_cleanup.return_value = None
+    def test_secure_account_after_password_reset(self) -> None:
+        """A reset keeps enrolled MFA and signs every existing session out (#595).
 
-            SessionSecurityService.cleanup_2fa_secrets_on_recovery(self.user, '127.0.0.1')
+        This used to mock the method it called and assert the call.
+        """
+        self.user.two_factor_enabled = True
+        self.user.two_factor_secret = 'JBSWY3DPEHPK3PXP'
+        self.user.save()
+        self.user.generate_backup_codes()
+        backup_tokens = list(self.user.backup_tokens)
+        browser = Client()
+        browser.force_login(self.user)
+        session_key = browser.session.session_key
+        self.assertTrue(UserSession.objects.filter(session_key=session_key).exists(), "precondition: indexed")
+        old_hash = self.user.get_session_auth_hash()
 
-            mock_cleanup.assert_called_once_with(self.user, '127.0.0.1')
+        SessionSecurityService.secure_account_after_password_reset(self.user, '127.0.0.1')
+
+        fresh = UserModel.objects.get(pk=self.user.pk)
+        self.assertTrue(fresh.two_factor_enabled)
+        self.assertEqual(fresh.two_factor_secret, 'JBSWY3DPEHPK3PXP')
+        self.assertEqual(fresh.backup_tokens, backup_tokens)
+        self.assertFalse(Session.objects.filter(session_key=session_key).exists(), "the session survived the reset")
+        self.assertNotEqual(fresh.get_session_auth_hash(), old_hash, "the credential version did not rotate")
 
     def test_update_session_timeout(self) -> None:
         """Test session timeout update"""

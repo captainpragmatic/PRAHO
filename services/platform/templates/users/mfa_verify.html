@@ -22,13 +22,13 @@
     <!-- MFA Form Card -->
     <div class="bg-slate-800 rounded-lg p-8 border border-slate-700 shadow-xl">
 
-      <!-- User Info -->
+      <!-- Pending account -->
       <div class="flex items-center justify-center mb-6 pb-6 border-b border-slate-600">
         <div class="text-center">
           <div class="w-12 h-12 bg-blue-600 rounded-full flex items-center justify-center mx-auto mb-2">
-            <span class="text-white font-bold text-lg">{{ user.email.0|upper }}</span>
+            <span class="text-white font-bold text-lg">{{ pending_email.0|upper }}</span>
           </div>
-          <p class="text-sm text-slate-300">{{ user.email }}</p>
+          <p class="text-sm text-slate-300">{{ pending_email }}</p>
         </div>
       </div>
 
@@ -49,57 +49,22 @@
           {% endfor %}
         {% endif %}
 
-        <!-- Code Input Section -->
-        <div class="text-center">
-          <label for="token" class="block text-lg font-medium text-white mb-4">
-            {% icon "lock" %} {% trans 'Enter Authentication Code' %}
-          </label>
+        <!-- One field takes either a 6-digit app code or an 8-digit backup code -->
+        {% trans 'Authentication or backup code' as token_label %}
+        {% trans 'Enter the 6-digit code from your authenticator app, or one of your 8-digit backup codes' as token_help %}
+        {% input_field name=form.token.name label=token_label placeholder="123456" required=True html_id=form.token.id_for_label error=form.token.errors.0 help_text=token_help css_class="text-center text-2xl font-mono tracking-widest" %}
 
-          <div class="mb-4">
-            <input type="text" id="token" name="token" maxlength="8"
-                   class="appearance-none block w-full px-4 py-4 border border-slate-600 placeholder-slate-400 text-white text-center text-2xl font-mono tracking-widest rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-slate-700 transition-all"
-                   placeholder="123456" required autocomplete="off" autofocus>
-          </div>
-
-          <p class="text-sm text-slate-400 mb-6">
-            {% trans 'Enter the 6-digit code from your authenticator app' %}
-          </p>
-        </div>
-
-        <!-- Submit Button -->
         <div>
-          <button type="submit"
-                  class="w-full flex justify-center py-4 px-6 border border-transparent text-lg font-medium rounded-lg text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all shadow-lg">
-            <span class="mr-2">{% icon "lock" %}</span>
-            {% trans 'Verify & Continue' %}
-          </button>
+          {% trans 'Verify & Continue' as verify_label %}
+          {% button verify_label type="submit" variant="primary" icon="lock" class_="w-full" %}
         </div>
       </form>
 
-      <!-- Alternative Options -->
-      <div class="mt-8 border-t border-slate-600 pt-6">
-        <div class="text-center">
-          <p class="text-sm text-slate-400 mb-4">{% trans 'Having trouble?' %}</p>
-
-          <div class="space-y-3">
-            <button data-action="invoke" data-invoke="showBackupCodeInput"
-                    class="w-full flex items-center justify-center px-4 py-3 border border-yellow-600 text-sm font-medium rounded-lg text-yellow-200 bg-yellow-900 bg-opacity-30 hover:bg-opacity-50 focus:outline-none focus:ring-2 focus:ring-yellow-500 transition-all">
-              <span class="mr-2">{% icon "lock" %}</span>
-              {% trans 'Use Backup Code Instead' %}
-            </button>
-
-            <div id="backup-code-input" class="hidden space-y-3">
-              <input type="text" id="backup-token" name="backup-token"
-                     class="appearance-none block w-full px-4 py-3 border border-slate-600 placeholder-slate-400 text-white text-center font-mono rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:border-yellow-500 bg-slate-700 transition-all"
-                     placeholder="BACKUP-CODE-12345" autocomplete="off">
-              <button data-action="invoke" data-invoke="submitBackupCode"
-                      class="w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white bg-yellow-600 hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-yellow-500 transition-all">
-                <span class="mr-2">{% icon "lock" %}</span>
-                {% trans 'Use Backup Code' %}
-              </button>
-            </div>
-          </div>
-        </div>
+      <!-- Cancel: logging out drops the pending sign-in -->
+      <div class="mt-6 text-center">
+        <a href="{% url 'users:logout' %}" class="text-slate-400 hover:text-slate-300 transition-colors text-sm">
+          ← {% trans 'Cancel and sign in again' %}
+        </a>
       </div>
     </div>
 
@@ -121,53 +86,7 @@
       </div>
     </div>
 
-    <!-- Back to Login -->
-    <div class="text-center mt-6">
-      <a href="{% url 'users:login' %}"
-         class="text-slate-400 hover:text-slate-300 transition-colors text-sm">
-        ← {% trans 'Back to login' %}
-      </a>
-    </div>
   </div>
 </div>
-
-<!-- JavaScript for Enhanced UX -->
-<script nonce="{{ csp_nonce }}">
-function showBackupCodeInput() {
-  const backupDiv = document.getElementById('backup-code-input');
-  const backupInput = document.getElementById('backup-token');
-
-  if (backupDiv.classList.contains('hidden')) {
-    backupDiv.classList.remove('hidden');
-    backupInput.focus();
-  } else {
-    backupDiv.classList.add('hidden');
-  }
-}
-
-function submitBackupCode() {
-  const backupCode = document.getElementById('backup-token').value;
-  if (backupCode.trim()) {
-    // Set the backup code in the main form
-    document.getElementById('token').value = backupCode;
-    // Submit the form
-    document.querySelector('form').submit();
-  }
-}
-
-// Auto-format input as user types
-document.getElementById('token').addEventListener('input', function(e) {
-  let value = e.target.value.replace(/\D/g, ''); // Remove non-digits
-  if (value.length > 6) {
-    value = value.substring(0, 6); // Limit to 6 digits
-  }
-  e.target.value = value;
-});
-
-document.getElementById('backup-token').addEventListener('input', function(e) {
-  let value = e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, ''); // Keep only alphanumeric and dashes
-  e.target.value = value;
-});
-</script>
 
 {% endblock %}

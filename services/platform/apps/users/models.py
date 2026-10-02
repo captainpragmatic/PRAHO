@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser, BaseUserManager
-from django.db import models
+from django.db import models, transaction
 from django.db.models import QuerySet
 from django.utils import timezone
 from django.utils.crypto import salted_hmac
@@ -297,35 +297,33 @@ class User(AbstractUser):
         Configure ACCOUNT_LOCKOUT_THRESHOLD and lockout_delays to adjust lockout.
 
 
-        Uses F() expression for atomic increment to prevent lost updates
-        under concurrent requests.
+        The increment and the lockout decision happen on the locked row in one
+        transaction, so concurrent failures are serialized and none is lost. The
+        caller's instance gets both values back, because callers check
+        is_account_locked() on it straight afterwards.
         """
         # Allow disabling lockout for development/testing
         if getattr(settings, "DISABLE_ACCOUNT_LOCKOUT", False):
             return  # Skip lockout logic completely when disabled
 
-        # Atomic increment — prevents lost updates under concurrent requests
-        from django.db.models import F  # noqa: PLC0415
+        with transaction.atomic():
+            locked = type(self).objects.select_for_update().get(pk=self.pk)
+            locked.failed_login_attempts += 1
+            update_fields = ["failed_login_attempts"]
 
-        type(self).objects.filter(pk=self.pk).update(
-            failed_login_attempts=F("failed_login_attempts") + 1,
-        )
-        # Refresh to get the actual DB value for lockout delay calculation
-        self.refresh_from_db(fields=["failed_login_attempts"])
+            # Configurable threshold: how many failed attempts before lockout kicks in
+            threshold = getattr(settings, "ACCOUNT_LOCKOUT_THRESHOLD", 1)
+            if locked.failed_login_attempts >= threshold:
+                # Progressive lockout delays: 5min → 15min → 30min → 1hr → 2hr → 4hr
+                lockout_delays = [5, 15, 30, 60, 120, 240]  # minutes
+                step = min(locked.failed_login_attempts - threshold, len(lockout_delays) - 1)
+                locked.account_locked_until = timezone.now() + timedelta(minutes=lockout_delays[step])
+                update_fields.append("account_locked_until")
 
-        # Configurable threshold: how many failed attempts before lockout kicks in
-        threshold = getattr(settings, "ACCOUNT_LOCKOUT_THRESHOLD", 1)
-        if self.failed_login_attempts < threshold:
-            self.save(update_fields=["failed_login_attempts"])
-            return
+            locked.save(update_fields=update_fields)
 
-        # Progressive lockout delays: 5min → 15min → 30min → 1hr → 2hr → 4hr
-        lockout_delays = [5, 15, 30, 60, 120, 240]  # minutes
-
-        lockout_minutes = lockout_delays[min(self.failed_login_attempts - threshold, len(lockout_delays) - 1)]
-
-        self.account_locked_until = timezone.now() + timedelta(minutes=lockout_minutes)
-        self.save(update_fields=["account_locked_until"])
+        self.failed_login_attempts = locked.failed_login_attempts
+        self.account_locked_until = locked.account_locked_until
 
     def reset_failed_login_attempts(self) -> None:
         """Reset failed login attempts and unlock account"""

@@ -8,6 +8,7 @@ from typing import Any
 
 from django.conf import settings
 from django.contrib.auth.signals import user_logged_in, user_logged_out, user_login_failed
+from django.db import transaction
 from django.db.models.signals import post_save, pre_delete
 from django.dispatch import receiver
 from django.http import HttpRequest
@@ -22,6 +23,7 @@ from apps.audit.services import (
     LogoutEventData,
 )
 
+from .mfa import LOGIN_METHOD_REQUEST_ATTR
 from .models import User, UserProfile
 
 logger = logging.getLogger(__name__)
@@ -180,16 +182,8 @@ def log_user_login(sender: Any, request: HttpRequest, user: User, **kwargs: Any)
     It works in conjunction with view-level logging to provide comprehensive coverage.
     """
     try:
-        # Determine authentication method based on session data
-        authentication_method = "password"
-
-        # Check if this was a 2FA login completion
-        if request.session.get("pre_2fa_user_id"):
-            # This was a 2FA verification completion
-            authentication_method = "2fa_totp"  # Default to TOTP, will be refined in view
-            # Clean up 2FA session marker
-            if "pre_2fa_user_id" in request.session:
-                del request.session["pre_2fa_user_id"]
+        # mfa_verify names the second factor it accepted; every other login is password-only.
+        authentication_method = str(getattr(request, LOGIN_METHOD_REQUEST_ATTR, "") or "password")
 
         # Log the successful login
         auth_event_data = AuthenticationEventData(
@@ -202,7 +196,10 @@ def log_user_login(sender: Any, request: HttpRequest, user: User, **kwargs: Any)
                 "session_exists": bool(request.session.session_key),
             },
         )
-        AuthenticationAuditService.log_login_success(auth_event_data)
+        # login() runs inside the transaction that decided it. Without its own savepoint, a failed
+        # audit insert would abort that transaction on PostgreSQL even though the error is caught.
+        with transaction.atomic():
+            AuthenticationAuditService.log_login_success(auth_event_data)
 
         logger.info(f"✅ [Auth Signal] Login success logged for {user.email} via {authentication_method}")
 

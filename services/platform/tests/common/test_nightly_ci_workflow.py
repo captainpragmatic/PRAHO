@@ -94,6 +94,13 @@ class NightlyPostgresConcurrencyWorkflowTests(SimpleTestCase):
         # Migration-only database objects: the trigger and the PostgreSQL indexes.
         self.assertIn("tests.customers.test_payment_method_encryption_trigger", command)
         self.assertIn("tests.common.test_migration_db_objects", command)
+        # Login second-factor races and the audit savepoint: only a real row lock shows them.
+        self.assertIn("tests.users.test_lockout_counter_concurrency", command)
+        self.assertIn("tests.users.test_staff_login_second_factor_concurrency", command)
+        self.assertIn("tests.users.test_staff_login_enrollment_race", command)
+        self.assertIn("tests.users.test_login_audit_failure_keeps_the_login", command)
+        self.assertIn("tests.users.test_mfa_audit_isolation", command)
+        self.assertIn("tests.api.test_token_second_factor_concurrency", command)
         self.assertIn("--settings=config.settings.ci", command)
         self.assertNotIn("config.settings.test", command)
         self.assertNotIn("--parallel", command)

@@ -50,7 +50,7 @@ from apps.common.performance.rate_limiting import (
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.validators import log_security_event
 from apps.customers.models import Customer
-from apps.users.mfa import MFAService
+from apps.users.mfa import MFAService, verify_login_second_factor
 from apps.users.models import APIToken, CustomerMembership, User, UserProfile
 from apps.users.services import APITokenService, SessionSecurityService
 
@@ -88,20 +88,6 @@ def _charge_login_failure(forwarded_ip: str | None) -> None:
     """Charge the per-client login failure budget; successful logins never count."""
     if forwarded_ip is not None:
         fixed_window_limited(f"login_ip:{forwarded_ip}", settings.THROTTLE_RATES["auth_login_ip"])
-
-
-def _second_factor_accepted(locked_user: User, code: str, request: HttpRequest) -> bool:
-    """Verify a TOTP or backup code for an enrolled user; a failure counts toward the lockout.
-
-    Shared by portal_login_api and obtain_token so both accept exactly the same codes. The
-    caller holds select_for_update on locked_user and must let its transaction commit on
-    failure, because the failed attempt is meant to count. A failure here is attributable:
-    reaching it took the correct password.
-    """
-    if code and MFAService.verify_mfa_code(locked_user, code, request)["success"]:
-        return True
-    locked_user.increment_failed_login_attempts()
-    return False
 
 
 @csrf_exempt  # nosemgrep: no-csrf-exempt — HMAC-authenticated inter-service endpoint
@@ -152,25 +138,36 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911 -- 
             _charge_login_failure(forwarded_ip)
             return JsonResponse({"success": False, "error": "Invalid email or password"}, status=401)
 
-        # Same generic error for locked/inactive — attacker cannot distinguish
-        if user.is_account_locked() or not user.is_active:
-            reason = "locked" if user.is_account_locked() else "inactive"
+        # Every decision is re-read on the locked row, so a password change, lockout,
+        # deactivation or 2FA enrolment that lands after authenticate() cannot be skipped,
+        # and the success reset cannot erase a failure recorded in between.
+        authenticated = user
+        refusal: str | None = None
+        with transaction.atomic():
+            user = User.objects.select_for_update().get(pk=authenticated.pk)
+            if user.password != authenticated.password or user.is_account_locked() or not user.is_active:
+                # Same generic error for locked/inactive — attacker cannot distinguish
+                refusal = "credentials"
+            # A password alone must never establish a session for an enrolled user.
+            elif (
+                user.two_factor_enabled
+                and not verify_login_second_factor(user, str(data.get("mfa_token", "")), request).accepted
+            ):
+                refusal = "second_factor"  # the transaction commits, so the failed attempt counts
+            else:
+                user.failed_login_attempts = 0
+                user.account_locked_until = None
+                user.save(update_fields=["failed_login_attempts", "account_locked_until"])
+                session_auth_hash = user.get_session_auth_hash()
+
+        if refusal == "credentials":
+            reason = "locked" if user.is_account_locked() else "inactive or changed"
             logger.warning("⚠️ [Portal API Auth] Login rejected (%s) — ip=%s", reason, forwarded_ip or client_ip)
             _charge_login_failure(forwarded_ip)
             return JsonResponse({"success": False, "error": "Invalid email or password"}, status=401)
-
-        # A password alone must never establish a session for an enrolled user.
-        if user.two_factor_enabled:
-            with transaction.atomic():
-                user = User.objects.select_for_update().get(pk=user.pk)
-                if not _second_factor_accepted(user, str(data.get("mfa_token", "")), request):
-                    _charge_login_failure(forwarded_ip)
-                    return JsonResponse({"success": False, "error": "Invalid authentication code"}, status=401)
-
-        # Success: reset lockout counter
-        user.failed_login_attempts = 0
-        user.account_locked_until = None
-        user.save(update_fields=["failed_login_attempts", "account_locked_until"])
+        if refusal == "second_factor":
+            _charge_login_failure(forwarded_ip)
+            return JsonResponse({"success": False, "error": "Invalid authentication code"}, status=401)
 
         logger.info("✅ [Portal API Auth] User authenticated successfully — ip=%s", forwarded_ip or client_ip)
 
@@ -191,7 +188,7 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911 -- 
             {
                 "success": True,
                 "user": user_data,
-                "session_auth_hash": user.get_session_auth_hash(),
+                "session_auth_hash": session_auth_hash,
                 "message": "Authentication successful",
             }
         )
@@ -314,8 +311,9 @@ def _issue_token_under_lock(
             )
             return refused
         # A password alone must never yield a token for an enrolled account (#565).
-        if user.two_factor_enabled and not _second_factor_accepted(
-            user, str(request.data.get("mfa_token", "")), request
+        if (
+            user.two_factor_enabled
+            and not verify_login_second_factor(user, str(request.data.get("mfa_token", "")), request).accepted
         ):
             logger.warning(  # nosemgrep: python-logger-credential-disclosure — literal log message, no secrets
                 "[Auth] Token request failed the second factor — ip=%s", client_ip

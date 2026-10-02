@@ -458,6 +458,7 @@ class EnhancedWebAuthnServiceTest(TestCase):
         request = self.factory.post("/")
         request.user = self.user
         request.session = SessionStore()
+        challenge = self.webauthn_service.generate_registration_options(request, self.user)["challenge"]
 
         # Mock registration data
         registration_data = {
@@ -483,12 +484,15 @@ class EnhancedWebAuthnServiceTest(TestCase):
 
             self.assertTrue(result["success"])
             self.assertIsInstance(result["credential"], WebAuthnCredential)
+            # The server's own challenge, never one from the payload (#596)
+            self.assertEqual(mock_webauthn.verify_registration_response.call_args.kwargs["challenge"], challenge)
 
     def test_verify_registration_response_failure(self) -> None:
         """Test WebAuthn registration response verification failure"""
         request = self.factory.post("/")
         request.user = self.user
         request.session = SessionStore()
+        self.webauthn_service.generate_registration_options(request, self.user)
 
         registration_data = {
             "id": "test_credential_id",
@@ -505,6 +509,8 @@ class EnhancedWebAuthnServiceTest(TestCase):
 
             result = self.webauthn_service.verify_registration_response(request, registration_data, "Test Device")
 
+            # The library was asked and said no; a missing challenge would refuse before it
+            mock_webauthn.verify_registration_response.assert_called_once()
             self.assertFalse(result["success"])
             self.assertIn("error", result)
 
@@ -522,6 +528,7 @@ class EnhancedWebAuthnServiceTest(TestCase):
         request = self.factory.post("/")
         request.user = self.user
         request.session = SessionStore()
+        challenge = self.webauthn_service.generate_authentication_options(request, self.user)["challenge"]
 
         auth_data = {
             "id": "auth_test_cred",
@@ -537,10 +544,13 @@ class EnhancedWebAuthnServiceTest(TestCase):
         with patch("apps.users.mfa.webauthn") as mock_webauthn:
             mock_webauthn.verify_authentication_response.return_value = {"verified": True, "new_sign_count": 1}
 
-            result = self.webauthn_service.verify_authentication(self.user, auth_data)
+            result = self.webauthn_service.verify_authentication(request, self.user, auth_data)
 
-            # Method returns boolean - now implemented
             self.assertTrue(result)
+            # Verified against the challenge in the session, never the client's (#596)
+            self.assertEqual(
+                mock_webauthn.verify_authentication_response.call_args.kwargs["expected_challenge"], challenge
+            )
 
     def test_delete_credential(self) -> None:
         """Test credential deletion"""
@@ -628,7 +638,10 @@ class EnhancedMFAServiceTest(TestCase):
         self.assertIn("backup_codes", methods)
 
     def test_get_enabled_methods_webauthn(self) -> None:
-        """Test getting enabled MFA methods with WebAuthn"""
+        """WebAuthn is offered only when it can be verified (#596).
+
+        This asserted it was offered with no verification library installed.
+        """
         WebAuthnCredential.objects.create(
             user=self.user,
             credential_id="webauthn_test",
@@ -637,8 +650,10 @@ class EnhancedMFAServiceTest(TestCase):
             is_active=True,
         )
 
-        methods = self.mfa_service.get_enabled_methods(self.user)
-        self.assertIn("webauthn", methods)
+        with patch("apps.users.mfa.webauthn", None):
+            self.assertNotIn("webauthn", self.mfa_service.get_enabled_methods(self.user))
+        with patch("apps.users.mfa.webauthn", Mock()):
+            self.assertIn("webauthn", self.mfa_service.get_enabled_methods(self.user))
 
     @patch("apps.users.mfa.MFAService._check_rate_limit", return_value=True)
     def test_verify_second_factor_totp_valid(self, mock_rate_limit: Mock) -> None:

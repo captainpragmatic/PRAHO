@@ -244,7 +244,11 @@ Before any route is opened:
    rejected. Token authentication checks the key, the user's active flag and expiry, not
    how the key was obtained, and a server default can issue keys that never expire.
 3. The staff web login must enforce the second factor. A staff session can mint tokens at
-   `/settings/api-tokens/`, and today that session is granted on a password alone.
+   `/settings/api-tokens/`. **Done for new logins (#590):** an enrolled account now stops at
+   the password step and gets a session only from `mfa_verify`, through the same check as
+   the token endpoint, and a web password reset keeps the second factor (#595). Sessions
+   granted on a password alone before that change are not revoked by it: before the first
+   deployment that relies on 2FA, revoke the sessions of enrolled staff.
 4. The tripwire's expected set must be updated deliberately, with a reviewer attached.
 
 Residual on the issuance endpoint after #565: refusals all share the wrong-password body,
@@ -257,8 +261,10 @@ address. Equalising the timing is open work.
 ### Second factor at issuance (#565)
 
 `POST /api/users/token/` requires `mfa_token` for an account with 2FA enabled and verifies
-it through the same helper as the Portal login (`_second_factor_accepted`), so both accept
-the same TOTP and backup codes with the same rate limit and replay protection. Request
+it through the same helper as the Portal login and the staff web login
+(`verify_login_second_factor` in `apps/users/mfa.py`), so all three accept the same TOTP and
+backup codes with the same rate limit and replay protection. A verified code resets the
+per-user attempt budget, so a run of honest logins cannot exhaust it. Request
 parameters are validated before any credential work. The password check is followed by one
 transaction on the locked user row that re-reads the password hash, the lock and active
 state and the 2FA flag, verifies the code and issues the token. A wrong or missing code

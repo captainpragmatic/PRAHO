@@ -221,28 +221,27 @@ class SessionSecurityServiceTestCase(TestCase):
         self.assertEqual(args[0], 'session_rotated_2fa_change')
 
     @patch('apps.users.services.log_security_event')
-    def test_cleanup_2fa_secrets_on_recovery(self, mock_log):
-        """Test 2FA secret cleanup during recovery"""
-        # Setup user with 2FA enabled
+    def test_password_reset_keeps_enrolled_2fa(self, mock_log):
+        """A password reset keeps enrolled 2FA (#595).
+
+        This asserted the opposite: that recovery cleared the secret and backup codes, so a
+        reset link alone yielded a login with no second factor. The API reset already kept it.
+        """
         self.user.two_factor_enabled = True
         self.user.two_factor_secret = 'test_secret'
         self.user.backup_tokens = ['token1', 'token2']
         self.user.save()
 
-        SessionSecurityService.cleanup_2fa_secrets_on_recovery(self.user, '192.168.1.1')
+        SessionSecurityService.secure_account_after_password_reset(self.user, '192.168.1.1')
 
-        # Refresh user from database
         self.user.refresh_from_db()
+        self.assertTrue(self.user.two_factor_enabled)
+        self.assertEqual(self.user.two_factor_secret, 'test_secret')
+        self.assertEqual(self.user.backup_tokens, ['token1', 'token2'])
 
-        # 2FA should be disabled
-        self.assertFalse(self.user.two_factor_enabled)
-        self.assertEqual(self.user.two_factor_secret, '')
-        self.assertEqual(self.user.backup_tokens, [])
-
-        # Security event should be logged
         mock_log.assert_called()
         args = mock_log.call_args[0]
-        self.assertEqual(args[0], '2fa_secrets_cleared_recovery')
+        self.assertEqual(args[0], 'sessions_revoked_password_reset')
 
     @patch('apps.users.services.log_security_event')
     def test_log_session_activity(self, mock_log):
@@ -478,14 +477,13 @@ class SessionSecurityIntegrationTest(TestCase):
         self.user.save()
 
     def test_password_reset_workflow(self):
-        """Test complete password reset with 2FA cleanup and session rotation"""
+        """A password reset keeps enrolled 2FA (#595); it used to assert that 2FA was cleared."""
         # Test the service directly without mocking
-        SessionSecurityService.cleanup_2fa_secrets_on_recovery(self.user)
+        SessionSecurityService.secure_account_after_password_reset(self.user)
 
-        # Verify 2FA was cleared
         self.user.refresh_from_db()
-        self.assertFalse(self.user.two_factor_enabled)
-        self.assertEqual(self.user.backup_tokens, [])
+        self.assertTrue(self.user.two_factor_enabled)
+        self.assertEqual(self.user.backup_tokens, ['backup1', 'backup2'])
 
     @patch('apps.users.services.log_security_event')
     def test_complete_session_security_lifecycle(self, mock_log):

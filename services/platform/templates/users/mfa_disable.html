@@ -115,7 +115,7 @@
               <label for="token" class="block text-sm font-medium text-slate-300 mb-2">
                 {% icon "lock" %} {% trans 'Current MFA Code' %}
               </label>
-              <input type="text" id="token" name="token" maxlength="6"
+              <input type="text" id="token" name="token" maxlength="8" inputmode="numeric"
                      class="appearance-none block w-full px-4 py-3 border border-slate-600 placeholder-slate-400 text-white text-center text-xl font-mono tracking-widest rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 bg-slate-700 transition-all"
                      placeholder="123456" required autocomplete="off" autofocus>
               <p class="mt-2 text-xs text-slate-400">
@@ -195,18 +195,6 @@ function confirmDisable() {
 
   return confirm('{% trans "Are you absolutely sure you want to disable two-factor authentication? This action cannot be undone." %}');
 }
-
-// Auto-format MFA code input
-document.getElementById('token').addEventListener('input', function(e) {
-  let value = e.target.value.replace(/\D/g, ''); // Remove non-digits for TOTP
-  // Allow backup codes (alphanumeric with dashes)
-  if (value.length === 0 && e.target.value.match(/[A-Za-z-]/)) {
-    value = e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, '');
-  } else if (value.length > 6) {
-    value = value.substring(0, 6); // Limit TOTP to 6 digits
-  }
-  e.target.value = value;
-});
 </script>
 
       <!-- Action Buttons -->

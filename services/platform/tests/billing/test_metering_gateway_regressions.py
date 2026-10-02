@@ -8,6 +8,7 @@ Targets uncovered lines in:
 
 from __future__ import annotations
 
+import itertools
 import logging
 import uuid
 from datetime import timedelta
@@ -51,8 +52,15 @@ from tests.helpers.fsm_helpers import force_status
 # ---------------------------------------------------------------------------
 
 
+_CURRENCY_CODES = itertools.count()
+
+
 def _make_currency():
-    return Currency.objects.create(code=uuid.uuid4().hex[:3].upper(), symbol="X", decimals=2)
+    # Three random hex characters gave 4,096 codes, so two currencies in one test collided on
+    # UNIQUE(code) about once in 4,096 runs. A counter cannot repeat; the Z prefix keeps clear of
+    # the seeded RON, EUR and USD.
+    n = next(_CURRENCY_CODES)
+    return Currency.objects.create(code=f"Z{chr(65 + n // 26 % 26)}{chr(65 + n % 26)}", symbol="X", decimals=2)
 
 
 def _make_customer(name="Test Co"):
