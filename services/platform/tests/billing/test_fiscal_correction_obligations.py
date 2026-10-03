@@ -27,7 +27,7 @@ from apps.billing.issuers.base import Ambiguous, Issued, PreparedDocument
 from apps.billing.issuers.models import IssuanceState, ProviderIssuance
 from apps.billing.issuers.service import issue_storno_for_invoice, reconcile_confirmed_issued
 from apps.billing.models import Payment, Refund
-from apps.billing.refund_service import RefundService
+from apps.billing.refund_service import RefundService, RefundType
 from apps.common.types import Ok
 from apps.orders.models import Order
 from apps.promotions.gift_cards import pay_document
@@ -468,3 +468,128 @@ class AReversedInvoiceIsNeverRestoredTests(TestCase):
         self.assertTrue(
             any(str(self.refund.pk) in line and "STORNO-000901" in line for line in logs.output), logs.output
         )
+
+
+TWO_RATES = ((10000, "0.21"), (5000, "0.11"))
+
+
+class PartialRefundOfAMultiRateInvoiceIsRefusedTests(TestCase):
+    """A partial correction of a multi-rate invoice has no single rate to allocate VAT by."""
+
+    def setUp(self) -> None:
+        self.owner = h.customer()
+
+    def _refund_invoice(self, invoice: Invoice, data: dict[str, Any]) -> tuple[Any, MagicMock]:
+        gateway = _gateway(int(data.get("amount_cents") or invoice.total_cents))
+        with patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=gateway):
+            result = RefundService.refund_invoice(invoice.pk, data)
+        return result, gateway
+
+    def test_a_partial_invoice_refund_is_refused_before_any_money_moves(self) -> None:
+        invoice = h.issued_invoice(self.owner, lines=TWO_RATES)
+        h.paid(invoice)
+
+        for refund_type in ("partial", RefundType.PARTIAL):
+            with self.subTest(refund_type=refund_type):
+                result, gateway = self._refund_invoice(
+                    invoice, {"refund_type": refund_type, "amount_cents": 3000, "reason": "customer_request"}
+                )
+
+                self.assertTrue(result.is_err())
+                self.assertIn("more than one VAT rate", result.unwrap_err())
+                gateway.refund_payment.assert_not_called()
+        self.assertFalse(Refund.objects.exists())
+
+    def test_a_full_refund_of_a_multi_rate_invoice_still_proceeds(self) -> None:
+        invoice = h.issued_invoice(self.owner, lines=TWO_RATES)
+        h.paid(invoice)
+
+        result, gateway = self._refund_invoice(invoice, _full(invoice.total_cents))
+
+        self.assertTrue(result.is_ok(), result)
+        gateway.refund_payment.assert_called_once()
+
+    def test_a_partial_refund_of_a_single_rate_invoice_still_proceeds(self) -> None:
+        invoice = h.issued_invoice(self.owner)
+        h.paid(invoice)
+
+        result, gateway = self._refund_invoice(
+            invoice, {"refund_type": "partial", "amount_cents": 3000, "reason": "customer_request"}
+        )
+
+        self.assertTrue(result.is_ok(), result)
+        gateway.refund_payment.assert_called_once()
+
+    def test_a_partial_order_refund_is_refused_the_same_way(self) -> None:
+        invoice = h.issued_invoice(self.owner, lines=TWO_RATES)
+        h.paid(invoice)
+        order = Order.objects.create(
+            order_number=f"ORD-{uuid.uuid4().hex[:8]}",
+            customer=self.owner,
+            currency=invoice.currency,
+            invoice=invoice,
+            status="completed",
+            subtotal_cents=invoice.subtotal_cents,
+            tax_cents=invoice.tax_cents,
+            total_cents=invoice.total_cents,
+            customer_email="billing@example.test",
+            customer_name="Fiscal Correction SRL",
+        )
+        gateway = _gateway(3000)
+
+        with patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=gateway):
+            result = RefundService.refund_order(
+                order.pk, {"refund_type": "partial", "amount_cents": 3000, "reason": "customer_request"}
+            )
+
+        self.assertTrue(result.is_err())
+        self.assertIn("more than one VAT rate", result.unwrap_err())
+        gateway.refund_payment.assert_not_called()
+        self.assertFalse(Refund.objects.exists())
+
+    def test_the_tender_path_is_refused_for_a_partial_but_not_for_a_full_refund(self) -> None:
+        """Its legs are always `partial` internally, so the check must read the CALLER's request."""
+        invoice = h.issued_invoice(self.owner, lines=TWO_RATES)
+        card = GiftCard.objects.create(
+            code="FISCAL-MULTI",
+            currency=invoice.currency,
+            initial_value_cents=5000,
+            current_balance_cents=5000,
+            status="active",
+            ledger_version=2,
+        )
+        pay_document(card.code, invoice, self.owner, "fiscal-multi-gift", 5000)
+        Payment.objects.create(
+            customer=self.owner,
+            invoice=invoice,
+            currency=invoice.currency,
+            amount_cents=invoice.total_cents - 5000,
+            payment_method="stripe",
+            gateway_txn_id="pi_fiscal_multi",
+            status="succeeded",
+        )
+        invoice.mark_as_paid()
+        invoice.save()
+
+        with patch("apps.promotions.tender_refunds.PaymentGatewayFactory.create_gateway") as factory:
+            factory.return_value.refund_payment.return_value = {
+                "success": True,
+                "refund_id": "re_fiscal_multi",
+                "status": "succeeded",
+                "amount_refunded_cents": invoice.total_cents - 5000,
+            }
+            partial = RefundService.refund_invoice(
+                invoice.pk,
+                {"refund_type": "partial", "amount_cents": 3000, "reason": "customer_request", "idempotency_key": "p1"},
+            )
+            self.assertTrue(partial.is_err())
+            self.assertIn("more than one VAT rate", partial.unwrap_err())
+            self.assertFalse(Refund.objects.exists())
+
+            full = RefundService.refund_invoice(
+                invoice.pk, {"refund_type": "full", "reason": "customer_request", "idempotency_key": "f1"}
+            )
+
+        self.assertTrue(full.is_ok(), full)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, "refunded")

@@ -220,6 +220,9 @@ class RefundService:
             if order_snapshot.status not in {"paid", "completed", "partially_refunded", "refunded"}:
                 return Err(f"Order status '{order_snapshot.status}' is not eligible for refund")
             invoice_id = order_snapshot.invoice_id
+            multi_rate_refusal = RefundService._multi_rate_partial_refusal(invoice_id, requested_refund_type)
+            if multi_rate_refusal is not None:
+                return Err(multi_rate_refusal)
             if invoice_id and Payment.objects.filter(invoice_id=invoice_id, payment_method="gift_card").exists():
                 from apps.promotions.tender_refunds import refund_from_existing_flow  # noqa: PLC0415
 
@@ -284,6 +287,37 @@ class RefundService:
         except Exception:
             logger.exception("Order refund processing failed for order_id=%s", order_id)
             return Err("Failed to process refund: internal error")
+
+    @staticmethod
+    def _multi_rate_partial_refusal(invoice_id: int | None, requested_refund_type: Any) -> str | None:
+        """Refuse a partial refund the fiscal correction could not express.
+
+        A partial correction is one credited line at ONE rate (and category). An invoice whose
+        lines carry several has no single rate to allocate the refunded VAT by, so any split
+        would be invented. Refused at request time, before any money moves; a full refund
+        mirrors every line and stays allowed.
+
+        Decided on the CALLER's requested type, and only here. The tender path creates each
+        payment leg as `partial` even for a whole-document refund, so a check placed anywhere
+        those legs pass through would refuse a legitimate full refund.
+        """
+        if invoice_id is None or requested_refund_type not in (RefundType.PARTIAL, "partial"):
+            return None
+        from apps.billing.invoice_models import InvoiceLine  # noqa: PLC0415  # Avoid a model import cycle
+
+        distinct_rates = (
+            InvoiceLine.objects.filter(invoice_id=invoice_id)
+            .order_by()
+            .values_list("tax_rate", "tax_category_code")
+            .distinct()
+            .count()
+        )
+        if distinct_rates <= 1:
+            return None
+        return (
+            "A partial refund cannot be corrected on an invoice whose lines carry more than one VAT rate "
+            "or VAT category. Refund the whole invoice, or issue the correction manually."
+        )
 
     @staticmethod
     def _normalize_refund_data(refund_data: RefundData) -> None:
@@ -616,7 +650,7 @@ class RefundService:
             return refund_data.get("amount_cents", refund_data.get("amount", 0))
 
     @staticmethod
-    def refund_invoice(  # noqa: C901, PLR0911  # Explicit legacy/tender validation gates
+    def refund_invoice(  # noqa: C901, PLR0911, PLR0912  # Explicit legacy/tender validation gates
         invoice_id: Any, refund_data: RefundData, *, actor: User | None = None
     ) -> Result[RefundResult, str]:
         """Refund an invoice with comprehensive validation.
@@ -635,6 +669,9 @@ class RefundService:
                 return Err("Failed to process refund: Invoice not found")
             if invoice_snapshot.status not in {"paid", "completed", "partially_refunded", "refunded"}:
                 return Err(f"Invoice status '{invoice_snapshot.status}' is not eligible for refund")
+            multi_rate_refusal = RefundService._multi_rate_partial_refusal(invoice_snapshot.pk, requested_refund_type)
+            if multi_rate_refusal is not None:
+                return Err(multi_rate_refusal)
             if Payment.objects.filter(invoice_id=invoice_id, payment_method="gift_card").exists():
                 from apps.promotions.tender_refunds import refund_from_existing_flow  # noqa: PLC0415
 
