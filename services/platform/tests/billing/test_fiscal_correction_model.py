@@ -60,6 +60,20 @@ class FiscalCorrectionModelTests(TestCase):
     def test_attached_requires_a_credit_note(self) -> None:
         self._refused(original=self.invoice, source_refund=self.refund, state=STATE_ATTACHED)
 
+    def test_only_an_attached_correction_may_carry_a_credit_note(self) -> None:
+        """The reverse of the rule above: a pending or not-required row holding a credit note
+        would look "already linked" to the attach logic, which would then never transition it,
+        so the recovery sweep could not repair it."""
+        note = h.issued_invoice(self.owner)
+        self._refused(original=self.invoice, source_refund=self.refund, credit_note=note)
+        self._refused(
+            original=self.invoice,
+            source_refund=self.refund,
+            state=STATE_NOT_REQUIRED,
+            not_required_reason=REASON_NO_FISCAL_DOCUMENT,
+            credit_note=note,
+        )
+
     def test_the_source_cannot_be_repointed_once_set(self) -> None:
         correction = FiscalCorrection.objects.create(original=self.invoice, source_refund=self.refund)
         correction.source_refund = self.other_refund

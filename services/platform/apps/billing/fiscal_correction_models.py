@@ -161,9 +161,12 @@ class FiscalCorrection(models.Model):
                 condition=models.Q(original__isnull=False) | models.Q(state=STATE_NOT_REQUIRED),
                 name="fiscal_correction_original_unless_not_required",
             ),
+            # Both directions: an attached correction names its credit note, and only an attached
+            # one may, or a row holding a note would look "already linked" and never transition.
             models.CheckConstraint(
-                condition=~models.Q(state=STATE_ATTACHED) | models.Q(credit_note__isnull=False),
-                name="fiscal_correction_attached_has_credit_note",
+                condition=(models.Q(state=STATE_ATTACHED) & models.Q(credit_note__isnull=False))
+                | (~models.Q(state=STATE_ATTACHED) & models.Q(credit_note__isnull=True)),
+                name="fiscal_correction_credit_note_iff_attached",
             ),
             # A "not required" outcome clears an obligation, so it must say why.
             models.CheckConstraint(
