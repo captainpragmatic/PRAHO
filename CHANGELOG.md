@@ -52,6 +52,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The missing-domain message from the order API is now translatable. Customers ordering
   through the portal were already protected, because the cart refuses that case earlier and
   in Romanian; this closes it for callers of the public order API.
+- A SmartBill invoice fully refunded through its order now gets its storno. The refund names
+  the invoice only through the order, so the reversal saw no settled refund and was refused.
+- A partial refund of an invoice whose lines carry more than one VAT rate is now refused up
+  front, before any money moves. Refund the whole invoice instead, or issue the correction
+  manually.
+- An invoice that an issued credit note reverses can no longer be restored to paid by refund
+  bookkeeping. The attempt is refused and logged.
 
 
 ### Added
@@ -71,6 +78,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and credits that retain their original value across subscription renewals.
 - Customer-initiated spending of existing gift-card balances at checkout and on billing
   documents, with proportional split refunds and a staff action to resume unfinished refunds.
+- Every completed refund now records the fiscal correction it owes, or that it owes none,
+  with an hourly sweep for any it missed. A SmartBill storno is linked to the correction it
+  settles. Nothing new is issued yet.
 
 ### Fixed
 
