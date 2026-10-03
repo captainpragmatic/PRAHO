@@ -419,8 +419,11 @@ class TestRefundLifecycleSignals(TestCase):
         )
         mock_log.reset_mock()
         force_status(refund, "completed")
-        call_kwargs = mock_log.call_args_list[-1][1]
-        assert call_kwargs["event_type"] == "refund_model_updated"
+        # Completion also records the refund's fiscal correction, which audits itself, so
+        # the refund's own event is no longer necessarily the last one logged.
+        event_types = [call.kwargs["event_type"] for call in mock_log.call_args_list]
+        assert "refund_model_updated" in event_types
+        assert "fiscal_correction_created" in event_types
 
     @patch("apps.billing.signals._log_billing_model_event")
     def test_deleted(self, mock_log):

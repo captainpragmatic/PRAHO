@@ -382,6 +382,50 @@ def audit_refund_lifecycle(sender: type[Refund], instance: Refund, created: bool
     )
 
 
+@receiver(pre_save, sender=Refund)
+def remember_refund_status_before_save(sender: type[Refund], instance: Refund, **kwargs: Any) -> None:
+    """Note whether this save is the one that moves a refund INTO `completed`.
+
+    Read only when it can matter: the row is being saved as completed AND the write includes
+    `status`. Any other save cannot be the transition, so it costs no query.
+    """
+    instance._status_before_save = "completed"
+    update_fields = kwargs.get("update_fields")
+    if kwargs.get("raw") or instance._state.adding or instance.status != "completed":
+        return
+    if update_fields is not None and "status" not in update_fields:
+        return
+    instance._status_before_save = Refund.objects.filter(pk=instance.pk).values_list("status", flat=True).first()
+
+
+@receiver(post_save, sender=Refund)
+def record_fiscal_correction_on_completion(
+    sender: type[Refund], instance: Refund, created: bool, **kwargs: Any
+) -> None:
+    """Record the fiscal correction a refund owes, the moment it completes.
+
+    In its own savepoint, with the exception caught OUTSIDE it. Settlement is running in the
+    enclosing transaction and must survive whatever happens here: on PostgreSQL a database
+    error swallowed without its own savepoint aborts the whole transaction, settlement
+    included. A refund created already-completed (fixtures, imports) never transitions, so it
+    is the recovery sweep's to find, as is any refund whose recording failed here.
+    """
+    if kwargs.get("raw") or created or instance.status != "completed":
+        return
+    if getattr(instance, "_status_before_save", "completed") == "completed":
+        return
+    from . import fiscal_correction_service  # Imported here to keep the model import graph acyclic
+
+    try:
+        with transaction.atomic():
+            fiscal_correction_service.record_obligation(instance)
+    except Exception:
+        logger.exception(
+            f"🔥 [Fiscal Correction] Could not record the correction owed by refund {instance.pk}; "
+            f"the refund stays settled and the recovery sweep will retry."
+        )
+
+
 def _fiscal_correction_audit_values(instance: FiscalCorrection) -> dict[str, Any]:
     return {
         "fiscal_correction_id": str(instance.id),

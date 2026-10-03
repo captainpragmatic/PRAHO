@@ -309,6 +309,30 @@ def refunds_for_invoice(invoice: Any) -> models.QuerySet[Refund]:
     return Refund.objects.filter(refund_scope_q(invoice))
 
 
+def invoice_ids_in_scope_of(refund: Refund) -> set[int]:
+    """The invoices whose `refund_scope_q` contains `refund`: the same three links, read forward.
+
+    Walked from the refund rather than by testing the rule against every invoice, which would
+    scan the invoice table to answer a question its three foreign keys already settle.
+    """
+    from apps.orders.models import Order  # noqa: PLC0415  # ADR-0007 cross-app import
+
+    from .payment_models import Payment  # noqa: PLC0415  # Avoid a model import cycle
+
+    invoice_ids: set[int] = set()
+    if refund.invoice_id is not None:
+        invoice_ids.add(refund.invoice_id)
+    if refund.payment_id is not None:
+        via_payment = Payment.objects.filter(pk=refund.payment_id).values_list("invoice_id", flat=True).first()
+        if via_payment is not None:
+            invoice_ids.add(via_payment)
+    if refund.order_id is not None:
+        via_order = Order.objects.filter(pk=refund.order_id).values_list("invoice_id", flat=True).first()
+        if via_order is not None:
+            invoice_ids.add(via_order)
+    return invoice_ids
+
+
 class RefundNote(models.Model):
     """
     Notes and comments on refunds for audit trail and communication.
