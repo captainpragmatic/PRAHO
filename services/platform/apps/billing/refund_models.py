@@ -284,6 +284,31 @@ class Refund(models.Model):
         return self.order if self.order else self.invoice
 
 
+def refund_scope_q(invoice: Any) -> models.Q:
+    """THE rule for which refunds belong to an invoice.
+
+    A refund names its document in one of three ways, and each path writes a different one:
+
+    * `invoice` - a direct invoice refund;
+    * `payment.invoice` - a refund attached to the payment that settled the invoice;
+    * `order.invoice` - an order refund. The `refund_order_or_invoice_not_both` constraint
+      leaves its own `invoice` NULL by schema, and its payment may be linked to the proforma
+      rather than the invoice, so this leg is often the ONLY one that finds it.
+
+    Reading `invoice.refunds` (the first leg alone) is how an order-path full refund came to
+    look like no refund at all. Every fiscal reading of "refunds of this invoice" goes through
+    here so the three cannot drift apart again.
+    """
+    return models.Q(invoice=invoice) | models.Q(payment__invoice=invoice) | models.Q(order__invoice=invoice)
+
+
+def refunds_for_invoice(invoice: Any) -> models.QuerySet[Refund]:
+    """Refunds belonging to `invoice` under the shared scope rule (all statuses)."""
+    # Every leg follows a forward foreign key from the refund row, so no row can match twice
+    # and no `distinct()` is needed.
+    return Refund.objects.filter(refund_scope_q(invoice))
+
+
 class RefundNote(models.Model):
     """
     Notes and comments on refunds for audit trail and communication.

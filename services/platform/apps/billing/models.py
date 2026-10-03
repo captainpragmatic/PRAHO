@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 from .currency_models import Currency, FXRate
 from .efactura.models import EFacturaDocument, EFacturaDocumentType, EFacturaStatus
 from .efactura.token_storage import OAuthToken
+from .fiscal_correction_models import FiscalCorrection
 from .invoice_models import Invoice, InvoiceLine, InvoiceSequence
 from .issuers.models import IssuanceState, ProviderIssuance, SmartBillRateGate
 
@@ -117,6 +118,8 @@ __all__ = [  # noqa: RUF022  # Grouped by billing domain for discoverability
     "EFacturaDocumentType",
     "EFacturaStatus",
     "FXRate",
+    # Fiscal correction obligations
+    "FiscalCorrection",
     # Invoice Models
     "Invoice",
     "InvoiceLine",

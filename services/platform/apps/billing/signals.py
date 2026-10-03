@@ -40,6 +40,7 @@ from .fiscal_identity import normalize_country_code
 from .issuers.models import IssuanceState, ProviderIssuance
 from .models import (
     CreditLedger,
+    FiscalCorrection,
     Invoice,
     OAuthToken,
     Payment,
@@ -378,6 +379,44 @@ def audit_refund_lifecycle(sender: type[Refund], instance: Refund, created: bool
             "amount_cents": instance.amount_cents,
         },
         metadata={"model": "Refund"},
+    )
+
+
+def _fiscal_correction_audit_values(instance: FiscalCorrection) -> dict[str, Any]:
+    return {
+        "fiscal_correction_id": str(instance.id),
+        "state": str(instance.state),
+        "original_id": str(instance.original_id) if instance.original_id is not None else None,
+        "source_refund_id": str(instance.source_refund_id) if instance.source_refund_id else None,
+        "source_command_id": str(instance.source_command_id) if instance.source_command_id else None,
+        "credit_note_id": str(instance.credit_note_id) if instance.credit_note_id is not None else None,
+        "not_required_reason": str(instance.not_required_reason),
+    }
+
+
+@receiver(post_save, sender=FiscalCorrection)
+def audit_fiscal_correction_lifecycle(
+    sender: type[FiscalCorrection], instance: FiscalCorrection, created: bool, **kwargs: Any
+) -> None:
+    """Audit every change to a fiscal correction obligation (ADR-0016)."""
+    _log_billing_model_event(
+        event_type="fiscal_correction_created" if created else "fiscal_correction_updated",
+        instance=instance,
+        description=f"Fiscal correction {instance.id} {'recorded' if created else 'updated'}: {instance.state}",
+        new_values=_fiscal_correction_audit_values(instance),
+        metadata={"model": "FiscalCorrection"},
+    )
+
+
+@receiver(pre_delete, sender=FiscalCorrection)
+def audit_fiscal_correction_deleted(sender: type[FiscalCorrection], instance: FiscalCorrection, **kwargs: Any) -> None:
+    """Deleting an obligation removes the record that a refund owed a correction."""
+    _log_billing_model_event(
+        event_type="fiscal_correction_deleted",
+        instance=instance,
+        description=f"Fiscal correction {instance.id} deleted",
+        old_values=_fiscal_correction_audit_values(instance),
+        metadata={"model": "FiscalCorrection"},
     )
 
 
