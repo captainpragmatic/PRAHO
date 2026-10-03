@@ -19,6 +19,7 @@ from apps.billing.invoice_models import DOCUMENT_KIND_CREDIT_NOTE, ISSUER_SMARTB
 from apps.billing.issuers.base import Issued, PreparedDocument
 from apps.billing.issuers.service import issue_storno_for_invoice
 from apps.billing.models import Payment, ProformaInvoice, Refund
+from apps.billing.refund_models import net_collected_cents_for_invoice
 from apps.billing.refund_service import RefundService
 from apps.common.types import Ok
 from tests.billing import _fiscal_correction_helpers as h
@@ -343,3 +344,79 @@ class ProjectionFollowsNetCollectedTests(TransactionTestCase):
         self.assertTrue(result.is_ok(), result)
         invoice.refresh_from_db()
         self.assertEqual(invoice.status, "partially_refunded")
+
+
+class OutstandingBalanceAgreesWithTheProjectionTests(TestCase):
+    """The outstanding balance and the refund projection read one definition of what is held.
+
+    The balance counted only payments linked to the invoice itself, while the projection also
+    counts a payment linked only to the proforma. An invoice paid through its proforma and then
+    partly refunded projected `partially_refunded` with 8,100 held, but showed 12,100 outstanding.
+    """
+
+    def setUp(self) -> None:
+        self.owner = h.customer()
+
+    def _paid_through_proforma(self) -> tuple[Invoice, Payment, Any]:
+        invoice = h.issued_invoice(self.owner)
+        invoice.mark_as_paid()
+        invoice.save()
+        proforma = ProformaInvoice.objects.create(
+            customer=self.owner,
+            currency=invoice.currency,
+            number=f"PRO-{invoice.pk}",
+            subtotal_cents=invoice.subtotal_cents,
+            tax_cents=invoice.tax_cents,
+            total_cents=invoice.total_cents,
+        )
+        order = h.order_for(invoice, proforma=proforma)
+        payment = Payment.objects.create(
+            customer=self.owner,
+            proforma=proforma,
+            currency=invoice.currency,
+            status="succeeded",
+            payment_method="stripe",
+            amount_cents=invoice.total_cents,
+            gateway_txn_id=f"pi_proforma_{invoice.pk}",
+        )
+        return invoice, payment, order
+
+    def _assert_agrees(self, invoice: Invoice) -> None:
+        invoice.refresh_from_db()
+        implied = max(0, invoice.total_cents - max(0, net_collected_cents_for_invoice(invoice)))
+        self.assertEqual(invoice.get_remaining_amount(), implied)
+        self.assertEqual(_invoice_remaining_amounts(Invoice.objects.filter(pk=invoice.pk)), {invoice.pk: implied})
+
+    def test_a_proforma_paid_invoice_with_a_partial_order_refund_owes_what_was_returned(self) -> None:
+        invoice, payment, order = self._paid_through_proforma()
+        h.pending_refund(order=order, payment=payment, amount_cents=4000, status="completed")
+        self.assertTrue(RefundService._project_settled_refunds(payment, invoice).is_ok())
+
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, "partially_refunded")
+        self.assertEqual(invoice.get_remaining_amount(), 4000)
+        self._assert_agrees(invoice)
+
+    def test_the_balance_and_the_projection_agree_across_the_ledger_shapes(self) -> None:
+        """Every shape the two readers could split on, compared reader against reader."""
+        with self.subTest("proforma-paid, untouched"):
+            invoice, _payment, _order = self._paid_through_proforma()
+            self._assert_agrees(invoice)
+        with self.subTest("invoice-paid, partly refunded"):
+            invoice = h.issued_invoice(self.owner)
+            paid = h.paid(invoice)
+            h.pending_refund(invoice=invoice, payment=paid, amount_cents=2500, status="completed")
+            self._assert_agrees(invoice)
+        with self.subTest("overpaid, excess returned"):
+            invoice = h.issued_invoice(self.owner)
+            paid = h.paid(invoice, amount_cents=invoice.total_cents * 2)
+            h.pending_refund(invoice=invoice, payment=paid, amount_cents=invoice.total_cents, status="completed")
+            self._assert_agrees(invoice)
+        with self.subTest("overpaid through the proforma, excess returned"):
+            invoice, payment, order = self._paid_through_proforma()
+            Payment.objects.filter(pk=payment.pk).update(amount_cents=invoice.total_cents * 2)
+            h.pending_refund(order=order, payment=payment, amount_cents=invoice.total_cents, status="completed")
+            self._assert_agrees(invoice)
+            self.assertEqual(invoice.get_remaining_amount(), 0, "the excess went back; the sale is still paid")
+        with self.subTest("issued, nothing paid"):
+            self._assert_agrees(h.issued_invoice(self.owner))

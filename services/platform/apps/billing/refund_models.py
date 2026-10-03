@@ -347,7 +347,9 @@ def refunded_cents_for_invoice(invoice: Any, *, statuses: Iterable[str] = ("comp
     return int(total)
 
 
-_COLLECTED_PAYMENT_STATUSES = ("succeeded", "partially_refunded", "refunded")
+COLLECTED_PAYMENT_STATUSES = ("succeeded", "partially_refunded", "refunded")
+# Invoice states that are only ever reached after the invoice was collected in full.
+FULLY_COLLECTED_INVOICE_STATES = frozenset({"paid", "partially_refunded", "refunded"})
 
 
 def collected_cents_for_invoice(invoice: Any) -> int:
@@ -363,7 +365,7 @@ def collected_cents_for_invoice(invoice: Any) -> int:
     unlinked_payment_ids = refunds_for_invoice(invoice).filter(payment__isnull=False).values("payment_id")
     total = Payment.objects.filter(
         models.Q(invoice=invoice) | models.Q(invoice__isnull=True, id__in=unlinked_payment_ids),
-        status__in=_COLLECTED_PAYMENT_STATUSES,
+        status__in=COLLECTED_PAYMENT_STATUSES,
     ).aggregate(total=models.Sum("amount_cents", default=0))["total"]
     return int(total)
 
@@ -371,13 +373,18 @@ def collected_cents_for_invoice(invoice: Any) -> int:
 def net_collected_cents_for_invoice(invoice: Any) -> int:
     """What is still held against `invoice` after its completed refunds.
 
-    Collected is floored at the invoice total. Only invoices that were collected in full reach the
-    refund states this feeds (paid, partially_refunded, refunded), so a ledger that cannot show
-    every payment - a legacy row, a payment linked only by metadata - must not make a partial
-    refund look like a full one. The floor never lowers what the ledger does show, so an
-    overpayment still counts in full.
+    THE one definition, read by the outstanding balance (`Invoice.get_remaining_amount`), the
+    refund projection and the storno eligibility check, so they cannot disagree.
+
+    For an invoice in a state only full collection reaches (paid, partially_refunded, refunded),
+    collected is floored at the invoice total: a ledger that cannot show every payment - a legacy
+    row, a payment linked only by metadata - must not make a partial refund look like a full one,
+    or a paid invoice look unpaid. The floor never lowers what the ledger does show, so an
+    overpayment still counts in full. Any other invoice is measured by its ledger alone.
     """
-    collected = max(collected_cents_for_invoice(invoice), int(invoice.total_cents))
+    collected = collected_cents_for_invoice(invoice)
+    if invoice.status in FULLY_COLLECTED_INVOICE_STATES:
+        collected = max(collected, int(invoice.total_cents))
     return collected - refunded_cents_for_invoice(invoice)
 
 
