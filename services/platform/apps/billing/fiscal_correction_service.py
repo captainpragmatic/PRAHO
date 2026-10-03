@@ -28,7 +28,7 @@ from .fiscal_correction_models import (
     FiscalCorrection,
 )
 from .invoice_models import DOCUMENT_KIND_CREDIT_NOTE, DOCUMENT_KIND_INVOICE, Invoice
-from .refund_models import resolved_invoice_id_of
+from .refund_models import refunds_for_invoice, resolved_invoice_id_of
 
 if TYPE_CHECKING:
     from django.db.models import QuerySet
@@ -99,51 +99,87 @@ def record_obligation(refund: Refund) -> FiscalCorrection | None:
     return correction
 
 
-def attach_provider_credit_note(credit_note: Invoice) -> FiscalCorrection | None:
-    """Settle the obligation an issued provider storno answers for, by linking its credit note.
+def _sources_settled_by(original: Invoice) -> dict[tuple[str, Any], int]:
+    """Completed refunds on `original`, summed per source (a tender command, or the refund itself).
 
-    The provider's whole-document storno is only ever allowed when ONE settled refund (or one
-    tender command) accounts for the entire invoice, so exactly one pending obligation can
-    match. Anything else is not a link this code may guess: none means the obligation has not
-    been recorded yet (the sweep links it once it is), several means an operator must decide.
-
-    Locks only the obligation rows. The caller is finalising the credit note and holds its
-    issuance lock, never the original's, and every writer of an obligation's state comes
-    through here or the sweep.
+    The same single-invoice resolution as every balance, so the storno is matched against exactly
+    the money the ledger counts against this invoice.
     """
+    from apps.promotions.models import TenderRefundLeg  # noqa: PLC0415  # ADR-0007 cross-app import
+
+    settled = list(refunds_for_invoice(original).filter(status="completed").only("pk", "amount_cents"))
+    command_of = dict(
+        TenderRefundLeg.objects.filter(refund_id__in=[refund.pk for refund in settled]).values_list(
+            "refund_id", "command_id"
+        )
+    )
+    totals: dict[tuple[str, Any], int] = {}
+    for refund in settled:
+        command_id = command_of.get(refund.pk)
+        key = ("command", command_id) if command_id is not None else ("refund", refund.pk)
+        totals[key] = totals.get(key, 0) + refund.amount_cents
+    return totals
+
+
+def attach_provider_credit_note(credit_note: Invoice) -> FiscalCorrection | None:
+    """Settle the obligation of the refund an issued provider storno reverses, by linking it.
+
+    Which refund that is comes from the ledger, not from whichever obligation happens to be
+    pending: a whole-document storno is only ever allowed when ONE refund, or one tender command,
+    accounts for the entire invoice, so its source is the one whose completed refunds sum to the
+    credit note's total. Obligations still missing for completed refunds on the original - a
+    backfill reaching history - are recorded first, so the match never lands on an unrelated
+    obligation just because it was the only one recorded yet. No match, or several, is not a link
+    this code may guess; it is logged for an operator, and the sweep looks again.
+
+    Locks only the obligation row it settles. The caller is finalising the credit note and holds
+    its issuance lock, never the original's; recording takes no locks at all.
+    """
+    from .refund_models import Refund  # noqa: PLC0415  # Avoid a model import cycle
+
     if credit_note.document_kind != DOCUMENT_KIND_CREDIT_NOTE or not credit_note.number:
         return None
-    original_id = credit_note.reverses_invoice_id
-    if original_id is None:
+    original = credit_note.reverses_invoice
+    if original is None:
         return None
 
     already = FiscalCorrection.objects.filter(credit_note=credit_note).first()
     if already is not None:
         return already
 
-    candidates = list(
-        FiscalCorrection.objects.select_for_update()
-        .filter(original_id=original_id, state=STATE_PENDING)
-        .order_by("created_at", "pk")[:2]
-    )
-    if not candidates:
-        logger.warning(
-            f"⚠️ [Fiscal Correction] Credit note {credit_note.number} reverses invoice {original_id}, "
-            f"which has no pending correction yet; the recovery sweep will link it once recorded."
+    for refund in refunds_for_invoice(original).filter(status="completed"):
+        record_obligation(refund)
+
+    reversed_cents = abs(credit_note.total_cents)
+    matches = [key for key, total in _sources_settled_by(original).items() if total == reversed_cents]
+    if len(matches) != 1:
+        level = logging.WARNING if not matches else logging.ERROR
+        logger.log(
+            level,
+            f"{'⚠️' if not matches else '🔥'} [Fiscal Correction] Credit note {credit_note.number} reverses "
+            f"{reversed_cents} cents of invoice {original.pk}, and {len(matches)} refund source(s) on it "
+            f"account for exactly that; it is not linked until an operator decides.",
         )
+        if matches:
+            log_security_event(
+                event_type="fiscal_correction_ambiguous_credit_note",
+                details={"credit_note_id": str(credit_note.pk), "original_id": str(original.pk)},
+            )
         return None
-    if len(candidates) > 1:
+
+    kind, source_id = matches[0]
+    if kind == "command":
+        source: dict[str, Any] = {"source_command_id": source_id}
+    else:
+        source = {"source_refund": Refund.objects.get(pk=source_id)}
+    correction = FiscalCorrection.objects.select_for_update().filter(**source).first()
+    if correction is None or correction.state != STATE_PENDING or correction.original_id != original.pk:
         logger.error(
-            f"🔥 [Fiscal Correction] Credit note {credit_note.number} reverses invoice {original_id}, "
-            f"which has several pending corrections; an operator must decide which one it settles."
-        )
-        log_security_event(
-            event_type="fiscal_correction_ambiguous_credit_note",
-            details={"credit_note_id": str(credit_note.pk), "original_id": str(original_id)},
+            f"🔥 [Fiscal Correction] Credit note {credit_note.number} matches refund source {source_id}, whose "
+            f"correction is {getattr(correction, 'state', 'missing')}; it is not linked until an operator decides."
         )
         return None
 
-    correction = candidates[0]
     correction.attach_credit_note(credit_note)
     correction.save(update_fields=["state", "credit_note", "updated_at"])
     logger.info(
