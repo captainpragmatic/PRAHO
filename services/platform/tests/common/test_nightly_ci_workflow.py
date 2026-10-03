@@ -101,6 +101,9 @@ class NightlyPostgresConcurrencyWorkflowTests(SimpleTestCase):
         self.assertIn("tests.users.test_login_audit_failure_keeps_the_login", command)
         self.assertIn("tests.users.test_mfa_audit_isolation", command)
         self.assertIn("tests.api.test_token_second_factor_concurrency", command)
+        # Fiscal correction recording: one row per command under racing legs, and the savepoint
+        # that keeps a recording failure from aborting settlement.
+        self.assertIn("tests.billing.test_fiscal_correction_concurrency", command)
         self.assertIn("--settings=config.settings.ci", command)
         self.assertNotIn("config.settings.test", command)
         self.assertNotIn("--parallel", command)
