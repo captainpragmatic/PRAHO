@@ -134,7 +134,8 @@ cost the estimate assumed, and the operator accepted SPV blindness knowingly.
   `isReverseCharge` is encouraging but proves only that SmartBill distinguishes such
   rates internally, not what XML it emits.
 - Partial refunds of provider-issued invoices need manual correction and raise a
-  security event. `/invoice/reverse` cannot express them.
+  security event. `/invoice/reverse` cannot express them. (Built-in invoices are corrected
+  automatically, partial refunds included: ADR-0053.)
 - There is no automated proof an invoice reached SPV, no deadline tracking and no
   signed-ZIP evidence in PRAHO while SmartBill owns e-Factura. This is the accepted
   cost of the decision, and the operator checks SmartBill Cloud for it.
@@ -149,6 +150,12 @@ cost the estimate assumed, and the operator accepted SPV blindness knowingly.
   credit note is ever minted for it. Revenue and VAT therefore exclude credit notes and
   take the correction from the `Refund` row, which both paths write at a single site. The
   credit note remains the fiscal document; it is no longer the reporting mechanism.
+  **Revised again (ADR-0053):** the premise above no longer holds. Every settled refund of a
+  built-in invoice now issues its own storno, partial ones included, so both paths produce a
+  correcting document. Reporting still takes the correction from the `Refund` row for now; it
+  moves to fiscal netting (invoices less credit notes, by fiscal date, next to cash) when the
+  SmartBill path is on the same obligation and the reports are rewritten. Until then this
+  consequence stands as written, for the reason it states rather than the one it started with.
 - Every invoice-touching feature now has two paths. The built-in issuer is kept
   exercised through the same gateway so the fallback stays real rather than becoming
   code that merely still compiles.

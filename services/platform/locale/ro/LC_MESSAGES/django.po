@@ -20256,3 +20256,85 @@ msgstr "Introduceți codul de 6 cifre din aplicația de autentificare sau unul d
 
 msgid "Cancel and sign in again"
 msgstr "Anulați și conectați-vă din nou"
+
+msgid "FACTURĂ STORNO / CREDIT NOTE"
+msgstr "FACTURĂ STORNO / CREDIT NOTE"
+
+msgid "Total creditat / Total credited: {amount} {currency}"
+msgstr "Total creditat / Total credited: {amount} {currency}"
+
+msgid "Storno la factura {number} din {date}"
+msgstr "Storno la factura {number} din {date}"
+
+msgid "The local numbering family the legal number came from; empty for provider-numbered documents"
+msgstr "Familia de numerotare locală din care provine numărul legal; gol pentru documentele numerotate de furnizor"
+
+msgid "Allocated, awaiting issuance"
+msgstr "Alocată, în așteptarea emiterii"
+
+msgid "Credit note issued"
+msgstr "Factură storno emisă"
+
+msgid "Credit note sent to the customer"
+msgstr "Factură storno trimisă clientului"
+
+msgid "Failed, will be retried"
+msgstr "Eșuată, se va reîncerca"
+
+msgid "The refund returned money the invoice did not need"
+msgstr "Rambursarea a returnat bani de care factura nu avea nevoie"
+
+msgid "Earlier corrections already credit the whole invoice"
+msgstr "Corecțiile anterioare creditează deja întreaga factură"
+
+msgid "The amount could not be allocated"
+msgstr "Suma nu a putut fi alocată"
+
+msgid "The credit note could not be issued"
+msgstr "Factura storno nu a putut fi emisă"
+
+msgid "The original already has a credit note"
+msgstr "Factura originală are deja o factură storno"
+
+msgid "Not due"
+msgstr "Nescadent"
+
+msgid "Not applicable"
+msgstr "Nu se aplică"
+
+msgid "Waiting for the original to be accepted"
+msgstr "Se așteaptă acceptarea facturii originale"
+
+msgid "Original rejected, needs review"
+msgstr "Factura originală a fost respinsă, necesită verificare"
+
+msgid "Allocated taxable base (signed)"
+msgstr "Baza impozabilă alocată (cu semn)"
+
+msgid "Allocated VAT (signed)"
+msgstr "TVA alocat (cu semn)"
+
+msgid "Allocated document discount (signed)"
+msgstr "Reducerea de document alocată (cu semn)"
+
+msgid "Allocated gross (signed)"
+msgstr "Totalul alocat (cu semn)"
+
+msgid "Unknown not-required reason."
+msgstr "Motiv necunoscut pentru „nu este necesară”."
+
+msgid "An allocation credits a positive amount."
+msgstr "O alocare creditează o sumă pozitivă."
+
+msgid "The credit note must reverse this correction's original."
+msgstr "Factura storno trebuie să stornoze factura originală a acestei corecții."
+
+msgid "The credit note does not carry this correction's allocation."
+msgstr "Factura storno nu conține alocarea acestei corecții."
+
+#, python-format
+msgid "A fiscal correction's %(fields)s cannot be changed once set."
+msgstr "Câmpurile %(fields)s ale unei corecții fiscale nu mai pot fi modificate odată stabilite."
+
+msgid "A fiscal correction's source, original, credit note, allocation and communication are fixed."
+msgstr "Sursa, factura originală, factura storno, alocarea și comunicarea unei corecții fiscale sunt fixe."

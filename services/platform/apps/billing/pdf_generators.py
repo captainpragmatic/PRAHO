@@ -625,15 +625,23 @@ class RomanianInvoicePDFGenerator(RomanianDocumentPDFGenerator):
         self.invoice = invoice  # Type-specific reference
 
     def _get_document_title(self) -> str:
+        # A storno is its own fiscal document (Cod Fiscal art. 330), and the copy the customer
+        # receives has to say so rather than present a correction as a new invoice.
+        if self._is_credit_note():
+            return _t("FACTURĂ STORNO / CREDIT NOTE")
         return _t("FISCAL INVOICE")
 
     def _get_filename(self) -> str:
-        return f"factura_{self.invoice.display_number}.pdf"
+        prefix = "storno" if self._is_credit_note() else "factura"
+        return f"{prefix}_{self.invoice.display_number}.pdf"
 
     def _get_legal_disclaimer(self) -> str:
         return _t("Factură fiscală emisă conform art. 319 din Legea nr. 227/2015 privind Codul fiscal.")
 
     def _get_total_label(self) -> str:
+        # Nothing is payable on a credit note; its total is what was credited.
+        if self._is_credit_note():
+            return _t("Total creditat / Total credited: {amount} {currency}")
         return _t("TOTAL TO PAY: {amount} {currency}")
 
     def _render_document_details(self) -> None:
@@ -657,6 +665,19 @@ class RomanianInvoicePDFGenerator(RomanianDocumentPDFGenerator):
                 str(_t("Due date: {date}")).format(date=format_romanian_date(self.invoice.due_at)),
             )
 
+        # Art. 330 requires a correction to reference the invoice it corrects. A credit note has no
+        # due date, so the reference takes that line.
+        original = self.invoice.reverses_invoice if self._is_credit_note() else None
+        if original is not None:
+            original_date = format_romanian_date(original.issued_at) if original.issued_at else ""
+            self.canvas.drawString(
+                2 * cm,
+                self.height - 6 * cm,
+                str(_t("Storno la factura {number} din {date}")).format(
+                    number=original.display_number, date=original_date
+                ),
+            )
+
         # Status indicator
         self.canvas.setFont(_FONT_BOLD, 10)
         self.canvas.drawString(
@@ -671,9 +692,8 @@ class RomanianInvoicePDFGenerator(RomanianDocumentPDFGenerator):
         if self._is_credit_note():
             return
         # A refunded or cancelled invoice is not "unpaid". Stamping it as such tells the
-        # customer to pay money they have already been given back - and on the built-in
-        # path it is the ONLY document they hold about that invoice, because no credit
-        # note is ever produced there.
+        # customer to pay money they have already been given back, next to the credit note
+        # that says so.
         if self.invoice.status in ("refunded", "partially_refunded", "void"):
             return
         if self.invoice.status != "paid":

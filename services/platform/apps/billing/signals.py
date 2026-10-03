@@ -414,11 +414,17 @@ def record_fiscal_correction_on_completion(
         return
     if getattr(instance, "_status_before_save", "completed") == "completed":
         return
-    from . import fiscal_correction_service  # Imported here to keep the model import graph acyclic
+    from . import fiscal_correction_service, fiscal_correction_worker  # Kept out of the model import graph
+    from .fiscal_correction_models import STATE_PENDING
 
     try:
         with transaction.atomic():
-            fiscal_correction_service.record_obligation(instance)
+            correction = fiscal_correction_service.record_obligation(instance)
+            if correction is not None and correction.state == STATE_PENDING:
+                # Registered inside the savepoint, so a recording that rolls back queues nothing.
+                # After settlement commits, never before: the worker locks rows settlement holds.
+                correction_id = correction.pk
+                transaction.on_commit(lambda: fiscal_correction_worker.queue_fiscal_correction(correction_id))
     except Exception:
         logger.exception(
             f"🔥 [Fiscal Correction] Could not record the correction owed by refund {instance.pk}; "
@@ -435,6 +441,17 @@ def _fiscal_correction_audit_values(instance: FiscalCorrection) -> dict[str, Any
         "source_command_id": str(instance.source_command_id) if instance.source_command_id else None,
         "credit_note_id": str(instance.credit_note_id) if instance.credit_note_id is not None else None,
         "not_required_reason": str(instance.not_required_reason),
+        "allocated_at": instance.allocated_at.isoformat() if instance.allocated_at else None,
+        "base_cents": instance.base_cents,
+        "tax_cents": instance.tax_cents,
+        "discount_cents": instance.discount_cents,
+        "total_cents": instance.total_cents,
+        "failure_code": str(instance.failure_code),
+        "last_error": str(instance.last_error)[:500],
+        "communicated_at": instance.communicated_at.isoformat() if instance.communicated_at else None,
+        "fiscal_date": instance.fiscal_date.isoformat() if instance.fiscal_date else None,
+        "communication_attempts": instance.communication_attempts,
+        "efactura_status": str(instance.efactura_status),
     }
 
 
@@ -685,7 +702,7 @@ def handle_invoice_number_generation(sender: type[Invoice], instance: Invoice, *
     issuance protocol rather than something to paper over with a local sequence
     number that would diverge from the document the customer and ANAF received.
     """
-    from .invoice_models import ISSUER_BUILTIN
+    from .invoice_models import ISSUER_BUILTIN, SEQUENCE_SCOPE_DEFAULT
     from .issuers.base import Issued
     from .issuers.policy import resolve_issuer
 
@@ -723,6 +740,8 @@ def handle_invoice_number_generation(sender: type[Invoice], instance: Invoice, *
 
         new_number = outcome.legal_number
         instance.number = new_number
+        # The built-in issuer allocates from the default family; recorded with the number.
+        instance.sequence_scope = SEQUENCE_SCOPE_DEFAULT
         if instance.issued_at is None:
             instance.issued_at = timezone.now()
 

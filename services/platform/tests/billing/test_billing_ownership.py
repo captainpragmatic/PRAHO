@@ -181,6 +181,13 @@ class BillingScheduleContractTestCase(TestCase):
         correction_sweep = Schedule.objects.get(name="billing-fiscal-correction-sweep")
         self.assertEqual(correction_sweep.func, "apps.billing.fiscal_correction_service.sweep_fiscal_corrections")
         self.assertEqual(correction_sweep.cron, "40 * * * *")
+        # A correction whose queued worker never ran is issued, emailed and filed only by this one.
+        issuance_correction_sweep = Schedule.objects.get(name="billing-fiscal-correction-issuance-sweep")
+        self.assertEqual(
+            issuance_correction_sweep.func,
+            "apps.billing.fiscal_correction_worker.sweep_fiscal_correction_issuance",
+        )
+        self.assertEqual(issuance_correction_sweep.cron, "50 * * * *")
         vies_schedule = Schedule.objects.get(name="billing-vies-reverification")
         self.assertEqual(vies_schedule.func, "apps.billing.tasks.reverify_expired_vat_validations")
         self.assertEqual(vies_schedule.cron, "15 2 * * *")
@@ -192,5 +199,5 @@ class BillingScheduleContractTestCase(TestCase):
         self.assertEqual(recurring_reconciliation.cron, "*/10 * * * *")
         # Counted, not just spot-checked: a schedule that is defined but never
         # registered is dead code that looks alive. Includes durable currency-notice repair.
-        self.assertEqual(len(result), 13)
+        self.assertEqual(len(result), 14)
         register_usage.assert_called_once_with()

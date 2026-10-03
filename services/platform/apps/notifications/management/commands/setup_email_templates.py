@@ -110,6 +110,64 @@ class Command(BaseCommand):
                     "invoice_url": "Link to invoice",
                 },
             },
+            # A storno credit note, sent with its PDF when a refund is credited (ADR-0053). The
+            # send's date is the note's communication date for D390, so it is never optional.
+            {
+                "key": "credit_note_issued",
+                "locale": "ro",
+                "category": "billing",
+                "subject": "Factură storno {{credit_note_number}} - PragmaticHost",
+                "body_html": """
+                <h2>Factură storno emisă</h2>
+                <p>Bună ziua {{customer_name}},</p>
+                <p>Am emis o factură storno pentru suma rambursată. Documentul este atașat acestui email.</p>
+                <ul>
+                    <li><strong>Factura storno:</strong> {{credit_note_number}} din {{credit_note_date}}</li>
+                    <li><strong>Storno la factura:</strong> {{original_number}} din {{original_date}}</li>
+                    <li><strong>Total creditat:</strong> {{total_credited}} {{currency}}</li>
+                </ul>
+                <p>Nu este necesară nicio acțiune din partea dumneavoastră.</p>
+                <p>Echipa PragmaticHost</p>
+                """,
+                "description": "Factură storno trimisă clientului după o rambursare",
+                "variables": {
+                    "customer_name": "Numele clientului",
+                    "credit_note_number": "Numărul facturii storno",
+                    "credit_note_date": "Data emiterii facturii storno",
+                    "original_number": "Numărul facturii stornate",
+                    "original_date": "Data facturii stornate",
+                    "total_credited": "Suma creditată",
+                    "currency": "Moneda",
+                },
+            },
+            {
+                "key": "credit_note_issued",
+                "locale": "en",
+                "category": "billing",
+                "subject": "Credit note {{credit_note_number}} - PragmaticHost",
+                "body_html": """
+                <h2>Credit note issued</h2>
+                <p>Hello {{customer_name}},</p>
+                <p>We have issued a credit note for the amount refunded to you. It is attached to this email.</p>
+                <ul>
+                    <li><strong>Credit note:</strong> {{credit_note_number}} of {{credit_note_date}}</li>
+                    <li><strong>Credits invoice:</strong> {{original_number}} of {{original_date}}</li>
+                    <li><strong>Total credited:</strong> {{total_credited}} {{currency}}</li>
+                </ul>
+                <p>No action is needed on your part.</p>
+                <p>PragmaticHost Team</p>
+                """,
+                "description": "Credit note sent to the customer after a refund",
+                "variables": {
+                    "customer_name": "Customer name",
+                    "credit_note_number": "Credit note number",
+                    "credit_note_date": "Credit note issue date",
+                    "original_number": "Number of the invoice credited",
+                    "original_date": "Date of the invoice credited",
+                    "total_credited": "Amount credited",
+                    "currency": "Currency",
+                },
+            },
             # ===============================================================================
             # PAYMENT DUNNING TEMPLATES
             # ===============================================================================

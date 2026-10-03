@@ -31,7 +31,7 @@ from apps.customers.models import CustomerAddress, CustomerTaxProfile
 
 from . import config as billing_config
 from .fiscal_identity import billing_country_code, get_customer_fiscal_identity
-from .invoice_models import Invoice, InvoiceLine
+from .invoice_models import SEQUENCE_SCOPE_DEFAULT, Invoice, InvoiceLine
 from .issuers.policy import begin_issuance, issuer_for_new_document
 from .metering_models import BillingCycle, UsageAggregation, UsageMeter
 from .metering_service import AggregationService, RatingEngine
@@ -174,6 +174,8 @@ class UsageInvoiceService:
                 customer=customer,
                 issuer_provider=issuer_provider,
                 number=None if external else InvoiceNumberingService.get_next_number(),
+                # Recorded with the number, so a correction is later numbered from the same family.
+                sequence_scope="" if external else SEQUENCE_SCOPE_DEFAULT,
                 status="draft",
                 currency=currency,
                 subtotal_cents=net_amount_cents,  # NET amount before tax (not gross)
