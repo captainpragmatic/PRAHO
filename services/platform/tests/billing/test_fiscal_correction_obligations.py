@@ -7,10 +7,12 @@ that recording can never cost a refund its settlement.
 from __future__ import annotations
 
 import uuid
+from datetime import timedelta
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-from django.test import TestCase, TransactionTestCase
+from django.core.cache import cache
+from django.test import TestCase, TransactionTestCase, override_settings
 
 from apps.billing.fiscal_correction_models import (
     REASON_NO_FISCAL_DOCUMENT,
@@ -19,6 +21,7 @@ from apps.billing.fiscal_correction_models import (
     STATE_PENDING,
     FiscalCorrection,
 )
+from apps.billing.fiscal_correction_service import sweep_fiscal_corrections
 from apps.billing.invoice_models import DOCUMENT_KIND_CREDIT_NOTE, ISSUER_SMARTBILL, Invoice
 from apps.billing.issuers.base import Ambiguous, Issued, PreparedDocument
 from apps.billing.issuers.models import IssuanceState, ProviderIssuance
@@ -28,8 +31,9 @@ from apps.billing.refund_service import RefundService
 from apps.common.types import Ok
 from apps.orders.models import Order
 from apps.promotions.gift_cards import pay_document
-from apps.promotions.models import GiftCard
+from apps.promotions.models import GiftCard, TenderRefundCommand, TenderRefundLeg
 from apps.promotions.tender_refunds import refund_document
+from config.settings.test import LOCMEM_TEST_CACHE
 from tests.billing import _fiscal_correction_helpers as h
 from tests.helpers.fsm_helpers import force_status
 
@@ -278,3 +282,125 @@ class ProviderStornoSettlesTheObligationTests(TransactionTestCase):
         self.correction.refresh_from_db()
         self.assertEqual(self.correction.state, STATE_PENDING)
         self.assertTrue(any(str(credit_note.pk) in line for line in logs.output), logs.output)
+
+
+def _born_completed(**fields: Any) -> Refund:
+    """A completed refund that never transitioned, so the completion hook never saw it."""
+    return h.pending_refund(status="completed", **fields)
+
+
+@override_settings(CACHES=LOCMEM_TEST_CACHE)
+class RecoverySweepTests(TestCase):
+    def setUp(self) -> None:
+        cache.clear()
+        self.owner = h.customer()
+
+    def test_the_sweep_records_what_the_hook_missed_and_only_once(self) -> None:
+        invoice = h.issued_invoice(self.owner)
+        refund = _born_completed(invoice=invoice)
+        self.assertFalse(FiscalCorrection.objects.exists())
+
+        first = sweep_fiscal_corrections()
+        second = sweep_fiscal_corrections()
+
+        correction = FiscalCorrection.objects.get()
+        self.assertEqual(correction.source_refund_id, refund.pk)
+        self.assertEqual(correction.original_id, invoice.pk)
+        self.assertEqual(correction.state, STATE_PENDING)
+        self.assertEqual(first["recorded"], 1)
+        self.assertEqual(second["examined"], 0, "a recorded refund is no longer a candidate")
+
+    def test_a_refund_still_in_flight_is_not_swept(self) -> None:
+        invoice = h.issued_invoice(self.owner)
+        h.pending_refund(invoice=invoice)
+
+        sweep_fiscal_corrections()
+
+        self.assertFalse(FiscalCorrection.objects.exists())
+
+    def test_legs_of_one_command_whose_hook_failed_converge_on_one_correction(self) -> None:
+        """Completion commits, recording fails: the sweep still owes the command ONE correction."""
+        invoice = h.issued_invoice(self.owner)
+        cash = h.paid(invoice, amount_cents=7100)
+        card = Payment.objects.create(
+            customer=self.owner,
+            invoice=invoice,
+            currency=invoice.currency,
+            status="succeeded",
+            payment_method="bank_transfer",
+            amount_cents=5000,
+        )
+        command = TenderRefundCommand.objects.create(
+            invoice=invoice,
+            customer=self.owner,
+            amount_cents=12100,
+            operation_key="fiscal-sweep-command",
+            reason="test",
+        )
+        for payment in (cash, card):
+            refund = h.pending_refund(invoice=invoice, payment=payment, amount_cents=payment.amount_cents)
+            TenderRefundLeg.objects.create(
+                command=command, payment=payment, refund=refund, amount_cents=refund.amount_cents
+            )
+            with (
+                patch(
+                    "apps.billing.fiscal_correction_service.record_obligation",
+                    side_effect=RuntimeError("obligation store unavailable"),
+                ),
+                self.assertLogs(HOOK_LOGGER, level="ERROR"),
+            ):
+                h.complete(refund)
+        self.assertFalse(FiscalCorrection.objects.exists())
+
+        report = sweep_fiscal_corrections()
+
+        correction = FiscalCorrection.objects.get()
+        self.assertEqual(correction.source_command_id, command.pk)
+        self.assertEqual(correction.original_id, invoice.pk)
+        self.assertEqual(report["recorded"], 2, "both legs resolve, to the same correction")
+        self.assertEqual(sweep_fiscal_corrections()["examined"], 0)
+
+    def test_an_unresolvable_refund_does_not_hold_up_the_rest(self) -> None:
+        """A refund linked to two invoices stays a candidate; the rotation still reaches the others."""
+        first_invoice = h.issued_invoice(self.owner)
+        second_invoice = h.issued_invoice(self.owner)
+        stray_payment = h.paid(second_invoice)
+        stuck = _born_completed(invoice=first_invoice, payment=stray_payment)
+        good = _born_completed(invoice=h.issued_invoice(self.owner))
+        Refund.objects.filter(pk=stuck.pk).update(created_at=good.created_at - timedelta(minutes=5))
+
+        with self.assertLogs("apps.billing.fiscal_correction_service", level="ERROR"):
+            sweep_fiscal_corrections(limit=1)
+        sweep_fiscal_corrections(limit=1)
+
+        self.assertFalse(FiscalCorrection.objects.filter(source_refund=stuck).exists())
+        self.assertTrue(FiscalCorrection.objects.filter(source_refund=good).exists())
+
+
+class RecoverySweepLinksLateObligationsTests(TransactionTestCase):
+    def test_a_storno_issued_before_its_obligation_existed_is_linked_by_the_sweep(self) -> None:
+        owner = h.customer()
+        invoice = h.issued_invoice(owner, issuer=ISSUER_SMARTBILL, number="FCT-000800")
+        h.paid(invoice)
+        refund = _born_completed(invoice=invoice)
+        force_status(invoice, "refunded")
+        with (
+            patch(
+                "apps.billing.issuers.smartbill.issuer.SmartBillIssuer.prepare_storno",
+                return_value=Ok(PreparedDocument(payload={"number": "000800"}, digest="d")),
+            ),
+            patch(
+                "apps.billing.issuers.smartbill.issuer.SmartBillIssuer.submit_storno",
+                return_value=Issued(number="000801", series="STORNO"),
+            ),
+        ):
+            self.assertTrue(issue_storno_for_invoice(invoice.pk).is_ok())
+        credit_note = Invoice.objects.get(document_kind=DOCUMENT_KIND_CREDIT_NOTE)
+
+        report = sweep_fiscal_corrections()
+
+        correction = FiscalCorrection.objects.get(source_refund=refund)
+        self.assertEqual(correction.state, STATE_ATTACHED)
+        self.assertEqual(correction.credit_note_id, credit_note.pk)
+        self.assertEqual(report["linked"], 1)
+        self.assertEqual(sweep_fiscal_corrections()["linked"], 0)
