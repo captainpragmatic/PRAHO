@@ -24,6 +24,7 @@ from apps.billing.efactura.service import (
 )
 from apps.billing.efactura.settings import ro_local_date
 from apps.billing.fiscal_correction_models import (
+    EFACTURA_FAILED,
     EFACTURA_NOT_APPLICABLE,
     EFACTURA_SUBMITTED,
     EFACTURA_WAITING_FOR_ORIGINAL,
@@ -100,6 +101,14 @@ class StornoCommunicationTests(StornoTestCase):
         (name, content, mimetype) = message.attachments[0]
         self.assertEqual((name, mimetype), (f"storno_{correction.credit_note.number}.pdf", "application/pdf"))
         self.assertTrue(content.startswith(b"%PDF"))
+
+    def test_a_customer_without_a_language_preference_gets_the_romanian_email(self) -> None:
+        original = self.original()
+        payment = self.collected(original, original.total_cents)
+
+        number = self.process(self.refund(original, payment, 1000)).credit_note.number
+
+        self.assertEqual(mail.outbox[0].subject, f"Factură storno {number} - PragmaticHost")
 
     def test_a_failed_send_stays_visible_and_the_sweep_sends_it_once(self) -> None:
         original = self.original()
@@ -178,6 +187,28 @@ class StornoEFacturaGateTests(StornoTestCase):
         correction.refresh_from_db()
         self.assertEqual(correction.efactura_status, EFACTURA_SUBMITTED)
         self.assertEqual(EFacturaDocument.objects.get(invoice=note).status, EFacturaStatus.SUBMITTED.value)
+
+    def test_a_failed_filing_is_retried_by_the_sweep(self) -> None:
+        original = self.original()
+        payment = self.collected(original, original.total_cents)
+        _anaf_document(original, EFacturaStatus.ACCEPTED.value)
+        refused = MagicMock()
+        refused.upload_credit_note.return_value = UploadResponse(success=False, message="ANAF refused the upload")
+        with patch("apps.billing.efactura.service.EFacturaClient", return_value=refused):
+            correction = self.process(self.refund(original, payment, 1000))
+
+        self.assertEqual(correction.efactura_status, EFACTURA_FAILED)
+        self.assertIn("ANAF refused the upload", correction.efactura_error)
+        note_document = EFacturaDocument.objects.get(invoice=correction.credit_note)
+        self.assertEqual(note_document.status, EFacturaStatus.ERROR.value)
+
+        with patch("apps.billing.efactura.service.EFacturaClient", return_value=_accepting_client()):
+            self.sweep()
+
+        correction.refresh_from_db()
+        self.assertEqual(correction.efactura_status, EFACTURA_SUBMITTED)
+        note_document.refresh_from_db()
+        self.assertEqual(note_document.status, EFacturaStatus.SUBMITTED.value)
 
     def test_a_note_outside_romania_is_never_filed(self) -> None:
         _original, note = self._issued_note(country="DE")

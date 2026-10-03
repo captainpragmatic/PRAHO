@@ -444,6 +444,7 @@ def _run_delivery_step(correction_id: str, step: Any) -> str:
 
 def _send_credit_note_email(note: Invoice) -> tuple[bool, str]:
     """Send the note's PDF to the customer, synchronously: success here means it was sent."""
+    from apps.customers.services import get_customer_locale  # noqa: PLC0415  # ADR-0007 cross-app import
     from apps.notifications.services import EmailService  # noqa: PLC0415  # ADR-0007 cross-app import
 
     from .pdf_generators import generate_invoice_pdf  # noqa: PLC0415
@@ -468,7 +469,8 @@ def _send_credit_note_email(note: Invoice) -> tuple[bool, str]:
         template_key="credit_note_issued",
         recipient=recipient,
         context=context,
-        locale=getattr(customer, "preferred_locale", "en") or "en",
+        # The customer's primary user's language, Romanian by default; there is no locale on Customer.
+        locale=get_customer_locale(customer),
         customer=customer,
         priority="high",
         attachments=[(f"storno_{note.number}.pdf", generate_invoice_pdf(note), "application/pdf")],
