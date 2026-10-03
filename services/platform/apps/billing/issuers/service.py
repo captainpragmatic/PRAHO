@@ -237,6 +237,7 @@ def _finalize(
             # `mark_as_paid` only accepts an issued invoice, so that convergence has
             # to happen here, the moment the document legally exists.
             invoice.update_status_from_payments()
+            _settle_correction_with(invoice)
             logger.info(f"✅ [Issuance] Invoice {invoice_id} issued as {outcome.legal_number}")
             return Ok(outcome.legal_number)
 
@@ -260,6 +261,27 @@ def _finalize(
             f"this will NOT be retried automatically."
         )
         return Err(f"Outcome unknown, manual reconciliation required: {outcome.reason}")
+
+
+def _settle_correction_with(document: Invoice) -> None:
+    """Link a just-numbered storno to the fiscal correction obligation it settles.
+
+    In its own savepoint, with the exception caught outside it: the provider has already issued
+    this document, and losing PRAHO's record of THAT would be far worse than an obligation left
+    pending for the recovery sweep to link.
+    """
+    if document.document_kind != DOCUMENT_KIND_CREDIT_NOTE:
+        return
+    from apps.billing import fiscal_correction_service  # noqa: PLC0415  # Resolved per call; keeps imports acyclic
+
+    try:
+        with transaction.atomic():
+            fiscal_correction_service.attach_provider_credit_note(document)
+    except Exception:
+        logger.exception(
+            f"🔥 [Issuance] Credit note {document.pk} is issued but could not be linked to its fiscal "
+            f"correction; the recovery sweep will retry."
+        )
 
 
 def reconcile_confirmed_issued(
@@ -318,6 +340,7 @@ def reconcile_confirmed_issued(
         # schedule reminders for a customer who owes nothing. It is a no-op for a credit
         # note, which `update_status_from_payments` refuses to collect.
         invoice.update_status_from_payments()
+        _settle_correction_with(invoice)
     logger.info(f"✅ [Issuance] Invoice {invoice.pk} reconciled to {legal_number} by operator")
     return Ok(legal_number)
 

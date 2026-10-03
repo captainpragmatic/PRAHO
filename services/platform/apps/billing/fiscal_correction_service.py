@@ -22,9 +22,10 @@ from apps.common.validators import log_security_event
 from .fiscal_correction_models import (
     REASON_NO_FISCAL_DOCUMENT,
     STATE_NOT_REQUIRED,
+    STATE_PENDING,
     FiscalCorrection,
 )
-from .invoice_models import DOCUMENT_KIND_INVOICE, Invoice
+from .invoice_models import DOCUMENT_KIND_CREDIT_NOTE, DOCUMENT_KIND_INVOICE, Invoice
 from .refund_models import invoice_ids_in_scope_of
 
 if TYPE_CHECKING:
@@ -102,8 +103,56 @@ def record_obligation(refund: Refund) -> FiscalCorrection | None:
 
 
 def attach_provider_credit_note(credit_note: Invoice) -> FiscalCorrection | None:
-    """Link a freshly issued provider credit note to the obligation it settles."""
-    return None
+    """Settle the obligation an issued provider storno answers for, by linking its credit note.
+
+    The provider's whole-document storno is only ever allowed when ONE settled refund (or one
+    tender command) accounts for the entire invoice, so exactly one pending obligation can
+    match. Anything else is not a link this code may guess: none means the obligation has not
+    been recorded yet (the sweep links it once it is), several means an operator must decide.
+
+    Locks only the obligation rows. The caller is finalising the credit note and holds its
+    issuance lock, never the original's, and every writer of an obligation's state comes
+    through here or the sweep.
+    """
+    if credit_note.document_kind != DOCUMENT_KIND_CREDIT_NOTE or not credit_note.number:
+        return None
+    original_id = credit_note.reverses_invoice_id
+    if original_id is None:
+        return None
+
+    already = FiscalCorrection.objects.filter(credit_note=credit_note).first()
+    if already is not None:
+        return already
+
+    candidates = list(
+        FiscalCorrection.objects.select_for_update()
+        .filter(original_id=original_id, state=STATE_PENDING)
+        .order_by("created_at", "pk")[:2]
+    )
+    if not candidates:
+        logger.warning(
+            f"⚠️ [Fiscal Correction] Credit note {credit_note.number} reverses invoice {original_id}, "
+            f"which has no pending correction yet; the recovery sweep will link it once recorded."
+        )
+        return None
+    if len(candidates) > 1:
+        logger.error(
+            f"🔥 [Fiscal Correction] Credit note {credit_note.number} reverses invoice {original_id}, "
+            f"which has several pending corrections; an operator must decide which one it settles."
+        )
+        log_security_event(
+            event_type="fiscal_correction_ambiguous_credit_note",
+            details={"credit_note_id": str(credit_note.pk), "original_id": str(original_id)},
+        )
+        return None
+
+    correction = candidates[0]
+    correction.attach_credit_note(credit_note)
+    correction.save(update_fields=["state", "credit_note", "updated_at"])
+    logger.info(
+        f"✅ [Fiscal Correction] Correction {correction.pk} settled by provider credit note {credit_note.number}"
+    )
+    return correction
 
 
 def sweep_fiscal_corrections(limit: int = 200) -> dict[str, Any]:
