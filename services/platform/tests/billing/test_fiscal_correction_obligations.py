@@ -375,19 +375,26 @@ class RecoverySweepTests(TestCase):
         self.assertEqual(report["recorded"], 2, "both legs resolve, to the same correction")
         self.assertEqual(sweep_fiscal_corrections()["examined"], 0)
 
-    def test_an_unresolvable_refund_does_not_hold_up_the_rest(self) -> None:
-        """A refund linked to two invoices stays a candidate; the rotation still reaches the others."""
-        first_invoice = h.issued_invoice(self.owner)
-        second_invoice = h.issued_invoice(self.owner)
-        stray_payment = h.paid(second_invoice)
-        stuck = _born_completed(invoice=first_invoice, payment=stray_payment)
+    def test_a_refund_that_keeps_failing_does_not_hold_up_the_rest(self) -> None:
+        """A refund whose recording fails every run stays a candidate; the rotation reaches the others."""
+        from apps.billing import fiscal_correction_service  # noqa: PLC0415
+
+        stuck = _born_completed(invoice=h.issued_invoice(self.owner))
         good = _born_completed(invoice=h.issued_invoice(self.owner))
         Refund.objects.filter(pk=stuck.pk).update(created_at=good.created_at - timedelta(minutes=5))
+        real_record = fiscal_correction_service.record_obligation
 
-        with self.assertLogs("apps.billing.fiscal_correction_service", level="ERROR"):
+        def failing_for_stuck(refund: Refund) -> Any:
+            if refund.pk == stuck.pk:
+                raise RuntimeError("this refund cannot be recorded")
+            return real_record(refund)
+
+        with patch("apps.billing.fiscal_correction_service.record_obligation", side_effect=failing_for_stuck):
+            with self.assertLogs("apps.billing.fiscal_correction_service", level="ERROR"):
+                first = sweep_fiscal_corrections(limit=1)
             sweep_fiscal_corrections(limit=1)
-        sweep_fiscal_corrections(limit=1)
 
+        self.assertEqual(first["unresolved"], 1)
         self.assertFalse(FiscalCorrection.objects.filter(source_refund=stuck).exists())
         self.assertTrue(FiscalCorrection.objects.filter(source_refund=good).exists())
 

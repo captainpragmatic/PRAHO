@@ -28,7 +28,7 @@ from .fiscal_correction_models import (
     FiscalCorrection,
 )
 from .invoice_models import DOCUMENT_KIND_CREDIT_NOTE, DOCUMENT_KIND_INVOICE, Invoice
-from .refund_models import invoice_ids_in_scope_of
+from .refund_models import resolved_invoice_id_of
 
 if TYPE_CHECKING:
     from django.db.models import QuerySet
@@ -58,9 +58,8 @@ def record_obligation(refund: Refund) -> FiscalCorrection | None:
     instruction is one correction however many tenders carried the money back. Any other
     refund answers for itself.
 
-    Returns None, loudly, when the refund's links name more than one invoice. Guessing which
-    document to correct is exactly the decision an operator has to make; recording nothing
-    leaves the refund a sweep candidate, so the alarm repeats until someone resolves it.
+    The original is the one invoice the refund belongs to under the shared resolution rule, the
+    same one every balance and projection counts it against.
     """
     from apps.promotions.models import TenderRefundLeg  # noqa: PLC0415  # ADR-0007 cross-app import
 
@@ -75,21 +74,12 @@ def record_obligation(refund: Refund) -> FiscalCorrection | None:
     if existing is not None:
         return existing
 
-    invoice_ids = invoice_ids_in_scope_of(refund)
-    if command is not None and command.invoice_id is not None:
-        invoice_ids.add(command.invoice_id)
-    if len(invoice_ids) > 1:
-        logger.error(
-            f"🔥 [Fiscal Correction] Refund {refund.pk} is linked to several invoices "
-            f"({sorted(invoice_ids)}); no correction recorded until its linkage is resolved."
-        )
-        log_security_event(
-            event_type="fiscal_correction_ambiguous_original",
-            details={"refund_id": str(refund.pk), "invoice_ids": [str(pk) for pk in sorted(invoice_ids)]},
-        )
-        return None
-
-    original = Invoice.objects.filter(pk=next(iter(invoice_ids))).first() if invoice_ids else None
+    # The shared resolution rule, so the obligation lands on the invoice the money math counts the
+    # refund against. Links that disagree are resolved by precedence and logged there.
+    original_id = resolved_invoice_id_of(refund)
+    if original_id is None and command is not None:
+        original_id = command.invoice_id
+    original = Invoice.objects.filter(pk=original_id).first() if original_id is not None else None
     if _is_fiscal_document(original):
         defaults: dict[str, Any] = {"original": original}
     else:

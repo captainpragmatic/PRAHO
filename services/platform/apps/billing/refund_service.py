@@ -20,7 +20,7 @@ from django_fsm import ConcurrentTransition, TransitionNotAllowed
 from apps.billing.gateways.base import GATEWAY_PAYMENT_METHODS, PaymentGatewayFactory
 from apps.billing.invoice_models import DOCUMENT_KIND_CREDIT_NOTE
 from apps.billing.models import Invoice, Payment, Refund, RefundStatusHistory, log_security_event
-from apps.billing.refund_models import invoice_ids_in_scope_of, refunded_cents_for_invoice
+from apps.billing.refund_models import refunded_cents_for_invoice, resolved_invoice_id_of
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 from apps.orders.models import Order
 
@@ -1595,11 +1595,9 @@ class RefundService:
         But money PRAHO recorded as returned may not have been, and when the invoice has already
         been corrected by an issued credit note that document cannot simply be taken back.
         """
-        reversed_by = [
-            credit_note.number
-            for invoice_id in sorted(invoice_ids_in_scope_of(refund))
-            if (credit_note := RefundService._issued_credit_note_reversing(invoice_id)) is not None
-        ]
+        invoice_id = resolved_invoice_id_of(refund)
+        credit_note = RefundService._issued_credit_note_reversing(invoice_id) if invoice_id is not None else None
+        reversed_by = [credit_note.number] if credit_note is not None else []
         detail = (
             f"; issued credit note(s) {', '.join(str(number) for number in reversed_by)} already reverse "
             f"its invoice and stay in force"

@@ -150,3 +150,43 @@ class OrderRefundAgainstTheProformaTests(TransactionTestCase):
         correction = FiscalCorrection.objects.get(source_refund=refund)
         self.assertEqual(correction.state, STATE_ATTACHED)
         self.assertEqual(correction.credit_note_id, credit_note.pk)
+
+
+class OneRefundBelongsToOneInvoiceTests(TestCase):
+    """A refund whose links disagree (payment names A, order names B) belongs to ONE of them.
+
+    Gateway convergence can attach a refund to a payment of one invoice and an order of another.
+    Counted against both, it returned the same money twice: A's and B's balances both dropped.
+    Precedence decides: the refund's own invoice, then its payment's, then its order's.
+    """
+
+    def setUp(self) -> None:
+        self.owner = h.customer()
+        self.invoice_a = h.issued_invoice(self.owner)
+        self.payment_a = h.paid(self.invoice_a)
+        self.invoice_b = h.issued_invoice(self.owner)
+        self.payment_b = h.paid(self.invoice_b)
+        self.order_b = h.order_for(self.invoice_b)
+
+    def _disagreeing_refund(self, **fields: object) -> Refund:
+        return h.pending_refund(order=self.order_b, payment=self.payment_a, amount_cents=4000, **fields)
+
+    def test_only_the_payments_invoice_counts_the_refund(self) -> None:
+        self._disagreeing_refund(status="completed")
+
+        self.assertEqual(self.invoice_a.get_remaining_amount(), 4000)
+        self.assertEqual(self.invoice_b.get_remaining_amount(), 0)
+        self.assertEqual(RefundService._get_invoice_refunded_amount(self.invoice_a), 4000)
+        self.assertEqual(RefundService._get_invoice_refunded_amount(self.invoice_b), 0)
+        both = Invoice.objects.filter(pk__in=[self.invoice_a.pk, self.invoice_b.pk])
+        self.assertEqual(_invoice_remaining_amounts(both), {self.invoice_a.pk: 4000, self.invoice_b.pk: 0})
+
+    def test_the_obligation_follows_the_same_precedence_and_says_so(self) -> None:
+        refund = self._disagreeing_refund()
+
+        with self.assertLogs("apps.billing.refund_models", level="WARNING") as logs:
+            h.complete(refund)
+
+        correction = FiscalCorrection.objects.get(source_refund=refund)
+        self.assertEqual(correction.original_id, self.invoice_a.pk)
+        self.assertTrue(any(str(refund.pk) in line for line in logs.output), logs.output)

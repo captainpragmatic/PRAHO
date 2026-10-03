@@ -196,8 +196,8 @@ class InvoiceDetailSerializer(serializers.ModelSerializer):
 
 def _invoice_remaining_amounts(invoices: QuerySet[Invoice]) -> dict[int, int]:
     """Batch the invoice ledger calculation without changing its per-invoice clamps."""
-    from apps.billing.models import Payment, Refund  # noqa: PLC0415  # ADR-0007
-    from apps.billing.refund_models import refund_scope_in_q  # noqa: PLC0415  # ADR-0007
+    from apps.billing.models import Payment  # noqa: PLC0415  # ADR-0007
+    from apps.billing.refund_models import refunds_for_invoices, resolved_invoice_expression  # noqa: PLC0415
 
     totals = {invoice.pk: invoice.total_cents for invoice in invoices}
     if not totals:
@@ -210,19 +210,17 @@ def _invoice_remaining_amounts(invoices: QuerySet[Invoice]) -> dict[int, int]:
         .values("invoice_id")
         .annotate(total=Sum("amount_cents"))
     }
-    # Separate aggregates avoid multiplying payment/refund rows. Each refund row is grouped by
-    # the three invoices its links name (the shared scope rule), and the set below counts it
-    # once per invoice however many of its links lead there, matching get_remaining_amount.
-    refunded: dict[int, int] = {}
-    refunds = (
-        Refund.objects.filter(refund_scope_in_q(invoices), status="completed")
-        .values("invoice_id", "payment__invoice_id", "order__invoice_id")
+    # Separate aggregates avoid multiplying payment/refund rows. Each refund belongs to exactly
+    # one invoice (the shared resolution rule) and is grouped by it, matching get_remaining_amount.
+    refunded: dict[int, int] = {
+        row["resolved_invoice_id"]: row["total"] or 0
+        for row in refunds_for_invoices(list(totals))
+        .filter(status="completed")
+        .annotate(resolved_invoice_id=resolved_invoice_expression())
+        .order_by()
+        .values("resolved_invoice_id")
         .annotate(total=Sum("amount_cents"))
-    )
-    for row in refunds:
-        linked = {row["invoice_id"], row["payment__invoice_id"], row["order__invoice_id"]}
-        for invoice_id in linked & totals.keys():
-            refunded[invoice_id] = refunded.get(invoice_id, 0) + row["total"]
+    }
     return {
         invoice_id: max(0, total - max(0, collected.get(invoice_id, 0) - refunded.get(invoice_id, 0)))
         for invoice_id, total in totals.items()

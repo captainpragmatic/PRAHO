@@ -5,6 +5,7 @@ Comprehensive refund tracking with Romanian compliance and audit trails.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from collections.abc import Iterable
 from decimal import Decimal
@@ -12,12 +13,15 @@ from typing import Any, ClassVar
 
 from django.core.validators import MinValueValidator
 from django.db import models
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django_fsm import FSMField, transition
 
 from .currency_models import Currency
 from .validators import validate_financial_amount, validate_financial_json, validate_financial_text_field
+
+logger = logging.getLogger(__name__)
 
 # ===============================================================================
 # REFUND MODELS
@@ -285,43 +289,56 @@ class Refund(models.Model):
         return self.order if self.order else self.invoice
 
 
-def refund_scope_q(invoice: Any) -> models.Q:
-    """THE rule for which refunds belong to an invoice.
+# THE rule for which invoice a refund belongs to. A refund names its document in one of three
+# ways, and each path writes a different one:
+#
+# * `invoice` - a direct invoice refund;
+# * `payment.invoice` - the payment that settled the invoice;
+# * `order.invoice` - an order refund. The `refund_order_or_invoice_not_both` constraint leaves
+#   its own `invoice` NULL by schema, and its payment may name only the proforma, so this link is
+#   often the ONLY one that finds it.
+#
+# A refund belongs to exactly ONE invoice, the first of those that is set. Reading only the first
+# link counted an order-path full refund as no refund at all; ORing all three counted a refund
+# whose links disagree (payment of A, order of B - gateway convergence can produce that) against
+# both invoices, returning the same money twice. Every reader of "refunds of this invoice" - the
+# balances, the projection, the storno eligibility, the reports and the fiscal obligation - goes
+# through here, so they always agree on where a refund belongs.
+_RESOLUTION_ORDER = ("invoice_id", "payment__invoice_id", "order__invoice_id")
 
-    A refund names its document in one of three ways, and each path writes a different one:
 
-    * `invoice` - a direct invoice refund;
-    * `payment.invoice` - a refund attached to the payment that settled the invoice;
-    * `order.invoice` - an order refund. The `refund_order_or_invoice_not_both` constraint
-      leaves its own `invoice` NULL by schema, and its payment may be linked to the proforma
-      rather than the invoice, so this leg is often the ONLY one that finds it.
+def resolved_invoice_expression() -> Coalesce:
+    """The one invoice a refund belongs to, as an expression to `annotate(resolved_invoice_id=...)`."""
+    return Coalesce(*_RESOLUTION_ORDER)
 
-    Reading `invoice.refunds` (the first leg alone) is how an order-path full refund came to
-    look like no refund at all. Every fiscal reading of "refunds of this invoice" goes through
-    here so the three cannot drift apart again.
+
+def refunds_for_invoices(invoices: Any) -> models.QuerySet[Refund]:
+    """Refunds belonging to any of `invoices` (a queryset of invoices, or their ids), all statuses.
+
+    Selected through an id subquery, so a `Sum()` over the result counts each refund once however
+    the joins behind the resolution grow.
     """
-    return models.Q(invoice=invoice) | models.Q(payment__invoice=invoice) | models.Q(order__invoice=invoice)
-
-
-def refund_scope_in_q(invoices: Any) -> models.Q:
-    """`refund_scope_q` for a set of invoices (a queryset or ids), for batch readers."""
-    return (
-        models.Q(invoice__in=invoices) | models.Q(payment__invoice__in=invoices) | models.Q(order__invoice__in=invoices)
+    invoice_ids = invoices.values("pk") if isinstance(invoices, models.QuerySet) else list(invoices)
+    matching = (
+        Refund.objects.annotate(resolved_invoice_id=resolved_invoice_expression())
+        .filter(resolved_invoice_id__in=invoice_ids)
+        .values("id")
     )
+    return Refund.objects.filter(id__in=matching)
 
 
 def refunds_for_invoice(invoice: Any) -> models.QuerySet[Refund]:
-    """Refunds belonging to `invoice` under the shared scope rule (all statuses).
-
-    Selected through an id subquery rather than by filtering the joins directly. The three legs
-    are forward keys today, so the OR cannot repeat a row, but a `Sum()` over this queryset must
-    stay correct however the rule grows: a refund reached through two links is ONE refund.
-    """
-    return Refund.objects.filter(id__in=Refund.objects.filter(refund_scope_q(invoice)).values("id"))
+    """Refunds belonging to `invoice` under the shared resolution rule (all statuses)."""
+    matching = (
+        Refund.objects.annotate(resolved_invoice_id=resolved_invoice_expression())
+        .filter(resolved_invoice_id=invoice.pk)
+        .values("id")
+    )
+    return Refund.objects.filter(id__in=matching)
 
 
 def refunded_cents_for_invoice(invoice: Any, *, statuses: Iterable[str] = ("completed",)) -> int:
-    """Cents refunded against `invoice` under the shared scope rule, each refund counted once."""
+    """Cents refunded against `invoice` under the shared resolution rule, each refund counted once."""
     total = (
         refunds_for_invoice(invoice)
         .filter(status__in=list(statuses))
@@ -330,28 +347,37 @@ def refunded_cents_for_invoice(invoice: Any, *, statuses: Iterable[str] = ("comp
     return int(total)
 
 
-def invoice_ids_in_scope_of(refund: Refund) -> set[int]:
-    """The invoices whose `refund_scope_q` contains `refund`: the same three links, read forward.
+def resolved_invoice_id_of(refund: Refund) -> int | None:
+    """The one invoice `refund` belongs to: the same precedence as `resolved_invoice_expression`.
 
-    Walked from the refund rather than by testing the rule against every invoice, which would
-    scan the invoice table to answer a question its three foreign keys already settle.
+    Walked from the refund rather than through the annotation, so callers holding an instance
+    need no query against the invoice table. Links that disagree are resolved by precedence and
+    logged: the money and the fiscal obligation must land on the same document, and someone has
+    to know the ledger linked one refund to two.
     """
     from apps.orders.models import Order  # noqa: PLC0415  # ADR-0007 cross-app import
 
     from .payment_models import Payment  # noqa: PLC0415  # Avoid a model import cycle
 
-    invoice_ids: set[int] = set()
-    if refund.invoice_id is not None:
-        invoice_ids.add(refund.invoice_id)
-    if refund.payment_id is not None:
-        via_payment = Payment.objects.filter(pk=refund.payment_id).values_list("invoice_id", flat=True).first()
-        if via_payment is not None:
-            invoice_ids.add(via_payment)
-    if refund.order_id is not None:
-        via_order = Order.objects.filter(pk=refund.order_id).values_list("invoice_id", flat=True).first()
-        if via_order is not None:
-            invoice_ids.add(via_order)
-    return invoice_ids
+    via_payment = (
+        Payment.objects.filter(pk=refund.payment_id).values_list("invoice_id", flat=True).first()
+        if refund.payment_id is not None
+        else None
+    )
+    via_order = (
+        Order.objects.filter(pk=refund.order_id).values_list("invoice_id", flat=True).first()
+        if refund.order_id is not None
+        else None
+    )
+    links = [link for link in (refund.invoice_id, via_payment, via_order) if link is not None]
+    if not links:
+        return None
+    if len(set(links)) > 1:
+        logger.warning(
+            f"⚠️ [Refund] Refund {refund.pk} is linked to invoices {links} (own, payment, order); "
+            f"it belongs to invoice {links[0]} by precedence."
+        )
+    return links[0]
 
 
 class RefundNote(models.Model):
