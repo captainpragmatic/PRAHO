@@ -130,12 +130,24 @@ class CompletionRecordsTheObligationTests(TestCase):
         self.assertEqual(correction.not_required_reason, REASON_NO_FISCAL_DOCUMENT)
 
     def test_a_refund_that_has_not_completed_owes_nothing_yet(self) -> None:
+        """Two guards, each pinned: the hook never asks, and the recorder refuses if asked."""
+        from apps.billing import fiscal_correction_service  # noqa: PLC0415
+
         invoice = h.issued_invoice(self.owner)
         refund = h.pending_refund(invoice=invoice)
 
-        refund.start_processing()
-        refund.save(update_fields=["status", "updated_at"])
+        with patch(
+            "apps.billing.fiscal_correction_service.record_obligation",
+            wraps=fiscal_correction_service.record_obligation,
+        ) as recorder:
+            refund.start_processing()
+            refund.save(update_fields=["status", "updated_at"])
+            refund.approve()
+            refund.save(update_fields=["status", "updated_at"])
+            refund.save()
 
+        recorder.assert_not_called()
+        self.assertIsNone(fiscal_correction_service.record_obligation(refund))
         self.assertFalse(FiscalCorrection.objects.exists())
 
     def test_saving_a_completed_refund_again_records_nothing_new(self) -> None:
@@ -314,8 +326,11 @@ class RecoverySweepTests(TestCase):
         invoice = h.issued_invoice(self.owner)
         h.pending_refund(invoice=invoice)
 
-        sweep_fiscal_corrections()
+        report = sweep_fiscal_corrections()
 
+        # `examined`, not just the absence of a row: the recorder would refuse an unsettled
+        # refund anyway, so only the count shows the sweep never selected it.
+        self.assertEqual(report["examined"], 0)
         self.assertFalse(FiscalCorrection.objects.exists())
 
     def test_legs_of_one_command_whose_hook_failed_converge_on_one_correction(self) -> None:
