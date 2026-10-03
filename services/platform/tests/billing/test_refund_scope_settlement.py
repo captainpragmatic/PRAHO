@@ -8,6 +8,7 @@ outstanding and refundable balances both overstated what was left.
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import patch
 
 from django.test import TestCase, TransactionTestCase
@@ -21,6 +22,7 @@ from apps.billing.models import Payment, ProformaInvoice, Refund
 from apps.billing.refund_service import RefundService
 from apps.common.types import Ok
 from tests.billing import _fiscal_correction_helpers as h
+from tests.helpers.fsm_helpers import force_status
 
 
 class SettlementSumsReadTheSharedScopeTests(TestCase):
@@ -190,3 +192,154 @@ class OneRefundBelongsToOneInvoiceTests(TestCase):
         correction = FiscalCorrection.objects.get(source_refund=refund)
         self.assertEqual(correction.original_id, self.invoice_a.pk)
         self.assertTrue(any(str(refund.pk) in line for line in logs.output), logs.output)
+
+
+ONE_HUNDRED = ((10000, "0"),)
+
+
+class ProjectionFollowsNetCollectedTests(TransactionTestCase):
+    """An invoice is refunded when the money it was paid with has gone back, not when refunds add up.
+
+    Returning an overpayment leaves the invoice fully paid. Projecting from refunds alone marked it
+    `refunded` and let a whole-document storno credit the customer for a sale they still paid for.
+    """
+
+    def setUp(self) -> None:
+        self.owner = h.customer()
+
+    def _smartbill_invoice(self, number: str) -> Invoice:
+        invoice = h.issued_invoice(self.owner, lines=ONE_HUNDRED, issuer=ISSUER_SMARTBILL, number=number)
+        invoice.mark_as_paid()
+        invoice.save()
+        return invoice
+
+    def _storno_patches(self, number: str) -> Any:
+        def storno_now(invoice_id: int) -> str:
+            result = issue_storno_for_invoice(invoice_id)
+            self.assertTrue(result.is_ok(), getattr(result, "error", ""))
+            return "inline"
+
+        return (
+            patch(
+                "apps.billing.issuers.smartbill.issuer.SmartBillIssuer.prepare_storno",
+                return_value=Ok(PreparedDocument(payload={"number": number}, digest="d")),
+            ),
+            patch(
+                "apps.billing.issuers.smartbill.issuer.SmartBillIssuer.submit_storno",
+                return_value=Issued(number=f"{number}9", series="STORNO"),
+            ),
+            patch("apps.billing.issuers.tasks.queue_invoice_storno", side_effect=storno_now),
+        )
+
+    def test_refunding_an_overpayment_leaves_the_invoice_paid_and_unreversed(self) -> None:
+        invoice = self._smartbill_invoice("FCT-002000")
+        proforma = ProformaInvoice.objects.create(
+            customer=self.owner,
+            currency=invoice.currency,
+            number="PRO-OVERPAID",
+            subtotal_cents=10000,
+            tax_cents=0,
+            total_cents=10000,
+        )
+        order = h.order_for(invoice, proforma=proforma, subtotal_cents=20000, tax_cents=0, total_cents=20000)
+        Payment.objects.create(
+            customer=self.owner,
+            proforma=proforma,
+            currency=invoice.currency,
+            status="succeeded",
+            payment_method="stripe",
+            amount_cents=20000,
+            gateway_txn_id="pi_overpaid",
+        )
+        prepare, submit, queue = self._storno_patches("002000")
+
+        with (
+            patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=h.gateway(10000)),
+            prepare,
+            submit,
+            queue as queued,
+        ):
+            result = RefundService.refund_order(
+                order.pk, {"refund_type": "partial", "amount_cents": 10000, "reason": "duplicate_payment"}
+            )
+
+        self.assertTrue(result.is_ok(), result)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, "paid", "100 is still collected against a 100 invoice")
+        queued.assert_not_called()
+        self.assertFalse(Invoice.objects.filter(document_kind=DOCUMENT_KIND_CREDIT_NOTE).exists())
+
+    def test_a_whole_document_storno_is_refused_while_money_is_still_collected(self) -> None:
+        invoice = self._smartbill_invoice("FCT-002100")
+        Payment.objects.create(
+            customer=self.owner,
+            invoice=invoice,
+            currency=invoice.currency,
+            status="succeeded",
+            payment_method="bank_transfer",
+            amount_cents=20000,
+        )
+        h.pending_refund(invoice=invoice, status="completed", amount_cents=10000)
+        force_status(invoice, "refunded")
+        prepare, submit, _queue = self._storno_patches("002100")
+
+        with prepare, submit:
+            result = issue_storno_for_invoice(invoice.pk)
+
+        self.assertTrue(result.is_err())
+        self.assertIn("still collected", result.error)
+        self.assertFalse(Invoice.objects.filter(document_kind=DOCUMENT_KIND_CREDIT_NOTE).exists())
+
+    def test_a_full_refund_of_a_fully_paid_invoice_is_still_refunded_and_reversed(self) -> None:
+        """Regression guard for the net rule: 100 paid, 100 returned, nothing left."""
+        invoice = self._smartbill_invoice("FCT-002200")
+        Payment.objects.create(
+            customer=self.owner,
+            invoice=invoice,
+            currency=invoice.currency,
+            status="succeeded",
+            payment_method="stripe",
+            amount_cents=10000,
+            gateway_txn_id="pi_full_100",
+        )
+        prepare, submit, queue = self._storno_patches("002200")
+
+        with (
+            patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=h.gateway(10000)),
+            prepare,
+            submit,
+            queue as queued,
+        ):
+            result = RefundService.refund_invoice(
+                invoice.pk, {"refund_type": "full", "amount_cents": 10000, "reason": "customer_request"}
+            )
+
+        self.assertTrue(result.is_ok(), result)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, "refunded")
+        queued.assert_called_once_with(invoice.pk)
+        self.assertTrue(
+            Invoice.objects.filter(document_kind=DOCUMENT_KIND_CREDIT_NOTE, reverses_invoice=invoice).exists()
+        )
+
+    def test_a_partial_refund_of_a_fully_paid_invoice_is_partially_refunded(self) -> None:
+        """Regression guard for the net rule: 100 paid, 40 returned, 60 still collected."""
+        invoice = self._smartbill_invoice("FCT-002300")
+        Payment.objects.create(
+            customer=self.owner,
+            invoice=invoice,
+            currency=invoice.currency,
+            status="succeeded",
+            payment_method="stripe",
+            amount_cents=10000,
+            gateway_txn_id="pi_partial_100",
+        )
+
+        with patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=h.gateway(4000)):
+            result = RefundService.refund_invoice(
+                invoice.pk, {"refund_type": "partial", "amount_cents": 4000, "reason": "customer_request"}
+            )
+
+        self.assertTrue(result.is_ok(), result)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, "partially_refunded")

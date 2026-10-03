@@ -347,6 +347,40 @@ def refunded_cents_for_invoice(invoice: Any, *, statuses: Iterable[str] = ("comp
     return int(total)
 
 
+_COLLECTED_PAYMENT_STATUSES = ("succeeded", "partially_refunded", "refunded")
+
+
+def collected_cents_for_invoice(invoice: Any) -> int:
+    """Cents collected for `invoice`, each payment counted against one invoice only.
+
+    Two tiers, mirroring the refund rule. A payment belongs to its own invoice first. A payment
+    with no invoice of its own (an order paid against its proforma) belongs to the invoice its
+    refunds resolve to, which is the only link the ledger records between them. Refunded
+    payments still count: the money was collected, and the refunds say what went back.
+    """
+    from .payment_models import Payment  # noqa: PLC0415  # Avoid a model import cycle
+
+    unlinked_payment_ids = refunds_for_invoice(invoice).filter(payment__isnull=False).values("payment_id")
+    total = Payment.objects.filter(
+        models.Q(invoice=invoice) | models.Q(invoice__isnull=True, id__in=unlinked_payment_ids),
+        status__in=_COLLECTED_PAYMENT_STATUSES,
+    ).aggregate(total=models.Sum("amount_cents", default=0))["total"]
+    return int(total)
+
+
+def net_collected_cents_for_invoice(invoice: Any) -> int:
+    """What is still held against `invoice` after its completed refunds.
+
+    Collected is floored at the invoice total. Only invoices that were collected in full reach the
+    refund states this feeds (paid, partially_refunded, refunded), so a ledger that cannot show
+    every payment - a legacy row, a payment linked only by metadata - must not make a partial
+    refund look like a full one. The floor never lowers what the ledger does show, so an
+    overpayment still counts in full.
+    """
+    collected = max(collected_cents_for_invoice(invoice), int(invoice.total_cents))
+    return collected - refunded_cents_for_invoice(invoice)
+
+
 def resolved_invoice_id_of(refund: Refund) -> int | None:
     """The one invoice `refund` belongs to: the same precedence as `resolved_invoice_expression`.
 

@@ -20,7 +20,11 @@ from django_fsm import ConcurrentTransition, TransitionNotAllowed
 from apps.billing.gateways.base import GATEWAY_PAYMENT_METHODS, PaymentGatewayFactory
 from apps.billing.invoice_models import DOCUMENT_KIND_CREDIT_NOTE
 from apps.billing.models import Invoice, Payment, Refund, RefundStatusHistory, log_security_event
-from apps.billing.refund_models import refunded_cents_for_invoice, resolved_invoice_id_of
+from apps.billing.refund_models import (
+    net_collected_cents_for_invoice,
+    refunded_cents_for_invoice,
+    resolved_invoice_id_of,
+)
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 from apps.orders.models import Order
 
@@ -1789,14 +1793,17 @@ class RefundService:
             invoice_target: str | None = None
             if invoice is not None:
                 invoice.refresh_from_db()
-                # The shared scope rule: an order refund whose payment names only the proforma
-                # reaches this invoice through its order alone, and must still project it.
+                # The shared resolution rule: an order refund whose payment names only the
+                # proforma reaches this invoice through its order alone, and must still project it.
                 settled_invoice = refunded_cents_for_invoice(invoice)
+                # Projected from what is still held, not from what went back: returning an
+                # overpayment leaves a fully paid invoice fully paid.
+                net_collected = net_collected_cents_for_invoice(invoice)
                 invoice_target = (
                     "paid"
-                    if settled_invoice == 0
+                    if settled_invoice == 0 or net_collected >= invoice.total_cents
                     else "refunded"
-                    if settled_invoice >= invoice.total_cents
+                    if net_collected <= 0
                     else "partially_refunded"
                 )
                 invoice_projection = RefundService._apply_invoice_refund_projection(invoice, invoice_target)

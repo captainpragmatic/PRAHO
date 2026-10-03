@@ -31,7 +31,7 @@ from apps.billing.invoice_models import (
     Invoice,
     InvoiceLine,
 )
-from apps.billing.refund_models import refunds_for_invoice
+from apps.billing.refund_models import net_collected_cents_for_invoice, refunds_for_invoice
 from apps.common.types import Err, Ok, Result
 
 from .base import Ambiguous, Issued, PreparedDocument, Rejected
@@ -505,7 +505,24 @@ def _split_correction_refusal(original: Invoice) -> str | None:
     cancelled refund wedge the invoice forever, which is the same defect that
     testing row existence caused above.
     """
-    # The shared scope rule, not `original.refunds`: an order refund names this invoice only
+    composition = _refund_composition_refusal(original)
+    if composition is not None:
+        return composition
+    # A whole-document storno credits the entire invoice, so it is only right once nothing is
+    # still held against it. Refunds adding up to the total is not that: returning an
+    # overpayment leaves the sale fully paid.
+    net_collected = net_collected_cents_for_invoice(original)
+    if net_collected != 0:
+        return (
+            f"{net_collected} cents are still collected against this invoice after its refunds. "
+            f"A provider reversal credits the whole document, so it is refused until nothing remains."
+        )
+    return None
+
+
+def _refund_composition_refusal(original: Invoice) -> str | None:
+    """Refuse unless one refund, or one tender command, accounts for the whole invoice."""
+    # The shared resolution rule, not `original.refunds`: an order refund names this invoice only
     # through its order, so reading the direct link alone counted a full order-path refund as
     # no refund at all and refused the reversal the customer was owed.
     settled = list(refunds_for_invoice(original).filter(status="completed"))
