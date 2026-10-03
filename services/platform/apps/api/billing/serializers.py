@@ -4,7 +4,7 @@
 
 from typing import Any, ClassVar
 
-from django.db.models import Q, QuerySet, Sum
+from django.db.models import QuerySet, Sum
 from django.utils import timezone
 from rest_framework import serializers
 
@@ -197,6 +197,7 @@ class InvoiceDetailSerializer(serializers.ModelSerializer):
 def _invoice_remaining_amounts(invoices: QuerySet[Invoice]) -> dict[int, int]:
     """Batch the invoice ledger calculation without changing its per-invoice clamps."""
     from apps.billing.models import Payment, Refund  # noqa: PLC0415  # ADR-0007
+    from apps.billing.refund_models import refund_scope_in_q  # noqa: PLC0415  # ADR-0007
 
     totals = {invoice.pk: invoice.total_cents for invoice in invoices}
     if not totals:
@@ -209,16 +210,18 @@ def _invoice_remaining_amounts(invoices: QuerySet[Invoice]) -> dict[int, int]:
         .values("invoice_id")
         .annotate(total=Sum("amount_cents"))
     }
-    # Separate aggregates avoid multiplying payment/refund rows. A refund reached
-    # through both links counts once for each invoice, matching get_remaining_amount.
+    # Separate aggregates avoid multiplying payment/refund rows. Each refund row is grouped by
+    # the three invoices its links name (the shared scope rule), and the set below counts it
+    # once per invoice however many of its links lead there, matching get_remaining_amount.
     refunded: dict[int, int] = {}
     refunds = (
-        Refund.objects.filter(Q(invoice__in=invoices) | Q(payment__invoice__in=invoices), status="completed")
-        .values("invoice_id", "payment__invoice_id")
+        Refund.objects.filter(refund_scope_in_q(invoices), status="completed")
+        .values("invoice_id", "payment__invoice_id", "order__invoice_id")
         .annotate(total=Sum("amount_cents"))
     )
     for row in refunds:
-        for invoice_id in {row["invoice_id"], row["payment__invoice_id"]} & totals.keys():
+        linked = {row["invoice_id"], row["payment__invoice_id"], row["order__invoice_id"]}
+        for invoice_id in linked & totals.keys():
             refunded[invoice_id] = refunded.get(invoice_id, 0) + row["total"]
     return {
         invoice_id: max(0, total - max(0, collected.get(invoice_id, 0) - refunded.get(invoice_id, 0)))

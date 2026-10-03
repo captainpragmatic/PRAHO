@@ -98,3 +98,41 @@ def complete(refund: Refund) -> Refund:
     result = RefundService._advance_refund_status(refund, "succeeded")
     assert result.is_ok(), result
     return result.unwrap()
+
+
+def gateway(amount_cents: int) -> Any:
+    """A payment gateway double that settles a refund of exactly `amount_cents`."""
+    from unittest.mock import MagicMock  # noqa: PLC0415
+
+    double = MagicMock()
+    double.refund_payment.return_value = {
+        "success": True,
+        "refund_id": f"re_{uuid.uuid4().hex[:10]}",
+        "amount_refunded_cents": amount_cents,
+        "status": "succeeded",
+        "error": None,
+    }
+    return double
+
+
+def order_for(invoice: Invoice | None, owner: Customer | None = None, **fields: Any) -> Any:
+    """An order linked to `invoice` (or to none), priced like it."""
+    from apps.orders.models import Order  # noqa: PLC0415
+
+    if owner is None:
+        assert invoice is not None, "an order with no invoice needs an explicit owner"
+        owner = invoice.customer
+    defaults: dict[str, Any] = {
+        "order_number": f"ORD-{uuid.uuid4().hex[:8]}",
+        "customer": owner,
+        "currency": ron(),
+        "invoice": invoice,
+        "status": "completed",
+        "subtotal_cents": 10000,
+        "tax_cents": 2100,
+        "total_cents": 12100,
+        "customer_email": "billing@example.test",
+        "customer_name": "Fiscal Correction SRL",
+    }
+    defaults.update(fields)
+    return Order.objects.create(**defaults)

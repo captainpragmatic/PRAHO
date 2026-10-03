@@ -20,7 +20,7 @@ from django_fsm import ConcurrentTransition, TransitionNotAllowed
 from apps.billing.gateways.base import GATEWAY_PAYMENT_METHODS, PaymentGatewayFactory
 from apps.billing.invoice_models import DOCUMENT_KIND_CREDIT_NOTE
 from apps.billing.models import Invoice, Payment, Refund, RefundStatusHistory, log_security_event
-from apps.billing.refund_models import invoice_ids_in_scope_of
+from apps.billing.refund_models import invoice_ids_in_scope_of, refunded_cents_for_invoice
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 from apps.orders.models import Order
 
@@ -1791,12 +1791,9 @@ class RefundService:
             invoice_target: str | None = None
             if invoice is not None:
                 invoice.refresh_from_db()
-                settled_invoice = int(
-                    Refund.objects.filter(
-                        Q(invoice=invoice) | Q(payment__invoice=invoice),
-                        status="completed",
-                    ).aggregate(total=Sum("amount_cents", default=0))["total"]
-                )
+                # The shared scope rule: an order refund whose payment names only the proforma
+                # reaches this invoice through its order alone, and must still project it.
+                settled_invoice = refunded_cents_for_invoice(invoice)
                 invoice_target = (
                     "paid"
                     if settled_invoice == 0
@@ -2083,12 +2080,7 @@ class RefundService:
 
         # Single source of truth: Refund model (#125 — removed meta.refunds fallback)
         try:
-            return int(
-                Refund.objects.filter(
-                    Q(invoice=invoice) | Q(payment__invoice=invoice),
-                    status__in=_REFUND_RESERVING_STATUSES,
-                ).aggregate(total=Sum("amount_cents", default=0))["total"]
-            )
+            return refunded_cents_for_invoice(invoice, statuses=_REFUND_RESERVING_STATUSES)
         except (TypeError, AttributeError) as exc:
             logger.error(
                 "Refund amount aggregation failed for invoice_id=%s — aborting to prevent over-refund",

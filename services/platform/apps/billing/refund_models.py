@@ -6,6 +6,7 @@ Comprehensive refund tracking with Romanian compliance and audit trails.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterable
 from decimal import Decimal
 from typing import Any, ClassVar
 
@@ -302,11 +303,31 @@ def refund_scope_q(invoice: Any) -> models.Q:
     return models.Q(invoice=invoice) | models.Q(payment__invoice=invoice) | models.Q(order__invoice=invoice)
 
 
+def refund_scope_in_q(invoices: Any) -> models.Q:
+    """`refund_scope_q` for a set of invoices (a queryset or ids), for batch readers."""
+    return (
+        models.Q(invoice__in=invoices) | models.Q(payment__invoice__in=invoices) | models.Q(order__invoice__in=invoices)
+    )
+
+
 def refunds_for_invoice(invoice: Any) -> models.QuerySet[Refund]:
-    """Refunds belonging to `invoice` under the shared scope rule (all statuses)."""
-    # Every leg follows a forward foreign key from the refund row, so no row can match twice
-    # and no `distinct()` is needed.
-    return Refund.objects.filter(refund_scope_q(invoice))
+    """Refunds belonging to `invoice` under the shared scope rule (all statuses).
+
+    Selected through an id subquery rather than by filtering the joins directly. The three legs
+    are forward keys today, so the OR cannot repeat a row, but a `Sum()` over this queryset must
+    stay correct however the rule grows: a refund reached through two links is ONE refund.
+    """
+    return Refund.objects.filter(id__in=Refund.objects.filter(refund_scope_q(invoice)).values("id"))
+
+
+def refunded_cents_for_invoice(invoice: Any, *, statuses: Iterable[str] = ("completed",)) -> int:
+    """Cents refunded against `invoice` under the shared scope rule, each refund counted once."""
+    total = (
+        refunds_for_invoice(invoice)
+        .filter(status__in=list(statuses))
+        .aggregate(total=models.Sum("amount_cents", default=0))["total"]
+    )
+    return int(total)
 
 
 def invoice_ids_in_scope_of(refund: Refund) -> set[int]:

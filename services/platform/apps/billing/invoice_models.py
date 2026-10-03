@@ -601,7 +601,7 @@ class Invoice(models.Model):
         its full amount_cents - without this subtraction the balance would understate
         what is still owed after a partial refund.
         """
-        from apps.billing.refund_models import Refund  # noqa: PLC0415  -- local import avoids an import cycle
+        from apps.billing.refund_models import refunded_cents_for_invoice  # noqa: PLC0415  -- avoids an import cycle
 
         collected = (
             self.payments.filter(status__in=["succeeded", "partially_refunded", "refunded"]).aggregate(
@@ -609,13 +609,8 @@ class Invoice(models.Model):
             )["total"]
             or 0
         )
-        refunded = (
-            Refund.objects.filter(
-                models.Q(invoice=self) | models.Q(payment__invoice=self),
-                status="completed",
-            ).aggregate(total=models.Sum("amount_cents"))["total"]
-            or 0
-        )
+        # The shared scope rule: an order refund names this invoice only through its order.
+        refunded = refunded_cents_for_invoice(self)
         net_collected = max(0, collected - refunded)
         return max(0, self.total_cents - net_collected)
 
