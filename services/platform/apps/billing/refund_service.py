@@ -18,7 +18,9 @@ from django.utils import timezone
 from django_fsm import ConcurrentTransition, TransitionNotAllowed
 
 from apps.billing.gateways.base import GATEWAY_PAYMENT_METHODS, PaymentGatewayFactory
+from apps.billing.invoice_models import DOCUMENT_KIND_CREDIT_NOTE
 from apps.billing.models import Invoice, Payment, Refund, RefundStatusHistory, log_security_event
+from apps.billing.refund_models import invoice_ids_in_scope_of
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 from apps.orders.models import Order
 
@@ -27,6 +29,10 @@ if TYPE_CHECKING:
     from apps.users.models import User
 
 logger = logging.getLogger(__name__)
+
+# Projections that move an invoice back from a refunded state. Forbidden beneath an issued credit
+# note, which no refund bookkeeping may quietly undo.
+_RESTORING_INVOICE_TRANSITIONS = frozenset({"restore_after_refund_reversal", "restore_partial_after_refund_reversal"})
 
 _FALLBACK_ORDER_TOTAL_CENTS = 15_000  # 150 EUR — safe fallback for missing order total
 _FALLBACK_INVOICE_TOTAL_CENTS = 11_900  # 119 EUR — safe fallback for missing invoice total
@@ -1410,6 +1416,8 @@ class RefundService:
             if normalized in {"pending", "requires_action"}:
                 return Ok(refund)
             if expected_terminal.get(normalized) != current_status:
+                if current_status == "completed":
+                    RefundService._report_failure_after_completion(refund, normalized)
                 return Err(
                     f"Refund state mismatch: cannot apply '{gateway_status}' to '{current_status}'",
                     retriability=Retriability.NOT_RETRIABLE,
@@ -1509,9 +1517,62 @@ class RefundService:
                 f"Cannot project invoice {invoice.pk} from {invoice.status!r} to {target!r}",
                 retriability=Retriability.NOT_RETRIABLE,
             )
+        if transition in _RESTORING_INVOICE_TRANSITIONS:
+            credit_note = RefundService._issued_credit_note_reversing(invoice.pk)
+            if credit_note is not None:
+                # An issued credit note is a legal document that cannot be voided, deleted or
+                # renumbered. Restoring the invoice beneath it would make the books say the
+                # customer owes, or has paid, money the credit note has already taken back.
+                logger.error(
+                    f"🔥 [Refund] Refusing to restore invoice {invoice.pk} from {invoice.status!r} to "
+                    f"{target!r}: issued credit note {credit_note.number} reverses it. A reversal of a "
+                    f"corrected refund needs a new invoice, not a restored one."
+                )
+                return Err(
+                    f"Invoice {invoice.pk} is reversed by issued credit note {credit_note.number} "
+                    f"and cannot be restored to {target!r}",
+                    retriability=Retriability.NOT_RETRIABLE,
+                )
         getattr(invoice, transition)()
         invoice.save(update_fields=["status", "updated_at"])
         return Ok(True)
+
+    @staticmethod
+    def _issued_credit_note_reversing(invoice_id: int) -> Invoice | None:
+        """The issued (numbered) credit note that reverses `invoice_id`, if one exists."""
+        return (
+            Invoice.objects.filter(
+                reverses_invoice_id=invoice_id,
+                document_kind=DOCUMENT_KIND_CREDIT_NOTE,
+                number__isnull=False,
+            )
+            .order_by("pk")
+            .first()
+        )
+
+    @staticmethod
+    def _report_failure_after_completion(refund: Refund, gateway_status: str) -> None:
+        """A processor now says a completed refund failed. Refused, and a human must look.
+
+        Nothing moves a refund out of `completed`, so the invoice is never restored from here.
+        But money PRAHO recorded as returned may not have been, and when the invoice has already
+        been corrected by an issued credit note that document cannot simply be taken back.
+        """
+        reversed_by = [
+            credit_note.number
+            for invoice_id in sorted(invoice_ids_in_scope_of(refund))
+            if (credit_note := RefundService._issued_credit_note_reversing(invoice_id)) is not None
+        ]
+        detail = (
+            f"; issued credit note(s) {', '.join(str(number) for number in reversed_by)} already reverse "
+            f"its invoice and stay in force"
+            if reversed_by
+            else ""
+        )
+        logger.error(
+            f"🔥 [Refund] Gateway reported {gateway_status!r} for refund {refund.pk}, which is already "
+            f"completed. Refused; the refund stays completed and needs manual reconciliation{detail}."
+        )
 
     @staticmethod
     def _legacy_refund_scope_for_payment(payment: Payment) -> Q | None:

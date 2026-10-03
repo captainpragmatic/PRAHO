@@ -404,3 +404,67 @@ class RecoverySweepLinksLateObligationsTests(TransactionTestCase):
         self.assertEqual(correction.credit_note_id, credit_note.pk)
         self.assertEqual(report["linked"], 1)
         self.assertEqual(sweep_fiscal_corrections()["linked"], 0)
+
+
+class AReversedInvoiceIsNeverRestoredTests(TestCase):
+    """An issued credit note is a legal document; no refund bookkeeping may quietly undo it."""
+
+    def setUp(self) -> None:
+        self.owner = h.customer()
+        self.invoice = h.issued_invoice(self.owner, issuer=ISSUER_SMARTBILL, number="FCT-000900")
+        h.paid(self.invoice)
+        self.refund = h.complete(h.pending_refund(invoice=self.invoice))
+        force_status(self.invoice, "refunded")
+        self.credit_note = Invoice.objects.create(
+            customer=self.owner,
+            currency=self.invoice.currency,
+            number="STORNO-000901",
+            status="issued",
+            document_kind=DOCUMENT_KIND_CREDIT_NOTE,
+            reverses_invoice=self.invoice,
+            issuer_provider=ISSUER_SMARTBILL,
+            subtotal_cents=-self.invoice.subtotal_cents,
+            tax_cents=-self.invoice.tax_cents,
+            total_cents=-self.invoice.total_cents,
+            bill_to_name=self.invoice.bill_to_name,
+        )
+
+    def test_the_projection_refuses_to_restore_a_reversed_invoice_to_paid(self) -> None:
+        with self.assertLogs("apps.billing.refund_service", level="ERROR") as logs:
+            result = RefundService._apply_invoice_refund_projection(self.invoice, "paid")
+
+        self.assertTrue(result.is_err())
+        self.assertIn("STORNO-000901", result.unwrap_err())
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.status, "refunded")
+        self.assertTrue(any("STORNO-000901" in line for line in logs.output), logs.output)
+
+    def test_the_projection_refuses_a_partial_restore_of_a_reversed_invoice(self) -> None:
+        with self.assertLogs("apps.billing.refund_service", level="ERROR"):
+            result = RefundService._apply_invoice_refund_projection(self.invoice, "partially_refunded")
+
+        self.assertTrue(result.is_err())
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.status, "refunded")
+
+    def test_an_unreversed_invoice_is_still_restored(self) -> None:
+        """The guard is about the credit note, not about restoring as such."""
+        Invoice.objects.filter(pk=self.credit_note.pk).update(number=None, locked_at=None)
+
+        result = RefundService._apply_invoice_refund_projection(self.invoice, "paid")
+
+        self.assertTrue(result.is_ok(), result)
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.status, "paid")
+
+    def test_a_failure_reported_after_success_is_refused_loudly(self) -> None:
+        """The gateway saying `failed` about a completed refund is refused, and a human is told."""
+        with self.assertLogs("apps.billing.refund_service", level="ERROR") as logs:
+            result = RefundService._advance_refund_status(self.refund, "failed")
+
+        self.assertTrue(result.is_err())
+        self.refund.refresh_from_db()
+        self.assertEqual(self.refund.status, "completed")
+        self.assertTrue(
+            any(str(self.refund.pk) in line and "STORNO-000901" in line for line in logs.output), logs.output
+        )
