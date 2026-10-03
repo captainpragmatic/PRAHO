@@ -9,11 +9,13 @@ from django.db.models import Sum
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
-from apps.billing.models import Invoice, ProformaInvoice
+from apps.billing.fiscal_correction_service import record_obligation
+from apps.billing.models import FiscalCorrection, Invoice, ProformaInvoice
 from apps.billing.refund_models import Refund
 from apps.common.management.commands.generate_sample_data import Command
 from apps.customers.models import Customer
 from apps.orders.models import Order
+from tests.billing import _fiscal_correction_helpers as h
 
 
 @override_settings(DEBUG=True, ENCRYPTION_KEYS=["MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="])
@@ -48,6 +50,33 @@ class SampleDataIntegrityTests(TestCase):
                 if refund.status == "completed":
                     self.assertEqual(refund.payment.status, "refunded")
                     self.assertEqual(refund.invoice.status, "refunded")
+                    # A settled refund owes a fiscal correction exactly as one settled by the
+                    # service would, so dev data shows the obligation the books depend on.
+                    correction = FiscalCorrection.objects.get(source_refund=refund)
+                    self.assertEqual(correction.original_id, refund.invoice_id)
+                    self.assertEqual(correction.state, "pending")
+                else:
+                    self.assertFalse(FiscalCorrection.objects.filter(source_refund=refund).exists())
+
+    def test_cleanup_removes_example_customers_fiscal_corrections_first(self):
+        """The `example.` cleanup site: an obligation PROTECTs its refund and its invoice."""
+        owner = Customer.objects.create(
+            name="Example Buyer",
+            customer_type="company",
+            company_name="Example Buyer",
+            status="active",
+            primary_email="buyer@example.com",
+        )
+        invoice = h.issued_invoice(owner)
+        Invoice.objects.filter(pk=invoice.pk).update(meta={"sample_data": True})
+        refund = h.pending_refund(invoice=invoice, status="completed")
+        self.assertIsNotNone(record_obligation(refund))
+
+        Command(stdout=StringIO(), stderr=StringIO()).create_billing_foundation()
+
+        self.assertFalse(FiscalCorrection.objects.filter(source_refund_id=refund.pk).exists())
+        self.assertFalse(Refund.objects.filter(pk=refund.pk).exists())
+        self.assertFalse(Invoice.objects.filter(pk=invoice.pk).exists())
 
     def test_failed_replacement_preserves_previous_dataset(self):
         self.seed()

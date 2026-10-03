@@ -592,32 +592,18 @@ class Invoice(models.Model):
         return now > due
 
     def get_remaining_amount(self) -> int:
-        """Calculate remaining unpaid amount in cents, net of completed refunds.
+        """Remaining unpaid amount in cents: the total less what is still held against it.
 
-        'succeeded', 'partially_refunded' and 'refunded' payments all represent funds
-        that were received; completed refunds are funds returned. Net retained =
-        collected - refunded, and the balance due is the invoice total minus that.
-        Refunds live in a separate Refund model, so a partially-refunded payment keeps
-        its full amount_cents - without this subtraction the balance would understate
-        what is still owed after a partial refund.
+        "Held" is `net_collected_cents_for_invoice`, the definition the refund projection and the
+        storno eligibility check use as well: payments counted against their own invoice (or, with
+        none, the invoice their refunds resolve to) less the completed refunds resolved to this
+        invoice. Reading it from one place is what keeps the balance a customer is shown in line
+        with the status the refund projection gives the same invoice.
         """
-        from apps.billing.refund_models import Refund  # noqa: PLC0415  -- local import avoids an import cycle
+        # Local import, as before: it avoids a model import cycle.
+        from apps.billing.refund_models import net_collected_cents_for_invoice  # noqa: PLC0415
 
-        collected = (
-            self.payments.filter(status__in=["succeeded", "partially_refunded", "refunded"]).aggregate(
-                total=models.Sum("amount_cents")
-            )["total"]
-            or 0
-        )
-        refunded = (
-            Refund.objects.filter(
-                models.Q(invoice=self) | models.Q(payment__invoice=self),
-                status="completed",
-            ).aggregate(total=models.Sum("amount_cents"))["total"]
-            or 0
-        )
-        net_collected = max(0, collected - refunded)
-        return max(0, self.total_cents - net_collected)
+        return max(0, self.total_cents - max(0, net_collected_cents_for_invoice(self)))
 
     @transition(field=status, source="draft", target="issued")
     def issue(self) -> None:

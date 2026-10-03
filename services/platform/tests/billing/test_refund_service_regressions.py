@@ -1286,10 +1286,12 @@ class TestGetRefundedAmounts(TestCase):
     def test_invoice_db_error_raises(self):
         # #119: aggregation failure must raise rather than silently return 0 (over-refund risk)
         inv = MagicMock(meta={})
-        with patch("apps.billing.refund_service.Refund.objects") as mock_qs:
-            mock_qs.filter.return_value.aggregate.side_effect = AttributeError("bad")
-            with self.assertRaises(RuntimeError, msg="Should raise to abort refund, not return 0"):
-                RefundService._get_invoice_refunded_amount(inv)
+        # The sum now goes through the shared refund-scope helper, so that is where it fails.
+        with (
+            patch("apps.billing.refund_service.refunded_cents_for_invoice", side_effect=AttributeError("bad")),
+            self.assertRaises(RuntimeError, msg="Should raise to abort refund, not return 0"),
+        ):
+            RefundService._get_invoice_refunded_amount(inv)
 
 
 # ===========================================================================

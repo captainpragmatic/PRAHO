@@ -1660,19 +1660,16 @@ def _refund_corrections(customer_ids: list[Any]) -> Any:
     never represent a partial refund, while a `Refund` row always carries the exact amount
     that went back.
     """
-    from .refund_models import Refund  # noqa: PLC0415
+    from .refund_models import refunds_for_invoices  # noqa: PLC0415
 
-    # Against an invoice THIS REPORT COUNTED, reached directly or through its payment -
-    # the same two links `_project_settled_refunds` uses to decide an invoice is refunded.
-    # Merely having an invoice link is not enough: a refund against an unissued draft, or
-    # against a credit note, would subtract money `_revenue_documents` never added. A
-    # refund attached only to an order or a proforma is likewise not this report's.
+    # Belonging to an invoice THIS REPORT COUNTED, under the shared refund resolution rule
+    # (its own invoice, else its payment's, else its order's) - the same rule
+    # `_project_settled_refunds` uses to decide an invoice is refunded. Merely having an
+    # invoice link is not enough: a refund against an unissued draft, or against a credit
+    # note, would subtract money `_revenue_documents` never added. A refund attached to an
+    # order with no counted invoice, or only to a proforma, is likewise not this report's.
     counted = _revenue_documents(customer_ids)
-    return (
-        Refund.objects.filter(status="completed")
-        .filter(Q(invoice__in=counted) | Q(payment__invoice__in=counted))
-        .distinct()
-    )
+    return refunds_for_invoices(counted).filter(status="completed")
 
 
 def _monthly_revenue(customer_ids: list[Any]) -> list[dict[str, Any]]:

@@ -18,7 +18,13 @@ from django.utils import timezone
 from django_fsm import ConcurrentTransition, TransitionNotAllowed
 
 from apps.billing.gateways.base import GATEWAY_PAYMENT_METHODS, PaymentGatewayFactory
+from apps.billing.invoice_models import DOCUMENT_KIND_CREDIT_NOTE
 from apps.billing.models import Invoice, Payment, Refund, RefundStatusHistory, log_security_event
+from apps.billing.refund_models import (
+    net_collected_cents_for_invoice,
+    refunded_cents_for_invoice,
+    resolved_invoice_id_of,
+)
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 from apps.orders.models import Order
 
@@ -27,6 +33,10 @@ if TYPE_CHECKING:
     from apps.users.models import User
 
 logger = logging.getLogger(__name__)
+
+# Projections that move an invoice back from a refunded state. Forbidden beneath an issued credit
+# note, which no refund bookkeeping may quietly undo.
+_RESTORING_INVOICE_TRANSITIONS = frozenset({"restore_after_refund_reversal", "restore_partial_after_refund_reversal"})
 
 _FALLBACK_ORDER_TOTAL_CENTS = 15_000  # 150 EUR — safe fallback for missing order total
 _FALLBACK_INVOICE_TOTAL_CENTS = 11_900  # 119 EUR — safe fallback for missing invoice total
@@ -214,6 +224,11 @@ class RefundService:
             if order_snapshot.status not in {"paid", "completed", "partially_refunded", "refunded"}:
                 return Err(f"Order status '{order_snapshot.status}' is not eligible for refund")
             invoice_id = order_snapshot.invoice_id
+            multi_rate_refusal = RefundService._multi_rate_partial_refusal(
+                invoice_id, RefundService._requested_type_as_served(refund_data, requested_refund_type)
+            )
+            if multi_rate_refusal is not None:
+                return Err(multi_rate_refusal)
             if invoice_id and Payment.objects.filter(invoice_id=invoice_id, payment_method="gift_card").exists():
                 from apps.promotions.tender_refunds import refund_from_existing_flow  # noqa: PLC0415
 
@@ -261,6 +276,11 @@ class RefundService:
                     validation_result = RefundService._validate_order_refund(order, refund_data)
                     if validation_result.is_err():
                         return Err(validation_result.unwrap_err())
+                    effective_refusal = RefundService._multi_rate_effective_refusal(
+                        order.invoice_id, payment, refund_data
+                    )
+                    if effective_refusal is not None:
+                        return Err(effective_refusal)
                     reservation = RefundService._create_refund_intent(
                         order=order,
                         invoice=None,
@@ -278,6 +298,67 @@ class RefundService:
         except Exception:
             logger.exception("Order refund processing failed for order_id=%s", order_id)
             return Err("Failed to process refund: internal error")
+
+    @staticmethod
+    def _multi_rate_partial_refusal(invoice_id: int | None, requested_refund_type: Any) -> str | None:
+        """Refuse a partial refund the fiscal correction could not express.
+
+        A partial correction is one credited line at ONE rate (and category). An invoice whose
+        lines carry several has no single rate to allocate the refunded VAT by, so any split
+        would be invented. Refused at request time, before any money moves; a full refund
+        mirrors every line and stays allowed.
+
+        Decided on the CALLER's requested type, and only here. The tender path creates each
+        payment leg as `partial` even for a whole-document refund, so a check placed anywhere
+        those legs pass through would refuse a legitimate full refund.
+        """
+        if invoice_id is None or requested_refund_type not in (RefundType.PARTIAL, "partial"):
+            return None
+        from apps.billing.invoice_models import InvoiceLine  # noqa: PLC0415  # Avoid a model import cycle
+
+        distinct_rates = (
+            InvoiceLine.objects.filter(invoice_id=invoice_id)
+            .order_by()
+            .values_list("tax_rate", "tax_category_code")
+            .distinct()
+            .count()
+        )
+        if distinct_rates <= 1:
+            return None
+        return (
+            "A partial refund cannot be corrected on an invoice whose lines carry more than one VAT rate "
+            "or VAT category. Refund the whole invoice, or issue the correction manually."
+        )
+
+    @staticmethod
+    def _requested_type_as_served(refund_data: RefundData, requested_refund_type: Any) -> Any:
+        """The type every path will actually serve: an amount with no type is a partial refund.
+
+        Read through the service's own predicate, so the door check, the reservation and the
+        tender flow cannot disagree about what was asked for.
+        """
+        if RefundService._is_partial_refund_request(refund_data, None, None):
+            return RefundType.PARTIAL
+        return requested_refund_type
+
+    @staticmethod
+    def _multi_rate_effective_refusal(invoice_id: int | None, payment: Payment, refund_data: RefundData) -> str | None:
+        """The multi-rate refusal, applied to what the service will actually refund.
+
+        The door check reads the requested type, and a request with an amount but no type reads
+        as full there. The reservation then refunds exactly that amount, which is a partial
+        refund. So the same decision is made again here, after the payment is locked and before
+        the intent is reserved, through the predicate the reservation itself uses.
+        """
+        if invoice_id is None:
+            return None
+        amount_result = RefundService._resolve_effective_refund_amount(payment, refund_data, None)
+        if amount_result.is_err():
+            return None  # The reservation reports its own refusal.
+        remaining = RefundService._get_remaining_payment_refund_amount(payment)
+        if not RefundService._is_partial_refund_request(refund_data, amount_result.unwrap(), remaining):
+            return None
+        return RefundService._multi_rate_partial_refusal(invoice_id, RefundType.PARTIAL)
 
     @staticmethod
     def _normalize_refund_data(refund_data: RefundData) -> None:
@@ -610,7 +691,7 @@ class RefundService:
             return refund_data.get("amount_cents", refund_data.get("amount", 0))
 
     @staticmethod
-    def refund_invoice(  # noqa: C901, PLR0911  # Explicit legacy/tender validation gates
+    def refund_invoice(  # noqa: C901, PLR0911, PLR0912  # Explicit legacy/tender validation gates
         invoice_id: Any, refund_data: RefundData, *, actor: User | None = None
     ) -> Result[RefundResult, str]:
         """Refund an invoice with comprehensive validation.
@@ -629,6 +710,11 @@ class RefundService:
                 return Err("Failed to process refund: Invoice not found")
             if invoice_snapshot.status not in {"paid", "completed", "partially_refunded", "refunded"}:
                 return Err(f"Invoice status '{invoice_snapshot.status}' is not eligible for refund")
+            multi_rate_refusal = RefundService._multi_rate_partial_refusal(
+                invoice_snapshot.pk, RefundService._requested_type_as_served(refund_data, requested_refund_type)
+            )
+            if multi_rate_refusal is not None:
+                return Err(multi_rate_refusal)
             if Payment.objects.filter(invoice_id=invoice_id, payment_method="gift_card").exists():
                 from apps.promotions.tender_refunds import refund_from_existing_flow  # noqa: PLC0415
 
@@ -669,6 +755,9 @@ class RefundService:
                     validation_result = RefundService._validate_invoice_refund(invoice, refund_data)
                     if validation_result.is_err():
                         return Err(validation_result.unwrap_err())
+                    effective_refusal = RefundService._multi_rate_effective_refusal(invoice.pk, payment, refund_data)
+                    if effective_refusal is not None:
+                        return Err(effective_refusal)
                     reservation = RefundService._create_refund_intent(
                         order=None,
                         invoice=invoice,
@@ -1410,6 +1499,8 @@ class RefundService:
             if normalized in {"pending", "requires_action"}:
                 return Ok(refund)
             if expected_terminal.get(normalized) != current_status:
+                if current_status == "completed":
+                    RefundService._report_failure_after_completion(refund, normalized)
                 return Err(
                     f"Refund state mismatch: cannot apply '{gateway_status}' to '{current_status}'",
                     retriability=Retriability.NOT_RETRIABLE,
@@ -1509,9 +1600,60 @@ class RefundService:
                 f"Cannot project invoice {invoice.pk} from {invoice.status!r} to {target!r}",
                 retriability=Retriability.NOT_RETRIABLE,
             )
+        if transition in _RESTORING_INVOICE_TRANSITIONS:
+            credit_note = RefundService._issued_credit_note_reversing(invoice.pk)
+            if credit_note is not None:
+                # An issued credit note is a legal document that cannot be voided, deleted or
+                # renumbered. Restoring the invoice beneath it would make the books say the
+                # customer owes, or has paid, money the credit note has already taken back.
+                logger.error(
+                    f"🔥 [Refund] Refusing to restore invoice {invoice.pk} from {invoice.status!r} to "
+                    f"{target!r}: issued credit note {credit_note.number} reverses it. A reversal of a "
+                    f"corrected refund needs a new invoice, not a restored one."
+                )
+                return Err(
+                    f"Invoice {invoice.pk} is reversed by issued credit note {credit_note.number} "
+                    f"and cannot be restored to {target!r}",
+                    retriability=Retriability.NOT_RETRIABLE,
+                )
         getattr(invoice, transition)()
         invoice.save(update_fields=["status", "updated_at"])
         return Ok(True)
+
+    @staticmethod
+    def _issued_credit_note_reversing(invoice_id: int) -> Invoice | None:
+        """The issued (numbered) credit note that reverses `invoice_id`, if one exists."""
+        return (
+            Invoice.objects.filter(
+                reverses_invoice_id=invoice_id,
+                document_kind=DOCUMENT_KIND_CREDIT_NOTE,
+                number__isnull=False,
+            )
+            .order_by("pk")
+            .first()
+        )
+
+    @staticmethod
+    def _report_failure_after_completion(refund: Refund, gateway_status: str) -> None:
+        """A processor now says a completed refund failed. Refused, and a human must look.
+
+        Nothing moves a refund out of `completed`, so the invoice is never restored from here.
+        But money PRAHO recorded as returned may not have been, and when the invoice has already
+        been corrected by an issued credit note that document cannot simply be taken back.
+        """
+        invoice_id = resolved_invoice_id_of(refund)
+        credit_note = RefundService._issued_credit_note_reversing(invoice_id) if invoice_id is not None else None
+        reversed_by = [credit_note.number] if credit_note is not None else []
+        detail = (
+            f"; issued credit note(s) {', '.join(str(number) for number in reversed_by)} already reverse "
+            f"its invoice and stay in force"
+            if reversed_by
+            else ""
+        )
+        logger.error(
+            f"🔥 [Refund] Gateway reported {gateway_status!r} for refund {refund.pk}, which is already "
+            f"completed. Refused; the refund stays completed and needs manual reconciliation{detail}."
+        )
 
     @staticmethod
     def _legacy_refund_scope_for_payment(payment: Payment) -> Q | None:
@@ -1693,17 +1835,17 @@ class RefundService:
             invoice_target: str | None = None
             if invoice is not None:
                 invoice.refresh_from_db()
-                settled_invoice = int(
-                    Refund.objects.filter(
-                        Q(invoice=invoice) | Q(payment__invoice=invoice),
-                        status="completed",
-                    ).aggregate(total=Sum("amount_cents", default=0))["total"]
-                )
+                # The shared resolution rule: an order refund whose payment names only the
+                # proforma reaches this invoice through its order alone, and must still project it.
+                settled_invoice = refunded_cents_for_invoice(invoice)
+                # Projected from what is still held, not from what went back: returning an
+                # overpayment leaves a fully paid invoice fully paid.
+                net_collected = net_collected_cents_for_invoice(invoice)
                 invoice_target = (
                     "paid"
-                    if settled_invoice == 0
+                    if settled_invoice == 0 or net_collected >= invoice.total_cents
                     else "refunded"
-                    if settled_invoice >= invoice.total_cents
+                    if net_collected <= 0
                     else "partially_refunded"
                 )
                 invoice_projection = RefundService._apply_invoice_refund_projection(invoice, invoice_target)
@@ -1985,12 +2127,7 @@ class RefundService:
 
         # Single source of truth: Refund model (#125 — removed meta.refunds fallback)
         try:
-            return int(
-                Refund.objects.filter(
-                    Q(invoice=invoice) | Q(payment__invoice=invoice),
-                    status__in=_REFUND_RESERVING_STATUSES,
-                ).aggregate(total=Sum("amount_cents", default=0))["total"]
-            )
+            return refunded_cents_for_invoice(invoice, statuses=_REFUND_RESERVING_STATUSES)
         except (TypeError, AttributeError) as exc:
             logger.error(
                 "Refund amount aggregation failed for invoice_id=%s — aborting to prevent over-refund",

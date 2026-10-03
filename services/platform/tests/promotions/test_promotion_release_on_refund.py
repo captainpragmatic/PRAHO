@@ -694,7 +694,11 @@ class PromotionReleaseOnRefundTest(TestCase):
             release_promotions_for_order(order, trigger="misspelled")
 
     def test_overpayment_guard_blocks_release_and_audits(self) -> None:
-        """15. A retained duplicate payment blocks a face-value invoice release."""
+        """15. A retained duplicate payment blocks a face-value invoice release.
+
+        The duplicate still holds the full invoice amount, so the invoice stays paid and the
+        release is never attempted: projection follows net collected, not refunds alone.
+        """
         order = self._make_order()
         redemption = self._apply_coupon(order)
         force_status(order, "paid")
@@ -727,7 +731,7 @@ class PromotionReleaseOnRefundTest(TestCase):
         invoice.refresh_from_db()
         redemption.refresh_from_db()
         self.coupon.refresh_from_db()
-        self.assertEqual(invoice.status, "refunded")
+        self.assertEqual(invoice.status, "paid", f"duplicate {sibling.pk} still holds the full amount")
         self.assertEqual(redemption.status, "applied")
         self.assertEqual(self.coupon.total_uses, 1)
         blocked_calls = [
@@ -736,12 +740,7 @@ class PromotionReleaseOnRefundTest(TestCase):
             if (call.args[0] if call.args else call.kwargs.get("event_type"))
             == "promotion_release_blocked_anomalous_payments"
         ]
-        self.assertEqual(len(blocked_calls), 1)
-        metadata = blocked_calls[0].kwargs["metadata"]
-        self.assertEqual(metadata["payment_id"], str(refunded_payment.pk))
-        self.assertEqual(metadata["invoice_id"], str(invoice.pk))
-        self.assertEqual(metadata["sibling_payment_ids"], [str(sibling.pk)])
-        self.assertTrue(metadata["requires_review"])
+        self.assertEqual(blocked_calls, [], "an invoice that is still paid never starts a release")
 
     def test_invoice_refund_row_fallback_releases_unlinked_order(self) -> None:
         """16. An order-owned Refund survives the order.invoice linking crash window."""
@@ -802,7 +801,9 @@ class PromotionReleaseOnRefundTest(TestCase):
         redemption.refresh_from_db()
         self.coupon.refresh_from_db()
         self.assertEqual(payment.status, "partially_refunded")
-        self.assertEqual(invoice.status, "refunded")
+        # 5,000 of the payment is still held, so the invoice is only partially refunded and the
+        # release is never attempted: projection follows net collected, not refunds alone.
+        self.assertEqual(invoice.status, "partially_refunded")
         self.assertEqual(redemption.status, "applied")
         self.assertEqual(self.coupon.total_uses, 1)
         blocked_calls = [
@@ -811,10 +812,7 @@ class PromotionReleaseOnRefundTest(TestCase):
             if (call.args[0] if call.args else call.kwargs.get("event_type"))
             == "promotion_release_blocked_anomalous_payments"
         ]
-        self.assertEqual(len(blocked_calls), 1)
-        metadata = blocked_calls[0].kwargs["metadata"]
-        self.assertEqual(metadata["sibling_payment_ids"], [str(payment.pk)])
-        self.assertTrue(metadata["requires_review"])
+        self.assertEqual(blocked_calls, [])
 
     def test_cross_linkage_retained_sibling_blocks_release_and_audits(self) -> None:
         """18. The invoice prong also sees payments linked through order metadata."""
@@ -916,10 +914,10 @@ class PromotionReleaseOnRefundTest(TestCase):
     def test_release_retries_when_retained_sibling_later_settles(self) -> None:
         """20. A guard-blocked release fires once every retained payment settles.
 
-        The invoice flips to "refunded" on the first projection and never
-        changes again — the sibling's later settlement changes only the
-        PAYMENT, so an invoice-flip-only trigger would skip the release
-        forever despite all payments ultimately being refunded.
+        The sibling's 5,000 is still held after the first projection, so the
+        invoice is only partially refunded and nothing is released. Once the
+        sibling settles too, nothing is held, the invoice becomes refunded and
+        the release fires.
         """
         order = self._make_order()
         redemption = self._apply_coupon(order)
@@ -948,7 +946,7 @@ class PromotionReleaseOnRefundTest(TestCase):
         self.assertTrue(blocked.is_ok(), blocked.unwrap_err() if blocked.is_err() else "")
         invoice.refresh_from_db()
         redemption.refresh_from_db()
-        self.assertEqual(invoice.status, "refunded")
+        self.assertEqual(invoice.status, "partially_refunded")
         self.assertEqual(redemption.status, "applied")
 
         self._completed_refund(
@@ -966,6 +964,8 @@ class PromotionReleaseOnRefundTest(TestCase):
         self.coupon.refresh_from_db()
         self.campaign.refresh_from_db()
         self.assertEqual(sibling.status, "refunded")
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, "refunded")
         self.assertEqual(redemption.status, "reversed")
         self.assertEqual(self.coupon.total_uses, 0)
         self.assertEqual(self.campaign.spent_cents, 0)

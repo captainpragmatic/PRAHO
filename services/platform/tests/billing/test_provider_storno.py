@@ -401,6 +401,86 @@ class SplitCorrectionTests(StornoTestBase):
 
         self.assertTrue(result.is_ok(), msg=getattr(result, "error", ""))
 
+    def _fully_refund_through_the_order(
+        self, *, payment_carries_invoice: bool, order_carries_invoice: bool = True
+    ) -> None:
+        """Settle the invoice the way `refund_order` records it: the refund's own invoice is NULL."""
+        from apps.billing.models import Payment, ProformaInvoice  # noqa: PLC0415
+        from apps.orders.models import Order  # noqa: PLC0415
+
+        force_status(self.invoice, "paid")
+        force_status(self.invoice, "refunded")
+        proforma = ProformaInvoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number="PRO-ORDER-PATH",
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
+        )
+        order = Order.objects.create(
+            order_number="ORD-STORNO-PATH",
+            customer=self.customer,
+            currency=self.currency,
+            invoice=self.invoice if order_carries_invoice else None,
+            proforma=proforma,
+            status="completed",
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
+            customer_email="billing@example.test",
+            customer_name="Test Company SRL",
+        )
+        payment = Payment.objects.create(
+            customer=self.customer,
+            proforma=proforma,
+            invoice=self.invoice if payment_carries_invoice else None,
+            currency=self.currency,
+            status="refunded",
+            payment_method="stripe",
+            amount_cents=12100,
+            gateway_txn_id="pi_order_path",
+        )
+        Refund.objects.create(
+            customer=self.customer,
+            order=order,
+            payment=payment,
+            status="completed",
+            refund_type="full",
+            amount_cents=12100,
+            currency=self.currency,
+            original_amount_cents=12100,
+            reference_number="REF-ORDER-PATH",
+        )
+
+    def _assert_reversed(self) -> None:
+        result = self._storno_returning(Issued(number="000501", series="STORNO"))
+
+        self.assertTrue(result.is_ok(), msg=getattr(result, "error", ""))
+        credit = Invoice.objects.get(document_kind=DOCUMENT_KIND_CREDIT_NOTE)
+        self.assertEqual(credit.reverses_invoice_id, self.invoice.pk)
+        self.assertEqual(credit.number, "STORNO-000501")
+
+    def test_order_path_full_refund_of_smartbill_invoice_mints_storno(self) -> None:
+        """An order refund names its invoice only through the order.
+
+        `refund_order` leaves the refund's own `invoice` NULL by schema, and the payment can be
+        linked to the proforma rather than the invoice. Counting `original.refunds` saw zero
+        settled refunds and refused the reversal the customer was owed.
+        """
+        self._fully_refund_through_the_order(payment_carries_invoice=False)
+        self._assert_reversed()
+
+    def test_a_refund_naming_the_invoice_only_through_its_payment_mints_storno(self) -> None:
+        """The payment leg on its own: the refund's invoice is NULL and its order names none."""
+        self._fully_refund_through_the_order(payment_carries_invoice=True, order_carries_invoice=False)
+        self._assert_reversed()
+
+    def test_order_path_full_refund_whose_payment_carries_the_invoice_mints_storno(self) -> None:
+        """The usual shape: the payment names the invoice too, and `original.refunds` still missed it."""
+        self._fully_refund_through_the_order(payment_carries_invoice=True)
+        self._assert_reversed()
+
     def test_a_refund_that_does_not_cover_the_total_is_refused(self) -> None:
         force_status(self.invoice, "paid")
         force_status(self.invoice, "refunded")

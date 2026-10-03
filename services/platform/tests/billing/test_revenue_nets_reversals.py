@@ -151,6 +151,42 @@ class RevenueRecognitionTests(TestCase):
         self.assertEqual(monthly.get(2), -20000, f"only the returned part; got {monthly}")
         self.assertEqual(total, 30000)
 
+    def test_an_order_path_refund_subtracts_like_a_direct_one(self) -> None:
+        """`refund_order` leaves the refund's own invoice NULL; the order still names it."""
+        from apps.orders.models import Order  # noqa: PLC0415
+
+        invoice = self._paid_invoice(50000, month=1)
+        order = Order.objects.create(
+            order_number=f"ORD-REV-{uuid.uuid4().hex[:8]}",
+            customer=self.customer,
+            currency=self.currency,
+            invoice=invoice,
+            status="completed",
+            subtotal_cents=50000,
+            tax_cents=0,
+            total_cents=50000,
+            customer_email="billing@example.test",
+            customer_name="Test Company SRL",
+        )
+        refund = Refund.objects.create(
+            customer=self.customer,
+            order=order,
+            currency=self.currency,
+            amount_cents=20000,
+            original_amount_cents=50000,
+            refund_type="partial",
+            reference_number=f"RF-{uuid.uuid4().hex[:12]}",
+            status="completed",
+        )
+        when = timezone.now().replace(month=2, day=15)
+        Refund.objects.filter(pk=refund.pk).update(created_at=when, processed_at=when)
+        force_status(invoice, "partially_refunded")
+
+        monthly, total = self._report()
+
+        self.assertEqual(monthly.get(2), -20000, f"the order-path refund must subtract; got {monthly}")
+        self.assertEqual(total, 30000)
+
     def test_both_issuers_report_the_same_numbers(self) -> None:
         """The parity rule: one business event, one answer.
 

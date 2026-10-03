@@ -176,6 +176,7 @@ jobs:
           tests.users.test_login_audit_failure_keeps_the_login \
           tests.users.test_mfa_audit_isolation \
           tests.api.test_token_second_factor_concurrency \
+          tests.billing.test_fiscal_correction_concurrency \
           --settings=config.settings.ci --verbosity=2
 
     - name: Service isolation security tests (make test-security)

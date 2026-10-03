@@ -2214,6 +2214,14 @@ def setup_billing_scheduled_tasks() -> dict[str, str]:
             "apps.billing.issuers.tasks.sweep_owed_reversals",
             "25 * * * *",
         ),
+        # Completion records a refund's fiscal correction in a savepoint that is allowed to fail;
+        # this is what records it afterwards, and links a provider storno that was issued before
+        # its obligation existed.
+        (
+            "billing-fiscal-correction-sweep",
+            "apps.billing.fiscal_correction_service.sweep_fiscal_corrections",
+            "40 * * * *",
+        ),
         # Offset from the issuance sweep so a claim taken by one run is not judged
         # stale by the other in the same minute; the lease is 10 minutes wide.
         (

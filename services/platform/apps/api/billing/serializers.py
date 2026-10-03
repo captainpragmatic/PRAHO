@@ -4,7 +4,7 @@
 
 from typing import Any, ClassVar
 
-from django.db.models import Q, QuerySet, Sum
+from django.db.models import QuerySet, Sum
 from django.utils import timezone
 from rest_framework import serializers
 
@@ -195,35 +195,60 @@ class InvoiceDetailSerializer(serializers.ModelSerializer):
 
 
 def _invoice_remaining_amounts(invoices: QuerySet[Invoice]) -> dict[int, int]:
-    """Batch the invoice ledger calculation without changing its per-invoice clamps."""
-    from apps.billing.models import Payment, Refund  # noqa: PLC0415  # ADR-0007
+    """Batch `Invoice.get_remaining_amount` without changing a single figure it returns.
 
-    totals = {invoice.pk: invoice.total_cents for invoice in invoices}
-    if not totals:
+    The same definition, read per batch: payments counted against their own invoice, or, with
+    none, against the invoice their refunds resolve to; collected floored at the total for an
+    invoice only full collection reaches; completed refunds resolved to one invoice each.
+    """
+    from apps.billing.models import Payment  # noqa: PLC0415  # ADR-0007
+    from apps.billing.refund_models import (  # noqa: PLC0415  # ADR-0007
+        COLLECTED_PAYMENT_STATUSES,
+        FULLY_COLLECTED_INVOICE_STATES,
+        refunds_for_invoices,
+        resolved_invoice_expression,
+    )
+
+    documents = {invoice.pk: invoice for invoice in invoices}
+    if not documents:
         return {}
-    collected = {
+    invoice_ids = list(documents)
+    # Separate aggregates avoid multiplying payment/refund rows.
+    collected: dict[int, int] = {
         row["invoice_id"]: row["total"] or 0
-        for row in Payment.objects.filter(
-            invoice__in=invoices, status__in=["succeeded", "partially_refunded", "refunded"]
-        )
+        for row in Payment.objects.filter(invoice_id__in=invoice_ids, status__in=COLLECTED_PAYMENT_STATUSES)
+        .order_by()
         .values("invoice_id")
         .annotate(total=Sum("amount_cents"))
     }
-    # Separate aggregates avoid multiplying payment/refund rows. A refund reached
-    # through both links counts once for each invoice, matching get_remaining_amount.
-    refunded: dict[int, int] = {}
-    refunds = (
-        Refund.objects.filter(Q(invoice__in=invoices) | Q(payment__invoice__in=invoices), status="completed")
-        .values("invoice_id", "payment__invoice_id")
+    # A payment with no invoice of its own counts once for each invoice its refunds resolve to.
+    for row in (
+        refunds_for_invoices(invoice_ids)
+        .filter(payment__isnull=False, payment__invoice__isnull=True, payment__status__in=COLLECTED_PAYMENT_STATUSES)
+        .annotate(resolved_invoice_id=resolved_invoice_expression())
+        .order_by()
+        .values("resolved_invoice_id", "payment_id", "payment__amount_cents")
+        .distinct()
+    ):
+        invoice_id = row["resolved_invoice_id"]
+        collected[invoice_id] = collected.get(invoice_id, 0) + row["payment__amount_cents"]
+    # Each refund belongs to exactly one invoice (the shared resolution rule) and is grouped by it.
+    refunded: dict[int, int] = {
+        row["resolved_invoice_id"]: row["total"] or 0
+        for row in refunds_for_invoices(invoice_ids)
+        .filter(status="completed")
+        .annotate(resolved_invoice_id=resolved_invoice_expression())
+        .order_by()
+        .values("resolved_invoice_id")
         .annotate(total=Sum("amount_cents"))
-    )
-    for row in refunds:
-        for invoice_id in {row["invoice_id"], row["payment__invoice_id"]} & totals.keys():
-            refunded[invoice_id] = refunded.get(invoice_id, 0) + row["total"]
-    return {
-        invoice_id: max(0, total - max(0, collected.get(invoice_id, 0) - refunded.get(invoice_id, 0)))
-        for invoice_id, total in totals.items()
     }
+    remaining: dict[int, int] = {}
+    for invoice_id, invoice in documents.items():
+        held = collected.get(invoice_id, 0)
+        if invoice.status in FULLY_COLLECTED_INVOICE_STATES:
+            held = max(held, invoice.total_cents)
+        remaining[invoice_id] = max(0, invoice.total_cents - max(0, held - refunded.get(invoice_id, 0)))
+    return remaining
 
 
 class InvoiceSummarySerializer(serializers.Serializer):
