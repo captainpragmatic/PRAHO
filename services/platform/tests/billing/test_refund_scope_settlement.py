@@ -39,6 +39,17 @@ class SettlementSumsReadTheSharedScopeTests(TestCase):
 
         self.assertEqual(self.invoice.get_remaining_amount(), 4000)
 
+    def test_a_refund_linked_only_through_its_payment_still_counts(self) -> None:
+        """The payment leg on its own: no invoice on the refund, and its order names none."""
+        unlinked_order = h.order_for(None, owner=self.owner)
+        h.pending_refund(order=unlinked_order, payment=self.payment, amount_cents=4000, status="completed")
+
+        self.assertEqual(self.invoice.get_remaining_amount(), 4000)
+        self.assertEqual(RefundService._get_invoice_refunded_amount(self.invoice), 4000)
+        self.assertEqual(
+            _invoice_remaining_amounts(Invoice.objects.filter(pk=self.invoice.pk)), {self.invoice.pk: 4000}
+        )
+
     def test_the_api_batch_agrees_with_the_per_invoice_balance(self) -> None:
         self._order_refund(4000)
 

@@ -401,7 +401,9 @@ class SplitCorrectionTests(StornoTestBase):
 
         self.assertTrue(result.is_ok(), msg=getattr(result, "error", ""))
 
-    def _fully_refund_through_the_order(self, *, payment_carries_invoice: bool) -> None:
+    def _fully_refund_through_the_order(
+        self, *, payment_carries_invoice: bool, order_carries_invoice: bool = True
+    ) -> None:
         """Settle the invoice the way `refund_order` records it: the refund's own invoice is NULL."""
         from apps.billing.models import Payment, ProformaInvoice  # noqa: PLC0415
         from apps.orders.models import Order  # noqa: PLC0415
@@ -420,7 +422,7 @@ class SplitCorrectionTests(StornoTestBase):
             order_number="ORD-STORNO-PATH",
             customer=self.customer,
             currency=self.currency,
-            invoice=self.invoice,
+            invoice=self.invoice if order_carries_invoice else None,
             proforma=proforma,
             status="completed",
             subtotal_cents=10000,
@@ -467,6 +469,11 @@ class SplitCorrectionTests(StornoTestBase):
         settled refunds and refused the reversal the customer was owed.
         """
         self._fully_refund_through_the_order(payment_carries_invoice=False)
+        self._assert_reversed()
+
+    def test_a_refund_naming_the_invoice_only_through_its_payment_mints_storno(self) -> None:
+        """The payment leg on its own: the refund's invoice is NULL and its order names none."""
+        self._fully_refund_through_the_order(payment_carries_invoice=True, order_carries_invoice=False)
         self._assert_reversed()
 
     def test_order_path_full_refund_whose_payment_carries_the_invoice_mints_storno(self) -> None:
