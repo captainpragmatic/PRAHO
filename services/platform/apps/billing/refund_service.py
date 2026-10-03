@@ -274,6 +274,11 @@ class RefundService:
                     validation_result = RefundService._validate_order_refund(order, refund_data)
                     if validation_result.is_err():
                         return Err(validation_result.unwrap_err())
+                    effective_refusal = RefundService._multi_rate_effective_refusal(
+                        order.invoice_id, payment, refund_data
+                    )
+                    if effective_refusal is not None:
+                        return Err(effective_refusal)
                     reservation = RefundService._create_refund_intent(
                         order=order,
                         invoice=None,
@@ -322,6 +327,25 @@ class RefundService:
             "A partial refund cannot be corrected on an invoice whose lines carry more than one VAT rate "
             "or VAT category. Refund the whole invoice, or issue the correction manually."
         )
+
+    @staticmethod
+    def _multi_rate_effective_refusal(invoice_id: int | None, payment: Payment, refund_data: RefundData) -> str | None:
+        """The multi-rate refusal, applied to what the service will actually refund.
+
+        The door check reads the requested type, and a request with an amount but no type reads
+        as full there. The reservation then refunds exactly that amount, which is a partial
+        refund. So the same decision is made again here, after the payment is locked and before
+        the intent is reserved, through the predicate the reservation itself uses.
+        """
+        if invoice_id is None:
+            return None
+        amount_result = RefundService._resolve_effective_refund_amount(payment, refund_data, None)
+        if amount_result.is_err():
+            return None  # The reservation reports its own refusal.
+        remaining = RefundService._get_remaining_payment_refund_amount(payment)
+        if not RefundService._is_partial_refund_request(refund_data, amount_result.unwrap(), remaining):
+            return None
+        return RefundService._multi_rate_partial_refusal(invoice_id, RefundType.PARTIAL)
 
     @staticmethod
     def _normalize_refund_data(refund_data: RefundData) -> None:
@@ -716,6 +740,9 @@ class RefundService:
                     validation_result = RefundService._validate_invoice_refund(invoice, refund_data)
                     if validation_result.is_err():
                         return Err(validation_result.unwrap_err())
+                    effective_refusal = RefundService._multi_rate_effective_refusal(invoice.pk, payment, refund_data)
+                    if effective_refusal is not None:
+                        return Err(effective_refusal)
                     reservation = RefundService._create_refund_intent(
                         order=None,
                         invoice=invoice,

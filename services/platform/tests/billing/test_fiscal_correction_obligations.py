@@ -522,6 +522,32 @@ class PartialRefundOfAMultiRateInvoiceIsRefusedTests(TestCase):
                 gateway.refund_payment.assert_not_called()
         self.assertFalse(Refund.objects.exists())
 
+    def test_an_amount_without_a_type_is_judged_as_the_partial_refund_it_is(self) -> None:
+        """No `refund_type` reads as full at the door, but the service refunds exactly the amount."""
+        invoice = h.issued_invoice(self.owner, lines=TWO_RATES)
+        h.paid(invoice)
+
+        result, gateway = self._refund_invoice(invoice, {"amount_cents": 3000, "reason": "customer_request"})
+
+        self.assertTrue(result.is_err())
+        self.assertIn("more than one VAT rate", result.unwrap_err())
+        gateway.refund_payment.assert_not_called()
+        self.assertFalse(Refund.objects.exists())
+
+    def test_an_order_amount_without_a_type_is_refused_the_same_way(self) -> None:
+        invoice = h.issued_invoice(self.owner, lines=TWO_RATES)
+        h.paid(invoice)
+        order = h.order_for(invoice)
+        gateway = _gateway(3000)
+
+        with patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=gateway):
+            result = RefundService.refund_order(order.pk, {"amount_cents": 3000, "reason": "customer_request"})
+
+        self.assertTrue(result.is_err())
+        self.assertIn("more than one VAT rate", result.unwrap_err())
+        gateway.refund_payment.assert_not_called()
+        self.assertFalse(Refund.objects.exists())
+
     def test_a_full_refund_of_a_multi_rate_invoice_still_proceeds(self) -> None:
         invoice = h.issued_invoice(self.owner, lines=TWO_RATES)
         h.paid(invoice)
