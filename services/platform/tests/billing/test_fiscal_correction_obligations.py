@@ -696,6 +696,14 @@ class PartialRefundOfAMultiRateInvoiceIsRefusedTests(TestCase):
             self.assertIn("more than one VAT rate", partial.unwrap_err())
             self.assertFalse(Refund.objects.exists())
 
+            # An amount with no type is a partial refund on the tender path too.
+            untyped = RefundService.refund_invoice(
+                invoice.pk, {"amount_cents": 3000, "reason": "customer_request", "idempotency_key": "u1"}
+            )
+            self.assertTrue(untyped.is_err())
+            self.assertIn("more than one VAT rate", untyped.unwrap_err())
+            self.assertFalse(Refund.objects.exists())
+
             full = RefundService.refund_invoice(
                 invoice.pk, {"refund_type": "full", "reason": "customer_request", "idempotency_key": "f1"}
             )

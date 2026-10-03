@@ -154,6 +154,53 @@ class TenderRefundTests(HMACTestMixin, TestCase):
         self.assertEqual(self.card.current_balance_cents, 5000)
         self.assertEqual(GiftCardTransaction.objects.filter(gift_card=self.card, transaction_type="refund").count(), 1)
 
+    def _refund_exactly_what_the_gateway_is_asked(self, data: dict) -> tuple:
+        with patch("apps.promotions.tender_refunds.PaymentGatewayFactory.create_gateway") as factory:
+            factory.return_value.refund_payment.side_effect = lambda **kwargs: self.gateway_result(
+                kwargs["amount_cents"], f"re_{kwargs['amount_cents']}"
+            )
+            result = RefundService.refund_invoice(self.invoice.pk, data)
+        refunded = sum(
+            Refund.objects.filter(invoice=self.invoice, status="completed").values_list("amount_cents", flat=True)
+        )
+        return result, refunded
+
+    def test_an_amount_without_a_type_refunds_exactly_that_amount(self) -> None:
+        """No `refund_type` read as full here and returned the whole balance instead of 3000."""
+        result, refunded = self._refund_exactly_what_the_gateway_is_asked(
+            {"amount_cents": 3000, "reason": "customer_request", "idempotency_key": "amount-only"}
+        )
+
+        self.assertTrue(result.is_ok(), result)
+        self.assertEqual(result.unwrap()["amount_refunded_cents"], 3000)
+        self.assertEqual(result.unwrap()["refund_type"], "partial")
+        self.assertEqual(refunded, 3000)
+
+    def test_an_amount_without_a_type_or_key_is_refused_rather_than_widened(self) -> None:
+        result, refunded = self._refund_exactly_what_the_gateway_is_asked(
+            {"amount_cents": 3000, "reason": "customer_request"}
+        )
+
+        self.assertTrue(result.is_err(), result)
+        self.assertIn("idempotency_key", result.unwrap_err())
+        self.assertEqual(refunded, 0)
+
+    def test_an_explicit_full_refund_still_refunds_the_whole_balance(self) -> None:
+        result, refunded = self._refund_exactly_what_the_gateway_is_asked(
+            {"refund_type": "full", "amount_cents": 3000, "reason": "customer_request"}
+        )
+
+        self.assertTrue(result.is_ok(), result)
+        self.assertEqual(refunded, self.invoice.total_cents)
+
+    def test_an_explicit_partial_refund_is_unchanged(self) -> None:
+        result, refunded = self._refund_exactly_what_the_gateway_is_asked(
+            {"refund_type": "partial", "amount_cents": 3000, "reason": "customer_request", "idempotency_key": "p"}
+        )
+
+        self.assertTrue(result.is_ok(), result)
+        self.assertEqual(refunded, 3000)
+
     def test_order_partial_refund_also_requires_a_request_identifier(self) -> None:
         order = Order.objects.create(
             customer=self.customer, currency=self.currency, invoice=self.invoice,

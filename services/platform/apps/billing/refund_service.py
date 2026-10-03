@@ -224,7 +224,9 @@ class RefundService:
             if order_snapshot.status not in {"paid", "completed", "partially_refunded", "refunded"}:
                 return Err(f"Order status '{order_snapshot.status}' is not eligible for refund")
             invoice_id = order_snapshot.invoice_id
-            multi_rate_refusal = RefundService._multi_rate_partial_refusal(invoice_id, requested_refund_type)
+            multi_rate_refusal = RefundService._multi_rate_partial_refusal(
+                invoice_id, RefundService._requested_type_as_served(refund_data, requested_refund_type)
+            )
             if multi_rate_refusal is not None:
                 return Err(multi_rate_refusal)
             if invoice_id and Payment.objects.filter(invoice_id=invoice_id, payment_method="gift_card").exists():
@@ -327,6 +329,17 @@ class RefundService:
             "A partial refund cannot be corrected on an invoice whose lines carry more than one VAT rate "
             "or VAT category. Refund the whole invoice, or issue the correction manually."
         )
+
+    @staticmethod
+    def _requested_type_as_served(refund_data: RefundData, requested_refund_type: Any) -> Any:
+        """The type every path will actually serve: an amount with no type is a partial refund.
+
+        Read through the service's own predicate, so the door check, the reservation and the
+        tender flow cannot disagree about what was asked for.
+        """
+        if RefundService._is_partial_refund_request(refund_data, None, None):
+            return RefundType.PARTIAL
+        return requested_refund_type
 
     @staticmethod
     def _multi_rate_effective_refusal(invoice_id: int | None, payment: Payment, refund_data: RefundData) -> str | None:
@@ -697,7 +710,9 @@ class RefundService:
                 return Err("Failed to process refund: Invoice not found")
             if invoice_snapshot.status not in {"paid", "completed", "partially_refunded", "refunded"}:
                 return Err(f"Invoice status '{invoice_snapshot.status}' is not eligible for refund")
-            multi_rate_refusal = RefundService._multi_rate_partial_refusal(invoice_snapshot.pk, requested_refund_type)
+            multi_rate_refusal = RefundService._multi_rate_partial_refusal(
+                invoice_snapshot.pk, RefundService._requested_type_as_served(refund_data, requested_refund_type)
+            )
             if multi_rate_refusal is not None:
                 return Err(multi_rate_refusal)
             if Payment.objects.filter(invoice_id=invoice_id, payment_method="gift_card").exists():
