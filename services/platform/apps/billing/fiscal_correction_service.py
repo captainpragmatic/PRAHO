@@ -39,6 +39,7 @@ logger = logging.getLogger(__name__)
 
 # Rotation state for `sweep_fiscal_corrections`; its docstring explains why it exists.
 _SWEEP_CURSOR_KEY = "billing:fiscal-correction-sweep-cursor"
+_LINK_CURSOR_KEY = "billing:fiscal-correction-link-cursor"
 
 
 def _is_fiscal_document(invoice: Invoice | None) -> bool:
@@ -238,17 +239,21 @@ def sweep_fiscal_corrections(limit: int = 200) -> dict[str, int]:
             correction = None
         results["recorded" if correction is not None else "unresolved"] += 1
 
-    unlinked_notes = (
-        Invoice.objects.filter(
-            document_kind=DOCUMENT_KIND_CREDIT_NOTE,
-            number__isnull=False,
-            settled_fiscal_correction__isnull=True,
-            reverses_invoice__fiscal_corrections__state=STATE_PENDING,
-        )
-        .distinct()
-        .order_by("pk")[:limit]
-    )
-    for credit_note in list(unlinked_notes):
+    unlinked_notes = Invoice.objects.filter(
+        document_kind=DOCUMENT_KIND_CREDIT_NOTE,
+        number__isnull=False,
+        settled_fiscal_correction__isnull=True,
+        reverses_invoice__fiscal_corrections__state=STATE_PENDING,
+    ).distinct()
+    # Rotated like the refund candidates above, by integer primary key: a credit note that can
+    # never be linked (an ambiguous or failing one) stays a candidate, and always taking the first
+    # `limit` would let a few of those hold every run while a linkable one behind them waits.
+    link_cursor = cache.get(_LINK_CURSOR_KEY) or 0
+    notes = list(unlinked_notes.filter(pk__gt=link_cursor).order_by("pk")[:limit])
+    if not notes and link_cursor:
+        notes = list(unlinked_notes.order_by("pk")[:limit])
+    cache.set(_LINK_CURSOR_KEY, notes[-1].pk if notes else 0, timeout=None)
+    for credit_note in notes:
         try:
             with transaction.atomic():
                 linked = attach_provider_credit_note(credit_note)

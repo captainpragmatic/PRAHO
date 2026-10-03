@@ -402,6 +402,45 @@ class RecoverySweepTests(TestCase):
         self.assertFalse(FiscalCorrection.objects.filter(source_refund=stuck).exists())
         self.assertTrue(FiscalCorrection.objects.filter(source_refund=good).exists())
 
+    def _issued_storno_with_pending_obligation(self, number: int) -> Invoice:
+        invoice = h.issued_invoice(self.owner, issuer=ISSUER_SMARTBILL, number=f"FCT-{number:06d}")
+        record_obligation(_born_completed(invoice=invoice))
+        return Invoice.objects.create(
+            customer=self.owner,
+            currency=invoice.currency,
+            number=f"STORNO-{number:06d}",
+            status="issued",
+            document_kind=DOCUMENT_KIND_CREDIT_NOTE,
+            reverses_invoice=invoice,
+            issuer_provider=ISSUER_SMARTBILL,
+            subtotal_cents=-invoice.subtotal_cents,
+            tax_cents=-invoice.tax_cents,
+            total_cents=-invoice.total_cents,
+            bill_to_name=invoice.bill_to_name,
+        )
+
+    def test_credit_notes_that_keep_failing_do_not_starve_a_recoverable_one(self) -> None:
+        from apps.billing import fiscal_correction_service  # noqa: PLC0415
+
+        failing = [self._issued_storno_with_pending_obligation(4000 + index) for index in range(3)]
+        recoverable = self._issued_storno_with_pending_obligation(4100)
+        failing_ids = {credit_note.pk for credit_note in failing}
+        real_attach = fiscal_correction_service.attach_provider_credit_note
+
+        def attach_or_fail(credit_note: Invoice) -> Any:
+            if credit_note.pk in failing_ids:
+                raise RuntimeError("this credit note cannot be linked")
+            return real_attach(credit_note)
+
+        with (
+            patch("apps.billing.fiscal_correction_service.attach_provider_credit_note", side_effect=attach_or_fail),
+            self.assertLogs("apps.billing.fiscal_correction_service", level="ERROR"),
+        ):
+            for _run in range(len(failing) + 1):
+                sweep_fiscal_corrections(limit=1)
+
+        self.assertTrue(FiscalCorrection.objects.filter(credit_note=recoverable).exists())
+
 
 class RecoverySweepLinksLateObligationsTests(TransactionTestCase):
     def _issue_storno_for_a_refund_without_obligation(self, *, linking_fails: bool) -> tuple[Refund, Invoice]:
