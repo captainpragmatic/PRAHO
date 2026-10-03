@@ -33,6 +33,8 @@ from django.utils.translation import gettext_lazy as _
 from faker import Faker
 
 from apps.billing.currency_models import FXRate
+from apps.billing.fiscal_correction_models import FiscalCorrection
+from apps.billing.fiscal_correction_service import record_obligation
 from apps.billing.models import Currency, Invoice, InvoiceLine, ProformaInvoice, ProformaLine, TaxRule
 from apps.billing.numbering_service import InvoiceNumberingService
 from apps.billing.payment_models import CreditLedger, Payment
@@ -140,6 +142,24 @@ def _purge_promotion_ledger(redemptions: Any, gift_card_transactions: Any) -> No
     redemptions.delete()
     gift_card_transactions.delete()
     _recount_promotion_aggregates(coupon_ids, campaign_ids, gift_card_ids)
+
+
+def _purge_sample_fiscal_corrections(**customer_lookup: Any) -> None:
+    """Delete the obligations of sample customers before the refunds and invoices they PROTECT.
+
+    An obligation points at its refund (or tender command), its original and its credit note,
+    all with PROTECT, so it has to go first. Matched through every one of those links, because
+    a not-required obligation may have no original and a command obligation has no refund.
+    """
+    scope = models.Q()
+    for prefix in (
+        "source_refund__customer",
+        "source_command__customer",
+        "original__customer",
+        "credit_note__customer",
+    ):
+        scope |= models.Q(**{f"{prefix}__{lookup}": value for lookup, value in customer_lookup.items()})
+    FiscalCorrection.objects.filter(scope).delete()
 
 
 def _purge_sample_invoices(invoices: models.QuerySet[Invoice]) -> None:
@@ -771,6 +791,7 @@ class Command(BaseCommand):
 
         # Delete in reverse dependency order — new models first
         CreditLedger.objects.filter(**example_filter).delete()
+        _purge_sample_fiscal_corrections(primary_email__contains="example.")
         Refund.objects.filter(**example_filter).delete()
         Payment.objects.filter(**example_filter).delete()
         SubscriptionItem.objects.filter(subscription__customer__primary_email__contains="example.").delete()
@@ -1000,6 +1021,7 @@ class Command(BaseCommand):
         # Clear ALL existing test data for idempotent re-runs
         self.stdout.write("  ✓ Clearing existing test data for Test Company...")
         CreditLedger.objects.filter(customer=customer).delete()
+        _purge_sample_fiscal_corrections(pk=customer.pk)
         Refund.objects.filter(customer=customer).delete()
         Payment.objects.filter(customer=customer).delete()
         SubscriptionItem.objects.filter(subscription__customer=customer).delete()
@@ -3126,6 +3148,9 @@ class Command(BaseCommand):
             if settled:
                 payment.refund_payment()
                 payment.save(update_fields=["status", "updated_at"])
+                # Written directly as completed, so the completion hook never sees a transition.
+                # Record the obligation the same way settlement would.
+                record_obligation(refund)
             refunds.append(refund)
         return refunds
 

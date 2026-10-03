@@ -9,7 +9,7 @@ from django.db.models import Sum
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
-from apps.billing.models import Invoice, ProformaInvoice
+from apps.billing.models import FiscalCorrection, Invoice, ProformaInvoice
 from apps.billing.refund_models import Refund
 from apps.common.management.commands.generate_sample_data import Command
 from apps.customers.models import Customer
@@ -48,6 +48,13 @@ class SampleDataIntegrityTests(TestCase):
                 if refund.status == "completed":
                     self.assertEqual(refund.payment.status, "refunded")
                     self.assertEqual(refund.invoice.status, "refunded")
+                    # A settled refund owes a fiscal correction exactly as one settled by the
+                    # service would, so dev data shows the obligation the books depend on.
+                    correction = FiscalCorrection.objects.get(source_refund=refund)
+                    self.assertEqual(correction.original_id, refund.invoice_id)
+                    self.assertEqual(correction.state, "pending")
+                else:
+                    self.assertFalse(FiscalCorrection.objects.filter(source_refund=refund).exists())
 
     def test_failed_replacement_preserves_previous_dataset(self):
         self.seed()
