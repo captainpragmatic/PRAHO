@@ -31,6 +31,7 @@ from apps.billing.invoice_models import (
     Invoice,
     InvoiceLine,
 )
+from apps.billing.refund_models import refunds_for_invoice
 from apps.common.types import Err, Ok, Result
 
 from .base import Ambiguous, Issued, PreparedDocument, Rejected
@@ -481,7 +482,10 @@ def _split_correction_refusal(original: Invoice) -> str | None:
     cancelled refund wedge the invoice forever, which is the same defect that
     testing row existence caused above.
     """
-    settled = list(original.refunds.filter(status="completed"))
+    # The shared scope rule, not `original.refunds`: an order refund names this invoice only
+    # through its order, so reading the direct link alone counted a full order-path refund as
+    # no refund at all and refused the reversal the customer was owed.
+    settled = list(refunds_for_invoice(original).filter(status="completed"))
     expected_cents = abs(original.total_cents)
 
     # One full customer instruction can have several payment legs. Those legs
