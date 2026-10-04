@@ -150,6 +150,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Deleting a Virtualmin account, and clearing the deletion-protection flag that guards it, now
   require an administrator rather than any staff member.
+- The revenue report shows fiscal and cash revenue side by side (ADR-0053). Fiscal revenue counts
+  collected invoices on their tax point and subtracts each credit note in the month the customer
+  received it. Cash revenue is what it was before: collected invoices less the money refunded, in
+  the month it went back. A January sale refunded in March reads +X in January and -X in March on
+  both.
+- The VAT report now lists every issued invoice on its tax point, whatever happened to it later,
+  and every sent credit note as a negative line in its own month. A refunded invoice used to drop
+  out, which rewrote a period that had already been filed. Both reports warn when completed refunds
+  are still waiting for their credit note, or when a credit note was issued but not yet sent, since
+  that period is not complete yet.
+- The dashboard's "Monthly Revenue" card is now labelled "Cash collected this month". It always
+  showed paid invoices created this month, which is a cash figure.
 - The database migration history starts again from fresh initial migrations (ADR-0052). There
   is no production or staging database, so the 152 old migrations and their data repairs were
   dropped rather than squashed. Delete and recreate every local development and E2E database:

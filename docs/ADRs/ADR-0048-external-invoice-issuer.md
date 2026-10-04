@@ -162,10 +162,10 @@ cost the estimate assumed, and the operator accepted SPV blindness knowingly.
   credit note remains the fiscal document; it is no longer the reporting mechanism.
   **Revised again (ADR-0053):** the premise above no longer holds. Every settled refund of a
   built-in invoice now issues its own storno, partial ones included, so both paths produce a
-  correcting document. Reporting still takes the correction from the `Refund` row for now; it
-  moves to fiscal netting (invoices less credit notes, by fiscal date, next to cash) when the
-  SmartBill path is on the same obligation and the reports are rewritten. Until then this
-  consequence stands as written, for the reason it states rather than the one it started with.
+  correcting document. The reports now net fiscally: revenue shows fiscal (invoices less credit
+  notes, each on its fiscal date) next to cash (collected less refunded, from the `Refund` row as
+  above), and VAT follows the documents (ADR-0053, Reports). A SmartBill note is dated by its own
+  tax point until the provider path records when the customer received it.
 - Every invoice-touching feature now has two paths. The built-in issuer is kept
   exercised through the same gateway so the fallback stays real rather than becoming
   code that merely still compiles.

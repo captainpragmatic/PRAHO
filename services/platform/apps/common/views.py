@@ -120,9 +120,17 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
 
 
 def _calculate_monthly_revenue(customers: QuerySet[Customer]) -> dict[str, int]:
-    """Keep each paid invoice's recorded monetary unit in the monthly summary."""
+    """This month's paid invoices per currency: a CASH indicator, labelled as one on the dashboard.
+
+    Deliberately not the fiscal figure. Fiscal revenue dates each invoice by its tax point and nets
+    credit notes on the day the customer received them (Financial Reports does that); this card
+    answers "what has been collected on documents created this month" and stays cheap to compute
+    on every dashboard load.
+    """
     # Local midnight on the 1st as an aware instant: compared directly with created_at so the
     # (customer, -created_at) index can bound the scan, unlike a per-row created_at__date cast.
+    # Kept on created_at on purpose (ADR-0053, reports): a fiscal-date basis would need its own
+    # index on a coalesced expression for one dashboard card, and the card is a cash indicator.
     month_start = timezone.make_aware(datetime.combine(timezone.localdate().replace(day=1), time.min))
 
     monthly_totals = (

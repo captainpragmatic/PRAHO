@@ -195,11 +195,45 @@ A refund cannot leave `completed`, and an issued correction is immutable. Restor
 paid while a credit note reverses it is refused (A1). If a refund is ever reversed, the correction
 is re-billed with a new invoice that references the credit note; that workflow is future work.
 
+### Reports (A4)
+
+The revenue report shows two figures side by side (owner decision, 2026-10-03), and the VAT report
+follows the fiscal one.
+
+- **Fiscal date.** An invoice declares on `Coalesce(tax_point_date, Romanian date of issued_at)`.
+  `issue()` sets both, so a row that never went through it (legacy or imported data) falls back to
+  the Romanian date of its creation rather than dropping out of every period. A credit note
+  declares on its correction's `fiscal_date`, the day the customer received it.
+- **Which credit notes have a period.** An allow-list: a note settled by a `communicated`
+  correction (dated by the send), a provider note `attached` to its correction, and a provider note
+  with no correction at all (both dated by the note's own tax point). A built-in note that is
+  `issued` but not yet sent has no period and is left out of every figure. Dating it by its tax point
+  would put the reversal in one month here and another in D390 once it is sent. The provider dates
+  are an interim answer: A3 records the provider's communication date, and that replaces them.
+- **Fiscal revenue** is the collected invoices (`paid`, `refunded`, `partially_refunded`) on their
+  fiscal date, less the credit notes with a period whose original is one of those invoices, on the
+  note's date. A note against an invoice the report never counted subtracts nothing.
+- **Cash revenue** is unchanged: collected invoices in the month the document was created, less
+  completed refunds (the shared resolution rule) in the month the money went back.
+- **VAT** lists every issued invoice (`issued`, `overdue`, `paid`, `refunded`,
+  `partially_refunded`) on its fiscal date, whatever its refund status, and every credit note with a
+  period as negative base and VAT on its own date. A refunded invoice no longer drops out, which had
+  restated periods already filed.
+- **The warning.** Both reports count completed refunds whose correction is unsettled: *not issued
+  yet* (no correction, or `pending`, `allocated`, `failed`) and *issued, not sent* (`issued`). A
+  tender leg answers to its command's correction. `not_required`, `attached` and `communicated` are
+  settled. The VAT report counts only refunds settled on or before the end of the selected period,
+  because a period that ended before the money went back cannot receive that refund's note. It does
+  not try to predict which later period the note will land in.
+- **Dashboard.** Its monthly card stays on paid invoices by `created_at`, labelled as cash. That
+  keeps the scan bounded by the existing `(customer, -created_at)` index. A fiscal-date basis would
+  need an index on a coalesced expression for one card, so none was added.
+
 ## Consequences
 
 - Every refund of a built-in invoice now produces a fiscal document the customer receives.
-- Reports still take the correction from the `Refund` row (ADR-0048, revised) until A4 moves them to
-  fiscal netting; D390 treats credit notes as exceptions until B.
+- Revenue shows fiscal (invoices less credit notes, by fiscal date) next to cash (collected less
+  refunded), and VAT follows the documents (A4, above). D390 treats credit notes as exceptions until B.
 - `setup_email_templates` must be run once on each database to seed `credit_note_issued`; until it
   is, sends fail visibly and are retried.
 - A partial refund of a SmartBill invoice, and any refund after the first, needs a person: the

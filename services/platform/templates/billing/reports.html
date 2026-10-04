@@ -11,12 +11,26 @@
       {% trans "Financial Reports" %}
     </h1>
 
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-      <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg p-6">
-        <h3 class="text-lg font-medium text-white mb-2">{% trans "Revenue collected, all time" %}</h3>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg p-6" data-testid="fiscal-revenue">
+        <h3 class="text-lg font-medium text-white mb-2">{% trans "Fiscal revenue, all time" %}</h3>
         {% for row in revenue_by_currency %}
         <p class="text-2xl font-bold text-green-400">
-          {{ row.revenue|cents_to_currency|romanian_currency:row.currency }}
+          {{ row.fiscal|cents_to_currency|romanian_currency:row.currency }}
+        </p>
+        {% empty %}
+        <p class="text-2xl font-bold text-slate-500">{% trans "Nothing invoiced yet" %}</p>
+        {% endfor %}
+        <p class="mt-2 text-sm text-slate-400">
+          {% trans "Collected invoices on their tax point, less the credit notes reversing them in the month the customer received each note." %}
+        </p>
+      </div>
+
+      <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg p-6" data-testid="cash-revenue">
+        <h3 class="text-lg font-medium text-white mb-2">{% trans "Cash revenue, all time" %}</h3>
+        {% for row in revenue_by_currency %}
+        <p class="text-2xl font-bold text-green-400">
+          {{ row.cash|cents_to_currency|romanian_currency:row.currency }}
         </p>
         {% empty %}
         <p class="text-2xl font-bold text-slate-500">{% trans "Nothing collected yet" %}</p>
@@ -37,6 +51,8 @@
       </div>
     </div>
 
+    {% include "billing/partials/undated_corrections_warning.html" %}
+
     <div class="mt-8">
       <h2 class="text-lg font-medium text-white mb-4">{% trans "Revenue by month" %}</h2>
       {% if monthly_stats %}
@@ -54,7 +70,10 @@
                 {% trans "Invoices" %}
               </th>
               <th class="px-6 py-3 text-right text-xs font-medium text-slate-400 uppercase tracking-wider">
-                {% trans "Revenue" %}
+                {% trans "Fiscal" %}
+              </th>
+              <th class="px-6 py-3 text-right text-xs font-medium text-slate-400 uppercase tracking-wider">
+                {% trans "Cash" context "revenue basis" %}
               </th>
             </tr>
           </thead>
@@ -71,7 +90,10 @@
                 {{ row.count }}
               </td>
               <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-white text-right">
-                {{ row.revenue|cents_to_currency|romanian_currency:row.currency }}
+                {{ row.fiscal|cents_to_currency|romanian_currency:row.currency }}
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-white text-right">
+                {{ row.cash|cents_to_currency|romanian_currency:row.currency }}
               </td>
             </tr>
             {% endfor %}
@@ -79,7 +101,7 @@
         </table>
       </div>
       <p class="mt-3 text-sm text-slate-500">
-        {% trans "Invoices are counted in the month the document was created; refunds are subtracted in the month they were settled." %}
+        {% trans "Fiscal: invoices count in the month of their tax point, and credit notes subtract in the month the customer received them. Cash: invoices count in the month the document was created, and refunds subtract in the month the money went back." %}
       </p>
       {% else %}
       <div class="text-center text-slate-500">

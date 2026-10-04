@@ -20443,3 +20443,76 @@ msgstr "Numărul devine numărul legal al facturii storno, iar data comunicării
 
 msgid "Record this credit note"
 msgstr "Înregistrați această factură storno"
+
+msgid "Fiscal figures are incomplete"
+msgstr "Cifrele fiscale sunt incomplete"
+
+#, python-format
+msgid "%(counter)s completed refund has no credit note issued yet."
+msgid_plural "%(counter)s completed refunds have no credit note issued yet."
+msgstr[0] "%(counter)s rambursare finalizată nu are încă o factură storno emisă."
+msgstr[1] "%(counter)s rambursări finalizate nu au încă o factură storno emisă."
+msgstr[2] "%(counter)s de rambursări finalizate nu au încă o factură storno emisă."
+
+#, python-format
+msgid "%(counter)s credit note is issued but has not been sent to the customer."
+msgid_plural "%(counter)s credit notes are issued but have not been sent to the customer."
+msgstr[0] "%(counter)s factură storno este emisă, dar nu a fost trimisă clientului."
+msgstr[1] "%(counter)s facturi storno sunt emise, dar nu au fost trimise clientului."
+msgstr[2] "%(counter)s de facturi storno sunt emise, dar nu au fost trimise clientului."
+
+msgid "A credit note belongs to the period in which the customer receives it, so these corrections will land in a period that is still open."
+msgstr "O factură storno aparține perioadei în care clientul o primește, așa că aceste corecții vor intra într-o perioadă încă deschisă."
+
+msgid "Fiscal revenue, all time"
+msgstr "Venituri fiscale, total"
+
+msgid "Nothing invoiced yet"
+msgstr "Nimic facturat încă"
+
+msgid "Collected invoices on their tax point, less the credit notes reversing them in the month the customer received each note."
+msgstr "Facturile încasate, la data exigibilității TVA, minus facturile storno care le anulează, în luna în care clientul a primit fiecare storno."
+
+msgid "Cash revenue, all time"
+msgstr "Încasări, total"
+
+msgid "Nothing collected yet"
+msgstr "Nimic încasat încă"
+
+msgid "Paid and refunded invoices, less the refunds settled against them. Listed per currency because the amounts are never converted."
+msgstr "Facturile plătite și rambursate, minus rambursările decontate pentru ele. Afișate pe monede, deoarece sumele nu sunt niciodată convertite."
+
+msgid "D390 review — outgoing EU services"
+msgstr "Verificare D390 — servicii prestate în UE"
+
+msgid "Revenue by month"
+msgstr "Venituri pe luni"
+
+msgid "Fiscal"
+msgstr "Fiscal"
+
+msgctxt "revenue basis"
+msgid "Cash"
+msgstr "Încasări"
+
+msgid "Fiscal: invoices count in the month of their tax point, and credit notes subtract in the month the customer received them. Cash: invoices count in the month the document was created, and refunds subtract in the month the money went back."
+msgstr "Fiscal: facturile se numără în luna exigibilității TVA, iar facturile storno se scad în luna în care clientul le-a primit. Încasări: facturile se numără în luna în care a fost creat documentul, iar rambursările se scad în luna în care banii au fost returnați."
+
+msgid "Document Details"
+msgstr "Detalii documente"
+
+msgid "Fiscal date"
+msgstr "Data fiscală"
+
+#, python-format
+msgid "Credit note for %(number)s"
+msgstr "Storno pentru %(number)s"
+
+msgid "No documents found for the selected period"
+msgstr "Nu s-au găsit documente pentru perioada selectată"
+
+msgid "Cash collected this month"
+msgstr "Încasat luna aceasta"
+
+msgid "Paid invoices created this month. Fiscal figures are in Financial Reports."
+msgstr "Facturi plătite create luna aceasta. Cifrele fiscale sunt în Rapoarte financiare."

@@ -1,0 +1,31 @@
+{% load i18n %}
+{% load ui_components %}
+{% comment %}
+  Completed refunds whose credit note has no period yet. Shared by the revenue and VAT reports.
+  Expects `undated_corrections` with `awaiting_issue` and `awaiting_communication` counts.
+{% endcomment %}
+{% if undated_corrections.awaiting_issue or undated_corrections.awaiting_communication %}
+<div class="bg-amber-900 border border-amber-700 rounded-lg p-4 mt-6" role="status" data-testid="undated-corrections">
+  <div class="flex items-start">
+    <span class="text-amber-300 text-xl mr-3">{% icon "warning" %}</span>
+    <div>
+      <h3 class="text-sm font-medium text-amber-200">{% trans "Fiscal figures are incomplete" %}</h3>
+      <ul class="mt-1 text-sm text-amber-300 list-disc list-inside">
+        {% if undated_corrections.awaiting_issue %}
+        <li>
+          {% blocktrans count counter=undated_corrections.awaiting_issue %}{{ counter }} completed refund has no credit note issued yet.{% plural %}{{ counter }} completed refunds have no credit note issued yet.{% endblocktrans %}
+        </li>
+        {% endif %}
+        {% if undated_corrections.awaiting_communication %}
+        <li>
+          {% blocktrans count counter=undated_corrections.awaiting_communication %}{{ counter }} credit note is issued but has not been sent to the customer.{% plural %}{{ counter }} credit notes are issued but have not been sent to the customer.{% endblocktrans %}
+        </li>
+        {% endif %}
+      </ul>
+      <p class="mt-2 text-sm text-amber-300">
+        {% trans "A credit note belongs to the period in which the customer receives it, so these corrections will land in a period that is still open." %}
+      </p>
+    </div>
+  </div>
+</div>
+{% endif %}

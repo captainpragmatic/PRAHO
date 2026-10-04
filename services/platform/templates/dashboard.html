@@ -53,12 +53,13 @@
           {% icon "currency" size="xl" css_class="text-green-400" %}
         </div>
         <div class="ml-4">
-          <p class="text-sm font-medium text-slate-400">{% trans 'Monthly Revenue' %}</p>
+          <p class="text-sm font-medium text-slate-400">{% trans 'Cash collected this month' %}</p>
           {% for currency, amount in stats.monthly_revenue_by_currency.items %}
             <p class="text-2xl font-semibold text-white">{{ amount|cents_to_currency|romanian_currency:currency }}</p>
           {% empty %}
             <p class="text-2xl font-semibold text-white">—</p>
           {% endfor %}
+          <p class="text-xs text-slate-500">{% trans 'Paid invoices created this month. Fiscal figures are in Financial Reports.' %}</p>
         </div>
       </div>
     </div>
