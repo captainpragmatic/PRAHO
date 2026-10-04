@@ -7,6 +7,7 @@ accepted the invoice it corrects.
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -30,6 +31,7 @@ from apps.billing.fiscal_correction_models import (
     EFACTURA_WAITING_FOR_ORIGINAL,
     STATE_COMMUNICATED,
     STATE_ISSUED,
+    FiscalCorrection,
 )
 from apps.billing.fiscal_correction_worker import deliver_credit_note
 from apps.billing.invoice_models import Invoice
@@ -52,6 +54,13 @@ def _anaf_document(invoice: Invoice, status: str) -> EFacturaDocument:
     )
     EFacturaDocument.objects.filter(pk=document.pk).update(status=status)
     return EFacturaDocument.objects.get(pk=document.pk)
+
+
+def _back_off_elapsed(correction: Any) -> None:
+    """Move the next filing attempt into the past, as if its backoff had run out."""
+    FiscalCorrection.objects.filter(pk=correction.pk).update(
+        efactura_next_attempt_at=timezone.now() - timedelta(seconds=1)
+    )
 
 
 def _accepting_client() -> MagicMock:
@@ -138,6 +147,56 @@ class StornoCommunicationTests(StornoTestCase):
 
 
 @SELLER
+class StornoCommunicationClaimTests(StornoTestCase):
+    def _unsent(self) -> FiscalCorrection:
+        original = self.original()
+        payment = self.collected(original, original.total_cents)
+        down = EmailResult(success=False, error="SMTP unavailable")
+        with patch("apps.notifications.services.EmailService.send_template_email", return_value=down):
+            return self.process(self.refund(original, payment, 1000))
+
+    def test_a_live_claim_keeps_a_second_sender_out(self) -> None:
+        correction = self._unsent()
+        FiscalCorrection.objects.filter(pk=correction.pk).update(
+            communication_claimed_at=timezone.now() - timedelta(minutes=1)
+        )
+
+        self.sweep()
+
+        correction.refresh_from_db()
+        self.assertEqual((correction.state, len(mail.outbox)), (STATE_ISSUED, 0))
+
+    def test_a_stale_claim_is_retaken_and_the_note_sent_once(self) -> None:
+        """A sender that died after claiming leaves a claim older than the lease; it is retaken."""
+        correction = self._unsent()
+        FiscalCorrection.objects.filter(pk=correction.pk).update(
+            communication_claimed_at=timezone.now() - timedelta(minutes=10)
+        )
+
+        self.sweep()
+        self.sweep()
+
+        correction.refresh_from_db()
+        self.assertEqual(correction.state, STATE_COMMUNICATED)
+        self.assertIsNone(correction.communication_claimed_at)
+        self.assertEqual(len(mail.outbox), 1)
+
+
+@SELLER
+class StornoEFacturaDisabledTests(StornoTestCase):
+    def test_a_note_is_not_held_for_an_efactura_that_is_switched_off(self) -> None:
+        """EFACTURA_ENABLED is the switch `submit_invoice` obeys; with it off nothing is ever filed,
+        so a Romanian note is not applicable rather than waiting forever for its original."""
+        original = self.original()
+        payment = self.collected(original, original.total_cents)
+
+        correction = self.process(self.refund(original, payment, 1000))
+
+        self.assertEqual(correction.efactura_status, EFACTURA_NOT_APPLICABLE)
+        self.assertIsNone(correction.efactura_next_attempt_at)
+
+
+@SELLER
 @override_settings(EFACTURA_ENABLED=True)
 class StornoEFacturaGateTests(StornoTestCase):
     def _issued_note(self, **original_fields: Any) -> tuple[Invoice, Invoice]:
@@ -181,12 +240,33 @@ class StornoEFacturaGateTests(StornoTestCase):
         self.assertEqual(correction.efactura_status, EFACTURA_WAITING_FOR_ORIGINAL)
 
         _anaf_document(original, EFacturaStatus.ACCEPTED.value)
+        _back_off_elapsed(correction)
         with patch("apps.billing.efactura.service.EFacturaClient", return_value=_accepting_client()):
             self.sweep()
 
         correction.refresh_from_db()
         self.assertEqual(correction.efactura_status, EFACTURA_SUBMITTED)
+        self.assertIsNone(correction.efactura_next_attempt_at)
         self.assertEqual(EFacturaDocument.objects.get(invoice=note).status, EFacturaStatus.SUBMITTED.value)
+
+    def test_a_held_note_is_rechecked_with_backoff_not_every_sweep(self) -> None:
+        _original, note = self._issued_note()
+        correction = note.settled_fiscal_correction
+        first_retry = correction.efactura_next_attempt_at
+        self.assertEqual((correction.efactura_status, correction.efactura_attempts), (EFACTURA_WAITING_FOR_ORIGINAL, 1))
+        self.assertAlmostEqual(first_retry - timezone.now(), timedelta(hours=1), delta=timedelta(minutes=1))
+
+        self.sweep()
+        correction.refresh_from_db()
+        self.assertEqual(correction.efactura_attempts, 1, "re-checked before its backoff elapsed")
+
+        _back_off_elapsed(correction)
+        self.sweep()
+        correction.refresh_from_db()
+        self.assertEqual((correction.efactura_status, correction.efactura_attempts), (EFACTURA_WAITING_FOR_ORIGINAL, 2))
+        self.assertAlmostEqual(
+            correction.efactura_next_attempt_at - timezone.now(), timedelta(hours=2), delta=timedelta(minutes=1)
+        )
 
     def test_a_failed_filing_is_retried_by_the_sweep(self) -> None:
         original = self.original()
@@ -202,6 +282,7 @@ class StornoEFacturaGateTests(StornoTestCase):
         note_document = EFacturaDocument.objects.get(invoice=correction.credit_note)
         self.assertEqual(note_document.status, EFacturaStatus.ERROR.value)
 
+        _back_off_elapsed(correction)
         with patch("apps.billing.efactura.service.EFacturaClient", return_value=_accepting_client()):
             self.sweep()
 

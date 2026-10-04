@@ -131,3 +131,57 @@ class BuiltinStornoPostgresConcurrencyTests(TransactionTestCase):
         correction = FiscalCorrection.objects.get(pk=self.correction.pk)
         self.assertIn(correction.state, {STATE_ISSUED, "communicated"})
         self.assertEqual(correction.total_cents, -1000)
+
+
+class StornoCommunicationPostgresConcurrencyTests(TransactionTestCase):
+    """Two senders racing the one email that dates a note: the claim commits first, so one sends."""
+
+    reset_sequences = True
+
+    def setUp(self) -> None:
+        if connection.vendor != "postgresql":
+            self.skipTest("row-lock waits require PostgreSQL")
+        BuiltinStornoPostgresConcurrencyTests.setUp(self)
+        with patch.object(fiscal_correction_worker, "_send_credit_note_email", return_value=(False, "SMTP down")):
+            fiscal_correction_worker.process_fiscal_correction(str(self.correction.pk))
+        self.assertEqual(FiscalCorrection.objects.get(pk=self.correction.pk).state, STATE_ISSUED)
+
+    @staticmethod
+    def _deliver(correction_id: str) -> None:
+        close_old_connections()
+        try:
+            fiscal_correction_worker.deliver_credit_note(correction_id)
+        finally:
+            connection.close()
+
+    def test_two_concurrent_senders_send_one_email(self) -> None:
+        first_sending = threading.Event()
+        release_first = threading.Event()
+        sends = 0
+        sends_lock = threading.Lock()
+
+        def slow_send(note: Invoice) -> tuple[bool, str]:
+            nonlocal sends
+            with sends_lock:
+                sends += 1
+            first_sending.set()
+            if not release_first.wait(timeout=10):
+                raise AssertionError("timed out releasing the first sender")
+            return True, ""
+
+        with (
+            patch.object(fiscal_correction_worker, "_send_credit_note_email", side_effect=slow_send),
+            self.assertNoLogs(WORKER_LOGGER, level="ERROR"),
+            ThreadPoolExecutor(max_workers=2) as executor,
+        ):
+            first = executor.submit(self._deliver, str(self.correction.pk))
+            self.assertTrue(first_sending.wait(timeout=10), "the first sender never started sending")
+            second = executor.submit(self._deliver, str(self.correction.pk))
+            second.result(timeout=15)
+            release_first.set()
+            first.result(timeout=15)
+
+        self.assertEqual(sends, 1, "the second sender must see the committed claim and not send")
+        correction = FiscalCorrection.objects.get(pk=self.correction.pk)
+        self.assertEqual(correction.state, "communicated")
+        self.assertIsNone(correction.communication_claimed_at)

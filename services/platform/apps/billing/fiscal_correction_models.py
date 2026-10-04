@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterable
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from django.core.exceptions import ValidationError
@@ -94,6 +94,7 @@ _WRITE_ONCE_FIELDS: frozenset[str] = frozenset(
         "tax_cents",
         "discount_cents",
         "total_cents",
+        "vat_residue_cents",
         "communicated_at",
         "fiscal_date",
     }
@@ -224,6 +225,11 @@ class FiscalCorrection(models.Model):
     tax_cents = models.BigIntegerField(null=True, blank=True, help_text=_("Allocated VAT (signed)"))
     discount_cents = models.BigIntegerField(null=True, blank=True, help_text=_("Allocated document discount (signed)"))
     total_cents = models.BigIntegerField(null=True, blank=True, help_text=_("Allocated gross (signed)"))
+    vat_residue_cents = models.BigIntegerField(
+        null=True,
+        blank=True,
+        help_text=_("VAT of the original this credit note leaves un-reversed (negative: reverses beyond it)"),
+    )
 
     # Why the last attempt failed; kept after a later success as history in the audit trail only.
     failure_code = models.CharField(max_length=64, blank=True, choices=FAILURE_CHOICES)
@@ -235,9 +241,15 @@ class FiscalCorrection(models.Model):
     fiscal_date = models.DateField(null=True, blank=True)
     communication_attempts = models.PositiveIntegerField(default=0)
     communication_error = models.TextField(blank=True)
+    # A sender's claim on the one send that dates the note. Taken and committed before the send, so a
+    # second worker sees it and stays out; a claim older than the lease is presumed dead and retaken.
+    communication_claimed_at = models.DateTimeField(null=True, blank=True)
 
     efactura_status = FSMField(max_length=24, choices=EFACTURA_CHOICES, default=EFACTURA_NOT_DUE, protected=True)
     efactura_error = models.TextField(blank=True)
+    # Re-checks of a held or failed filing back off instead of running every sweep forever.
+    efactura_attempts = models.PositiveIntegerField(default=0)
+    efactura_next_attempt_at = models.DateTimeField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -302,6 +314,7 @@ class FiscalCorrection(models.Model):
                         tax_cents__isnull=True,
                         discount_cents__isnull=True,
                         total_cents__isnull=True,
+                        vat_residue_cents__isnull=True,
                     )
                     | models.Q(
                         allocated_at__isnull=False,
@@ -310,6 +323,7 @@ class FiscalCorrection(models.Model):
                         discount_cents__lte=0,
                         total_cents__lt=0,
                         total_cents=models.F("base_cents") + models.F("tax_cents"),
+                        vat_residue_cents__isnull=False,
                     )
                 ),
                 name="fiscal_correction_allocation_complete",
@@ -426,7 +440,9 @@ class FiscalCorrection(models.Model):
     @transition(
         field=state, source=[STATE_PENDING, STATE_FAILED], target=STATE_ALLOCATED, conditions=[_has_no_allocation]
     )
-    def allocate(self, *, base_cents: int, tax_cents: int, discount_cents: int, at: datetime) -> None:
+    def allocate(
+        self, *, base_cents: int, tax_cents: int, discount_cents: int, at: datetime, vat_residue_cents: int = 0
+    ) -> None:
         """Freeze what the credit note will credit, as magnitudes stored signed (<= 0)."""
         if min(base_cents, tax_cents, discount_cents) < 0 or base_cents + tax_cents <= 0:
             raise ValidationError(_("An allocation credits a positive amount."))
@@ -434,6 +450,7 @@ class FiscalCorrection(models.Model):
         self.tax_cents = -tax_cents
         self.discount_cents = -discount_cents
         self.total_cents = -(base_cents + tax_cents)
+        self.vat_residue_cents = vat_residue_cents
         self.allocated_at = at
         self.failure_code = ""
         self.last_error = ""
@@ -473,11 +490,26 @@ class FiscalCorrection(models.Model):
         self.fiscal_date = fiscal_date
         self.communication_attempts += 1
         self.communication_error = ""
+        self.communication_claimed_at = None
 
     def record_communication_failure(self, error: str) -> None:
         """A send that failed stays visible; the sweep tries again. Not a state change."""
         self.communication_attempts += 1
         self.communication_error = error[:2000]
+        self.communication_claimed_at = None
+
+    def claim_communication(self, *, now: datetime, lease: timedelta) -> bool:
+        """Take the right to send, unless the note was sent or another sender holds a live claim.
+
+        The caller holds this row's lock and commits the claim BEFORE sending, so the email itself
+        happens outside any transaction and a racing worker sees the claim rather than a second send.
+        """
+        if self.state != STATE_ISSUED or self.communicated_at is not None:
+            return False
+        if self.communication_claimed_at is not None and self.communication_claimed_at > now - lease:
+            return False
+        self.communication_claimed_at = now
+        return True
 
     @transition(field=efactura_status, source=EFACTURA_NOT_DUE, target=EFACTURA_PENDING)
     def owe_efactura(self) -> None:
@@ -494,7 +526,9 @@ class FiscalCorrection(models.Model):
             EFACTURA_FAILED,
         ),
     )
-    def record_efactura(self, outcome: str, error: str = "") -> str:
-        """Record where the credit note's e-Factura submission stands."""
+    def record_efactura(self, outcome: str, error: str = "", *, next_attempt_at: datetime | None = None) -> str:
+        """Record where the credit note's e-Factura submission stands, and when to look again."""
         self.efactura_error = error[:2000]
+        self.efactura_attempts += 1
+        self.efactura_next_attempt_at = next_attempt_at
         return outcome

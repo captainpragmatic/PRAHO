@@ -21,11 +21,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from django.conf import settings
 from django.db import models, transaction
 from django.utils import timezone
 
@@ -33,6 +32,7 @@ from .efactura.settings import ro_local_date
 from .fiscal_correction_allocation import AllocationRefusedError, Components, allocate, owed_reduction
 from .fiscal_correction_models import (
     EFACTURA_FAILED,
+    EFACTURA_NOT_APPLICABLE,
     EFACTURA_RETRYABLE,
     EFACTURA_SUBMITTED,
     FAILURE_ALLOCATION_REFUSED,
@@ -63,6 +63,10 @@ logger = logging.getLogger(__name__)
 TASK_PATH = "apps.billing.fiscal_correction_worker.process_fiscal_correction"
 TASK_TIMEOUT_SECONDS = 300
 _SWEEP_CURSOR_KEY = "billing:fiscal-correction-issuance-cursor"
+# A sender's claim on the communication; longer than any synchronous send, short enough to recover.
+COMMUNICATION_CLAIM_LEASE = timedelta(minutes=5)
+EFACTURA_FIRST_BACKOFF = timedelta(hours=1)
+EFACTURA_MAX_BACKOFF = timedelta(days=7)
 
 # States in which an earlier correction has decided its amount, so a later one can build on it.
 _DECIDED_STATES = frozenset({STATE_ALLOCATED, STATE_ISSUED, STATE_COMMUNICATED, STATE_NOT_REQUIRED, STATE_ATTACHED})
@@ -278,8 +282,8 @@ def _advance_allocation(correction_id: str) -> str:  # noqa: PLR0911  # One retu
             allocation = allocate(
                 gross_cents=gross,
                 remaining=remaining,
+                credited=credited,
                 rate=_single_rate(original),
-                untouched=credited == Components(0, 0, 0),
             )
         except AllocationRefusedError as refused:
             correction.fail(code=FAILURE_ALLOCATION_REFUSED, error=f"{refused.code}: {refused}")
@@ -292,8 +296,15 @@ def _advance_allocation(correction_id: str) -> str:  # noqa: PLR0911  # One retu
             tax_cents=allocation.tax_cents,
             discount_cents=allocation.discount_cents,
             at=timezone.now(),
+            vat_residue_cents=allocation.vat_residue_cents,
         )
         correction.save()
+        if allocation.vat_residue_cents:
+            # Owner decision (ADR-0053): the note stays valid and the cent or two is recorded, not hidden.
+            logger.warning(
+                f"⚠️ [Storno] Correction {correction.pk} leaves {allocation.vat_residue_cents} cent(s) of VAT of "
+                f"invoice {original.number} un-reversed, so that its credit note stays within BR-CO-14"
+            )
         logger.info(f"✅ [Storno] Correction {correction.pk} allocated {allocation.total_cents} cents")
         return "allocated"
 
@@ -479,10 +490,32 @@ def _send_credit_note_email(note: Invoice) -> tuple[bool, str]:
     return bool(result.success), str(result.error or "")
 
 
+def _claim_communication(correction_id: str) -> FiscalCorrection | None:
+    """Claim the send in a short transaction of its own, committed before anything is sent."""
+    with transaction.atomic():
+        # `of=("self",)`: PostgreSQL refuses FOR UPDATE on the nullable side of the credit-note join.
+        locked = (
+            FiscalCorrection.objects.select_for_update(of=("self",))
+            .select_related("credit_note")
+            .filter(pk=correction_id)
+        )
+        correction = locked.first()
+        if correction is None or correction.credit_note is None:
+            return None
+        if not correction.claim_communication(now=timezone.now(), lease=COMMUNICATION_CLAIM_LEASE):
+            return None
+        correction.save(update_fields=["communication_claimed_at", "updated_at"])
+        return correction
+
+
 def _advance_communication(correction_id: str) -> str:
-    """Send once; the first success dates the note. A failure is counted and left for the sweep."""
-    correction = FiscalCorrection.objects.select_related("credit_note").filter(pk=correction_id).first()
-    if correction is None or correction.state != STATE_ISSUED or correction.credit_note is None:
+    """Claim, send outside any transaction, then record the first success once.
+
+    Claim-then-send: the claim commits before the email leaves, so a second worker racing this one
+    finds it and does not send again. A claim whose sender died is retaken after the lease.
+    """
+    correction = _claim_communication(correction_id)
+    if correction is None or correction.credit_note is None:
         return "skipped"
     try:
         # Its own savepoint, with the exception caught outside it: the send writes rows of its own,
@@ -496,7 +529,7 @@ def _advance_communication(correction_id: str) -> str:
     with transaction.atomic():
         locked = FiscalCorrection.objects.select_for_update().get(pk=correction_id)
         if locked.state != STATE_ISSUED:
-            # Another worker recorded the first send; its date stands.
+            # A sender whose claim had lapsed recorded the first send meanwhile; its date stands.
             return "already_communicated"
         if sent:
             sent_at = timezone.now()
@@ -512,7 +545,12 @@ def _advance_communication(correction_id: str) -> str:
 
 def _advance_efactura(correction_id: str) -> str:
     """File the note with ANAF through the service's own gate; record where it stands."""
-    from .efactura.service import GATE_READY, EFacturaService, credit_note_submission_gate  # noqa: PLC0415
+    from .efactura.service import (  # noqa: PLC0415  # Kept out of the model import graph
+        GATE_READY,
+        EFacturaService,
+        credit_note_submission_gate,
+        is_efactura_enabled,
+    )
 
     correction = FiscalCorrection.objects.select_related("credit_note").filter(pk=correction_id).first()
     if (
@@ -522,14 +560,17 @@ def _advance_efactura(correction_id: str) -> str:
         or correction.credit_note is None
     ):
         return "skipped"
+    if correction.efactura_next_attempt_at is not None and correction.efactura_next_attempt_at > timezone.now():
+        return "backing_off"
     note = correction.credit_note
     gate = credit_note_submission_gate(note)
     error = ""
-    if gate != GATE_READY:
+    if not is_efactura_enabled():
+        # The service files nothing while e-Factura is switched off, so there is no submission owed
+        # to wait for; held as `waiting_for_original` it would be re-checked forever.
+        outcome = EFACTURA_NOT_APPLICABLE
+    elif gate != GATE_READY:
         outcome = gate
-    elif not getattr(settings, "EFACTURA_ENABLED", False):
-        # Nothing is filed while e-Factura is switched off; the submission stays owed.
-        return "disabled"
     else:
         result = EFacturaService().submit_invoice(note)
         outcome = EFACTURA_SUBMITTED if result.success else (result.gate or EFACTURA_FAILED)
@@ -539,10 +580,22 @@ def _advance_efactura(correction_id: str) -> str:
         locked = FiscalCorrection.objects.select_for_update().get(pk=correction_id)
         if locked.efactura_status not in EFACTURA_RETRYABLE:
             return str(locked.efactura_status)
-        if (locked.efactura_status, locked.efactura_error) != (outcome, error[:2000]):
-            locked.record_efactura(outcome, error)
-            locked.save()
+        retry_at = (
+            timezone.now() + efactura_backoff(locked.efactura_attempts + 1) if outcome in EFACTURA_RETRYABLE else None
+        )
+        locked.record_efactura(outcome, error, next_attempt_at=retry_at)
+        locked.save()
     return outcome
+
+
+def efactura_backoff(attempt: int) -> timedelta:
+    """How long to wait after the `attempt`-th held or failed filing: doubling, capped at a week.
+
+    The correction stays visible in `waiting_for_original` or `failed` with its next attempt time;
+    it is only re-checked less and less often, rather than every hour forever.
+    """
+    doubled: timedelta = EFACTURA_FIRST_BACKOFF * (2 ** max(0, attempt - 1))
+    return min(doubled, EFACTURA_MAX_BACKOFF)
 
 
 # ===============================================================================
@@ -556,7 +609,9 @@ def _unfinished_corrections() -> models.QuerySet[FiscalCorrection]:
         state__in=[STATE_PENDING, STATE_ALLOCATED, STATE_FAILED], original__issuer_provider=ISSUER_BUILTIN
     )
     communication_owed = models.Q(state=STATE_ISSUED)
-    efactura_owed = models.Q(state__in=[STATE_ISSUED, STATE_COMMUNICATED], efactura_status__in=EFACTURA_RETRYABLE)
+    efactura_owed = models.Q(state__in=[STATE_ISSUED, STATE_COMMUNICATED], efactura_status__in=EFACTURA_RETRYABLE) & (
+        models.Q(efactura_next_attempt_at__isnull=True) | models.Q(efactura_next_attempt_at__lte=timezone.now())
+    )
     return FiscalCorrection.objects.filter(issuance_owed | communication_owed | efactura_owed).order_by(
         "created_at", "pk"
     )

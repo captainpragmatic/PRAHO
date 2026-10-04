@@ -53,21 +53,26 @@ The gross is kept exact and the parts are clamped jointly against what the origi
 
 - **The whole remainder** takes exactly the remaining base, VAT and discount. An original never
   credited before is mirrored line by line, negated.
-- **A partial** is one negated line, quantity 1, line discount 0: `base = round_half_even(G / (1 + r))`
-  and `tax = G − base`. If either part exceeds its remainder it takes exactly the remainder and the
-  other is the difference; if that one then exceeds its own remainder, the amount is refused. A
-  partial carries no discount; the last correction takes the discount left. A partial needs a single
-  VAT rate (A1 already refuses the refund request otherwise).
-- **Acceptance**: every allocation except a mirror must satisfy BR-CO-14 as the e-Factura validator
-  states it (`|tax − round_half_up(base × r)| ≤ 0.01`). The two share one helper.
+- **A partial** is one negated line, quantity 1, line discount 0, split from **running totals**:
+  with C_k the gross credited including this correction, `base_k = round_half_even(C_k / (1 + r))`,
+  and this correction's base is `base_k` less the base already credited; its VAT is `G − base`. Each
+  note's rounding corrects the one before rather than adding to it, so every partial satisfies
+  BR-CO-14. If either part exceeds its remainder it takes exactly the remainder and the other is the
+  difference; if that one then exceeds its own remainder, the amount is refused. A partial carries no
+  discount; the last correction takes the discount left. A partial needs a single VAT rate (A1
+  already refuses the refund request otherwise).
+- **Acceptance**: every document satisfies BR-CO-14 as the e-Factura validator states it
+  (`|tax − round_half_up(base × r)| ≤ 0.01`). The two share one helper.
 
-The allocation is written once, with its timestamp, and never recomputed. A refused amount writes no
-allocation and leaves the correction `failed` with the reason.
+**The residue (owner decision, 2026-10-04): every document stays valid.** A final remainder whose
+exact base and VAT would fall outside BR-CO-14 (possible when the original's own VAT is a sum of
+rounded lines) is split at the valid VAT nearest to the VAT left, keeping the gross exact. The VAT
+this leaves un-reversed, signed (negative when it reverses beyond the original), is recorded on the
+correction as `vat_residue_cents` and logged; it is at most a cent or two. Per-step rounding was
+rejected: after 31.43, 31.43 and 29.01 against 121.00 it left base 24.06 with VAT 5.07 for the rest,
+two cents outside the rule; from running totals the rest is base 24.07 with VAT 5.06.
 
-**Known gap, for the owner.** The formula can leave a residue that fails BR-CO-14 when the rest is
-later credited in full: after 31.43, 31.43 and 29.01 against 121.00 (21%), the remainder is base
-24.06 with VAT 5.07, two cents from 5.05. That correction is refused rather than issued, and needs a
-decision (steer earlier partials, or issue the residue manually).
+The allocation is written once, with its timestamp and residue, and never recomputed.
 
 ### Issuance and numbering
 
@@ -92,9 +97,15 @@ its allocation, and is retried by the sweep.
 ### Communication
 
 After the issuance commits, the note's PDF is emailed to the customer through the notifications
-service (`credit_note_issued`, RO and EN, seeded by `setup_email_templates`). The first successful
-send sets `communicated_at` and `fiscal_date` (its Romanian calendar date) once; per OPANAF 705/2020
-that date places the note in its D390 period. A failed send is counted, stays visible and is retried.
+service (`credit_note_issued`, RO and EN, seeded by `setup_email_templates`), in the customer's
+language (`get_customer_locale`). The first successful send sets `communicated_at` and `fiscal_date`
+(its Romanian calendar date) once; per OPANAF 705/2020 that date places the note in its D390 period.
+A failed send is counted, stays visible and is retried.
+
+Sending is claim-then-send: a short transaction locks the correction and, if it is unsent and no
+live claim exists, records a claim with a five-minute lease and commits; the email is sent outside any
+transaction; the first success is then recorded once. A racing worker sees the claim and does not
+send. A claim whose sender died is retaken once the lease runs out.
 
 ### The e-Factura gate
 
@@ -102,7 +113,11 @@ A 381 is filed only once its original is accepted. The gate is inside
 `EFacturaService.submit_invoice`, the path every signal, task and retry goes through, so none of them
 can skip it. Its states are `not_applicable` (not Romanian), `waiting_for_original` (retried by the
 sweep) and `original_rejected` (manual review). Reaching `communicated` does not take a note out of
-e-Factura recovery: the two have separate status fields.
+e-Factura recovery: the two have separate status fields. While e-Factura is switched off
+(`EFACTURA_ENABLED`, the one switch the service obeys) nothing is filed, so the note is
+`not_applicable` rather than waiting forever. A held or failed filing is re-checked with exponential
+backoff (one hour, doubling, capped at a week), recorded as `efactura_attempts` and
+`efactura_next_attempt_at`, so it stays visible without being re-checked every hour.
 
 ### Recovery
 

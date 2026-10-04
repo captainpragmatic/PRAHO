@@ -94,6 +94,11 @@ class SubmissionResult:
         }
 
 
+def is_efactura_enabled() -> bool:
+    """Whether PRAHO files anything with ANAF at all: the one switch `submit_invoice` obeys."""
+    return bool(getattr(settings, "EFACTURA_ENABLED", False))
+
+
 def credit_note_submission_gate(invoice: Invoice) -> str:
     """Whether a credit note may be filed yet: only once ANAF accepted the invoice it reverses.
 
@@ -722,7 +727,7 @@ class EFacturaService:
 
     def _is_efactura_enabled(self) -> bool:
         """Check if e-Factura is enabled in settings."""
-        return getattr(settings, "EFACTURA_ENABLED", False)
+        return is_efactura_enabled()
 
     def _is_b2c(self, invoice: Invoice) -> bool:
         """Whether this invoice routes to ANAF's B2C (/uploadb2c) endpoint.

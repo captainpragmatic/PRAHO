@@ -16,7 +16,6 @@ from lxml import etree
 from apps.billing.efactura.validator import CIUSROValidator
 from apps.billing.efactura.xml_builder import NAMESPACES, builder_for
 from apps.billing.fiscal_correction_models import (
-    FAILURE_ALLOCATION_REFUSED,
     FAILURE_ISSUANCE_ERROR,
     FAILURE_SECOND_CREDIT_NOTE,
     REASON_COVERED_BY_COLLECTIONS,
@@ -318,23 +317,47 @@ class BuiltinStornoIssuanceTests(StornoTestCase):
         TenderRefundCommand.objects.filter(pk=command.pk).update(status="completed")
         self.assertEqual(self.process(correction).total_cents, -5000)
 
-    def test_an_amount_outside_br_co_14_is_refused_before_a_number_is_spent(self) -> None:
-        """The plan-v3 residue: 31.43, 31.43 and 29.01 leave base 24.06 with VAT 5.07."""
+    def test_running_partials_each_give_a_valid_document(self) -> None:
+        """31.43, 31.43, 29.01, 29.12 against 121.00, allocated in turn from the running total.
+
+        Until A3 an original can carry one credit note, so the later three are parked with their
+        allocations. Each allocation is then issued against an identical twin original, through the
+        same worker, to prove the document it describes passes the validator.
+        """
         original = self.original()
         payment = self.collected(original, original.total_cents)
-        for amount in (3143, 3143, 2901):
+        corrections = []
+        for amount in (3143, 3143, 2901, 2912):
             correction = self.refund(original, payment, amount)
             with self.captureOnCommitCallbacks(execute=True):
                 process_fiscal_correction(str(correction.pk))
-        before = _sequence_value()
+            correction.refresh_from_db()
+            corrections.append(correction)
 
-        rest = self.process(self.refund(original, payment, 2913))
+        allocations = [(c.base_cents, c.tax_cents, c.vat_residue_cents) for c in corrections]
+        self.assertEqual(allocations, [(-2598, -545, 0), (-2597, -546, 0), (-2398, -503, 0), (-2406, -506, 0)])
+        for base, tax, _residue in allocations:
+            twin = self.original()
+            twin_correction = self.refund(twin, self.collected(twin, twin.total_cents), -(base + tax))
+            twin_correction.allocate(base_cents=-base, tax_cents=-tax, discount_cents=0, at=timezone.now())
+            twin_correction.save()
+            note = self.process(twin_correction).credit_note
+            result = CIUSROValidator().validate(builder_for(note).build())
+            self.assertTrue(result.is_valid, [(error.code, error.message) for error in result.errors])
 
-        self.assertEqual(rest.state, STATE_FAILED)
-        self.assertEqual(rest.failure_code, FAILURE_ALLOCATION_REFUSED)
-        self.assertIn("vat_outside_br_co_14", rest.last_error)
-        self.assertIsNone(rest.allocated_at)
-        self.assertEqual(_sequence_value(), before)
+    def test_a_remainder_split_for_validity_records_its_vat_residue(self) -> None:
+        """Three lines of 1.02 at 21% (VAT 0.63 on 3.06). After a 0.03 refund the rest would be base
+        3.04 with VAT 0.62, outside BR-CO-14; it is credited as 3.03 + 0.63 and the cent recorded."""
+        original = self.original(lines=((102, "0.21"), (102, "0.21"), (102, "0.21")))
+        payment = self.collected(original, original.total_cents)
+        self.process(self.refund(original, payment, 3))
+
+        with self.assertLogs("apps.billing.fiscal_correction_worker", level="WARNING") as logs:
+            rest = self.process(self.refund(original, payment, 366))
+
+        self.assertEqual((rest.base_cents, rest.tax_cents, rest.total_cents), (-303, -63, -366))
+        self.assertEqual(rest.vat_residue_cents, -1)
+        self.assertTrue(any("un-reversed" in line for line in logs.output), logs.output)
 
     def test_completing_a_refund_queues_the_worker_after_commit(self) -> None:
         original = self.original()
@@ -362,6 +385,6 @@ class AllocationAmountsTests(StornoTestCase):
             correction.refresh_from_db()
             totals.append((correction.base_cents, correction.tax_cents, correction.total_cents))
 
-        self.assertEqual(totals, [(-2479, -521, -3000), (-3307, -695, -4002), (-4213, -884, -5097)])
+        self.assertEqual(totals, [(-2479, -521, -3000), (-3308, -694, -4002), (-4212, -885, -5097)])
         self.assertLessEqual(-sum(tax for _base, tax, _total in totals), original.tax_cents)
         self.assertEqual(sum(base for base, _tax, _total in totals), -9999)
