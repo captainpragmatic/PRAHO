@@ -99,6 +99,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   against the refund and dates the note for D390 by the sending date. The hourly sweep that
   looked for refunded SmartBill invoices without a storno is retired;
   `setup_billing_scheduled_tasks` removes its schedule.
+- The D390 review declares storno credit notes. A note is a negative line in the month the
+  customer received it, so a June invoice refunded in July is declared in June and taken off
+  in July. A partner whose month nets below zero gets a negative row. One that nets to exactly
+  zero gets no XML row, which D390 cannot carry, and stays in the preview and the CSV as
+  "fully netted". A refund no longer blocks its invoice's own month once that month has closed.
+  Until its credit note is sent, or the refund is found to need none, it blocks every month from
+  the one it was raised in. A note that has not reached the customer is shown and never declared.
+  A note is judged by its original's VAT evidence, under the rules the original was recorded
+  with, so a note issued months later is not reported as a late decision or stale VIES proof.
 - Invoice, payment and reminder emails are sent in the customer's language. They read a locale
   setting customers never had, so every one went out in English.
 

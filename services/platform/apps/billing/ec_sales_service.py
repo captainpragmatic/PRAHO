@@ -2,6 +2,10 @@
 
 One operating entity owns this invoice ledger. This service reads frozen invoice
 facts only; D390 serialization and supplier/declarant validation are separate.
+
+A storno credit note is a supply line with a negative base, declared in the month it
+reached the customer (its correction's `fiscal_date`, OPANAF 705/2020), not in its
+original's month and not by its own tax point (ADR-0053).
 """
 
 from __future__ import annotations
@@ -21,12 +25,15 @@ from django.utils.dateparse import parse_datetime
 
 from apps.billing.document_adjustments import UnsupportedDocumentAdjustmentError, validate_no_unsupported_adjustments
 from apps.billing.efactura.settings import ro_local_date
+from apps.billing.fiscal_correction_models import STATE_COMMUNICATED, STATE_NOT_REQUIRED, FiscalCorrection
 from apps.billing.invoice_models import DOCUMENT_KIND_CREDIT_NOTE, Invoice, InvoiceLine
 from apps.billing.refund_models import Refund
 from apps.billing.tax_evidence import (
     CONSULTATION_REFERENCE_EVIDENCE_VERSION,
+    CREDIT_NOTE_EVIDENCE_VERSION,
     TaxEvidenceError,
     VATDecision,
+    evidence_rules_version,
     read_vat_evidence,
     vat_country,
     vat_identity,
@@ -41,6 +48,10 @@ MAX_YEAR = 2100
 MONTHS_PER_YEAR = 12
 PARTNER_NAME_LIMIT = 200
 UNRESOLVED_REFUNDS = {"pending", "processing", "approved", "completed"}
+# A completed refund whose correction reached one of these settled it: a note the customer received,
+# which is declared in its own month, or a decision that the invoice needed no correction at all.
+SETTLED_CORRECTION_STATES = (STATE_COMMUNICATED, STATE_NOT_REQUIRED)
+BUCHAREST = ZoneInfo("Europe/Bucharest")
 
 
 @dataclass(frozen=True, order=True)
@@ -79,6 +90,7 @@ class SupplyContribution:
     invoice_number: str
     line_id: int
     description: str
+    # The date that places the line in its month: an invoice's tax point, a credit note's fiscal date.
     tax_point_date: date
     country: str
     vat_body: str
@@ -116,6 +128,40 @@ class PartnerSupply:
     rounding_difference: Decimal
     operation: str = "P"
 
+    @property
+    def fully_netted(self) -> bool:
+        """Credit notes cancelled the month's supplies to the ban: no row is declared for it.
+
+        D390 has no zero row, so the group is left out of the XML and kept everywhere else.
+        `_group_supplies` builds a zero group only from an exact zero that a credit note made,
+        and `assert_reconciled` holds every zero group to that.
+        """
+        return self.rounded_ron == 0
+
+
+@dataclass(frozen=True)
+class RefundSettlement:
+    """A refund as the declaration sees it: settled for one invoice, or a correction still to land."""
+
+    refund_id: str
+    status: str
+    amount_cents: int
+    raised_on: date
+    correction_id: str
+    correction_state: str
+    correction_original_id: int | None
+    fiscal_date: date | None
+    settled: bool
+
+    def could_land_in(self, period: ReportingPeriod) -> bool:
+        """Whether this refund's correction may still be declared in `period`.
+
+        A correction lands in the month its credit note reaches the customer, which is never before
+        the refund was raised. So an unsettled refund holds every month from the one it was raised
+        in, and never the original's closed month before it.
+        """
+        return not self.settled and self.raised_on < period.end
+
 
 @dataclass(frozen=True)
 class ECSalesReport:
@@ -139,8 +185,13 @@ class ECSalesReport:
         return Decimal(self.rounded_ron) - self.base_ron
 
     @property
+    def declared_partners(self) -> tuple[PartnerSupply, ...]:
+        """The groups that become XML rows: every one but a group netted to exactly nothing."""
+        return tuple(partner for partner in self.partners if not partner.fully_netted)
+
+    @property
     def can_export(self) -> bool:
-        return bool(self.partners) and not self.exceptions
+        return bool(self.declared_partners) and not self.exceptions
 
     def assert_reconciled(self) -> None:
         actual = [line.line_id for line in self.contributions]
@@ -159,6 +210,10 @@ class ECSalesReport:
                 Decimal(rounded) - base,
             ):
                 raise ValueError("Partner totals do not reconcile to the included invoice lines.")
+            # A zero row cannot be declared, so a zero group must be a real cancellation: an exact
+            # zero that a credit note made, never a rounding loss or a fully discounted supply.
+            if partner.fully_netted and (base != 0 or not any(line.base_ron < 0 for line in partner.contributions)):
+                raise ValueError("A partner group rounding to zero lei must be fully netted by a credit note.")
 
 
 def _candidate(invoice: Invoice, line: InvoiceLine | None) -> bool:
@@ -190,10 +245,11 @@ def _identity_problems(invoice: Invoice, decision: VATDecision | None) -> list[s
     if decision:
         proof = invoice.vat_evidence.get("vies")
         # An absent snapshot is the version-1 "not recorded" shape whatever the version; only a
-        # recorded consultation that lacks its reference is a policy failure.
+        # recorded consultation that lacks its reference is a policy failure. A credit note's proof
+        # is its original's, so it answers to the rules its original was written under.
         if (
             decision.category == "AE"
-            and invoice.vat_evidence.get("version", 0) >= CONSULTATION_REFERENCE_EVIDENCE_VERSION
+            and evidence_rules_version(invoice.vat_evidence) >= CONSULTATION_REFERENCE_EVIDENCE_VERSION
             and isinstance(proof, dict)
             and (
                 not isinstance(proof.get("consultation_reference"), str) or not proof["consultation_reference"].strip()
@@ -236,10 +292,8 @@ def _document_problems(invoice: Invoice, lines: list[InvoiceLine], decision: VAT
         problems.append("missing_tax_point: Period unknown; this invoice is shown in every month until reviewed.")
     if not invoice.issued_at or not invoice.locked_at:
         problems.append("missing_issue_evidence: Issuance is not fully recorded.")
-    if decision and invoice.issued_at:
-        calculated_at = parse_datetime(invoice.vat_evidence["calculated_at"])
-        if calculated_at and calculated_at > invoice.issued_at:
-            problems.append("late_tax_decision: VAT decision was recorded after invoice issuance.")
+    if decision and invoice.issued_at and _late_decision(invoice):
+        problems.append("late_tax_decision: VAT decision was recorded after invoice issuance.")
     problems.extend(_identity_problems(invoice, decision))
     problems.extend(_vies_problems(invoice))
     # The direction is a property of the document, not of a line. The header's sign is
@@ -287,6 +341,33 @@ def _document_problems(invoice: Invoice, lines: list[InvoiceLine], decision: VAT
     return problems
 
 
+def _decided_at(evidence: dict[str, object]) -> str:
+    """When the recorded decision was taken: a credit note restates its original's, taken earlier."""
+    credit = evidence.get("version") == CREDIT_NOTE_EVIDENCE_VERSION
+    value = evidence["reverses_calculated_at" if credit else "calculated_at"]
+    if not isinstance(value, str):
+        raise TypeError("Decision time is not recorded")
+    return value
+
+
+def _late_decision(invoice: Invoice) -> bool:
+    """Whether the recorded decision came after the document it decides.
+
+    A credit note's decision is its original's, taken at `reverses_calculated_at`: it is late when
+    that came after the ORIGINAL was issued, however long after the original the note follows. The
+    note's own snapshot restates it before the note is issued, and is late if written afterwards.
+    """
+    evidence = invoice.vat_evidence
+    calculated_at = parse_datetime(evidence["calculated_at"])
+    if calculated_at and invoice.issued_at and calculated_at > invoice.issued_at:
+        return True
+    if evidence.get("version") != CREDIT_NOTE_EVIDENCE_VERSION:
+        return False
+    original = invoice.reverses_invoice
+    decided_at = parse_datetime(evidence["reverses_calculated_at"])
+    return original is None or original.issued_at is None or decided_at is None or decided_at > original.issued_at
+
+
 def _vies_problems(invoice: Invoice) -> list[str]:
     """Review contrary or stale captured proof without querying today's VIES status."""
     proof = invoice.vat_evidence.get("vies")
@@ -304,8 +385,10 @@ def _vies_problems(invoice: Invoice) -> list[str]:
         ):
             raise ValueError("Captured VAT validation refers to a different identity")
         checked_at = parse_datetime(proof["validated_at"])
-        calculated_at = parse_datetime(invoice.vat_evidence["calculated_at"])
-        if invoice.vat_evidence.get("version", 0) >= CONSULTATION_REFERENCE_EVIDENCE_VERSION:
+        # A credit note's proof is its original's: current when the original was decided, and judged
+        # by the rules its original was written under, not by the note's later restatement.
+        calculated_at = parse_datetime(_decided_at(invoice.vat_evidence))
+        if evidence_rules_version(invoice.vat_evidence) >= CONSULTATION_REFERENCE_EVIDENCE_VERSION:
             max_age = invoice.vat_evidence.get("evidence_max_age_days", 30)
             if type(max_age) is not int or max_age < 1:
                 raise ValueError("Malformed evidence maximum age")
@@ -326,8 +409,41 @@ def _vies_problems(invoice: Invoice) -> list[str]:
     return []
 
 
-def _refund_evidence(invoice: Invoice) -> list[dict[str, str]]:
-    """Find unresolved events even when recorded against the payment or source order."""
+def _settlement(refund: Refund, invoice: Invoice) -> RefundSettlement:
+    """How far `refund` has been settled for `invoice`.
+
+    Settled only by a correction decided against THIS invoice: a credit note of it that reached the
+    customer, or a validated finding that it needed none. A correction on another invoice, or one
+    that found no fiscal document at all, was never decided against this supply.
+    """
+    correction = (
+        FiscalCorrection.objects.filter(
+            Q(source_refund_id=refund.pk) | Q(source_command__legs__refund_id=refund.pk)
+        ).first()
+        if refund.status == "completed"
+        else None
+    )
+    return RefundSettlement(
+        str(refund.pk),
+        refund.status,
+        refund.amount_cents,
+        ro_local_date(refund.created_at),
+        "" if correction is None else str(correction.pk),
+        "" if correction is None else correction.state,
+        None if correction is None else correction.original_id,
+        None if correction is None else correction.fiscal_date,
+        correction is not None
+        and correction.original_id == invoice.pk
+        and correction.state in SETTLED_CORRECTION_STATES,
+    )
+
+
+def _refund_evidence(invoice: Invoice) -> tuple[list[RefundSettlement], list[dict[str, str]]]:
+    """Find refund events even when recorded against the payment or source order.
+
+    Returns each refund with how far it is settled for this invoice, and the legacy order
+    metadata that no refund row explains.
+    """
     order_links = Q(invoice=invoice)
     related = (
         Q(invoice=invoice)
@@ -343,11 +459,11 @@ def _refund_evidence(invoice: Invoice) -> list[dict[str, str]]:
     if order_id:
         related |= Q(order_id=order_id)
         order_links |= Q(pk=order_id)
-    evidence = [
-        {"id": str(refund.pk), "status": refund.status, "amount_cents": str(refund.amount_cents)}
+    settlements = [
+        _settlement(refund, invoice)
         for refund in Refund.objects.filter(related, status__in=UNRESOLVED_REFUNDS).distinct().order_by("pk")
     ]
-    evidence.extend(
+    legacy = [
         {
             "order_id": str(order.pk),
             "status": "legacy_metadata",
@@ -355,8 +471,8 @@ def _refund_evidence(invoice: Invoice) -> list[dict[str, str]]:
         }
         for order in invoice.orders.model.objects.filter(order_links).only("pk", "meta").order_by("pk")
         if isinstance(order.meta, dict) and order.meta.get("refunds")
-    )
-    return evidence
+    ]
+    return settlements, legacy
 
 
 def _discount_allocations(lines: list[InvoiceLine], discount: int) -> dict[int, int]:
@@ -399,12 +515,56 @@ def _exception(invoice: Invoice, line: InvoiceLine | None, problems: list[str]) 
     )
 
 
-def aggregate_ec_services(period: ReportingPeriod) -> ECSalesReport:
+def _settling_correction(invoice: Invoice) -> FiscalCorrection | None:
+    """The correction a credit note settles, if any. A reverse one-to-one raises when absent."""
+    correction: FiscalCorrection | None = getattr(invoice, "settled_fiscal_correction", None)
+    return correction
+
+
+def _correction_source(correction: FiscalCorrection | None) -> dict[str, object]:
+    """What places a credit note in a month, so a note reaching its customer changes the fingerprint."""
+    if correction is None:
+        return {"id": None}
+    return {
+        "id": str(correction.pk),
+        "state": correction.state,
+        "original_id": correction.original_id,
+        "communicated_at": correction.communicated_at,
+        "fiscal_date": correction.fiscal_date,
+    }
+
+
+def _documents_in(period: ReportingPeriod) -> Q:
+    """Invoices by tax point; credit notes by the month they reached the customer.
+
+    A note not yet communicated has no month: it is shown, blocked, in every month from its own
+    tax point on until it is sent, and never declared. Its tax point never places it otherwise, or a
+    note issued in June and sent in July would be counted in both.
+    """
+    credit = Q(document_kind=DOCUMENT_KIND_CREDIT_NOTE)
+    communicated = Q(settled_fiscal_correction__state=STATE_COMMUNICATED)
+    tax_point_unknown = Q(tax_point_date__isnull=True)
+    return (
+        (~credit & (Q(tax_point_date__gte=period.start, tax_point_date__lt=period.end) | tax_point_unknown))
+        | (
+            credit
+            & communicated
+            & Q(
+                settled_fiscal_correction__fiscal_date__gte=period.start,
+                settled_fiscal_correction__fiscal_date__lt=period.end,
+            )
+        )
+        | (credit & ~communicated & (Q(tax_point_date__lt=period.end) | tax_point_unknown))
+    )
+
+
+def aggregate_ec_services(period: ReportingPeriod) -> ECSalesReport:  # noqa: PLR0915  # One reconciliation pass
     """Reconcile each candidate exactly once, then aggregate RON before rounding."""
     invoices = (
         Invoice.objects.exclude(status="draft")
         .exclude(status="void", issued_at__isnull=True, locked_at__isnull=True)
-        .filter(Q(tax_point_date__gte=period.start, tax_point_date__lt=period.end) | Q(tax_point_date__isnull=True))
+        .filter(_documents_in(period))
+        .select_related("settled_fiscal_correction", "reverses_invoice")
         .prefetch_related("lines", "payments")
         .order_by("pk")
     )
@@ -425,23 +585,42 @@ def aggregate_ec_services(period: ReportingPeriod) -> ECSalesReport:
             problems = _document_problems(invoice, lines, decision)
         except TaxEvidenceError as exc:
             problems = [f"invalid_evidence: {exc}"]
+        placed_on = invoice.tax_point_date
+        correction = None
+        if invoice.document_kind == DOCUMENT_KIND_CREDIT_NOTE:
+            correction = _settling_correction(invoice)
+            if correction is None or correction.state != STATE_COMMUNICATED or correction.fiscal_date is None:
+                placed_on = None
+                problems.append(
+                    "uncommunicated_credit_note: The credit note has not reached the customer, so it has no "
+                    "D390 month yet; it is declared in the month it is sent."
+                )
+            else:
+                placed_on = correction.fiscal_date
         try:
-            refunds = _refund_evidence(invoice)
+            settlements, legacy_order_refunds = _refund_evidence(invoice)
         except (ValidationError, ValueError, TypeError, AttributeError):
-            refunds = []
+            settlements, legacy_order_refunds = [], []
             problems.append("invalid_refund_links: Source document links cannot be reconciled.")
         refunded_payment = any(
             payment.status in {"refunded", "partially_refunded"} for payment in invoice.payments.all()
         )
         legacy_refunds = isinstance(invoice.meta, dict) and invoice.meta.get("refunds")
+        # A refunded status or payment is a refund's footprint. Refund rows explain it one by one,
+        # each settled or holding the month its correction can land in; with none, nothing does.
+        unexplained_refund = (
+            invoice.status in {"refunded", "partially_refunded"} or refunded_payment
+        ) and not settlements
         if (
-            invoice.status in {"void", "refunded", "partially_refunded"}
-            or refunds
-            or refunded_payment
+            invoice.status == "void"
             or legacy_refunds
+            or legacy_order_refunds
+            or unexplained_refund
+            or any(settlement.could_land_in(period) for settlement in settlements)
         ):
             problems.append(
-                "unresolved_fiscal_adjustment: Void/refund event requires review; payment refunds are not fiscal credit notes."
+                "unresolved_fiscal_adjustment: Void or refund event requires review; a refund is deducted only "
+                "by its credit note, in the month the customer received it."
             )
         source.append(
             {
@@ -454,8 +633,10 @@ def aggregate_ec_services(period: ReportingPeriod) -> ECSalesReport:
                 "lines": [
                     {field.name: getattr(line, field.attname) for field in line._meta.concrete_fields} for line in lines
                 ],
-                "refunds": refunds,
+                "refunds": [asdict(settlement) for settlement in settlements],
+                "legacy_order_refunds": legacy_order_refunds,
                 "refunded_payment": refunded_payment,
+                "correction": _correction_source(correction),
             }
         )
         if not lines:
@@ -470,7 +651,7 @@ def aggregate_ec_services(period: ReportingPeriod) -> ECSalesReport:
                 continue
             country, body = vat_identity(invoice.bill_to_tax_id, invoice.bill_to_country)
             rate = Decimal(1) if invoice.currency_id == "RON" else invoice.exchange_to_ron
-            assert rate is not None and invoice.tax_point_date is not None
+            assert rate is not None and placed_on is not None
             invoice_number = _require_legal_number(invoice)
             discount = allocations[line.pk]
             included.append(
@@ -479,7 +660,7 @@ def aggregate_ec_services(period: ReportingPeriod) -> ECSalesReport:
                     invoice_number,
                     line.pk,
                     line.description,
-                    invoice.tax_point_date,
+                    placed_on,
                     country,
                     body,
                     invoice.bill_to_name.strip(),
@@ -535,7 +716,12 @@ def _line_problems(line: InvoiceLine) -> list[str]:
 def _group_supplies(
     included: list[SupplyContribution], exceptions: list[ReviewException]
 ) -> tuple[list[PartnerSupply], list[SupplyContribution]]:
-    """Round once per VAT identity and reject conflicting names before rendering."""
+    """Net and round once per VAT identity and operation, and reject conflicting names before rendering.
+
+    A credit note's negative lines net against the month's supplies to the same partner. A negative
+    net is declared as such. A net of exactly zero made by a credit note is kept as a fully netted
+    group, which the XML leaves out; anything else that rounds to zero lei needs review.
+    """
     grouped: dict[tuple[str, str, str], list[SupplyContribution]] = defaultdict(list)
     for contribution in included:
         grouped[(contribution.country, contribution.vat_body, contribution.operation)].append(contribution)
@@ -545,7 +731,8 @@ def _group_supplies(
         names = {line.partner_name for line in contributions}
         base = sum((line.base_ron for line in contributions), Decimal(0))
         rounded = int(base.quantize(Decimal(1), rounding=ROUND_HALF_UP))
-        if len(names) != 1 or rounded <= 0:
+        fully_netted = base == 0 and any(line.base_ron < 0 for line in contributions)
+        if len(names) != 1 or (rounded == 0 and not fully_netted):
             code = "conflicting_partner_names" if len(names) != 1 else "zero_rounded_base"
             exceptions.extend(
                 ReviewException(
@@ -553,7 +740,8 @@ def _group_supplies(
                     line.invoice_number,
                     line.line_id,
                     (code,),
-                    "Partner names must agree and the monthly rounded base must be positive.",
+                    "Partner names must agree, and a monthly base that rounds to zero lei must be fully "
+                    "netted by a credit note.",
                     line.tax_point_date,
                     line.currency,
                     line.gross_cents,
@@ -569,23 +757,26 @@ def _group_supplies(
 
 
 def _other_period_adjustments(period: ReportingPeriod, handled: set[int]) -> tuple[list[ReviewException], list[object]]:
-    """Surface current-month refund events on older supplies without assigning a tax period.
+    """Hold this month for refunds on older supplies whose correction could still land in it.
 
-    An accountant must decide whether these are current adjustments or corrections
-    to an earlier declaration. Event dates are used for review alerts only.
+    A refund raised in or before this month and not yet settled (its credit note not yet with the
+    customer, or no decision that none is owed) may be declared in this month or a later one, so
+    each such month is held. The original's own month, closed before the refund, is not. Once the
+    note is sent it is declared in its month as a supply line of its own and holds nothing.
+
+    A refund already settled by its own correction is skipped in the query; one whose correction
+    was decided against another invoice than the one it links to is caught in that invoice's own
+    month by the main pass.
     """
-    start = datetime.combine(period.start, time.min, ZoneInfo("Europe/Bucharest"))
-    end = datetime.combine(period.end, time.min, ZoneInfo("Europe/Bucharest"))
-    event_dates = (
-        Q(created_at__gte=start, created_at__lt=end)
-        | Q(processed_at__gte=start, processed_at__lt=end)
-        | Q(gateway_processed_at__gte=start, gateway_processed_at__lt=end)
-    )
+    end = datetime.combine(period.end, time.min, BUCHAREST)
     exceptions: list[ReviewException] = []
     source: list[object] = []
     alerted: set[int] = set()
+    settled = list(SETTLED_CORRECTION_STATES)
     refunds = (
-        Refund.objects.filter(event_dates, status__in=UNRESOLVED_REFUNDS)
+        Refund.objects.filter(status__in=UNRESOLVED_REFUNDS, created_at__lt=end)
+        .exclude(status="completed", fiscal_correction__state__in=settled)
+        .exclude(status="completed", tender_leg__command__fiscal_correction__state__in=settled)
         .select_related("payment", "order")
         .order_by("pk")
     )
@@ -604,11 +795,12 @@ def _other_period_adjustments(period: ReportingPeriod, handled: set[int]) -> tup
         for invoice in invoices:
             if invoice.pk in handled or not any(_candidate(invoice, line) for line in invoice.lines.all()):
                 continue
+            settlement = _settlement(refund, invoice)
+            if not settlement.could_land_in(period):
+                continue
             source.append(
                 {
-                    "refund_id": str(refund.pk),
-                    "status": refund.status,
-                    "amount_cents": refund.amount_cents,
+                    **asdict(settlement),
                     "created_at": refund.created_at,
                     "processed_at": refund.processed_at,
                     "gateway_processed_at": refund.gateway_processed_at,
@@ -624,8 +816,9 @@ def _other_period_adjustments(period: ReportingPeriod, handled: set[int]) -> tup
                     invoice,
                     None,
                     [
-                        "outside_period_adjustment: Refund event recorded in this month affects a supply with another tax point. "
-                        "The accountant must determine the fiscal adjustment or rectificative treatment."
+                        "outside_period_adjustment: A refund of a supply from an earlier month is not settled yet; "
+                        "its credit note may be declared in this month. Settle it, or have the accountant "
+                        "determine the treatment."
                     ],
                 )
             )

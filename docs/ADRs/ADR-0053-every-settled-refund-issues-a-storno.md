@@ -18,8 +18,8 @@ e-Factura record and the customer's copy kept stating a sale that had been partl
 Issuing the note inside settlement was rejected in review: a numbering failure or a slow provider
 must never roll back money that has already left. PR #599 (A1) therefore records a durable
 `FiscalCorrection` obligation when a refund completes. This ADR records how that obligation is
-settled: on the built-in path (A2), and on the SmartBill path (A3). The reports move in A4 and D390
-in B.
+settled: on the built-in path (A2), and on the SmartBill path (A3), and how D390 declares the notes
+(B). The reports move in A4.
 
 ## Decision
 
@@ -189,6 +189,41 @@ spent submission budget: the reconciliation queue's) and one that is `manual_req
 `billing-owed-reversals` sweep, which looked for refunded provider invoices without a reversal, is
 retired, and `setup_billing_scheduled_tasks` removes its schedule.
 
+### D390 (B, #541)
+
+A credit note is a supply line with a negative base, declared in the month its correction's
+`fiscal_date` falls in: the communication date, per OPANAF 705/2020. Its own tax point never places
+it, so a note issued in June and sent in July is declared in July only. A note whose correction is
+not `communicated` (issued and unsent, the inert `attached` state, or no correction at all) has no
+month yet. It is shown as an `uncommunicated_credit_note` exception in every month from its tax
+point on, and never declared.
+
+A note is judged by its original's proof. Its v3 evidence restates the original's decision and VIES
+snapshot, so the consultation-reference rule and the VIES freshness rule are those of
+`original_version` (`evidence_rules_version`), and freshness is measured at
+`reverses_calculated_at`, when the original was decided. A note issued long after its original is
+therefore neither a late decision nor stale proof. The late-decision check moved with it: a note is
+late when its original's decision came after the original was issued, or when its own snapshot was
+written after the note was issued.
+
+Refunds hold the month their correction can land in. A refund is settled for an invoice only by a
+correction decided against that invoice that is `communicated` or `not_required`. An unsettled
+refund holds every month from the one it was raised in (its Romanian creation date), because its
+note can only be sent on or after that day. It never holds the original's earlier, closed month.
+A refunded invoice or payment status with no refund row behind it still holds the invoice's own
+month, as do a void and legacy refund metadata.
+
+Netting is per `(country, VAT body, operation)`, in RON, before rounding. A negative net is
+declared. An exact zero made by a credit note is a "fully netted" group: no XML row, because D390
+has no zero row, but kept in the preview, the CSV (`fully_netted`) and the source fingerprint. Any
+other group that rounds to zero lei is a `zero_rounded_base` exception, as before.
+`totalPlata_A` is `nrOPI` plus the signed bases, bounded by magnitude. Declarations stay initial
+(`d_rec=0`); rectificatives are out of scope.
+
+A provider storno staff record carries a communication date they enter, which may be earlier than
+the refund was raised in PRAHO. Such a note lands in a month this report did not hold; if that
+month was already filed, the accountant decides whether a rectificative is due.
+
 ### Reversal
 
 A refund cannot leave `completed`, and an issued correction is immutable. Restoring an invoice to
@@ -235,7 +270,8 @@ follows the fiscal one.
 
 - Every refund of a built-in invoice now produces a fiscal document the customer receives.
 - Revenue shows fiscal (invoices less credit notes, by fiscal date) next to cash (collected less
-  refunded), and VAT follows the documents (A4, above). D390 treats credit notes as exceptions until B.
+  refunded), and VAT follows the documents (A4, above). D390 declares credit notes as negative lines
+  in their communication month (B).
 - `setup_email_templates` must be run once on each database to seed `credit_note_issued`; until it
   is, sends fail visibly and are retried.
 - A partial refund of a SmartBill invoice, and any refund after the first, needs a person: the

@@ -408,7 +408,7 @@ class ECSalesAggregationTests(D390FixtureMixin, TestCase):
             status="succeeded",
             payment_method="bank",
         )
-        Refund.objects.create(
+        refund = Refund.objects.create(
             customer=invoice.customer,
             invoice=invoice,
             payment=payment,
@@ -416,6 +416,9 @@ class ECSalesAggregationTests(D390FixtureMixin, TestCase):
             amount_cents=1000,
             original_amount_cents=10000,
         )
+        # Raised in the declared month, so its credit note may land in it. A refund raised in a
+        # later month holds that month instead, never the original's closed one.
+        Refund.objects.filter(pk=refund.pk).update(created_at=datetime(2026, 8, 20, tzinfo=UTC))
         self.assert_blocked("unresolved_fiscal_adjustment")
 
     def test_void_after_issue_blocks_but_void_draft_is_excluded(self):
