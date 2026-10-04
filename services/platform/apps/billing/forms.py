@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from django import forms
 from django.core.exceptions import ValidationError
@@ -10,6 +10,9 @@ from django.utils.translation import gettext_lazy as _
 
 from .ec_sales_service import ReportingPeriod
 from .payment_models import PaymentRetryPolicy
+
+if TYPE_CHECKING:
+    from .fiscal_correction_service import ProviderStornoRecord
 
 _INPUT_CLASS = (
     "w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-slate-100 "
@@ -267,3 +270,76 @@ class ProviderReconciliationForm(forms.Form):
                     % {"length": len(legal_number), "limit": limit},
                 )
         return cleaned
+
+
+class ProviderStornoRecordForm(ProviderReconciliationForm):
+    """Record a storno staff issued at the provider for a correction its API cannot issue.
+
+    The document's number gets the reconciliation form's guards (asked twice, charset, composed
+    length), since it is about to become a legal number that cannot change. The amounts are entered
+    as the provider shows them and checked against the correction's allocation by the service.
+    """
+
+    field_order = (
+        "series",
+        "number",
+        "confirmation",
+        "issued_on",
+        "communicated_on",
+        "currency_code",
+        "base_amount",
+        "tax_amount",
+        "evidence",
+        "reason",
+    )
+
+    issued_on = forms.DateField(
+        label=_("Issue date"),
+        widget=forms.DateInput(attrs={"type": "date"}),
+        help_text=_("The date printed on the provider's credit note."),
+    )
+    communicated_on = forms.DateField(
+        label=_("Communication date"),
+        widget=forms.DateInput(attrs={"type": "date"}),
+        help_text=_("The day the credit note was sent to the customer. It sets the D390 period."),
+    )
+    currency_code = forms.CharField(
+        label=_("Currency"),
+        max_length=3,
+        help_text=_("The currency the credit note is in."),
+    )
+    base_amount = forms.DecimalField(
+        label=_("Taxable base"),
+        max_digits=14,
+        decimal_places=2,
+        help_text=_("As printed on the credit note; the sign does not matter."),
+    )
+    tax_amount = forms.DecimalField(
+        label=_("VAT"),
+        max_digits=14,
+        decimal_places=2,
+        help_text=_("As printed on the credit note; the sign does not matter."),
+    )
+    evidence = forms.CharField(
+        label=_("Evidence of sending"),
+        max_length=500,
+        help_text=_(
+            "Where the proof of sending is kept, such as the sent email's subject and date, or a file reference."
+        ),
+    )
+
+    def to_record(self) -> ProviderStornoRecord:
+        """The validated entry, with amounts in cents."""
+        from .fiscal_correction_service import ProviderStornoRecord  # noqa: PLC0415  # deferred: forms load early
+
+        data = self.cleaned_data
+        return ProviderStornoRecord(
+            series=data["series"],
+            number=data["number"],
+            issued_on=data["issued_on"],
+            communicated_on=data["communicated_on"],
+            currency_code=data["currency_code"].strip().upper(),
+            base_cents=int(data["base_amount"] * 100),
+            tax_cents=int(data["tax_amount"] * 100),
+            evidence=data["evidence"].strip(),
+        )

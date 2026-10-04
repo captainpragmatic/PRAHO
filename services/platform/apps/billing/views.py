@@ -2640,6 +2640,7 @@ def provider_reconciliation_queue(request: HttpRequest) -> HttpResponse:
     `pending` row is now reachable. Listing it is the point of deriving this set rather than
     storing it.
     """
+    from .fiscal_correction_models import STATE_MANUAL_REQUIRED, FiscalCorrection  # noqa: PLC0415  # ADR-0007
     from .issuers.models import MAX_SUBMISSIONS, IssuanceState, ProviderIssuance  # noqa: PLC0415  # ADR-0007
 
     rows = ProviderIssuance.objects.select_related("invoice", "invoice__customer", "invoice__currency")
@@ -2649,10 +2650,21 @@ def provider_reconciliation_queue(request: HttpRequest) -> HttpResponse:
         invoice__number__isnull=True,
         submissions__gte=MAX_SUBMISSIONS,
     ).order_by("created_at")
+    # Corrections the provider's API cannot issue: staff issue them at the provider and record them.
+    manual = (
+        FiscalCorrection.objects.filter(state=STATE_MANUAL_REQUIRED)
+        .select_related("original", "original__customer", "original__currency")
+        .order_by("created_at")
+    )
     return render(
         request,
         "billing/provider_reconciliation_queue.html",
-        {"issuances": unresolved, "exhausted": exhausted, "max_submissions": MAX_SUBMISSIONS},
+        {
+            "issuances": unresolved,
+            "exhausted": exhausted,
+            "max_submissions": MAX_SUBMISSIONS,
+            "manual_corrections": manual,
+        },
     )
 
 
@@ -2696,6 +2708,47 @@ def provider_reconciliation_adopt(request: HttpRequest, pk: uuid.UUID) -> HttpRe
         request,
         "billing/provider_reconciliation_form.html",
         {"form": form, "issuance": issuance},
+    )
+
+
+@billing_configuration_required
+@require_http_methods(["GET", "POST"])
+def provider_storno_record(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
+    """Record the storno staff issued at the provider for a correction its API cannot issue."""
+    from apps.common.request_ip import get_safe_client_ip  # noqa: PLC0415
+
+    from .fiscal_correction_models import STATE_MANUAL_REQUIRED, FiscalCorrection  # noqa: PLC0415  # ADR-0007
+    from .forms import ProviderStornoRecordForm  # noqa: PLC0415
+    from .operator_controls import BillingControlActor, record_manual_provider_storno  # noqa: PLC0415
+
+    correction = get_object_or_404(
+        FiscalCorrection.objects.select_related("original", "original__customer", "original__currency"), pk=pk
+    )
+    if correction.state != STATE_MANUAL_REQUIRED:
+        messages.error(request, _("That correction is no longer waiting for a provider document."))
+        return redirect("billing:provider_reconciliation_queue")
+
+    form = ProviderStornoRecordForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        try:
+            number = record_manual_provider_storno(
+                correction_id=correction.pk,
+                record=form.to_record(),
+                actor=BillingControlActor(
+                    user=cast(User, request.user),
+                    reason=form.cleaned_data["reason"],
+                    ip_address=get_safe_client_ip(request),
+                ),
+            )
+        except ValidationError as error:
+            _add_validation_errors(form, error)
+        else:
+            messages.success(request, _("Recorded provider credit note %(number)s.") % {"number": number})
+            return redirect("billing:provider_reconciliation_queue")
+    return render(
+        request,
+        "billing/provider_storno_form.html",
+        {"form": form, "correction": correction},
     )
 
 

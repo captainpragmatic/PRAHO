@@ -22,6 +22,8 @@ if TYPE_CHECKING:
 
     from apps.users.models import User
 
+    from .fiscal_correction_service import ProviderStornoRecord
+
 
 # Prefixes owned by non-default numbering scopes. The subscription sequence uses
 # "SUB" and may not have a row yet, so the existing-rows reuse check cannot catch
@@ -305,3 +307,38 @@ def adopt_provider_document(
             },
         )
     return legal_number
+
+
+def record_manual_provider_storno(
+    *,
+    correction_id: uuid.UUID,
+    record: ProviderStornoRecord,
+    actor: BillingControlActor,
+) -> str:
+    """Record the storno staff issued at the provider for a correction its API cannot issue.
+
+    One transaction owns the credit note, the correction's settlement and the record of who
+    entered it, as `adopt_provider_document` does: this assigns a legal fiscal number and a D390
+    period on a person's word, which under ADR-0016 must name who decided it and why.
+    """
+    from apps.billing.fiscal_correction_models import FiscalCorrection  # noqa: PLC0415  # ADR-0007
+    from apps.billing.fiscal_correction_service import record_provider_storno  # noqa: PLC0415
+
+    _require_audit_reason(actor)
+    with transaction.atomic():
+        note = record_provider_storno(correction_id, record)
+        correction = FiscalCorrection.objects.get(pk=correction_id)
+        _audit_configuration_change(
+            content_object=correction,
+            actor=actor,
+            old_values={"state": "manual_required"},
+            new_values={
+                "state": str(correction.state),
+                "credit_note_number": str(note.number),
+                "provider_issue_date": record.issued_on.isoformat(),
+                "communication_date": record.communicated_on.isoformat(),
+                "communication_evidence": record.evidence,
+                "total_cents": correction.total_cents,
+            },
+        )
+    return str(note.number)

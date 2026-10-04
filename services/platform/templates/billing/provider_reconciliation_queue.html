@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% load i18n %}
 {% load ui_components %}
+{% load formatting %}
 
 {% block title %}{% trans "Provider reconciliation" %} - PRAHO Platform{% endblock %}
 
@@ -64,6 +65,50 @@
       </table>
     </div>
   {% end_section_card %}
+
+  {% if manual_corrections %}
+  {% trans "Credit notes to issue at the provider" as manual_title %}
+  {% section_card title=manual_title %}
+    <p class="mb-4 text-sm text-slate-400">
+      {% blocktrans trimmed %}
+        Each refund below owes a credit note the provider's API cannot issue: it reverses only a
+        whole invoice, once. Issue the storno in the provider's own interface for exactly the
+        amount shown, send it to the customer, then record it here.
+      {% endblocktrans %}
+    </p>
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-slate-700 text-sm" data-testid="manual-corrections">
+        <thead>
+          <tr class="text-left text-slate-400">
+            <th class="py-2 pr-4">{% trans "Customer" %}</th>
+            <th class="py-2 pr-4">{% trans "Invoice" %}</th>
+            <th class="py-2 pr-4">{% trans "To credit" %}</th>
+            <th class="py-2 pr-4">{% trans "Waiting since" %}</th>
+            <th class="py-2 text-right">{% trans "Action" %}</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-700/60">
+          {% for correction in manual_corrections %}
+          <tr>
+            <td class="py-3 pr-4 text-white">{{ correction.original.customer }}</td>
+            <td class="py-3 pr-4 text-slate-300">
+              {{ correction.original.display_number }}
+              <span class="block text-xs text-slate-500">{{ correction.original.issuer_provider }}</span>
+            </td>
+            <td class="py-3 pr-4 text-slate-300">{{ correction.total_cents|cents_to_currency|floatformat:2 }} {{ correction.original.currency.code }}</td>
+            <td class="py-3 pr-4 text-slate-400">{{ correction.updated_at|date:"d.m.Y H:i" }}</td>
+            <td class="py-3 text-right">
+              {% url "billing:provider_storno_record" correction.pk as record_url %}
+              {% trans "Record the credit note" as record_label %}
+              {% button record_label href=record_url variant="primary" %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% end_section_card %}
+  {% endif %}
 
   {% if exhausted %}
   {% trans "Out of submission budget" as exhausted_title %}

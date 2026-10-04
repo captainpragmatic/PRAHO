@@ -23,6 +23,11 @@ urlpatterns = [
         views.provider_reconciliation_adopt,
         name="provider_reconciliation_adopt",
     ),
+    path(
+        "controls/provider-reconciliation/corrections/<uuid:pk>/record/",
+        views.provider_storno_record,
+        name="provider_storno_record",
+    ),
     # Combined listing (proformas + invoices)
     path("invoices/", views.billing_list, name="invoice_list"),  # Updated view name
     path("invoices/list/", views.billing_list_htmx, name="billing_list_htmx"),  # HTMX endpoint

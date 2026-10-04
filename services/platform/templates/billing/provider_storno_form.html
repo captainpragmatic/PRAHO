@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% load ui_components %}
+{% load formatting %}
+
+{% block title %}{% trans "Record a provider credit note" %} - PRAHO Platform{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 max-w-4xl mx-auto space-y-6">
+  {% trans "Record a provider credit note" as page_title %}
+  {% page_header title=page_title subtitle=correction.original.customer icon="warning" %}{% end_page_header %}
+
+  {% trans "What this correction credits" as allocation_title %}
+  {% section_card title=allocation_title %}
+    <p class="mb-4 text-sm text-slate-400">
+      {% blocktrans trimmed %}
+        The provider's API cannot issue this credit note. Issue a storno of the invoice below in the
+        provider's own interface for exactly these amounts, send it to the customer, then record
+        it here.
+      {% endblocktrans %}
+    </p>
+    <dl class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm" data-testid="correction-allocation">
+      <div>
+        <dt class="text-slate-400">{% trans "Invoice" %}</dt>
+        <dd class="text-white">{{ correction.original.display_number }}</dd>
+      </div>
+      <div>
+        <dt class="text-slate-400">{% trans "Provider" %}</dt>
+        <dd class="text-white">{{ correction.original.issuer_provider }}</dd>
+      </div>
+      <div>
+        <dt class="text-slate-400">{% trans "Taxable base" %}</dt>
+        <dd class="text-white">{{ correction.base_cents|cents_to_currency|floatformat:2 }} {{ correction.original.currency.code }}</dd>
+      </div>
+      <div>
+        <dt class="text-slate-400">{% trans "VAT" %}</dt>
+        <dd class="text-white">{{ correction.tax_cents|cents_to_currency|floatformat:2 }} {{ correction.original.currency.code }}</dd>
+      </div>
+      <div class="md:col-span-2">
+        <dt class="text-slate-400">{% trans "Total credited" %}</dt>
+        <dd class="text-white">{{ correction.total_cents|cents_to_currency|floatformat:2 }} {{ correction.original.currency.code }}</dd>
+      </div>
+    </dl>
+  {% end_section_card %}
+
+  <form method="post" class="space-y-6">
+    {% csrf_token %}
+    {% if form.non_field_errors %}
+    <div class="rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-300">{{ form.non_field_errors }}</div>
+    {% endif %}
+
+    {% trans "The credit note you issued" as document_title %}
+    {% section_card title=document_title %}
+      <p class="mb-4 text-xs text-slate-500">
+        {% blocktrans trimmed %}
+          The number becomes the credit note's legal number and the communication date places it
+          in its D390 period. Neither can be changed afterwards, so the number is asked for twice.
+        {% endblocktrans %}
+      </p>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {% for field in form.visible_fields %}
+        <div class="{% if field.name == 'reason' or field.name == 'evidence' %}md:col-span-2{% endif %}">
+          <label for="{{ field.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">{{ field.label }}</label>
+          {{ field }}
+          {% if field.help_text %}<p class="mt-1 text-xs text-slate-500">{{ field.help_text }}</p>{% endif %}
+          {% for error in field.errors %}<p class="mt-1 text-sm text-red-400">{{ error }}</p>{% endfor %}
+        </div>
+        {% endfor %}
+      </div>
+    {% end_section_card %}
+
+    <div class="flex justify-end gap-3">
+      {% url "billing:provider_reconciliation_queue" as queue_url %}
+      {% trans "Cancel" as cancel_label %}
+      {% button cancel_label href=queue_url variant="secondary" %}
+      {% trans "Record this credit note" as record_label %}
+      {% button record_label type="submit" variant="primary" %}
+    </div>
+  </form>
+</div>
+{% endblock %}

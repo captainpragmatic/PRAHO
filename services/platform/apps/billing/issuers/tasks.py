@@ -21,10 +21,8 @@ from .service import issue_invoice_externally
 
 logger = logging.getLogger(__name__)
 
-# Rotation state for `sweep_owed_reversals`; its docstring explains why it exists.
-_REVERSAL_CURSOR_KEY = "billing:owed-reversal-sweep-cursor"
-# The same idea for `sweep_pending_issuances`, but a `(created_at, pk)` keyset rather than a
-# single integer: `ProviderIssuance.id` is a UUID and this sweep orders by `created_at`, so
+# Rotation state for `sweep_pending_issuances`: a `(created_at, pk)` keyset rather than a single
+# integer, because `ProviderIssuance.id` is a UUID and this sweep orders by `created_at`, so
 # `pk__gt` alone is neither the ordering nor a complete resume point.
 _PENDING_CURSOR_KEY = "billing:pending-issuance-sweep-cursor"
 
@@ -99,15 +97,16 @@ def sweep_pending_issuances(limit: int = 100) -> dict[str, int]:
     to say the claim path handled that, which was true only if some later attempt happened
     to reach `_claim` for the same invoice, and nothing guaranteed one ever would.
     """
+    from apps.billing.fiscal_correction_worker import queue_fiscal_correction  # noqa: PLC0415
     from apps.billing.invoice_models import DOCUMENT_KIND_CREDIT_NOTE  # noqa: PLC0415  # ADR-0007
 
     from .models import MAX_SUBMISSIONS, IssuanceState, ProviderIssuance  # noqa: PLC0415
 
     # `pending` records that a provider call is owed, not WHICH one, so this dispatches
-    # by document kind rather than filtering one out. Excluding credit notes stopped a
-    # rate-gated reversal being POSTed to /invoice, but `sweep_owed_reversals` skips any
-    # invoice that already has a reversal row - and a deferred storno always has one -
-    # so the reversal was then recovered by neither sweep while the refund had moved.
+    # by document kind rather than filtering one out: a rate-gated reversal POSTed to /invoice
+    # would mint a new document instead of reversing one. A reversal is resumed through the
+    # fiscal correction it issues, which names exactly this document; the original's id did
+    # not, once an original could carry more than one credit note.
     #
     # `failed` is included because `claim()` accepts it: a refusal earns REJECTED only
     # from a recognised refusal envelope, which is the classifier's guarantee that
@@ -130,10 +129,8 @@ def sweep_pending_issuances(limit: int = 100) -> dict[str, int]:
     # handful of those occupy every run while a genuinely recoverable issuance behind them is
     # never reached, and that invoice has no legal number and no other automated path to one.
     # The cursor advances past whatever was examined and wraps at the end, so every candidate is
-    # reached within a bounded number of runs. This is `sweep_owed_reversals`' arrangement; only
-    # the key shape differs, because that one pages an integer primary key that is also its
-    # ordering key. Losing the cursor to cache eviction restarts the rotation, which is
-    # harmless, and where the cache is a no-op the sweep degrades to always scanning from the
+    # reached within a bounded number of runs. Losing the cursor to cache eviction restarts the
+    # rotation, which is harmless, and where the cache is a no-op the sweep degrades to always scanning from the
     # oldest row - correct, just not fair. Fairness only matters once rows are permanently
     # stuck, which is itself the alarm condition.
     cursor = cache.get(_PENDING_CURSOR_KEY)
@@ -148,16 +145,18 @@ def sweep_pending_issuances(limit: int = 100) -> dict[str, int]:
     for issuance in owed:
         invoice = issuance.invoice
         if invoice.document_kind == DOCUMENT_KIND_CREDIT_NOTE:
-            # The reversal service is addressed by the ORIGINAL's id: it is the document
-            # being reversed, and the credit note is what the call produces.
-            if invoice.reverses_invoice_id is None:
+            # A reversal is resumed by the fiscal correction it issues: the correction's worker
+            # finds this very document through its issuance and claims it again.
+            if issuance.fiscal_correction_id is None:
                 logger.error(
-                    f"🔥 [Issuance] Credit note {invoice.pk} has no original to reverse; "
+                    f"🔥 [Issuance] Credit note {invoice.pk} answers to no fiscal correction; "
                     f"it cannot be recovered automatically."
                 )
                 results["skipped"] += 1
                 continue
-            queued = queue_invoice_storno(invoice.reverses_invoice_id)
+            # `queue_fiscal_correction` never raises: a lost enqueue is the correction sweep's.
+            queue_fiscal_correction(issuance.fiscal_correction_id)
+            queued: str | None = "queued"
         else:
             queued = queue_invoice_issuance(invoice.pk)
         results["queued" if queued else "skipped"] += 1
@@ -238,86 +237,3 @@ def sweep_abandoned_claims(limit: int = 100) -> dict[str, int]:
             f"reconciliation; a document may exist at the provider for each."
         )
     return {"quarantined": quarantined}
-
-
-def sweep_owed_reversals(limit: int = 100) -> dict[str, int]:
-    """Pick up reversals whose queue callback never ran.
-
-    Issuance survives a lost enqueue because its work row is written in the same
-    transaction as the invoice, so a sweep can find it. A reversal has no such row:
-    the credit note is created by the task itself, so an enqueue that fails leaves
-    nothing behind at all - while the refund has already moved money, so the customer
-    holds a full invoice with nothing reversing it and the books show revenue that was
-    returned.
-
-    No new state is needed to fix that, because the durable record already exists: a
-    provider-issued invoice sitting in `refunded` with no reversal IS an outstanding
-    correction. This reads that rather than inventing a second source of truth.
-
-    Eligibility is deliberately not re-checked here. `issue_storno_for_invoice`
-    settles it under lock, and a sweep that duplicated those rules is exactly how the
-    two would drift apart.
-    """
-    from apps.billing.invoice_models import DOCUMENT_KIND_INVOICE, ISSUER_BUILTIN, Invoice  # noqa: PLC0415
-
-    candidates = Invoice.objects.filter(
-        status="refunded",
-        document_kind=DOCUMENT_KIND_INVOICE,
-        reversals__isnull=True,
-    ).exclude(issuer_provider=ISSUER_BUILTIN)
-
-    # A refusal that can never succeed - an invoice refunded in instalments, say -
-    # leaves that invoice a candidate forever. Always taking the lowest N primary keys
-    # would let a handful of permanently stuck documents occupy every run while a
-    # genuinely recoverable reversal behind them is never reached, and the money for
-    # that one has already left. The cursor advances past whatever was examined and
-    # wraps at the end, so every candidate is reached within a bounded number of runs.
-    # Losing it to cache eviction only restarts the rotation, which is harmless, and
-    # where the cache is a no-op the sweep simply degrades to always scanning from the
-    # lowest key - correct, just not fair. Fairness only matters once candidates are
-    # permanently stuck, which is itself the alarm condition.
-    cursor = cache.get(_REVERSAL_CURSOR_KEY) or 0
-    owed = list(candidates.filter(pk__gt=cursor).order_by("pk")[:limit])
-    if not owed and cursor:
-        owed = list(candidates.order_by("pk")[:limit])
-    cache.set(_REVERSAL_CURSOR_KEY, owed[-1].pk if owed else 0, timeout=None)
-
-    queued = 0
-    for invoice in owed:
-        if queue_invoice_storno(invoice.pk):
-            queued += 1
-        else:
-            logger.error(
-                f"🔥 [Storno] Reversal still cannot be queued for invoice {invoice.pk}; "
-                f"the customer holds a refunded invoice with no credit note."
-            )
-    if owed:
-        logger.info(f"🐢 [Storno] Swept {len(owed)} owed reversal(s); {queued} queued")
-    return {"examined": len(owed), "queued": queued}
-
-
-def issue_storno_task(invoice_id: int) -> dict[str, object]:
-    """Reverse one provider-issued invoice."""
-    from .service import issue_storno_for_invoice  # noqa: PLC0415
-
-    result = issue_storno_for_invoice(invoice_id)
-    if isinstance(result, Err):
-        logger.warning(f"⚠️ [Storno] Invoice {invoice_id} not reversed: {result.error}")
-        return {"invoice_id": invoice_id, "reversed": False, "error": result.error}
-    return {"invoice_id": invoice_id, "reversed": True, "number": result.unwrap()}
-
-
-def queue_invoice_storno(invoice_id: int) -> str | None:
-    """Enqueue a reversal after the surrounding transaction commits."""
-    try:
-        from django_q.tasks import async_task  # noqa: PLC0415  # Optional at import time
-
-        task_id: str = async_task(
-            "apps.billing.issuers.tasks.issue_storno_task",
-            invoice_id,
-            task_name=f"storno-invoice-{invoice_id}",
-        )
-    except Exception as exc:
-        logger.warning(f"⚠️ [Storno] Could not queue reversal for invoice {invoice_id}: {exc}")
-        return None
-    return task_id

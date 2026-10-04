@@ -19,7 +19,6 @@ from apps.billing.efactura.validator import CIUSROValidator
 from apps.billing.efactura.xml_builder import NAMESPACES, builder_for
 from apps.billing.fiscal_correction_models import (
     FAILURE_ISSUANCE_ERROR,
-    FAILURE_SECOND_CREDIT_NOTE,
     REASON_COVERED_BY_COLLECTIONS,
     STATE_COMMUNICATED,
     STATE_FAILED,
@@ -40,7 +39,7 @@ from apps.billing.invoice_models import (
     InvoiceSequence,
 )
 from apps.billing.issuers.models import ProviderIssuance
-from apps.billing.issuers.tasks import sweep_owed_reversals, sweep_pending_issuances
+from apps.billing.issuers.tasks import sweep_pending_issuances
 from apps.billing.operator_controls import BillingControlActor, rotate_invoice_series
 from apps.promotions.models import TenderRefundCommand, TenderRefundLeg
 from tests.billing import _fiscal_correction_helpers as h
@@ -141,28 +140,45 @@ class BuiltinStornoIssuanceTests(StornoTestCase):
 
         self.assertEqual(correction.credit_note.total_cents, -1000)
 
-    def test_a_later_refund_credits_only_what_is_left_and_waits_for_a3(self) -> None:
-        """30 then 91 against 121. The second correction is allocated exactly -91, never another
-        -121, and is parked rather than writing a second note the A2 schema cannot hold."""
+    def test_a_second_refund_of_an_invoice_issues_a_second_note(self) -> None:
+        """30 then 91 against 121. The second correction credits exactly what is left, -91 and
+        never another -121, on a credit note of its own beside the first."""
         original = self.original()
         payment = self.collected(original, original.total_cents)
         first = self.process(self.refund(original, payment, 3000))
 
-        with self.assertLogs("apps.billing.fiscal_correction_worker", level="WARNING") as logs:
-            second = self.process(self.refund(original, payment, 9100))
+        second = self.process(self.refund(original, payment, 9100))
 
         self.assertEqual(first.credit_note.total_cents, -3000)
-        self.assertEqual(second.state, STATE_FAILED)
-        self.assertEqual(second.failure_code, FAILURE_SECOND_CREDIT_NOTE)
+        self.assertEqual(second.state, STATE_COMMUNICATED, second.last_error)
         self.assertEqual((second.base_cents, second.tax_cents, second.total_cents), (-7521, -1579, -9100))
-        self.assertIsNone(second.credit_note_id)
-        self.assertEqual(Invoice.objects.filter(reverses_invoice=original).count(), 1)
-        self.assertIn("one-reversal-per-original", "\n".join(logs.output))
+        self.assertEqual(
+            (second.credit_note.subtotal_cents, second.credit_note.tax_cents, second.credit_note.total_cents),
+            (-7521, -1579, -9100),
+        )
+        self.assertEqual(
+            sorted(Invoice.objects.filter(reverses_invoice=original).values_list("total_cents", flat=True)),
+            [-9100, -3000],
+        )
+        self.assertNotEqual(first.credit_note.number, second.credit_note.number)
 
-        # Retried by the sweep, still parked, the allocation untouched.
+    def test_two_corrections_waiting_on_one_original_are_both_issued_by_one_sweep(self) -> None:
+        """Both allocated, neither issued: the sweep issues each against its own allocation, in
+        refund-completion order, rather than stopping at the first note the original carries."""
+        original = self.original()
+        payment = self.collected(original, original.total_cents)
+        earlier = self.refund(original, payment, 3000)
+        later = self.refund(original, payment, 2000)
+        _advance_allocation(str(earlier.pk))
+        _advance_allocation(str(later.pk))
+
         self.sweep()
-        second.refresh_from_db()
-        self.assertEqual((second.state, second.total_cents), (STATE_FAILED, -9100))
+
+        earlier.refresh_from_db()
+        later.refresh_from_db()
+        self.assertEqual((earlier.state, later.state), (STATE_COMMUNICATED, STATE_COMMUNICATED), later.last_error)
+        self.assertEqual((earlier.credit_note.total_cents, later.credit_note.total_cents), (-3000, -2000))
+        self.assertLess(earlier.credit_note.number, later.credit_note.number)
 
     def test_a_worker_failure_after_numbering_leaves_no_draft_and_no_gap(self) -> None:
         original = self.original()
@@ -209,7 +225,6 @@ class BuiltinStornoIssuanceTests(StornoTestCase):
         note = self.process(self.refund(original, payment, original.total_cents)).credit_note
 
         sweep_pending_issuances()
-        sweep_owed_reversals()
 
         self.assertFalse(ProviderIssuance.objects.exists())
         note.refresh_from_db()
@@ -284,14 +299,22 @@ class BuiltinStornoIssuanceTests(StornoTestCase):
         self.assertEqual(note.vat_evidence["total_cents"], note.total_cents)
         self.assertLessEqual(datetime.fromisoformat(note.vat_evidence["calculated_at"]), note.issued_at)
 
-    def test_a_provider_originals_correction_is_left_for_the_provider_path(self) -> None:
+    def test_a_provider_originals_correction_is_allocated_but_never_issued_here(self) -> None:
+        """Its amount is decided like any other; its document is the provider's to issue, so the
+        built-in sequence is never spent on it."""
         original = h.issued_invoice(self.owner, issuer=ISSUER_SMARTBILL)
         payment = h.paid(original)
+        sequence_before = InvoiceSequence.objects.filter(scope="default").values_list("last_value", flat=True).first()
 
         correction = self.process(self.refund(original, payment, original.total_cents))
 
-        self.assertEqual(correction.state, STATE_PENDING)
-        self.assertIsNone(correction.allocated_at)
+        self.assertEqual(correction.total_cents, -original.total_cents)
+        self.assertIsNone(correction.credit_note_id)
+        self.assertFalse(Invoice.objects.filter(reverses_invoice=original, issuer_provider="builtin").exists())
+        self.assertEqual(
+            InvoiceSequence.objects.filter(scope="default").values_list("last_value", flat=True).first(),
+            sequence_before,
+        )
 
     def test_corrections_are_decided_in_refund_completion_order(self) -> None:
         original = self.original()
@@ -325,30 +348,18 @@ class BuiltinStornoIssuanceTests(StornoTestCase):
         self.assertEqual(self.process(correction).total_cents, -5000)
 
     def test_running_partials_each_give_a_valid_document(self) -> None:
-        """31.43, 31.43, 29.01, 29.12 against 121.00, allocated in turn from the running total.
-
-        Until A3 an original can carry one credit note, so the later three are parked with their
-        allocations. Each allocation is then issued against an identical twin original, through the
-        same worker, to prove the document it describes passes the validator.
-        """
+        """31.43, 31.43, 29.01, 29.12 against 121.00, allocated in turn from the running total, each
+        issued on its own credit note against the original, and each passing the validator."""
         original = self.original()
         payment = self.collected(original, original.total_cents)
-        corrections = []
-        for amount in (3143, 3143, 2901, 2912):
-            correction = self.refund(original, payment, amount)
-            with self.captureOnCommitCallbacks(execute=True):
-                process_fiscal_correction(str(correction.pk))
-            correction.refresh_from_db()
-            corrections.append(correction)
+        corrections = [self.process(self.refund(original, payment, amount)) for amount in (3143, 3143, 2901, 2912)]
 
         allocations = [(c.base_cents, c.tax_cents, c.vat_residue_cents) for c in corrections]
         self.assertEqual(allocations, [(-2598, -545, 0), (-2597, -546, 0), (-2398, -503, 0), (-2406, -506, 0)])
-        for base, tax, _residue in allocations:
-            twin = self.original()
-            twin_correction = self.refund(twin, self.collected(twin, twin.total_cents), -(base + tax))
-            twin_correction.allocate(base_cents=-base, tax_cents=-tax, discount_cents=0, at=timezone.now())
-            twin_correction.save()
-            note = self.process(twin_correction).credit_note
+        self.assertEqual(Invoice.objects.filter(reverses_invoice=original).count(), 4)
+        for correction in corrections:
+            note = correction.credit_note
+            self.assertEqual((note.subtotal_cents, note.tax_cents), (correction.base_cents, correction.tax_cents))
             result = CIUSROValidator().validate(builder_for(note).build())
             self.assertTrue(result.is_valid, [(error.code, error.message) for error in result.errors])
 
@@ -368,7 +379,7 @@ class BuiltinStornoIssuanceTests(StornoTestCase):
 
 
 class AllocationAmountsTests(StornoTestCase):
-    """The sequences of plan v3, at the allocation layer: one note per original until A3."""
+    """The sequences of plan v3, at the allocation layer."""
 
     def test_sequential_allocations_never_exceed_the_original(self) -> None:
         original = self.original()
@@ -389,8 +400,8 @@ class AllocationAmountsTests(StornoTestCase):
 @SELLER
 class IssuanceOrderTests(StornoTestCase):
     def test_a_later_correction_cannot_issue_before_an_earlier_one(self) -> None:
-        """Both allocated; the later worker reaches issuance first. It must wait, so the earlier
-        correction takes the one note A2 allows and the later is the one parked."""
+        """Both allocated; the later worker reaches issuance first. It must wait, so the notes are
+        numbered in the order the refunds completed."""
         original = self.original()
         payment = self.collected(original, original.total_cents)
         earlier = self.refund(original, payment, 3000)
@@ -405,9 +416,9 @@ class IssuanceOrderTests(StornoTestCase):
 
         earlier.refresh_from_db()
         later.refresh_from_db()
-        self.assertEqual((later_first, earlier_next, later_again), ("waiting_for_earlier", "issued", "parked"))
-        self.assertEqual(earlier.credit_note.total_cents, -3000)
-        self.assertEqual((later.state, later.failure_code), (STATE_FAILED, FAILURE_SECOND_CREDIT_NOTE))
+        self.assertEqual((later_first, earlier_next, later_again), ("waiting_for_earlier", "issued", "issued"))
+        self.assertEqual((earlier.credit_note.total_cents, later.credit_note.total_cents), (-3000, -2000))
+        self.assertLess(earlier.credit_note.number, later.credit_note.number)
 
 
 class QueueAfterCommitTests(StornoTestCase):

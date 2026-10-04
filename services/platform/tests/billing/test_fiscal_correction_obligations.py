@@ -16,20 +16,21 @@ from django.test import TestCase, TransactionTestCase, override_settings
 
 from apps.billing.fiscal_correction_models import (
     REASON_NO_FISCAL_DOCUMENT,
-    STATE_ATTACHED,
+    STATE_ALLOCATED,
+    STATE_ISSUED,
     STATE_NOT_REQUIRED,
     STATE_PENDING,
     FiscalCorrection,
 )
 from apps.billing.fiscal_correction_service import (
-    attach_provider_credit_note,
     record_obligation,
     sweep_fiscal_corrections,
 )
+from apps.billing.fiscal_correction_worker import sweep_fiscal_correction_issuance
 from apps.billing.invoice_models import DOCUMENT_KIND_CREDIT_NOTE, ISSUER_SMARTBILL, Invoice
 from apps.billing.issuers.base import Ambiguous, Issued, PreparedDocument
 from apps.billing.issuers.models import IssuanceState, ProviderIssuance
-from apps.billing.issuers.service import issue_storno_for_invoice, reconcile_confirmed_issued
+from apps.billing.issuers.service import _record_issued_for, issue_storno_for_correction, reconcile_confirmed_issued
 from apps.billing.models import Payment, Refund
 from apps.billing.refund_service import RefundService, RefundType
 from apps.common.types import Ok
@@ -236,7 +237,7 @@ class RecordingNeverCostsSettlementTests(TestCase):
 
 
 class ProviderStornoSettlesTheObligationTests(TransactionTestCase):
-    """The existing SmartBill storno flow keeps running, and now says which obligation it settled."""
+    """A SmartBill storno is issued for one correction, and its outcome settles exactly that one."""
 
     def setUp(self) -> None:
         self.owner = h.customer()
@@ -244,7 +245,9 @@ class ProviderStornoSettlesTheObligationTests(TransactionTestCase):
         h.paid(self.invoice)
         self.refund = h.complete(h.pending_refund(invoice=self.invoice))
         force_status(self.invoice, "refunded")
-        self.correction = FiscalCorrection.objects.get(source_refund=self.refund)
+        self.correction = h.allocated(
+            FiscalCorrection.objects.get(source_refund=self.refund), base_cents=10000, tax_cents=2100
+        )
 
     def _storno(self, outcome: object) -> Any:
         with (
@@ -254,22 +257,22 @@ class ProviderStornoSettlesTheObligationTests(TransactionTestCase):
             ),
             patch("apps.billing.issuers.smartbill.issuer.SmartBillIssuer.submit_storno", return_value=outcome),
         ):
-            return issue_storno_for_invoice(self.invoice.pk)
+            return issue_storno_for_correction(self.correction.pk)
 
-    def test_an_issued_storno_settles_the_refunds_obligation(self) -> None:
+    def test_an_issued_storno_settles_its_correction(self) -> None:
         result = self._storno(Issued(number="000701", series="STORNO"))
 
         self.assertTrue(result.is_ok(), getattr(result, "error", ""))
         credit_note = Invoice.objects.get(document_kind=DOCUMENT_KIND_CREDIT_NOTE)
         self.correction.refresh_from_db()
-        self.assertEqual(self.correction.state, STATE_ATTACHED)
+        self.assertEqual(self.correction.state, STATE_ISSUED)
         self.assertEqual(self.correction.credit_note_id, credit_note.pk)
 
-    def test_a_storno_adopted_by_an_operator_settles_the_obligation_too(self) -> None:
+    def test_a_storno_adopted_by_an_operator_settles_the_correction_too(self) -> None:
         self.assertTrue(self._storno(Ambiguous(reason="read timeout after POST")).is_err())
         credit_note = Invoice.objects.get(document_kind=DOCUMENT_KIND_CREDIT_NOTE)
         self.correction.refresh_from_db()
-        self.assertEqual(self.correction.state, STATE_PENDING, "an unknown outcome settles nothing")
+        self.assertEqual(self.correction.state, STATE_ALLOCATED, "an unknown outcome settles nothing")
 
         issuance = ProviderIssuance.objects.get(invoice=credit_note)
         adopted = reconcile_confirmed_issued(
@@ -278,15 +281,12 @@ class ProviderStornoSettlesTheObligationTests(TransactionTestCase):
 
         self.assertTrue(adopted.is_ok(), getattr(adopted, "error", ""))
         self.correction.refresh_from_db()
-        self.assertEqual(self.correction.state, STATE_ATTACHED)
+        self.assertEqual(self.correction.state, STATE_ISSUED)
         self.assertEqual(self.correction.credit_note_id, credit_note.pk)
 
-    def test_a_failure_to_attach_never_unwinds_the_issued_storno(self) -> None:
+    def test_a_failure_to_settle_never_unwinds_the_issued_storno(self) -> None:
         with (
-            patch(
-                "apps.billing.fiscal_correction_service.attach_provider_credit_note",
-                side_effect=RuntimeError("obligation store unavailable"),
-            ),
+            patch("apps.billing.issuers.service._record_issued_for", side_effect=RuntimeError("store unavailable")),
             self.assertLogs("apps.billing.issuers.service", level="ERROR") as logs,
         ):
             result = self._storno(Issued(number="000703", series="STORNO"))
@@ -296,8 +296,28 @@ class ProviderStornoSettlesTheObligationTests(TransactionTestCase):
         self.assertEqual(credit_note.number, "STORNO-000703")
         self.assertEqual(ProviderIssuance.objects.get(invoice=credit_note).state, IssuanceState.ISSUED.value)
         self.correction.refresh_from_db()
-        self.assertEqual(self.correction.state, STATE_PENDING)
+        self.assertEqual(self.correction.state, STATE_ALLOCATED)
         self.assertTrue(any(str(credit_note.pk) in line for line in logs.output), logs.output)
+
+    def test_the_sweep_settles_an_issued_storno_without_calling_the_provider_again(self) -> None:
+        """The provider issued it and only the settling failed: the next run settles it from the
+        issuance record. Calling `/invoice/reverse` again would be refused, or reverse twice."""
+        with (
+            patch("apps.billing.issuers.service._record_issued_for", side_effect=RuntimeError("store unavailable")),
+            self.assertLogs("apps.billing.issuers.service", level="ERROR"),
+        ):
+            self._storno(Issued(number="000704", series="STORNO"))
+
+        with (
+            patch("apps.billing.issuers.smartbill.issuer.SmartBillIssuer.submit_storno") as submit,
+            patch("apps.billing.fiscal_correction_worker.deliver_credit_note"),
+        ):
+            sweep_fiscal_correction_issuance()
+
+        self.correction.refresh_from_db()
+        self.assertEqual(self.correction.state, STATE_ISSUED)
+        self.assertEqual(self.correction.credit_note.number, "STORNO-000704")
+        submit.assert_not_called()
 
 
 def _born_completed(**fields: Any) -> Refund:
@@ -402,92 +422,29 @@ class RecoverySweepTests(TestCase):
         self.assertFalse(FiscalCorrection.objects.filter(source_refund=stuck).exists())
         self.assertTrue(FiscalCorrection.objects.filter(source_refund=good).exists())
 
-    def _issued_storno_with_pending_obligation(self, number: int) -> Invoice:
-        invoice = h.issued_invoice(self.owner, issuer=ISSUER_SMARTBILL, number=f"FCT-{number:06d}")
-        record_obligation(_born_completed(invoice=invoice))
-        return Invoice.objects.create(
-            customer=self.owner,
-            currency=invoice.currency,
-            number=f"STORNO-{number:06d}",
-            status="issued",
-            document_kind=DOCUMENT_KIND_CREDIT_NOTE,
-            reverses_invoice=invoice,
-            issuer_provider=ISSUER_SMARTBILL,
-            subtotal_cents=-invoice.subtotal_cents,
-            tax_cents=-invoice.tax_cents,
-            total_cents=-invoice.total_cents,
-            bill_to_name=invoice.bill_to_name,
-        )
+    def test_corrections_that_keep_failing_do_not_starve_a_recoverable_one(self) -> None:
+        """The issuance sweep rotates like the recording sweep: a few corrections whose worker keeps
+        failing cannot hold every run while one that would succeed waits behind them."""
+        from apps.billing import fiscal_correction_worker  # noqa: PLC0415
 
-    def test_credit_notes_that_keep_failing_do_not_starve_a_recoverable_one(self) -> None:
-        from apps.billing import fiscal_correction_service  # noqa: PLC0415
+        corrections = [record_obligation(_born_completed(invoice=h.issued_invoice(self.owner))) for _ in range(4)]
+        failing_ids = {str(correction.pk) for correction in corrections[:3]}
+        reached: list[str] = []
 
-        failing = [self._issued_storno_with_pending_obligation(4000 + index) for index in range(3)]
-        recoverable = self._issued_storno_with_pending_obligation(4100)
-        failing_ids = {credit_note.pk for credit_note in failing}
-        real_attach = fiscal_correction_service.attach_provider_credit_note
-
-        def attach_or_fail(credit_note: Invoice) -> Any:
-            if credit_note.pk in failing_ids:
-                raise RuntimeError("this credit note cannot be linked")
-            return real_attach(credit_note)
+        def process_or_fail(correction_id: str) -> dict[str, str]:
+            if correction_id in failing_ids:
+                raise RuntimeError("this correction cannot be advanced")
+            reached.append(correction_id)
+            return {}
 
         with (
-            patch("apps.billing.fiscal_correction_service.attach_provider_credit_note", side_effect=attach_or_fail),
-            self.assertLogs("apps.billing.fiscal_correction_service", level="ERROR"),
+            patch.object(fiscal_correction_worker, "process_fiscal_correction", side_effect=process_or_fail),
+            self.assertLogs("apps.billing.fiscal_correction_worker", level="ERROR"),
         ):
-            for _run in range(len(failing) + 1):
-                sweep_fiscal_corrections(limit=1)
+            for _run in range(len(corrections)):
+                sweep_fiscal_correction_issuance(limit=1)
 
-        self.assertTrue(FiscalCorrection.objects.filter(credit_note=recoverable).exists())
-
-
-class RecoverySweepLinksLateObligationsTests(TransactionTestCase):
-    def _issue_storno_for_a_refund_without_obligation(self, *, linking_fails: bool) -> tuple[Refund, Invoice]:
-        owner = h.customer()
-        invoice = h.issued_invoice(owner, issuer=ISSUER_SMARTBILL, number="FCT-000800")
-        h.paid(invoice)
-        refund = _born_completed(invoice=invoice)
-        force_status(invoice, "refunded")
-        failing_link = patch(
-            "apps.billing.fiscal_correction_service.attach_provider_credit_note",
-            side_effect=RuntimeError("obligation store unavailable"),
-        )
-        with (
-            patch(
-                "apps.billing.issuers.smartbill.issuer.SmartBillIssuer.prepare_storno",
-                return_value=Ok(PreparedDocument(payload={"number": "000800"}, digest="d")),
-            ),
-            patch(
-                "apps.billing.issuers.smartbill.issuer.SmartBillIssuer.submit_storno",
-                return_value=Issued(number="000801", series="STORNO"),
-            ),
-        ):
-            if linking_fails:
-                with failing_link, self.assertLogs("apps.billing.issuers.service", level="ERROR"):
-                    self.assertTrue(issue_storno_for_invoice(invoice.pk).is_ok())
-            else:
-                self.assertTrue(issue_storno_for_invoice(invoice.pk).is_ok())
-        return refund, Invoice.objects.get(document_kind=DOCUMENT_KIND_CREDIT_NOTE)
-
-    def test_a_storno_whose_refund_has_no_obligation_yet_records_and_settles_it_at_issue(self) -> None:
-        refund, credit_note = self._issue_storno_for_a_refund_without_obligation(linking_fails=False)
-
-        correction = FiscalCorrection.objects.get(source_refund=refund)
-        self.assertEqual(correction.state, STATE_ATTACHED)
-        self.assertEqual(correction.credit_note_id, credit_note.pk)
-
-    def test_a_storno_whose_linking_failed_at_issue_is_linked_by_the_sweep(self) -> None:
-        refund, credit_note = self._issue_storno_for_a_refund_without_obligation(linking_fails=True)
-        self.assertFalse(FiscalCorrection.objects.filter(source_refund=refund).exists())
-
-        report = sweep_fiscal_corrections()
-
-        correction = FiscalCorrection.objects.get(source_refund=refund)
-        self.assertEqual(correction.state, STATE_ATTACHED)
-        self.assertEqual(correction.credit_note_id, credit_note.pk)
-        self.assertEqual(report["linked"], 1)
-        self.assertEqual(sweep_fiscal_corrections()["linked"], 0)
+        self.assertEqual(reached, [str(corrections[3].pk)])
 
 
 class AReversedInvoiceIsNeverRestoredTests(TestCase):
@@ -713,11 +670,11 @@ class PartialRefundOfAMultiRateInvoiceIsRefusedTests(TestCase):
         self.assertEqual(invoice.status, "refunded")
 
 
-class StornoSettlesTheRefundThatAccountsForItTests(TestCase):
-    """A storno settles the obligation of the refund (or command) it reverses, found in the ledger.
+class AProviderNoteIsNeverLinkedByGuessworkTests(TestCase):
+    """A provider credit note settles the correction it was issued for, named by its issuance.
 
-    "The only pending obligation" is not that during a backfill: the refund the storno answered
-    may not have its obligation yet while an unrelated one does.
+    Nothing infers it from amounts any more: a note that answers to no correction is left alone
+    for an operator, and an unrelated correction on the same invoice is never touched.
     """
 
     def setUp(self) -> None:
@@ -736,25 +693,14 @@ class StornoSettlesTheRefundThatAccountsForItTests(TestCase):
             total_cents=-self.invoice.total_cents,
             bill_to_name=self.invoice.bill_to_name,
         )
-        self.unrelated = _born_completed(invoice=self.invoice, amount_cents=500, refund_type="partial")
-        self.unrelated_correction = record_obligation(self.unrelated)
+        self.matching = record_obligation(_born_completed(invoice=self.invoice))
 
-    def test_the_refund_matching_the_storno_is_recorded_and_attached(self) -> None:
-        reversed_refund = _born_completed(invoice=self.invoice)
+    def test_a_note_that_answers_to_no_correction_settles_none(self) -> None:
+        ProviderIssuance.objects.create(invoice=self.credit_note, provider=ISSUER_SMARTBILL)
 
-        attached = attach_provider_credit_note(self.credit_note)
+        with self.assertLogs("apps.billing.issuers.service", level="ERROR"):
+            settled = _record_issued_for(self.credit_note)
 
-        self.assertIsNotNone(attached)
-        self.assertEqual(attached.source_refund_id, reversed_refund.pk)
-        self.assertEqual(attached.state, STATE_ATTACHED)
-        self.assertEqual(attached.credit_note_id, self.credit_note.pk)
-        self.unrelated_correction.refresh_from_db()
-        self.assertEqual(self.unrelated_correction.state, STATE_PENDING)
-
-    def test_a_storno_no_refund_accounts_for_is_left_unattached(self) -> None:
-        with self.assertLogs("apps.billing.fiscal_correction_service", level="WARNING"):
-            attached = attach_provider_credit_note(self.credit_note)
-
-        self.assertIsNone(attached)
-        self.unrelated_correction.refresh_from_db()
-        self.assertEqual(self.unrelated_correction.state, STATE_PENDING)
+        self.assertIsNone(settled)
+        self.matching.refresh_from_db()
+        self.assertEqual(self.matching.state, STATE_PENDING, "the amounts match, and that is not a link")

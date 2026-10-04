@@ -7,7 +7,8 @@ the operator did not choose, frozen permanently on the document.
 
 And a reversal that cannot be enqueued must still be recoverable: the refund has
 already moved money, so losing the correction leaves the customer holding a full
-invoice with nothing reversing it.
+invoice with nothing reversing it. It is recovered through the refund's fiscal
+correction, which the recording and issuance sweeps both find again.
 """
 
 from __future__ import annotations
@@ -19,6 +20,9 @@ from django.test import TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 
 from apps.audit.models import AuditEvent
+from apps.billing import fiscal_correction_worker
+from apps.billing.fiscal_correction_models import STATE_ISSUED, STATE_MANUAL_REQUIRED, FiscalCorrection
+from apps.billing.fiscal_correction_service import record_obligation, sweep_fiscal_corrections
 from apps.billing.invoice_models import (
     DOCUMENT_KIND_CREDIT_NOTE,
     ISSUER_BUILTIN,
@@ -30,7 +34,7 @@ from apps.billing.invoice_models import (
 from apps.billing.issuers.models import IssuanceState, ProviderIssuance
 from apps.billing.issuers.policy import can_switch_invoice_issuer
 from apps.billing.issuers.service import issue_invoice_externally
-from apps.billing.issuers.tasks import sweep_owed_reversals, sweep_pending_issuances
+from apps.billing.issuers.tasks import sweep_pending_issuances
 from apps.billing.pdf_generators import RomanianInvoicePDFGenerator
 from apps.billing.refund_models import Refund
 from apps.billing.services import InvoiceService
@@ -40,6 +44,7 @@ from apps.orders.models import Order, OrderItem
 from apps.products.models import Product
 from apps.settings.services import SettingsService
 from config.settings.test import LOCMEM_TEST_CACHE
+from tests.billing import _fiscal_correction_helpers as h
 from tests.factories.billing_factories import CustomerFactory
 from tests.helpers.fsm_helpers import force_status
 
@@ -173,49 +178,33 @@ class OwedReversalIsRecoverableTests(TransactionTestCase):
         )
         return invoice
 
-    def _split_refunded_invoice(self) -> Invoice:
-        """Refunded in two instalments: eligibility refuses this one permanently."""
-        invoice = self._refunded_provider_invoice()
-        Refund.objects.filter(invoice=invoice).delete()
-        for index, amount in enumerate((4000, 8100)):
-            Refund.objects.create(
-                customer=self.customer,
-                invoice=invoice,
-                status="completed",
-                refund_type="partial",
-                amount_cents=amount,
-                currency=self.currency,
-                original_amount_cents=12100,
-                reference_number=f"REF-SPLIT-{invoice.pk}-{index}",
-            )
-        return invoice
-
-    def test_a_reversal_whose_enqueue_failed_is_found_again(self) -> None:
-        # The refund settles while the queue is unavailable. The signal resolves
-        # `queue_invoice_storno` from the module at call time, so this is the real
-        # boundary; patching `async_task` would miss it (it is a function-level
-        # import, so the module attribute is never consulted).
-        with patch("apps.billing.issuers.tasks.queue_invoice_storno", return_value=None):
-            invoice = self._refunded_provider_invoice()
-
-        self.assertFalse(
-            Invoice.objects.filter(reverses_invoice=invoice).exists(),
-            "precondition: the enqueue failed, so no reversal was produced",
-        )
-
-        queued: list[int] = []
-        with patch(
-            "apps.billing.issuers.tasks.queue_invoice_storno",
-            side_effect=lambda pk: queued.append(pk) or "task-id",
+    def _swept(self, **sweep: int) -> list[str]:
+        """The corrections one issuance sweep hands to the worker."""
+        seen: list[str] = []
+        with patch.object(
+            fiscal_correction_worker, "process_fiscal_correction", side_effect=lambda pk: seen.append(pk) or {}
         ):
-            report = sweep_owed_reversals()
+            fiscal_correction_worker.sweep_fiscal_correction_issuance(**sweep)
+        return seen
 
-        self.assertEqual(queued, [invoice.pk], "the owed reversal must be picked up again")
-        self.assertEqual(report["queued"], 1)
-
-    def test_an_invoice_already_reversed_is_not_swept_again(self) -> None:
+    def test_a_reversal_whose_enqueue_was_lost_is_found_again(self) -> None:
+        """The refund settled and no worker ever ran: no hook fired for a row born completed, which
+        is what a lost enqueue leaves behind. The recording sweep finds the refund, and the issuance
+        sweep then hands its correction to the worker."""
         invoice = self._refunded_provider_invoice()
-        Invoice.objects.create(
+        self.assertFalse(FiscalCorrection.objects.exists(), "precondition: nothing recorded, nothing queued")
+
+        sweep_fiscal_corrections()
+        swept = self._swept()
+
+        correction = FiscalCorrection.objects.get(original=invoice)
+        self.assertEqual(swept, [str(correction.pk)], "the owed reversal must be picked up again")
+
+    def test_a_reversal_awaiting_a_person_is_not_swept_again(self) -> None:
+        """An unknown outcome is the reconciliation queue's: retrying it would only be refused."""
+        invoice = self._refunded_provider_invoice()
+        correction = h.whole_correction(Refund.objects.get(invoice=invoice))
+        credit_note = Invoice.objects.create(
             customer=self.customer,
             currency=self.currency,
             number=None,
@@ -229,69 +218,45 @@ class OwedReversalIsRecoverableTests(TransactionTestCase):
             bill_to_name="Test Company SRL",
             bill_to_country="RO",
         )
+        ProviderIssuance.objects.create(
+            invoice=credit_note,
+            provider=ISSUER_SMARTBILL,
+            state=IssuanceState.OUTCOME_UNKNOWN.value,
+            fiscal_correction=correction,
+        )
 
-        queued: list[int] = []
-        with patch(
-            "apps.billing.issuers.tasks.queue_invoice_storno",
-            side_effect=lambda pk: queued.append(pk) or "task-id",
-        ):
-            sweep_owed_reversals()
-
-        self.assertEqual(queued, [], "a reversal that exists is already owned by its own claim")
+        self.assertEqual(self._swept(), [], "a reversal that may exist at the provider waits for an operator")
 
     @override_settings(CACHES=LOCMEM_TEST_CACHE)
-    def test_permanently_refused_invoices_do_not_starve_the_queue(self) -> None:
-        """A refusal that can never succeed must not monopolise every sweep.
+    def test_corrections_waiting_for_staff_do_not_starve_the_queue(self) -> None:
+        """A correction the provider cannot issue waits for staff, however long that takes. It is
+        not a candidate at all, so it can never occupy a run while a recoverable one waits."""
+        for _ in range(2):
+            stuck = h.whole_correction(Refund.objects.get(invoice=self._refunded_provider_invoice()))
+            stuck.require_manual_issuance()
+            stuck.save()
+        recoverable = record_obligation(Refund.objects.get(invoice=self._refunded_provider_invoice()))
+        assert recoverable is not None
 
-        An invoice refunded in instalments is refused forever, and stays refunded
-        with no reversal - so it stays a candidate forever. Taking the first N
-        candidates by primary key means the oldest few permanently-stuck documents
-        occupy every run, and a genuinely recoverable reversal behind them is never
-        reached. The money for that one has already left.
-        """
-        stuck = [self._split_refunded_invoice() for _ in range(2)]
-        recoverable = self._refunded_provider_invoice()
+        self.assertEqual(self._swept(limit=1), [str(recoverable.pk)])
+        self.assertEqual(FiscalCorrection.objects.filter(state=STATE_MANUAL_REQUIRED).count(), 2)
 
-        seen: list[int] = []
-        with patch(
-            "apps.billing.issuers.tasks.queue_invoice_storno",
-            side_effect=lambda pk: seen.append(pk) or "task-id",
+    def test_a_builtin_invoices_correction_never_reaches_a_provider_reversal(self) -> None:
+        invoice = h.issued_invoice(self.customer, number="INV-000901")
+        payment = h.paid(invoice)
+        refund = h.complete(h.pending_refund(invoice=invoice, payment=payment))
+        correction = FiscalCorrection.objects.get(source_refund=refund)
+
+        with (
+            patch("apps.billing.issuers.service.issue_storno_for_correction", side_effect=AssertionError),
+            patch.object(fiscal_correction_worker, "deliver_credit_note"),
         ):
-            for _ in range(4):
-                sweep_owed_reversals(limit=2)
+            fiscal_correction_worker.process_fiscal_correction(str(correction.pk))
 
-        self.assertIn(
-            recoverable.pk,
-            seen,
-            f"the recoverable reversal was never reached; swept only {sorted(set(seen))} "
-            f"while {[i.pk for i in stuck]} are permanently refused",
-        )
-
-    def test_a_builtin_invoice_is_never_swept_for_a_provider_reversal(self) -> None:
-        invoice = Invoice.objects.create(
-            customer=self.customer,
-            currency=self.currency,
-            number="INV-000901",
-            status="draft",
-            issued_at=timezone.now(),
-            subtotal_cents=10000,
-            tax_cents=2100,
-            total_cents=12100,
-            bill_to_name="Test Company SRL",
-            bill_to_country="RO",
-            issuer_provider=ISSUER_BUILTIN,
-        )
-        force_status(invoice, "paid")
-        force_status(invoice, "refunded")
-
-        queued: list[int] = []
-        with patch(
-            "apps.billing.issuers.tasks.queue_invoice_storno",
-            side_effect=lambda pk: queued.append(pk) or "task-id",
-        ):
-            sweep_owed_reversals()
-
-        self.assertEqual(queued, [], "built-in invoices are corrected through e-Factura, not the provider")
+        correction.refresh_from_db()
+        self.assertEqual(correction.state, STATE_ISSUED, correction.last_error)
+        self.assertEqual(correction.credit_note.issuer_provider, ISSUER_BUILTIN)
+        self.assertFalse(ProviderIssuance.objects.exists())
 
 
 class CreditNotesAreNeverIssuedAsInvoicesTests(TransactionTestCase):
@@ -369,7 +334,7 @@ class CreditNotesAreNeverIssuedAsInvoicesTests(TransactionTestCase):
         ):
             sweep_pending_issuances()
 
-        self.assertNotIn(credit_note.pk, queued, "the issuance sweep must leave reversals to the reversal sweep")
+        self.assertNotIn(credit_note.pk, queued, "a reversal is resumed through its correction, never as an invoice")
 
 
 class LeavingTheIntegrationIsNeverBlockedTests(TestCase):

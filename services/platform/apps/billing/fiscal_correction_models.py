@@ -44,11 +44,16 @@ STATE_ALLOCATED = "allocated"
 STATE_ISSUED = "issued"
 STATE_COMMUNICATED = "communicated"
 STATE_FAILED = "failed"
+# A provider (SmartBill) original whose correction the provider's API cannot issue: anything but the
+# first correction crediting the whole document. Staff issue it at the provider and record it here.
+STATE_MANUAL_REQUIRED = "manual_required"
 
 # The states in which this correction is settled by a credit note it names.
 STATES_WITH_CREDIT_NOTE: frozenset[str] = frozenset({STATE_ATTACHED, STATE_ISSUED, STATE_COMMUNICATED})
 # The states that hold an allocation, so the amounts are frozen. `failed` may or may not.
-STATES_WITH_ALLOCATION: frozenset[str] = frozenset({STATE_ALLOCATED, STATE_ISSUED, STATE_COMMUNICATED})
+STATES_WITH_ALLOCATION: frozenset[str] = frozenset(
+    {STATE_ALLOCATED, STATE_MANUAL_REQUIRED, STATE_ISSUED, STATE_COMMUNICATED}
+)
 
 # The obligation was resolved to no issued, numbered invoice, so there is no fiscal
 # document a correction could reduce.
@@ -62,9 +67,6 @@ REASON_FULLY_CREDITED = "fully_credited"
 # Why a correction is `failed`. Every one is retried by the sweep; the code says what a retry needs.
 FAILURE_ALLOCATION_REFUSED = "allocation_refused"
 FAILURE_ISSUANCE_ERROR = "issuance_error"
-# The original already has a credit note, and until the one-reversal-per-original constraint is
-# dropped (PR A3) a second one cannot be written. Parked, never forced.
-FAILURE_SECOND_CREDIT_NOTE = "awaiting_second_credit_note_support"
 
 # e-Factura submission of the credit note (RO only), tracked apart from issuance and communication
 # so that reaching `communicated` never takes a note out of e-Factura recovery.
@@ -82,7 +84,8 @@ EFACTURA_RETRYABLE: frozenset[str] = frozenset({EFACTURA_PENDING, EFACTURA_WAITI
 # corrected and WHY, and a different value would silently re-point a fiscal decision at another
 # document or refund. The allocation is the amount a credit note was (or will be) issued for:
 # recomputing it on a retry could credit a different amount from the one already decided. The
-# communication date is the D390 period of the note (OPANAF 705/2020), set by the first send.
+# communication date is the D390 period of the note (OPANAF 705/2020), set by the first send, and
+# for a document staff recorded, its evidence reference with it.
 _WRITE_ONCE_FIELDS: frozenset[str] = frozenset(
     {
         "original_id",
@@ -97,8 +100,13 @@ _WRITE_ONCE_FIELDS: frozenset[str] = frozenset(
         "vat_residue_cents",
         "communicated_at",
         "fiscal_date",
+        "communication_evidence",
     }
 )
+
+
+# What a write-once field holds before it is written: NULL, or blank for the one text field.
+_UNSET: tuple[None, str] = (None, "")
 
 
 def _normalized_link_fields(names: Iterable[str]) -> set[str]:
@@ -119,7 +127,7 @@ class FiscalCorrectionQuerySet(models.QuerySet["FiscalCorrection"]):
         targeted = _normalized_link_fields(kwargs)
         if targeted:
             rows = self.select_for_update().values_list(*sorted(targeted))
-            if any(value is not None for row in rows for value in row):
+            if any(value not in _UNSET for row in rows for value in row):
                 raise ValidationError(
                     _("A fiscal correction's source, original, credit note, allocation and communication are fixed.")
                 )
@@ -154,6 +162,7 @@ class FiscalCorrection(models.Model):
         (STATE_ISSUED, _("Credit note issued")),
         (STATE_COMMUNICATED, _("Credit note sent to the customer")),
         (STATE_FAILED, _("Failed, will be retried")),
+        (STATE_MANUAL_REQUIRED, _("Awaiting a credit note issued by staff at the provider")),
     )
 
     NOT_REQUIRED_REASON_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
@@ -165,7 +174,6 @@ class FiscalCorrection(models.Model):
     FAILURE_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         (FAILURE_ALLOCATION_REFUSED, _("The amount could not be allocated")),
         (FAILURE_ISSUANCE_ERROR, _("The credit note could not be issued")),
-        (FAILURE_SECOND_CREDIT_NOTE, _("The original already has a credit note")),
     )
 
     EFACTURA_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
@@ -244,6 +252,9 @@ class FiscalCorrection(models.Model):
     # A sender's claim on the one send that dates the note. Taken and committed before the send, so a
     # second worker sees it and stays out; a claim older than the lease is presumed dead and retaken.
     communication_claimed_at = models.DateTimeField(null=True, blank=True)
+    # A provider document staff recorded was communicated by them, not by PRAHO: this says where the
+    # proof of that date is (the sent email, an uploaded file).
+    communication_evidence = models.CharField(max_length=500, blank=True)
 
     efactura_status = FSMField(max_length=24, choices=EFACTURA_CHOICES, default=EFACTURA_NOT_DUE, protected=True)
     efactura_error = models.TextField(blank=True)
@@ -283,6 +294,7 @@ class FiscalCorrection(models.Model):
                         STATE_ISSUED,
                         STATE_COMMUNICATED,
                         STATE_FAILED,
+                        STATE_MANUAL_REQUIRED,
                     ]
                 ),
                 name="fiscal_correction_state_valid_values",
@@ -389,7 +401,7 @@ class FiscalCorrection(models.Model):
                 changed = sorted(
                     field
                     for field in checked
-                    if persisted[field] is not None and getattr(self, field) != persisted[field]
+                    if persisted[field] not in _UNSET and getattr(self, field) != persisted[field]
                 )
                 if changed:
                     raise ValidationError(
@@ -468,7 +480,10 @@ class FiscalCorrection(models.Model):
 
     @transition(field=state, source=[STATE_ALLOCATED, STATE_FAILED], target=STATE_ISSUED, conditions=[_has_allocation])
     def record_issued(self, credit_note: Invoice) -> None:
-        """Link the built-in credit note just numbered for this allocation."""
+        """Link the credit note just numbered for this allocation, built-in or the provider's."""
+        self._link_note_carrying_allocation(credit_note)
+
+    def _link_note_carrying_allocation(self, credit_note: Invoice) -> None:
         from .invoice_models import DOCUMENT_KIND_CREDIT_NOTE  # noqa: PLC0415  # Avoid model import cycle.
 
         if (
@@ -487,6 +502,26 @@ class FiscalCorrection(models.Model):
         self.credit_note = credit_note
         self.failure_code = ""
         self.last_error = ""
+
+    @transition(
+        field=state, source=[STATE_ALLOCATED, STATE_FAILED], target=STATE_MANUAL_REQUIRED, conditions=[_has_allocation]
+    )
+    def require_manual_issuance(self) -> None:
+        """The provider cannot issue this amount; staff issue it there and record it against this row."""
+        self.failure_code = ""
+        self.last_error = ""
+
+    @transition(field=state, source=STATE_MANUAL_REQUIRED, target=STATE_COMMUNICATED)
+    def record_provider_document(
+        self, credit_note: Invoice, *, communicated_at: datetime, fiscal_date: date, evidence: str
+    ) -> None:
+        """A credit note staff issued at the provider and sent themselves, dated by that sending."""
+        if not evidence.strip():
+            raise ValidationError(_("A provider document needs a reference to the proof it was sent."))
+        self._link_note_carrying_allocation(credit_note)
+        self.communicated_at = communicated_at
+        self.fiscal_date = fiscal_date
+        self.communication_evidence = evidence.strip()[:500]
 
     @transition(field=state, source=STATE_ISSUED, target=STATE_COMMUNICATED)
     def record_communicated(self, *, at: datetime, fiscal_date: date) -> None:

@@ -23,6 +23,7 @@ from django.utils import timezone
 from apps.billing.invoice_models import ISSUER_SMARTBILL, Currency, Invoice
 from apps.billing.issuers.service import _get_or_create_credit_note
 from apps.billing.pdf_generators import RomanianInvoicePDFGenerator
+from tests.billing import _fiscal_correction_helpers as h
 from tests.factories.billing_factories import CustomerFactory, InvoiceLineFactory
 from tests.helpers.fsm_helpers import force_status
 
@@ -63,7 +64,7 @@ class CreditNoteTotalsBlockTests(TestCase):
         return invoice
 
     def _issued_reversal(self, original: Invoice) -> Invoice:
-        credit_note = _get_or_create_credit_note(original)
+        credit_note = _get_or_create_credit_note(original, h.correction_of(original))
         Invoice.objects.filter(pk=credit_note.pk).update(number="CN-000800", issued_at=timezone.now())
         return Invoice.objects.get(pk=credit_note.pk)
 

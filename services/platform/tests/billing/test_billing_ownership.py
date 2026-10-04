@@ -149,6 +149,13 @@ class BillingScheduleContractTestCase(TestCase):
             func="apps.billing.metering_tasks.sync_pending_to_stripe",
             schedule_type=Schedule.HOURLY,
         )
+        # Its function no longer exists; left registered, the cluster would fail on it every hour.
+        Schedule.objects.create(
+            name="billing-owed-reversals",
+            func="apps.billing.issuers.tasks.sweep_owed_reversals",
+            schedule_type=Schedule.CRON,
+            cron="25 * * * *",
+        )
 
         result = billing_tasks.setup_billing_scheduled_tasks()
 
@@ -164,20 +171,20 @@ class BillingScheduleContractTestCase(TestCase):
         refund_schedule = Schedule.objects.get(name="billing-refund-reconciliation")
         self.assertEqual(refund_schedule.func, "apps.billing.tasks.reconcile_stripe_refunds")
         self.assertEqual(refund_schedule.cron, "45 2 * * *")
-        # Three recovery sweeps. Two catch work whose on_commit enqueue was lost; the
-        # third catches a claim whose worker died holding it, which no enqueue would
-        # recover because nothing selects a `claimed` row. Unregistered, none of them
-        # runs and the loss each exists to catch becomes permanent.
+        # Two provider recovery sweeps. One catches work whose on_commit enqueue was lost;
+        # the other catches a claim whose worker died holding it, which no enqueue would
+        # recover because nothing selects a `claimed` row. Unregistered, neither runs and
+        # the loss each exists to catch becomes permanent.
         issuance_sweep = Schedule.objects.get(name="billing-issuance-sweep")
         self.assertEqual(issuance_sweep.func, "apps.billing.issuers.tasks.sweep_pending_issuances")
         abandoned_sweep = Schedule.objects.get(name="billing-abandoned-claims")
         self.assertEqual(abandoned_sweep.func, "apps.billing.issuers.tasks.sweep_abandoned_claims")
         self.assertEqual(issuance_sweep.cron, "*/10 * * * *")
-        reversal_sweep = Schedule.objects.get(name="billing-owed-reversals")
-        self.assertEqual(reversal_sweep.func, "apps.billing.issuers.tasks.sweep_owed_reversals")
-        self.assertEqual(reversal_sweep.cron, "25 * * * *")
+        # A provider reversal is resumed by its fiscal correction now, so the sweep keyed by original
+        # invoice is retired, and removed from an installation that registered it before.
+        self.assertFalse(Schedule.objects.filter(name="billing-owed-reversals").exists())
         # A refund whose completion hook failed owes a fiscal correction nobody recorded; only this
-        # sweep records it, and links any provider storno issued before its obligation existed.
+        # sweep records it.
         correction_sweep = Schedule.objects.get(name="billing-fiscal-correction-sweep")
         self.assertEqual(correction_sweep.func, "apps.billing.fiscal_correction_service.sweep_fiscal_corrections")
         self.assertEqual(correction_sweep.cron, "40 * * * *")
@@ -199,5 +206,5 @@ class BillingScheduleContractTestCase(TestCase):
         self.assertEqual(recurring_reconciliation.cron, "*/10 * * * *")
         # Counted, not just spot-checked: a schedule that is defined but never
         # registered is dead code that looks alive. Includes durable currency-notice repair.
-        self.assertEqual(len(result), 14)
+        self.assertEqual(len(result), 13)
         register_usage.assert_called_once_with()

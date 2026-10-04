@@ -32,7 +32,6 @@ from apps.billing.invoice_models import (
     SEQUENCE_SCOPE_DEFAULT,
     Invoice,
 )
-from apps.billing.refund_models import net_collected_cents_for_invoice, refunds_for_invoice
 from apps.common.types import Err, Ok, Result
 
 from .base import Ambiguous, Issued, PreparedDocument, Rejected
@@ -41,6 +40,8 @@ from .policy import resolve_issuer
 from .smartbill.client import RateGateWait
 
 if TYPE_CHECKING:
+    from apps.billing.fiscal_correction_models import FiscalCorrection
+
     from .base import IssueOutcome
 
 logger = logging.getLogger(__name__)
@@ -268,24 +269,54 @@ def _finalize(
 
 
 def _settle_correction_with(document: Invoice) -> None:
-    """Link a just-numbered storno to the fiscal correction obligation it settles.
+    """Settle the fiscal correction a just-numbered storno was issued for.
 
     In its own savepoint, with the exception caught outside it: the provider has already issued
-    this document, and losing PRAHO's record of THAT would be far worse than an obligation left
-    pending for the recovery sweep to link.
+    this document, and losing PRAHO's record of THAT would be far worse than a correction left
+    allocated, which its next worker run settles from this issuance without calling the provider.
     """
     if document.document_kind != DOCUMENT_KIND_CREDIT_NOTE:
         return
-    from apps.billing import fiscal_correction_service  # noqa: PLC0415  # Resolved per call; keeps imports acyclic
-
     try:
         with transaction.atomic():
-            fiscal_correction_service.attach_provider_credit_note(document)
+            _record_issued_for(document)
     except Exception:
         logger.exception(
-            f"🔥 [Issuance] Credit note {document.pk} is issued but could not be linked to its fiscal "
-            f"correction; the recovery sweep will retry."
+            f"🔥 [Issuance] Credit note {document.pk} is issued but its fiscal correction could not be "
+            f"settled; the correction's next run settles it from this issuance."
         )
+
+
+def _record_issued_for(document: Invoice) -> FiscalCorrection | None:
+    """Move the correction this provider storno belongs to onto it. Idempotent."""
+    from apps.billing.fiscal_correction_models import (  # noqa: PLC0415  # Keeps the model graph acyclic
+        STATE_ALLOCATED,
+        STATE_FAILED,
+        FiscalCorrection,
+    )
+
+    correction_id = (
+        ProviderIssuance.objects.filter(invoice=document).values_list("fiscal_correction_id", flat=True).first()
+    )
+    if correction_id is None:
+        logger.error(
+            f"🔥 [Issuance] Credit note {document.pk} answers to no fiscal correction; "
+            f"it cannot settle one until an operator links it."
+        )
+        return None
+    correction = FiscalCorrection.objects.select_for_update().get(pk=correction_id)
+    if correction.credit_note_id == document.pk:
+        return correction
+    if correction.state not in {STATE_ALLOCATED, STATE_FAILED}:
+        logger.error(
+            f"🔥 [Issuance] Credit note {document.number} was issued for correction {correction.pk}, which is "
+            f"{correction.state}; it is not linked until an operator decides."
+        )
+        return None
+    correction.record_issued(document)
+    correction.save()
+    logger.info(f"✅ [Issuance] Correction {correction.pk} settled by provider credit note {document.number}")
+    return correction
 
 
 def reconcile_confirmed_issued(
@@ -349,54 +380,63 @@ def reconcile_confirmed_issued(
     return Ok(legal_number)
 
 
-def issue_storno_for_invoice(invoice_id: int) -> Result[str, str]:
-    """Reverse a provider-issued invoice, creating the credit note it produces.
+def issue_storno_for_correction(  # noqa: PLR0911  # One return per distinct refusal or outcome
+    correction_id: Any,
+) -> Result[str, str]:
+    """Reverse a provider-issued invoice for one fiscal correction, creating its credit note.
 
-    `/invoice/reverse` carries no amounts: it reverses the whole document or
-    nothing. A partial refund therefore has no representation at the provider and
-    is refused here rather than approximated by reversing too much - the difference
-    between a customer being credited what they are owed and being credited the
-    entire invoice.
+    `/invoice/reverse` carries no amounts: it reverses the whole document or nothing. So it serves
+    exactly one correction, the one crediting the whole original before anything else credited it
+    (`whole_document_storno_refusal`); every other correction of a provider invoice is issued by
+    staff at the provider. Keyed by the correction, never by the original: the correction says
+    which refund this document answers for, and its issuance is unique to it.
 
-    The reversal is a real document with its own legal number, so it becomes its
-    own Invoice row (negative, `document_kind=credit_note`) rather than a flag on
-    the original. Reporting that sums invoice rows then sees the correction without
-    needing to know this integration exists.
+    The reversal is a real document with its own legal number, so it becomes its own Invoice row
+    (negative, `document_kind=credit_note`) rather than a flag on the original.
 
-    Eligibility, the credit-note row and the claim are all decided under a row lock
-    on the original, so two workers cannot each conclude they are the first.
-    Crucially, the existence of a credit-note row is *not* the "already reversed"
-    test: a crash between creating that row and hearing back from the provider
-    would otherwise wedge the invoice permanently. The authority is the claim's
-    durable state, which resumes a `pending`/`failed` attempt and refuses only one
-    that is live, already issued, or ambiguous.
+    Eligibility, the credit-note row and the claim are decided under a row lock on the original.
+    The existence of a credit-note row is *not* the "already reversed" test: a crash between
+    creating that row and hearing back from the provider would otherwise wedge the correction
+    permanently. The authority is the claim's durable state, which resumes a `pending`/`failed`
+    attempt and refuses one that is live, already issued, or ambiguous.
     """
+    from apps.billing.fiscal_correction_models import FiscalCorrection  # noqa: PLC0415  # Keeps imports acyclic
+
     _refuse_if_inside_transaction()
 
-    try:
-        original = Invoice.objects.select_related("currency", "customer").get(pk=invoice_id)
-    except Invoice.DoesNotExist:
-        return Err(f"Invoice {invoice_id} does not exist")
+    correction = FiscalCorrection.objects.filter(pk=correction_id).first()
+    if correction is None or correction.original_id is None:
+        return Err(f"Fiscal correction {correction_id} has no original to reverse")
+    original = Invoice.objects.select_related("currency", "customer").get(pk=correction.original_id)
 
-    # Provenance and document kind are frozen at creation, so these cannot change
-    # under us and are worth answering before doing any work. They also produce the
-    # refusal that actually tells an operator what to do instead, which a generic
-    # "this issuer cannot reverse" from the gateway does not.
+    # Provenance and document kind are frozen at creation, so these cannot change under us and
+    # are worth answering before doing any work.
     immutable_refusal = _ineligible_by_provenance(original)
     if immutable_refusal is not None:
         return Err(immutable_refusal)
 
+    # The provider already issued this correction's document and only the settling failed: settle
+    # it from that record. Calling the provider again would be refused, or worse, reverse twice.
+    issued = ProviderIssuance.objects.filter(
+        fiscal_correction=correction, state=IssuanceState.ISSUED.value, invoice__number__isnull=False
+    ).first()
+    if issued is not None:
+        with transaction.atomic():
+            note = Invoice.objects.select_for_update().get(pk=issued.invoice_id)
+            _record_issued_for(note)
+        return Ok(str(note.number))
+
     issuer = resolve_issuer(original)
 
-    # Mapping reads settings and the frozen snapshot. It makes no network call and
-    # writes nothing, so it stays outside the lock rather than widening it.
+    # Mapping reads settings and the frozen snapshot. It makes no network call and writes
+    # nothing, so it stays outside the lock rather than widening it.
     prepared_result = issuer.prepare_storno(original)
     if isinstance(prepared_result, Err):
         return Err("; ".join(prepared_result.error))
     prepared = prepared_result.unwrap()
 
     attempt_id = uuid.uuid4()
-    opened = _open_storno_attempt(original, issuer.provider, attempt_id, prepared)
+    opened = _open_storno_attempt(correction.pk, original, issuer.provider, attempt_id, prepared)
     if isinstance(opened, Err):
         return Err(opened.error)
     credit_note_pk, issuance_id = opened.unwrap()
@@ -411,16 +451,26 @@ def issue_storno_for_invoice(invoice_id: int) -> Result[str, str]:
 
 
 def _open_storno_attempt(
+    correction_id: Any,
     original: Invoice,
     provider: str,
     attempt_id: uuid.UUID,
     prepared: PreparedDocument,
 ) -> Result[tuple[int, uuid.UUID], str]:
-    """Settle eligibility, materialise the credit note and claim it under one lock."""
+    """Settle eligibility, materialise the credit note and claim it under one lock.
+
+    The original is locked, then the issuance (inside `_claim`), the order `_finalize` and
+    `adopt_provider_document` use. The correction is read without a lock: its allocation is
+    written once and never changes, and `_finalize` locks it after the issuance, so locking it
+    here, ahead of the issuance, could deadlock against an attempt being recorded.
+    """
+    from apps.billing.fiscal_correction_models import FiscalCorrection  # noqa: PLC0415  # Keeps imports acyclic
+
     with transaction.atomic():
         locked = Invoice.objects.select_for_update().get(pk=original.pk)
+        correction = FiscalCorrection.objects.get(pk=correction_id)
 
-        refusal = _storno_refusal_reason(locked)
+        refusal = whole_document_storno_refusal(correction, locked)
         if refusal is not None:
             # Nothing is written above this line today, but returning Err from inside
             # an atomic block is how this codebase has leaked partial writes before.
@@ -429,17 +479,17 @@ def _open_storno_attempt(
             transaction.set_rollback(True)
             return Err(refusal)
 
-        credit_note = _get_or_create_credit_note(locked)
+        credit_note = _get_or_create_credit_note(locked, correction)
 
         # Durable state, not row existence, is what proves a reversal happened. The
         # distinction is the whole point: a row can exist because an earlier attempt
-        # died before it ever reached the provider, and that invoice must stay
+        # died before it ever reached the provider, and that correction must stay
         # reversible. `_claim` would refuse this case too, but in the vocabulary of
         # issuing a document rather than of reversing one.
         issued_already = ProviderIssuance.objects.filter(invoice=credit_note, state=IssuanceState.ISSUED.value).exists()
         if issued_already:
             transaction.set_rollback(True)
-            return Err(f"This invoice has already been reversed by credit note {credit_note.display_number}")
+            return Err(f"This correction has already been reversed by credit note {credit_note.display_number}")
 
         claim_result = _claim(credit_note, provider, attempt_id, prepared)
         if isinstance(claim_result, Err):
@@ -466,102 +516,53 @@ def _ineligible_by_provenance(original: Invoice) -> str | None:
         # attempt to be told so is worse than knowing.
         return "A credit note cannot itself be reversed"
     if original.issuer_provider == ISSUER_BUILTIN:
-        # NOT "corrected through the e-Factura credit-note path" - that path does not
-        # exist. `_get_or_create_credit_note` below is the only thing in the codebase that
-        # mints a credit note, and this guard is what keeps built-in invoices away from it.
-        # A built-in refund today produces no correcting document at all; the refusal is
-        # accurate about the provider, and must not imply a correction happens elsewhere.
+        # A built-in invoice is corrected by its own built-in storno (ADR-0053), issued by the
+        # fiscal-correction worker. There is no provider document to reverse.
         return "Built-in invoices are not reversed at a provider; no provider document exists to correct"
     return None
 
 
-def _storno_refusal_reason(original: Invoice) -> str | None:
-    """Why this invoice must not be reversed at the provider, or None.
+def whole_document_storno_refusal(correction: FiscalCorrection, original: Invoice) -> str | None:
+    """Why `/invoice/reverse` must not issue this correction, or None when it is exactly right.
 
-    Re-checks the frozen refusals under the lock as well. They cannot have changed,
-    but this is the function the lock exists to make authoritative, and a reader
-    should not have to know that two callers split the question between them.
+    It reverses the whole document and carries no amount, so it is right for one correction only:
+    the one whose frozen allocation is the whole original (base, VAT and discount) while nothing
+    else has credited it. A partial, or the remainder after one, would be credited the entire
+    invoice; those are issued by staff at the provider instead. Decided by amount, from the
+    allocation, never by the invoice's refund status or by counting refunds: the allocation already
+    says what the refund caused, overpayments and tender legs included.
+
+    Called by the worker under the correction's lock, and again under the original's lock right
+    before anything is sent.
     """
+    from apps.billing.fiscal_correction_models import FiscalCorrection  # noqa: PLC0415  # Keeps imports acyclic
+
     frozen = _ineligible_by_provenance(original)
     if frozen is not None:
         return frozen
-    if original.status != "refunded":
-        # The decisive constraint. `/invoice/reverse` takes no amounts, so there is
-        # no way to express "reverse 40 of 100". Reversing the whole document for a
-        # partial refund would credit the customer money they were not refunded.
+    if correction.original_id != original.pk or not correction.is_allocated:
+        return "The correction has no allocation against this invoice yet"
+    whole = (-original.subtotal_cents, -original.tax_cents, -original.discount_cents)
+    if (correction.base_cents, correction.tax_cents, correction.discount_cents) != whole:
         return (
-            f"Only a fully refunded invoice can be reversed at the provider "
-            f"(this one is {original.status!r}). A partial refund has no representation "
-            f"in SmartBill's storno, which reverses the whole document or nothing."
+            f"The correction credits {abs(correction.total_cents or 0)} of the invoice's {original.total_cents} "
+            f"cents. A provider reversal carries no amount and would credit the whole document."
         )
-    return _split_correction_refusal(original)
-
-
-def _split_correction_refusal(original: Invoice) -> str | None:
-    """Refuse a whole-document reversal unless one settled refund accounts for it.
-
-    Reaching `refunded` does not imply a single refund got it there. An invoice
-    refunded in two instalments may already have had the first corrected by hand in
-    the provider's own interface, and a reversal - which carries no amount and
-    credits the entire document - would then credit the customer twice.
-
-    Only *settled* refunds are counted. Counting attempts would let a failed or
-    cancelled refund wedge the invoice forever, which is the same defect that
-    testing row existence caused above.
-    """
-    composition = _refund_composition_refusal(original)
-    if composition is not None:
-        return composition
-    # A whole-document storno credits the entire invoice, so it is only right once nothing is
-    # still held against it. Refunds adding up to the total is not that: returning an
-    # overpayment leaves the sale fully paid.
-    net_collected = net_collected_cents_for_invoice(original)
-    if net_collected != 0:
+    if (
+        FiscalCorrection.objects.filter(original=original, allocated_at__isnull=False)
+        .exclude(pk=correction.pk)
+        .exists()
+    ):
         return (
-            f"{net_collected} cents are still collected against this invoice after its refunds. "
-            f"A provider reversal credits the whole document, so it is refused until nothing remains."
+            "Another correction already credits part of this invoice; a whole-document reversal would credit it twice"
         )
-    return None
-
-
-def _refund_composition_refusal(original: Invoice) -> str | None:
-    """Refuse unless one refund, or one tender command, accounts for the whole invoice."""
-    # The shared resolution rule, not `original.refunds`: an order refund names this invoice only
-    # through its order, so reading the direct link alone counted a full order-path refund as
-    # no refund at all and refused the reversal the customer was owed.
-    settled = list(refunds_for_invoice(original).filter(status="completed"))
-    expected_cents = abs(original.total_cents)
-
-    # One full customer instruction can have several payment legs. Those legs
-    # are one correction; independent earlier partial refunds remain excluded.
-    from apps.promotions.models import TenderRefundCommand  # noqa: PLC0415
-
-    command = TenderRefundCommand.objects.filter(
-        invoice=original, status="completed", amount_cents=expected_cents
-    ).first()
-    if command is not None and settled:
-        completed_ids = set(command.legs.filter(status="completed").values_list("refund_id", flat=True))
-        if (
-            completed_ids == {refund.pk for refund in settled}
-            and sum(refund.amount_cents for refund in settled) == expected_cents
-        ):
-            return None
-
-    if len(settled) != 1:
-        return (
-            f"This invoice reached 'refunded' through {len(settled)} settled refunds. "
-            f"A provider reversal credits the whole document in one step, which "
-            f"over-credits the customer if any part of it was already corrected by "
-            f"hand. Issue this correction in the provider's own interface."
-        )
-
-    only = settled[0]
-    if only.amount_cents != expected_cents:
-        return (
-            f"The settled refund is {only.amount_cents} cents against an invoice total "
-            f"of {expected_cents} cents. A provider reversal carries no amount and "
-            f"would credit the whole document."
-        )
+    other_notes = (
+        Invoice.objects.filter(reverses_invoice=original, number__isnull=False)
+        .exclude(provider_issuance__fiscal_correction=correction)
+        .exists()
+    )
+    if other_notes:
+        return "This invoice already carries a credit note; a whole-document reversal would credit it twice"
     return None
 
 
@@ -621,14 +622,16 @@ def _repair_unissued_reversal(original: Invoice, credit_note: Invoice) -> None:
         setattr(credit_note, field, value)
 
 
-def _get_or_create_credit_note(original: Invoice) -> Invoice:
-    """The reversal document for `original`, created once and reused thereafter.
+def _get_or_create_credit_note(original: Invoice, correction: FiscalCorrection) -> Invoice:
+    """The reversal document `correction` issues, created once and reused thereafter.
 
-    Called under `select_for_update` on the original and backed by a uniqueness
-    constraint on `reverses_invoice`, so concurrent callers converge on a single
-    credit note instead of each minting one for the same invoice.
+    Found through the correction's issuance, never through the original: an original may carry
+    several credit notes, and which one a retry resumes is the correction's to say. Called under
+    `select_for_update` on the original and backed by the issuance's unique correction link, so
+    concurrent callers converge on a single credit note instead of each minting one.
     """
-    existing = Invoice.objects.filter(reverses_invoice=original).first()
+    issuance = ProviderIssuance.objects.select_related("invoice").filter(fiscal_correction=correction).first()
+    existing = issuance.invoice if issuance is not None else None
     if existing is not None:
         # Resuming has to repair what the interrupted attempt never wrote, not just
         # reuse the row. An earlier implementation created the credit note without
@@ -682,7 +685,10 @@ def _get_or_create_credit_note(original: Invoice) -> Invoice:
         bill_to_postal=original.bill_to_postal,
         bill_to_country=original.bill_to_country,
         vat_evidence=deepcopy(original.vat_evidence),
+        meta={"fiscal_correction_id": str(correction.pk)},
     )
     mirror_lines_negated(original, credit_note)
-    ProviderIssuance.objects.get_or_create(invoice=credit_note, defaults={"provider": original.issuer_provider})
+    ProviderIssuance.objects.create(
+        invoice=credit_note, provider=original.issuer_provider, fiscal_correction=correction
+    )
     return credit_note

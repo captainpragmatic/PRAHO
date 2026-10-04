@@ -136,3 +136,59 @@ def order_for(invoice: Invoice | None, owner: Customer | None = None, **fields: 
     }
     defaults.update(fields)
     return Order.objects.create(**defaults)
+
+
+def allocated(correction: Any, *, base_cents: int, tax_cents: int, discount_cents: int = 0) -> Any:
+    """Freeze an allocation of these magnitudes on `correction`, as the worker's allocation step does."""
+    from django.utils import timezone  # noqa: PLC0415
+
+    correction.allocate(base_cents=base_cents, tax_cents=tax_cents, discount_cents=discount_cents, at=timezone.now())
+    correction.save()
+    return correction
+
+
+def whole_correction(refund: Refund) -> Any:
+    """The correction a completed refund records, allocated the whole original, as a full refund is."""
+    from apps.billing.fiscal_correction_service import record_obligation  # noqa: PLC0415
+
+    correction = record_obligation(refund)
+    assert correction is not None and correction.original is not None, "the refund owes no correction"
+    original = correction.original
+    return allocated(
+        correction,
+        base_cents=original.subtotal_cents,
+        tax_cents=original.tax_cents,
+        discount_cents=original.discount_cents,
+    )
+
+
+def run_queued_now(func_path: str, *args: Any, **kwargs: Any) -> str:
+    """Django-Q's `async_task`, run synchronously: patch it in to run a queued worker right away."""
+    from importlib import import_module  # noqa: PLC0415
+
+    module, name = func_path.rsplit(".", 1)
+    getattr(import_module(module), name)(*args)
+    return "inline"
+
+
+def correction_of(original: Invoice, *, whole: bool = False) -> Any:
+    """The fiscal correction a provider storno of `original` is issued for, created once per original.
+
+    Recorded straight onto a completed refund, without the fiscal-document check the completion hook
+    applies, so tests of the reversal document itself need not issue and pay the original first.
+    `whole` allocates it the whole original, which is what makes a whole-document storno eligible.
+    """
+    from apps.billing.fiscal_correction_models import FiscalCorrection  # noqa: PLC0415
+
+    correction = FiscalCorrection.objects.filter(original=original).first()
+    if correction is None:
+        refund = pending_refund(invoice=original, status="completed", amount_cents=abs(original.total_cents))
+        correction = FiscalCorrection.objects.create(original=original, source_refund=refund)
+    if whole and not correction.is_allocated:
+        allocated(
+            correction,
+            base_cents=original.subtotal_cents,
+            tax_cents=original.tax_cents,
+            discount_cents=original.discount_cents,
+        )
+    return correction

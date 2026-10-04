@@ -20338,3 +20338,108 @@ msgstr "Câmpurile %(fields)s ale unei corecții fiscale nu mai pot fi modificat
 
 msgid "A fiscal correction's source, original, credit note, allocation and communication are fixed."
 msgstr "Sursa, factura originală, factura storno, alocarea și comunicarea unei corecții fiscale sunt fixe."
+
+msgid "Awaiting a credit note issued by staff at the provider"
+msgstr "În așteptarea unei facturi storno emise de personal la furnizor"
+
+msgid "A provider document needs a reference to the proof it was sent."
+msgstr "Un document al furnizorului are nevoie de o referință la dovada trimiterii."
+
+msgid "This correction is no longer waiting for a provider document."
+msgstr "Această corecție nu mai așteaptă un document al furnizorului."
+
+msgid "Another document already has this number."
+msgstr "Un alt document are deja acest număr."
+
+msgid "The credit note must be in the invoice's currency, %(code)s."
+msgstr "Factura storno trebuie să fie în moneda facturii, %(code)s."
+
+msgid "The taxable base must be exactly the amount this correction credits."
+msgstr "Baza impozabilă trebuie să fie exact suma creditată de această corecție."
+
+msgid "The VAT must be exactly the amount this correction credits."
+msgstr "TVA-ul trebuie să fie exact suma creditată de această corecție."
+
+msgid "A storno cannot be dated before the invoice it corrects."
+msgstr "O factură storno nu poate avea o dată anterioară facturii pe care o corectează."
+
+msgid "The issue date cannot be in the future."
+msgstr "Data emiterii nu poate fi în viitor."
+
+msgid "The credit note cannot have been sent before it was issued."
+msgstr "Factura storno nu poate fi trimisă înainte de a fi emisă."
+
+msgid "The communication date cannot be in the future."
+msgstr "Data comunicării nu poate fi în viitor."
+
+msgid "Say where the proof of sending is kept."
+msgstr "Indicați unde se păstrează dovada trimiterii."
+
+msgid "Issue date"
+msgstr "Data emiterii"
+
+msgid "The date printed on the provider's credit note."
+msgstr "Data tipărită pe factura storno a furnizorului."
+
+msgid "Communication date"
+msgstr "Data comunicării"
+
+msgid "The day the credit note was sent to the customer. It sets the D390 period."
+msgstr "Ziua în care factura storno a fost trimisă clientului. Stabilește perioada D390."
+
+msgid "The currency the credit note is in."
+msgstr "Moneda facturii storno."
+
+msgid "Taxable base"
+msgstr "Baza impozabilă"
+
+msgid "As printed on the credit note; the sign does not matter."
+msgstr "Așa cum apare pe factura storno; semnul nu contează."
+
+msgid "Evidence of sending"
+msgstr "Dovada trimiterii"
+
+msgid "Where the proof of sending is kept, such as the sent email's subject and date, or a file reference."
+msgstr "Unde se păstrează dovada trimiterii, de exemplu subiectul și data emailului trimis sau o referință la fișier."
+
+msgid "That correction is no longer waiting for a provider document."
+msgstr "Acea corecție nu mai așteaptă un document al furnizorului."
+
+msgid "Recorded provider credit note %(number)s."
+msgstr "Factura storno a furnizorului %(number)s a fost înregistrată."
+
+msgid "Credit notes to issue at the provider"
+msgstr "Facturi storno de emis la furnizor"
+
+msgid "Each refund below owes a credit note the provider's API cannot issue: it reverses only a whole invoice, once. Issue the storno in the provider's own interface for exactly the amount shown, send it to the customer, then record it here."
+msgstr "Fiecare rambursare de mai jos necesită o factură storno pe care API-ul furnizorului nu o poate emite: acesta stornează doar o factură întreagă, o singură dată. Emiteți factura storno în interfața furnizorului exact pentru suma afișată, trimiteți-o clientului, apoi înregistrați-o aici."
+
+msgid "To credit"
+msgstr "De creditat"
+
+msgid "Waiting since"
+msgstr "În așteptare din"
+
+msgid "Record the credit note"
+msgstr "Înregistrați factura storno"
+
+msgid "Record a provider credit note"
+msgstr "Înregistrați o factură storno a furnizorului"
+
+msgid "What this correction credits"
+msgstr "Ce creditează această corecție"
+
+msgid "The provider's API cannot issue this credit note. Issue a storno of the invoice below in the provider's own interface for exactly these amounts, send it to the customer, then record it here."
+msgstr "API-ul furnizorului nu poate emite această factură storno. Emiteți o factură storno pentru factura de mai jos în interfața furnizorului exact pentru aceste sume, trimiteți-o clientului, apoi înregistrați-o aici."
+
+msgid "Total credited"
+msgstr "Total creditat"
+
+msgid "The credit note you issued"
+msgstr "Factura storno pe care ați emis-o"
+
+msgid "The number becomes the credit note's legal number and the communication date places it in its D390 period. Neither can be changed afterwards, so the number is asked for twice."
+msgstr "Numărul devine numărul legal al facturii storno, iar data comunicării o încadrează în perioada D390. Niciunul nu mai poate fi modificat ulterior, de aceea numărul este cerut de două ori."
+
+msgid "Record this credit note"
+msgstr "Înregistrați această factură storno"
