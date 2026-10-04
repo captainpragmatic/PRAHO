@@ -35,6 +35,7 @@ from faker import Faker
 from apps.billing.currency_models import FXRate
 from apps.billing.fiscal_correction_models import FiscalCorrection
 from apps.billing.fiscal_correction_service import record_obligation
+from apps.billing.invoice_models import SEQUENCE_SCOPE_DEFAULT
 from apps.billing.models import Currency, Invoice, InvoiceLine, ProformaInvoice, ProformaLine, TaxRule
 from apps.billing.numbering_service import InvoiceNumberingService
 from apps.billing.payment_models import CreditLedger, Payment
@@ -2224,6 +2225,7 @@ class Command(BaseCommand):
 
             # Generate proper invoice number using sequence
             invoice.number = InvoiceNumberingService.get_next_number()
+            invoice.sequence_scope = SEQUENCE_SCOPE_DEFAULT
             invoice.save()
 
             self._create_invoice_lines(fake, invoice, i, base_amount_cents, services)

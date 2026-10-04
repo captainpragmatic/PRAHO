@@ -134,6 +134,12 @@ class Payment(ConcurrentTransitionMixin, models.Model):
     received_at = models.DateTimeField(default=timezone.now)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    succeeded_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        editable=False,
+        help_text=_("When the payment succeeded; empty on rows older than this field, read as received_at"),
+    )
     failed_at = models.DateTimeField(
         null=True,
         blank=True,
@@ -188,6 +194,13 @@ class Payment(ConcurrentTransitionMixin, models.Model):
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         """Keep every persisted failed payment anchored to one stable failure time."""
+        if self._state.adding and self.status == "succeeded" and self.succeeded_at is None:
+            # Written already succeeded (a bank transfer recorded by staff, an import): it succeeded now.
+            self.succeeded_at = timezone.now()
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None and "status" in update_fields:
+            # The time `succeed()` set travels with the status it belongs to.
+            kwargs["update_fields"] = {*update_fields, "succeeded_at"}
         if self.status == "failed":
             if self.failed_at is None:
                 self.failed_at = timezone.now()
@@ -224,7 +237,8 @@ class Payment(ConcurrentTransitionMixin, models.Model):
 
     @transition(field=status, source="pending", target="succeeded")
     def succeed(self) -> None:
-        """Mark payment as succeeded."""
+        """Mark payment as succeeded, and when: what a refund held as of its completion depends on it."""
+        self.succeeded_at = timezone.now()
 
     @transition(field=status, source="pending", target="failed")
     def fail_payment(self) -> None:

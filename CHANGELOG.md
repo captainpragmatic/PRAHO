@@ -81,6 +81,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Every completed refund now records the fiscal correction it owes, or that it owes none,
   with an hourly sweep for any it missed. A SmartBill storno is linked to the correction it
   settles. Nothing new is issued yet.
+- A refund of a built-in invoice now issues a storno credit note (ADR-0053). The amount is what
+  the refund takes off the invoice: returning an overpayment or a duplicate payment credits
+  nothing. The note is numbered from its original's series, emailed to the customer as a PDF
+  titled "FACTURĂ STORNO / CREDIT NOTE", and filed with e-Factura once ANAF has accepted the
+  original. A failed email is retried hourly. A failed filing is retried after an hour, then at
+  doubling intervals up to once every seven days. Run `setup_email_templates` once to add
+  the `credit_note_issued` email. Until the SmartBill work lands, an invoice can carry one credit
+  note, so a second refund of the same invoice waits with its amount recorded.
+- Invoice, payment and reminder emails are sent in the customer's language. They read a locale
+  setting customers never had, so every one went out in English.
 
 ### Fixed
 

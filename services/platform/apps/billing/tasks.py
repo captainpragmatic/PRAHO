@@ -2222,6 +2222,14 @@ def setup_billing_scheduled_tasks() -> dict[str, str]:
             "apps.billing.fiscal_correction_service.sweep_fiscal_corrections",
             "40 * * * *",
         ),
+        # Issues the built-in storno each recorded correction owes, and resumes every unfinished
+        # step - allocation, issuance, the customer email, the e-Factura filing - by correction id.
+        # After the recording sweep, so a correction it recovers is issued in the same hour.
+        (
+            "billing-fiscal-correction-issuance-sweep",
+            "apps.billing.fiscal_correction_worker.sweep_fiscal_correction_issuance",
+            "50 * * * *",
+        ),
         # Offset from the issuance sweep so a claim taken by one run is not judged
         # stale by the other in the same minute; the lease is 10 minutes wide.
         (

@@ -53,6 +53,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# Where a credit note stands against its original (ADR-0053). Only `ready` may be uploaded.
+GATE_READY = "ready"
+GATE_NOT_APPLICABLE = "not_applicable"
+GATE_WAITING_FOR_ORIGINAL = "waiting_for_original"
+GATE_ORIGINAL_REJECTED = "original_rejected"
+
+
 @dataclass
 class SubmissionResult:
     """Result of e-Factura submission."""
@@ -61,14 +68,16 @@ class SubmissionResult:
     document: EFacturaDocument | None = None
     error_message: str = ""
     errors: list[dict[str, Any]] = field(default_factory=list)
+    # Set when a credit note was held back by its original; one of the GATE_* values.
+    gate: str = ""
 
     @classmethod
     def ok(cls, document: EFacturaDocument) -> SubmissionResult:
         return cls(success=True, document=document)
 
     @classmethod
-    def error(cls, message: str, errors: list[dict[str, Any]] | None = None) -> SubmissionResult:
-        return cls(success=False, error_message=message, errors=errors or [])
+    def error(cls, message: str, errors: list[dict[str, Any]] | None = None, *, gate: str = "") -> SubmissionResult:
+        return cls(success=False, error_message=message, errors=errors or [], gate=gate)
 
     @property
     def document_status(self) -> str:
@@ -83,6 +92,38 @@ class SubmissionResult:
             EFacturaStatus.PROCESSING.value,
             EFacturaStatus.ACCEPTED.value,
         }
+
+
+def is_efactura_enabled() -> bool:
+    """Whether PRAHO files anything with ANAF at all: the one switch `submit_invoice` obeys."""
+    return bool(getattr(settings, "EFACTURA_ENABLED", False))
+
+
+def credit_note_submission_gate(invoice: Invoice) -> str:
+    """Whether a credit note may be filed yet: only once ANAF accepted the invoice it reverses.
+
+    A 381 refers to its original by number. Filed before the original is accepted, it corrects a
+    document ANAF may still refuse, and a refused original leaves the correction pointing at
+    nothing, so that case goes to a person rather than being filed. A note for a customer outside
+    Romania is never filed. Anything that is not a credit note passes untouched.
+    """
+    from apps.billing.invoice_models import DOCUMENT_KIND_CREDIT_NOTE  # noqa: PLC0415  # ADR-0007
+
+    # `getattr`, as the XML builder reads it: callers hand this method lightweight invoice doubles.
+    if getattr(invoice, "document_kind", None) != DOCUMENT_KIND_CREDIT_NOTE:
+        return GATE_READY
+    if normalize_country_code(invoice.bill_to_country) != "RO":
+        return GATE_NOT_APPLICABLE
+    if invoice.reverses_invoice_id is None:
+        return GATE_WAITING_FOR_ORIGINAL
+    status = (
+        EFacturaDocument.objects.filter(invoice_id=invoice.reverses_invoice_id).values_list("status", flat=True).first()
+    )
+    if status == EFacturaStatus.ACCEPTED.value:
+        return GATE_READY
+    if status == EFacturaStatus.REJECTED.value:
+        return GATE_ORIGINAL_REJECTED
+    return GATE_WAITING_FOR_ORIGINAL
 
 
 @dataclass
@@ -231,6 +272,15 @@ class EFacturaService:
         # Check if e-Factura is enabled
         if not self._is_efactura_enabled():
             return SubmissionResult.error("e-Factura is disabled in settings")
+
+        # Here rather than at any caller: the invoice-issued signal, the queued task, the retry
+        # paths and the staff action all arrive through this method, so none of them can file a
+        # credit note before ANAF accepted the invoice it reverses. Before the claim, so a held
+        # note leaves no document row behind.
+        gate = credit_note_submission_gate(invoice)
+        if gate != GATE_READY:
+            logger.info(f"⏭️ [e-Factura] Holding credit note {invoice.display_number}: {gate}")
+            return SubmissionResult.error(f"Credit note held: {gate}", gate=gate)
 
         # Check if invoice requires e-Factura
         if not self._requires_efactura(invoice):
@@ -677,7 +727,7 @@ class EFacturaService:
 
     def _is_efactura_enabled(self) -> bool:
         """Check if e-Factura is enabled in settings."""
-        return getattr(settings, "EFACTURA_ENABLED", False)
+        return is_efactura_enabled()
 
     def _is_b2c(self, invoice: Invoice) -> bool:
         """Whether this invoice routes to ANAF's B2C (/uploadb2c) endpoint.

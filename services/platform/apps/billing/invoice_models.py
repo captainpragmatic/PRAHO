@@ -99,6 +99,27 @@ class InvoiceSequence(models.Model):
         return self.scope.startswith("archived:")
 
 
+# The numbering families PRAHO allocates legal numbers from. `default` is the invoice series
+# (rotated by `rotate_invoice_series`, which archives the old prefix under `archived:<prefix>` and
+# keeps this scope); `subscription` is its own family. A document records the family it was numbered
+# from, so its corrections can be numbered from the same one.
+SEQUENCE_SCOPE_DEFAULT = "default"
+SEQUENCE_SCOPE_SUBSCRIPTION = "subscription"
+SEQUENCE_FAMILIES: frozenset[str] = frozenset({SEQUENCE_SCOPE_DEFAULT, SEQUENCE_SCOPE_SUBSCRIPTION})
+
+
+def sequence_family_of(scope: str) -> str:
+    """The live family a recorded scope belongs to; an archived series answers to `default`.
+
+    Only known families are returned. `InvoiceNumberingService` creates a sequence for any scope
+    it is handed, so an unrecognised value must never reach it; and a scope is never inferred from
+    a number's prefix, which would route a document onto another family's counter.
+    """
+    if scope in SEQUENCE_FAMILIES:
+        return scope
+    return SEQUENCE_SCOPE_DEFAULT
+
+
 # ===============================================================================
 # DOCUMENT PROVENANCE
 # ===============================================================================
@@ -165,6 +186,12 @@ class Invoice(models.Model):
         help_text=_("Legal number. None until issued; assigned by the issuing provider."),
     )
     status = FSMField(max_length=20, choices=STATUS_CHOICES, default="draft", protected=True)
+    sequence_scope = models.CharField(
+        max_length=50,
+        blank=True,
+        default="",
+        help_text=_("The local numbering family the legal number came from; empty for provider-numbered documents"),
+    )
 
     # Provenance: stamped at creation, immutable once locked. Nothing renders or
     # reconciles by reading a global "current provider" setting.
@@ -372,6 +399,7 @@ class Invoice(models.Model):
     _FISCAL_SNAPSHOT_FIELDS: ClassVar[frozenset[str]] = frozenset(
         {
             "number",
+            "sequence_scope",
             "issuer_provider",
             "document_kind",
             "reverses_invoice_id",
@@ -392,6 +420,7 @@ class Invoice(models.Model):
     _ISSUE_TRANSITION_FIELDS: ClassVar[frozenset[str]] = frozenset(
         {
             "number",
+            "sequence_scope",
             "issued_at",
             "locked_at",
             "tax_point_date",

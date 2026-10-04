@@ -31,6 +31,24 @@ NAMESPACES = {
     "cn": "urn:oasis:names:specification:ubl:schema:xsd:CreditNote-2",
 }
 
+# Allowed rounding tolerance for the multiply-based rule BR-CO-14 (tax = base * rate).
+BR_CO_14_TOLERANCE = Decimal("0.01")
+
+
+def br_co_14_expected_tax(taxable: Decimal, percent: Decimal) -> Decimal:
+    """The standard-rate VAT BR-CO-14 expects for a breakdown, in major units."""
+    return (taxable * percent / Decimal("100")).quantize(Decimal("0.01"), ROUND_HALF_UP)
+
+
+def br_co_14_holds(taxable: Decimal, tax: Decimal, percent: Decimal) -> bool:
+    """Whether a standard-rate breakdown's VAT is within BR-CO-14's tolerance of base x rate.
+
+    The one statement of the rule: the validator applies it to every S breakdown, and the credit
+    note allocation applies it to an amount before it is ever issued, so a note PRAHO numbers is
+    one this validator would accept.
+    """
+    return abs(tax - br_co_14_expected_tax(taxable, percent)) <= BR_CO_14_TOLERANCE
+
 
 @dataclass
 class ValidationError:
@@ -179,7 +197,7 @@ class CIUSROValidator:
     # BR-O-05/06/07 require the line and allowance rate elements to be ABSENT, not 0.
     _ZERO_RATE_CATEGORIES: ClassVar[set[str]] = {"Z", "E", "AE", "K", "G"}
     # Allowed rounding tolerance for the multiply-based rule BR-CO-14 (tax = base * rate).
-    _ROUNDING_TOLERANCE: ClassVar[Decimal] = Decimal("0.01")
+    _ROUNDING_TOLERANCE: ClassVar[Decimal] = BR_CO_14_TOLERANCE
     _MAX_ACCOUNTING_AMOUNT_DECIMALS: ClassVar[int] = 2
 
     def __init__(self) -> None:
@@ -795,8 +813,8 @@ class CIUSROValidator:
 
             # BR-CO-14 / BR-S-08: standard-rate tax == taxable * rate (within 0.01 rounding)
             if cat_id == "S" and taxable is not None and tax is not None and percent is not None:
-                expected = (taxable * percent / Decimal("100")).quantize(Decimal("0.01"), ROUND_HALF_UP)
-                if abs(tax - expected) > self._ROUNDING_TOLERANCE:
+                expected = br_co_14_expected_tax(taxable, percent)
+                if not br_co_14_holds(taxable, tax, percent):
                     result.add_error(
                         "BR-CO-14",
                         f"Standard-rate TaxAmount {tax} != taxable {taxable} * {percent}% (expected {expected})",

@@ -7,6 +7,7 @@ An empty snapshot means unknown, including for historical and manual documents.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any
@@ -26,6 +27,19 @@ EVIDENCE_VERSION = 2
 SUPPORTED_EVIDENCE_VERSIONS = frozenset({1, 2})
 # Snapshots from this version on were written while the consultation-reference policy was enforceable.
 CONSULTATION_REFERENCE_EVIDENCE_VERSION = 2
+# A built-in credit note's evidence (ADR-0053): its original's decision, written under the
+# original's version (`original_version`), with the note's own signed amounts. Only ever valid on
+# a credit note, whose amounts are <= 0.
+CREDIT_NOTE_EVIDENCE_VERSION = 3
+# The decision fields a note restates from its original, unchanged.
+_RESTATED_DECISION_FIELDS = (
+    "scenario",
+    "category",
+    "country_code",
+    "vat_number",
+    "is_business",
+    "vat_rate_percent",
+)
 
 
 class TaxEvidenceError(ValueError):
@@ -112,19 +126,92 @@ class VATDecision:
     total_cents: int
 
 
-def _validate_snapshot_fields(data: dict[str, Any]) -> None:
-    """Validate the primitive fields before decoding the decision."""
+def _validate_timestamp(data: dict[str, Any], field: str) -> None:
+    if not isinstance(data[field], str):
+        raise ValueError(f"Invalid {field}")
+    timestamp = parse_datetime(data[field])
+    if timestamp is None or timestamp.utcoffset() is None:
+        raise ValueError(f"Missing {field} with timezone")
+
+
+def _validate_snapshot_fields(data: dict[str, Any], *, credit: bool = False) -> None:
+    """Validate the primitive fields before decoding the decision.
+
+    A credit (version 3) carries amounts <= 0; every other snapshot carries amounts >= 0.
+    """
     for field in ("country_code", "vat_number", "calculated_at", "vat_rate_percent", "category"):
         if not isinstance(data[field], str):
             raise ValueError(f"Invalid {field}")
-    timestamp = parse_datetime(data["calculated_at"])
-    if timestamp is None or timestamp.utcoffset() is None:
-        raise ValueError("Missing calculation timestamp with timezone")
+    _validate_timestamp(data, "calculated_at")
     if type(data["is_business"]) is not bool:
         raise ValueError("Missing business decision")
     for field in ("subtotal_cents", "tax_cents", "total_cents"):
-        if type(data[field]) is not int or data[field] < 0:
+        if type(data[field]) is not int or (data[field] > 0 if credit else data[field] < 0):
             raise ValueError(f"Invalid {field}")
+
+
+def _validate_credit_note_snapshot(document: Invoice | ProformaInvoice, data: dict[str, Any]) -> None:
+    """Version 3 holds only on a credit note, and only for that note's own amounts."""
+    from apps.billing.invoice_models import DOCUMENT_KIND_CREDIT_NOTE  # noqa: PLC0415  # Avoid model import cycle.
+
+    if getattr(document, "document_kind", None) != DOCUMENT_KIND_CREDIT_NOTE:
+        raise ValueError("Credit-note evidence on a document that is not a credit note")
+    if data["document_kind"] != DOCUMENT_KIND_CREDIT_NOTE:
+        raise ValueError("Credit-note evidence that does not say it is one")
+    if type(data["original_version"]) is not int or data["original_version"] not in SUPPORTED_EVIDENCE_VERSIONS:
+        raise ValueError("Unknown original evidence version")
+    if not isinstance(data["reverses_number"], str) or not data["reverses_number"].strip():
+        raise ValueError("Missing reversed document number")
+    _validate_timestamp(data, "reverses_calculated_at")
+    stated = (data["subtotal_cents"], data["tax_cents"], data["total_cents"])
+    if stated != (document.subtotal_cents, document.tax_cents, document.total_cents):
+        raise ValueError("Credit-note evidence amounts disagree with the credit note")
+
+
+def evidence_rules_version(data: dict[str, Any]) -> int:
+    """The version whose rules judge this snapshot's proof.
+
+    A credit note's proof is its original's, so it is judged as its original was: a version 3
+    snapshot answers with the original's version, every other one with its own.
+    """
+    version = data.get("version", 0)
+    if version == CREDIT_NOTE_EVIDENCE_VERSION:
+        return int(data.get("original_version", 0))
+    return int(version) if type(version) is int else 0
+
+
+def capture_credit_note_evidence(
+    original: Invoice, *, subtotal_cents: int, tax_cents: int, total_cents: int
+) -> dict[str, Any]:
+    """The version 3 snapshot for a credit note of `original`, written before the note is issued.
+
+    The decision, identity and VIES proof are the original's, unchanged: a correction restates the
+    supply it corrects rather than re-deciding it. An original with no recorded decision (a
+    historical or manual document) gives a note with none either, which reads as unknown.
+    """
+    from django.utils import timezone  # noqa: PLC0415
+
+    from apps.billing.invoice_models import DOCUMENT_KIND_CREDIT_NOTE  # noqa: PLC0415  # Avoid model import cycle.
+
+    if read_vat_evidence(original) is None:
+        return {}
+    source = original.vat_evidence
+    evidence: dict[str, Any] = {
+        "version": CREDIT_NOTE_EVIDENCE_VERSION,
+        "document_kind": DOCUMENT_KIND_CREDIT_NOTE,
+        "original_version": source["version"],
+        "reverses_number": original.number or "",
+        "reverses_calculated_at": source["calculated_at"],
+        **{field: source[field] for field in _RESTATED_DECISION_FIELDS},
+        "subtotal_cents": subtotal_cents,
+        "tax_cents": tax_cents,
+        "total_cents": total_cents,
+        "calculated_at": timezone.now().isoformat(),
+        "vies": deepcopy(source.get("vies")),
+    }
+    if "evidence_max_age_days" in source:
+        evidence["evidence_max_age_days"] = source["evidence_max_age_days"]
+    return evidence
 
 
 def read_vat_evidence(document: Invoice | ProformaInvoice) -> VATDecision | None:
@@ -133,13 +220,14 @@ def read_vat_evidence(document: Invoice | ProformaInvoice) -> VATDecision | None
     if data == {}:
         return None
     try:
-        if (
-            not isinstance(data, dict)
-            or type(data["version"]) is not int
-            or data["version"] not in SUPPORTED_EVIDENCE_VERSIONS
-        ):
+        if not isinstance(data, dict) or type(data["version"]) is not int:
             raise ValueError("Unknown evidence version")
-        _validate_snapshot_fields(data)
+        credit = data["version"] == CREDIT_NOTE_EVIDENCE_VERSION
+        if credit:
+            _validate_credit_note_snapshot(document, data)
+        elif data["version"] not in SUPPORTED_EVIDENCE_VERSIONS:
+            raise ValueError("Unknown evidence version")
+        _validate_snapshot_fields(data, credit=credit)
         rate = Decimal(data["vat_rate_percent"])
         if not rate.is_finite() or rate < 0:
             raise ValueError("Invalid VAT rate")

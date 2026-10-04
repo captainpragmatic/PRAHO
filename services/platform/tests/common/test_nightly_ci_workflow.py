@@ -104,6 +104,8 @@ class NightlyPostgresConcurrencyWorkflowTests(SimpleTestCase):
         # Fiscal correction recording: one row per command under racing legs, and the savepoint
         # that keeps a recording failure from aborting settlement.
         self.assertIn("tests.billing.test_fiscal_correction_concurrency", command)
+        # Built-in storno issuance: two workers on one correction issue one note and spend one number.
+        self.assertIn("tests.billing.test_builtin_storno_concurrency", command)
         self.assertIn("--settings=config.settings.ci", command)
         self.assertNotIn("config.settings.test", command)
         self.assertNotIn("--parallel", command)

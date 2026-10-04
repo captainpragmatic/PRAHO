@@ -38,6 +38,7 @@ from apps.billing.fiscal_identity import (
     normalize_business_tax_id,
     validated_cnp_or_empty,
 )
+from apps.billing.invoice_models import SEQUENCE_SCOPE_DEFAULT
 from apps.billing.models import Invoice, InvoiceLine
 from apps.billing.tax_evidence import capture_vat_evidence, derive_tax_category
 from apps.common.financial_arithmetic import calculate_document_totals
@@ -157,6 +158,8 @@ class InvoiceService:
                     customer=order.customer,
                     issuer_provider=issuer_provider,
                     number=None if external else InvoiceNumberingService.get_next_number(),
+                    # Recorded with the number, so a correction is later numbered from the same family.
+                    sequence_scope="" if external else SEQUENCE_SCOPE_DEFAULT,
                     currency=order.currency,
                     subtotal_cents=vat_result.subtotal_cents,
                     tax_cents=vat_result.vat_cents,
@@ -359,6 +362,8 @@ class ProformaConversionService:
                     customer=proforma.customer,
                     issuer_provider=issuer_provider,
                     number=None if external else InvoiceNumberingService.get_next_number(),
+                    # Recorded with the number, so a correction is later numbered from the same family.
+                    sequence_scope="" if external else SEQUENCE_SCOPE_DEFAULT,
                     currency=currency,
                     subtotal_cents=subtotal_cents,
                     tax_cents=tax_cents,

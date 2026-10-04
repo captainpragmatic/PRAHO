@@ -26,12 +26,12 @@ def _extract_setup_template_keys() -> set[str]:
 
 
 def _extract_signal_template_keys() -> list[tuple[str, str, int]]:
-    """Find all template_key="..." usages in signals and tasks files.
+    """Find all template_key="..." usages in signals, tasks and worker files.
 
     Returns [(file_path, key, line_number), ...]
     """
     results: list[tuple[str, str, int]] = []
-    for pattern in ("apps/*/signals.py", "apps/*/tasks.py"):
+    for pattern in ("apps/*/signals.py", "apps/*/tasks.py", "apps/*/*_worker.py"):
         for filepath in PLATFORM_DIR.glob(pattern):
             tree = ast.parse(filepath.read_text())
             for node in ast.walk(tree):

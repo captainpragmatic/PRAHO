@@ -81,6 +81,7 @@ providing a historical record of why the system is built the way it is.
 | [ADR-0050](ADR-0050-portal-infrastructure-tables.md) | Portal Infrastructure Tables | Accepted | 2026-09-28 |
 | [ADR-0051](ADR-0051-hosting-account-enabled-state-ownership.md) | Hosting Account Enabled-State Ownership | Proposed | 2026-10-01 |
 | [ADR-0052](ADR-0052-disposable-databases-and-migration-reset.md) | All Databases Are Disposable Until the First One That Must Be Preserved | Accepted | 2026-10-02 |
+| [ADR-0053](ADR-0053-every-settled-refund-issues-a-storno.md) | Every Settled Refund Issues a Storno Credit Note | Accepted | 2026-10-03 |
 
 ### 🟡 Partially Superseded
 
@@ -193,13 +194,14 @@ Billing Ownership
 - [ADR-0038](ADR-0038-proforma-payment-convergence.md) — Atomic proforma payment and invoice convergence
 - [ADR-0039](ADR-0039-praho-owned-recurring-billing.md) — PRAHO-owned subscriptions, consent, collection, and usage billing
 - [ADR-0041](ADR-0041-foreign-currency-efactura-accounting.md) — provenanced FX snapshots and multi-currency e-Factura VAT
+- [ADR-0053](ADR-0053-every-settled-refund-issues-a-storno.md) — every settled refund issues a storno credit note: amount, allocation, numbering, communication, e-Factura gate
 
 ---
 
 ## Statistics
 
-- **Total ADRs**: 52 (ADR-0001 through ADR-0052)
-- **Active**: 40 (Accepted + Implemented)
+- **Total ADRs**: 53 (ADR-0001 through ADR-0053)
+- **Active**: 41 (Accepted + Implemented)
 - **Partially Superseded**: 1
 - **Superseded / Historical**: 5
-- **Next available**: ADR-0053
+- **Next available**: ADR-0054
