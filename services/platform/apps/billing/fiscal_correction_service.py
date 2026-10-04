@@ -182,9 +182,9 @@ def record_provider_storno(correction_id: Any, record: ProviderStornoRecord) -> 
     and the correction moves straight to `communicated`, dated by the staff-entered communication
     date, which places it in its D390 period (OPANAF 705/2020) and is backed by the evidence reference.
 
-    Nothing is trusted that can be checked: the amounts and currency must be the allocation's
-    (codex 12), the dates must be possible, and the number must be new. Raises `ValidationError`
-    keyed by what to correct; the transaction then rolls back whole.
+    Nothing is trusted that can be checked: the amounts and currency must be the allocation's, the
+    dates must be possible, and the number must be new. Raises `ValidationError` keyed by what to
+    correct; the transaction then rolls back whole.
     """
     from django.utils import timezone  # noqa: PLC0415
 
