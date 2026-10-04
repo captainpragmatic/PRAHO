@@ -9,7 +9,7 @@ from __future__ import annotations
 from decimal import Decimal
 from unittest.mock import patch
 
-from django.test import TestCase
+from django.test import TestCase, TransactionTestCase
 
 from apps.billing.invoice_models import ISSUER_BUILTIN, ISSUER_SMARTBILL, Invoice, InvoiceSequence
 from apps.billing.models import ProformaInvoice, ProformaLine
@@ -105,3 +105,39 @@ class SequenceScopeIsRecordedTests(TestCase):
         stored = Invoice.objects.get(pk=draft.pk)
         self.assertTrue(stored.number)
         self.assertEqual(stored.sequence_scope, "default")
+
+
+class UsageInvoiceSequenceScopeTests(TestCase):
+    def setUp(self) -> None:
+        from tests.billing import test_metering_services as metering_fixtures  # noqa: PLC0415
+
+        metering_fixtures.UsageInvoiceServiceTestCase.setUp(self)
+
+    def test_a_usage_invoice_records_the_default_family(self) -> None:
+        result = self.service.generate_invoice_from_cycle(str(self.billing_cycle.pk))
+
+        invoice = Invoice.objects.get(pk=result.unwrap()["invoice_id"])
+        self.assertTrue(invoice.number)
+        self.assertEqual(invoice.sequence_scope, "default")
+
+
+class BuiltinIssuanceGatewaySequenceScopeTests(TransactionTestCase):
+    """The provider issuance path numbers a built-in document through the same gateway."""
+
+    def test_a_builtin_document_finalised_through_the_gateway_records_the_default_family(self) -> None:
+        from apps.billing.issuers.service import issue_invoice_externally  # noqa: PLC0415
+
+        draft = Invoice.objects.create(
+            customer=h.customer(),
+            currency=h.ron(),
+            issuer_provider=ISSUER_BUILTIN,
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
+        )
+
+        result = issue_invoice_externally(draft.pk)
+
+        stored = Invoice.objects.get(pk=draft.pk)
+        self.assertTrue(result.is_ok(), result)
+        self.assertEqual((stored.number, stored.sequence_scope), (result.unwrap(), "default"))
