@@ -14,6 +14,8 @@ from django.utils import timezone
 
 from apps.billing.fiscal_correction_models import FiscalCorrection
 from apps.billing.models import Invoice, Payment, Refund
+from apps.promotions.models import TenderRefundCommand, TenderRefundLeg
+from tests.billing import _fiscal_correction_helpers as h
 from tests.billing._storno_helpers import SELLER, StornoTestCase
 
 
@@ -174,5 +176,28 @@ class AmountOwedAsOfCompletionTests(StornoTestCase):
         FiscalCorrection.objects.create(
             source_refund_id=refund_id, state="not_required", not_required_reason="no_fiscal_document"
         )
+
+        self.assertEqual(self.process(self.refund(original, payment, 3000)).total_cents, -3000)
+
+    def test_a_completed_leg_of_an_unfinished_tender_command_is_still_taken_off(self) -> None:
+        """120 collected for 100. A tender command left `failed` (resumable) already returned 20
+        through one completed leg, before an ordinary refund of 30. The command's correction waits
+        for it to complete and has no source yet, but that 20 left: held before the 30 is 100,
+        nothing is slack, and all 30 is credited."""
+        original = self.original(lines=((10000, "0.00"),))
+        payment = self.collected(original, 12000)
+        command = TenderRefundCommand.objects.create(
+            invoice=original,
+            customer=original.customer,
+            amount_cents=5000,
+            operation_key="held-as-of-unfinished-tender",
+            reason="test",
+            status="failed",
+        )
+        leg_refund = h.pending_refund(invoice=original, payment=payment, amount_cents=2000, refund_type="partial")
+        TenderRefundLeg.objects.create(
+            command=command, payment=payment, refund=leg_refund, amount_cents=2000, status="completed"
+        )
+        h.complete(leg_refund)
 
         self.assertEqual(self.process(self.refund(original, payment, 3000)).total_cents, -3000)

@@ -229,10 +229,11 @@ def _held_before(original: Invoice, correction: FiscalCorrection, source: _Sourc
     * Returned already: the refunds of the corrections ordered before this one, by the worker's own
       `_completion_key`, so refunds sharing a timestamp are subtracted in the order their corrections
       are decided and never twice or not at all.
-    * Plus completed refunds of this invoice that belong to no correction on it. A refund completed
-      while its invoice was still a draft is recorded `not_required` with no original, yet its money
-      left; those that completed before this refund are subtracted too. (A completed refund with no
-      correction at all makes `_earlier_undecided` wait, so none of those is earlier at this point.)
+    * Every other completed refund of this invoice is placed by its completion time, and counts if
+      it completed before this one: the completed legs of a tender command that has not finished
+      (its correction has no source yet, though the money has left), a refund with no correction on
+      this invoice (one completed while the invoice was a draft is recorded not-required with no
+      original), and a refund whose correction is on another original.
     """
     collected = collected_cents_for_invoice(original, as_of=source.completed_at)
     if original.paid_at is not None and original.paid_at <= source.completed_at:
@@ -240,16 +241,18 @@ def _held_before(original: Invoice, correction: FiscalCorrection, source: _Sourc
 
     key = _completion_key(correction, source)
     returned = 0
+    keyed_refund_ids = set(source.refund_ids)
     for other in FiscalCorrection.objects.filter(original=original).exclude(pk=correction.pk):
         other_source = _source_of(other)
-        if other_source is not None and _completion_key(other, other_source) < key:
+        if other_source is None:
+            continue  # An unfinished tender command: its completed legs fall to the time rule below.
+        keyed_refund_ids.update(other_source.refund_ids)
+        if _completion_key(other, other_source) < key:
             returned += other_source.refunded_cents
     outside = (
         refunds_for_invoice(original)
         .filter(status="completed")
-        .exclude(pk__in=source.refund_ids)
-        .exclude(fiscal_correction__original=original)
-        .exclude(tender_leg__command__fiscal_correction__original=original)
+        .exclude(pk__in=keyed_refund_ids)
         .annotate(completed_at=Coalesce("processed_at", "created_at"))
         .filter(completed_at__lt=source.completed_at)
         .aggregate(total=models.Sum("amount_cents", default=0))["total"]
