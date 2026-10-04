@@ -28,15 +28,21 @@ from apps.billing.invoice_models import DOCUMENT_KIND_CREDIT_NOTE, ISSUER_SMARTB
 from apps.billing.issuers.models import IssuanceState, ProviderIssuance
 from apps.billing.operator_controls import BillingControlActor, record_manual_provider_storno
 from tests.billing import _fiscal_correction_helpers as h
+from tests.billing._storno_helpers import v2_evidence
 from tests.factories.core_factories import create_admin_user
 
 _EVIDENCE = "Email 'Factura storno STORNO-2001' sent to billing@customer.test"
 
 
 class _ManualCorrectionCase(TestCase):
+    # The original's recorded VAT decision; None leaves it without one, as most fixtures are.
+    original_evidence: dict[str, Any] | None = None
+
     def setUp(self) -> None:
         self.owner = h.customer()
-        self.invoice = h.issued_invoice(self.owner, issuer=ISSUER_SMARTBILL, number="FCT-002000")
+        self.invoice = h.issued_invoice(
+            self.owner, issuer=ISSUER_SMARTBILL, number="FCT-002000", vat_evidence=self.original_evidence
+        )
         payment = h.paid(self.invoice)
         refund = h.complete(
             h.pending_refund(invoice=self.invoice, payment=payment, amount_cents=5000, refund_type="partial")
@@ -154,6 +160,42 @@ class RecordingAProviderStornoTests(_ManualCorrectionCase):
         self.assertEqual(event.metadata["reason"], "Partial storno issued in SmartBill Cloud")
 
 
+class AStornoRecordedLaterIsNotALateDecisionTests(_ManualCorrectionCase):
+    """The note restates the original's decision as of the provider's issue, not of its recording."""
+
+    original_evidence = v2_evidence(subtotal=10000, tax=2100, total=12100)
+
+    def test_recording_a_storno_the_next_day_raises_no_late_tax_decision(self) -> None:
+        from apps.billing.ec_sales_service import _document_problems  # noqa: PLC0415  # The check D390 applies
+        from apps.billing.tax_evidence import read_vat_evidence  # noqa: PLC0415
+
+        with patch("django.utils.timezone.now", return_value=timezone.now() + timedelta(days=1)):
+            note = record_provider_storno(
+                self.correction.pk,
+                self.record(issued_on=self.today, communicated_on=self.today + timedelta(days=1)),
+            )
+
+        decision = read_vat_evidence(note)
+        self.assertIsNotNone(decision, "the note must carry a decision, or the check below proves nothing")
+        problems = _document_problems(note, list(note.lines.all()), decision)
+        self.assertEqual([problem for problem in problems if problem.startswith("late_tax_decision")], [])
+        self.assertEqual(note.vat_evidence["version"], 3)
+
+
+class AuditSnapshotTests(_ManualCorrectionCase):
+    def test_the_audit_trail_carries_the_evidence_and_the_issuance_link(self) -> None:
+        note = record_provider_storno(self.correction.pk, self.record())
+
+        correction_events = AuditEvent.objects.filter(action="fiscal_correction_updated").order_by("timestamp")
+        latest = [event for event in correction_events if event.new_values.get("state") == STATE_COMMUNICATED]
+        self.assertEqual(latest[-1].new_values.get("communication_evidence"), _EVIDENCE)
+        issuance = ProviderIssuance.objects.get(invoice=note)
+        issued_events = AuditEvent.objects.filter(action="invoice_provider_issued", object_id=str(issuance.pk))
+        self.assertEqual(
+            [event.new_values.get("fiscal_correction_id") for event in issued_events], [str(self.correction.pk)]
+        )
+
+
 class RecordingScreenTests(_ManualCorrectionCase):
     def setUp(self) -> None:
         super().setUp()
@@ -201,6 +243,34 @@ class RecordingScreenTests(_ManualCorrectionCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("base_amount", response.context["form"].errors)
+        self.correction.refresh_from_db()
+        self.assertEqual(self.correction.state, STATE_MANUAL_REQUIRED)
+
+    def test_a_number_taken_by_a_concurrent_recording_is_a_form_error_not_a_500(self) -> None:
+        """Both pass the number check; the second write hits the unique number and must say so."""
+        from apps.billing import fiscal_correction_worker  # noqa: PLC0415
+
+        real_draft = fiscal_correction_worker.draft_credit_note
+
+        def draft_after_a_concurrent_winner(*args: Any, **kwargs: Any) -> Invoice:
+            Invoice.objects.create(
+                customer=self.owner,
+                currency=self.invoice.currency,
+                number="STORNO-2001",
+                status="draft",
+                subtotal_cents=0,
+                tax_cents=0,
+                total_cents=0,
+                bill_to_name="Concurrent SRL",
+                issuer_provider=ISSUER_SMARTBILL,
+            )
+            return real_draft(*args, **kwargs)
+
+        with patch.object(fiscal_correction_worker, "draft_credit_note", side_effect=draft_after_a_concurrent_winner):
+            response = self._post()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("number", response.context["form"].errors)
         self.correction.refresh_from_db()
         self.assertEqual(self.correction.state, STATE_MANUAL_REQUIRED)
 

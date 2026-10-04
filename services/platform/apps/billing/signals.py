@@ -451,6 +451,7 @@ def _fiscal_correction_audit_values(instance: FiscalCorrection) -> dict[str, Any
         "communicated_at": instance.communicated_at.isoformat() if instance.communicated_at else None,
         "fiscal_date": instance.fiscal_date.isoformat() if instance.fiscal_date else None,
         "communication_attempts": instance.communication_attempts,
+        "communication_evidence": str(instance.communication_evidence),
         "efactura_status": str(instance.efactura_status),
     }
 
@@ -2377,6 +2378,7 @@ def handle_issuance_audit(
             "state": instance.state,
             "attempts": instance.attempts,
             "provider_number": instance.provider_number,
+            "fiscal_correction_id": str(instance.fiscal_correction_id) if instance.fiscal_correction_id else None,
         }
         event_type = "invoice_provider_issue_attempted" if created else _issuance_event_type(instance.state)
 

@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import logging
 import uuid
-from copy import deepcopy
 from typing import TYPE_CHECKING, Any, assert_never
 
 from django.db import connection, transaction
@@ -32,6 +31,7 @@ from apps.billing.invoice_models import (
     SEQUENCE_SCOPE_DEFAULT,
     Invoice,
 )
+from apps.billing.tax_evidence import capture_credit_note_evidence
 from apps.common.types import Err, Ok, Result
 
 from .base import Ambiguous, Issued, PreparedDocument, Rejected
@@ -684,7 +684,14 @@ def _get_or_create_credit_note(original: Invoice, correction: FiscalCorrection) 
         bill_to_region=original.bill_to_region,
         bill_to_postal=original.bill_to_postal,
         bill_to_country=original.bill_to_country,
-        vat_evidence=deepcopy(original.vat_evidence),
+        # The correction's own decision record (version 3): the original's decision restated with
+        # this note's signed amounts. A copy of the original's would claim the note charged VAT.
+        vat_evidence=capture_credit_note_evidence(
+            original,
+            subtotal_cents=-original.subtotal_cents,
+            tax_cents=-original.tax_cents,
+            total_cents=-original.total_cents,
+        ),
         meta={"fiscal_correction_id": str(correction.pk)},
     )
     mirror_lines_negated(original, credit_note)

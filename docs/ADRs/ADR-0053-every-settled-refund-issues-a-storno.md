@@ -143,8 +143,9 @@ rule, the same split, frozen once. Only issuance differs, because the provider i
 - **Keyed by the correction.** `issue_storno_for_correction` finds or creates the credit note through
   the correction's `ProviderIssuance`, never through the original, and the ADR-0048 claim discipline
   (claim committed before the call, `outcome_unknown` for a human, pacing hands the claim back) is
-  unchanged. The outcome settles that correction (`record_issued`): its frozen allocation must equal
-  the note's totals. If the settling fails after the provider issued the note, the next worker run
+  unchanged. The note carries version 3 VAT evidence for its own signed amounts, as a built-in note
+  does, never a copy of the original's. The outcome settles that correction (`record_issued`): its
+  frozen allocation must equal the note's totals. If the settling fails after the provider issued the note, the next worker run
   finds the issued attempt on the correction and settles it without calling the provider again.
 - **Delivery.** The note is emailed like a built-in one, with the provider's own PDF
   (`get_invoice_pdf_bytes`, ADR-0048 decision 8), and the first send dates it. No e-Factura
@@ -163,8 +164,10 @@ rule, the same split, frozen once. Only issuance differs, because the provider i
   the proof of sending is kept, and an audit reason. `record_provider_storno` refuses amounts or a
   currency that differ from the allocation (sign ignored), an issue date before the original's or
   after today, a communication date before the issue date or after today, and a number already in
-  use. It writes a locked credit note with the provider's number and issue date, one negated line
-  carrying the allocation, version 3 VAT evidence, and a `ProviderIssuance` recorded by staff
+  use. It writes a locked credit note with the provider's number and issue date (noon of that day
+  in Bucharest, or the recording moment if that is earlier), one negated line carrying the
+  allocation, version 3 VAT evidence dated by that issue rather than by the recording (a later date
+  would read as a VAT decision taken after the document), and a `ProviderIssuance` recorded by staff
   (`record_issued_by_staff`, no request or response) so the provider's PDF can be fetched. The
   correction goes straight to `communicated`: `fiscal_date` is the staff-entered communication date,
   `communicated_at` noon of that day in Bucharest, and `communication_evidence` the reference. The
@@ -204,3 +207,8 @@ is re-billed with a new invoice that references the credit note; that workflow i
   security event until staff record the document they issued.
 - A recorded provider storno is dated for D390 by what staff enter. The evidence reference is the
   check on that date; PRAHO cannot verify a send it did not make.
+- Two provider cases stay with an operator, with no dedicated exit yet. A whole-document reverse
+  that spends its submission budget stays `allocated`: it is listed under "Out of submission
+  budget" on the reconciliation screen but cannot be recorded by hand, because only
+  `manual_required` corrections can. And a reverse that cannot even be prepared (the original has
+  no provider number) is retried by the hourly sweep with a warning each time.

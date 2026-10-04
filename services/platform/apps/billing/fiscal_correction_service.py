@@ -206,9 +206,13 @@ def record_provider_storno(correction_id: Any, record: ProviderStornoRecord) -> 
         if errors:
             raise ValidationError(errors)
 
-        note = draft_credit_note(correction, original, issuer_provider=original.issuer_provider)
+        # The provider issued it on that day; noon stands for the moment, unless that is still ahead.
+        issued_at = min(_bucharest_noon(record.issued_on), timezone.now())
+        # The restated decision is dated by that issue, not by this recording, or it would read
+        # as a VAT decision taken after the document it belongs to.
+        note = draft_credit_note(correction, original, issuer_provider=original.issuer_provider, evidence_at=issued_at)
         note.number = legal_number
-        note.issued_at = _bucharest_noon(record.issued_on)
+        note.issued_at = issued_at
         note.tax_point_date = record.issued_on
         note.issue()
         note.save()

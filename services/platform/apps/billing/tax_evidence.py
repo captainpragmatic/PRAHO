@@ -19,6 +19,8 @@ from apps.common.eu_vat_validator import EU_COUNTRIES, parse_vat_number
 from apps.common.tax_service import VATCalculationResult, VATScenario
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from apps.billing.invoice_models import Invoice
     from apps.billing.proforma_models import ProformaInvoice
 
@@ -181,13 +183,22 @@ def evidence_rules_version(data: dict[str, Any]) -> int:
 
 
 def capture_credit_note_evidence(
-    original: Invoice, *, subtotal_cents: int, tax_cents: int, total_cents: int
+    original: Invoice,
+    *,
+    subtotal_cents: int,
+    tax_cents: int,
+    total_cents: int,
+    calculated_at: datetime | None = None,
 ) -> dict[str, Any]:
     """The version 3 snapshot for a credit note of `original`, written before the note is issued.
 
     The decision, identity and VIES proof are the original's, unchanged: a correction restates the
     supply it corrects rather than re-deciding it. An original with no recorded decision (a
     historical or manual document) gives a note with none either, which reads as unknown.
+
+    `calculated_at` defaults to now, which precedes the issue of a note PRAHO is about to issue. A
+    note issued earlier elsewhere and recorded now passes its issue time: the decision is the
+    original's, restated as of the note's own issue, never later than it.
     """
     from django.utils import timezone  # noqa: PLC0415
 
@@ -206,7 +217,7 @@ def capture_credit_note_evidence(
         "subtotal_cents": subtotal_cents,
         "tax_cents": tax_cents,
         "total_cents": total_cents,
-        "calculated_at": timezone.now().isoformat(),
+        "calculated_at": (calculated_at or timezone.now()).isoformat(),
         "vies": deepcopy(source.get("vies")),
     }
     if "evidence_max_age_days" in source:

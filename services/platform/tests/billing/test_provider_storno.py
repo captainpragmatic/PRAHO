@@ -38,6 +38,7 @@ from apps.billing.refund_models import Refund
 from apps.common.types import Ok
 from apps.settings.services import SettingsService
 from tests.billing import _fiscal_correction_helpers as h
+from tests.billing._storno_helpers import v2_evidence
 from tests.factories.billing_factories import CustomerFactory, InvoiceLineFactory
 from tests.helpers.fsm_helpers import force_status
 
@@ -74,7 +75,7 @@ class StornoTestBase(TransactionTestCase):
             bill_to_tax_id="RO12345678",
             bill_to_country="RO",
             issuer_provider=issuer,
-            vat_evidence={"version": 1, "scenario": "romania_b2b", "category": "S", "is_business": True},
+            vat_evidence=v2_evidence(subtotal=10000, tax=2100, total=12100),
         )
         InvoiceLineFactory(
             invoice=invoice,
@@ -167,7 +168,10 @@ class FullRefundTests(StornoTestBase):
 
         credit = Invoice.objects.get(document_kind=DOCUMENT_KIND_CREDIT_NOTE)
         self.assertEqual(credit.bill_to_tax_id, self.invoice.bill_to_tax_id)
-        self.assertEqual(credit.vat_evidence, self.invoice.vat_evidence)
+        # The original's decision and identity, restated for this note rather than copied.
+        for field in ("scenario", "category", "country_code", "vat_number", "is_business"):
+            self.assertEqual(credit.vat_evidence[field], self.invoice.vat_evidence[field], field)
+        self.assertEqual(credit.vat_evidence["reverses_number"], self.invoice.number)
 
 
 class PartialRefundTests(StornoTestBase):
@@ -209,6 +213,31 @@ class PartialRefundTests(StornoTestBase):
         self.assertEqual(correction.state, "manual_required")
         events = [call.kwargs.get("event_type") for call in security.call_args_list]
         self.assertIn("provider_partial_refund_needs_manual_correction", events)
+
+
+class ProviderStornoEvidenceTests(StornoTestBase):
+    """The provider's storno records its own correction decision, as a built-in note does (v3)."""
+
+    def test_the_storno_carries_version_3_evidence_for_its_own_amounts(self) -> None:
+        """A copy of the original's +121.00 decision on a -121.00 note says the note charged VAT."""
+        from apps.billing.tax_evidence import read_vat_evidence  # noqa: PLC0415
+
+        evidenced = self._issued_invoice(number="FCT-000520")
+        correction = self._refund_fully(evidenced)
+
+        result = self._storno_returning(Issued(number="000521", series="STORNO"), correction)
+
+        self.assertTrue(result.is_ok(), msg=getattr(result, "error", ""))
+        credit = Invoice.objects.get(document_kind=DOCUMENT_KIND_CREDIT_NOTE)
+        evidence = credit.vat_evidence
+        self.assertEqual((evidence.get("version"), evidence.get("original_version")), (3, 2))
+        self.assertEqual(
+            (evidence["subtotal_cents"], evidence["tax_cents"], evidence["total_cents"]),
+            (credit.subtotal_cents, credit.tax_cents, credit.total_cents),
+        )
+        self.assertLess(evidence["total_cents"], 0)
+        self.assertEqual(evidence["reverses_number"], "FCT-000520")
+        self.assertIsNotNone(read_vat_evidence(credit), "the note's evidence must read back as valid")
 
 
 class StornoEligibilityTests(StornoTestBase):

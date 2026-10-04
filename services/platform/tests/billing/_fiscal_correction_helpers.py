@@ -20,13 +20,14 @@ def customer(name: str = "Fiscal Correction SRL") -> Customer:
     return Customer.objects.create(name=name, customer_type="company", company_name=name, status="active")
 
 
-def issued_invoice(
+def issued_invoice(  # noqa: PLR0913  # One keyword per shape of original a test needs
     owner: Customer,
     *,
     lines: tuple[tuple[int, str], ...] = ((10000, "0.21"),),
     issuer: str = ISSUER_BUILTIN,
     number: str | None = None,
     issue: bool = True,
+    vat_evidence: dict[str, Any] | None = None,
 ) -> Invoice:
     """An invoice whose lines carry the given (net cents, rate) pairs, issued and numbered."""
     subtotal = sum(net for net, _rate in lines)
@@ -42,6 +43,7 @@ def issued_invoice(
         bill_to_name=owner.company_name,
         bill_to_country="RO",
         issuer_provider=issuer,
+        vat_evidence=vat_evidence or {},
     )
     for index, ((net, rate), tax) in enumerate(zip(lines, taxes, strict=True)):
         InvoiceLine.objects.create(

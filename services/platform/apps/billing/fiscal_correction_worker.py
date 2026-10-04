@@ -481,10 +481,13 @@ def _issue_credit_note(correction: FiscalCorrection, original: Invoice) -> Invoi
     return note
 
 
-def draft_credit_note(correction: FiscalCorrection, original: Invoice, *, issuer_provider: str) -> Invoice:
+def draft_credit_note(
+    correction: FiscalCorrection, original: Invoice, *, issuer_provider: str, evidence_at: datetime | None = None
+) -> Invoice:
     """The unnumbered credit note carrying exactly the correction's allocation, lines included.
 
     Runs inside the caller's transaction; the caller numbers and issues it, or rolls it back.
+    `evidence_at` dates the restated VAT decision for a note issued before it is recorded here.
     """
     from .credit_note_lines import mirror_lines_negated  # noqa: PLC0415  # Keeps the import graph acyclic
     from .tax_evidence import capture_credit_note_evidence  # noqa: PLC0415
@@ -509,6 +512,7 @@ def draft_credit_note(correction: FiscalCorrection, original: Invoice, *, issuer
             subtotal_cents=correction.base_cents,
             tax_cents=correction.tax_cents,
             total_cents=correction.total_cents,
+            calculated_at=evidence_at,
         ),
         # The original's rate, all four fields, so `issue()` consumes it rather than today's rate.
         exchange_to_ron=original.exchange_to_ron,
