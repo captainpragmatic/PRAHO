@@ -85,7 +85,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the refund takes off the invoice: returning an overpayment or a duplicate payment credits
   nothing. The note is numbered from its original's series, emailed to the customer as a PDF
   titled "FACTURĂ STORNO / CREDIT NOTE", and filed with e-Factura once ANAF has accepted the
-  original. A failed email or filing is retried hourly. Run `setup_email_templates` once to add
+  original. A failed email is retried hourly. A failed filing is retried after an hour, then at
+  doubling intervals up to once every seven days. Run `setup_email_templates` once to add
   the `credit_note_issued` email. Until the SmartBill work lands, an invoice can carry one credit
   note, so a second refund of the same invoice waits with its amount recorded.
 - Invoice, payment and reminder emails are sent in the customer's language. They read a locale

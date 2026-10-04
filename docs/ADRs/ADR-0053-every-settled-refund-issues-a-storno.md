@@ -107,6 +107,12 @@ live claim exists, records a claim with a five-minute lease and commits; the ema
 transaction; the first success is then recorded once. A racing worker sees the claim and does not
 send. A claim whose sender died is retaken once the lease runs out.
 
+Delivery is at least once, not exactly once. If the process dies after the mail server accepts the
+email but before the success is recorded, the claim lapses and the sweep sends it again. That is
+accepted on purpose: a customer receiving the same credit note twice is harmless, while one never
+receiving it leaves the note uncommunicated and out of its D390 period. Only the first recorded
+success sets the communication date.
+
 ### The e-Factura gate
 
 A 381 is filed only once its original is accepted. The gate is inside

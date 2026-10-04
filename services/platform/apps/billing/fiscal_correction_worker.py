@@ -567,6 +567,8 @@ def _advance_communication(correction_id: str) -> str:
 
     Claim-then-send: the claim commits before the email leaves, so a second worker racing this one
     finds it and does not send again. A claim whose sender died is retaken after the lease.
+    Delivery is at least once (ADR-0053): a sender that dies after the email left but before the
+    success is recorded gets it sent again once the lease lapses.
     """
     correction = _claim_communication(correction_id)
     if correction is None or correction.credit_note is None:
