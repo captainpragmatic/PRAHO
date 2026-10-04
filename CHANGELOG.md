@@ -89,6 +89,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   doubling intervals up to once every seven days. Run `setup_email_templates` once to add
   the `credit_note_issued` email. Until the SmartBill work lands, an invoice can carry one credit
   note, so a second refund of the same invoice waits with its amount recorded.
+- A SmartBill invoice is now stornoed from the refund's fiscal correction, the same way a built-in
+  one is, and an invoice can carry a credit note for every refund. A second refund of a built-in
+  invoice issues its own note instead of waiting. A SmartBill invoice is reversed at SmartBill only
+  when the first refund covers the whole invoice; the storno is emailed with SmartBill's PDF. Any
+  other SmartBill refund needs a storno that SmartBill's API cannot issue, so it is listed on the
+  provider reconciliation screen with the amounts to credit. Staff issue it in SmartBill, send it,
+  and record its number, issue date, sending date and proof of sending; PRAHO checks the amounts
+  against the refund and dates the note for D390 by the sending date. The hourly sweep that
+  looked for refunded SmartBill invoices without a storno is retired;
+  `setup_billing_scheduled_tasks` removes its schedule.
 - Invoice, payment and reminder emails are sent in the customer's language. They read a locale
   setting customers never had, so every one went out in English.
 
