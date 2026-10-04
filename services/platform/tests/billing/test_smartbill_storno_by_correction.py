@@ -15,6 +15,7 @@ from io import StringIO
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+from django.core import mail
 from django.core.cache import cache
 from django.core.management import call_command
 from django.test import TransactionTestCase
@@ -120,6 +121,9 @@ class SmartBillStornoByCorrectionTests(TransactionTestCase):
         submit.assert_called_once()
         # SmartBill files its own documents with ANAF; PRAHO owes no e-Factura submission for this one.
         self.assertEqual(correction.efactura_status, "not_due")
+        # The customer gets the provider's own document, never a second rendering of it (ADR-0048).
+        sent = [message for message in mail.outbox if message.attachments]
+        self.assertEqual([attachment[1] for attachment in sent[-1].attachments], [b"%PDF-1.4 provider storno"])
 
     def test_a_partial_refund_of_a_smartbill_invoice_needs_a_manual_storno(self) -> None:
         """Never the whole-document reverse: it would credit the customer 121 for a 50 refund."""

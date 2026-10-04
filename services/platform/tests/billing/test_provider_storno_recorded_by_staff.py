@@ -74,10 +74,14 @@ class _ManualCorrectionCase(TestCase):
 
 class RecordingAProviderStornoTests(_ManualCorrectionCase):
     def test_the_recorded_storno_settles_the_correction_dated_by_its_sending(self) -> None:
-        issued_on = self.today
-        sent_on = self.today
+        """Issued one day, sent the next, recorded the day after: the sending date is the D390 date."""
+        issued_on = self.today + timedelta(days=1)
+        sent_on = self.today + timedelta(days=2)
 
-        note = record_provider_storno(self.correction.pk, self.record(issued_on=issued_on, communicated_on=sent_on))
+        with patch("django.utils.timezone.now", return_value=timezone.now() + timedelta(days=3)):
+            note = record_provider_storno(
+                self.correction.pk, self.record(issued_on=issued_on, communicated_on=sent_on)
+            )
 
         self.correction.refresh_from_db()
         self.assertEqual(self.correction.state, STATE_COMMUNICATED)
