@@ -155,8 +155,7 @@ def sweep_pending_issuances(limit: int = 100) -> dict[str, int]:
                 results["skipped"] += 1
                 continue
             # `queue_fiscal_correction` never raises: a lost enqueue is the correction sweep's.
-            queue_fiscal_correction(issuance.fiscal_correction_id)
-            queued: str | None = "queued"
+            queued: str | bool | None = queue_fiscal_correction(issuance.fiscal_correction_id)
         else:
             queued = queue_invoice_issuance(invoice.pk)
         results["queued" if queued else "skipped"] += 1

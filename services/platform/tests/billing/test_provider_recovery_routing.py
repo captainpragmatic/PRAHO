@@ -145,6 +145,15 @@ class RecoveryRoutesByDocumentKindTests(TestCase):
         self.assertEqual(sorted(correction_calls), sorted([str(first.pk), str(second.pk)]))
         self.assertEqual(issuance_calls, [], "a reversal must never reach the issuance task")
 
+    def test_a_reversal_whose_enqueue_failed_is_counted_as_skipped(self) -> None:
+        """A queue outage must show in the sweep's result, not read as work handed on."""
+        self._deferred_credit_note()
+
+        with patch("django_q.tasks.async_task", side_effect=RuntimeError("broker down")):
+            results = sweep_pending_issuances()
+
+        self.assertEqual((results["queued"], results["skipped"]), (0, 1))
+
     def test_an_unnumbered_invoice_still_goes_to_the_issuance_task(self) -> None:
         """The regression guard."""
         invoice = self._unnumbered_invoice()

@@ -101,14 +101,16 @@ class _Source:
     completed_at: datetime
 
 
-def queue_fiscal_correction(correction_id: Any) -> None:
-    """Hand one correction to the worker. Losing this enqueue costs only time: the sweep finds it."""
+def queue_fiscal_correction(correction_id: Any) -> bool:
+    """Hand one correction to the worker; whether it was queued. A lost enqueue costs only time: the sweep finds it."""
     try:
         from django_q.tasks import async_task  # noqa: PLC0415
 
         async_task(TASK_PATH, str(correction_id), timeout=TASK_TIMEOUT_SECONDS)
     except Exception:
         logger.exception(f"🔥 [Storno] Could not queue fiscal correction {correction_id}; the sweep will pick it up")
+        return False
+    return True
 
 
 def process_fiscal_correction(correction_id: str) -> dict[str, str]:
