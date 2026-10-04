@@ -7,9 +7,11 @@ completion hook recorded, then runs the worker with its after-commit delivery ex
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.db import transaction
 from django.utils import timezone
 from lxml import etree
 
@@ -25,7 +27,12 @@ from apps.billing.fiscal_correction_models import (
     STATE_PENDING,
     FiscalCorrection,
 )
-from apps.billing.fiscal_correction_worker import TASK_PATH, process_fiscal_correction
+from apps.billing.fiscal_correction_worker import (
+    TASK_PATH,
+    _advance_allocation,
+    _advance_issuance,
+    process_fiscal_correction,
+)
 from apps.billing.invoice_models import (
     DOCUMENT_KIND_CREDIT_NOTE,
     ISSUER_SMARTBILL,
@@ -359,17 +366,6 @@ class BuiltinStornoIssuanceTests(StornoTestCase):
         self.assertEqual(rest.vat_residue_cents, -1)
         self.assertTrue(any("un-reversed" in line for line in logs.output), logs.output)
 
-    def test_completing_a_refund_queues_the_worker_after_commit(self) -> None:
-        original = self.original()
-        payment = self.collected(original, original.total_cents)
-
-        with patch("django_q.tasks.async_task") as queued, self.captureOnCommitCallbacks(execute=True):
-            correction = self.refund(original, payment, 1000)
-
-        worker_calls = [call for call in queued.call_args_list if call.args[0] == TASK_PATH]
-        self.assertEqual(len(worker_calls), 1)
-        self.assertEqual(worker_calls[0].args[1], str(correction.pk))
-
 
 class AllocationAmountsTests(StornoTestCase):
     """The sequences of plan v3, at the allocation layer: one note per original until A3."""
@@ -388,3 +384,54 @@ class AllocationAmountsTests(StornoTestCase):
         self.assertEqual(totals, [(-2479, -521, -3000), (-3308, -694, -4002), (-4212, -885, -5097)])
         self.assertLessEqual(-sum(tax for _base, tax, _total in totals), original.tax_cents)
         self.assertEqual(sum(base for base, _tax, _total in totals), -9999)
+
+
+@SELLER
+class IssuanceOrderTests(StornoTestCase):
+    def test_a_later_correction_cannot_issue_before_an_earlier_one(self) -> None:
+        """Both allocated; the later worker reaches issuance first. It must wait, so the earlier
+        correction takes the one note A2 allows and the later is the one parked."""
+        original = self.original()
+        payment = self.collected(original, original.total_cents)
+        earlier = self.refund(original, payment, 3000)
+        later = self.refund(original, payment, 2000)
+        _advance_allocation(str(earlier.pk))
+        _advance_allocation(str(later.pk))
+
+        with self.captureOnCommitCallbacks(execute=True):
+            later_first = _advance_issuance(str(later.pk))
+            earlier_next = _advance_issuance(str(earlier.pk))
+            later_again = _advance_issuance(str(later.pk))
+
+        earlier.refresh_from_db()
+        later.refresh_from_db()
+        self.assertEqual((later_first, earlier_next, later_again), ("waiting_for_earlier", "issued", "parked"))
+        self.assertEqual(earlier.credit_note.total_cents, -3000)
+        self.assertEqual((later.state, later.failure_code), (STATE_FAILED, FAILURE_SECOND_CREDIT_NOTE))
+
+
+class QueueAfterCommitTests(StornoTestCase):
+    def test_the_worker_is_queued_only_after_commit_and_never_after_a_rollback(self) -> None:
+        original = self.original()
+        payment = self.collected(original, original.total_cents)
+
+        def worker_calls(queued: Any) -> list[Any]:
+            return [call for call in queued.call_args_list if call.args[0] == TASK_PATH]
+
+        with patch("django_q.tasks.async_task") as queued:
+            with self.captureOnCommitCallbacks(execute=False) as callbacks:
+                correction = self.refund(original, payment, 1000)
+            self.assertEqual(worker_calls(queued), [], "queued before settlement committed")
+            for callback in callbacks:
+                callback()
+            self.assertEqual([call.args[1] for call in worker_calls(queued)], [str(correction.pk)])
+
+            queued.reset_mock()
+            with self.captureOnCommitCallbacks(execute=True):
+                try:
+                    with transaction.atomic():
+                        self.refund(original, payment, 500)
+                        raise RuntimeError("settlement rolled back")
+                except RuntimeError:
+                    pass
+            self.assertEqual(worker_calls(queued), [], "queued for a refund whose settlement rolled back")

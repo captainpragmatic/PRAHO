@@ -22,18 +22,25 @@ from apps.billing.efactura.service import (
     GATE_ORIGINAL_REJECTED,
     GATE_WAITING_FOR_ORIGINAL,
     EFacturaService,
+    SubmissionResult,
 )
 from apps.billing.efactura.settings import ro_local_date
 from apps.billing.fiscal_correction_models import (
     EFACTURA_FAILED,
     EFACTURA_NOT_APPLICABLE,
+    EFACTURA_PENDING,
     EFACTURA_SUBMITTED,
     EFACTURA_WAITING_FOR_ORIGINAL,
     STATE_COMMUNICATED,
     STATE_ISSUED,
     FiscalCorrection,
 )
-from apps.billing.fiscal_correction_worker import deliver_credit_note
+from apps.billing.fiscal_correction_worker import (
+    EFACTURA_MAX_BACKOFF,
+    _advance_efactura,
+    deliver_credit_note,
+    efactura_backoff,
+)
 from apps.billing.invoice_models import Invoice
 from apps.billing.pdf_generators import RomanianInvoicePDFGenerator
 from apps.notifications.services import EmailResult
@@ -297,3 +304,38 @@ class StornoEFacturaGateTests(StornoTestCase):
         self.assertEqual(note.settled_fiscal_correction.efactura_status, EFACTURA_NOT_APPLICABLE)
         result = EFacturaService(client=_accepting_client()).submit_invoice(note)
         self.assertEqual(result.gate, GATE_NOT_APPLICABLE)
+
+
+@SELLER
+@override_settings(EFACTURA_ENABLED=True)
+class InFlightUploadTests(StornoTestCase):
+    def test_another_workers_live_upload_is_not_recorded_as_submitted(self) -> None:
+        original = self.original()
+        payment = self.collected(original, original.total_cents)
+        correction = self.process(self.refund(original, payment, 1000))
+        EFacturaDocument.objects.create(
+            invoice=original, document_type=EFacturaDocumentType.INVOICE.value, environment="test"
+        )
+        EFacturaDocument.objects.filter(invoice=original).update(status=EFacturaStatus.ACCEPTED.value)
+        uploading = EFacturaDocument(status=EFacturaStatus.UPLOADING.value)
+        FiscalCorrection.objects.filter(pk=correction.pk).update(
+            efactura_status=EFACTURA_PENDING, efactura_next_attempt_at=None
+        )
+
+        with patch(
+            "apps.billing.efactura.service.EFacturaService.submit_invoice",
+            return_value=SubmissionResult.ok(uploading),
+        ):
+            _advance_efactura(str(correction.pk))
+
+        correction.refresh_from_db()
+        self.assertNotEqual(correction.efactura_status, EFACTURA_SUBMITTED)
+        self.assertEqual(correction.efactura_status, EFACTURA_PENDING)
+        self.assertIsNotNone(correction.efactura_next_attempt_at)
+
+
+class BackoffCapTests(StornoTestCase):
+    def test_a_long_failing_filing_backs_off_a_week_without_overflowing(self) -> None:
+        self.assertEqual(efactura_backoff(100), EFACTURA_MAX_BACKOFF)
+        self.assertEqual(efactura_backoff(10_000), timedelta(days=7))
+        self.assertEqual(efactura_backoff(1), timedelta(hours=1))

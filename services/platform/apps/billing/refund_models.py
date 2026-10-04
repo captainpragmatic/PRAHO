@@ -353,25 +353,34 @@ FULLY_COLLECTED_INVOICE_STATES = frozenset({"paid", "partially_refunded", "refun
 
 
 def collected_cents_for_invoice(invoice: Any, *, as_of: Any = None) -> int:
-    """Cents collected for `invoice`, each payment counted against one invoice only (by `as_of`, if given).
+    """Cents collected for `invoice`, each payment counted against one invoice only.
 
     Two tiers, mirroring the refund rule. A payment belongs to its own invoice first. A payment
     with no invoice of its own (an order paid against its proforma) belongs to the invoice its
     refunds resolve to, which is the only link the ledger records between them. Refunded
     payments still count: the money was collected, and the refunds say what went back.
+
+    Without `as_of`, a payment counts by its current status (succeeded, partially refunded or
+    refunded). With `as_of`, it counts by what was true then, whatever has happened since:
+
+    * a payment with a success time counts if it succeeded at or before `as_of`, even if it is now
+      disputed or failed - it was held at that moment;
+    * a row older than `succeeded_at` has none. It counts only if its current status is a collected
+      one and it was received by `as_of`. A disputed or failed row without a success time is never
+      counted, because nothing shows it ever succeeded.
     """
     from .payment_models import Payment  # noqa: PLC0415  # Avoid a model import cycle
 
     unlinked_payment_ids = refunds_for_invoice(invoice).filter(payment__isnull=False).values("payment_id")
     payments = Payment.objects.filter(
-        models.Q(invoice=invoice) | models.Q(invoice__isnull=True, id__in=unlinked_payment_ids),
-        status__in=COLLECTED_PAYMENT_STATUSES,
+        models.Q(invoice=invoice) | models.Q(invoice__isnull=True, id__in=unlinked_payment_ids)
     )
-    if as_of is not None:
-        # What was held at `as_of`: a payment counts from when it succeeded. A row older than
-        # `succeeded_at` has none, and its receipt time stands in for it.
-        payments = payments.annotate(collected_at=Coalesce("succeeded_at", "received_at")).filter(
-            collected_at__lte=as_of
+    if as_of is None:
+        payments = payments.filter(status__in=COLLECTED_PAYMENT_STATUSES)
+    else:
+        payments = payments.filter(
+            models.Q(succeeded_at__isnull=False, succeeded_at__lte=as_of)
+            | models.Q(succeeded_at__isnull=True, status__in=COLLECTED_PAYMENT_STATUSES, received_at__lte=as_of)
         )
     total = payments.aggregate(total=models.Sum("amount_cents", default=0))["total"]
     return int(total)

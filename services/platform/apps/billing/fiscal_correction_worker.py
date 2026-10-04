@@ -58,7 +58,7 @@ from .invoice_models import (
     InvoiceLine,
     sequence_family_of,
 )
-from .refund_models import FULLY_COLLECTED_INVOICE_STATES, collected_cents_for_invoice, refunds_for_invoice
+from .refund_models import collected_cents_for_invoice, refunds_for_invoice
 
 logger = logging.getLogger(__name__)
 
@@ -215,28 +215,46 @@ def _credited_so_far(original: Invoice, *, excluding: FiscalCorrection) -> Compo
     )
 
 
-def _held_before(original: Invoice, source: _Source) -> int:
+def _held_before(original: Invoice, correction: FiscalCorrection, source: _Source) -> int:
     """What the ledger held against `original` just before this correction's refunds completed.
 
-    As of that moment, not as of whenever the worker runs: a payment arriving after the refund would
-    otherwise make it read as the return of an overpayment, and close the correction for good. A
-    payment counts from when it succeeded (`collected_cents_for_invoice(as_of=...)`); the refunds
-    subtracted are the completed ones of this invoice, by the shared resolution rule, that completed
-    earlier. A refund missing its completion time is placed by its creation, as `_source_of` does.
+    As of that moment, not as of whenever the worker runs: a payment arriving later, a dispute, or the
+    invoice becoming paid afterwards must not change the answer.
+
+    * Collected: payments by what was true then (`collected_cents_for_invoice(as_of=...)`).
+    * The paid floor (`net_collected_cents_for_invoice` floors a paid invoice at its total, for a
+      ledger that cannot show every payment) applies only if the invoice was paid by then. `paid_at`
+      is set once, by `mark_as_paid`, and nothing clears it: refunding moves a paid invoice to
+      partially_refunded or refunded and back, never to an unpaid state.
+    * Returned already: the refunds of the corrections ordered before this one, by the worker's own
+      `_completion_key`, so refunds sharing a timestamp are subtracted in the order their corrections
+      are decided and never twice or not at all.
+    * Plus completed refunds of this invoice that belong to no correction on it. A refund completed
+      while its invoice was still a draft is recorded `not_required` with no original, yet its money
+      left; those that completed before this refund are subtracted too. (A completed refund with no
+      correction at all makes `_earlier_undecided` wait, so none of those is earlier at this point.)
     """
     collected = collected_cents_for_invoice(original, as_of=source.completed_at)
-    if original.status in FULLY_COLLECTED_INVOICE_STATES:
-        # The same floor as `net_collected_cents_for_invoice`: a paid invoice was collected in full.
+    if original.paid_at is not None and original.paid_at <= source.completed_at:
         collected = max(collected, original.total_cents)
-    refunded_before = (
+
+    key = _completion_key(correction, source)
+    returned = 0
+    for other in FiscalCorrection.objects.filter(original=original).exclude(pk=correction.pk):
+        other_source = _source_of(other)
+        if other_source is not None and _completion_key(other, other_source) < key:
+            returned += other_source.refunded_cents
+    outside = (
         refunds_for_invoice(original)
         .filter(status="completed")
         .exclude(pk__in=source.refund_ids)
+        .exclude(fiscal_correction__original=original)
+        .exclude(tender_leg__command__fiscal_correction__original=original)
         .annotate(completed_at=Coalesce("processed_at", "created_at"))
         .filter(completed_at__lt=source.completed_at)
         .aggregate(total=models.Sum("amount_cents", default=0))["total"]
     )
-    return collected - int(refunded_before)
+    return collected - returned - int(outside)
 
 
 def _earlier_not_issued(correction: FiscalCorrection, original: Invoice) -> str:
@@ -288,7 +306,7 @@ def _advance_allocation(correction_id: str) -> str:  # noqa: PLR0911  # One retu
         credited = _credited_so_far(original, excluding=correction)
         whole = Components(original.subtotal_cents, original.tax_cents, original.discount_cents)
         remaining = whole.minus(credited)
-        held_before = _held_before(original, source)
+        held_before = _held_before(original, correction, source)
         gross = owed_reduction(
             refund_cents=source.refunded_cents,
             net_collected_before_cents=held_before,

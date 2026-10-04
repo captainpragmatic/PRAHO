@@ -18,11 +18,13 @@ from apps.billing.fiscal_correction_models import (
     EFACTURA_PENDING,
     STATE_ALLOCATED,
     STATE_COMMUNICATED,
+    STATE_FAILED,
     STATE_ISSUED,
     FiscalCorrection,
 )
 from apps.billing.invoice_models import DOCUMENT_KIND_CREDIT_NOTE, Invoice
 from tests.billing import _fiscal_correction_helpers as h
+from tests.billing._storno_helpers import StornoTestCase
 
 
 class FiscalCorrectionIssuanceModelTests(TestCase):
@@ -121,3 +123,15 @@ class FiscalCorrectionIssuanceModelTests(TestCase):
         self._allocated()
 
         self._refused(efactura_status=EFACTURA_PENDING)
+
+
+class AllocationNullAmountTests(StornoTestCase):
+    def test_an_allocation_timestamp_without_its_amounts_is_refused(self) -> None:
+        original = self.original()
+        correction = self.refund(original, self.collected(original, original.total_cents), 1000)
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            FiscalCorrection.objects.filter(pk=correction.pk).update(
+                state=STATE_FAILED, allocated_at=timezone.now(), vat_residue_cents=0
+            )
+        self.assertNotEqual(FiscalCorrection.objects.get(pk=correction.pk).state, STATE_ALLOCATED)
