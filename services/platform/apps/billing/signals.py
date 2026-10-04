@@ -451,6 +451,7 @@ def _fiscal_correction_audit_values(instance: FiscalCorrection) -> dict[str, Any
         "communicated_at": instance.communicated_at.isoformat() if instance.communicated_at else None,
         "fiscal_date": instance.fiscal_date.isoformat() if instance.fiscal_date else None,
         "communication_attempts": instance.communication_attempts,
+        "communication_evidence": str(instance.communication_evidence),
         "efactura_status": str(instance.efactura_status),
     }
 
@@ -650,11 +651,10 @@ def handle_invoice_created_or_updated(sender: type[Invoice], instance: Invoice, 
                 _sync_orders_on_invoice_status_change(instance, old_status, instance.status)
 
                 # REFUND: Post-refund side effects
+                # The storno a refund owes is issued from the refund's fiscal correction
+                # (ADR-0053), for either issuer and either refund size, not from this status.
                 if instance.status == "refunded" and old_status != "refunded":
                     _handle_invoice_refund_completion(instance)
-                elif instance.status == "partially_refunded" and old_status != "partially_refunded":
-                    # A provider that reverses whole documents cannot express this.
-                    _warn_partial_refund_cannot_be_reversed(instance)
 
         # An existing invoice's transition to issued is handled above by
         # _handle_invoice_status_change(). Only cover invoices created directly
@@ -1334,7 +1334,6 @@ def _remove_payment_credit_adjustment(payment: Payment, event_type: str) -> None
 
 def _handle_invoice_refund_completion(invoice: Invoice) -> None:
     """Handle side effects when invoice refund is completed"""
-    _queue_provider_storno(invoice)
     try:
         # H5 fix: Send email via on_commit to prevent ghost emails on rollback.
         # If an outer transaction rolls back, the email would have already been sent.
@@ -2133,9 +2132,9 @@ def _handle_efactura_refund_reporting(invoice: Invoice) -> None:
                     # it already has one - a OneToOneField, so an IntegrityError that the
                     # surrounding `except` logged and swallowed every single time.
                     #
-                    # The reversal is a real document with its own row, created by
-                    # `issue_storno_for_invoice` and typed by `_document_type_for`. All
-                    # that belongs here is the record that one is owed.
+                    # The reversal is a real document with its own row, issued for the
+                    # refund's fiscal correction (ADR-0053) and typed by `_document_type_for`.
+                    # All that belongs here is the record that one is owed.
 
                     # Log compliance event
                     compliance_request = ComplianceEventRequest(
@@ -2379,6 +2378,7 @@ def handle_issuance_audit(
             "state": instance.state,
             "attempts": instance.attempts,
             "provider_number": instance.provider_number,
+            "fiscal_correction_id": str(instance.fiscal_correction_id) if instance.fiscal_correction_id else None,
         }
         event_type = "invoice_provider_issue_attempted" if created else _issuance_event_type(instance.state)
 
@@ -2424,57 +2424,3 @@ def _issuance_event_type(state: str) -> str:
         IssuanceState.FAILED.value: "invoice_provider_issue_failed",
         IssuanceState.OUTCOME_UNKNOWN.value: "invoice_provider_outcome_unknown",
     }.get(state, "invoice_provider_issue_attempted")
-
-
-def _queue_provider_storno(invoice: Invoice) -> None:
-    """A provider-issued invoice is corrected by a document, not by a status change.
-
-    Built-in invoices produce no correcting document at all - this comment used to claim
-    they "already produce an e-Factura credit note on refund", and they never have. Their
-    refund is a status change and nothing more. Their
-    provider-issued counterparts need the equivalent at the provider, or the customer
-    holds a full invoice with nothing reversing it and the accountant's books show
-    revenue that was returned.
-
-    Fired only for a FULL refund, which is the only kind `/invoice/reverse` can
-    express: it carries no amounts and reverses the whole document or nothing.
-    """
-    from apps.billing.invoice_models import ISSUER_BUILTIN
-
-    if invoice.issuer_provider == ISSUER_BUILTIN:
-        return
-    if invoice.document_kind != "invoice":
-        return  # a credit note is not itself reversible
-
-    from apps.billing.issuers.tasks import queue_invoice_storno
-
-    transaction.on_commit(lambda inv=invoice: queue_invoice_storno(inv.pk))
-    logger.info(f"↩️ [Storno] Queued provider reversal for invoice {invoice.display_number}")
-
-
-def _warn_partial_refund_cannot_be_reversed(invoice: Invoice) -> None:
-    """A partial refund of a provider-issued invoice needs a human.
-
-    SmartBill's storno takes no amounts, so there is no way to credit part of a
-    document. Reversing the whole thing would credit the customer money they were
-    never refunded, so the correction is left to an operator and made loud rather
-    than attempted.
-    """
-    from apps.billing.invoice_models import ISSUER_BUILTIN
-
-    if invoice.issuer_provider == ISSUER_BUILTIN or invoice.document_kind != "invoice":
-        return
-
-    logger.error(
-        f"🔥 [Storno] Invoice {invoice.display_number} was partially refunded but its "
-        f"provider cannot reverse part of a document. A correcting document must be "
-        f"issued manually."
-    )
-    log_security_event(
-        event_type="provider_partial_refund_needs_manual_correction",
-        details={
-            "invoice_number": str(invoice.display_number),
-            "issuer_provider": str(invoice.issuer_provider),
-            "customer_id": str(invoice.customer_id),
-        },
-    )

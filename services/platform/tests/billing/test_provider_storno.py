@@ -1,13 +1,13 @@
 """Refunding a provider-issued invoice.
 
-A locally issued invoice is corrected by an e-Factura credit note. Its
-provider-issued counterpart needs the equivalent AT the provider, or the customer
-holds a full invoice with nothing reversing it and the accountant's books show
-revenue that was returned.
+A locally issued invoice is corrected by its own built-in storno. Its provider-issued
+counterpart needs the equivalent AT the provider, or the customer holds a full invoice
+with nothing reversing it and the accountant's books show revenue that was returned.
 
 The decisive constraint: `/invoice/reverse` takes only a series and a number. It
 carries NO amounts, reverses the whole document or nothing, and may run once per
-invoice. A partial refund therefore has no representation and must be refused —
+invoice. So it issues exactly one fiscal correction: the first, crediting the whole
+original. Any other correction, a partial refund above all, is refused here, because
 reversing the whole document would credit the customer money they never got back.
 """
 
@@ -20,6 +20,9 @@ from unittest.mock import patch
 from django.test import TransactionTestCase
 from django.utils import timezone
 
+from apps.billing.fiscal_correction_models import FiscalCorrection
+from apps.billing.fiscal_correction_service import record_obligation
+from apps.billing.fiscal_correction_worker import process_fiscal_correction
 from apps.billing.invoice_models import (
     DOCUMENT_KIND_CREDIT_NOTE,
     ISSUER_BUILTIN,
@@ -29,13 +32,22 @@ from apps.billing.invoice_models import (
 )
 from apps.billing.issuers.base import Ambiguous, Issued, PreparedDocument, Rejected
 from apps.billing.issuers.models import IssuanceState, ProviderIssuance
-from apps.billing.issuers.service import issue_storno_for_invoice
+from apps.billing.issuers.service import issue_storno_for_correction, whole_document_storno_refusal
 from apps.billing.issuers.smartbill.issuer import SmartBillIssuer
 from apps.billing.refund_models import Refund
 from apps.common.types import Ok
 from apps.settings.services import SettingsService
+from tests.billing import _fiscal_correction_helpers as h
+from tests.billing._storno_helpers import v2_evidence
 from tests.factories.billing_factories import CustomerFactory, InvoiceLineFactory
 from tests.helpers.fsm_helpers import force_status
+
+
+def process_fiscal_correction_allocation(correction: FiscalCorrection) -> None:
+    """Run only the worker's allocation step, which decides how much the correction credits."""
+    from apps.billing.fiscal_correction_worker import _advance_allocation  # noqa: PLC0415
+
+    _advance_allocation(str(correction.pk))
 
 
 def _currency(code: str = "RON") -> Currency:
@@ -63,7 +75,7 @@ class StornoTestBase(TransactionTestCase):
             bill_to_tax_id="RO12345678",
             bill_to_country="RO",
             issuer_provider=issuer,
-            vat_evidence={"version": 1, "scenario": "romania_b2b", "category": "S", "is_business": True},
+            vat_evidence=v2_evidence(subtotal=10000, tax=2100, total=12100),
         )
         InvoiceLineFactory(
             invoice=invoice,
@@ -84,10 +96,20 @@ class StornoTestBase(TransactionTestCase):
             )
         return invoice
 
-    def _refund_fully(self, invoice: Invoice) -> None:
+    def _refund_fully(self, invoice: Invoice) -> FiscalCorrection:
+        """Fully refunded; its correction allocated the whole invoice, as the worker decides it."""
         force_status(invoice, "paid")
         force_status(invoice, "refunded")
-        self._settled_refund(invoice, abs(invoice.total_cents), refund_type="full")
+        refund = self._settled_refund(invoice, abs(invoice.total_cents), refund_type="full")
+        self.correction: FiscalCorrection = h.whole_correction(refund)
+        return self.correction
+
+    def _partial_correction(self, invoice: Invoice, amount_cents: int) -> FiscalCorrection:
+        """A settled partial refund's correction, allocated just its amount at 21%."""
+        correction = record_obligation(self._settled_refund(invoice, amount_cents))
+        assert correction is not None
+        base = round(amount_cents / Decimal("1.21"))
+        return h.allocated(correction, base_cents=base, tax_cents=amount_cents - base)
 
     def _settled_refund(self, invoice: Invoice, amount_cents: int, *, refund_type: str = "partial") -> Refund:
         """A refund that actually settled, which is what the storno guard counts."""
@@ -103,8 +125,8 @@ class StornoTestBase(TransactionTestCase):
             reference_number=f"REF-{invoice.pk}-{self._refund_seq}",
         )
 
-    def _storno_returning(self, outcome: object, invoice: Invoice | None = None) -> object:
-        target = invoice or self.invoice
+    def _storno_returning(self, outcome: object, correction: FiscalCorrection | None = None) -> object:
+        target = correction or self.correction
         with (
             patch(
                 "apps.billing.issuers.smartbill.issuer.SmartBillIssuer.prepare_storno",
@@ -115,7 +137,7 @@ class StornoTestBase(TransactionTestCase):
                 return_value=outcome,
             ),
         ):
-            return issue_storno_for_invoice(target.pk)
+            return issue_storno_for_correction(target.pk)
 
 
 class FullRefundTests(StornoTestBase):
@@ -146,12 +168,15 @@ class FullRefundTests(StornoTestBase):
 
         credit = Invoice.objects.get(document_kind=DOCUMENT_KIND_CREDIT_NOTE)
         self.assertEqual(credit.bill_to_tax_id, self.invoice.bill_to_tax_id)
-        self.assertEqual(credit.vat_evidence, self.invoice.vat_evidence)
+        # The original's decision and identity, restated for this note rather than copied.
+        for field in ("scenario", "category", "country_code", "vat_number", "is_business"):
+            self.assertEqual(credit.vat_evidence[field], self.invoice.vat_evidence[field], field)
+        self.assertEqual(credit.vat_evidence["reverses_number"], self.invoice.number)
 
 
 class PartialRefundTests(StornoTestBase):
     def test_a_partial_refund_is_refused_not_approximated(self) -> None:
-        """THE constraint of this phase.
+        """THE constraint of this path.
 
         `/invoice/reverse` carries no amounts. Reversing the whole document for a
         partial refund would credit the customer the entire invoice when they were
@@ -159,16 +184,17 @@ class PartialRefundTests(StornoTestBase):
         """
         force_status(self.invoice, "paid")
         force_status(self.invoice, "partially_refunded")
+        correction = self._partial_correction(self.invoice, 4000)
 
         submitted = []
         with patch(
             "apps.billing.issuers.smartbill.issuer.SmartBillIssuer.submit_storno",
             side_effect=lambda *a, **k: submitted.append(a),
         ):
-            result = issue_storno_for_invoice(self.invoice.pk)
+            result = issue_storno_for_correction(correction.pk)
 
         self.assertTrue(result.is_err())
-        self.assertIn("partial refund", result.error.lower())
+        self.assertIn("would credit the whole document", result.error)
         self.assertFalse(Invoice.objects.filter(document_kind=DOCUMENT_KIND_CREDIT_NOTE).exists())
         # The refusal has to happen before the call, not be recovered from after it.
         # SmartBill has no idempotency key and its reversal is not itself reversible.
@@ -177,18 +203,54 @@ class PartialRefundTests(StornoTestBase):
     def test_a_partial_refund_raises_a_visible_manual_flag(self) -> None:
         """It needs a human, so it must not merely be skipped in silence."""
         force_status(self.invoice, "paid")
+        force_status(self.invoice, "partially_refunded")
+        correction = self._partial_correction(self.invoice, 4000)
 
-        with patch("apps.billing.signals.log_security_event") as security:
-            force_status(self.invoice, "partially_refunded")
+        with patch("apps.billing.fiscal_correction_worker.log_security_event") as security:
+            process_fiscal_correction(str(correction.pk))
 
+        correction.refresh_from_db()
+        self.assertEqual(correction.state, "manual_required")
         events = [call.kwargs.get("event_type") for call in security.call_args_list]
         self.assertIn("provider_partial_refund_needs_manual_correction", events)
 
 
+class ProviderStornoEvidenceTests(StornoTestBase):
+    """The provider's storno records its own correction decision, as a built-in note does (v3)."""
+
+    def test_the_storno_carries_version_3_evidence_for_its_own_amounts(self) -> None:
+        """A copy of the original's +121.00 decision on a -121.00 note says the note charged VAT."""
+        from apps.billing.tax_evidence import read_vat_evidence  # noqa: PLC0415
+
+        evidenced = self._issued_invoice(number="FCT-000520")
+        correction = self._refund_fully(evidenced)
+
+        result = self._storno_returning(Issued(number="000521", series="STORNO"), correction)
+
+        self.assertTrue(result.is_ok(), msg=getattr(result, "error", ""))
+        credit = Invoice.objects.get(document_kind=DOCUMENT_KIND_CREDIT_NOTE)
+        evidence = credit.vat_evidence
+        self.assertEqual((evidence.get("version"), evidence.get("original_version")), (3, 2))
+        self.assertEqual(
+            (evidence["subtotal_cents"], evidence["tax_cents"], evidence["total_cents"]),
+            (credit.subtotal_cents, credit.tax_cents, credit.total_cents),
+        )
+        self.assertLess(evidence["total_cents"], 0)
+        self.assertEqual(evidence["reverses_number"], "FCT-000520")
+        self.assertIsNotNone(read_vat_evidence(credit), "the note's evidence must read back as valid")
+
+
 class StornoEligibilityTests(StornoTestBase):
-    def test_an_unrefunded_invoice_is_not_reversed(self) -> None:
-        result = self._storno_returning(Issued(number="000501", series="STORNO"))
+    def test_a_correction_with_no_allocation_is_not_reversed(self) -> None:
+        """Nothing decided yet is nothing to reverse."""
+        force_status(self.invoice, "paid")
+        correction = record_obligation(self._settled_refund(self.invoice, 12100, refund_type="full"))
+        assert correction is not None
+
+        result = self._storno_returning(Issued(number="000501", series="STORNO"), correction)
+
         self.assertTrue(result.is_err())
+        self.assertFalse(Invoice.objects.filter(document_kind=DOCUMENT_KIND_CREDIT_NOTE).exists())
 
     def test_a_builtin_invoice_is_not_reversed_at_a_provider(self) -> None:
         """It is refused here, and nothing corrects it anywhere else.
@@ -200,9 +262,9 @@ class StornoEligibilityTests(StornoTestBase):
         elsewhere, because none does.
         """
         builtin = self._issued_invoice(issuer=ISSUER_BUILTIN, number="INV-LOCAL-0500")
-        self._refund_fully(builtin)
+        correction = self._refund_fully(builtin)
 
-        result = issue_storno_for_invoice(builtin.pk)
+        result = issue_storno_for_correction(correction.pk)
 
         self.assertTrue(result.is_err())
         self.assertIn("no provider document exists", result.error)
@@ -211,25 +273,37 @@ class StornoEligibilityTests(StornoTestBase):
             "and no correcting document is produced for it anywhere",
         )
 
-    def test_an_invoice_is_never_reversed_twice(self) -> None:
-        """SmartBill refuses a second reversal; we should not spend an attempt on it."""
+    def test_a_correction_is_never_reversed_twice(self) -> None:
+        """SmartBill refuses a second reversal; a replay settles from the first and calls nothing."""
         self._refund_fully(self.invoice)
         self._storno_returning(Issued(number="000501", series="STORNO"))
 
-        result = self._storno_returning(Issued(number="000502", series="STORNO"))
+        with patch("apps.billing.issuers.smartbill.issuer.SmartBillIssuer.submit_storno") as submit:
+            result = issue_storno_for_correction(self.correction.pk)
 
-        self.assertTrue(result.is_err())
-        self.assertIn("already been reversed by credit note", result.error)
+        self.assertEqual(result.unwrap(), "STORNO-000501")
+        submit.assert_not_called()
+        self.assertEqual(Invoice.objects.filter(document_kind=DOCUMENT_KIND_CREDIT_NOTE).count(), 1)
+
+    def test_a_second_correction_is_never_reversed_whole(self) -> None:
+        """The original already carries a storno, so a whole-document reversal would credit it twice."""
+        self._refund_fully(self.invoice)
+        self._storno_returning(Issued(number="000501", series="STORNO"))
+        later = record_obligation(self._settled_refund(self.invoice, 12100, refund_type="full"))
+        assert later is not None
+        # Even one whose allocation equals the whole invoice: what matters is what already credits it.
+        h.allocated(later, base_cents=10000, tax_cents=2100)
+
+        self.assertIn("credit it twice", whole_document_storno_refusal(later, self.invoice) or "")
 
     def test_a_credit_note_cannot_itself_be_reversed(self) -> None:
         self._refund_fully(self.invoice)
         self._storno_returning(Issued(number="000501", series="STORNO"))
         credit = Invoice.objects.get(document_kind=DOCUMENT_KIND_CREDIT_NOTE)
 
-        result = issue_storno_for_invoice(credit.pk)
+        refusal = whole_document_storno_refusal(self.correction, credit)
 
-        self.assertTrue(result.is_err())
-        self.assertIn("cannot itself be reversed", result.error)
+        self.assertIn("cannot itself be reversed", refusal or "")
 
 
 class StornoOutcomeTests(StornoTestBase):
@@ -309,7 +383,12 @@ class StornoResumeTests(StornoTestBase):
             bill_to_name=self.invoice.bill_to_name,
             bill_to_country="RO",
         )
-        ProviderIssuance.objects.create(invoice=orphan, provider=ISSUER_SMARTBILL, state=IssuanceState.PENDING.value)
+        ProviderIssuance.objects.create(
+            invoice=orphan,
+            provider=ISSUER_SMARTBILL,
+            state=IssuanceState.PENDING.value,
+            fiscal_correction=self.correction,
+        )
 
         result = self._storno_returning(Issued(number="000501", series="STORNO"))
 
@@ -368,18 +447,18 @@ class SplitCorrectionTests(StornoTestBase):
         """
         force_status(self.invoice, "paid")
         force_status(self.invoice, "refunded")
-        self._settled_refund(self.invoice, 4000)
-        self._settled_refund(self.invoice, 8100)
+        first = self._partial_correction(self.invoice, 4000)
+        second = self._partial_correction(self.invoice, 8100)
 
         submitted = []
         with patch(
             "apps.billing.issuers.smartbill.issuer.SmartBillIssuer.submit_storno",
             side_effect=lambda *a, **k: submitted.append(a),
         ):
-            result = issue_storno_for_invoice(self.invoice.pk)
+            results = [issue_storno_for_correction(correction.pk) for correction in (first, second)]
 
-        self.assertTrue(result.is_err())
-        self.assertIn("2 settled refunds", result.error)
+        self.assertTrue(all(result.is_err() for result in results))
+        self.assertIn("would credit the whole document", results[1].error)
         self.assertEqual(submitted, [], "a refused reversal must never reach the provider")
         self.assertFalse(Invoice.objects.filter(document_kind=DOCUMENT_KIND_CREDIT_NOTE).exists())
 
@@ -404,7 +483,11 @@ class SplitCorrectionTests(StornoTestBase):
     def _fully_refund_through_the_order(
         self, *, payment_carries_invoice: bool, order_carries_invoice: bool = True
     ) -> None:
-        """Settle the invoice the way `refund_order` records it: the refund's own invoice is NULL."""
+        """Settle the invoice the way `refund_order` records it: the refund's own invoice is NULL.
+
+        The correction is recorded and allocated by the worker, which resolves the invoice through
+        the same shared rule every balance uses.
+        """
         from apps.billing.models import Payment, ProformaInvoice  # noqa: PLC0415
         from apps.orders.models import Order  # noqa: PLC0415
 
@@ -441,7 +524,7 @@ class SplitCorrectionTests(StornoTestBase):
             amount_cents=12100,
             gateway_txn_id="pi_order_path",
         )
-        Refund.objects.create(
+        refund = Refund.objects.create(
             customer=self.customer,
             order=order,
             payment=payment,
@@ -452,6 +535,12 @@ class SplitCorrectionTests(StornoTestBase):
             original_amount_cents=12100,
             reference_number="REF-ORDER-PATH",
         )
+        correction = record_obligation(refund)
+        assert correction is not None
+        self.assertEqual(correction.original_id, self.invoice.pk)
+        process_fiscal_correction_allocation(correction)
+        correction.refresh_from_db()
+        self.correction = correction
 
     def _assert_reversed(self) -> None:
         result = self._storno_returning(Issued(number="000501", series="STORNO"))
@@ -484,12 +573,12 @@ class SplitCorrectionTests(StornoTestBase):
     def test_a_refund_that_does_not_cover_the_total_is_refused(self) -> None:
         force_status(self.invoice, "paid")
         force_status(self.invoice, "refunded")
-        self._settled_refund(self.invoice, 4000)
+        correction = self._partial_correction(self.invoice, 4000)
 
-        result = issue_storno_for_invoice(self.invoice.pk)
+        result = issue_storno_for_correction(correction.pk)
 
         self.assertTrue(result.is_err())
-        self.assertIn("4000 cents", result.error)
+        self.assertIn("credits 4000 of the invoice's 12100 cents", result.error)
 
 
 class StornoResumeWithRealMapperTests(StornoTestBase):
@@ -506,7 +595,7 @@ class StornoResumeWithRealMapperTests(StornoTestBase):
             "apps.billing.issuers.smartbill.issuer.SmartBillIssuer.submit_storno",
             return_value=outcome,
         ):
-            return issue_storno_for_invoice(invoice.pk)
+            return issue_storno_for_correction(self.correction.pk)
 
     def _config(self) -> None:
         for key, value in (
@@ -533,7 +622,12 @@ class StornoResumeWithRealMapperTests(StornoTestBase):
             bill_to_name=self.invoice.bill_to_name,
             bill_to_country="RO",
         )
-        ProviderIssuance.objects.create(invoice=orphan, provider=ISSUER_SMARTBILL, state=IssuanceState.PENDING.value)
+        ProviderIssuance.objects.create(
+            invoice=orphan,
+            provider=ISSUER_SMARTBILL,
+            state=IssuanceState.PENDING.value,
+            fiscal_correction=self.correction,
+        )
 
         result = self._submit_only(Issued(number="000501", series="STORNO"), self.invoice)
 

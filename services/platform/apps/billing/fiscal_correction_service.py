@@ -1,4 +1,4 @@
-"""Recording the fiscal correction a completed refund owes.
+"""Recording the fiscal correction a completed refund owes, and the provider storno staff issued for one.
 
 Completion RECORDS; it never issues. The refund has already moved money, and nothing about
 invoicing - a provider being slow, a number failing to allocate - may roll that back. So the
@@ -15,20 +15,22 @@ on the index without ordering against anything else.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
+from datetime import date, datetime, time
 from typing import TYPE_CHECKING, Any
 
+from django.core.exceptions import ValidationError
 from django.db import transaction
-
-from apps.common.validators import log_security_event
+from django.utils.translation import gettext_lazy as _
 
 from .fiscal_correction_models import (
     REASON_NO_FISCAL_DOCUMENT,
+    STATE_MANUAL_REQUIRED,
     STATE_NOT_REQUIRED,
-    STATE_PENDING,
     FiscalCorrection,
 )
-from .invoice_models import DOCUMENT_KIND_CREDIT_NOTE, DOCUMENT_KIND_INVOICE, Invoice
-from .refund_models import refunds_for_invoice, resolved_invoice_id_of
+from .invoice_models import DOCUMENT_KIND_INVOICE, Invoice
+from .refund_models import resolved_invoice_id_of
 
 if TYPE_CHECKING:
     from django.db.models import QuerySet
@@ -39,7 +41,6 @@ logger = logging.getLogger(__name__)
 
 # Rotation state for `sweep_fiscal_corrections`; its docstring explains why it exists.
 _SWEEP_CURSOR_KEY = "billing:fiscal-correction-sweep-cursor"
-_LINK_CURSOR_KEY = "billing:fiscal-correction-link-cursor"
 
 
 def _is_fiscal_document(invoice: Invoice | None) -> bool:
@@ -100,95 +101,6 @@ def record_obligation(refund: Refund) -> FiscalCorrection | None:
     return correction
 
 
-def _sources_settled_by(original: Invoice) -> dict[tuple[str, Any], int]:
-    """Completed refunds on `original`, summed per source (a tender command, or the refund itself).
-
-    The same single-invoice resolution as every balance, so the storno is matched against exactly
-    the money the ledger counts against this invoice.
-    """
-    from apps.promotions.models import TenderRefundLeg  # noqa: PLC0415  # ADR-0007 cross-app import
-
-    settled = list(refunds_for_invoice(original).filter(status="completed").only("pk", "amount_cents"))
-    command_of = dict(
-        TenderRefundLeg.objects.filter(refund_id__in=[refund.pk for refund in settled]).values_list(
-            "refund_id", "command_id"
-        )
-    )
-    totals: dict[tuple[str, Any], int] = {}
-    for refund in settled:
-        command_id = command_of.get(refund.pk)
-        key = ("command", command_id) if command_id is not None else ("refund", refund.pk)
-        totals[key] = totals.get(key, 0) + refund.amount_cents
-    return totals
-
-
-def attach_provider_credit_note(credit_note: Invoice) -> FiscalCorrection | None:
-    """Settle the obligation of the refund an issued provider storno reverses, by linking it.
-
-    Which refund that is comes from the ledger, not from whichever obligation happens to be
-    pending: a whole-document storno is only ever allowed when ONE refund, or one tender command,
-    accounts for the entire invoice, so its source is the one whose completed refunds sum to the
-    credit note's total. Obligations still missing for completed refunds on the original - a
-    backfill reaching history - are recorded first, so the match never lands on an unrelated
-    obligation just because it was the only one recorded yet. No match, or several, is not a link
-    this code may guess; it is logged for an operator, and the sweep looks again.
-
-    Locks only the obligation row it settles. The caller is finalising the credit note and holds
-    its issuance lock, never the original's; recording takes no locks at all.
-    """
-    from .refund_models import Refund  # noqa: PLC0415  # Avoid a model import cycle
-
-    if credit_note.document_kind != DOCUMENT_KIND_CREDIT_NOTE or not credit_note.number:
-        return None
-    original = credit_note.reverses_invoice
-    if original is None:
-        return None
-
-    already = FiscalCorrection.objects.filter(credit_note=credit_note).first()
-    if already is not None:
-        return already
-
-    for refund in refunds_for_invoice(original).filter(status="completed"):
-        record_obligation(refund)
-
-    reversed_cents = abs(credit_note.total_cents)
-    matches = [key for key, total in _sources_settled_by(original).items() if total == reversed_cents]
-    if len(matches) != 1:
-        level = logging.WARNING if not matches else logging.ERROR
-        logger.log(
-            level,
-            f"{'⚠️' if not matches else '🔥'} [Fiscal Correction] Credit note {credit_note.number} reverses "
-            f"{reversed_cents} cents of invoice {original.pk}, and {len(matches)} refund source(s) on it "
-            f"account for exactly that; it is not linked until an operator decides.",
-        )
-        if matches:
-            log_security_event(
-                event_type="fiscal_correction_ambiguous_credit_note",
-                details={"credit_note_id": str(credit_note.pk), "original_id": str(original.pk)},
-            )
-        return None
-
-    kind, source_id = matches[0]
-    if kind == "command":
-        source: dict[str, Any] = {"source_command_id": source_id}
-    else:
-        source = {"source_refund": Refund.objects.get(pk=source_id)}
-    correction = FiscalCorrection.objects.select_for_update().filter(**source).first()
-    if correction is None or correction.state != STATE_PENDING or correction.original_id != original.pk:
-        logger.error(
-            f"🔥 [Fiscal Correction] Credit note {credit_note.number} matches refund source {source_id}, whose "
-            f"correction is {getattr(correction, 'state', 'missing')}; it is not linked until an operator decides."
-        )
-        return None
-
-    correction.attach_credit_note(credit_note)
-    correction.save(update_fields=["state", "credit_note", "updated_at"])
-    logger.info(
-        f"✅ [Fiscal Correction] Correction {correction.pk} settled by provider credit note {credit_note.number}"
-    )
-    return correction
-
-
 def _unrecorded_completed_refunds() -> QuerySet[Refund]:
     """Completed refunds that answer to no correction, directly or through their tender command."""
     from .refund_models import Refund  # noqa: PLC0415  # Avoid a model import cycle
@@ -204,13 +116,12 @@ def _unrecorded_completed_refunds() -> QuerySet[Refund]:
 def sweep_fiscal_corrections(limit: int = 200) -> dict[str, int]:
     """Recover what the completion hook could not do, idempotently.
 
-    1. Record the obligation for every completed refund that has none. The hook misses a refund
-       when its recording failed (the savepoint rolled back and only a log line remains), when
-       a refund reached `completed` without a `save()` that this process saw, or when a row was
-       created already completed. Keyed by the refund-and-command identity, so a second run, or a
-       second leg of a command already recorded, converges on the existing row.
-    2. Link any issued provider credit note still unlinked to the pending obligation it settles:
-       a storno can be issued before its obligation was recorded, and then had nothing to attach to.
+    Records the obligation for every completed refund that has none. The hook misses a refund
+    when its recording failed (the savepoint rolled back and only a log line remains), when a
+    refund reached `completed` without a `save()` that this process saw, or when a row was
+    created already completed. Keyed by the refund-and-command identity, so a second run, or a
+    second leg of a command already recorded, converges on the existing row. Every storno, a
+    provider's included, is issued from its correction (ADR-0053), so none exists to link back.
 
     A refund the recorder refuses (linked to several invoices) stays a candidate and is raised
     again on every run. The cursor rotates through candidates, so a handful of those can never
@@ -229,7 +140,7 @@ def sweep_fiscal_corrections(limit: int = 200) -> dict[str, int]:
     # Advanced BEFORE the work, so a crash part-way still moves past what was examined.
     cache.set(_SWEEP_CURSOR_KEY, _cursor_for(owed[-1]) if owed else None, timeout=None)
 
-    results = {"examined": len(owed), "recorded": 0, "unresolved": 0, "linked": 0}
+    results = {"examined": len(owed), "recorded": 0, "unresolved": 0}
     for refund in owed:
         try:
             with transaction.atomic():
@@ -239,33 +150,121 @@ def sweep_fiscal_corrections(limit: int = 200) -> dict[str, int]:
             correction = None
         results["recorded" if correction is not None else "unresolved"] += 1
 
-    unlinked_notes = Invoice.objects.filter(
-        document_kind=DOCUMENT_KIND_CREDIT_NOTE,
-        number__isnull=False,
-        settled_fiscal_correction__isnull=True,
-        reverses_invoice__fiscal_corrections__state=STATE_PENDING,
-    ).distinct()
-    # Rotated like the refund candidates above, by integer primary key: a credit note that can
-    # never be linked (an ambiguous or failing one) stays a candidate, and always taking the first
-    # `limit` would let a few of those hold every run while a linkable one behind them waits.
-    link_cursor = cache.get(_LINK_CURSOR_KEY) or 0
-    notes = list(unlinked_notes.filter(pk__gt=link_cursor).order_by("pk")[:limit])
-    if not notes and link_cursor:
-        notes = list(unlinked_notes.order_by("pk")[:limit])
-    cache.set(_LINK_CURSOR_KEY, notes[-1].pk if notes else 0, timeout=None)
-    for credit_note in notes:
-        try:
-            with transaction.atomic():
-                linked = attach_provider_credit_note(credit_note)
-        except Exception:
-            logger.exception(f"🔥 [Fiscal Correction] Sweep could not link credit note {credit_note.pk}")
-            linked = None
-        if linked is not None:
-            results["linked"] += 1
-
-    if results["examined"] or results["linked"]:
+    if results["examined"]:
         logger.info(
             f"🐢 [Fiscal Correction] Swept {results['examined']} refund(s): {results['recorded']} recorded, "
-            f"{results['unresolved']} unresolved; {results['linked']} credit note(s) linked"
+            f"{results['unresolved']} unresolved"
         )
     return results
+
+
+@dataclass(frozen=True)
+class ProviderStornoRecord:
+    """A credit note staff issued at the provider and sent to the customer, as they read it."""
+
+    series: str
+    number: str
+    issued_on: date
+    communicated_on: date
+    currency_code: str
+    # Magnitudes, as the allocation's are compared: the sign a screen shows is not the question.
+    base_cents: int
+    tax_cents: int
+    evidence: str
+
+
+def record_provider_storno(correction_id: Any, record: ProviderStornoRecord) -> Invoice:
+    """Settle a `manual_required` correction with the storno staff issued at the provider.
+
+    The provider's API cannot issue a partial storno (A3 research), so staff issue it in the
+    provider's own interface and send it themselves. This records that document: a locked credit
+    note with the provider's number and issue date, carrying exactly the correction's allocation,
+    and the correction moves straight to `communicated`, dated by the staff-entered communication
+    date, which places it in its D390 period (OPANAF 705/2020) and is backed by the evidence reference.
+
+    Nothing is trusted that can be checked: the amounts and currency must be the allocation's, the
+    dates must be possible, and the number must be new. Raises `ValidationError` keyed by what to
+    correct; the transaction then rolls back whole.
+    """
+    from django.utils import timezone  # noqa: PLC0415
+
+    from .efactura.settings import ro_local_date  # noqa: PLC0415
+    from .fiscal_correction_worker import draft_credit_note  # noqa: PLC0415  # Keeps the import graph acyclic
+    from .issuers.models import ProviderIssuance  # noqa: PLC0415
+
+    with transaction.atomic():
+        # The correction, then its original: the order allocation takes them in.
+        correction = FiscalCorrection.objects.select_for_update().filter(pk=correction_id).first()
+        if correction is None or correction.state != STATE_MANUAL_REQUIRED or correction.original_id is None:
+            raise ValidationError({"__all__": _("This correction is no longer waiting for a provider document.")})
+        original = Invoice.objects.select_for_update().select_related("currency").get(pk=correction.original_id)
+
+        errors = _provider_storno_errors(correction, original, record, today=ro_local_date(timezone.now()))
+        legal_number = f"{record.series}-{record.number}" if record.series else record.number
+        if Invoice.objects.filter(number=legal_number).exists():
+            errors.setdefault("number", _("Another document already has this number."))
+        if errors:
+            raise ValidationError(errors)
+
+        # The provider issued it on that day; noon stands for the moment, unless that is still ahead.
+        issued_at = min(_bucharest_noon(record.issued_on), timezone.now())
+        # The restated decision is dated by that issue, not by this recording, or it would read
+        # as a VAT decision taken after the document it belongs to.
+        note = draft_credit_note(correction, original, issuer_provider=original.issuer_provider, evidence_at=issued_at)
+        note.number = legal_number
+        note.issued_at = issued_at
+        note.tax_point_date = record.issued_on
+        note.issue()
+        note.save()
+
+        issuance = ProviderIssuance.objects.create(
+            invoice=note, provider=original.issuer_provider, fiscal_correction=correction
+        )
+        issuance.record_issued_by_staff(series=record.series, number=record.number, operator_note=record.evidence)
+        issuance.save()
+
+        correction.record_provider_document(
+            note,
+            communicated_at=_bucharest_noon(record.communicated_on),
+            fiscal_date=record.communicated_on,
+            evidence=record.evidence,
+        )
+        correction.save()
+    logger.info(f"✅ [Fiscal Correction] Correction {correction_id} settled by provider document {legal_number}")
+    return note
+
+
+def _provider_storno_errors(
+    correction: FiscalCorrection, original: Invoice, record: ProviderStornoRecord, *, today: date
+) -> dict[str, Any]:
+    """What is wrong with a recorded provider storno, keyed by the field to correct."""
+    from .efactura.settings import ro_local_date  # noqa: PLC0415
+
+    errors: dict[str, Any] = {}
+    if record.currency_code.strip().upper() != original.currency.code:
+        errors["currency_code"] = _("The credit note must be in the invoice's currency, %(code)s.") % {
+            "code": original.currency.code
+        }
+    if abs(record.base_cents) != abs(correction.base_cents or 0):
+        errors["base_amount"] = _("The taxable base must be exactly the amount this correction credits.")
+    if abs(record.tax_cents) != abs(correction.tax_cents or 0):
+        errors["tax_amount"] = _("The VAT must be exactly the amount this correction credits.")
+    original_date = ro_local_date(original.issued_at) if original.issued_at else original.tax_point_date
+    if original_date is not None and record.issued_on < original_date:
+        errors["issued_on"] = _("A storno cannot be dated before the invoice it corrects.")
+    elif record.issued_on > today:
+        errors["issued_on"] = _("The issue date cannot be in the future.")
+    if record.communicated_on < record.issued_on:
+        errors["communicated_on"] = _("The credit note cannot have been sent before it was issued.")
+    elif record.communicated_on > today:
+        errors["communicated_on"] = _("The communication date cannot be in the future.")
+    if not record.evidence.strip():
+        errors["evidence"] = _("Say where the proof of sending is kept.")
+    return errors
+
+
+def _bucharest_noon(day: date) -> datetime:
+    """A recorded calendar day as an instant: noon in Bucharest is that day in every zone PRAHO reads."""
+    from .efactura.settings import ROMANIA_TIMEZONE  # noqa: PLC0415
+
+    return datetime.combine(day, time(12), tzinfo=ROMANIA_TIMEZONE)

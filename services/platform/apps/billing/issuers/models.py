@@ -172,6 +172,16 @@ class ProviderIssuance(models.Model):
         related_name="provider_issuance",
     )
     provider = models.CharField(max_length=20)
+    # For a storno: the fiscal correction it issues. One provider document per correction, which is
+    # what keeps two workers from reversing the same refund twice now that an original may carry
+    # several credit notes (ADR-0053).
+    fiscal_correction = models.OneToOneField(
+        "billing.FiscalCorrection",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="provider_issuance",
+    )
     state = FSMField(
         max_length=20,
         choices=[(s.value, s.value) for s in IssuanceState],
@@ -316,6 +326,17 @@ class ProviderIssuance(models.Model):
         self.last_error = f"Reconciled by operator: {operator_note}"
         self.claim_token = None
         self.claim_expires_at = None
+
+    @transition(field=state, source=IssuanceState.PENDING.value, target=IssuanceState.ISSUED.value)
+    def record_issued_by_staff(self, *, series: str, number: str, operator_note: str) -> None:
+        """A document staff issued at the provider by hand, recorded rather than requested.
+
+        For a correction the provider's API cannot express (ADR-0053): PRAHO made no call, so there
+        is no payload or response, only the number a person read off the provider's screen and why.
+        """
+        self.provider_series = series
+        self.provider_number = number
+        self.last_error = f"Issued by staff at the provider: {operator_note}"
 
     @classmethod
     def abandoned(cls) -> models.QuerySet[ProviderIssuance]:

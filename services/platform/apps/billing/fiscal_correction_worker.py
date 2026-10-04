@@ -1,4 +1,4 @@
-"""Issuing the built-in storno credit note a fiscal correction owes (ADR-0053).
+"""Issuing the storno credit note a fiscal correction owes (ADR-0053).
 
 A1 records the obligation when a refund completes. This module settles it, one correction at a
 time, as a Django-Q task and an hourly sweep. Each step is its own transaction and is resumed
@@ -13,8 +13,11 @@ independently, by correction id:
    successful send dates it for D390) and, in Romania, filed with e-Factura once its original is
    accepted. Neither can undo the note; each is retried until it succeeds.
 
-Built-in originals only. A provider (SmartBill) original keeps its existing storno path until A3,
-so its corrections are left exactly as A1 records them.
+A provider (SmartBill) original is allocated the same way and issued at the provider instead
+(ADR-0048). Its reverse call carries no amount, so it is used only when this correction credits the
+whole original and nothing has credited it before; any other correction waits as `manual_required`
+for staff to issue it at the provider and record it. The provider files its own documents with
+e-Factura, so no submission is owed for them here.
 """
 
 from __future__ import annotations
@@ -29,6 +32,9 @@ from django.db import models, transaction
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
+from apps.common.types import Err
+from apps.common.validators import log_security_event
+
 from .efactura.settings import ro_local_date
 from .fiscal_correction_allocation import AllocationRefusedError, Components, allocate, owed_reduction
 from .fiscal_correction_models import (
@@ -39,7 +45,6 @@ from .fiscal_correction_models import (
     EFACTURA_SUBMITTED,
     FAILURE_ALLOCATION_REFUSED,
     FAILURE_ISSUANCE_ERROR,
-    FAILURE_SECOND_CREDIT_NOTE,
     REASON_COVERED_BY_COLLECTIONS,
     REASON_FULLY_CREDITED,
     STATE_ALLOCATED,
@@ -47,6 +52,7 @@ from .fiscal_correction_models import (
     STATE_COMMUNICATED,
     STATE_FAILED,
     STATE_ISSUED,
+    STATE_MANUAL_REQUIRED,
     STATE_NOT_REQUIRED,
     STATE_PENDING,
     FiscalCorrection,
@@ -72,14 +78,18 @@ EFACTURA_MAX_BACKOFF = timedelta(days=7)
 # 2 ** 8 hours is past the week, so no larger exponent can change the result.
 _MAX_BACKOFF_EXPONENT = 8
 
-# States in which an earlier correction no longer competes for issuance.
-_ISSUANCE_SETTLED_STATES = frozenset({STATE_ISSUED, STATE_COMMUNICATED, STATE_NOT_REQUIRED, STATE_ATTACHED})
+# States in which an earlier correction no longer competes for issuance. One waiting for staff is
+# out of the race: its document is issued at the provider, numbered there, whenever staff get to it.
+_ISSUANCE_SETTLED_STATES = frozenset(
+    {STATE_ISSUED, STATE_COMMUNICATED, STATE_NOT_REQUIRED, STATE_ATTACHED, STATE_MANUAL_REQUIRED}
+)
 # States in which an earlier correction has decided its amount, so a later one can build on it.
-_DECIDED_STATES = frozenset({STATE_ALLOCATED, STATE_ISSUED, STATE_COMMUNICATED, STATE_NOT_REQUIRED, STATE_ATTACHED})
-
-
-class _SecondCreditNoteError(Exception):
-    """The original already has a credit note; A2 cannot write a second (A3 lifts this)."""
+_DECIDED_STATES = frozenset(
+    {STATE_ALLOCATED, STATE_ISSUED, STATE_COMMUNICATED, STATE_NOT_REQUIRED, STATE_ATTACHED, STATE_MANUAL_REQUIRED}
+)
+_AT_PROVIDER = "at_provider"
+# The security event a correction raises when it needs staff at the provider.
+MANUAL_STORNO_EVENT = "provider_partial_refund_needs_manual_correction"
 
 
 @dataclass(frozen=True)
@@ -91,14 +101,16 @@ class _Source:
     completed_at: datetime
 
 
-def queue_fiscal_correction(correction_id: Any) -> None:
-    """Hand one correction to the worker. Losing this enqueue costs only time: the sweep finds it."""
+def queue_fiscal_correction(correction_id: Any) -> bool:
+    """Hand one correction to the worker; whether it was queued. A lost enqueue costs only time: the sweep finds it."""
     try:
         from django_q.tasks import async_task  # noqa: PLC0415
 
         async_task(TASK_PATH, str(correction_id), timeout=TASK_TIMEOUT_SECONDS)
     except Exception:
         logger.exception(f"🔥 [Storno] Could not queue fiscal correction {correction_id}; the sweep will pick it up")
+        return False
+    return True
 
 
 def process_fiscal_correction(correction_id: str) -> dict[str, str]:
@@ -199,9 +211,12 @@ def _credited_so_far(original: Invoice, *, excluding: FiscalCorrection) -> Compo
             discount=models.Sum("discount_cents", default=0),
         )
     )
+    # A note that answers to an allocation is counted through it, never twice: settled, or still a
+    # provider draft its correction is issuing. An unnumbered draft credits nothing.
     other_notes = (
-        Invoice.objects.filter(reverses_invoice=original)
+        Invoice.objects.filter(reverses_invoice=original, number__isnull=False)
         .exclude(settled_fiscal_correction__allocated_at__isnull=False)
+        .exclude(provider_issuance__fiscal_correction__isnull=False)
         .aggregate(
             base=models.Sum("subtotal_cents", default=0),
             tax=models.Sum("tax_cents", default=0),
@@ -285,9 +300,6 @@ def _advance_allocation(correction_id: str) -> str:  # noqa: PLR0911  # One retu
         if correction.original_id is None:
             return "skipped"
         original = Invoice.objects.select_for_update().get(pk=correction.original_id)
-        if original.issuer_provider != ISSUER_BUILTIN:
-            # A provider's document is corrected at the provider (A3), not here.
-            return "provider"
         source = _source_of(correction)
         if source is None:
             return "waiting_for_source"
@@ -363,45 +375,123 @@ def _advance_allocation(correction_id: str) -> str:  # noqa: PLR0911  # One retu
 
 
 def _advance_issuance(correction_id: str) -> str:
-    """Draft, lines, number and issue in ONE transaction, against the frozen allocation."""
+    """Issue the frozen allocation: built-in here, at the provider, or by staff at the provider."""
+    with transaction.atomic():
+        correction = FiscalCorrection.objects.select_for_update().filter(pk=correction_id).first()
+        # Checked before the original is locked: a replay, or a worker that lost the race, must
+        # see the note already issued here rather than wait on a correction it settled itself.
+        if correction is None or correction.state not in {STATE_ALLOCATED, STATE_FAILED}:
+            return "skipped"
+        if not correction.is_allocated or correction.original_id is None:
+            return "skipped"
+        if Invoice.objects.filter(pk=correction.original_id, issuer_provider=ISSUER_BUILTIN).exists():
+            route = _issue_builtin(correction)
+        else:
+            route = _route_provider_correction(correction)
+    if route == _AT_PROVIDER:
+        # Only now, with the transaction closed: the provider call refuses to run inside one (ADR-0045).
+        return _issue_at_provider(correction_id)
+    return route
+
+
+def _issue_builtin(correction: FiscalCorrection) -> str:
+    """Number and issue the built-in note, under the original's lock, in the caller's transaction."""
+    assert correction.original_id is not None  # The caller skips a correction with no original.
+    original = Invoice.objects.select_for_update().get(pk=correction.original_id)
+    # In refund-completion order, like allocation: notes of one original are numbered in the order
+    # their refunds completed, whichever worker reaches this line first.
+    waiting = _earlier_not_issued(correction, original)
+    if waiting:
+        logger.info(f"🐢 [Storno] Correction {correction.pk} waits to issue: {waiting}")
+        return "waiting_for_earlier"
+    note = _issue_credit_note(correction, original)
+    correction.record_issued(note)
+    correction.owe_efactura()
+    correction.save()
+    logger.info(f"✅ [Storno] Correction {correction.pk} issued credit note {note.number}")
+    return "issued"
+
+
+def _route_provider_correction(correction: FiscalCorrection) -> str:
+    """A provider original: reverse it whole at the provider, or hand the correction to staff.
+
+    Runs under the correction's lock and never takes the original's. Reversal locks the original
+    and then its issuance, and recording the outcome locks the issuance and then this correction;
+    taking the original here as well would close that cycle. The original's issuer and the
+    allocation are both frozen, so nothing read here can change, and reversal re-checks the
+    whole-document rule under its own lock before anything is sent.
+    """
+    from .issuers.service import whole_document_storno_refusal  # noqa: PLC0415  # Keeps imports acyclic
+
+    assert correction.original_id is not None  # The caller skips a correction with no original.
+    original = Invoice.objects.get(pk=correction.original_id)
+    waiting = _earlier_not_issued(correction, original)
+    if waiting:
+        logger.info(f"🐢 [Storno] Correction {correction.pk} waits to issue: {waiting}")
+        return "waiting_for_earlier"
+    refusal = whole_document_storno_refusal(correction, original)
+    if refusal is None:
+        return _AT_PROVIDER
+
+    correction.require_manual_issuance()
+    correction.save()
+    logger.error(
+        f"🔥 [Storno] Correction {correction.pk} credits {correction.total_cents} cents of provider invoice "
+        f"{original.number}, which the provider's reverse cannot express ({refusal}). Issue it at the provider "
+        f"and record it against the correction."
+    )
+    details = {
+        "fiscal_correction_id": str(correction.pk),
+        "invoice_number": str(original.number),
+        "issuer_provider": str(original.issuer_provider),
+        "customer_id": str(original.customer_id),
+        "credit_cents": str(correction.total_cents),
+    }
+    # Raised once the hand-over commits, never for one that rolled back.
+    transaction.on_commit(lambda: log_security_event(event_type=MANUAL_STORNO_EVENT, details=details))
+    return "manual_required"
+
+
+def _issue_at_provider(correction_id: str) -> str:
+    """Reverse the original at its provider for this correction; the outcome settles the correction."""
+    from .issuers.service import issue_storno_for_correction  # noqa: PLC0415  # Keeps imports acyclic
+
     try:
-        with transaction.atomic():
-            correction = FiscalCorrection.objects.select_for_update().filter(pk=correction_id).first()
-            # Checked before the original is locked: a replay, or a worker that lost the race, must
-            # see the note already issued here rather than park itself against its own note below.
-            if correction is None or correction.state not in {STATE_ALLOCATED, STATE_FAILED}:
-                return "skipped"
-            if not correction.is_allocated or correction.original_id is None:
-                return "skipped"
-            original = Invoice.objects.select_for_update().get(pk=correction.original_id)
-            # In refund-completion order, like allocation: the earlier correction takes the one note
-            # A2 allows and the later is the one parked, whichever worker reaches this line first.
-            waiting = _earlier_not_issued(correction, original)
-            if waiting:
-                logger.info(f"🐢 [Storno] Correction {correction.pk} waits to issue: {waiting}")
-                return "waiting_for_earlier"
-            if Invoice.objects.filter(reverses_invoice=original).exists():
-                raise _SecondCreditNoteError
-            note = _issue_credit_note(correction, original)
-            correction.record_issued(note)
-            correction.owe_efactura()
-            correction.save()
-    except _SecondCreditNoteError:
-        message = (
-            "The original already has a credit note and a second one cannot be written until the "
-            "one-reversal-per-original rule is lifted (A3). Parked with its allocation; retried by the sweep."
-        )
-        logger.warning(f"⚠️ [Storno] Correction {correction_id}: {message}")
-        _record_failure(correction_id, FAILURE_SECOND_CREDIT_NOTE, message)
-        return "parked"
-    logger.info(f"✅ [Storno] Correction {correction_id} issued credit note {note.number}")
+        result = issue_storno_for_correction(correction_id)
+    except Exception:
+        # The issuance record says what happened at the provider; the sweep resumes from it.
+        logger.exception(f"🔥 [Storno] Correction {correction_id}: the provider reversal failed")
+        return "failed"
+    if isinstance(result, Err):
+        logger.warning(f"⚠️ [Storno] Correction {correction_id} not reversed at the provider yet: {result.error}")
+        return "provider_waiting"
+    logger.info(f"✅ [Storno] Correction {correction_id} reversed at the provider as {result.unwrap()}")
     return "issued"
 
 
 def _issue_credit_note(correction: FiscalCorrection, original: Invoice) -> Invoice:
     """Create, number and issue the note. Runs inside the caller's transaction, all or nothing."""
-    from .credit_note_lines import mirror_lines_negated  # noqa: PLC0415  # Keeps the import graph acyclic
     from .numbering_service import InvoiceNumberingService  # noqa: PLC0415
+
+    note = draft_credit_note(correction, original, issuer_provider=ISSUER_BUILTIN)
+    # Numbered from the original's family; an archived series answers to the live one.
+    scope = sequence_family_of(original.sequence_scope)
+    note.number = InvoiceNumberingService.get_next_number(scope=scope)
+    note.sequence_scope = scope
+    note.issue()
+    note.save()
+    return note
+
+
+def draft_credit_note(
+    correction: FiscalCorrection, original: Invoice, *, issuer_provider: str, evidence_at: datetime | None = None
+) -> Invoice:
+    """The unnumbered credit note carrying exactly the correction's allocation, lines included.
+
+    Runs inside the caller's transaction; the caller numbers and issues it, or rolls it back.
+    `evidence_at` dates the restated VAT decision for a note issued before it is recorded here.
+    """
+    from .credit_note_lines import mirror_lines_negated  # noqa: PLC0415  # Keeps the import graph acyclic
     from .tax_evidence import capture_credit_note_evidence  # noqa: PLC0415
 
     assert correction.base_cents is not None and correction.tax_cents is not None  # allocated
@@ -413,7 +503,7 @@ def _issue_credit_note(correction: FiscalCorrection, original: Invoice) -> Invoi
         status="draft",
         document_kind=DOCUMENT_KIND_CREDIT_NOTE,
         reverses_invoice=original,
-        issuer_provider=ISSUER_BUILTIN,
+        issuer_provider=issuer_provider,
         subtotal_cents=correction.base_cents,
         tax_cents=correction.tax_cents,
         total_cents=correction.total_cents,
@@ -424,6 +514,7 @@ def _issue_credit_note(correction: FiscalCorrection, original: Invoice) -> Invoi
             subtotal_cents=correction.base_cents,
             tax_cents=correction.tax_cents,
             total_cents=correction.total_cents,
+            calculated_at=evidence_at,
         ),
         # The original's rate, all four fields, so `issue()` consumes it rather than today's rate.
         exchange_to_ron=original.exchange_to_ron,
@@ -444,13 +535,6 @@ def _issue_credit_note(correction: FiscalCorrection, original: Invoice) -> Invoi
         mirror_lines_negated(original, note)
     else:
         _write_single_line(note, original, correction)
-
-    # Numbered from the original's family; an archived series answers to the live one.
-    scope = sequence_family_of(original.sequence_scope)
-    note.number = InvoiceNumberingService.get_next_number(scope=scope)
-    note.sequence_scope = scope
-    note.issue()
-    note.save()
     return note
 
 
@@ -508,12 +592,19 @@ def _run_delivery_step(correction_id: str, step: Any) -> str:
 
 
 def _send_credit_note_email(note: Invoice) -> tuple[bool, str]:
-    """Send the note's PDF to the customer, synchronously: success here means it was sent."""
+    """Send the note's PDF to the customer, synchronously: success here means it was sent.
+
+    The PDF is the document's own (ADR-0048): PRAHO's rendering of a built-in note, the provider's
+    of a provider note. A provider fetch the rate gate defers raises, and is retried like a failed send.
+    """
     from apps.customers.services import get_customer_locale  # noqa: PLC0415  # ADR-0007 cross-app import
     from apps.notifications.services import EmailService  # noqa: PLC0415  # ADR-0007 cross-app import
 
-    from .pdf_generators import generate_invoice_pdf  # noqa: PLC0415
+    from .issuers.documents import get_invoice_pdf_bytes  # noqa: PLC0415
 
+    pdf = get_invoice_pdf_bytes(note)
+    if isinstance(pdf, Err):
+        return False, f"The credit note's PDF is not available: {pdf.error}"
     customer = note.customer
     original = note.reverses_invoice
     assert original is not None  # A credit note always reverses an invoice.
@@ -538,7 +629,7 @@ def _send_credit_note_email(note: Invoice) -> tuple[bool, str]:
         locale=get_customer_locale(customer),
         customer=customer,
         priority="high",
-        attachments=[(f"storno_{note.number}.pdf", generate_invoice_pdf(note), "application/pdf")],
+        attachments=[(f"storno_{note.number}.pdf", pdf.unwrap(), "application/pdf")],
         async_send=False,
     )
     return bool(result.success), str(result.error or "")
@@ -669,10 +760,22 @@ def efactura_backoff(attempt: int) -> timedelta:
 
 
 def _unfinished_corrections() -> models.QuerySet[FiscalCorrection]:
-    """Every correction with a step still to take, on a built-in original."""
-    issuance_owed = models.Q(
-        state__in=[STATE_PENDING, STATE_ALLOCATED, STATE_FAILED], original__issuer_provider=ISSUER_BUILTIN
+    """Every correction with a step still to take.
+
+    Not one whose provider reversal waits for a person: an unknown outcome or a spent submission
+    budget is the reconciliation queue's, and a live claim is its worker's or the abandoned-claim
+    sweep's. Retrying them hourly would only be refused again. `manual_required` is not here either:
+    staff settle it.
+    """
+    from .issuers.models import MAX_SUBMISSIONS, IssuanceState  # noqa: PLC0415  # Kept out of the model graph
+
+    provider_waits_for_a_person = models.Q(
+        provider_issuance__state__in=[IssuanceState.OUTCOME_UNKNOWN.value, IssuanceState.CLAIMED.value]
+    ) | models.Q(
+        provider_issuance__state__in=[IssuanceState.PENDING.value, IssuanceState.FAILED.value],
+        provider_issuance__submissions__gte=MAX_SUBMISSIONS,
     )
+    issuance_owed = models.Q(state__in=[STATE_PENDING, STATE_ALLOCATED, STATE_FAILED]) & ~provider_waits_for_a_person
     communication_owed = models.Q(state=STATE_ISSUED)
     efactura_owed = models.Q(state__in=[STATE_ISSUED, STATE_COMMUNICATED], efactura_status__in=EFACTURA_RETRYABLE) & (
         models.Q(efactura_next_attempt_at__isnull=True) | models.Q(efactura_next_attempt_at__lte=timezone.now())

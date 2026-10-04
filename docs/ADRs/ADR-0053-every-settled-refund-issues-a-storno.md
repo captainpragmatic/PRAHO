@@ -18,16 +18,18 @@ e-Factura record and the customer's copy kept stating a sale that had been partl
 Issuing the note inside settlement was rejected in review: a numbering failure or a slow provider
 must never roll back money that has already left. PR #599 (A1) therefore records a durable
 `FiscalCorrection` obligation when a refund completes. This ADR records how that obligation is
-settled on the built-in path (A2). SmartBill moves onto the same obligation in A3, the reports in A4
-and D390 in B.
+settled: on the built-in path (A2), and on the SmartBill path (A3). The reports move in A4 and D390
+in B.
 
 ## Decision
 
 ### The rule
 
 Every completed refund records one fiscal correction (a tender command records one for all its
-legs). A correction on a built-in original is settled by exactly one built-in storno credit note,
-or is closed as `not_required` with a computed reason. Nothing is ever deleted, voided or renumbered.
+legs). A correction is settled by exactly one storno credit note, or is closed as `not_required`
+with a computed reason. On a built-in original the note is PRAHO's own; on a provider (SmartBill)
+original it is the provider's (see "Provider originals" below). An original may carry several
+credit notes, one per correction. Nothing is ever deleted, voided or renumbered.
 
 ### The amount
 
@@ -90,9 +92,11 @@ permits. In the code as it stands, every invoice is numbered from `default` (`su
 subscriptions, not invoices). Built-in notes get no `ProviderIssuance` row and are never swept as
 provider documents.
 
-Until A3 drops `invoice_one_reversal_per_original`, an original can carry one credit note. A second
-correction on the same original is parked as `failed` (`awaiting_second_credit_note_support`) with
-its allocation, and is retried by the sweep.
+`invoice_one_reversal_per_original` is gone (A3, migration `0007`). Uniqueness is per correction
+instead: a correction names one credit note (`FiscalCorrection.credit_note`, one-to-one) and at most
+one provider attempt (`ProviderIssuance.fiscal_correction`, one-to-one). The notes of one original
+are numbered in refund-completion order: a correction waits to issue until every earlier one has
+issued, been closed, or been handed to staff.
 
 ### Communication
 
@@ -125,11 +129,65 @@ e-Factura recovery: the two have separate status fields. While e-Factura is swit
 backoff (one hour, doubling, capped at a week), recorded as `efactura_attempts` and
 `efactura_next_attempt_at`, so it stays visible without being re-checked every hour.
 
+### Provider originals (SmartBill, A3)
+
+A correction on a SmartBill original is allocated exactly like a built-in one: the same amount
+rule, the same split, frozen once. Only issuance differs, because the provider issues the document.
+
+- **Whole-document reverse, for one case only.** `/invoice/reverse` takes the original's series and
+  number and nothing else: no products, no amounts, once per invoice. So it issues a correction only
+  when that correction's allocation is the whole original (base, VAT and discount) and nothing else
+  credits the original: no other allocated correction and no other numbered note
+  (`whole_document_storno_refusal`). The worker decides under the correction's lock and the reversal
+  checks again under the original's lock before anything is sent.
+- **Keyed by the correction.** `issue_storno_for_correction` finds or creates the credit note through
+  the correction's `ProviderIssuance`, never through the original, and the ADR-0048 claim discipline
+  (claim committed before the call, `outcome_unknown` for a human, pacing hands the claim back) is
+  unchanged. The note carries version 3 VAT evidence for its own signed amounts, as a built-in note
+  does, never a copy of the original's. The outcome settles that correction (`record_issued`): its
+  frozen allocation must equal the note's totals. If the settling fails after the provider issued the note, the next worker run
+  finds the issued attempt on the correction and settles it without calling the provider again.
+- **Delivery.** The note is emailed like a built-in one, with the provider's own PDF
+  (`get_invoice_pdf_bytes`, ADR-0048 decision 8), and the first send dates it. No e-Factura
+  submission is owed: SmartBill files its own documents, so the correction's e-Factura status stays
+  `not_due`.
+- **Every other correction is `manual_required`.** A partial refund, or the rest of an invoice
+  after one, cannot be expressed by the reverse call, and the API has no other way to issue a storno
+  that references its original (research, 2026-10-04: `/invoice/v2` accepts negative quantities but
+  has no field linking a document to the invoice it corrects; partial storno exists only in
+  SmartBill's web interface). The correction keeps its allocation, moves to `manual_required`, and
+  raises the `provider_partial_refund_needs_manual_correction` security event once that commits.
+- **Staff record the provider's document.** The provider reconciliation screen lists every
+  `manual_required` correction with the amounts to credit. Staff issue the storno in SmartBill, send
+  it to the customer, and record its series and number (entered twice), its issue date, the
+  communication date, the currency, the base and VAT as printed, an evidence reference saying where
+  the proof of sending is kept, and an audit reason. `record_provider_storno` refuses amounts or a
+  currency that differ from the allocation (sign ignored), an issue date before the original's or
+  after today, a communication date before the issue date or after today, and a number already in
+  use. It writes a locked credit note with the provider's number and issue date (noon of that day
+  in Bucharest, or the recording moment if that is earlier), one negated line carrying the
+  allocation, version 3 VAT evidence dated by that issue rather than by the recording (a later date
+  would read as a VAT decision taken after the document), and a `ProviderIssuance` recorded by staff
+  (`record_issued_by_staff`, no request or response) so the provider's PDF can be fetched. The
+  correction goes straight to `communicated`: `fiscal_date` is the staff-entered communication date,
+  `communicated_at` noon of that day in Bucharest, and `communication_evidence` the reference. The
+  operator, their reason and the values are audited in the same transaction (ADR-0016).
+- **No more matching by amounts.** A1 linked a provider storno to the obligation whose refunds summed
+  to its total. Every provider storno is now issued from, or recorded against, a named correction, so
+  that matching and the sweep that ran it are gone; a provider note answering to no correction is
+  logged for an operator and never linked by guesswork. The `attached` state and its transition stay
+  in the model because the A4 reports read them, but nothing produces them any more.
+
 ### Recovery
 
 A Django-Q task is queued when a refund records its obligation, and an hourly sweep resumes every
 unfinished correction by id, each step independently: allocation, issuance, communication and
-e-Factura. Neither the task nor the sweep ever re-allocates or renumbers.
+e-Factura, on either issuer. Neither the task nor the sweep ever re-allocates or renumbers. The sweep
+skips a correction whose provider attempt waits for a person (an unknown outcome, a live claim, or a
+spent submission budget: the reconciliation queue's) and one that is `manual_required` (staff's).
+`sweep_pending_issuances` resumes a paced or refused provider storno through its correction. The
+`billing-owed-reversals` sweep, which looked for refunded provider invoices without a reversal, is
+retired, and `setup_billing_scheduled_tasks` removes its schedule.
 
 ### Reversal
 
@@ -144,4 +202,13 @@ is re-billed with a new invoice that references the credit note; that workflow i
   fiscal netting; D390 treats credit notes as exceptions until B.
 - `setup_email_templates` must be run once on each database to seed `credit_note_issued`; until it
   is, sends fail visibly and are retried.
-- A second correction on one original waits for A3.
+- A partial refund of a SmartBill invoice, and any refund after the first, needs a person: the
+  provider's API cannot issue that storno. It is listed on the reconciliation screen and raises a
+  security event until staff record the document they issued.
+- A recorded provider storno is dated for D390 by what staff enter. The evidence reference is the
+  check on that date; PRAHO cannot verify a send it did not make.
+- Two provider cases stay with an operator, with no dedicated exit yet. A whole-document reverse
+  that spends its submission budget stays `allocated`: it is listed under "Out of submission
+  budget" on the reconciliation screen but cannot be recorded by hand, because only
+  `manual_required` corrections can. And a reverse that cannot even be prepared (the original has
+  no provider number) is retried by the hourly sweep with a warning each time.

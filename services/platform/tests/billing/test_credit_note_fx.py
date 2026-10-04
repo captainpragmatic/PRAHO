@@ -21,9 +21,10 @@ from django.utils import timezone
 from apps.billing.invoice_models import ISSUER_SMARTBILL, Currency, Invoice
 from apps.billing.issuers.base import Issued, PreparedDocument
 from apps.billing.issuers.models import IssuanceState, ProviderIssuance
-from apps.billing.issuers.service import _get_or_create_credit_note, issue_storno_for_invoice
+from apps.billing.issuers.service import _get_or_create_credit_note, issue_storno_for_correction
 from apps.billing.refund_models import Refund
 from apps.common.types import Ok
+from tests.billing import _fiscal_correction_helpers as h
 from tests.factories.billing_factories import CustomerFactory, InvoiceLineFactory
 from tests.helpers.fsm_helpers import force_status
 
@@ -64,7 +65,7 @@ class ReversalKeepsTheOriginalRateTests(TestCase):
         return invoice
 
     def _reverse(self, original: Invoice) -> Invoice:
-        return _get_or_create_credit_note(original)
+        return _get_or_create_credit_note(original, h.correction_of(original))
 
     def test_all_four_exchange_fields_are_carried(self) -> None:
         original = self._eur_original()
@@ -171,7 +172,7 @@ class ResumingAnExistingReversalTests(TestCase):
 
     def _stale_reversal_of(self, original: Invoice) -> Invoice:
         """The row an older implementation would have left behind."""
-        credit_note = _get_or_create_credit_note(original)
+        credit_note = _get_or_create_credit_note(original, h.correction_of(original))
         Invoice.objects.filter(pk=credit_note.pk).update(
             discount_cents=0,
             exchange_to_ron=None,
@@ -191,14 +192,14 @@ class ResumingAnExistingReversalTests(TestCase):
         credit_note = self._stale_reversal_of(original)
         Invoice.objects.filter(pk=credit_note.pk).update(number="STORNO-000661")
 
-        resumed = _get_or_create_credit_note(original)
+        resumed = _get_or_create_credit_note(original, h.correction_of(original))
 
         self.assertIsNone(resumed.exchange_to_ron, "an issued reversal must be left exactly as filed")
         self.assertEqual(resumed.discount_cents, 0)
 
 
 class ReversalRepairSafetyTests(TransactionTestCase):
-    """`TransactionTestCase` because `issue_storno_for_invoice` refuses an open transaction."""
+    """`TransactionTestCase` because `issue_storno_for_correction` refuses an open transaction."""
 
     def setUp(self) -> None:
         self.customer = CustomerFactory()
@@ -239,7 +240,7 @@ class ReversalRepairSafetyTests(TransactionTestCase):
                 return_value=Issued(number="000661", series="STORNO"),
             ),
         ):
-            return issue_storno_for_invoice(original.pk)
+            return issue_storno_for_correction(h.correction_of(original, whole=True).pk)
 
     def test_resuming_restores_the_original_snapshot(self) -> None:
         """Driven through the real reversal path, which is where the repair now runs."""
@@ -285,15 +286,13 @@ class ReversalRepairSafetyTests(TransactionTestCase):
             state=IssuanceState.ISSUED.value, provider_series="FCT", provider_number="000660"
         )
         credit_note = self._stale_reversal_of(original)
-        cn_issuance, _ = ProviderIssuance.objects.get_or_create(
-            invoice=credit_note, defaults={"provider": ISSUER_SMARTBILL}
-        )
+        cn_issuance = ProviderIssuance.objects.get(invoice=credit_note)
         ProviderIssuance.objects.filter(pk=cn_issuance.pk).update(
             state=IssuanceState.OUTCOME_UNKNOWN.value, last_error="No usable reply from SmartBill"
         )
         force_status(original, "issued")
         force_status(original, "paid")
-        # One settled refund of the full amount, or `_storno_refusal_reason` bails first.
+        # Allocated the whole invoice, or `whole_document_storno_refusal` bails first.
         Refund.objects.create(
             customer=self.customer,
             invoice=original,
@@ -305,7 +304,7 @@ class ReversalRepairSafetyTests(TransactionTestCase):
         )
         force_status(original, "refunded")
 
-        result = issue_storno_for_invoice(original.pk)
+        result = issue_storno_for_correction(h.correction_of(original, whole=True).pk)
 
         self.assertTrue(result.is_err(), f"an unknown outcome must refuse; got {result}")
         untouched = Invoice.objects.get(pk=credit_note.pk)

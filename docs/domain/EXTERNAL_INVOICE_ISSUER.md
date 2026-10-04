@@ -30,7 +30,7 @@ Only EN16931 category **S** — an ordinary positive VAT rate. Refused:
 | EU B2B reverse charge (`AE`) | The request has no tax-category and no exemption-reason field. A 0% rate says how much, never why |
 | Zero-rated (`Z`), out of scope (`O`) | Same |
 | More than one VAT rate on a document | A single document discount cannot be split across rates faithfully |
-| Partial refunds | `/invoice/reverse` carries no amounts. It reverses everything or nothing |
+| Partial refunds | `/invoice/reverse` carries no amounts. It reverses everything or nothing, so staff issue a partial storno in SmartBill and record it |
 
 A refused invoice is not lost. It stays a draft with a staff alert; it simply is not
 sent. Those customers are billed through the built-in issuer instead.
@@ -62,24 +62,32 @@ ownership.
 
 ## Refunds
 
-A full refund of a SmartBill invoice issues a storno automatically. It becomes its
-own document — a credit note with its own legal number and negative totals, linked
-to the original.
+Every completed refund records a fiscal correction (ADR-0053), and the correction decides
+how much the refund credits. On a SmartBill invoice:
 
-It is **not** what reporting nets, though an earlier version of this document said so.
-A credit note exists only on this path; the built-in issuer produces no correcting
-document at all, so netting through it would make the same refund move revenue
-differently depending on which issuer happened to be configured — and it cannot express
-a partial refund, because `/invoice/reverse` refuses one and no credit note is minted.
-Revenue and VAT take the correction from the `Refund` row instead, which both paths
-write at a single site and which carries the exact amount returned and the date it went
-back.
+- **The first refund, covering the whole invoice**, is reversed at SmartBill automatically
+  (`/invoice/reverse`), keyed by the correction. The storno becomes its own document, a
+  credit note with its own legal number and negative totals, linked to the original. It is
+  emailed to the customer with SmartBill's PDF; SmartBill files it with ANAF.
+- **Anything else**, a partial refund or a refund after an earlier one, cannot be expressed
+  by that call, and the API offers no other storno. The correction waits as
+  `manual_required`, raises a security event, and is listed under "Credit notes to issue at
+  the provider" on the reconciliation screen with the exact base and VAT to credit.
+  1. Issue the storno of the invoice in SmartBill Cloud for exactly those amounts.
+  2. Send it to the customer.
+  3. Click **Record the credit note** and enter its series and number (twice), its issue
+     date, the date you sent it, the currency, the base and VAT as printed, where the proof
+     of sending is kept, and why. PRAHO refuses amounts that differ from the correction,
+     impossible dates, and a number already in use.
 
-A **partial** refund cannot be done at the provider at all, and raises a security
-event asking for manual correction. Reversing the whole document because part of it
-was refunded would credit the customer money they never got back.
+  The date you sent it is the credit note's communication date, which places it in its
+  D390 period, so enter the real one.
 
-An invoice can be reversed once. A credit note cannot itself be reversed.
+Reporting does not net provider credit notes yet: revenue and VAT take the correction from
+the `Refund` row until the reports move to fiscal netting (ADR-0053, A4).
+
+A SmartBill invoice can be reversed through the API once. A credit note cannot itself be
+reversed.
 
 ### Which sign a reversal carries, and where
 

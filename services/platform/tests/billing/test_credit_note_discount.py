@@ -22,6 +22,7 @@ from apps.billing.invoice_models import (
     Invoice,
 )
 from apps.billing.issuers.service import _get_or_create_credit_note
+from tests.billing import _fiscal_correction_helpers as h
 from tests.factories.billing_factories import CustomerFactory, InvoiceLineFactory
 
 
@@ -58,7 +59,7 @@ class DiscountedReversalTests(TestCase):
         return invoice
 
     def _reverse(self, original: Invoice) -> Invoice:
-        return _get_or_create_credit_note(original)
+        return _get_or_create_credit_note(original, h.correction_of(original))
 
     def test_the_credit_note_carries_the_discount_negated(self) -> None:
         original = self._discounted_original()

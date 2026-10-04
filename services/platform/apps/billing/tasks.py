@@ -2166,9 +2166,13 @@ def setup_billing_scheduled_tasks() -> dict[str, str]:
             "link or migrate them before replacing the renewal scheduler"
         )
 
-    # Remove the retired order-based renewal engine from installations that ran
-    # an older setup command. No code path remains behind this schedule.
-    Schedule.objects.filter(name__in=["order-process-recurring", "Sync Pending to Stripe"]).delete()
+    # Remove retired schedules from installations that ran an older setup command: the
+    # order-based renewal engine, and the reversal sweep keyed by original invoice, whose work
+    # the fiscal-correction issuance sweep now does by correction (ADR-0053). No code path
+    # remains behind any of them.
+    Schedule.objects.filter(
+        name__in=["order-process-recurring", "Sync Pending to Stripe", "billing-owed-reversals"]
+    ).delete()
 
     schedule_definitions = (
         (
@@ -2201,29 +2205,24 @@ def setup_billing_scheduled_tasks() -> dict[str, str]:
             "apps.billing.tasks.reconcile_stripe_refunds",
             "45 2 * * *",
         ),
-        # Both of these exist because `on_commit` fires in-process: a crash or an
-        # unavailable queue between commit and callback loses the enqueue while the
-        # work remains owed. Unregistered, they are elaborate dead code.
+        # This one exists because `on_commit` fires in-process: a crash or an unavailable
+        # queue between commit and callback loses the enqueue while the work remains owed.
+        # Unregistered, it is elaborate dead code.
         (
             "billing-issuance-sweep",
             "apps.billing.issuers.tasks.sweep_pending_issuances",
             "*/10 * * * *",
         ),
-        (
-            "billing-owed-reversals",
-            "apps.billing.issuers.tasks.sweep_owed_reversals",
-            "25 * * * *",
-        ),
         # Completion records a refund's fiscal correction in a savepoint that is allowed to fail;
-        # this is what records it afterwards, and links a provider storno that was issued before
-        # its obligation existed.
+        # this is what records it afterwards.
         (
             "billing-fiscal-correction-sweep",
             "apps.billing.fiscal_correction_service.sweep_fiscal_corrections",
             "40 * * * *",
         ),
-        # Issues the built-in storno each recorded correction owes, and resumes every unfinished
-        # step - allocation, issuance, the customer email, the e-Factura filing - by correction id.
+        # Issues the storno each recorded correction owes, built-in or at the provider, and resumes
+        # every unfinished step - allocation, issuance, the customer email, the e-Factura filing -
+        # by correction id.
         # After the recording sweep, so a correction it recovers is issued in the same hour.
         (
             "billing-fiscal-correction-issuance-sweep",

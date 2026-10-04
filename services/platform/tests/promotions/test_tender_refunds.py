@@ -9,8 +9,9 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.audit.models import AuditEvent
+from apps.billing.fiscal_correction_models import FiscalCorrection
+from apps.billing.fiscal_correction_worker import _source_of
 from apps.billing.invoice_models import Invoice
-from apps.billing.issuers.service import _split_correction_refusal
 from apps.billing.models import Currency, Payment, Refund
 from apps.billing.refund_service import RefundReason, RefundService, RefundType
 from apps.customers.models import Customer
@@ -328,8 +329,11 @@ class TenderRefundTests(HMACTestMixin, TestCase):
         with patch("apps.promotions.tender_refunds.PaymentGatewayFactory.create_gateway") as factory:
             factory.return_value.refund_payment.return_value = self.gateway_result(7100)
             refund_document(self.invoice.pk, 12100, "full-accounting", reason="customer_request")
-        self.invoice.refresh_from_db()
-        self.assertIsNone(_split_correction_refusal(self.invoice))
+        correction = FiscalCorrection.objects.get(original=self.invoice)
+        self.assertIsNotNone(correction.source_command_id, "both legs answer to the command's one correction")
+        source = _source_of(correction)
+        assert source is not None
+        self.assertEqual((len(source.refund_ids), source.refunded_cents), (2, 12100))
 
     def test_gateway_success_survives_failed_local_projection(self) -> None:
 

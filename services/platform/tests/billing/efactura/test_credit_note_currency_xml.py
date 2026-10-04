@@ -15,6 +15,7 @@ from apps.billing.efactura.xml_builder import NAMESPACES, XMLBuilderError, build
 from apps.billing.invoice_models import Invoice
 from apps.billing.issuers.service import _get_or_create_credit_note
 from apps.settings.services import SettingsService
+from tests.billing import _fiscal_correction_helpers as h
 from tests.factories.billing_factories import CustomerFactory, InvoiceLineFactory
 
 
@@ -64,7 +65,7 @@ class CreditNoteCurrencyXMLTests(TestCase):
             unit_price_cents=10000,
             tax_rate=Decimal("0") if zero_tax else Decimal("0.2100"),
         )
-        credit_note = _get_or_create_credit_note(original)
+        credit_note = _get_or_create_credit_note(original, h.correction_of(original))
         credit_note.number = f"CN-2026-{self.sequence:04d}"
         credit_note.issued_at = datetime(2026, 9, 29, 9, tzinfo=UTC)
         credit_note.issue()

@@ -23,6 +23,7 @@ from apps.billing.efactura.validator import CIUSROValidator
 from apps.billing.efactura.xml_builder import UBLCreditNoteBuilder, UBLInvoiceBuilder, XMLBuilderError
 from apps.billing.invoice_models import ISSUER_SMARTBILL, Currency, Invoice
 from apps.billing.issuers.service import _get_or_create_credit_note
+from tests.billing import _fiscal_correction_helpers as h
 from tests.factories.billing_factories import CustomerFactory, InvoiceLineFactory
 
 COMPANY = {
@@ -87,7 +88,7 @@ class DiscountedCreditNoteReconciliationTests(TestCase):
         document under test has to be in that state. Re-fetched rather than refreshed:
         `refresh_from_db` raises on a protected FSMField.
         """
-        credit_note = _get_or_create_credit_note(original)
+        credit_note = _get_or_create_credit_note(original, h.correction_of(original))
         Invoice.objects.filter(pk=credit_note.pk).update(
             number="CN-000700", issued_at=timezone.now(), due_at=timezone.now()
         )

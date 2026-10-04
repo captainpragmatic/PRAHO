@@ -341,11 +341,6 @@ class Invoice(models.Model):
                 condition=~models.Q(reverses_invoice=models.F("id")),
                 name="invoice_credit_note_not_self_referential",
             ),
-            models.UniqueConstraint(
-                fields=["reverses_invoice"],
-                condition=models.Q(reverses_invoice__isnull=False),
-                name="invoice_one_reversal_per_original",
-            ),
             # A discount points the same way as the document it belongs to. The ledger
             # invariant every reader relies on is `line gross - discount == subtotal`,
             # and it only holds for a reversal if the discount is negated along with

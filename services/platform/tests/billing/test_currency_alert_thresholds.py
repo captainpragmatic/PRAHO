@@ -45,7 +45,6 @@ class CurrencyAlertThresholdTests(TestCase):
         invoice = Mock(total_cents=2000)
         invoice.currency.code = "EUR"
         with (
-            patch("apps.billing.signals._queue_provider_storno"),
             patch("apps.billing.signals._send_invoice_refund_confirmation"),
             patch("apps.billing.signals._update_customer_invoice_history"),
             patch("apps.billing.signals._handle_efactura_refund_reporting"),

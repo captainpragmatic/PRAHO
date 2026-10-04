@@ -2,9 +2,9 @@
 
 `pending` records that a provider call is owed, not WHICH one. A rate-gated reversal
 returns to `pending` by design, so excluding credit notes from the issuance sweep
-stopped them being POSTed to /invoice - but `sweep_owed_reversals` skips any invoice
-that already has a reversal row, and a deferred storno always has one. The reversal
-was then recovered by neither sweep while the customer's refund had already moved.
+stopped them being POSTed to /invoice. A reversal is resumed through the fiscal
+correction it issues, which names exactly one document; resuming it by its original
+found only the first credit note an original carried and stranded any other.
 
 Separately, `claim()` accepts a FAILED source, so the state machine was built for
 retry, but nothing selected those rows. A refusal is REJECTED only from a recognised
@@ -21,6 +21,9 @@ from unittest.mock import patch
 from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
+from apps.billing import fiscal_correction_worker
+from apps.billing.fiscal_correction_models import FiscalCorrection
+from apps.billing.fiscal_correction_service import record_obligation
 from apps.billing.invoice_models import (
     DOCUMENT_KIND_CREDIT_NOTE,
     ISSUER_SMARTBILL,
@@ -33,6 +36,7 @@ from apps.billing.issuers.service import issue_invoice_externally
 from apps.billing.issuers.smartbill.client import RateGateWait
 from apps.billing.issuers.tasks import sweep_pending_issuances
 from apps.common.types import Ok
+from tests.billing import _fiscal_correction_helpers as h
 from tests.factories.billing_factories import CustomerFactory, InvoiceLineFactory
 
 
@@ -68,8 +72,19 @@ class RecoveryRoutesByDocumentKindTests(TestCase):
         )
         return invoice
 
-    def _deferred_credit_note(self, state: str = IssuanceState.PENDING.value) -> tuple[Invoice, Invoice]:
-        original = self._original()
+    def _correction(self, original: Invoice, amount_cents: int) -> FiscalCorrection:
+        refund = h.pending_refund(
+            invoice=original, status="completed", amount_cents=amount_cents, refund_type="partial"
+        )
+        correction = record_obligation(refund)
+        assert correction is not None
+        return correction
+
+    def _deferred_credit_note(
+        self, state: str = IssuanceState.PENDING.value, *, original: Invoice | None = None
+    ) -> tuple[Invoice, Invoice, FiscalCorrection]:
+        original = original or self._original()
+        correction = self._correction(original, 12100)
         credit_note = Invoice.objects.create(
             customer=self.customer,
             currency=self.currency,
@@ -84,8 +99,10 @@ class RecoveryRoutesByDocumentKindTests(TestCase):
             bill_to_name="Test Company SRL",
             bill_to_country="RO",
         )
-        ProviderIssuance.objects.create(invoice=credit_note, provider=ISSUER_SMARTBILL, state=state)
-        return original, credit_note
+        ProviderIssuance.objects.create(
+            invoice=credit_note, provider=ISSUER_SMARTBILL, state=state, fiscal_correction=correction
+        )
+        return original, credit_note, correction
 
     def _unnumbered_invoice(self) -> Invoice:
         self._seq += 1
@@ -104,30 +121,38 @@ class RecoveryRoutesByDocumentKindTests(TestCase):
         ProviderIssuance.objects.create(invoice=invoice, provider=ISSUER_SMARTBILL, state=IssuanceState.PENDING.value)
         return invoice
 
-    def test_a_deferred_reversal_is_routed_to_the_reversal_task(self) -> None:
-        """Stranded by both sweeps until now: pacing left it pending, and the reversal
-        sweep skips any invoice that already has a credit note."""
-        original, _credit_note = self._deferred_credit_note()
+    def test_two_pending_reversals_on_one_original_are_each_resumed_by_their_correction(self) -> None:
+        """Pacing left both pending. Resumed by their original, both resolved to the first credit
+        note that original carried, and the other was never sent; resumed by correction, each is."""
+        original, _first_note, first = self._deferred_credit_note()
+        _same, _second_note, second = self._deferred_credit_note(original=original)
 
         issuance_calls: list[int] = []
-        storno_calls: list[int] = []
+        correction_calls: list[str] = []
         with (
             patch(
                 "apps.billing.issuers.tasks.queue_invoice_issuance",
                 side_effect=lambda pk: issuance_calls.append(pk) or "t",
             ),
-            patch(
-                "apps.billing.issuers.tasks.queue_invoice_storno", side_effect=lambda pk: storno_calls.append(pk) or "t"
+            patch.object(
+                fiscal_correction_worker,
+                "queue_fiscal_correction",
+                side_effect=lambda pk: correction_calls.append(str(pk)),
             ),
         ):
             sweep_pending_issuances()
 
-        self.assertEqual(
-            storno_calls,
-            [original.pk],
-            "the reversal task takes the ORIGINAL's id, which is what it reverses",
-        )
+        self.assertEqual(sorted(correction_calls), sorted([str(first.pk), str(second.pk)]))
         self.assertEqual(issuance_calls, [], "a reversal must never reach the issuance task")
+
+    def test_a_reversal_whose_enqueue_failed_is_counted_as_skipped(self) -> None:
+        """A queue outage must show in the sweep's result, not read as work handed on."""
+        self._deferred_credit_note()
+
+        with patch("django_q.tasks.async_task", side_effect=RuntimeError("broker down")):
+            results = sweep_pending_issuances()
+
+        self.assertEqual((results["queued"], results["skipped"]), (0, 1))
 
     def test_an_unnumbered_invoice_still_goes_to_the_issuance_task(self) -> None:
         """The regression guard."""
@@ -139,7 +164,7 @@ class RecoveryRoutesByDocumentKindTests(TestCase):
                 "apps.billing.issuers.tasks.queue_invoice_issuance",
                 side_effect=lambda pk: issuance_calls.append(pk) or "t",
             ),
-            patch("apps.billing.issuers.tasks.queue_invoice_storno", side_effect=AssertionError),
+            patch.object(fiscal_correction_worker, "queue_fiscal_correction", side_effect=AssertionError),
         ):
             sweep_pending_issuances()
 

@@ -14,10 +14,17 @@ from unittest.mock import patch
 from django.test import TestCase, TransactionTestCase
 
 from apps.api.billing.serializers import _invoice_remaining_amounts
-from apps.billing.fiscal_correction_models import STATE_ATTACHED, FiscalCorrection
+from apps.billing.fiscal_correction_models import (
+    REASON_COVERED_BY_COLLECTIONS,
+    STATE_ISSUED,
+    STATE_NOT_REQUIRED,
+    FiscalCorrection,
+)
+from apps.billing.fiscal_correction_service import record_obligation
+from apps.billing.fiscal_correction_worker import process_fiscal_correction
 from apps.billing.invoice_models import DOCUMENT_KIND_CREDIT_NOTE, ISSUER_SMARTBILL, Invoice
 from apps.billing.issuers.base import Issued, PreparedDocument
-from apps.billing.issuers.service import issue_storno_for_invoice
+from apps.billing.issuers.service import issue_storno_for_correction
 from apps.billing.models import Payment, ProformaInvoice, Refund
 from apps.billing.refund_models import net_collected_cents_for_invoice
 from apps.billing.refund_service import RefundService
@@ -121,11 +128,6 @@ class OrderRefundAgainstTheProformaTests(TransactionTestCase):
         )
         self.assertIsNone(payment.invoice_id)
 
-        def storno_now(invoice_id: int) -> str:
-            result = issue_storno_for_invoice(invoice_id)
-            self.assertTrue(result.is_ok(), getattr(result, "error", ""))
-            return "inline"
-
         with (
             patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=h.gateway(12100)),
             patch(
@@ -135,8 +137,9 @@ class OrderRefundAgainstTheProformaTests(TransactionTestCase):
             patch(
                 "apps.billing.issuers.smartbill.issuer.SmartBillIssuer.submit_storno",
                 return_value=Issued(number="001001", series="STORNO"),
-            ),
-            patch("apps.billing.issuers.tasks.queue_invoice_storno", side_effect=storno_now) as queued,
+            ) as submitted,
+            patch("django_q.tasks.async_task", side_effect=h.run_queued_now),
+            patch("apps.billing.fiscal_correction_worker.deliver_credit_note"),
         ):
             result = RefundService.refund_order(
                 order.pk, {"refund_type": "full", "amount_cents": 12100, "reason": "customer_request"}
@@ -145,13 +148,13 @@ class OrderRefundAgainstTheProformaTests(TransactionTestCase):
         self.assertTrue(result.is_ok(), result)
         invoice.refresh_from_db()
         self.assertEqual(invoice.status, "refunded")
-        queued.assert_called_once_with(invoice.pk)
+        submitted.assert_called_once()
         credit_note = Invoice.objects.get(document_kind=DOCUMENT_KIND_CREDIT_NOTE)
         self.assertEqual(credit_note.number, "STORNO-001001")
         self.assertEqual(credit_note.reverses_invoice_id, invoice.pk)
         refund = Refund.objects.get(order=order)
         correction = FiscalCorrection.objects.get(source_refund=refund)
-        self.assertEqual(correction.state, STATE_ATTACHED)
+        self.assertEqual(correction.state, STATE_ISSUED)
         self.assertEqual(correction.credit_note_id, credit_note.pk)
 
 
@@ -215,11 +218,7 @@ class ProjectionFollowsNetCollectedTests(TransactionTestCase):
         return invoice
 
     def _storno_patches(self, number: str) -> Any:
-        def storno_now(invoice_id: int) -> str:
-            result = issue_storno_for_invoice(invoice_id)
-            self.assertTrue(result.is_ok(), getattr(result, "error", ""))
-            return "inline"
-
+        """The provider's reversal answered locally, and each queued worker run synchronously."""
         return (
             patch(
                 "apps.billing.issuers.smartbill.issuer.SmartBillIssuer.prepare_storno",
@@ -229,7 +228,8 @@ class ProjectionFollowsNetCollectedTests(TransactionTestCase):
                 "apps.billing.issuers.smartbill.issuer.SmartBillIssuer.submit_storno",
                 return_value=Issued(number=f"{number}9", series="STORNO"),
             ),
-            patch("apps.billing.issuers.tasks.queue_invoice_storno", side_effect=storno_now),
+            patch("django_q.tasks.async_task", side_effect=h.run_queued_now),
+            patch("apps.billing.fiscal_correction_worker.deliver_credit_note"),
         )
 
     def test_refunding_an_overpayment_leaves_the_invoice_paid_and_unreversed(self) -> None:
@@ -252,13 +252,14 @@ class ProjectionFollowsNetCollectedTests(TransactionTestCase):
             amount_cents=20000,
             gateway_txn_id="pi_overpaid",
         )
-        prepare, submit, queue = self._storno_patches("002000")
+        prepare, submit, queue, deliver = self._storno_patches("002000")
 
         with (
             patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=h.gateway(10000)),
             prepare,
-            submit,
-            queue as queued,
+            submit as submitted,
+            queue,
+            deliver,
         ):
             result = RefundService.refund_order(
                 order.pk, {"refund_type": "partial", "amount_cents": 10000, "reason": "duplicate_payment"}
@@ -267,8 +268,12 @@ class ProjectionFollowsNetCollectedTests(TransactionTestCase):
         self.assertTrue(result.is_ok(), result)
         invoice.refresh_from_db()
         self.assertEqual(invoice.status, "paid", "100 is still collected against a 100 invoice")
-        queued.assert_not_called()
+        submitted.assert_not_called()
         self.assertFalse(Invoice.objects.filter(document_kind=DOCUMENT_KIND_CREDIT_NOTE).exists())
+        correction = FiscalCorrection.objects.get(source_refund=Refund.objects.get(order=order))
+        self.assertEqual(
+            (correction.state, correction.not_required_reason), (STATE_NOT_REQUIRED, REASON_COVERED_BY_COLLECTIONS)
+        )
 
     def test_a_whole_document_storno_is_refused_while_money_is_still_collected(self) -> None:
         invoice = self._smartbill_invoice("FCT-002100")
@@ -280,15 +285,20 @@ class ProjectionFollowsNetCollectedTests(TransactionTestCase):
             payment_method="bank_transfer",
             amount_cents=20000,
         )
-        h.pending_refund(invoice=invoice, status="completed", amount_cents=10000)
+        refund = h.pending_refund(invoice=invoice, status="completed", amount_cents=10000)
         force_status(invoice, "refunded")
-        prepare, submit, _queue = self._storno_patches("002100")
+        correction = record_obligation(refund)
+        assert correction is not None
+        prepare, submit, _queue, _deliver = self._storno_patches("002100")
 
-        with prepare, submit:
-            result = issue_storno_for_invoice(invoice.pk)
+        with prepare, submit as submitted:
+            process_fiscal_correction(str(correction.pk))
+            result = issue_storno_for_correction(correction.pk)
 
+        correction.refresh_from_db()
+        self.assertEqual(correction.state, STATE_NOT_REQUIRED, "100 of the 200 collected is still held")
         self.assertTrue(result.is_err())
-        self.assertIn("still collected", result.error)
+        submitted.assert_not_called()
         self.assertFalse(Invoice.objects.filter(document_kind=DOCUMENT_KIND_CREDIT_NOTE).exists())
 
     def test_a_full_refund_of_a_fully_paid_invoice_is_still_refunded_and_reversed(self) -> None:
@@ -303,13 +313,14 @@ class ProjectionFollowsNetCollectedTests(TransactionTestCase):
             amount_cents=10000,
             gateway_txn_id="pi_full_100",
         )
-        prepare, submit, queue = self._storno_patches("002200")
+        prepare, submit, queue, deliver = self._storno_patches("002200")
 
         with (
             patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=h.gateway(10000)),
             prepare,
-            submit,
-            queue as queued,
+            submit as submitted,
+            queue,
+            deliver,
         ):
             result = RefundService.refund_invoice(
                 invoice.pk, {"refund_type": "full", "amount_cents": 10000, "reason": "customer_request"}
@@ -318,7 +329,7 @@ class ProjectionFollowsNetCollectedTests(TransactionTestCase):
         self.assertTrue(result.is_ok(), result)
         invoice.refresh_from_db()
         self.assertEqual(invoice.status, "refunded")
-        queued.assert_called_once_with(invoice.pk)
+        submitted.assert_called_once()
         self.assertTrue(
             Invoice.objects.filter(document_kind=DOCUMENT_KIND_CREDIT_NOTE, reverses_invoice=invoice).exists()
         )

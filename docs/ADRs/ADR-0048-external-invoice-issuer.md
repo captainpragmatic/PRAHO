@@ -88,16 +88,21 @@ cost the estimate assumed, and the operator accepted SPV blindness knowingly.
    original, and a credit note that exists but was never submitted is *resumed*.
    Treating row existence as proof of reversal makes any interruption permanent: a
    refund the customer can never be issued, recoverable only by editing the
-   database. A uniqueness constraint on `reverses_invoice` backs the lock, so
-   concurrent callers converge on one credit note instead of minting two.
+   database.
 
-   A whole-document reversal is refused unless exactly one *settled* refund accounts
-   for exactly the invoice total. `/invoice/reverse` carries no amount, so an
-   invoice refunded in instalments — where an earlier part may already have been
-   corrected by hand in SmartBill's own interface — would be credited twice, and
-   nothing downstream would notice. Settled refunds are counted rather than
-   attempted ones; counting attempts would let a failed refund wedge the invoice in
-   the same way row existence did.
+   **Revised (A3, ADR-0053):** a reversal is issued for one fiscal correction and keyed
+   by it, not by the original. The uniqueness that backs the lock is
+   `ProviderIssuance.fiscal_correction` (one provider attempt per correction); the old
+   constraint allowing one credit note per original is gone, because an original may
+   now carry several notes, one per correction.
+
+   A whole-document reversal is refused unless the correction's frozen allocation is
+   the whole invoice and nothing else has credited it. `/invoice/reverse` carries no
+   amount, so an invoice refunded in instalments, or one already partly corrected,
+   would be credited twice, and nothing downstream would notice. The allocation already
+   says what the refunds caused (overpayments and tender legs included), so the rule
+   reads it rather than counting refunds. Every other SmartBill correction waits as
+   `manual_required` for staff to issue it in SmartBill and record it (ADR-0053).
 
    Credit-note lines are the original's, negated. EC-Sales reconciles partner totals
    against `InvoiceLine` rows, so a line-less correction cannot balance against a
@@ -134,8 +139,13 @@ cost the estimate assumed, and the operator accepted SPV blindness knowingly.
   `isReverseCharge` is encouraging but proves only that SmartBill distinguishes such
   rates internally, not what XML it emits.
 - Partial refunds of provider-issued invoices need manual correction and raise a
-  security event. `/invoice/reverse` cannot express them. (Built-in invoices are corrected
-  automatically, partial refunds included: ADR-0053.)
+  security event. `/invoice/reverse` cannot express them, and the API has no other way to
+  issue a storno that references its original (A3 research: `/invoice/v2` accepts negative
+  quantities but cannot link the document to the invoice it corrects). Staff issue the
+  storno in SmartBill's own interface and record it on the reconciliation screen, against
+  the refund's fiscal correction, with its issue date, the date it was sent, and an
+  evidence reference; PRAHO checks the amounts against the correction (ADR-0053). Built-in
+  invoices are corrected automatically, partial refunds included.
 - There is no automated proof an invoice reached SPV, no deadline tracking and no
   signed-ZIP evidence in PRAHO while SmartBill owns e-Factura. This is the accepted
   cost of the decision, and the operator checks SmartBill Cloud for it.
