@@ -543,6 +543,9 @@ def _documents_in(period: ReportingPeriod) -> Q:
     """
     credit = Q(document_kind=DOCUMENT_KIND_CREDIT_NOTE)
     communicated = Q(settled_fiscal_correction__state=STATE_COMMUNICATED)
+    # Spelt out: `state` is NOT NULL, so Django negates it without an `IS NULL` arm, and a note with
+    # no correction row (NULL through the outer join) would fail both branches and vanish.
+    uncommunicated = Q(settled_fiscal_correction__isnull=True) | ~communicated
     tax_point_unknown = Q(tax_point_date__isnull=True)
     return (
         (~credit & (Q(tax_point_date__gte=period.start, tax_point_date__lt=period.end) | tax_point_unknown))
@@ -554,7 +557,7 @@ def _documents_in(period: ReportingPeriod) -> Q:
                 settled_fiscal_correction__fiscal_date__lt=period.end,
             )
         )
-        | (credit & ~communicated & (Q(tax_point_date__lt=period.end) | tax_point_unknown))
+        | (credit & uncommunicated & (Q(tax_point_date__lt=period.end) | tax_point_unknown))
     )
 
 

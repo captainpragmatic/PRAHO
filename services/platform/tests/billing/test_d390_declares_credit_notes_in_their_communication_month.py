@@ -36,7 +36,7 @@ from apps.billing.fiscal_correction_models import (
     FiscalCorrection,
 )
 from apps.billing.fiscal_correction_worker import _advance_allocation, _advance_communication, _advance_issuance
-from apps.billing.invoice_models import DOCUMENT_KIND_CREDIT_NOTE, Invoice
+from apps.billing.invoice_models import DOCUMENT_KIND_CREDIT_NOTE, Invoice, InvoiceLine
 from apps.billing.models import Payment, Refund
 from apps.billing.tax_evidence import read_vat_evidence
 from tests.billing import _fiscal_correction_helpers as h
@@ -303,6 +303,50 @@ class UnsettledRefundsBlockTheMonthTheirCorrectionLandsInTests(_CreditNoteCase):
                 report = aggregate_ec_services(period)
                 self.assertFalse(report.exceptions)
         self.assertEqual([p.rounded_ron for p in aggregate_ec_services(JUNE).partners], [100])
+
+    def test_a_note_with_no_correction_at_all_is_flagged_in_every_later_month(self) -> None:
+        """No correction row means no communication date: the note must stay visible, never vanish.
+
+        The selection reads a reverse one-to-one that is absent here, so it is the case the query's
+        negation has to keep rather than drop.
+        """
+        original = self.original(date(2026, 6, 15))
+        note = Invoice.objects.create(
+            customer=original.customer,
+            currency=original.currency,
+            number="CN-UNLINKED-1",
+            status="draft",
+            document_kind=DOCUMENT_KIND_CREDIT_NOTE,
+            reverses_invoice=original,
+            subtotal_cents=-4000,
+            tax_cents=0,
+            total_cents=-4000,
+            bill_to_name=original.bill_to_name,
+            bill_to_country=original.bill_to_country,
+            bill_to_tax_id=original.bill_to_tax_id,
+            tax_point_date=date(2026, 7, 10),
+            issued_at=_at(date(2026, 7, 10)),
+        )
+        InvoiceLine.objects.create(
+            invoice=note,
+            kind="service",
+            description="Storno",
+            quantity=1,
+            unit_price_cents=-4000,
+            tax_rate=0,
+            tax_category_code="AE",
+        )
+        note.issue()
+        note.save()
+        self.assertFalse(FiscalCorrection.objects.filter(credit_note=note).exists())
+
+        for period in (JULY, AUGUST):
+            with self.subTest(period=period.label):
+                report = self.assert_blocked_in(period, "uncommunicated_credit_note")
+                flagged = [exc for exc in report.exceptions if exc.invoice_id == note.pk]
+                self.assertEqual(len(flagged), 1, report.exceptions)
+                self.assertIn("uncommunicated_credit_note", flagged[0].codes)
+        self.assertNotIn(note.pk, {exc.invoice_id for exc in aggregate_ec_services(JUNE).exceptions})
 
     def assert_blocked_in(self, period: ReportingPeriod, code: str) -> Any:
         report = aggregate_ec_services(period)
