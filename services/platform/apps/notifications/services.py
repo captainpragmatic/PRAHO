@@ -1040,7 +1040,10 @@ class EmailService:
     def send_invoice_created(cls, invoice: Invoice) -> EmailResult:
         """Send invoice created notification."""
         customer = invoice.customer
-        locale = getattr(customer, "preferred_locale", "en") or "en"
+        from apps.customers.services import get_customer_locale  # noqa: PLC0415  # ADR-0007 cross-app import
+
+        # Customer has no locale of its own: it is the primary user's language, Romanian by default.
+        locale = get_customer_locale(customer)
 
         context = {
             "customer_name": customer.get_display_name(),
@@ -1069,7 +1072,10 @@ class EmailService:
     def send_invoice_paid(cls, invoice: Invoice) -> EmailResult:
         """Send invoice paid notification."""
         customer = invoice.customer
-        locale = getattr(customer, "preferred_locale", "en") or "en"
+        from apps.customers.services import get_customer_locale  # noqa: PLC0415  # ADR-0007 cross-app import
+
+        # Customer has no locale of its own: it is the primary user's language, Romanian by default.
+        locale = get_customer_locale(customer)
 
         context = {
             "customer_name": customer.get_display_name(),
@@ -1095,7 +1101,10 @@ class EmailService:
     def send_payment_reminder(cls, invoice: Invoice) -> EmailResult:
         """Send payment reminder for unpaid invoice."""
         customer = invoice.customer
-        locale = getattr(customer, "preferred_locale", "en") or "en"
+        from apps.customers.services import get_customer_locale  # noqa: PLC0415  # ADR-0007 cross-app import
+
+        # Customer has no locale of its own: it is the primary user's language, Romanian by default.
+        locale = get_customer_locale(customer)
 
         days_until_due = 0
         if invoice.due_at:

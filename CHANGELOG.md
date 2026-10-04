@@ -88,6 +88,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   original. A failed email or filing is retried hourly. Run `setup_email_templates` once to add
   the `credit_note_issued` email. Until the SmartBill work lands, an invoice can carry one credit
   note, so a second refund of the same invoice waits with its amount recorded.
+- Invoice, payment and reminder emails are sent in the customer's language. They read a locale
+  setting customers never had, so every one went out in English.
 
 ### Fixed
 
