@@ -12,6 +12,7 @@ from datetime import timedelta
 
 from django.utils import timezone
 
+from apps.billing.fiscal_correction_models import FiscalCorrection
 from apps.billing.models import Invoice, Payment, Refund
 from tests.billing._storno_helpers import SELLER, StornoTestCase
 
@@ -160,3 +161,18 @@ class AmountOwedAsOfCompletionTests(StornoTestCase):
         credited = [self.process(first).total_cents, self.process(second).total_cents]
 
         self.assertEqual(credited, [-1000, -2000])
+
+    def test_a_refund_with_no_correction_on_the_invoice_is_still_taken_off(self) -> None:
+        """A refund completed while its invoice was a draft is recorded not-required with no original,
+        yet 20 went back. A later refund of 30 against 120 collected for 100 must count that 20 as
+        already returned, or it reads 20 of slack that no longer exists and credits 10."""
+        original = self.original(lines=((10000, "0.00"),))
+        payment = self.collected(original, 12000)
+        draft_era = self.refund(original, payment, 2000)
+        refund_id = draft_era.source_refund_id
+        FiscalCorrection.objects.filter(pk=draft_era.pk).delete()
+        FiscalCorrection.objects.create(
+            source_refund_id=refund_id, state="not_required", not_required_reason="no_fiscal_document"
+        )
+
+        self.assertEqual(self.process(self.refund(original, payment, 3000)).total_cents, -3000)
