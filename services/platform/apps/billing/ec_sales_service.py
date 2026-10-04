@@ -146,6 +146,8 @@ class RefundSettlement:
     refund_id: str
     status: str
     amount_cents: int
+    # The payment the money went back to, directly or through a tender leg; "" when none is recorded.
+    payment_id: str
     raised_on: date
     correction_id: str
     correction_state: str
@@ -416,6 +418,8 @@ def _settlement(refund: Refund, invoice: Invoice) -> RefundSettlement:
     customer, or a validated finding that it needed none. A correction on another invoice, or one
     that found no fiscal document at all, was never decided against this supply.
     """
+    from apps.promotions.models import TenderRefundLeg  # noqa: PLC0415  # ADR-0007 cross-app import
+
     correction = (
         FiscalCorrection.objects.filter(
             Q(source_refund_id=refund.pk) | Q(source_command__legs__refund_id=refund.pk)
@@ -423,16 +427,20 @@ def _settlement(refund: Refund, invoice: Invoice) -> RefundSettlement:
         if refund.status == "completed"
         else None
     )
+    payment_id = refund.payment_id or (
+        TenderRefundLeg.objects.filter(refund_id=refund.pk).values_list("payment_id", flat=True).first()
+    )
     return RefundSettlement(
-        str(refund.pk),
-        refund.status,
-        refund.amount_cents,
-        ro_local_date(refund.created_at),
-        "" if correction is None else str(correction.pk),
-        "" if correction is None else correction.state,
-        None if correction is None else correction.original_id,
-        None if correction is None else correction.fiscal_date,
-        correction is not None
+        refund_id=str(refund.pk),
+        status=refund.status,
+        amount_cents=refund.amount_cents,
+        payment_id="" if payment_id is None else str(payment_id),
+        raised_on=ro_local_date(refund.created_at),
+        correction_id="" if correction is None else str(correction.pk),
+        correction_state="" if correction is None else correction.state,
+        correction_original_id=None if correction is None else correction.original_id,
+        fiscal_date=None if correction is None else correction.fiscal_date,
+        settled=correction is not None
         and correction.original_id == invoice.pk
         and correction.state in SETTLED_CORRECTION_STATES,
     )
@@ -605,15 +613,23 @@ def aggregate_ec_services(period: ReportingPeriod) -> ECSalesReport:  # noqa: PL
         except (ValidationError, ValueError, TypeError, AttributeError):
             settlements, legacy_order_refunds = [], []
             problems.append("invalid_refund_links: Source document links cannot be reconciled.")
-        refunded_payment = any(
-            payment.status in {"refunded", "partially_refunded"} for payment in invoice.payments.all()
-        )
+        refunded_payments = [
+            payment for payment in invoice.payments.all() if payment.status in {"refunded", "partially_refunded"}
+        ]
+        refunded_payment = bool(refunded_payments)
         legacy_refunds = isinstance(invoice.meta, dict) and invoice.meta.get("refunds")
-        # A refunded status or payment is a refund's footprint. Refund rows explain it one by one,
-        # each settled or holding the month its correction can land in; with none, nothing does.
-        unexplained_refund = (
-            invoice.status in {"refunded", "partially_refunded"} or refunded_payment
-        ) and not settlements
+        # A refunded status or payment is a refund's footprint, and only refund rows explain it: each
+        # one settled or holding the month its correction can land in. A refunded invoice needs at least
+        # one. A refunded payment needs a completed refund of its own; another payment's refund says
+        # nothing about the money this one returned.
+        explained_payments = {
+            settlement.payment_id
+            for settlement in settlements
+            if settlement.status == "completed" and settlement.payment_id
+        }
+        unexplained_refund = (invoice.status in {"refunded", "partially_refunded"} and not settlements) or any(
+            str(payment.pk) not in explained_payments for payment in refunded_payments
+        )
         if (
             invoice.status == "void"
             or legacy_refunds
@@ -767,19 +783,16 @@ def _other_period_adjustments(period: ReportingPeriod, handled: set[int]) -> tup
     each such month is held. The original's own month, closed before the refund, is not. Once the
     note is sent it is declared in its month as a supply line of its own and holds nothing.
 
-    A refund already settled by its own correction is skipped in the query; one whose correction
-    was decided against another invoice than the one it links to is caught in that invoice's own
-    month by the main pass.
+    Every refund is judged against each invoice it links to. Nothing is skipped as settled before
+    that: a correction closed with no original, or decided against another invoice, settles nothing
+    for this one.
     """
     end = datetime.combine(period.end, time.min, BUCHAREST)
     exceptions: list[ReviewException] = []
     source: list[object] = []
     alerted: set[int] = set()
-    settled = list(SETTLED_CORRECTION_STATES)
     refunds = (
         Refund.objects.filter(status__in=UNRESOLVED_REFUNDS, created_at__lt=end)
-        .exclude(status="completed", fiscal_correction__state__in=settled)
-        .exclude(status="completed", tender_leg__command__fiscal_correction__state__in=settled)
         .select_related("payment", "order")
         .order_by("pk")
     )

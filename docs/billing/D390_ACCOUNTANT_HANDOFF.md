@@ -54,7 +54,8 @@ Every completed refund records a fiscal correction (ADR-0053). Its storno credit
 Unpaid and overdue supplies remain candidates. A refund never subtracts money from a tax base by itself; only its credit note does, in the month the customer received it.
 
 - **A refund that is not settled yet** holds every month from the one it was raised in (Romanian calendar), because its note can only be sent on or after that day. On the original's own month it blocks the original's lines (`unresolved_fiscal_adjustment`); on a later month it appears as `outside_period_adjustment`. It never holds the original's month when it was raised after that month closed. A refund is settled when its correction's note was communicated, or when the correction was decided as `not_required` for that invoice (an overpayment or duplicate payment returned, or an invoice already fully credited).
-- **Still blocking the original's own month:** a void after issue, legacy invoice or source-order refund metadata, and a refunded invoice or payment status that no refund record explains.
+- **Still blocking the original's own month:** a void after issue, legacy invoice or source-order refund metadata, a refunded invoice status with no refund record, and any refunded payment without a completed refund recorded on that payment. Another payment's refund does not explain it.
+- **A refund settled for no invoice** (its correction found no fiscal document, for example a refund linked to the invoice only through its order or proforma) settles nothing for the invoice it links to, and holds its month like any unsettled refund.
 - **A storno recorded by staff** carries the sending date they entered, which can be earlier than the refund was raised in PRAHO. Such a note lands in a month this report did not hold for it. If that month was already filed, decide whether a rectificative is due.
 
 CSV remains available whenever XML is blocked.

@@ -417,3 +417,52 @@ def _fields(invoice: Invoice) -> dict[str, Any]:
         for field in invoice._meta.concrete_fields
         if field.attname != "id"
     }
+
+
+class ARefundIsSettledOnlyForTheInvoiceAndPaymentItAnswersForTests(_CreditNoteCase):
+    def test_a_refund_closed_with_no_fiscal_document_still_holds_its_own_month(self) -> None:
+        """Linked to the invoice only through its order, so the correction never found the invoice.
+
+        `not_required` with no original was not decided against this supply, so it settles nothing
+        here: June stays clear, and July, when the refund was raised, is held.
+        """
+        order = h.order_for(None, h.customer("Order Owner GmbH"), total_cents=10000)
+        original = self.original(date(2026, 6, 15), meta={"order_id": str(order.pk)})
+        with patch("django.utils.timezone.now", return_value=_at(date(2026, 7, 10))):
+            refund = h.complete(h.pending_refund(order=order, amount_cents=10000))
+        correction = FiscalCorrection.objects.get(source_refund_id=refund.pk)
+        self.assertEqual((correction.state, correction.original_id), (STATE_NOT_REQUIRED, None))
+
+        self.assertTrue(aggregate_ec_services(JUNE).can_export, aggregate_ec_services(JUNE).exceptions)
+        july = self.assert_blocked_in(JULY, "outside_period_adjustment")
+        self.assertEqual([exc.invoice_id for exc in july.exceptions], [original.pk])
+
+    def test_a_refunded_payment_with_no_refund_record_blocks_even_beside_a_settled_one(self) -> None:
+        """Each refunded payment needs its own settled refund; another payment's does not explain it."""
+        original = self.original(date(2026, 6, 15))
+        self.paid(original)
+        duplicate = self.paid(original, duplicate=True)
+        settled = self.settle(
+            self.refund(original, 10000, at=_at(date(2026, 7, 10)), payment=duplicate), at=_at(date(2026, 7, 10))
+        )
+        self.assertEqual(settled.state, STATE_NOT_REQUIRED)
+        Payment.objects.create(
+            customer=original.customer,
+            invoice=original,
+            currency=original.currency,
+            status="refunded",
+            payment_method="bank",
+            amount_cents=500,
+        )
+
+        report = aggregate_ec_services(JUNE)
+
+        self.assertFalse(report.can_export)
+        self.assertIn("unresolved_fiscal_adjustment", {code for exc in report.exceptions for code in exc.codes})
+
+    def assert_blocked_in(self, period: ReportingPeriod, code: str) -> Any:
+        report = aggregate_ec_services(period)
+        self.assertFalse(report.can_export)
+        self.assertTrue(any(code in exc.codes for exc in report.exceptions), report.exceptions)
+        report.assert_reconciled()
+        return report

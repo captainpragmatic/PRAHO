@@ -210,8 +210,10 @@ Refunds hold the month their correction can land in. A refund is settled for an 
 correction decided against that invoice that is `communicated` or `not_required`. An unsettled
 refund holds every month from the one it was raised in (its Romanian creation date), because its
 note can only be sent on or after that day. It never holds the original's earlier, closed month.
-A refunded invoice or payment status with no refund row behind it still holds the invoice's own
-month, as do a void and legacy refund metadata.
+A refunded invoice status with no refund row behind it, and a refunded payment without a completed
+refund recorded on that same payment, still hold the invoice's own month, as do a void and legacy
+refund metadata. A correction closed with no original, or decided against another invoice, settles
+nothing for the invoice a refund links to, so no refund is skipped as settled before that check.
 
 Netting is per `(country, VAT body, operation)`, in RON, before rounding. A negative net is
 declared. An exact zero made by a credit note is a "fully netted" group: no XML row, because D390
