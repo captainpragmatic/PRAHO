@@ -71,9 +71,30 @@ class UndatedCorrectionWarningTests(RevenueRecognitionTestCase):
         self.assertEqual(self._vat_warning(), {NOT_ISSUED: 0, NOT_SENT: 0})
 
     def test_an_attached_provider_note_settles_the_period(self) -> None:
+        """Rows linked before A3; nothing produces `attached` now, but existing rows must not warn."""
         invoice = self._paid_invoice(59500, month=1, tax=9500, issuer=ISSUER_SMARTBILL)
         force_status(invoice, "refunded")
-        self._provider_note(self._refund(invoice, 59500, month=3), month=3, tax=9500)
+        self._attached_note(self._refund(invoice, 59500, month=3), month=3, tax=9500)
+
+        self.assertEqual(self._vat_warning(), {NOT_ISSUED: 0, NOT_SENT: 0})
+
+    def test_a_correction_waiting_for_a_manual_storno_is_flagged_as_not_issued(self) -> None:
+        """The provider cannot issue it; until staff record the storno it is owed, not settled."""
+        invoice = self._paid_invoice(59500, month=1, tax=9500, issuer=ISSUER_SMARTBILL)
+        force_status(invoice, "refunded")
+        refund = self._refund(invoice, 59500, month=3)
+        correction = FiscalCorrection.objects.create(original=invoice, source_refund=refund)
+        correction.allocate(base_cents=50000, tax_cents=9500, discount_cents=0, at=local_at(3))
+        correction.save()
+        correction.require_manual_issuance()
+        correction.save()
+
+        self.assertEqual(self._vat_warning(), {NOT_ISSUED: 1, NOT_SENT: 0})
+
+    def test_a_recorded_manual_storno_settles_the_period(self) -> None:
+        invoice = self._paid_invoice(59500, month=1, tax=9500, issuer=ISSUER_SMARTBILL)
+        force_status(invoice, "refunded")
+        self._provider_note(self._refund(invoice, 59500, month=3), issued_month=3, sent_month=3, tax=9500)
 
         self.assertEqual(self._vat_warning(), {NOT_ISSUED: 0, NOT_SENT: 0})
 

@@ -1653,8 +1653,8 @@ def _document_fiscal_date() -> Coalesce:
 def _credit_note_fiscal_date() -> Coalesce:
     """A credit note's period is the day it reached the customer (OPANAF 705/2020).
 
-    That is its correction's `fiscal_date`. A provider note attached to a correction has none yet,
-    so it keeps its own tax point until the provider path records when the customer received it.
+    That is its correction's `fiscal_date`, on either issuer path. A note from before corrections
+    carried that date (`attached`, or linked to none) has only its own tax point, so it keeps it.
     On an invoice the correction join is empty and this is `_document_fiscal_date`.
     """
     return Coalesce(
@@ -1670,9 +1670,10 @@ def _with_a_period() -> Q:
     """Credit notes whose period is known.
 
     An allow-list, so a state added later is excluded until someone decides it has a period. A
-    built-in note that is issued but not yet sent has none: dating it by its tax point would put
-    the reversal in one month here and another in the D390 once it is sent. A provider note with no
-    correction at all is a fiscal document all the same, and counts on its own date.
+    note that is issued but not yet sent has none: dating it by its tax point would put the
+    reversal in one month here and another in the D390 once it is sent. A provider note linked to no
+    correction (written before corrections existed) is a fiscal document all the same, and counts on
+    its own date.
     """
     from .fiscal_correction_models import STATE_ATTACHED, STATE_COMMUNICATED  # noqa: PLC0415
 
@@ -1816,7 +1817,8 @@ def _undated_corrections(customer_ids: list[Any], *, settled_by: Any = None) -> 
     """Completed refunds whose credit note has no period yet, so the fiscal figures are incomplete.
 
     Two groups, because they need different people: `awaiting_issue` (no correction recorded, or
-    one pending, allocated or failed) and `awaiting_communication` (a numbered note the customer has
+    one in any state but the settled three, such as pending, allocated, failed or waiting for staff
+    to record a manual storno) and `awaiting_communication` (a numbered note the customer has
     not received). A refund answers to its own correction or, as a tender leg, to its command's.
 
     With `settled_by`, only refunds settled on or before that Romanian calendar date: a period that

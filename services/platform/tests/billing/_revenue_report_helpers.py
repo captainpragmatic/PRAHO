@@ -152,7 +152,8 @@ class RevenueRecognitionTestCase(TestCase):
         correction.save()
         return credit_note
 
-    def _issued_correction(self, refund: Refund, credit_note: Invoice) -> FiscalCorrection:
+    def _allocated_correction(self, refund: Refund, credit_note: Invoice) -> FiscalCorrection:
+        """The refund's correction, allocated for exactly what `credit_note` carries."""
         correction = FiscalCorrection.objects.create(original=refund.invoice, source_refund=refund)
         correction.allocate(
             base_cents=-credit_note.subtotal_cents,
@@ -161,14 +162,40 @@ class RevenueRecognitionTestCase(TestCase):
             at=credit_note.issued_at or timezone.now(),
         )
         correction.save()
+        return correction
+
+    def _issued_correction(self, refund: Refund, credit_note: Invoice) -> FiscalCorrection:
+        correction = self._allocated_correction(refund, credit_note)
         correction.record_issued(credit_note)
         correction.save()
         return correction
 
-    def _provider_note(self, refund: Refund, *, month: int, tax: int = 0) -> Invoice:
-        """The SmartBill path: the provider's storno, attached to the refund's obligation."""
+    def _provider_note(
+        self, refund: Refund, *, issued_month: int, sent_month: int, tax: int = 0, sent_day: int = 15
+    ) -> Invoice:
+        """The SmartBill path: a storno staff issued at the provider and recorded with its sending date."""
         assert refund.invoice is not None
-        credit_note = self._credit_note(refund.invoice, refund.amount_cents, month=month, tax=tax, issuer=ISSUER_SMARTBILL)
+        credit_note = self._credit_note(
+            refund.invoice, refund.amount_cents, month=issued_month, tax=tax, issuer=ISSUER_SMARTBILL
+        )
+        correction = self._allocated_correction(refund, credit_note)
+        correction.require_manual_issuance()
+        correction.save()
+        correction.record_provider_document(
+            credit_note,
+            communicated_at=local_at(sent_month, sent_day),
+            fiscal_date=date(YEAR, sent_month, sent_day),
+            evidence="sent from the provider, message 42",
+        )
+        correction.save()
+        return credit_note
+
+    def _attached_note(self, refund: Refund, *, month: int, tax: int = 0) -> Invoice:
+        """A provider storno linked before corrections carried a sending date: `attached`, no fiscal date."""
+        assert refund.invoice is not None
+        credit_note = self._credit_note(
+            refund.invoice, refund.amount_cents, month=month, tax=tax, issuer=ISSUER_SMARTBILL
+        )
         correction = FiscalCorrection.objects.create(original=refund.invoice, source_refund=refund)
         correction.attach_credit_note(credit_note)
         correction.save()

@@ -118,10 +118,9 @@ class FiscalAndCashSeriesTests(RevenueRecognitionTestCase):
     def test_both_issuers_report_the_same_numbers(self) -> None:
         """The parity rule: one business event, one answer, whichever system issued the storno.
 
-        The built-in path's note is dated by its email; the SmartBill path's attached note by its
-        own issue date (until A3 records the provider's communication date). With both in the same
-        month the two must be indistinguishable. Two currencies keep the scenarios apart, because
-        an issued document can no longer be deleted to reset between them.
+        The built-in note is dated by its email, the SmartBill one by the sending date staff
+        recorded; both are the day the customer received it. Two currencies keep the scenarios
+        apart, because an issued document can no longer be deleted to reset between them.
         """
         eur = Currency.objects.get_or_create(code="EUR", defaults={"symbol": "€", "decimals": 2})[0]
 
@@ -131,7 +130,7 @@ class FiscalAndCashSeriesTests(RevenueRecognitionTestCase):
 
         provider = self._paid_invoice(50000, month=1, issuer=ISSUER_SMARTBILL, currency=eur)
         force_status(provider, "refunded")
-        self._provider_note(self._refund(provider, 50000, month=3, currency=eur), month=3)
+        self._provider_note(self._refund(provider, 50000, month=3, currency=eur), issued_month=3, sent_month=3)
 
         builtin_series = self._report("RON")
         provider_series = self._report("EUR")
@@ -144,12 +143,48 @@ class FiscalAndCashSeriesTests(RevenueRecognitionTestCase):
         """The note is the fiscal record of the refund; the refund is the cash record. One each."""
         invoice = self._paid_invoice(50000, issuer=ISSUER_SMARTBILL, month=1)
         force_status(invoice, "refunded")
-        self._provider_note(self._refund(invoice, 50000, month=3), month=3)
+        self._provider_note(self._refund(invoice, 50000, month=3), issued_month=3, sent_month=3)
 
         fiscal, cash = self._report()
 
         self.assertEqual(fiscal.get((YEAR, 3)), -50000, f"the note subtracts once; got {fiscal}")
         self.assertEqual(cash.get((YEAR, 3)), -50000, f"the refund subtracts once, the note not at all; got {cash}")
+
+    def test_every_credit_note_on_one_original_subtracts_in_its_own_month(self) -> None:
+        """An original may carry several notes, one per correction; none may hide another."""
+        invoice = self._paid_invoice(50000, month=1)
+        force_status(invoice, "partially_refunded")
+        self._communicated_note(self._refund(invoice, 20000, month=2), issued_month=2, sent_month=2)
+        self._communicated_note(self._refund(invoice, 10000, month=4), issued_month=4, sent_month=4)
+
+        fiscal, _cash = self._report()
+
+        self.assertEqual(fiscal.get((YEAR, 2)), -20000, f"the first note; got {fiscal}")
+        self.assertEqual(fiscal.get((YEAR, 4)), -10000, f"the second note; got {fiscal}")
+        self.assertEqual(self._vat(4), 0)
+
+    def test_a_smartbill_note_counts_on_the_day_staff_recorded_it_was_sent(self) -> None:
+        """Issued in SmartBill on 31 March, sent on 2 April: April's, like a built-in note."""
+        invoice = self._paid_invoice(59500, issuer=ISSUER_SMARTBILL, month=1, tax=9500)
+        force_status(invoice, "refunded")
+        refund = self._refund(invoice, 59500, month=3)
+        self._provider_note(refund, issued_month=3, sent_month=4, sent_day=2, tax=9500)
+
+        fiscal, _cash = self._report()
+
+        self.assertEqual(fiscal.get((YEAR, 3), 0), 0, f"not sent in March; got {fiscal}")
+        self.assertEqual(fiscal.get((YEAR, 4)), -59500, f"April is the sending month; got {fiscal}")
+        self.assertEqual((self._vat(3), self._vat(4)), (0, -9500))
+
+    def test_a_note_linked_before_sending_dates_existed_counts_on_its_own_date(self) -> None:
+        """An `attached` row has no sending date; its own tax point is the only date it carries."""
+        invoice = self._paid_invoice(50000, issuer=ISSUER_SMARTBILL, month=1)
+        force_status(invoice, "refunded")
+        self._attached_note(self._refund(invoice, 50000, month=3), month=3)
+
+        fiscal, _cash = self._report()
+
+        self.assertEqual(fiscal.get((YEAR, 3)), -50000, f"dated by its own tax point; got {fiscal}")
 
     def test_a_refund_without_its_credit_note_yet_moves_cash_but_not_fiscal(self) -> None:
         """Until the correction is issued and sent, nothing fiscal has happened."""
@@ -274,7 +309,7 @@ class VatPeriodTests(RevenueRecognitionTestCase):
         """
         invoice = self._paid_invoice(59500, issuer=ISSUER_SMARTBILL, month=1, tax=9500)
         force_status(invoice, "refunded")
-        self._provider_note(self._refund(invoice, 59500, month=3), month=3, tax=9500)
+        self._provider_note(self._refund(invoice, 59500, month=3), issued_month=3, sent_month=3, tax=9500)
 
         self.assertEqual(self._vat(1), 9500, "January's filing is not rewritten by a later refund")
         self.assertEqual(self._vat(3), -9500, "March declares the reversal")

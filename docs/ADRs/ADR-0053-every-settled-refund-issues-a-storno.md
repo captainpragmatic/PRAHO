@@ -203,13 +203,14 @@ follows the fiscal one.
 - **Fiscal date.** An invoice declares on `Coalesce(tax_point_date, Romanian date of issued_at)`.
   `issue()` sets both, so a row that never went through it (legacy or imported data) falls back to
   the Romanian date of its creation rather than dropping out of every period. A credit note
-  declares on its correction's `fiscal_date`, the day the customer received it.
+  declares on its correction's `fiscal_date`, the day the customer received it: the built-in send,
+  SmartBill's own email, or the sending date staff record for a manual storno.
 - **Which credit notes have a period.** An allow-list: a note settled by a `communicated`
-  correction (dated by the send), a provider note `attached` to its correction, and a provider note
-  with no correction at all (both dated by the note's own tax point). A built-in note that is
-  `issued` but not yet sent has no period and is left out of every figure. Dating it by its tax point
-  would put the reversal in one month here and another in D390 once it is sent. The provider dates
-  are an interim answer: A3 records the provider's communication date, and that replaces them.
+  correction (dated by the send), and, for rows written before A3, a provider note `attached` to its
+  correction or one with no correction at all (both dated by the note's own tax point, the only date
+  they carry). A note that is `issued` but not yet sent has no period and is left out of every
+  figure. Dating it by its tax point would put the reversal in one month here and another in D390
+  once it is sent. An original may carry several notes; each subtracts on its own date.
 - **Fiscal revenue** is the collected invoices (`paid`, `refunded`, `partially_refunded`) on their
   fiscal date, less the credit notes with a period whose original is one of those invoices, on the
   note's date. A note against an invoice the report never counted subtracts nothing.
@@ -220,9 +221,10 @@ follows the fiscal one.
   period as negative base and VAT on its own date. A refunded invoice no longer drops out, which had
   restated periods already filed.
 - **The warning.** Both reports count completed refunds whose correction is unsettled: *not issued
-  yet* (no correction, or `pending`, `allocated`, `failed`) and *issued, not sent* (`issued`). A
-  tender leg answers to its command's correction. `not_required`, `attached` and `communicated` are
-  settled. The VAT report counts only refunds settled on or before the end of the selected period,
+  yet* (no correction, or `pending`, `allocated`, `failed`, `manual_required`) and *issued, not sent*
+  (`issued`). A tender leg answers to its command's correction. `not_required`, `attached` and
+  `communicated` are settled; that allow-list decides, so a state added later warns until someone
+  decides it is settled. The VAT report counts only refunds settled on or before the end of the selected period,
   because a period that ended before the money went back cannot receive that refund's note. It does
   not try to predict which later period the note will land in.
 - **Dashboard.** Its monthly card stays on paid invoices by `created_at`, labelled as cash. That

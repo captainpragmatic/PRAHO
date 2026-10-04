@@ -164,8 +164,8 @@ cost the estimate assumed, and the operator accepted SPV blindness knowingly.
   built-in invoice now issues its own storno, partial ones included, so both paths produce a
   correcting document. The reports now net fiscally: revenue shows fiscal (invoices less credit
   notes, each on its fiscal date) next to cash (collected less refunded, from the `Refund` row as
-  above), and VAT follows the documents (ADR-0053, Reports). A SmartBill note is dated by its own
-  tax point until the provider path records when the customer received it.
+  above), and VAT follows the documents (ADR-0053, Reports). A note on either path is dated by
+  the day the customer received it.
 - Every invoice-touching feature now has two paths. The built-in issuer is kept
   exercised through the same gateway so the fallback stays real rather than becoming
   code that merely still compiles.
