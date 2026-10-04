@@ -75,7 +75,8 @@ class AmountOwedAsOfCompletionTests(StornoTestCase):
         )
         correction = self.refund(original, payment, 2000)
         late.succeed()
-        late.save()
+        # Saved the way the payment services save a transition, writing the status alone.
+        late.save(update_fields=["status", "updated_at"])
 
         self.assertEqual(self.process(correction).total_cents, -2000)
 
