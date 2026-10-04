@@ -316,8 +316,13 @@ class FiscalCorrection(models.Model):
                         total_cents__isnull=True,
                         vat_residue_cents__isnull=True,
                     )
+                    # `IS NOT NULL` spelt out: SQL reads `NULL <= 0` as unknown, which a CHECK passes.
                     | models.Q(
                         allocated_at__isnull=False,
+                        base_cents__isnull=False,
+                        tax_cents__isnull=False,
+                        discount_cents__isnull=False,
+                        total_cents__isnull=False,
                         base_cents__lte=0,
                         tax_cents__lte=0,
                         discount_cents__lte=0,
@@ -519,6 +524,7 @@ class FiscalCorrection(models.Model):
         field=efactura_status,
         source=sorted(EFACTURA_RETRYABLE),
         target=RETURN_VALUE(
+            EFACTURA_PENDING,
             EFACTURA_NOT_APPLICABLE,
             EFACTURA_WAITING_FOR_ORIGINAL,
             EFACTURA_ORIGINAL_REJECTED,

@@ -26,6 +26,7 @@ from decimal import Decimal
 from typing import Any
 
 from django.db import models, transaction
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from .efactura.settings import ro_local_date
@@ -33,6 +34,7 @@ from .fiscal_correction_allocation import AllocationRefusedError, Components, al
 from .fiscal_correction_models import (
     EFACTURA_FAILED,
     EFACTURA_NOT_APPLICABLE,
+    EFACTURA_PENDING,
     EFACTURA_RETRYABLE,
     EFACTURA_SUBMITTED,
     FAILURE_ALLOCATION_REFUSED,
@@ -67,7 +69,11 @@ _SWEEP_CURSOR_KEY = "billing:fiscal-correction-issuance-cursor"
 COMMUNICATION_CLAIM_LEASE = timedelta(minutes=5)
 EFACTURA_FIRST_BACKOFF = timedelta(hours=1)
 EFACTURA_MAX_BACKOFF = timedelta(days=7)
+# 2 ** 8 hours is past the week, so no larger exponent can change the result.
+_MAX_BACKOFF_EXPONENT = 8
 
+# States in which an earlier correction no longer competes for issuance.
+_ISSUANCE_SETTLED_STATES = frozenset({STATE_ISSUED, STATE_COMMUNICATED, STATE_NOT_REQUIRED, STATE_ATTACHED})
 # States in which an earlier correction has decided its amount, so a later one can build on it.
 _DECIDED_STATES = frozenset({STATE_ALLOCATED, STATE_ISSUED, STATE_COMMUNICATED, STATE_NOT_REQUIRED, STATE_ATTACHED})
 
@@ -173,10 +179,12 @@ def _earlier_undecided(correction: FiscalCorrection, original: Invoice, key: tup
             return f"earlier correction {other.pk} is {other.state}"
     unrecorded = (
         refunds_for_invoice(original)
-        .filter(status="completed", fiscal_correction__isnull=True, processed_at__lt=key[0])
+        .filter(status="completed", fiscal_correction__isnull=True)
+        .annotate(completed_at=Coalesce("processed_at", "created_at"))
+        .filter(completed_at__lt=key[0])
         .exclude(tender_leg__command__fiscal_correction__isnull=False)
     )
-    first = unrecorded.order_by("processed_at").first()
+    first = unrecorded.order_by("completed_at").first()
     return f"earlier refund {first.pk} has no recorded correction yet" if first is not None else ""
 
 
@@ -207,14 +215,37 @@ def _credited_so_far(original: Invoice, *, excluding: FiscalCorrection) -> Compo
     )
 
 
-def _refunded_by_earlier(original: Invoice, correction: FiscalCorrection, key: tuple[datetime, datetime, str]) -> int:
-    """Cents returned by the refunds of corrections decided before this one."""
-    total = 0
+def _held_before(original: Invoice, source: _Source) -> int:
+    """What the ledger held against `original` just before this correction's refunds completed.
+
+    As of that moment, not as of whenever the worker runs: a payment arriving after the refund would
+    otherwise make it read as the return of an overpayment, and close the correction for good. A
+    payment counts from when it succeeded (`collected_cents_for_invoice(as_of=...)`); the refunds
+    subtracted are the completed ones of this invoice, by the shared resolution rule, that completed
+    earlier. A refund missing its completion time is placed by its creation, as `_source_of` does.
+    """
+    collected = collected_cents_for_invoice(original, as_of=source.completed_at)
+    if original.status in FULLY_COLLECTED_INVOICE_STATES:
+        # The same floor as `net_collected_cents_for_invoice`: a paid invoice was collected in full.
+        collected = max(collected, original.total_cents)
+    refunded_before = (
+        refunds_for_invoice(original)
+        .filter(status="completed")
+        .exclude(pk__in=source.refund_ids)
+        .annotate(completed_at=Coalesce("processed_at", "created_at"))
+        .filter(completed_at__lt=source.completed_at)
+        .aggregate(total=models.Sum("amount_cents", default=0))["total"]
+    )
+    return collected - int(refunded_before)
+
+
+def _earlier_not_issued(correction: FiscalCorrection, original: Invoice) -> str:
+    """Why an earlier correction on this original must settle before this one issues, or ""."""
+    key = _completion_key(correction, _source_of(correction))
     for other in FiscalCorrection.objects.filter(original=original).exclude(pk=correction.pk):
-        other_source = _source_of(other)
-        if other_source is not None and _completion_key(other, other_source) < key:
-            total += other_source.refunded_cents
-    return total
+        if other.state not in _ISSUANCE_SETTLED_STATES and _completion_key(other, _source_of(other)) < key:
+            return f"earlier correction {other.pk} is {other.state}"
+    return ""
 
 
 def _single_rate(original: Invoice) -> Decimal | None:
@@ -257,11 +288,7 @@ def _advance_allocation(correction_id: str) -> str:  # noqa: PLR0911  # One retu
         credited = _credited_so_far(original, excluding=correction)
         whole = Components(original.subtotal_cents, original.tax_cents, original.discount_cents)
         remaining = whole.minus(credited)
-        collected = collected_cents_for_invoice(original)
-        if original.status in FULLY_COLLECTED_INVOICE_STATES:
-            # The same floor as `net_collected_cents_for_invoice`: a paid invoice was collected in full.
-            collected = max(collected, original.total_cents)
-        held_before = collected - _refunded_by_earlier(original, correction, key)
+        held_before = _held_before(original, source)
         gross = owed_reduction(
             refund_cents=source.refunded_cents,
             net_collected_before_cents=held_before,
@@ -326,6 +353,12 @@ def _advance_issuance(correction_id: str) -> str:
             if not correction.is_allocated or correction.original_id is None:
                 return "skipped"
             original = Invoice.objects.select_for_update().get(pk=correction.original_id)
+            # In refund-completion order, like allocation: the earlier correction takes the one note
+            # A2 allows and the later is the one parked, whichever worker reaches this line first.
+            waiting = _earlier_not_issued(correction, original)
+            if waiting:
+                logger.info(f"🐢 [Storno] Correction {correction.pk} waits to issue: {waiting}")
+                return "waiting_for_earlier"
             if Invoice.objects.filter(reverses_invoice=original).exists():
                 raise _SecondCreditNoteError
             note = _issue_credit_note(correction, original)
@@ -573,8 +606,15 @@ def _advance_efactura(correction_id: str) -> str:
         outcome = gate
     else:
         result = EFacturaService().submit_invoice(note)
-        outcome = EFACTURA_SUBMITTED if result.success else (result.gate or EFACTURA_FAILED)
-        error = "" if result.success else result.error_message
+        if result.success and result.registered_with_anaf:
+            outcome, error = EFACTURA_SUBMITTED, ""
+        elif result.success:
+            # `success` also answers for another worker's upload still in flight: ANAF has registered
+            # nothing yet, so the submission stays owed and is looked at again after the backoff.
+            outcome = EFACTURA_PENDING
+            error = f"An upload is in flight ({result.document_status or 'unknown'}); not registered yet"
+        else:
+            outcome, error = (result.gate or EFACTURA_FAILED), result.error_message
 
     with transaction.atomic():
         locked = FiscalCorrection.objects.select_for_update().get(pk=correction_id)
@@ -594,7 +634,9 @@ def efactura_backoff(attempt: int) -> timedelta:
     The correction stays visible in `waiting_for_original` or `failed` with its next attempt time;
     it is only re-checked less and less often, rather than every hour forever.
     """
-    doubled: timedelta = EFACTURA_FIRST_BACKOFF * (2 ** max(0, attempt - 1))
+    # The exponent is capped before it is used: 2 ** 35 hours already overflows a timedelta, and an
+    # attempt that raises is never recorded, so every later sweep would raise again.
+    doubled: timedelta = EFACTURA_FIRST_BACKOFF * (2 ** min(max(0, attempt - 1), _MAX_BACKOFF_EXPONENT))
     return min(doubled, EFACTURA_MAX_BACKOFF)
 
 

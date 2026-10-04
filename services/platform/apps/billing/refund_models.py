@@ -352,8 +352,8 @@ COLLECTED_PAYMENT_STATUSES = ("succeeded", "partially_refunded", "refunded")
 FULLY_COLLECTED_INVOICE_STATES = frozenset({"paid", "partially_refunded", "refunded"})
 
 
-def collected_cents_for_invoice(invoice: Any) -> int:
-    """Cents collected for `invoice`, each payment counted against one invoice only.
+def collected_cents_for_invoice(invoice: Any, *, as_of: Any = None) -> int:
+    """Cents collected for `invoice`, each payment counted against one invoice only (by `as_of`, if given).
 
     Two tiers, mirroring the refund rule. A payment belongs to its own invoice first. A payment
     with no invoice of its own (an order paid against its proforma) belongs to the invoice its
@@ -363,10 +363,17 @@ def collected_cents_for_invoice(invoice: Any) -> int:
     from .payment_models import Payment  # noqa: PLC0415  # Avoid a model import cycle
 
     unlinked_payment_ids = refunds_for_invoice(invoice).filter(payment__isnull=False).values("payment_id")
-    total = Payment.objects.filter(
+    payments = Payment.objects.filter(
         models.Q(invoice=invoice) | models.Q(invoice__isnull=True, id__in=unlinked_payment_ids),
         status__in=COLLECTED_PAYMENT_STATUSES,
-    ).aggregate(total=models.Sum("amount_cents", default=0))["total"]
+    )
+    if as_of is not None:
+        # What was held at `as_of`: a payment counts from when it succeeded. A row older than
+        # `succeeded_at` has none, and its receipt time stands in for it.
+        payments = payments.annotate(collected_at=Coalesce("succeeded_at", "received_at")).filter(
+            collected_at__lte=as_of
+        )
+    total = payments.aggregate(total=models.Sum("amount_cents", default=0))["total"]
     return int(total)
 
 
