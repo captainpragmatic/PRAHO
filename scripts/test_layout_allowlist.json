@@ -12,6 +12,7 @@
     "^TagCallSitesTests\\.test_",
     "^UnknownArgumentTests\\.test_",
     "^ButtonClassTests\\.test_",
+    "^BlockTagTests\\.test_",
     "^DisplayLocalisationTests\\.test_",
     "^LanguageLocalisationTests\\.test_",
     "^CoerceRetryAfterSecondsTests\\.test_",
