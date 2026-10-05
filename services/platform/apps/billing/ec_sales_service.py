@@ -18,7 +18,7 @@ from datetime import date, datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from zoneinfo import ZoneInfo
 
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -411,25 +411,44 @@ def _vies_problems(invoice: Invoice) -> list[str]:
     return []
 
 
+# Load these with every refund passed to `_settlement`, so settling N refunds costs no query per refund.
+SETTLEMENT_RELATED = ("fiscal_correction", "tender_leg__command__fiscal_correction")
+
+
+def _settlement_links(refund: Refund) -> tuple[FiscalCorrection | None, object]:
+    """The correction `refund` answers to and the payment its money went back to.
+
+    A direct refund owns its correction; a tender leg's refund answers to its command's, and its
+    payment is the leg's. Missing reverse rows read as None.
+    """
+    try:
+        leg = refund.tender_leg
+    except ObjectDoesNotExist:
+        leg = None
+    correction: FiscalCorrection | None
+    try:
+        correction = refund.fiscal_correction
+    except ObjectDoesNotExist:
+        correction = None
+    if correction is None and leg is not None:
+        try:
+            correction = leg.command.fiscal_correction
+        except ObjectDoesNotExist:
+            correction = None
+    return correction, refund.payment_id or (None if leg is None else leg.payment_id)
+
+
 def _settlement(refund: Refund, invoice: Invoice) -> RefundSettlement:
     """How far `refund` has been settled for `invoice`.
 
     Settled only by a correction decided against THIS invoice: a credit note of it that reached the
     customer, or a validated finding that it needed none. A correction on another invoice, or one
     that found no fiscal document at all, was never decided against this supply.
-    """
-    from apps.promotions.models import TenderRefundLeg  # noqa: PLC0415  # ADR-0007 cross-app import
 
-    correction = (
-        FiscalCorrection.objects.filter(
-            Q(source_refund_id=refund.pk) | Q(source_command__legs__refund_id=refund.pk)
-        ).first()
-        if refund.status == "completed"
-        else None
-    )
-    payment_id = refund.payment_id or (
-        TenderRefundLeg.objects.filter(refund_id=refund.pk).values_list("payment_id", flat=True).first()
-    )
+    Load the refund with `SETTLEMENT_RELATED` to read its links without a query.
+    """
+    linked, payment_id = _settlement_links(refund)
+    correction = linked if refund.status == "completed" else None
     return RefundSettlement(
         refund_id=str(refund.pk),
         status=refund.status,
@@ -469,7 +488,10 @@ def _refund_evidence(invoice: Invoice) -> tuple[list[RefundSettlement], list[dic
         order_links |= Q(pk=order_id)
     settlements = [
         _settlement(refund, invoice)
-        for refund in Refund.objects.filter(related, status__in=UNRESOLVED_REFUNDS).distinct().order_by("pk")
+        for refund in Refund.objects.filter(related, status__in=UNRESOLVED_REFUNDS)
+        .select_related(*SETTLEMENT_RELATED)
+        .distinct()
+        .order_by("pk")
     ]
     legacy = [
         {
@@ -793,7 +815,7 @@ def _other_period_adjustments(period: ReportingPeriod, handled: set[int]) -> tup
     alerted: set[int] = set()
     refunds = (
         Refund.objects.filter(status__in=UNRESOLVED_REFUNDS, created_at__lt=end)
-        .select_related("payment", "order")
+        .select_related("payment", "order", *SETTLEMENT_RELATED)
         .order_by("pk")
     )
     for refund in refunds:

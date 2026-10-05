@@ -15,7 +15,9 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from unittest.mock import patch
 
+from django.db import connection
 from django.test import TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from lxml import etree
 
@@ -28,7 +30,12 @@ from apps.billing.d390 import (
     render_reconciliation_csv,
     validate_d390_xml,
 )
-from apps.billing.ec_sales_service import ReportingPeriod, _document_problems, aggregate_ec_services
+from apps.billing.ec_sales_service import (
+    ReportingPeriod,
+    _document_problems,
+    _refund_evidence,
+    aggregate_ec_services,
+)
 from apps.billing.fiscal_correction_models import (
     STATE_COMMUNICATED,
     STATE_ISSUED,
@@ -459,6 +466,24 @@ class ARefundIsSettledOnlyForTheInvoiceAndPaymentItAnswersForTests(_CreditNoteCa
 
         self.assertFalse(report.can_export)
         self.assertIn("unresolved_fiscal_adjustment", {code for exc in report.exceptions for code in exc.codes})
+
+    def test_reading_an_invoices_refunds_costs_the_same_however_many_there_are(self) -> None:
+        """Each refund's correction and tender leg are read with the refunds, not looked up one by one."""
+        original = self.original(date(2026, 6, 15))
+        payment = self.paid(original)
+
+        def cost() -> int:
+            with CaptureQueriesContext(connection) as queries:
+                _refund_evidence(original)
+            return len(queries.captured_queries)
+
+        self.settle(self.refund(original, 1000, at=_at(date(2026, 7, 10)), payment=payment), at=_at(date(2026, 7, 10)))
+        one = cost()
+        for day in (11, 12):
+            at = _at(date(2026, 7, day))
+            self.settle(self.refund(original, 1000, at=at, payment=payment), at=at)
+
+        self.assertEqual(cost(), one)
 
     def assert_blocked_in(self, period: ReportingPeriod, code: str) -> Any:
         report = aggregate_ec_services(period)

@@ -75,7 +75,7 @@
   {% if report.exceptions %}
   <div class="bg-slate-800 border border-red-700 rounded-lg p-4">
     <h2 class="font-semibold text-red-300">{% trans "XML blocked — review these exceptions" %}</h2>
-    <p class="mt-2 text-slate-300">{% trans "Missing tax-point dates appear in every month, and credit notes not yet sent to the customer in every month from their issue, because their reporting period is unknown. A refund is deducted only by its credit note, in the month the customer received it." %}</p>
+    <p class="mt-2 text-slate-300">{% trans "Missing tax-point dates appear in every month, and credit notes not yet sent to the customer in every month from their tax point, because their reporting period is unknown. A refund is deducted only by its credit note, in the month the customer received it." %}</p>
     <ul class="mt-4 space-y-3">
       {% for exception in report.exceptions %}
       <li><a class="text-blue-400" href="{% url 'billing:invoice_detail' pk=exception.invoice_id %}">{{ exception.invoice_number }}</a>{% if exception.line_id %} / {{ exception.line_id }}{% endif %}: {{ exception.detail }}</li>
