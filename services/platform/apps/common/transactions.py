@@ -39,4 +39,11 @@ def best_effort_atomic(*, logger: Logger, scope: str, message: str, using: str |
             transaction.set_rollback(True, using=using)
             # Roll back before logging, including when a service marked needs_rollback.
             stack.close()
+            if connection.needs_rollback or connection.closed_in_transaction:
+                raise
             logger.exception(f"🔥 [{scope}] {message}")
+
+    if connection.needs_rollback or connection.closed_in_transaction:
+        raise TransactionManagementError(
+            "Best-effort effect could not restore a usable transaction."
+        ) from connection.rollback_exc

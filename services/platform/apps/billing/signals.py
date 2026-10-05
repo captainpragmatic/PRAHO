@@ -1995,7 +1995,7 @@ def _update_customer_invoice_history(invoice: Invoice, event_type: str) -> None:
 
 def _activate_pending_services(invoice: Invoice) -> None:
     """Activate services that were pending payment"""
-    try:
+    with swallow_application_errors(logger=logger, scope="Invoice", message="Failed to activate pending services"):
         from apps.provisioning.models import Service
         from apps.provisioning.services import ServiceActivationService
 
@@ -2013,9 +2013,6 @@ def _activate_pending_services(invoice: Invoice) -> None:
                 if not result.is_ok():
                     raise RuntimeError(f"Service activation failed: {result.unwrap_err()}")
                 logger.info(f"⚡ [Service] Activated {service.id} after payment")
-
-    except Exception as e:
-        logger.exception(f"🔥 [Invoice] Failed to activate pending services: {e}")
 
 
 def _invalidate_tax_cache(country_code: str, tax_type: str) -> None:

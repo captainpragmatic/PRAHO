@@ -53,6 +53,32 @@ class BestEffortAtomicTests(TestCase):
             transaction.on_commit(lambda: seen.append("survived"))
         self.assertEqual(seen, ["survived"])
 
+    def test_failed_rollback_propagates_body_error_instead_of_silently_losing_outer_write(self) -> None:
+        Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei"})
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            Currency.objects.create(code="XIV", symbol="invoice")
+            with (
+                patch.object(connection, "savepoint_rollback", side_effect=OperationalError("rollback failed")),
+                swallow_application_errors(logger=logger, scope="Dispatch", message="must propagate"),
+                best_effort_atomic(logger=logger, scope="Test", message="must propagate"),
+            ):
+                Currency.objects.create(code="RON", symbol="duplicate")
+        self.assertFalse(connection.needs_rollback)
+        self.assertFalse(Currency.objects.filter(code="XIV").exists())
+
+    def test_failed_rollback_after_a_swallowed_write_error_propagates(self) -> None:
+        Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei"})
+        with self.assertRaises(TransactionManagementError), transaction.atomic():
+            Currency.objects.create(code="XIV", symbol="invoice")
+            with (
+                patch.object(connection, "savepoint_rollback", side_effect=OperationalError("rollback failed")),
+                best_effort_atomic(logger=logger, scope="Test", message="must propagate"),
+                self.assertRaises(IntegrityError),
+            ):
+                Currency.objects.create(code="RON", symbol="duplicate")
+        self.assertFalse(connection.needs_rollback)
+        self.assertFalse(Currency.objects.filter(code="XIV").exists())
+
 
 class SwallowApplicationErrorsTests(TestCase):
     def test_plain_value_error_is_swallowed_and_logged_without_a_savepoint(self) -> None:

@@ -87,6 +87,15 @@ class InvoiceSignalIsolationTests(TestCase):
         self.customer = CustomerFactory()
         self.currency = CurrencyFactory()
 
+    def test_service_activation_savepoint_entry_error_propagates(self) -> None:
+        failure = DatabaseError("savepoint entry failed")
+        with (
+            patch.object(connection, "savepoint", side_effect=failure),
+            self.assertRaises(DatabaseError) as raised,
+        ):
+            signals._activate_pending_services(Invoice())
+        self.assertIs(raised.exception, failure)
+
     def test_required_receivable_read_error_propagates_from_save_unchanged(self) -> None:
         invoice = _draft(self.customer, self.currency)
         invoice.issue()
