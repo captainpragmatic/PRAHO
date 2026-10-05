@@ -34,7 +34,7 @@ from apps.audit.services import (
     BillingAuditService,
     ComplianceEventRequest,
 )
-from apps.common.transactions import best_effort_atomic
+from apps.common.transactions import best_effort_atomic, swallow_application_errors
 from apps.common.validators import log_security_event
 
 from .fiscal_identity import normalize_country_code
@@ -153,26 +153,23 @@ def _log_billing_model_event(  # Django signal parameters  # noqa: PLR0913  # Bu
             "DISABLE_AUDIT_SIGNALS is set outside of TESTING context — ignoring flag and continuing audit for safety"
         )
 
-    try:
-        event_metadata = {
-            "source_app": "billing",
-            "model_lifecycle": True,
-        }
-        if metadata:
-            event_metadata.update(metadata)
+    event_metadata = {
+        "source_app": "billing",
+        "model_lifecycle": True,
+    }
+    if metadata:
+        event_metadata.update(metadata)
 
-        AuditService.log_event(
-            AuditEventData(
-                event_type=event_type,
-                content_object=instance,
-                old_values=_serialize_values_for_audit(old_values or {}),
-                new_values=_serialize_values_for_audit(new_values or {}),
-                description=description,
-            ),
-            context=AuditContext(actor_type="system", metadata=event_metadata),
-        )
-    except Exception as e:
-        logger.exception(f"🔥 [Billing Lifecycle] Failed to log {event_type}: {e}")
+    event_data = AuditEventData(
+        event_type=event_type,
+        content_object=instance,
+        old_values=_serialize_values_for_audit(old_values or {}),
+        new_values=_serialize_values_for_audit(new_values or {}),
+        description=description,
+    )
+    context = AuditContext(actor_type="system", metadata=event_metadata)
+    with best_effort_atomic(logger=logger, scope="Billing Lifecycle", message=f"Failed to log {event_type}"):
+        AuditService.log_event(event_data, context=context)
 
 
 @receiver(post_save, sender=Subscription)
@@ -599,7 +596,7 @@ def handle_invoice_created_or_updated(sender: type[Invoice], instance: Invoice, 
     - Cross-app order synchronization
     - Post-refund side effects
     """
-    try:
+    with swallow_application_errors(logger=logger, scope="Invoice Signal", message="Failed to handle invoice save"):
         # Enhanced audit logging using BillingAuditService
         event_type = "invoice_created" if created else "invoice_status_changed"
 
@@ -667,9 +664,6 @@ def handle_invoice_created_or_updated(sender: type[Invoice], instance: Invoice, 
 
         # EXTENDED: Update billing analytics
         _update_billing_analytics(instance, created)
-
-    except Exception as e:
-        logger.exception(f"🔥 [Invoice Signal] Failed to handle invoice save: {e}")
 
 
 @receiver(pre_save, sender=Invoice)
@@ -769,7 +763,7 @@ def handle_invoice_cleanup(sender: type[Invoice], instance: Invoice, **kwargs: A
     Clean up related data when invoices are deleted.
     Romanian compliance: issued invoices cannot be deleted, only voided.
     """
-    try:
+    with swallow_application_errors(logger=logger, scope="Invoice Signal", message="Cleanup failed"):
         # Romanian law: issued invoices cannot be deleted, only voided
         if instance.status == "issued":
             logger.error(f"🔥 [Invoice] ILLEGAL DELETION: Issued invoice {instance.number} deleted!")
@@ -793,9 +787,6 @@ def handle_invoice_cleanup(sender: type[Invoice], instance: Invoice, **kwargs: A
         _cancel_invoice_webhooks(instance)
 
         logger.warning(f"🗑️ [Invoice] Cleaned up deleted invoice {instance.number}")
-
-    except Exception as e:
-        logger.exception(f"🔥 [Invoice Signal] Cleanup failed: {e}")
 
 
 # ===============================================================================
@@ -1138,7 +1129,7 @@ def store_original_retry_values(
 
 def _sync_orders_on_invoice_status_change(invoice: Invoice, old_status: str, new_status: str) -> None:
     """Update related orders when invoice status changes"""
-    try:
+    with swallow_application_errors(logger=logger, scope="Invoice", message="Order sync failed"):
         from apps.orders.models import Order
         from apps.orders.services import OrderPaymentConfirmationService, OrderService, StatusChangeData
 
@@ -1192,9 +1183,6 @@ def _sync_orders_on_invoice_status_change(invoice: Invoice, old_status: str, new
                             logger.info(f"📋 [Order] Cancelled {order.order_number} due to voided invoice")
                         else:
                             raise RuntimeError(f"Order cancellation failed: {result.unwrap_err()}")
-
-    except Exception as e:
-        logger.exception(f"🔥 [Invoice] Order sync failed: {e}")
 
 
 def _activate_payment_services(payment: Payment) -> None:
@@ -1344,7 +1332,9 @@ def _remove_payment_credit_adjustment(payment: Payment, event_type: str) -> None
 
 def _handle_invoice_refund_completion(invoice: Invoice) -> None:
     """Handle side effects when invoice refund is completed"""
-    try:
+    with swallow_application_errors(
+        logger=logger, scope="Refund Signal", message="Invoice refund completion handling failed"
+    ):
         # H5 fix: Send email via on_commit to prevent ghost emails on rollback.
         # If an outer transaction rolls back, the email would have already been sent.
         _inv = invoice
@@ -1399,9 +1389,6 @@ def _handle_invoice_refund_completion(invoice: Invoice) -> None:
 
         logger.info(f"💰 [Refund] Completed invoice refund for {invoice.number}")
 
-    except Exception as e:
-        logger.exception(f"🔥 [Refund Signal] Invoice refund completion handling failed: {e}")
-
 
 # ===============================================================================
 # CORE BUSINESS LOGIC FUNCTIONS
@@ -1425,7 +1412,7 @@ def _is_receivable(invoice: Invoice) -> bool:
 
 def _handle_new_invoice_creation(invoice: Invoice) -> None:
     """Handle new invoice creation tasks"""
-    try:
+    with swallow_application_errors(logger=logger, scope="Invoice Signal", message="New invoice handling failed"):
         if _is_receivable(invoice):
             # Send invoice notification to customer
             _send_invoice_created_email(invoice)
@@ -1440,13 +1427,10 @@ def _handle_new_invoice_creation(invoice: Invoice) -> None:
         ):
             _update_customer_billing_stats(invoice.customer)
 
-    except Exception as e:
-        logger.exception(f"🔥 [Invoice Signal] New invoice handling failed: {e}")
-
 
 def _handle_invoice_status_change(invoice: Invoice, old_status: str, new_status: str) -> None:
     """Handle invoice status changes with various triggers"""
-    try:
+    with swallow_application_errors(logger=logger, scope="Invoice Signal", message="Status change handling failed"):
         logger.info(f"🔄 [Invoice] Status change {invoice.number}: {old_status} → {new_status}")
 
         # Security event for important status changes
@@ -1471,9 +1455,6 @@ def _handle_invoice_status_change(invoice: Invoice, old_status: str, new_status:
             _handle_invoice_overdue(invoice)
         elif new_status == "void" and old_status in ["draft", "issued"]:
             _handle_invoice_voided(invoice)
-
-    except Exception as e:
-        logger.exception(f"🔥 [Invoice Signal] Status change handling failed: {e}")
 
 
 def _handle_payment_status_change(payment: Payment, old_status: str, new_status: str) -> None:
@@ -1519,7 +1500,7 @@ def _handle_payment_status_change(payment: Payment, old_status: str, new_status:
 
 def _handle_invoice_issued(invoice: Invoice) -> None:
     """Handle invoice being issued"""
-    try:
+    with swallow_application_errors(logger=logger, scope="Invoice Signal", message="Invoice issued handling failed"):
         if _is_receivable(invoice):
             _send_invoice_issued_email(invoice)
             _schedule_payment_reminders(invoice)
@@ -1541,20 +1522,17 @@ def _handle_invoice_issued(invoice: Invoice) -> None:
             )
             AuditService.log_compliance_event(compliance_request)
 
-    except Exception as e:
-        logger.exception(f"🔥 [Invoice Signal] Invoice issued handling failed: {e}")
-
 
 def _handle_invoice_paid(invoice: Invoice) -> None:
     """Handle invoice being paid"""
-    try:
+    with swallow_application_errors(logger=logger, scope="Invoice Signal", message="Invoice paid handling failed"):
         if not _is_receivable(invoice):
             # Defence behind the transition guard, and it covers more than the receipt:
             # this handler also credits payment history and activates pending services.
             return
         if not invoice.paid_at:
-            with best_effort_atomic(logger=logger, scope="Invoice Paid", message="Failed to record paid timestamp"):
-                Invoice.objects.filter(pk=invoice.pk).update(paid_at=timezone.now())
+            # Required invoice data: database failures must reach the caller.
+            Invoice.objects.filter(pk=invoice.pk).update(paid_at=timezone.now())
 
         _send_payment_received_email(invoice)
         _cancel_payment_reminders(invoice)
@@ -1563,9 +1541,6 @@ def _handle_invoice_paid(invoice: Invoice) -> None:
         _activate_pending_services(invoice)
 
         logger.info(f"✅ [Invoice] Payment completed for {invoice.number}")
-
-    except Exception as e:
-        logger.exception(f"🔥 [Invoice Signal] Invoice paid handling failed: {e}")
 
 
 def _handle_invoice_overdue(invoice: Invoice) -> None:
@@ -1577,7 +1552,7 @@ def _handle_invoice_overdue(invoice: Invoice) -> None:
     if not _is_receivable(invoice):
         return
 
-    try:
+    with swallow_application_errors(logger=logger, scope="Invoice Signal", message="Overdue handling failed"):
         _send_invoice_overdue_email(invoice)
         _trigger_dunning_process(invoice)
         with best_effort_atomic(logger=logger, scope="Invoice History", message="Failed to update payment history"):
@@ -1600,13 +1575,10 @@ def _handle_invoice_overdue(invoice: Invoice) -> None:
 
         logger.warning(f"⚠️ [Invoice] Invoice {invoice.number} is overdue")
 
-    except Exception as e:
-        logger.exception(f"🔥 [Invoice Signal] Overdue handling failed: {e}")
-
 
 def _handle_invoice_voided(invoice: Invoice) -> None:
     """Handle invoice being voided"""
-    try:
+    with swallow_application_errors(logger=logger, scope="Invoice Signal", message="Invoice voided handling failed"):
         _send_invoice_voided_email(invoice)
         _cancel_payment_reminders(invoice)
 
@@ -1619,9 +1591,6 @@ def _handle_invoice_voided(invoice: Invoice) -> None:
                 evidence={"void_date": timezone.now().isoformat()},
             )
             AuditService.log_compliance_event(compliance_request)
-
-    except Exception as e:
-        logger.exception(f"🔥 [Invoice Signal] Invoice voided handling failed: {e}")
 
 
 def _handle_payment_success(payment: Payment) -> None:

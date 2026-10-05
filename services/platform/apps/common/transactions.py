@@ -4,8 +4,21 @@ from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
 from logging import Logger
 
-from django.db import transaction
+from django.db import DatabaseError, transaction
 from django.db.transaction import TransactionManagementError
+
+
+@contextmanager
+def swallow_application_errors(*, logger: Logger, scope: str, message: str, using: str | None = None) -> Iterator[None]:
+    """Swallow application errors only when the caller's transaction remains usable."""
+    try:
+        yield
+    except (DatabaseError, TransactionManagementError):
+        raise
+    except Exception:
+        if transaction.get_connection(using).needs_rollback:
+            raise
+        logger.exception(f"🔥 [{scope}] {message}")
 
 
 @contextmanager

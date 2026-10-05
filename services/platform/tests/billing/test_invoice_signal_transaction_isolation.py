@@ -1,11 +1,13 @@
 """Regression proofs for invoice signal failures using real failed database operations."""
 
+from collections.abc import Callable
 from contextlib import nullcontext
 from datetime import timedelta
+from typing import Any
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
-from django.db import DatabaseError, connection, transaction
+from django.db import DatabaseError, IntegrityError, connection, transaction
 from django.test import SimpleTestCase, TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 
@@ -84,6 +86,67 @@ class InvoiceSignalIsolationTests(TestCase):
         self.queued = _quiet_delivery(self)
         self.customer = CustomerFactory()
         self.currency = CurrencyFactory()
+
+    def test_required_receivable_read_error_propagates_from_save_unchanged(self) -> None:
+        invoice = _draft(self.customer, self.currency)
+        invoice.issue()
+        invoice.save()
+        invoice.mark_as_paid()
+        failure = DatabaseError("receivable lookup failed")
+        with (
+            patch.object(signals, "_is_receivable", side_effect=failure) as failed,
+            self.assertRaises(DatabaseError) as raised,
+            transaction.atomic(),
+        ):
+            invoice.save(update_fields=["status"])
+        self.assertIs(raised.exception, failure)
+        failed.assert_called_once_with(invoice)
+        self.assertEqual(Invoice.objects.get(pk=invoice.pk).status, "issued")
+
+    def test_required_paid_at_write_failure_propagates_from_save_and_rolls_back_status(self) -> None:
+        invoice = _draft(self.customer, self.currency)
+        invoice.issue()
+        invoice.save()
+        invoice.mark_as_paid()
+        # Exercise the handler's fallback for a paid document lacking its timestamp.
+        invoice.paid_at = None
+        failed = MagicMock(side_effect=_fail_write)
+
+        def fail_paid_at(
+            execute: Callable[..., Any], sql: str, params: Any, many: bool, context: dict[str, Any]
+        ) -> Any:
+            if sql.startswith(f'UPDATE "{Invoice._meta.db_table}"') and '"paid_at"' in sql:
+                failed()
+            return execute(sql, params, many, context)
+
+        with (
+            connection.execute_wrapper(fail_paid_at),
+            self.assertRaises(IntegrityError),
+            transaction.atomic(),
+        ):
+            invoice.save(update_fields=["status"])
+        failed.assert_called_once()
+        self.assertFalse(connection.needs_rollback)
+        persisted = Invoice.objects.get(pk=invoice.pk)
+        self.assertEqual(persisted.status, "issued")
+        self.assertIsNone(persisted.paid_at)
+
+    def test_lifecycle_audit_failed_orm_write_preserves_invoice_save(self) -> None:
+        with transaction.atomic():
+            invoice = _draft(self.customer, self.currency)
+            with patch.object(signals.AuditService, "log_event", side_effect=_fail_write) as failed:
+                signals._log_billing_model_event(
+                    event_type="invoice_isolation_probe",
+                    instance=invoice,
+                    description=f"Invoice {invoice.pk} audit probe",
+                )
+                failed.assert_called_once()
+            self.assertFalse(connection.needs_rollback)
+            invoice.meta = {"audit_probe": "saved"}
+            invoice.save(update_fields=["meta"])
+        persisted = Invoice.objects.get(pk=invoice.pk)
+        self.assertEqual(persisted.status, "draft")
+        self.assertEqual(persisted.meta, {"audit_probe": "saved"})
 
     def test_compliance_failure_preserves_issued_invoice_and_efactura_callback(self) -> None:
         invoice = _draft(self.customer, self.currency)
@@ -220,8 +283,9 @@ class InvoiceSignalIsolationTests(TestCase):
             nonlocal calls
             calls += 1
             if calls == 1:
+                Currency.objects.create(code="XOF", symbol="first")
                 _fail_write()
-            Currency.objects.create(code="XOR", symbol="second order")
+            Currency.objects.create(code="XOR", symbol="second")
             return Ok(True)
 
         with patch(
@@ -229,8 +293,13 @@ class InvoiceSignalIsolationTests(TestCase):
         ) as confirm_order:
             with transaction.atomic():
                 signals._sync_orders_on_invoice_status_change(invoice, "issued", "paid")
+                self.assertFalse(connection.needs_rollback)
+                # This write is outside every per-order savepoint.
+                Currency.objects.create(code="XOK", symbol="outer")
             self.assertEqual(confirm_order.call_count, 2)
+        self.assertFalse(Currency.objects.filter(code="XOF").exists())
         self.assertTrue(Currency.objects.filter(code="XOR").exists())
+        self.assertTrue(Currency.objects.filter(code="XOK").exists())
 
     def _assert_refund_callbacks_survive(self, failing_target: str) -> None:
         invoice = _draft(self.customer, self.currency)
@@ -281,6 +350,38 @@ class InvoiceSignalPostgresTests(TransactionTestCase):
         self.queued = _quiet_delivery(self)
         self.customer = CustomerFactory()
         self.currency = CurrencyFactory()
+
+    def test_required_paid_at_sql_error_surfaces_to_caller_and_rolls_back_status(self) -> None:
+        invoice = _draft(self.customer, self.currency)
+        invoice.issue()
+        invoice.save()
+        invoice.mark_as_paid()
+        # Exercise the handler's fallback for a paid document lacking its timestamp.
+        invoice.paid_at = None
+        failed = MagicMock(side_effect=_fail_sql)
+
+        def fail_paid_at(
+            execute: Callable[..., Any], sql: str, params: Any, many: bool, context: dict[str, Any]
+        ) -> Any:
+            if sql.startswith(f'UPDATE "{Invoice._meta.db_table}"') and '"paid_at"' in sql:
+                failed()
+            return execute(sql, params, many, context)
+
+        with (
+            connection.execute_wrapper(fail_paid_at),
+            self.assertRaises(DatabaseError) as raised,
+            transaction.atomic(),
+        ):
+            invoice.save(update_fields=["status"])
+        failed.assert_called_once()
+        self.assertEqual(getattr(raised.exception.__cause__, "sqlstate", None), "22012")
+        self.assertFalse(connection.needs_rollback)
+        persisted = Invoice.objects.get(pk=invoice.pk)
+        self.assertEqual(persisted.status, "issued")
+        self.assertIsNone(persisted.paid_at)
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            self.assertEqual(cursor.fetchone(), (1,))
 
     def test_create_without_caller_atomic_commits_after_failed_sql(self) -> None:
         with patch.object(signals, "_update_customer_billing_stats", side_effect=_fail_sql) as failed:
