@@ -14,6 +14,7 @@ import os
 import sys
 from pathlib import Path
 from types import ModuleType
+from typing import cast
 
 import pytest
 import yaml
@@ -478,6 +479,76 @@ class TestIncompletePlurals:
 
         total_line = next(line for line in capsys.readouterr().out.splitlines() if line.startswith("TOTAL"))
         assert total_line.split()[1:3] == ["0", "2"]
+
+    @pytest.fixture()
+    def reviewed_plural(self, tp: ModuleType, incomplete: Path) -> Path:
+        review = incomplete / "review.yaml"
+        tp.cmd_generate(tp.GenerateConfig(po_file=PO_REL, output=review))
+        document = cast("dict[str, object]", yaml.safe_load(review.read_text(encoding="utf-8")))
+        entries = cast("list[dict[str, object]]", document["entries"])
+        plural = next(entry for entry in entries if entry["msgid"] == "%(count)s domain")
+        forms = cast("list[str]", plural["msgstr_suggested"])
+        assert forms == ["%(count)s domeniu", "%(count)s domenii", ""]
+        forms[2] = "%(count)s de domenii"
+        plural["status"] = "approved"
+        review.write_text(yaml.dump(document, allow_unicode=True), encoding="utf-8")
+        return review
+
+    @pytest.fixture(params=[0, 1], ids=["form-0", "form-1"])
+    def changed_plural(self, incomplete: Path, reviewed_plural: Path, request: pytest.FixtureRequest) -> bytes:
+        # Depending on reviewed_plural ensures this edit happens after generate and review.
+        index = cast("int", request.param)
+        original_form = ["%(count)s domeniu", "%(count)s domenii"][index]
+        po = incomplete / PO_REL
+        changed = po.read_bytes().replace(
+            f'msgstr[{index}] "{original_form}"'.encode(),
+            f'msgstr[{index}] "%(count)s traducere nouă"'.encode(),
+        )
+        po.write_bytes(changed)
+        return changed
+
+    def test_stale_partial_plural_is_skipped_without_overwrite(
+        self,
+        tp: ModuleType,
+        incomplete: Path,
+        reviewed_plural: Path,
+        changed_plural: bytes,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        tp.cmd_apply(reviewed_plural)
+
+        assert (incomplete / PO_REL).read_bytes() == changed_plural
+        assert "Already translated, not overwriting without --overwrite or overwrite: true" in caplog.text
+
+    @pytest.mark.parametrize("overwrite", [False, True], ids=["per-entry", "cli"])
+    def test_stale_partial_plural_applies_with_overwrite(
+        self,
+        tp: ModuleType,
+        incomplete: Path,
+        reviewed_plural: Path,
+        changed_plural: bytes,
+        overwrite: bool,
+    ) -> None:
+        if not overwrite:
+            document = cast("dict[str, object]", yaml.safe_load(reviewed_plural.read_text(encoding="utf-8")))
+            entries = cast("list[dict[str, object]]", document["entries"])
+            plural = next(entry for entry in entries if entry["msgid"] == "%(count)s domain")
+            plural["overwrite"] = True
+            reviewed_plural.write_text(yaml.dump(document, allow_unicode=True), encoding="utf-8")
+
+        assert (incomplete / PO_REL).read_bytes() == changed_plural
+        tp.cmd_apply(reviewed_plural, overwrite=overwrite)
+
+        repaired = INCOMPLETE_PLURAL + 'msgstr[2] "%(count)s de domenii"\n'
+        assert (incomplete / PO_REL).read_bytes() == _catalogue(REFUND, repaired).encode()
+
+    def test_unchanged_partial_plural_fills_missing_form(
+        self, tp: ModuleType, incomplete: Path, reviewed_plural: Path
+    ) -> None:
+        tp.cmd_apply(reviewed_plural)
+
+        repaired = INCOMPLETE_PLURAL + 'msgstr[2] "%(count)s de domenii"\n'
+        assert (incomplete / PO_REL).read_bytes() == _catalogue(REFUND, repaired).encode()
 
     def test_apply_repairs_a_plural_missing_a_form(self, tp, incomplete):
         forms = ["%(count)s domeniu", "%(count)s domenii", "%(count)s de domenii"]

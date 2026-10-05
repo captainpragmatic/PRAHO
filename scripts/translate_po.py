@@ -1319,8 +1319,8 @@ def cmd_apply(
 ) -> None:
     """Apply approved translations from YAML back to .po file.
 
-    An entry that is already translated (and not fuzzy) is only replaced when `overwrite` is set,
-    or when its review entry says `overwrite: true`.
+    A non-fuzzy translation, including each filled form of an incomplete plural, is only
+    replaced when `overwrite` is set or its review entry says `overwrite: true`.
     """
     raw: object = yaml.safe_load(review_yaml.read_text(encoding="utf-8"))
 
@@ -1407,9 +1407,17 @@ def cmd_apply(
             continue
 
         is_fuzzy = "fuzzy" in po_entry.flags
-        if _has_translation(po_entry, nplurals) and not is_fuzzy:
-            # Review files list untranslated or fuzzy entries; a translated target is either a
-            # deliberate correction (overwrite) or a review that was already applied or is stale
+        replaces_filled_plural_form = (
+            bool(po_entry.msgid_plural)
+            and isinstance(suggestion, list)
+            and any(
+                form and (index >= len(suggestion) or form != suggestion[index])
+                for index, form in po_entry.msgstr_plural.items()
+            )
+        )
+        if not is_fuzzy and (_has_translation(po_entry, nplurals) or replaces_filled_plural_form):
+            # Even an incomplete plural can have established forms; replacing any of them
+            # requires the same explicit override as replacing a fully translated entry
             if _current_translation(po_entry) == suggestion:
                 skipped += 1
                 continue
