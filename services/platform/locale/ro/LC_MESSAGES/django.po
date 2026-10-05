@@ -20511,8 +20511,8 @@ msgstr "Storno pentru %(number)s"
 msgid "No documents found for the selected period"
 msgstr "Nu s-au găsit documente pentru perioada selectată"
 
-msgid "Cash collected this month"
-msgstr "Încasat luna aceasta"
+msgid "Paid invoices this month"
+msgstr "Facturi plătite luna aceasta"
 
 msgid "Paid invoices created this month. Fiscal figures are in Financial Reports."
 msgstr "Facturi plătite create luna aceasta. Cifrele fiscale sunt în Rapoarte financiare."

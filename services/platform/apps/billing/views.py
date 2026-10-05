@@ -1913,12 +1913,18 @@ def billing_reports(request: HttpRequest) -> HttpResponse:
 
 
 def _requested_date(value: str | None, *, default: date) -> date:
-    """A `YYYY-MM-DD` query parameter, or `default` when it is missing or not a real date."""
+    """A `YYYY-MM-DD` query parameter, or `default` when it is missing or not a real date.
+
+    The last representable day is refused too: a period is closed by the day after its end, and
+    `date.max` has none.
+    """
     try:
         parsed = parse_date(value) if value else None
     except ValueError:  # Well formed but impossible, such as 2025-02-30.
         parsed = None
-    return parsed or default
+    if parsed is None or parsed == date.max:
+        return default
+    return parsed
 
 
 @billing_staff_required

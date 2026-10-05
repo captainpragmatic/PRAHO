@@ -160,8 +160,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   out, which rewrote a period that had already been filed. Both reports warn when completed refunds
   are still waiting for their credit note, or when a credit note was issued but not yet sent, since
   that period is not complete yet.
-- The dashboard's "Monthly Revenue" card is now labelled "Cash collected this month". It always
-  showed paid invoices created this month, which is a cash figure.
+- The dashboard's "Monthly Revenue" card is now labelled "Paid invoices this month", which is what
+  it always showed: invoices created this month and paid since. Fiscal figures are in the reports.
 - The database migration history starts again from fresh initial migrations (ADR-0052). There
   is no production or staging database, so the 152 old migrations and their data repairs were
   dropped rather than squashed. Delete and recreate every local development and E2E database:

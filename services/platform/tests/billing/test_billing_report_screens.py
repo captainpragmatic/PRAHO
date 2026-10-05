@@ -148,6 +148,14 @@ class VatReportPeriodTests(BillingReportScreenTestCase):
         self.assertEqual(response.context["end_date"].isoformat(), "2026-09-28")
 
 
+    def test_the_last_representable_end_date_falls_back_instead_of_failing(self) -> None:
+        """9999-12-31 parses, but the day after it does not exist; the period must not reach it."""
+        response = self.client.get(reverse("billing:vat_report"), {"end_date": "9999-12-31"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotEqual(response.context["end_date"], date.max)
+
+
 class MixedCurrencyReportTests(TestCase):
     """Adding lei to euros produces a number that is wrong under any label.
 
