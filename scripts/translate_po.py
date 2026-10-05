@@ -1195,10 +1195,10 @@ def cmd_generate(cfg: GenerateConfig) -> None:
             result_entries.append(
                 review_entry(
                     entry,
-                    [""] * nplurals,
+                    [entry.msgstr_plural.get(index, "") for index in range(nplurals)],
                     "none",
                     "low",
-                    comment=f"Plural entry: fill all {nplurals} forms, msgstr[0] to msgstr[{nplurals - 1}]",
+                    comment=f"Plural entry: fill missing forms, msgstr[0] to msgstr[{nplurals - 1}]",
                 )
             )
             continue
@@ -1361,8 +1361,14 @@ def cmd_apply(
     po = load_po(po_file_path)
     nplurals = _nplurals(po)
     # Obsolete (#~) entries are never targets: an obsolete msgid can share its key with a live one
-    po_map: dict[EntryKey, polib.POEntry] = {_entry_key(entry): entry for entry in po if not entry.obsolete}
-    contextual_msgids = {msgid for msgctxt, msgid in po_map if msgctxt is not None}
+    po_map: dict[EntryKey, polib.POEntry] = {}
+    keys_by_msgid: dict[str, list[EntryKey]] = defaultdict(list)
+    for entry in po:
+        if entry.obsolete:
+            continue
+        entry_key = _entry_key(entry)
+        po_map[entry_key] = entry
+        keys_by_msgid[entry.msgid].append(entry_key)
 
     # Resolve and validate ALL approved entries before touching any file
     edits: dict[EntryKey, EntryEdit] = {}
@@ -1382,15 +1388,17 @@ def cmd_apply(
             skipped += 1
             continue
 
-        if not records_context and "msgctxt" not in entry_data and key[1] in contextual_msgids:
-            # It may have been generated from a contextual entry, so it cannot be told apart from
-            # the bare one; no override applies
-            logger.warning(
-                "⚠️  Review file predates msgctxt and %s also exists with a context; regenerate it (skipping)",
-                _describe_key(key),
-            )
-            skipped += 1
-            continue
+        if not records_context and "msgctxt" not in entry_data:
+            matching_keys = keys_by_msgid.get(msgid, [])
+            if len(matching_keys) > 1:
+                logger.warning(
+                    "⚠️  Review file predates msgctxt and %s is ambiguous; regenerate it (skipping)",
+                    _describe_key(key),
+                )
+                skipped += 1
+                continue
+            if matching_keys:
+                key = matching_keys[0]
 
         po_entry = po_map.get(key)
         if po_entry is None:

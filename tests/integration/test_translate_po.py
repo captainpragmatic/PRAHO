@@ -198,6 +198,40 @@ msgstr "Factura %(number)s"
 
 
 class TestApplyKeysByContext:
+    @pytest.mark.parametrize("records_context", [False, True], ids=["legacy", "recorded-context"])
+    def test_contextless_review_with_a_unique_contextual_match(
+        self, tp: ModuleType, project: Path, records_context: bool
+    ) -> None:
+        obsolete_cash = '#~ msgid "Cash"\n#~ msgstr "Numerar"\n'
+        catalogue = _catalogue(CONTEXT_CASH, obsolete_cash)
+        (project / PO_REL).write_bytes(catalogue.encode("utf-8"))
+        review = _write_review(
+            project / "review.yaml",
+            [{"msgid": "Cash", "msgstr_suggested": "Încasări"}],
+            records_context=records_context,
+        )
+
+        tp.cmd_apply(review)
+
+        new_context = CONTEXT_CASH.replace('msgstr ""', 'msgstr "Încasări"')
+        expected = catalogue if records_context else catalogue.replace(CONTEXT_CASH, new_context)
+        assert _po_text(project) == expected
+
+    def test_legacy_review_refuses_an_ambiguous_msgid_even_when_both_entries_are_untranslated(
+        self, tp: ModuleType, project: Path
+    ) -> None:
+        empty_bare_cash = BARE_CASH.replace('msgstr "Numerar"', 'msgstr ""')
+        catalogue = _catalogue(CONTEXT_CASH, empty_bare_cash)
+        (project / PO_REL).write_bytes(catalogue.encode("utf-8"))
+        review = _write_review(
+            project / "review.yaml",
+            [{"msgid": "Cash", "msgstr_suggested": "Încasări", "overwrite": True}],
+        )
+
+        tp.cmd_apply(review, overwrite=True)
+
+        assert _po_text(project) == catalogue
+
     def test_contextual_entry_does_not_overwrite_the_bare_msgid(self, tp, project):
         review = _write_review(
             project / "review.yaml",
@@ -427,6 +461,17 @@ class TestIncompletePlurals:
 
         msgids = [e["msgid"] for e in yaml.safe_load(output.read_text(encoding="utf-8"))["entries"]]
         assert "%(count)s domain" in msgids
+
+    def test_generate_preserves_existing_forms_of_a_partially_translated_plural(
+        self, tp: ModuleType, incomplete: Path
+    ) -> None:
+        output = incomplete / "review.yaml"
+
+        tp.cmd_generate(tp.GenerateConfig(po_file=PO_REL, output=output))
+
+        entries = yaml.safe_load(output.read_text(encoding="utf-8"))["entries"]
+        plural = next(entry for entry in entries if entry["msgid"] == "%(count)s domain")
+        assert plural["msgstr_suggested"] == ["%(count)s domeniu", "%(count)s domenii", ""]
 
     def test_stats_do_not_count_a_plural_missing_a_form(self, tp, incomplete, capsys):
         tp.cmd_stats(PO_REL)
