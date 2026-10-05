@@ -8,6 +8,7 @@
   ],
   "allowed_duplicate_name_patterns": [
     "^ButtonAttributeRenderingTests\\.test_",
+    "^InputTemplateParityTests\\.test_",
     "^DisplayLocalisationTests\\.test_",
     "^LanguageLocalisationTests\\.test_",
     "^CoerceRetryAfterSecondsTests\\.test_",
