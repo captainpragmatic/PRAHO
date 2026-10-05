@@ -6,6 +6,7 @@ HTMX-powered reusable components for Romanian hosting provider interface
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -21,7 +22,7 @@ if TYPE_CHECKING:
     pass
 
 from apps.common.constants import FILE_SIZE_CONVERSION_FACTOR
-from apps.ui.attributes import serialize_button_attributes
+from apps.ui.attributes import sanitize_data_attrs, serialize_button_attributes
 
 register = template.Library()
 
@@ -91,6 +92,22 @@ class InputConfig:
     html_id: str | None = None
     options: list[dict[str, Any]] | None = None
     romanian_validation: bool = True
+    # Everything else components/input.html reads, as the Portal's InputConfig has it. A key the
+    # config lacks is skipped by the kwargs loop below, so a missing field drops the attribute.
+    min: str | int | None = None
+    max: str | int | None = None
+    step: str | int | None = None
+    maxlength: int | None = None
+    pattern: str | None = None
+    autocomplete: str | None = None
+    autofocus: bool = False
+    rows: int | None = None
+    multiple: bool = False
+    data_attrs: Mapping[str, object] | None = None
+    accept: str | None = None
+    aria_label: str | None = None
+    container_class: str = ""
+    help_text_below: str | None = None
 
 
 @dataclass
@@ -308,6 +325,20 @@ def input_field(
         "options": config.options,
         "romanian_validation": config.romanian_validation,
         "has_error": bool(config.error),
+        "min": config.min,
+        "max": config.max,
+        "step": config.step,
+        "maxlength": config.maxlength,
+        "pattern": config.pattern,
+        "autocomplete": config.autocomplete,
+        "autofocus": config.autofocus,
+        "rows": config.rows,
+        "multiple": config.multiple,
+        "data_attrs": sanitize_data_attrs(config.data_attrs),
+        "accept": config.accept,
+        "aria_label": config.aria_label,
+        "container_class": config.container_class,
+        "help_text_below": config.help_text_below,
     }
 
 
