@@ -1113,9 +1113,10 @@ class TestSyncOrdersOnInvoiceStatusChange(TestCase):
 
     def test_exception_handling(self):
         invoice = MagicMock()
-        invoice.orders.exists.side_effect = Exception("boom")
-        # Should not raise
-        _sync_orders_on_invoice_status_change(invoice, "draft", "paid")
+        invoice.orders.filter.side_effect = Exception("boom")
+        with self.assertLogs("apps.billing.signals", level="ERROR") as logs:
+            _sync_orders_on_invoice_status_change(invoice, "draft", "paid")
+        self.assertIn("Failed to load invoice orders", logs.output[0])
 
 
 class TestActivatePaymentServices(TestCase):
@@ -2120,25 +2121,42 @@ class TestHandleEfacturaRefundReporting(TestCase):
 
 
 class TestInvalidateBillingDashboardCache(TestCase):
-    def test_flow(self):
-        _invalidate_billing_dashboard_cache(123)
+    @patch("apps.billing.signals.cache.delete_many")
+    def test_flow(self, mock_delete: MagicMock) -> None:
+        with self.captureOnCommitCallbacks(execute=True):
+            _invalidate_billing_dashboard_cache(123)
+            mock_delete.assert_not_called()
+        mock_delete.assert_called_once_with(
+            ("billing_dashboard:123", "customer_invoices:123", "customer_payments:123", "billing_totals", "monthly_revenue")
+        )
 
 
 class TestCleanupInvoiceFiles(TestCase):
     @patch("apps.billing.signals.default_storage")
-    def test_deletes_existing_files(self, mock_storage):
+    def test_deletes_existing_files(self, mock_storage: MagicMock) -> None:
         mock_storage.exists.return_value = True
         invoice = MagicMock()
         invoice.number = "INV-001"
-        _cleanup_invoice_files(invoice)
-        assert mock_storage.delete.call_count == 2
+        with self.captureOnCommitCallbacks(execute=True):
+            _cleanup_invoice_files(invoice)
+            invoice.number = "CHANGED"
+            mock_storage.exists.assert_not_called()
+            mock_storage.delete.assert_not_called()
+        self.assertEqual(mock_storage.delete.call_count, 2)
+        self.assertEqual(
+            [call.args[0] for call in mock_storage.delete.call_args_list],
+            ["invoices/INV-001.pdf", "efactura/INV-001.xml"],
+        )
 
     @patch("apps.billing.signals.default_storage")
-    def test_no_files(self, mock_storage):
+    def test_no_files(self, mock_storage: MagicMock) -> None:
         mock_storage.exists.return_value = False
         invoice = MagicMock()
         invoice.number = "INV-002"
-        _cleanup_invoice_files(invoice)
+        with self.captureOnCommitCallbacks(execute=True):
+            _cleanup_invoice_files(invoice)
+            mock_storage.exists.assert_not_called()
+        self.assertEqual(mock_storage.exists.call_count, 2)
         mock_storage.delete.assert_not_called()
 
 
@@ -2160,12 +2178,21 @@ class TestCleanupPaymentFiles(TestCase):
 
 
 class TestInvalidateInvoiceCaches(TestCase):
-    def test_flow(self):
+    @patch("apps.billing.signals.cache.delete_many")
+    def test_flow(self, mock_delete: MagicMock) -> None:
         invoice = MagicMock()
-        invoice.id = 1
+        invoice.pk = 1
         invoice.number = "INV-001"
-        invoice.customer.id = 1
-        _invalidate_invoice_caches(invoice)
+        invoice.customer_id = 1
+        with self.captureOnCommitCallbacks(execute=True):
+            _invalidate_invoice_caches(invoice)
+            invoice.pk = None
+            invoice.number = "CHANGED"
+            invoice.customer_id = 9
+            mock_delete.assert_not_called()
+        mock_delete.assert_called_once_with(
+            ("invoice:1", "invoice_pdf:INV-001", "customer_invoices:1", "pending_invoices", "overdue_invoices")
+        )
 
 
 class TestCancelInvoiceWebhooks(TestCase):
