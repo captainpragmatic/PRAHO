@@ -1694,11 +1694,38 @@ def _fields(*configs: type[DataclassInstance]) -> frozenset[str]:
     return frozenset(field.name for config in configs for field in fields(config))
 
 
+def _htmx(*names: str) -> frozenset[str]:
+    """The HTMX arguments a tag forwards to its template; each must be an HTMXAttributes field."""
+    unknown = set(names) - _fields(HTMXAttributes)
+    if unknown:
+        raise RuntimeError(f"Not HTMXAttributes fields: {sorted(unknown)}")
+    return frozenset(names)
+
+
 # What each tag's **kwargs may carry. A tag missing here accepts only its named parameters.
+# HTMX arguments are listed per tag: accepting one a tag never forwards would drop it silently.
 _TAG_ARGUMENTS: dict[str, frozenset[str]] = {
-    "button": _fields(ButtonConfig, HTMXAttributes) | frozenset(_BUTTON_ALIASES),
-    "input_field": _fields(InputConfig, HTMXAttributes),
-    "checkbox_field": _fields(CheckboxConfig, HTMXAttributes),
+    "button": _fields(ButtonConfig)
+    | frozenset(_BUTTON_ALIASES)
+    | _htmx(
+        "hx_get",
+        "hx_post",
+        "hx_put",
+        "hx_patch",
+        "hx_delete",
+        "hx_target",
+        "hx_swap",
+        "hx_trigger",
+        "hx_confirm",
+        "hx_indicator",
+        "hx_push_url",
+        "hx_select",
+        "hx_include",
+        "hx_boost",
+    ),
+    "input_field": _fields(InputConfig)
+    | _htmx("hx_get", "hx_post", "hx_trigger", "hx_target", "hx_swap", "hx_include", "hx_sync", "hx_indicator"),
+    "checkbox_field": _fields(CheckboxConfig) | _htmx("hx_get", "hx_post", "hx_trigger", "hx_target", "hx_swap"),
     "alert": _fields(AlertConfig),
     "modal": _fields(ModalConfig),
     "badge": _fields(BadgeConfig),

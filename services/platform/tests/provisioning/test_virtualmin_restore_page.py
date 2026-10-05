@@ -37,3 +37,17 @@ class VirtualminRestorePageTests(VirtualminTaskTestBase):
         ):
             self.assertIn(f'href="{url}"', nav.group(0))
         self.assertIn("Restore", nav.group(0))
+
+    def test_every_restore_option_is_offered_and_starts_enabled(self) -> None:
+        """The page named `restore_mail` and `restore_config`, which the form does not have: email
+        and SSL rendered no checkbox, so every restore submitted from the page switched them off."""
+        self.client.force_login(create_admin_user())
+        with patch(
+            "apps.provisioning.virtualmin_views.VirtualminBackupService.list_backups", return_value=Ok([_BACKUP])
+        ):
+            response = self.client.get(reverse("provisioning:virtualmin_account_restore", args=[self.account.id]))
+
+        html = response.content.decode()
+        for name in ("restore_email", "restore_databases", "restore_files", "restore_ssl"):
+            with self.subTest(option=name):
+                self.assertRegex(html, rf'<input type="checkbox" name="{name}"[^>]*checked')

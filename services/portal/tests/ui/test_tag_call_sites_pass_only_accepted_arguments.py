@@ -63,6 +63,21 @@ class TagCallSitesTests(SimpleTestCase):
         self.assertEqual(problems, [])
 
 
+class DeclaredHtmxReachesTheContextTests(SimpleTestCase):
+    def test_every_accepted_htmx_argument_is_passed_to_the_template(self) -> None:
+        """Accepting an hx_* argument a tag never forwards would drop it as silently as before."""
+        contexts = {
+            "button": ui_components.button("Go"),
+            "input_field": ui_components.input_field("f"),
+            "checkbox_field": ui_components.checkbox_field("f"),
+        }
+        for tag, context in contexts.items():
+            with self.subTest(tag=tag):
+                accepted = {name for name in ui_components.tag_arguments(tag) if name.startswith("hx_")}
+                self.assertTrue(accepted)
+                self.assertEqual(accepted - set(context), set())
+
+
 class BlockTagTests(SimpleTestCase):
     def test_calls_inside_block_tags_are_scanned(self) -> None:
         for block, end in (("page_header", "end_page_header"), ("section_card", "end_section_card")):
