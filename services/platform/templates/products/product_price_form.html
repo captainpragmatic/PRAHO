@@ -81,13 +81,13 @@
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
         <!-- Semi-annual Discount -->
         <div>
-          {% input_field "semiannual_discount_percent" input_type="number" label="Semi-Annual Discount %" html_id="id_semiannual_discount_percent" placeholder="0" min=0 max=100 value=form.semiannual_discount_percent.value|default:"0" help_text="Discount for 6-month billing (0 = no discount)" error=form.semiannual_discount_percent.errors.0 %}
+          {% input_field "semiannual_discount_percent" input_type="number" label="Semi-Annual Discount %" html_id="id_semiannual_discount_percent" placeholder="0" min=0 max=100 step="0.01" value=form.semiannual_discount_percent.value|default:"0" help_text="Discount for 6-month billing (0 = no discount)" error=form.semiannual_discount_percent.errors.0 %}
           <div id="semiannual_calculation" class="text-xs text-slate-400 mt-1">{% trans 'Semi-annual will be: Monthly × 6' %}</div>
         </div>
 
         <!-- Annual Discount -->
         <div>
-          {% input_field "annual_discount_percent" input_type="number" label="Annual Discount %" html_id="id_annual_discount_percent" placeholder="0" min=0 max=100 value=form.annual_discount_percent.value|default:"0" help_text="Discount for 12-month billing (0 = no discount)" error=form.annual_discount_percent.errors.0 %}
+          {% input_field "annual_discount_percent" input_type="number" label="Annual Discount %" html_id="id_annual_discount_percent" placeholder="0" min=0 max=100 step="0.01" value=form.annual_discount_percent.value|default:"0" help_text="Discount for 12-month billing (0 = no discount)" error=form.annual_discount_percent.errors.0 %}
           <div id="annual_calculation" class="text-xs text-slate-400 mt-1">{% trans 'Annual will be: Monthly × 12' %}</div>
         </div>
       </div>

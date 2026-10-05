@@ -37,6 +37,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Platform form fields now get the limits their templates already set. The TOTP code field keeps
+  its 6-digit pattern, length and one-time-code autocomplete; TLD, registrar and product price
+  fields keep their minimums, maximums and steps; text areas keep their rows. Platform's input
+  component had been dropping these silently (#593). The product discount fields now also accept
+  two decimal places, which their model stores.
 - A registrar webhook that fails part way through no longer half-applies. A domain status
   change and its audit record are now one unit, and the control panel is updated only after
   both succeed rather than before the audit record exists.

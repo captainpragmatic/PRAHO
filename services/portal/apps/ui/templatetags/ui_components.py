@@ -6,7 +6,7 @@ HTMX-powered reusable components for Romanian hosting provider interface
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -106,7 +106,7 @@ class InputConfig:
     autofocus: bool = False
     rows: int | None = None
     multiple: bool = False
-    data_attrs: dict[str, Any] | None = None
+    data_attrs: Mapping[str, object] | None = None
     # file inputs need both - neither was read by the plain <input> branch (multiple was only
     # wired for <select>) or had a dataclass field at all (accept, aria_label).
     accept: str | None = None
@@ -116,6 +116,8 @@ class InputConfig:
     # gets a plain space-y-2 wrapper div that renders as a visible, empty flex child wherever
     # the caller's own layout expects nothing to be there.
     container_class: str = ""
+    # Help rendered under the field rather than above it.
+    help_text_below: str | None = None
 
 
 @dataclass
@@ -328,6 +330,7 @@ def input_field(
         "accept": config.accept,
         "aria_label": config.aria_label,
         "container_class": config.container_class,
+        "help_text_below": config.help_text_below,
     }
 
 
