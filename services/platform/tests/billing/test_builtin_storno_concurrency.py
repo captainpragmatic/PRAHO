@@ -35,8 +35,6 @@ def _finished_within(future: Any, *, seconds: float) -> bool:
 
 
 class BuiltinStornoPostgresConcurrencyTests(TransactionTestCase):
-    reset_sequences = True
-
     def setUp(self) -> None:
         if connection.vendor != "postgresql":
             self.skipTest("row-lock waits require PostgreSQL")
@@ -135,8 +133,6 @@ class BuiltinStornoPostgresConcurrencyTests(TransactionTestCase):
 
 class StornoCommunicationPostgresConcurrencyTests(TransactionTestCase):
     """Two senders racing the one email that dates a note: the claim commits first, so one sends."""
-
-    reset_sequences = True
 
     def setUp(self) -> None:
         if connection.vendor != "postgresql":

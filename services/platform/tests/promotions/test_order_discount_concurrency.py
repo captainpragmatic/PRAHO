@@ -207,8 +207,6 @@ class PromotionOrderLockTestCase(TestCase):
 class PromotionOrderPostgresConcurrencyTests(TransactionTestCase):
     """Exercise the real two-connection coupon/gift-card interleaving."""
 
-    reset_sequences = True
-
     def setUp(self) -> None:
         self.currency, _ = Currency.objects.get_or_create(
             code="RON", defaults={"name": "Romanian Leu", "symbol": "lei"}

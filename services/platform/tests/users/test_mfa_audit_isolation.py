@@ -57,8 +57,6 @@ class AuditFailureDoesNotDecideTheCheckTests(TestCase):
 
 @override_settings(CACHES=settings.LOCMEM_TEST_CACHE)
 class AuditDatabaseErrorKeepsTheLoginTests(TransactionTestCase):
-    reset_sequences = True
-
     def setUp(self) -> None:
         if connection.vendor != "postgresql":
             self.skipTest("only PostgreSQL aborts a transaction on a failed statement")

@@ -260,8 +260,6 @@ class SubmissionClaimLifecycleTests(_SubmissionClaimFixture, TestCase):
 
 @override_settings(EFACTURA_ENABLED=True, EFACTURA_ENVIRONMENT="test")
 class SubmissionClaimPostgresConcurrencyTests(_SubmissionClaimFixture, TransactionTestCase):
-    reset_sequences = True
-
     def setUp(self) -> None:
         if connection.vendor != "postgresql":
             self.skipTest("PostgreSQL row-lock behavior required")

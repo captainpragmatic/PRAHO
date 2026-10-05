@@ -18,8 +18,6 @@ from apps.users.models import APIToken, User
 class APITokenPostgresConcurrencyTests(TransactionTestCase):
     """Exercise token issuance and usage tracking over independent connections."""
 
-    reset_sequences = True
-
     def setUp(self) -> None:
         if connection.vendor != "postgresql":
             self.skipTest("API token concurrency guarantees require PostgreSQL")

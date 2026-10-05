@@ -540,8 +540,6 @@ class PaymentIntentIdempotencyTests(TestCase):
 
 
 class DirectPaymentIntentPostgresConcurrencyTests(TransactionTestCase):
-    reset_sequences = True
-
     def setUp(self) -> None:
         self.customer = Customer.objects.create(
             name="Concurrent Idem Co",

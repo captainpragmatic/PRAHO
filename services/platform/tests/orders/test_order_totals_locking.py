@@ -152,8 +152,6 @@ class OrderTotalsLockTestCase(_OrderTotalsFixture, TestCase):
 class OrderTotalsPostgresConcurrencyTests(_OrderTotalsFixture, TransactionTestCase):
     """Real two-connection interleaving — a held Order lock blocks the item recompute."""
 
-    reset_sequences = True
-
     def setUp(self) -> None:
         self._build()
 
