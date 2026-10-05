@@ -151,17 +151,19 @@ class FiscalAndCashSeriesTests(RevenueRecognitionTestCase):
         self.assertEqual(cash.get((YEAR, 3)), -50000, f"the refund subtracts once, the note not at all; got {cash}")
 
     def test_every_credit_note_on_one_original_subtracts_in_its_own_month(self) -> None:
-        """An original may carry several notes, one per correction; none may hide another."""
-        invoice = self._paid_invoice(50000, month=1)
+        """An original may carry several notes, one per correction; none may hide another.
+
+        Each note carries its own VAT, so dropping, doubling or misdating either one changes a month.
+        """
+        invoice = self._paid_invoice(59500, month=1, tax=9500)
         force_status(invoice, "partially_refunded")
-        self._communicated_note(self._refund(invoice, 20000, month=2), issued_month=2, sent_month=2)
-        self._communicated_note(self._refund(invoice, 10000, month=4), issued_month=4, sent_month=4)
+        self._communicated_note(self._refund(invoice, 23800, month=2), issued_month=2, sent_month=2, tax=3800)
+        self._communicated_note(self._refund(invoice, 11900, month=4), issued_month=4, sent_month=4, tax=1900)
 
+        self.assertEqual((self._vat(2), self._vat(3), self._vat(4)), (-3800, 0, -1900), "VAT, month by month")
         fiscal, _cash = self._report()
-
-        self.assertEqual(fiscal.get((YEAR, 2)), -20000, f"the first note; got {fiscal}")
-        self.assertEqual(fiscal.get((YEAR, 4)), -10000, f"the second note; got {fiscal}")
-        self.assertEqual(self._vat(4), 0)
+        self.assertEqual(fiscal.get((YEAR, 2)), -23800, f"the first note; got {fiscal}")
+        self.assertEqual(fiscal.get((YEAR, 4)), -11900, f"the second note; got {fiscal}")
 
     def test_a_smartbill_note_counts_on_the_day_staff_recorded_it_was_sent(self) -> None:
         """Issued in SmartBill on 31 March, sent on 2 April: April's, like a built-in note."""

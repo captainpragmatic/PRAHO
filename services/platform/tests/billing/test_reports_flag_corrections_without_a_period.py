@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date
+from typing import TYPE_CHECKING
 
 from django.urls import reverse
 
@@ -26,6 +27,10 @@ from apps.billing.models import Payment
 from apps.billing.refund_models import Refund
 from tests.billing._revenue_report_helpers import YEAR, RevenueRecognitionTestCase, local_at
 from tests.helpers.fsm_helpers import force_status
+
+if TYPE_CHECKING:
+    from apps.billing.invoice_models import Invoice
+    from apps.promotions.models import TenderRefundCommand
 
 NOT_ISSUED = "awaiting_issue"
 NOT_SENT = "awaiting_communication"
@@ -42,6 +47,32 @@ class UndatedCorrectionWarningTests(RevenueRecognitionTestCase):
         invoice = self._paid_invoice(59500, month=1, tax=9500)
         force_status(invoice, "refunded")
         return self._refund(invoice, 59500, month=month)
+
+    def _tender_refund(self) -> tuple[Invoice, TenderRefundCommand]:
+        """A refunded invoice whose money went back in two legs of one tender command."""
+        from apps.promotions.models import TenderRefundCommand, TenderRefundLeg  # noqa: PLC0415
+
+        invoice = self._paid_invoice(59500, month=1, tax=9500)
+        force_status(invoice, "refunded")
+        command = TenderRefundCommand.objects.create(
+            invoice=invoice,
+            customer=self.customer,
+            amount_cents=59500,
+            operation_key=f"report-warning-{uuid.uuid4().hex[:8]}",
+            reason="test",
+        )
+        for amount in (40000, 19500):
+            payment = Payment.objects.create(
+                customer=self.customer,
+                invoice=invoice,
+                currency=self.currency,
+                status="succeeded",
+                payment_method="bank_transfer",
+                amount_cents=amount,
+            )
+            leg = self._refund(invoice, amount, month=3)
+            TenderRefundLeg.objects.create(command=command, payment=payment, refund=leg, amount_cents=amount)
+        return invoice, command
 
     def test_a_refund_with_no_correction_yet_is_flagged_as_not_issued(self) -> None:
         self._refunded()
@@ -108,28 +139,7 @@ class UndatedCorrectionWarningTests(RevenueRecognitionTestCase):
 
     def test_tender_legs_answer_to_their_command_correction(self) -> None:
         """Two legs, one command, one sent note: settled, even though neither leg owns a correction."""
-        from apps.promotions.models import TenderRefundCommand, TenderRefundLeg  # noqa: PLC0415
-
-        invoice = self._paid_invoice(59500, month=1, tax=9500)
-        force_status(invoice, "refunded")
-        command = TenderRefundCommand.objects.create(
-            invoice=invoice,
-            customer=self.customer,
-            amount_cents=59500,
-            operation_key=f"report-warning-{uuid.uuid4().hex[:8]}",
-            reason="test",
-        )
-        for amount in (40000, 19500):
-            payment = Payment.objects.create(
-                customer=self.customer,
-                invoice=invoice,
-                currency=self.currency,
-                status="succeeded",
-                payment_method="bank_transfer",
-                amount_cents=amount,
-            )
-            leg = self._refund(invoice, amount, month=3)
-            TenderRefundLeg.objects.create(command=command, payment=payment, refund=leg, amount_cents=amount)
+        invoice, command = self._tender_refund()
         credit_note = self._credit_note(invoice, 59500, month=3, tax=9500)
         correction = FiscalCorrection.objects.create(original=invoice, source_command=command)
         correction.allocate(base_cents=50000, tax_cents=9500, discount_cents=0, at=local_at(3))
@@ -140,6 +150,18 @@ class UndatedCorrectionWarningTests(RevenueRecognitionTestCase):
         correction.save()
 
         self.assertEqual(self._vat_warning(), {NOT_ISSUED: 0, NOT_SENT: 0})
+
+    def test_an_unsent_tender_note_is_one_note_however_many_legs_carried_the_money(self) -> None:
+        """Two legs, one command, one issued note not yet sent: one note waits, not two."""
+        invoice, command = self._tender_refund()
+        credit_note = self._credit_note(invoice, 59500, month=3, tax=9500)
+        correction = FiscalCorrection.objects.create(original=invoice, source_command=command)
+        correction.allocate(base_cents=50000, tax_cents=9500, discount_cents=0, at=local_at(3))
+        correction.save()
+        correction.record_issued(credit_note)
+        correction.save()
+
+        self.assertEqual(self._vat_warning(), {NOT_ISSUED: 0, NOT_SENT: 1})
 
     def test_a_refund_settled_after_the_period_does_not_flag_it(self) -> None:
         """A period that ended before the money went back cannot receive that refund's note."""

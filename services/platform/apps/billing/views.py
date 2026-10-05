@@ -8,7 +8,7 @@ import decimal
 import json
 import logging
 import uuid
-from datetime import datetime
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, cast
 
@@ -24,7 +24,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
 from django.db import DatabaseError, InterfaceError, transaction
-from django.db.models import CharField, Count, DateField, F, Q, QuerySet, Sum
+from django.db.models import CharField, Count, DateField, F, Q, QuerySet, Sum, UUIDField
 from django.db.models.functions import Coalesce, ExtractMonth, ExtractYear, TruncDate
 from django.http import (
     Http404,
@@ -38,6 +38,7 @@ from django.http import (
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods, require_POST
@@ -1666,19 +1667,54 @@ def _credit_note_fiscal_date() -> Coalesce:
     )
 
 
+def _dated_by_own_date() -> Q:
+    """Credit notes that carry no sending date, so they keep their own (`_document_fiscal_date`).
+
+    A provider note linked to no correction, or `attached` to one, was written before corrections
+    recorded when the customer received the note. It is a fiscal document all the same.
+    """
+    from .fiscal_correction_models import STATE_ATTACHED  # noqa: PLC0415
+
+    return Q(settled_fiscal_correction__isnull=True) | Q(settled_fiscal_correction__state=STATE_ATTACHED)
+
+
+def _dated_by_sending() -> Q:
+    """Credit notes the customer received: dated by their correction's `fiscal_date`."""
+    from .fiscal_correction_models import STATE_COMMUNICATED  # noqa: PLC0415
+
+    return Q(settled_fiscal_correction__state=STATE_COMMUNICATED)
+
+
 def _with_a_period() -> Q:
     """Credit notes whose period is known.
 
     An allow-list, so a state added later is excluded until someone decides it has a period. A
     note that is issued but not yet sent has none: dating it by its tax point would put the
-    reversal in one month here and another in the D390 once it is sent. A provider note linked to no
-    correction (written before corrections existed) is a fiscal document all the same, and counts on
-    its own date.
+    reversal in one month here and another in the D390 once it is sent.
     """
-    from .fiscal_correction_models import STATE_ATTACHED, STATE_COMMUNICATED  # noqa: PLC0415
+    return _dated_by_own_date() | _dated_by_sending()
 
-    return Q(settled_fiscal_correction__isnull=True) | Q(
-        settled_fiscal_correction__state__in=(STATE_ATTACHED, STATE_COMMUNICATED)
+
+def _bucharest_day_bounds(first: date, last: date) -> tuple[datetime, datetime]:
+    """The instants that open `first` and close `last` (exclusive) in Bucharest."""
+    return (
+        datetime.combine(first, time.min, tzinfo=ROMANIA_TIMEZONE),
+        datetime.combine(last + timedelta(days=1), time.min, tzinfo=ROMANIA_TIMEZONE),
+    )
+
+
+def _own_date_between(first: date, last: date) -> Q:
+    """`_document_fiscal_date()` within [first, last], written so each fallback can use an index.
+
+    One branch per fallback of the Coalesce, each comparing a bare column: the tax point, else the
+    issue instant within the Romanian days' bounds, else the creation instant. Filtering on the
+    computed date instead made every period scan the whole history of documents.
+    """
+    since, until = _bucharest_day_bounds(first, last)
+    return (
+        Q(tax_point_date__range=(first, last))
+        | Q(tax_point_date__isnull=True, issued_at__gte=since, issued_at__lt=until)
+        | Q(tax_point_date__isnull=True, issued_at__isnull=True, created_at__gte=since, created_at__lt=until)
     )
 
 
@@ -1813,13 +1849,14 @@ def _revenue_by_currency(customer_ids: list[Any]) -> list[dict[str, Any]]:
     ]
 
 
-def _undated_corrections(customer_ids: list[Any], *, settled_by: Any = None) -> dict[str, int]:
+def _undated_corrections(customer_ids: list[Any], *, settled_by: date | None = None) -> dict[str, int]:
     """Completed refunds whose credit note has no period yet, so the fiscal figures are incomplete.
 
     Two groups, because they need different people: `awaiting_issue` (no correction recorded, or
     one in any state but the settled three, such as pending, allocated, failed or waiting for staff
-    to record a manual storno) and `awaiting_communication` (a numbered note the customer has
-    not received). A refund answers to its own correction or, as a tender leg, to its command's.
+    to record a manual storno), counted per refund, and `awaiting_communication` (a numbered note
+    the customer has not received), counted per note: a tender command's legs share one. A refund
+    answers to its own correction or, as a tender leg, to its command's.
 
     With `settled_by`, only refunds settled on or before that Romanian calendar date: a period that
     ended before the money went back cannot receive that refund's note.
@@ -1835,20 +1872,23 @@ def _undated_corrections(customer_ids: list[Any], *, settled_by: Any = None) -> 
     refunds = Refund.objects.filter(customer_id__in=customer_ids, status="completed").annotate(
         correction_state=Coalesce(
             "fiscal_correction__state", "tender_leg__command__fiscal_correction__state", output_field=CharField()
-        )
+        ),
+        correction_id=Coalesce(
+            "fiscal_correction__id", "tender_leg__command__fiscal_correction__id", output_field=UUIDField()
+        ),
     )
     if settled_by is not None:
-        refunds = refunds.annotate(
-            settled_on=TruncDate(Coalesce("processed_at", "created_at"), tzinfo=ROMANIA_TIMEZONE)
-        ).filter(settled_on__lte=settled_by)
+        # Settled on or before that Romanian day, on bare columns so an index can serve it.
+        _since, until = _bucharest_day_bounds(settled_by, settled_by)
+        refunds = refunds.filter(Q(processed_at__lt=until) | Q(processed_at__isnull=True, created_at__lt=until))
     unsettled = refunds.filter(
         Q(correction_state__isnull=True)
         | ~Q(correction_state__in=(STATE_NOT_REQUIRED, STATE_ATTACHED, STATE_COMMUNICATED))
     )
-    awaiting_communication = unsettled.filter(correction_state=STATE_ISSUED).count()
+    unsent = unsettled.filter(correction_state=STATE_ISSUED)
     return {
-        "awaiting_issue": unsettled.count() - awaiting_communication,
-        "awaiting_communication": awaiting_communication,
+        "awaiting_issue": unsettled.count() - unsent.count(),
+        "awaiting_communication": unsent.aggregate(notes=Count("correction_id", distinct=True))["notes"],
     }
 
 
@@ -1870,6 +1910,15 @@ def billing_reports(request: HttpRequest) -> HttpResponse:
     }
 
     return render(request, "billing/reports.html", context)
+
+
+def _requested_date(value: str | None, *, default: date) -> date:
+    """A `YYYY-MM-DD` query parameter, or `default` when it is missing or not a real date."""
+    try:
+        parsed = parse_date(value) if value else None
+    except ValueError:  # Well formed but impossible, such as 2025-02-30.
+        parsed = None
+    return parsed or default
 
 
 @billing_staff_required
@@ -1895,42 +1944,50 @@ def vat_report(request: HttpRequest) -> HttpResponse:
     # ONE `today` rather than two `localdate()` calls: two calls can straddle midnight and put
     # start_date in the previous month.
     today = timezone.localdate()
-    start_date = request.GET.get("start_date", today.replace(day=1))
-    end_date = request.GET.get("end_date", today)
+    start_date = _requested_date(request.GET.get("start_date"), default=today.replace(day=1))
+    end_date = _requested_date(request.GET.get("end_date"), default=today)
 
     # Every issued document on its fiscal date. An invoice declares in its own period whatever
     # happens to it later: a filing already made cannot be un-filed by a refund. The refund is
     # corrected by its credit note, negative base and VAT, in the period the customer received it.
     # A credit note with no period yet is left out and counted in the warning below instead.
-    documents = (
-        Invoice.objects.filter(
-            Q(document_kind=DOCUMENT_KIND_INVOICE) | (Q(document_kind=DOCUMENT_KIND_CREDIT_NOTE) & _with_a_period()),
-            customer_id__in=customer_ids,
-            status__in=_ISSUED_DOCUMENT_STATUSES,
-        )
-        .annotate(fiscal_date=_credit_note_fiscal_date())
-        .filter(fiscal_date__range=[start_date, end_date])
-        .select_related("customer", "currency", "reverses_invoice")
-        .order_by("fiscal_date", "pk")
-    )
+    #
+    # Two queries, one per dating rule, so each period condition is on an indexed column of the
+    # table it is read from: the document's own dates, and the correction's sending date.
+    issued = Invoice.objects.filter(customer_id__in=customer_ids, status__in=_ISSUED_DOCUMENT_STATUSES)
+    own_dated = issued.filter(
+        Q(document_kind=DOCUMENT_KIND_INVOICE) | (Q(document_kind=DOCUMENT_KIND_CREDIT_NOTE) & _dated_by_own_date()),
+        _own_date_between(start_date, end_date),
+    ).annotate(fiscal_date=_document_fiscal_date())
+    sent_notes = issued.filter(
+        _dated_by_sending(),
+        document_kind=DOCUMENT_KIND_CREDIT_NOTE,
+        settled_fiscal_correction__fiscal_date__range=(start_date, end_date),
+    ).annotate(fiscal_date=F("settled_fiscal_correction__fiscal_date"))
 
-    totals = documents.aggregate(total_vat=Sum("tax_cents"), total_net=Sum("subtotal_cents"))
-    total_vat = totals["total_vat"] or 0
-    total_net = totals["total_net"] or 0
+    documents = sorted(
+        (
+            document
+            for queryset in (own_dated, sent_notes)
+            for document in queryset.select_related("customer", "currency", "reverses_invoice")
+        ),
+        key=lambda document: (document.fiscal_date, document.pk),
+    )
 
     # Per currency for the same reason the revenue screen is: these aggregate `tax_cents` and
     # `subtotal_cents` with no conversion, so one combined trio cannot be labelled.
+    sums: dict[str, tuple[int, int]] = {}
+    for queryset in (own_dated, sent_notes):
+        for row in (
+            queryset.values("currency__code").annotate(net=Sum("subtotal_cents"), vat=Sum("tax_cents")).order_by()
+        ):
+            net, vat = sums.get(row["currency__code"], (0, 0))
+            sums[row["currency__code"]] = (net + (row["net"] or 0), vat + (row["vat"] or 0))
     vat_summary_by_currency = [
-        {
-            "currency": row["currency__code"],
-            "net": row["net"] or 0,
-            "vat": row["vat"] or 0,
-            "gross": (row["net"] or 0) + (row["vat"] or 0),
-        }
-        for row in documents.values("currency__code")
-        .annotate(net=Sum("subtotal_cents"), vat=Sum("tax_cents"))
-        .order_by("currency__code")
+        {"currency": code, "net": net, "vat": vat, "gross": net + vat} for code, (net, vat) in sorted(sums.items())
     ]
+    total_net = sum(net for net, _vat in sums.values())
+    total_vat = sum(vat for _net, vat in sums.values())
 
     context = {
         "documents": documents,

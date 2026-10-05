@@ -303,6 +303,17 @@ class Invoice(models.Model):
             ),
             models.Index(fields=["status", "-due_at"]),
             models.Index(fields=["number"]),
+            # The VAT period, one index per dating rule (`_own_date_between`): the tax point, which
+            # `issue()` always sets, then the issue and creation instants for the few rows without it.
+            models.Index(fields=["tax_point_date"], name="bill_inv_tax_point"),
+            models.Index(
+                fields=["issued_at"], condition=models.Q(tax_point_date__isnull=True), name="bill_inv_issued_no_tp"
+            ),
+            models.Index(
+                fields=["created_at"],
+                condition=models.Q(tax_point_date__isnull=True, issued_at__isnull=True),
+                name="bill_inv_created_undated",
+            ),
         )
         constraints: ClassVar[list[models.BaseConstraint]] = [
             models.CheckConstraint(
