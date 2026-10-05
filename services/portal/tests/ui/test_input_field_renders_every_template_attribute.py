@@ -90,3 +90,13 @@ class InputTemplateParityTests(SimpleTestCase):
 
     def test_help_below_renders_under_the_field(self) -> None:
         self.assertIn("Below the field", _render('{% input_field "f" help_text_below="Below the field" %}'))
+
+    def test_help_below_is_announced_with_its_own_id(self) -> None:
+        for kind in ("", ' input_type="textarea"', ' input_type="select"'):
+            with self.subTest(kind=kind or "input"):
+                below_only = _render(f'{{% input_field "f"{kind} help_text_below="Below" %}}')
+                self.assertIn('aria-describedby="input-f-help-below"', below_only)
+                self.assertIn('id="input-f-help-below"', below_only)
+                both = _render(f'{{% input_field "f"{kind} help_text="Above" help_text_below="Below" %}}')
+                self.assertIn('aria-describedby="input-f-help input-f-help-below"', both)
+                self.assertEqual(both.count('id="input-f-help"'), 1)
