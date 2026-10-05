@@ -92,9 +92,12 @@ def _validate_operations(operations: list[etree._Element]) -> int:
         if (country, body) in seen:
             raise D390ExportError("Duplicate partner VAT identity.")
         seen.add((country, body))
+        # Signed: a month whose credit notes outweigh its supplies declares a negative base, which
+        # the annex permits on an initial declaration. A zero row is never written; a fully netted
+        # partner is left out instead.
         amount = int(row.attrib["baza"])
-        if not 0 < amount <= _MAX_BASE:
-            raise D390ExportError("Initial service supplies must have a positive base within 15 digits.")
+        if amount == 0 or abs(amount) > _MAX_BASE:
+            raise D390ExportError("A service supply row must have a non-zero base of at most 15 digits.")
         total += amount
     return total
 
@@ -136,7 +139,7 @@ def validate_d390_xml(content: bytes) -> None:
         if any(int(summary.attrib[key]) != value for key, value in expected.items()):
             raise D390ExportError("D390 summary does not reconcile to operation rows.")
         control = total + len(operations)
-        if not operations or control > _MAX_BASE or int(root.attrib["totalPlata_A"]) != control:
+        if not operations or abs(control) > _MAX_BASE or int(root.attrib["totalPlata_A"]) != control:
             raise D390ExportError("D390 control total is invalid or the period is empty.")
     except (etree.XMLSyntaxError, etree.DocumentInvalid, KeyError, ValueError) as exc:
         raise D390ExportError(str(exc)) from exc
@@ -146,7 +149,11 @@ def render_d390_xml(report: ECSalesReport, declarant: Declarant) -> bytes:
     """Render deterministic draft bytes only after complete candidate reconciliation."""
     report.assert_reconciled()
     if not report.can_export:
-        raise D390ExportError("XML export requires a non-empty period with no blocking exceptions.")
+        raise D390ExportError(
+            "XML export requires a period with at least one non-zero partner row and no blocking exceptions."
+        )
+    # A fully netted partner has no row: D390 cannot carry a zero base. The CSV keeps it.
+    declared = report.declared_partners
     supplier = get_supplier_info()
     cui = validate_supplier(supplier)
     root = etree.Element(
@@ -162,7 +169,7 @@ def render_d390_xml(report: ECSalesReport, declarant: Declarant) -> bytes:
             "cui": cui,
             "den": supplier.name,
             "adresa": f"{supplier.street} {supplier.city} {supplier.postal_code}",
-            "totalPlata_A": str(report.rounded_ron + len(report.partners)),
+            "totalPlata_A": str(report.rounded_ron + len(declared)),
         },
     )
     etree.SubElement(
@@ -171,7 +178,7 @@ def render_d390_xml(report: ECSalesReport, declarant: Declarant) -> bytes:
         attrib={
             # One logical XML annex; no physical PDF pagination is generated.
             "nr_pag": "1",
-            "nrOPI": str(len(report.partners)),
+            "nrOPI": str(len(declared)),
             "bazaL": "0",
             "bazaT": "0",
             "bazaA": "0",
@@ -181,7 +188,7 @@ def render_d390_xml(report: ECSalesReport, declarant: Declarant) -> bytes:
             "total_baza": str(report.rounded_ron),
         },
     )
-    for partner in report.partners:
+    for partner in declared:
         etree.SubElement(
             root,
             f"{{{NAMESPACE}}}operatie",
@@ -261,7 +268,7 @@ def render_reconciliation_csv(report: ECSalesReport) -> bytes:
     for partner in report.partners:
         writer.writerow(
             [
-                "partner_total",
+                "fully_netted" if partner.fully_netted else "partner_total",
                 "",
                 "",
                 "",

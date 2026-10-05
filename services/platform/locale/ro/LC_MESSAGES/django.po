@@ -20516,3 +20516,21 @@ msgstr "Facturi plătite luna aceasta"
 
 msgid "Paid invoices created this month. Fiscal figures are in Financial Reports."
 msgstr "Facturi plătite create luna aceasta. Cifrele fiscale sunt în Rapoarte financiare."
+
+msgid "Outgoing intra-Community services (P): invoices in the month of their recorded tax point, storno credit notes as negative lines in the month the customer received them. Confirm the operating entity's reporting obligations and filing with your accountant."
+msgstr "Prestări intracomunitare de servicii (P): facturile în luna faptului generator înregistrat, facturile storno ca rânduri negative în luna în care clientul le-a primit. Confirmați cu contabilul obligațiile de raportare și depunerea pentru entitatea care operează."
+
+msgid "Fully netted, no XML row"
+msgstr "Compensat integral, fără rând în XML"
+
+msgid "Tax point or date sent"
+msgstr "Fapt generator sau data trimiterii"
+
+msgid "Every partner nets to exactly zero this month. There is no row to declare, so no XML is generated."
+msgstr "Pentru fiecare partener, luna se compensează exact la zero. Nu există niciun rând de declarat, așa că nu se generează XML."
+
+msgid "Missing tax-point dates appear in every month, and credit notes not yet sent to the customer in every month from their tax point, because their reporting period is unknown. A refund is deducted only by its credit note, in the month the customer received it."
+msgstr "Datele lipsă ale faptului generator apar în fiecare lună, iar facturile storno încă netrimise clientului în fiecare lună de la data faptului generator, deoarece perioada lor de raportare nu este cunoscută. O rambursare se scade doar prin factura ei storno, în luna în care clientul a primit-o."
+
+msgid "Goods, acquisitions and rectificative declarations are outside this report. Have the accountant distinguish current-period adjustments from corrections of a previous declaration."
+msgstr "Bunurile, achizițiile și declarațiile rectificative nu fac parte din acest raport. Contabilul trebuie să distingă ajustările din perioada curentă de corectarea unei declarații anterioare."

@@ -8,7 +8,7 @@
   <a href="{% url 'billing:reports' %}" class="text-blue-400">{% trans "Billing reports" %}</a>
   <h1 class="text-2xl font-semibold">{% trans "D390 review" %}</h1>
   <p class="text-amber-300">{% trans "Services-only draft for accountant review." %}</p>
-  <p class="text-slate-400">{% trans "Outgoing intra-Community services (P), grouped by the recorded tax point. Confirm the operating entity's reporting obligations and filing with your accountant." %}</p>
+  <p class="text-slate-400">{% trans "Outgoing intra-Community services (P): invoices in the month of their recorded tax point, storno credit notes as negative lines in the month the customer received them. Confirm the operating entity's reporting obligations and filing with your accountant." %}</p>
   <form method="get" class="bg-slate-800 rounded-lg p-4 flex items-end gap-4">
     <div>
       {{ period_form.month.label_tag }}
@@ -38,7 +38,7 @@
         <tr class="border-t border-slate-700">
           <td class="p-3">{{ partner.partner_name }} · {{ partner.country }}{{ partner.vat_body }} · {{ partner.operation }}</td>
           <td class="p-3 text-right">{{ partner.base_ron }}</td>
-          <td class="p-3 text-right">{{ partner.rounded_ron }}</td>
+          <td class="p-3 text-right">{{ partner.rounded_ron }}{% if partner.fully_netted %}<br><span class="text-slate-400">{% trans "Fully netted, no XML row" %}</span>{% endif %}</td>
           <td class="p-3 text-right">{{ partner.rounding_difference }}</td>
         </tr>
         {% endfor %}
@@ -50,7 +50,7 @@
       <caption class="p-4 text-left font-semibold">{% trans "Invoice reconciliation" %}</caption>
       <thead class="bg-slate-700"><tr>
         <th class="p-3 text-left">{% trans "Invoice / line" %}</th>
-        <th class="p-3 text-left">{% trans "Tax point" %}</th>
+        <th class="p-3 text-left">{% trans "Tax point or date sent" %}</th>
         <th class="p-3 text-right">{% trans "Base / discount in cents" %}</th>
         <th class="p-3 text-right">{% trans "RON rate / base" %}</th>
       </tr></thead>
@@ -66,13 +66,16 @@
       </tbody>
     </table>
   </div>
+  {% if not report.declared_partners and not report.exceptions %}
+  <p class="bg-slate-800 rounded-lg p-6">{% trans "Every partner nets to exactly zero this month. There is no row to declare, so no XML is generated." %}</p>
+  {% endif %}
   {% elif not report.exceptions %}
   <p class="bg-slate-800 rounded-lg p-6">{% trans "No candidate supplies in this period. No declaration will be generated." %}</p>
   {% endif %}
   {% if report.exceptions %}
   <div class="bg-slate-800 border border-red-700 rounded-lg p-4">
     <h2 class="font-semibold text-red-300">{% trans "XML blocked — review these exceptions" %}</h2>
-    <p class="mt-2 text-slate-300">{% trans "Missing tax-point dates appear in every month because their reporting period is unknown. Refunds require fiscal review and are never deducted as credit notes." %}</p>
+    <p class="mt-2 text-slate-300">{% trans "Missing tax-point dates appear in every month, and credit notes not yet sent to the customer in every month from their tax point, because their reporting period is unknown. A refund is deducted only by its credit note, in the month the customer received it." %}</p>
     <ul class="mt-4 space-y-3">
       {% for exception in report.exceptions %}
       <li><a class="text-blue-400" href="{% url 'billing:invoice_detail' pk=exception.invoice_id %}">{{ exception.invoice_number }}</a>{% if exception.line_id %} / {{ exception.line_id }}{% endif %}: {{ exception.detail }}</li>
@@ -104,7 +107,7 @@
       {% endif %}
     </div>
     <p class="text-xs text-slate-400 break-all">{% trans "Source fingerprint" %}: {{ report.source_fingerprint }}</p>
-    <p class="text-slate-400">{% trans "Goods, acquisitions, fiscal credit notes and rectificative declarations are outside this report. Have the accountant distinguish current-period adjustments from corrections of a previous declaration." %}</p>
+    <p class="text-slate-400">{% trans "Goods, acquisitions and rectificative declarations are outside this report. Have the accountant distinguish current-period adjustments from corrections of a previous declaration." %}</p>
   </form>
   {% endif %}
 </div>

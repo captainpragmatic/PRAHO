@@ -5,11 +5,12 @@ Two sign guards rejected a reversal outright: the header check read
 `subtotal_cents <= 0`. So every reversal became a review exception carrying a wrong
 diagnostic, while the partner's declared base kept the full original amount.
 
-The policy is to net into the current period. `d390.py` refuses to serialise a
-non-positive base, and `_group_supplies` already raises `zero_rounded_base` for a
-partner whose month nets to zero or below — so the one case that genuinely cannot be
-filed was always reported honestly. These guards are what stopped a reversal reaching
-that point at all.
+A credit note is declared as a negative line in the month it reached the customer and
+nets against that month's supplies to the same partner (ADR-0053). A negative net is
+a negative row; an exact zero made by a credit note is a fully netted group with no XML
+row; any other zero-lei group stays a `zero_rounded_base` exception. These guards are
+what let a reversal reach that netting at all. The month placement and netting are
+tested in `test_d390_declares_credit_notes_in_their_communication_month`.
 """
 
 from __future__ import annotations
