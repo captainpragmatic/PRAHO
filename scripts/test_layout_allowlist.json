@@ -9,6 +9,11 @@
   "allowed_duplicate_name_patterns": [
     "^ButtonAttributeRenderingTests\\.test_",
     "^InputTemplateParityTests\\.test_",
+    "^TagCallSitesTests\\.test_",
+    "^UnknownArgumentTests\\.test_",
+    "^ButtonClassTests\\.test_",
+    "^BlockTagTests\\.test_",
+    "^DeclaredHtmxReachesTheContextTests\\.test_",
     "^DisplayLocalisationTests\\.test_",
     "^LanguageLocalisationTests\\.test_",
     "^CoerceRetryAfterSecondsTests\\.test_",

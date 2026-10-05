@@ -681,9 +681,19 @@ def virtualmin_account_restore(request: HttpRequest, account_id: str) -> HttpRes
     else:
         form = VirtualminRestoreForm(available_backups=available_backups)
 
+    breadcrumb_items = [
+        {"text": "🏠 Management", "url": "/dashboard/"},
+        {"text": "⚙️ Provisioning", "url": reverse("provisioning:services")},
+        {"text": "🖥️ Virtualmin", "url": "#"},
+        {"text": "Accounts", "url": reverse("provisioning:virtualmin_accounts")},
+        {"text": account.domain, "url": reverse("provisioning:virtualmin_account_detail", args=[account.id])},
+        {"text": "Restore"},  # Current page - no URL
+    ]
+
     context = {
         "page_title": f"Restore Account: {account.domain}",
         "account": account,
+        "breadcrumb_items": breadcrumb_items,
         "form": form,
         "available_backups": available_backups,
         "form_action": reverse("provisioning:virtualmin_account_restore", args=[account.id]),

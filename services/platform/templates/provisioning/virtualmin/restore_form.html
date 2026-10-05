@@ -1,13 +1,4 @@
-{% extends     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between">
-        <div>
-            <nav class="text-sm text-slate-400 mb-2">
-                Virtualmin > Accounts > {{ account.domain }} > Restore
-            </nav>
-            <h1 class="text-2xl font-bold text-slate-100">{{ page_title }}</h1>
-            <p class="mt-2 text-sm text-slate-400">
-                {% trans "Restore domain from backup" %}
-            </p>
-        </div>ml" %}
+{% extends "base.html" %}
 {% load localisation_tags ui_components %}
 {% load i18n %}
 
@@ -20,7 +11,7 @@
     <!-- =============================================================================== -->
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between">
         <div>
-            {% breadcrumb steps="Virtualmin,Accounts,"|add:account.domain|add:",Restore" %}
+            {% breadcrumb breadcrumb_items css_class="mb-4" %}
             <h1 class="text-2xl font-bold text-slate-100 mt-2">{{ page_title }}</h1>
             <p class="mt-2 text-sm text-slate-400">
                 {% trans "Restore domain from backup" %}
@@ -123,15 +114,15 @@
                                             </label>
                                         </div>
                                         <div class="flex items-center">
-                                            {{ form.restore_mail }}
-                                            <label for="{{ form.restore_mail.id_for_label }}" class="ml-2 text-sm text-slate-300">
-                                                {{ form.restore_mail.label }}
+                                            {{ form.restore_email }}
+                                            <label for="{{ form.restore_email.id_for_label }}" class="ml-2 text-sm text-slate-300">
+                                                {{ form.restore_email.label }}
                                             </label>
                                         </div>
                                         <div class="flex items-center">
-                                            {{ form.restore_config }}
-                                            <label for="{{ form.restore_config.id_for_label }}" class="ml-2 text-sm text-slate-300">
-                                                {{ form.restore_config.label }}
+                                            {{ form.restore_ssl }}
+                                            <label for="{{ form.restore_ssl.id_for_label }}" class="ml-2 text-sm text-slate-300">
+                                                {{ form.restore_ssl.label }}
                                             </label>
                                         </div>
                                     </div>

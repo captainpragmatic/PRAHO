@@ -6,11 +6,13 @@ HTMX-powered reusable components for Romanian hosting provider interface
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from typing import TYPE_CHECKING, Any
 
 from django import template
+from django.conf import settings
 from django.forms import CheckboxInput, Select, Textarea
 from django.template.base import FilterExpression
 from django.template.base import token_kwargs as django_token_kwargs
@@ -19,12 +21,56 @@ from django.utils.safestring import mark_safe  # For XSS prevention
 from django.utils.translation import gettext_lazy as _
 
 if TYPE_CHECKING:
+    from _typeshed import DataclassInstance
     from django.utils.functional import _StrPromise
 
 from apps.common.constants import FILE_SIZE_CONVERSION_FACTOR
 from apps.ui.attributes import sanitize_data_attrs, serialize_button_attributes
 
 register = template.Library()
+
+logger = logging.getLogger(__name__)
+
+
+# ===============================================================================
+# TAG ARGUMENTS
+# ===============================================================================
+# The tags used to apply their keyword arguments with `if hasattr(config, key)`, which skipped
+# anything else without a word: a misspelt or missing argument was simply left off the page. Each
+# tag now declares what its **kwargs may carry (`_TAG_ARGUMENTS`, at the end of this module), and
+# anything else fails while developing and testing, and is logged in production.
+
+_BUTTON_ALIASES: Mapping[str, str] = {"class": "class_", "css_class": "class_"}
+
+
+def tag_arguments(tag: str) -> frozenset[str]:
+    """The keyword arguments `tag` accepts beyond its named parameters."""
+    return _TAG_ARGUMENTS.get(tag, frozenset())
+
+
+def _reject_unknown(tag: str, names: Iterable[str]) -> None:
+    unknown = sorted(set(names) - tag_arguments(tag))
+    if not unknown:
+        return
+    message = f"{{% {tag} %}} got unknown argument(s): {', '.join(unknown)}"
+    if settings.DEBUG or getattr(settings, "TESTING", False):
+        raise template.TemplateSyntaxError(message)
+    logger.warning(f"⚠️ [UI] {message}; ignored")
+
+
+def _apply_arguments(
+    tag: str, kwargs: Mapping[str, object], *targets: object, aliases: Mapping[str, str] | None = None
+) -> None:
+    """Set each keyword argument on the first target that has it, after rejecting unknown ones."""
+    _reject_unknown(tag, kwargs)
+    for key, value in kwargs.items():
+        name = (aliases or {}).get(key, key)
+        if value is None:
+            continue
+        for target in targets:
+            if hasattr(target, name):
+                setattr(target, name, value)
+                break
 
 
 # ===============================================================================
@@ -220,12 +266,7 @@ def button(
     if htmx is None:
         htmx = HTMXAttributes()
 
-    # Override with any direct kwargs for backward compatibility
-    for key, value in kwargs.items():
-        if hasattr(config, key) and value is not None:
-            setattr(config, key, value)
-        elif hasattr(htmx, key) and value is not None:
-            setattr(htmx, key, value)
+    _apply_arguments("button", kwargs, config, htmx, aliases=_BUTTON_ALIASES)
 
     clean_attrs = serialize_button_attributes(config.attrs)
 
@@ -280,12 +321,7 @@ def input_field(
     if htmx is None:
         htmx = HTMXAttributes()
 
-    # Override with any direct kwargs for backward compatibility
-    for key, value in kwargs.items():
-        if hasattr(config, key) and value is not None:
-            setattr(config, key, value)
-        elif hasattr(htmx, key) and value is not None:
-            setattr(htmx, key, value)
+    _apply_arguments("input_field", kwargs, config, htmx)
 
     # Auto-generate ID if not provided
     if not config.html_id:
@@ -369,12 +405,7 @@ def checkbox_field(
     if htmx is None:
         htmx = HTMXAttributes()
 
-    # Override with any direct kwargs for backward compatibility
-    for key, value in kwargs.items():
-        if hasattr(config, key) and value is not None:
-            setattr(config, key, value)
-        elif hasattr(htmx, key) and value is not None:
-            setattr(htmx, key, value)
+    _apply_arguments("checkbox_field", kwargs, config, htmx)
 
     # Auto-generate ID if not provided
     if not config.html_id:
@@ -419,10 +450,7 @@ def alert(message: str, *, config: AlertConfig | None = None, **kwargs: Any) -> 
     if config is None:
         config = AlertConfig()
 
-    # Override with any direct kwargs for backward compatibility
-    for key, value in kwargs.items():
-        if hasattr(config, key) and value is not None:
-            setattr(config, key, value)
+    _apply_arguments("alert", kwargs, config)
 
     return {
         "message": message,
@@ -450,6 +478,7 @@ def form_field(field: Any, *, icon_left: str | None = None, **kwargs: str) -> di
         {% form_field form.password icon_left="lock" placeholder="Enter password" %}
         {% form_field form.customer_type %}   {# select widget auto-detected #}
     """
+    _reject_unknown("form_field", kwargs)
     widget = field.field.widget
     name: str = field.html_name
     html_id: str = field.id_for_label or f"id_{name}"
@@ -541,6 +570,7 @@ def form_checkbox(field: Any, **kwargs: Any) -> dict[str, Any]:
         {% form_checkbox form.remember_me %}
         {% form_checkbox form.data_processing_consent %}
     """
+    _reject_unknown("form_checkbox", kwargs)
     name: str = field.html_name
     html_id: str = field.id_for_label or f"id_{name}"
 
@@ -621,10 +651,7 @@ def modal(modal_id: str, title: str, *, config: ModalConfig | None = None, **kwa
     if config is None:
         config = ModalConfig()
 
-    # Override with any direct kwargs for backward compatibility
-    for key, value in kwargs.items():
-        if hasattr(config, key) and value is not None:
-            setattr(config, key, value)
+    _apply_arguments("modal", kwargs, config)
 
     # Always resolve a concrete DOM id so JS open/close hooks target the same element.
     resolved_html_id = config.html_id or f"modal-{modal_id or 'default'}"
@@ -658,6 +685,8 @@ class PageHeaderConfig:
 
 class PageHeaderNode(template.Node):
     """Renders a page header with an actions slot between the opening and closing tags."""
+
+    child_nodelists = ("nodelist_actions",)
 
     def __init__(
         self,
@@ -704,6 +733,7 @@ def do_page_header(parser: template.base.Parser, token: template.base.Token) -> 
     kwargs = django_token_kwargs(remaining_bits, parser)
     if remaining_bits:
         raise template.TemplateSyntaxError(f"{bits[0]} received an invalid argument: {remaining_bits[0]}")
+    _reject_unknown("page_header", kwargs)
 
     nodelist = parser.parse(("end_page_header",))
     parser.delete_first_token()
@@ -712,6 +742,8 @@ def do_page_header(parser: template.base.Parser, token: template.base.Token) -> 
 
 class SectionCardNode(template.Node):
     """Renders a section card with a content slot between opening and closing tags."""
+
+    child_nodelists = ("nodelist_content",)
 
     def __init__(
         self,
@@ -760,6 +792,7 @@ def do_section_card(parser: template.base.Parser, token: template.base.Token) ->
     kwargs = django_token_kwargs(remaining_bits, parser)
     if remaining_bits:
         raise template.TemplateSyntaxError(f"{bits[0]} received an invalid argument: {remaining_bits[0]}")
+    _reject_unknown("section_card", kwargs)
 
     nodelist = parser.parse(("end_section_card",))
     parser.delete_first_token()
@@ -1016,10 +1049,7 @@ def data_table(
     if config is None:
         config = DataTableConfig()
 
-    # Override with any direct kwargs for backward compatibility
-    for key, value in kwargs.items():
-        if hasattr(config, key) and value is not None:
-            setattr(config, key, value)
+    _apply_arguments("data_table", kwargs, config)
 
     pagination_obj = kwargs.get("pagination_obj")
     if pagination_obj is None and not isinstance(config.pagination, bool):
@@ -1067,6 +1097,7 @@ def toast(
         auto_dismiss: Auto-dismiss after milliseconds (0 = no auto-dismiss)
         toast_id: Unique identifier
     """
+    _reject_unknown("toast", kwargs)
     return {
         "message": message,
         "variant": variant,
@@ -1100,6 +1131,7 @@ def card(
         css_class: Additional CSS classes
         actions: List of card actions
     """
+    _reject_unknown("card", kwargs)
     return {
         "title": title,
         "subtitle": subtitle,
@@ -1126,6 +1158,7 @@ def breadcrumb(
         css_class: Additional CSS classes
         separator: Breadcrumb separator character
     """
+    _reject_unknown("breadcrumb", kwargs)
     return {
         "items": items,
         "css_class": css_class,
@@ -1299,6 +1332,7 @@ def icon(name: str, *, size: str = "md", css_class: str = "", style: str = "outl
         css_class: Additional CSS classes
         style: "outline" (24x24 stroke) or "filled" (20x20 fill)
     """
+    _reject_unknown("icon", kwargs)
     if style == "filled":
         paths = _FILLED_ICON_PATHS.get(name)
         if paths is None:
@@ -1362,6 +1396,7 @@ def spinner(*, size: str = "sm", css_class: str = "", color: str = "current", **
         color: current|blue|white|green|slate
         css_class: Additional CSS classes
     """
+    _reject_unknown("spinner", kwargs)
     dim, border = _SPINNER_SIZES.get(size, _SPINNER_SIZES["sm"])
     border_color = _SPINNER_COLORS.get(color, _SPINNER_COLORS["current"])
 
@@ -1453,6 +1488,7 @@ def filter_select(  # noqa: PLR0913
     Usage:
         {% filter_select "status" status_choices selected=status_filter label="Status" placeholder="All" %}
     """
+    _reject_unknown("filter_select", kwargs)
     return {
         "name": name,
         "options": options,
@@ -1490,10 +1526,7 @@ def badge(text: str, *, config: BadgeConfig | None = None, **kwargs: Any) -> dic
     if config is None:
         config = BadgeConfig()
 
-    # Override with any direct kwargs for backward compatibility
-    for key, value in kwargs.items():
-        if hasattr(config, key) and value is not None:
-            setattr(config, key, value)
+    _apply_arguments("badge", kwargs, config)
 
     # Only use ID if explicitly provided to avoid duplicate IDs
     # Multiple badges with same text would create duplicate IDs otherwise
@@ -1532,6 +1565,7 @@ def dropdown(title: str, items: list[dict[str, Any]], *, icon: str | None = None
         items: List of menu items
         icon: Optional icon for dropdown button
     """
+    _reject_unknown("dropdown", kwargs)
     return {
         "title": title,
         "items": items,
@@ -1632,6 +1666,7 @@ def step_progress(  # noqa: PLR0913
         {% step_progress mfa_steps current_step=1 color_scheme="purple" show_back_button=True %}
     """
     # Derive back URL from previous step if not explicitly provided
+    _reject_unknown("step_progress", kwargs)
     derived_back_url = back_url
     if show_back_button and not back_url and current_step > 1:
         prev_step = steps[current_step - 2] if current_step - 1 < len(steps) else None
@@ -1648,3 +1683,66 @@ def step_progress(  # noqa: PLR0913
         "back_url": derived_back_url,
         "separator": separator,
     }
+
+
+# ===============================================================================
+# ACCEPTED TAG ARGUMENTS
+# ===============================================================================
+
+
+def _fields(*configs: type[DataclassInstance]) -> frozenset[str]:
+    return frozenset(field.name for config in configs for field in fields(config))
+
+
+def _htmx(*names: str) -> frozenset[str]:
+    """The HTMX arguments a tag forwards to its template; each must be an HTMXAttributes field."""
+    unknown = set(names) - _fields(HTMXAttributes)
+    if unknown:
+        raise RuntimeError(f"Not HTMXAttributes fields: {sorted(unknown)}")
+    return frozenset(names)
+
+
+# What each tag's **kwargs may carry. A tag missing here accepts only its named parameters.
+# HTMX arguments are listed per tag: accepting one a tag never forwards would drop it silently.
+_TAG_ARGUMENTS: dict[str, frozenset[str]] = {
+    "button": _fields(ButtonConfig)
+    | frozenset(_BUTTON_ALIASES)
+    | _htmx(
+        "hx_get",
+        "hx_post",
+        "hx_put",
+        "hx_patch",
+        "hx_delete",
+        "hx_target",
+        "hx_swap",
+        "hx_trigger",
+        "hx_confirm",
+        "hx_indicator",
+        "hx_push_url",
+        "hx_select",
+        "hx_include",
+        "hx_boost",
+    ),
+    "input_field": _fields(InputConfig)
+    | _htmx("hx_get", "hx_post", "hx_trigger", "hx_target", "hx_swap", "hx_include", "hx_sync", "hx_indicator"),
+    "checkbox_field": _fields(CheckboxConfig) | _htmx("hx_get", "hx_post", "hx_trigger", "hx_target", "hx_swap"),
+    "alert": _fields(AlertConfig),
+    "modal": _fields(ModalConfig),
+    "badge": _fields(BadgeConfig),
+    "data_table": _fields(DataTableConfig) | {"pagination_obj", "show_actions"},
+    "page_header": frozenset({"title", "subtitle", "icon", "css_class"}),
+    "section_card": frozenset({"title", "icon", "collapsible", "padding", "css_class", "html_id"}),
+    "form_field": frozenset(
+        {
+            "autocomplete",
+            "autofocus",
+            "container_class",
+            "css_class",
+            "disabled",
+            "icon_right",
+            "placeholder",
+            "readonly",
+        }
+    ),
+    "form_checkbox": frozenset({"container_class", "css_class", "data_attrs", "disabled", "label", "variant"}),
+}

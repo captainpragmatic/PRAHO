@@ -20534,3 +20534,12 @@ msgstr "Datele lipsă ale faptului generator apar în fiecare lună, iar facturi
 
 msgid "Goods, acquisitions and rectificative declarations are outside this report. Have the accountant distinguish current-period adjustments from corrections of a previous declaration."
 msgstr "Bunurile, achizițiile și declarațiile rectificative nu fac parte din acest raport. Contabilul trebuie să distingă ajustările din perioada curentă de corectarea unei declarații anterioare."
+
+msgid "Process Now"
+msgstr "Procesează acum"
+
+msgid "Download Export"
+msgstr "Descarcă exportul"
+
+msgid "Delete Expired"
+msgstr "Șterge exportul expirat"
