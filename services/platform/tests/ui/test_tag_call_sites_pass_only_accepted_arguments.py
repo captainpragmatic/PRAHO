@@ -63,6 +63,22 @@ class TagCallSitesTests(SimpleTestCase):
         self.assertEqual(problems, [])
 
 
+class BlockTagTests(SimpleTestCase):
+    def test_calls_inside_block_tags_are_scanned(self) -> None:
+        for block, end in (("page_header", "end_page_header"), ("section_card", "end_section_card")):
+            with self.subTest(block=block):
+                compiled = Template(
+                    f'{{% load ui_components %}}{{% {block} title="T" %}}{{% button "Inner" %}}{{% {end} %}}'
+                )
+                inner = [n.func.__name__ for n in compiled.nodelist.get_nodes_by_type(TagHelperNode)]
+                self.assertEqual(inner, ["button"])
+
+    def test_an_unknown_block_tag_argument_fails_while_testing(self) -> None:
+        for block, end in (("page_header", "end_page_header"), ("section_card", "end_section_card")):
+            with self.subTest(block=block), self.assertRaisesMessage(TemplateSyntaxError, "unknown argument"):
+                Template(f'{{% load ui_components %}}{{% {block} bogus=1 %}}{{% {end} %}}')
+
+
 def _render(template_str: str) -> str:
     return Template("{% load ui_components %}" + template_str).render(Context({}))
 

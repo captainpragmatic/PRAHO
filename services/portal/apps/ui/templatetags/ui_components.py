@@ -59,7 +59,7 @@ def _reject_unknown(tag: str, names: Iterable[str]) -> None:
 
 
 def _apply_arguments(
-    tag: str, kwargs: Mapping[str, Any], *targets: object, aliases: Mapping[str, str] | None = None
+    tag: str, kwargs: Mapping[str, object], *targets: object, aliases: Mapping[str, str] | None = None
 ) -> None:
     """Set each keyword argument on the first target that has it, after rejecting unknown ones."""
     _reject_unknown(tag, kwargs)
@@ -686,6 +686,8 @@ class PageHeaderConfig:
 class PageHeaderNode(template.Node):
     """Renders a page header with an actions slot between the opening and closing tags."""
 
+    child_nodelists = ("nodelist_actions",)
+
     def __init__(
         self,
         kwargs: dict[str, FilterExpression],
@@ -731,6 +733,7 @@ def do_page_header(parser: template.base.Parser, token: template.base.Token) -> 
     kwargs = django_token_kwargs(remaining_bits, parser)
     if remaining_bits:
         raise template.TemplateSyntaxError(f"{bits[0]} received an invalid argument: {remaining_bits[0]}")
+    _reject_unknown("page_header", kwargs)
 
     nodelist = parser.parse(("end_page_header",))
     parser.delete_first_token()
@@ -739,6 +742,8 @@ def do_page_header(parser: template.base.Parser, token: template.base.Token) -> 
 
 class SectionCardNode(template.Node):
     """Renders a section card with a content slot between opening and closing tags."""
+
+    child_nodelists = ("nodelist_content",)
 
     def __init__(
         self,
@@ -787,6 +792,7 @@ def do_section_card(parser: template.base.Parser, token: template.base.Token) ->
     kwargs = django_token_kwargs(remaining_bits, parser)
     if remaining_bits:
         raise template.TemplateSyntaxError(f"{bits[0]} received an invalid argument: {remaining_bits[0]}")
+    _reject_unknown("section_card", kwargs)
 
     nodelist = parser.parse(("end_section_card",))
     parser.delete_first_token()
@@ -1697,6 +1703,8 @@ _TAG_ARGUMENTS: dict[str, frozenset[str]] = {
     "modal": _fields(ModalConfig),
     "badge": _fields(BadgeConfig),
     "data_table": _fields(DataTableConfig) | {"pagination_obj", "show_actions"},
+    "page_header": frozenset({"title", "subtitle", "icon", "css_class"}),
+    "section_card": frozenset({"title", "icon", "collapsible", "padding", "css_class", "html_id"}),
     "form_field": frozenset(
         {
             "autocomplete",

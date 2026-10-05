@@ -7,6 +7,7 @@ tag requires. Every GET with a backup to restore from raised instead of showing 
 
 from __future__ import annotations
 
+import re
 from unittest.mock import patch
 
 from django.urls import reverse
@@ -27,6 +28,12 @@ class VirtualminRestorePageTests(VirtualminTaskTestBase):
             response = self.client.get(reverse("provisioning:virtualmin_account_restore", args=[self.account.id]))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, self.account.domain)
-        self.assertContains(response, reverse("provisioning:virtualmin_account_detail", args=[self.account.id]))
         self.assertContains(response, 'value="bk-1"')
+        nav = re.search(r'<nav aria-label="Breadcrumb".*?</nav>', response.content.decode(), re.S)
+        assert nav is not None, "the restore page renders no breadcrumb"
+        for url in (
+            reverse("provisioning:virtualmin_accounts"),
+            reverse("provisioning:virtualmin_account_detail", args=[self.account.id]),
+        ):
+            self.assertIn(f'href="{url}"', nav.group(0))
+        self.assertIn("Restore", nav.group(0))
