@@ -10,7 +10,7 @@ Modes:
 Usage:
   translate_po.py stats <po-file>
   translate_po.py generate <po-file> [-o review.yaml] [--claude] [--model haiku] [--batch-size 30]
-  translate_po.py apply <review.yaml> [--compile] [--dry-run] [--backup]
+  translate_po.py apply <review.yaml> [--compile] [--dry-run] [--backup] [--overwrite]
 
 Flags: --dry-run, --backup, --include-fuzzy
 """
@@ -21,14 +21,16 @@ import argparse
 import datetime as dt
 import json
 import logging
+import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Literal, cast
 
 import polib
 import yaml
@@ -552,8 +554,8 @@ class TranslationEntry:
     msgctxt: str | None = None
     msgid_plural: str = ""
 
-    def to_dict(self) -> dict[str, Any]:
-        d: dict[str, Any] = {}
+    def to_dict(self) -> dict[str, object]:
+        d: dict[str, object] = {}
         if self.msgctxt is not None:
             d["msgctxt"] = self.msgctxt
         d["msgid"] = self.msgid
@@ -815,6 +817,8 @@ def load_po(po_file: Path) -> polib.POFile:
 # A catalogue entry is identified by (msgctxt, msgid): the same msgid may appear once bare and
 # once per context, each with its own translation.
 EntryKey = tuple[str | None, str]
+# Written into review metadata by generate: its entries carry msgctxt whenever the entry has one
+ENTRY_KEY_FORMAT = "msgctxt+msgid"
 
 
 def _entry_key(entry: polib.POEntry) -> EntryKey:
@@ -826,10 +830,10 @@ def _describe_key(key: EntryKey) -> str:
     return f"[{msgctxt}] '{msgid[:60]}'" if msgctxt is not None else f"'{msgid[:60]}'"
 
 
-def _has_translation(entry: polib.POEntry) -> bool:
-    """True when every form is filled: msgstr, or each msgstr[n] of a plural entry."""
+def _has_translation(entry: polib.POEntry, nplurals: int) -> bool:
+    """True when every form is filled: msgstr, or msgstr[0] to msgstr[nplurals - 1] of a plural."""
     if entry.msgid_plural:
-        return bool(entry.msgstr_plural) and all(form.strip() for form in entry.msgstr_plural.values())
+        return all(entry.msgstr_plural.get(index, "").strip() for index in range(nplurals))
     return bool(entry.msgstr and entry.msgstr.strip())
 
 
@@ -844,6 +848,7 @@ def get_untranslated_entries(
     include_fuzzy: bool = False,
 ) -> list[polib.POEntry]:
     """Return entries with an empty msgstr or msgstr[n] (and optionally fuzzy entries)."""
+    nplurals = _nplurals(po)
     entries: list[polib.POEntry] = []
     for entry in po:
         if entry.obsolete:
@@ -854,7 +859,7 @@ def get_untranslated_entries(
         if is_fuzzy and include_fuzzy:
             entries.append(entry)
             continue
-        if not _has_translation(entry):
+        if not _has_translation(entry, nplurals):
             entries.append(entry)
     return entries
 
@@ -877,32 +882,97 @@ class EntryEdit:
     add_ai_marker: bool = False
 
 
+@dataclass
+class EntrySpan:
+    """Where one entry sits in the .po source lines."""
+
+    start: int  # first line: a comment or the first keyword
+    end: int  # one past the entry's last non-blank line
+    msgstr_start: int | None = None
+    msgstr_end: int | None = None  # one past the last msgstr keyword or continuation
+    has_msgid: bool = False
+    has_field: bool = False
+    obsolete: bool = False
+
+
 AI_MARKER = "AI-generated"
 # Lines that follow the extracted (#.) comments in gettext's entry layout
 _AFTER_EXTRACTED_COMMENTS = ("#:", "#,", "#|", "msgctxt", "msgid")
+_FIELD_RE = re.compile(r'(msgctxt|msgid_plural|msgid|msgstr(?:\[\d+\])?)\s*"')
+type LineKind = Literal["blank", "comment", "keyword", "continuation"]
 
 
-def _block_spans(lines: list[str]) -> list[tuple[int, int]]:
-    """(start, end) line spans of the entries in a .po file; entries are separated by blank lines."""
-    spans: list[tuple[int, int]] = []
-    start: int | None = None
+def _classify_line(line: str) -> tuple[LineKind, str | None, bool]:
+    """(kind, keyword, obsolete) of a .po line; kind is blank, comment, keyword or continuation."""
+    text = line.strip()
+    obsolete = text.startswith("#~")
+    if obsolete:
+        text = text[2:].lstrip()
+        if not text or text.startswith(("#", "|")):  # Includes obsolete comments and previous msgids
+            return "comment", None, True
+    elif not text:
+        return "blank", None, False
+    elif text.startswith("#"):
+        return "comment", None, False
+    if text.startswith('"'):
+        return "continuation", None, obsolete
+    match = _FIELD_RE.match(text)
+    if match is None:
+        raise ValueError(f"Unrecognised .po line: {line!r}")
+    return "keyword", match.group(1), obsolete
+
+
+def _entry_spans(lines: list[str]) -> list[EntrySpan]:
+    """Split .po source lines into entries by the PO grammar.
+
+    Blank lines cannot be trusted as delimiters: gettext needs none between entries (e.g. after
+    the header) and accepts them inside a multi-line field. An entry starts at the first comment
+    or msgctxt after a field, at a second msgid, or where live and obsolete (#~) lines meet.
+    """
+    spans: list[EntrySpan] = []
+    current: EntrySpan | None = None
     for index, line in enumerate(lines):
-        if line.strip():
-            if start is None:
-                start = index
-        elif start is not None:
-            spans.append((start, index))
-            start = None
-    if start is not None:
-        spans.append((start, len(lines)))
+        kind, keyword, obsolete = _classify_line(line)
+        if kind == "blank":
+            continue
+        if kind == "continuation":
+            if current is None or not current.has_field:
+                raise ValueError(f"Continuation line {index + 1} outside a field: {line!r}")
+            if obsolete != current.obsolete:
+                raise ValueError(f"Continuation line {index + 1} has a different obsolete status from its field")
+            current.end = index + 1
+            if current.msgstr_start is not None:
+                current.msgstr_end = index + 1
+            continue
+        if current is None or (
+            current.has_field
+            and (
+                kind == "comment"
+                or keyword == "msgctxt"
+                or (keyword == "msgid" and current.has_msgid)
+                or obsolete != current.obsolete
+            )
+        ):
+            current = EntrySpan(start=index, end=index + 1)
+            spans.append(current)
+        current.end = index + 1
+        if kind == "keyword" and keyword is not None:
+            current.has_field = True
+            current.obsolete = current.obsolete or obsolete
+            if keyword == "msgid":
+                current.has_msgid = True
+            elif keyword.startswith("msgstr"):
+                if current.msgstr_start is None:
+                    current.msgstr_start = index
+                current.msgstr_end = index + 1
     return spans
 
 
-def _block_key(block: list[str]) -> EntryKey | None:
-    """Key of the live entry in a block; None for the header and obsolete (#~) entries."""
-    if any(line.startswith("#~") for line in block):
+def _span_key(lines: list[str], span: EntrySpan) -> EntryKey | None:
+    """Key of a live entry; None for the header and obsolete (#~) entries."""
+    if span.obsolete or not span.has_msgid:
         return None
-    entries = list(polib.pofile("\n".join(block) + "\n"))
+    entries = list(polib.pofile("\n".join(lines[span.start : span.end]) + "\n"))
     return _entry_key(entries[0]) if len(entries) == 1 else None
 
 
@@ -917,17 +987,26 @@ def _render_msgstr_lines(translation: str | list[str]) -> list[str]:
     return lines[first:]
 
 
-def _rewrite_block(block: list[str], edit: EntryEdit) -> list[str]:
-    """The block with its msgstr replaced; comment, reference and msgid lines stay verbatim."""
-    msgstr_start = next(index for index, line in enumerate(block) if line.startswith("msgstr"))
-    head = block[:msgstr_start]
+def _without_fuzzy(line: str) -> str | None:
+    """A `#,` flag line with fuzzy removed (None if no flag is left); other lines pass through."""
+    if not line.startswith("#,"):
+        return line
+    flags = [flag.strip() for flag in line[2:].split(",") if flag.strip()]
+    if "fuzzy" not in flags:
+        return line
+    remaining = [flag for flag in flags if flag != "fuzzy"]
+    return f"#, {', '.join(remaining)}" if remaining else None
+
+
+def _rewrite_entry(lines: list[str], span: EntrySpan, edit: EntryEdit) -> list[str]:
+    """The entry with its msgstr lines replaced; comment, reference and msgid lines stay verbatim."""
+    if span.msgstr_start is None or span.msgstr_end is None:
+        raise ValueError(f"Entry at line {span.start + 1} has no msgstr")
+    head = lines[span.start : span.msgstr_start]
 
     if edit.remove_fuzzy:
-        for index, line in enumerate(head):
-            if line.startswith("#,"):
-                flags = [flag.strip() for flag in line[2:].split(",") if flag.strip() and flag.strip() != "fuzzy"]
-                head[index : index + 1] = [f"#, {', '.join(flags)}"] if flags else []
-                break
+        # gettext allows several `#,` lines; fuzzy is removed from whichever one holds it
+        head = [kept for line in head if (kept := _without_fuzzy(line)) is not None]
 
     if edit.add_ai_marker:
         insert_at = next(
@@ -935,25 +1014,87 @@ def _rewrite_block(block: list[str], edit: EntryEdit) -> list[str]:
         )
         head.insert(insert_at, f"#. {AI_MARKER}")
 
-    return head + _render_msgstr_lines(edit.translation)
+    return head + _render_msgstr_lines(edit.translation) + lines[span.msgstr_end : span.end]
+
+
+type EntryState = tuple[
+    str,
+    tuple[tuple[int, str], ...],
+    tuple[str, ...],
+    str,
+    str,
+    tuple[tuple[str, str], ...],
+]
+type CatalogueState = dict[tuple[bool, str | None, str], EntryState]
+
+
+def _check_patch(original: str, patched: str, edits: dict[EntryKey, EntryEdit]) -> None:
+    """Re-parse both texts: only the edited entries may differ, and they must hold the new text."""
+
+    def snapshot(text: str) -> tuple[dict[str, str], CatalogueState]:
+        po = polib.pofile(text)
+        entries: CatalogueState = {
+            (entry.obsolete, *_entry_key(entry)): (
+                entry.msgstr,
+                tuple(sorted(entry.msgstr_plural.items())),
+                tuple(sorted(entry.flags)),
+                entry.comment,
+                entry.tcomment,
+                tuple(entry.occurrences),
+            )
+            for entry in po
+        }
+        return dict(po.metadata), entries
+
+    meta_before, before = snapshot(original)
+    meta_after, after = snapshot(patched)
+    if meta_before != meta_after or before.keys() != after.keys():
+        raise RuntimeError("Patched .po no longer has the same header and entries; nothing written")
+    for full_key, state in before.items():
+        obsolete, msgctxt, msgid = full_key
+        edit = None if obsolete else edits.get((msgctxt, msgid))
+        if edit is None:
+            if after[full_key] != state:
+                raise RuntimeError(f"Patch changed an entry it was not asked to: {_describe_key((msgctxt, msgid))}")
+            continue
+        msgstr, plural_items = after[full_key][0], after[full_key][1]
+        written = [form for _, form in plural_items] if isinstance(edit.translation, list) else msgstr
+        if written != edit.translation:
+            raise RuntimeError(f"Patch did not write the translation of {_describe_key((msgctxt, msgid))}")
 
 
 def patch_po_text(text: str, edits: dict[EntryKey, EntryEdit]) -> str:
     """Apply `edits` to the .po source text, leaving every other line untouched."""
     lines = text.split("\n")
     pending = dict(edits)
-    # Walk backwards so that replacing a block never shifts the spans still to visit
-    for start, end in reversed(_block_spans(lines)):
-        block = lines[start:end]
-        if not any(line.startswith("msgid") for line in block):
-            continue
-        key = _block_key(block)
-        if key in pending:
-            lines[start:end] = _rewrite_block(block, pending.pop(key))
+    # Walk backwards so that replacing an entry never shifts the spans still to visit
+    for span in reversed(_entry_spans(lines)):
+        key = _span_key(lines, span)
+        if key is not None and key in pending:
+            lines[span.start : span.end] = _rewrite_entry(lines, span, pending.pop(key))
     if pending:
         missing = ", ".join(_describe_key(key) for key in pending)
         raise ValueError(f"Entries not found in .po source: {missing}")
-    return "\n".join(lines)
+    patched = "\n".join(lines)
+    _check_patch(text, patched, edits)
+    return patched
+
+
+def _write_atomically(path: Path, data: bytes) -> None:
+    """Replace the file so that readers see the old catalogue or the new one, never a partial one."""
+    target = path.resolve()
+    fd, temp_name = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
+    temp = Path(temp_name)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        shutil.copymode(target, temp)
+        os.replace(temp, target)
+    except BaseException:
+        temp.unlink(missing_ok=True)
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -965,6 +1106,7 @@ def cmd_stats(po_file: Path, include_fuzzy: bool = False) -> None:
     """Print per-app translation coverage statistics."""
     po = load_po(po_file)
 
+    nplurals = _nplurals(po)
     app_stats: dict[str, AppStats] = defaultdict(lambda: AppStats(app=""))
 
     for entry in po:
@@ -979,7 +1121,7 @@ def cmd_stats(po_file: Path, include_fuzzy: bool = False) -> None:
         stats.total += 1
 
         is_fuzzy = "fuzzy" in entry.flags
-        has_translation = _has_translation(entry)
+        has_translation = _has_translation(entry, nplurals)
         if has_translation and (not is_fuzzy or include_fuzzy):
             stats.translated += 1
 
@@ -1105,12 +1247,13 @@ def cmd_generate(cfg: GenerateConfig) -> None:
         result_entries.extend(review_entry(entry, "", "none", "low") for entry in ai_candidates)
 
     # Build YAML document
-    document: dict[str, Any] = {
+    document: dict[str, object] = {
         "metadata": {
             "po_file": str(po_file),
             "generated_at": dt.datetime.now(tz=dt.UTC).isoformat(),
             "source": "ai" if cfg.use_claude else "dictionary",
             "total_entries": len(result_entries),
+            "entry_key": ENTRY_KEY_FORMAT,
         },
         "entries": [e.to_dict() for e in result_entries],
     }
@@ -1151,7 +1294,8 @@ def _validate_suggestion(po_entry: polib.POEntry, suggestion: object, nplurals: 
     if not all(isinstance(form, str) and form.strip() for form in suggestion):
         return ["Every plural form must be a non-empty string"]
     errors: list[str] = []
-    for index, form in enumerate(suggestion):
+    forms = cast("list[str]", suggestion)  # Every item was checked above.
+    for index, form in enumerate(forms):
         form_errors = validate_translation(po_entry.msgid_plural, form)
         # The first form may follow the singular msgid instead (e.g. "One invoice")
         if index == 0 and form_errors and not validate_translation(po_entry.msgid, form):
@@ -1171,23 +1315,42 @@ def cmd_apply(
     compile_messages: bool = False,
     dry_run: bool = False,
     backup: bool = False,
+    overwrite: bool = False,
 ) -> None:
-    """Apply approved translations from YAML back to .po file."""
-    raw = yaml.safe_load(review_yaml.read_text(encoding="utf-8"))
+    """Apply approved translations from YAML back to .po file.
+
+    An entry that is already translated (and not fuzzy) is only replaced when `overwrite` is set,
+    or when its review entry says `overwrite: true`.
+    """
+    raw: object = yaml.safe_load(review_yaml.read_text(encoding="utf-8"))
 
     if not isinstance(raw, dict):
         logger.error("🔥 Invalid YAML format: expected a mapping at top level")
         sys.exit(1)
+    document = cast("dict[str, object]", raw)
+    metadata_raw = document.get("metadata", {})
+    if not isinstance(metadata_raw, dict):
+        logger.error("🔥 Invalid YAML metadata: expected a mapping")
+        sys.exit(1)
+    metadata = cast("dict[str, object]", metadata_raw)
+    po_file_name = metadata.get("po_file", "")
+    if not isinstance(po_file_name, str) or not po_file_name:
+        logger.error("🔥 Invalid YAML metadata: po_file must be a non-empty string")
+        sys.exit(1)
+    po_file_path = Path(po_file_name)
+    # Review files from before msgctxt was recorded name contextual entries by bare msgid only
+    records_context = metadata.get("entry_key") == ENTRY_KEY_FORMAT
 
-    metadata = raw.get("metadata", {})
-    po_file_path = Path(metadata.get("po_file", ""))
-
-    if not po_file_path.exists():
+    if not po_file_path.is_file():
         logger.error("🔥 .po file not found: %s", po_file_path)
         sys.exit(1)
 
-    entries_raw: list[dict[str, Any]] = raw.get("entries", [])
-    approved = [e for e in entries_raw if e.get("status") == "approved"]
+    entries_raw = document.get("entries", [])
+    if not isinstance(entries_raw, list) or not all(isinstance(entry, dict) for entry in entries_raw):
+        logger.error("🔥 Invalid YAML entries: expected a list of mappings")
+        sys.exit(1)
+    entries = cast("list[dict[str, object]]", entries_raw)
+    approved = [entry for entry in entries if entry.get("status") == "approved"]
 
     if not approved:
         logger.warning("⚠️  No entries with status: approved found in %s", review_yaml)
@@ -1199,6 +1362,7 @@ def cmd_apply(
     nplurals = _nplurals(po)
     # Obsolete (#~) entries are never targets: an obsolete msgid can share its key with a live one
     po_map: dict[EntryKey, polib.POEntry] = {_entry_key(entry): entry for entry in po if not entry.obsolete}
+    contextual_msgids = {msgid for msgctxt, msgid in po_map if msgctxt is not None}
 
     # Resolve and validate ALL approved entries before touching any file
     edits: dict[EntryKey, EntryEdit] = {}
@@ -1206,10 +1370,25 @@ def cmd_apply(
     skipped = 0
 
     for entry_data in approved:
-        key: EntryKey = (entry_data.get("msgctxt"), entry_data.get("msgid", ""))
+        msgctxt = entry_data.get("msgctxt")
+        msgid = entry_data.get("msgid", "")
+        if not isinstance(msgid, str) or (msgctxt is not None and not isinstance(msgctxt, str)):
+            invalid_msgs.append("  Entry keys require a string msgid and a string or null msgctxt")
+            continue
+        key: EntryKey = (msgctxt, msgid)
         suggestion = entry_data.get("msgstr_suggested", "")
 
         if not key[1] or not suggestion:
+            skipped += 1
+            continue
+
+        if not records_context and "msgctxt" not in entry_data and key[1] in contextual_msgids:
+            # It may have been generated from a contextual entry, so it cannot be told apart from
+            # the bare one; no override applies
+            logger.warning(
+                "⚠️  Review file predates msgctxt and %s also exists with a context; regenerate it (skipping)",
+                _describe_key(key),
+            )
             skipped += 1
             continue
 
@@ -1220,14 +1399,19 @@ def cmd_apply(
             continue
 
         is_fuzzy = "fuzzy" in po_entry.flags
-        if _has_translation(po_entry) and not is_fuzzy:
-            # Review files only list untranslated or fuzzy entries; a translated target means the
-            # review was already applied, is stale, or names the wrong entry (e.g. it predates
-            # msgctxt being recorded and so names the bare msgid)
-            if _current_translation(po_entry) != suggestion:
-                logger.warning("⚠️  Already translated, not overwriting (skipping): %s", _describe_key(key))
-            skipped += 1
-            continue
+        if _has_translation(po_entry, nplurals) and not is_fuzzy:
+            # Review files list untranslated or fuzzy entries; a translated target is either a
+            # deliberate correction (overwrite) or a review that was already applied or is stale
+            if _current_translation(po_entry) == suggestion:
+                skipped += 1
+                continue
+            if not (overwrite or entry_data.get("overwrite") is True):
+                logger.warning(
+                    "⚠️  Already translated, not overwriting without --overwrite or overwrite: true (skipping): %s",
+                    _describe_key(key),
+                )
+                skipped += 1
+                continue
 
         errors = _validate_suggestion(po_entry, suggestion, nplurals)
         if errors:
@@ -1235,7 +1419,7 @@ def cmd_apply(
             continue
 
         edits[key] = EntryEdit(
-            translation=suggestion,
+            translation=cast("str | list[str]", suggestion),  # Validated against the entry's shape above.
             remove_fuzzy=is_fuzzy,
             # Mark AI-generated entries with a comment
             add_ai_marker=entry_data.get("source", "") == "ai" and AI_MARKER not in (po_entry.comment or ""),
@@ -1266,7 +1450,7 @@ def cmd_apply(
 
     # Bytes in, bytes out: no newline translation, every untouched line is written back as read
     original = po_file_path.read_bytes().decode(po.encoding)
-    po_file_path.write_bytes(patch_po_text(original, edits).encode(po.encoding))
+    _write_atomically(po_file_path, patch_po_text(original, edits).encode(po.encoding))
     logger.info("✅ Saved %d translations to %s (%d skipped)", len(edits), po_file_path, skipped)
 
     if compile_messages:
@@ -1392,6 +1576,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Create .po.bak before modifying the .po file",
     )
+    apply_p.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Replace existing translations too (per entry: overwrite: true in the YAML)",
+    )
 
     return parser
 
@@ -1422,6 +1611,7 @@ def main() -> None:
             compile_messages=args.compile,
             dry_run=args.dry_run,
             backup=args.backup,
+            overwrite=args.overwrite,
         )
 
 

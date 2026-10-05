@@ -10,14 +10,16 @@ end. A whole-file rewrite through polib changes all three, whatever wrapwidth it
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 import yaml
 
 
-def _load_module():
+def _load_module() -> ModuleType:
     repo_root = Path(__file__).resolve().parents[2]
     module_path = repo_root / "scripts" / "translate_po.py"
     spec = importlib.util.spec_from_file_location("translate_po", module_path)
@@ -29,7 +31,7 @@ def _load_module():
 
 
 @pytest.fixture()
-def tp():
+def tp() -> ModuleType:
     return _load_module()
 
 
@@ -131,7 +133,7 @@ ORIGINAL = _catalogue(*ENTRIES, OBSOLETE)
 
 
 @pytest.fixture()
-def project(tmp_path, monkeypatch):
+def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A temp repo root holding the fixture catalogue at its real relative path."""
     monkeypatch.chdir(tmp_path)
     po = tmp_path / PO_REL
@@ -140,11 +142,15 @@ def project(tmp_path, monkeypatch):
     return tmp_path
 
 
-def _write_review(path: Path, entries: list[dict]) -> Path:
+def _write_review(path: Path, entries: list[dict[str, object]], *, records_context: bool = False) -> Path:
+    """A review file; records_context marks it as written by a generate that records msgctxt."""
     for entry in entries:
         entry.setdefault("status", "approved")
+    metadata = {"po_file": str(PO_REL)}
+    if records_context:
+        metadata["entry_key"] = "msgctxt+msgid"
     path.write_text(
-        yaml.dump({"metadata": {"po_file": str(PO_REL)}, "entries": entries}, allow_unicode=True),
+        yaml.dump({"metadata": metadata, "entries": entries}, allow_unicode=True),
         encoding="utf-8",
     )
     return path
@@ -312,3 +318,376 @@ class TestCompile:
         cwd, args = marker.read_text(encoding="utf-8").split("|")
         assert Path(cwd).resolve() == manage.parent.resolve()
         assert args == "compilemessages"
+
+
+class TestEntryBoundaries:
+    """gettext does not need blank lines between entries, and allows them inside a field."""
+
+    def _install(self, project: Path, text: str) -> None:
+        (project / PO_REL).write_bytes(text.encode("utf-8"))
+
+    def test_header_without_trailing_blank_line_keeps_header_and_first_entry(self, tp, project):
+        text = HEADER + REFUND + "\n" + BARE_CASH
+        self._install(project, text)
+        review = _write_review(project / "review.yaml", [{"msgid": "Refund", "msgstr_suggested": "Rambursare"}])
+
+        tp.cmd_apply(review)
+
+        assert _po_text(project) == HEADER + REFUND.replace('msgstr ""', 'msgstr "Rambursare"') + "\n" + BARE_CASH
+
+    def test_blank_line_inside_a_multiline_msgstr_is_replaced_with_the_field(self, tp, project):
+        target = """\
+#: apps/billing/views.py:70
+#, fuzzy
+msgid "Long notice"
+msgstr ""
+"Prima parte "
+
+"a doua parte"
+"""
+        text = HEADER + "\n" + target + REFUND
+        self._install(project, text)
+        review = _write_review(project / "review.yaml", [{"msgid": "Long notice", "msgstr_suggested": "Notificare"}])
+
+        tp.cmd_apply(review)
+
+        new_target = """\
+#: apps/billing/views.py:70
+msgid "Long notice"
+msgstr "Notificare"
+"""
+        assert _po_text(project) == HEADER + "\n" + new_target + REFUND
+
+    def test_target_packed_between_header_and_obsolete_block(self, tp, project):
+        text = HEADER + REFUND + OBSOLETE
+        self._install(project, text)
+        review = _write_review(project / "review.yaml", [{"msgid": "Refund", "msgstr_suggested": "Rambursare"}])
+
+        tp.cmd_apply(review)
+
+        assert _po_text(project) == HEADER + REFUND.replace('msgstr ""', 'msgstr "Rambursare"') + OBSOLETE
+
+    def test_packed_context_and_multiline_keywords_keep_their_source(
+        self, tp: ModuleType, project: Path
+    ) -> None:
+        target = (
+            '#. Billing notice\n'
+            '#: apps/billing/views.py:70\n'
+            '#, fuzzy\n'
+            'msgctxt ""\n'
+            '"billing "\n\n'
+            '"notice"\n'
+            'msgid ""\n'
+            '"Long "\n\n'
+            '"notice"\n'
+            'msgstr ""\n'
+            '"Prima parte "\n\n'
+            '"a doua parte"\n'
+        )
+        text = HEADER + target + REFUND + OBSOLETE
+        self._install(project, text)
+        review = _write_review(
+            project / "review.yaml",
+            [
+                {"msgctxt": "billing notice", "msgid": "Long notice", "msgstr_suggested": "Notificare"},
+                {"msgid": "Refund", "msgstr_suggested": "Rambursare"},
+            ],
+        )
+
+        tp.cmd_apply(review)
+
+        expected_target = target[:target.index('msgstr ""')].replace('#, fuzzy\n', '') + 'msgstr "Notificare"\n'
+        expected_refund = REFUND.replace('msgstr ""', 'msgstr "Rambursare"')
+        assert _po_text(project) == HEADER + expected_target + expected_refund + OBSOLETE
+
+
+INCOMPLETE_PLURAL = """\
+#: apps/billing/views.py:80
+#, python-format
+msgid "%(count)s domain"
+msgid_plural "%(count)s domains"
+msgstr[0] "%(count)s domeniu"
+msgstr[1] "%(count)s domenii"
+"""
+
+
+class TestIncompletePlurals:
+    """With nplurals=3, missing and explicitly empty msgstr[2] both need translation."""
+
+    @pytest.fixture(params=["", 'msgstr[2] ""\n'], ids=["missing", "empty"])
+    def incomplete(self, project: Path, request: pytest.FixtureRequest) -> Path:
+        suffix: str = request.param
+        (project / PO_REL).write_bytes(_catalogue(REFUND, INCOMPLETE_PLURAL + suffix).encode("utf-8"))
+        return project
+
+    def test_generate_lists_a_plural_missing_a_form(self, tp, incomplete):
+        output = incomplete / "review.yaml"
+
+        tp.cmd_generate(tp.GenerateConfig(po_file=PO_REL, output=output))
+
+        msgids = [e["msgid"] for e in yaml.safe_load(output.read_text(encoding="utf-8"))["entries"]]
+        assert "%(count)s domain" in msgids
+
+    def test_stats_do_not_count_a_plural_missing_a_form(self, tp, incomplete, capsys):
+        tp.cmd_stats(PO_REL)
+
+        total_line = next(line for line in capsys.readouterr().out.splitlines() if line.startswith("TOTAL"))
+        assert total_line.split()[1:3] == ["0", "2"]
+
+    def test_apply_repairs_a_plural_missing_a_form(self, tp, incomplete):
+        forms = ["%(count)s domeniu", "%(count)s domenii", "%(count)s de domenii"]
+        review = _write_review(
+            incomplete / "review.yaml",
+            [{"msgid": "%(count)s domain", "msgid_plural": "%(count)s domains", "msgstr_suggested": forms}],
+        )
+
+        tp.cmd_apply(review)
+
+        repaired = INCOMPLETE_PLURAL + 'msgstr[2] "%(count)s de domenii"\n'
+        assert _po_text(incomplete) == _catalogue(REFUND, repaired)
+
+
+class TestOverwrite:
+    def test_per_entry_overwrite_corrects_an_existing_translation(self, tp, project):
+        review = _write_review(
+            project / "review.yaml",
+            [{"msgid": "Cash", "msgstr_suggested": "Numerar (bani gheață)", "overwrite": True}],
+            records_context=True,
+        )
+
+        tp.cmd_apply(review)
+
+        new_cash = BARE_CASH.replace('msgstr "Numerar"', 'msgstr "Numerar (bani gheață)"')
+        assert _po_text(project) == ORIGINAL.replace(BARE_CASH, new_cash)
+
+    def test_overwrite_option_corrects_an_existing_translation(self, tp, project):
+        review = _write_review(
+            project / "review.yaml",
+            [{"msgid": "Cash", "msgstr_suggested": "Numerar (bani gheață)"}],
+            records_context=True,
+        )
+
+        tp.cmd_apply(review, overwrite=True)
+
+        new_cash = BARE_CASH.replace('msgstr "Numerar"', 'msgstr "Numerar (bani gheață)"')
+        assert _po_text(project) == ORIGINAL.replace(BARE_CASH, new_cash)
+
+    def test_review_without_recorded_context_is_refused_for_an_ambiguous_msgid_even_with_overwrite(
+        self, tp, project
+    ):
+        # Written before msgctxt was recorded: "Cash" may have been generated from the
+        # "revenue basis" entry, so it must not land on the bare one.
+        review = _write_review(
+            project / "review.yaml", [{"msgid": "Cash", "msgstr_suggested": "Încasări", "overwrite": True}]
+        )
+
+        tp.cmd_apply(review, overwrite=True)
+
+        assert _po_text(project) == ORIGINAL
+
+    def test_generate_marks_its_review_file_as_recording_context(self, tp, project):
+        output = project / "review.yaml"
+
+        tp.cmd_generate(tp.GenerateConfig(po_file=PO_REL, output=output))
+
+        assert yaml.safe_load(output.read_text(encoding="utf-8"))["metadata"]["entry_key"] == "msgctxt+msgid"
+
+    @pytest.mark.parametrize("overwrite_value", [None, False, "true"])
+    def test_translated_entry_is_skipped_without_an_explicit_boolean_override(
+        self, tp: ModuleType, project: Path, overwrite_value: object
+    ) -> None:
+        entry: dict[str, object] = {"msgid": "Cash", "msgstr_suggested": "Bani"}
+        if overwrite_value is not None:
+            entry["overwrite"] = overwrite_value
+        review = _write_review(project / "review.yaml", [entry], records_context=True)
+
+        tp.cmd_apply(review)
+
+        assert _po_text(project) == ORIGINAL
+
+    @pytest.mark.parametrize(
+        "msgctxt,msgid",
+        [("unknown", "Cash"), ("revenue basis", "cash"), ("", "Cash")],
+    )
+    def test_overwrite_still_requires_an_exact_context_and_msgid(
+        self, tp: ModuleType, project: Path, msgctxt: str, msgid: str
+    ) -> None:
+        review = _write_review(
+            project / "review.yaml",
+            [{"msgctxt": msgctxt, "msgid": msgid, "msgstr_suggested": "Bani", "overwrite": True}],
+            records_context=True,
+        )
+
+        tp.cmd_apply(review, overwrite=True)
+
+        assert _po_text(project) == ORIGINAL
+
+    @pytest.mark.parametrize("msgctxt,msgid", [(["revenue basis"], "Cash"), (None, ["Cash"])])
+    def test_invalid_key_types_are_rejected_before_overwrite(
+        self, tp: ModuleType, project: Path, msgctxt: object, msgid: object
+    ) -> None:
+        review = _write_review(
+            project / "review.yaml",
+            [{"msgctxt": msgctxt, "msgid": msgid, "msgstr_suggested": "Bani", "overwrite": True}],
+            records_context=True,
+        )
+
+        with pytest.raises(SystemExit) as exc:
+            tp.cmd_apply(review)
+
+        assert exc.value.code == 1
+        assert _po_text(project) == ORIGINAL
+
+    def test_overwrite_cli_flag_reaches_apply(
+        self, tp: ModuleType, project: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        review = _write_review(
+            project / "review.yaml",
+            [{"msgid": "Cash", "msgstr_suggested": "Bani"}],
+            records_context=True,
+        )
+        monkeypatch.setattr(sys, "argv", ["translate_po.py", "apply", str(review), "--overwrite"])
+
+        tp.main()
+
+        assert _po_text(project) == ORIGINAL.replace(BARE_CASH, BARE_CASH.replace("Numerar", "Bani"))
+
+    def test_overwrite_still_validates_placeholders(self, tp: ModuleType, project: Path) -> None:
+        review = _write_review(
+            project / "review.yaml",
+            [{"msgid": "%(count)s invoice", "msgstr_suggested": ["factură", "facturi", "de facturi"]}],
+        )
+
+        with pytest.raises(SystemExit) as exc:
+            tp.cmd_apply(review, overwrite=True)
+
+        assert exc.value.code == 1
+        assert _po_text(project) == ORIGINAL
+
+
+class TestFuzzyOnItsOwnFlagLine:
+    @pytest.mark.parametrize(
+        "fuzzy_flags,remaining_flags",
+        [
+            ("#, fuzzy\n", ""),
+            ("#, fuzzy, no-wrap\n", "#, no-wrap\n"),
+            ("#, fuzzy, no-wrap\n#, fuzzy\n", "#, no-wrap\n"),
+        ],
+    )
+    def test_fuzzy_is_removed_from_whichever_flag_line_holds_it(
+        self, tp: ModuleType, project: Path, fuzzy_flags: str, remaining_flags: str
+    ) -> None:
+        split_flags = (
+            "#: apps/billing/views.py:90\n"
+            "#, python-format\n"
+            + fuzzy_flags
+            + 'msgid "Proforma %(number)s"\n'
+            'msgstr "Factura %(number)s"\n'
+        )
+        (project / PO_REL).write_bytes(_catalogue(REFUND, split_flags).encode("utf-8"))
+        review = _write_review(
+            project / "review.yaml", [{"msgid": "Proforma %(number)s", "msgstr_suggested": "Proformă %(number)s"}]
+        )
+
+        tp.cmd_apply(review)
+
+        expected = (
+            "#: apps/billing/views.py:90\n"
+            "#, python-format\n"
+            + remaining_flags
+            + 'msgid "Proforma %(number)s"\n'
+            'msgstr "Proformă %(number)s"\n'
+        )
+        assert _po_text(project) == _catalogue(REFUND, expected)
+
+
+class TestAtomicWrite:
+    def _review(self, project: Path) -> Path:
+        return _write_review(project / "review.yaml", [{"msgid": "Refund", "msgstr_suggested": "Rambursare"}])
+
+    def test_a_failed_flush_leaves_the_catalogue_whole_and_no_temp_files(self, tp, project, monkeypatch):
+        review = self._review(project)
+        before = sorted(p.name for p in (project / PO_REL).parent.iterdir())
+
+        def failing_fsync(fd: int) -> None:
+            raise OSError("disk full")
+
+        monkeypatch.setattr(os, "fsync", failing_fsync)
+
+        with pytest.raises(OSError, match="disk full"):
+            tp.cmd_apply(review)
+
+        assert _po_text(project) == ORIGINAL
+        assert sorted(p.name for p in (project / PO_REL).parent.iterdir()) == before
+
+    def test_a_reader_holding_the_old_catalogue_open_keeps_a_complete_copy(self, tp, project):
+        review = self._review(project)
+
+        with (project / PO_REL).open("rb") as reader:
+            tp.cmd_apply(review)
+            assert reader.read().decode("utf-8") == ORIGINAL
+
+        assert "Rambursare" in _po_text(project)
+
+    def test_file_mode_is_preserved(self, tp, project):
+        po = project / PO_REL
+        po.chmod(0o640)
+
+        tp.cmd_apply(self._review(project))
+
+        assert po.stat().st_mode & 0o777 == 0o640
+
+    def test_failed_replace_preserves_the_catalogue_and_cleans_up(
+        self, tp: ModuleType, project: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        po = project / PO_REL
+        before = sorted(path.name for path in po.parent.iterdir())
+
+        def failing_replace(source: Path, destination: Path) -> None:
+            assert source.parent == destination.parent == po.parent.resolve()
+            assert destination.read_bytes() == ORIGINAL.encode("utf-8")
+            raise OSError("replace failed")
+
+        monkeypatch.setattr(os, "replace", failing_replace)
+
+        with pytest.raises(OSError, match="replace failed"):
+            tp.cmd_apply(self._review(project))
+
+        assert _po_text(project) == ORIGINAL
+        assert sorted(path.name for path in po.parent.iterdir()) == before
+
+    def test_temp_catalogue_is_complete_and_synced_before_replace(
+        self, tp: ModuleType, project: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        po = project / PO_REL
+        expected = ORIGINAL.replace(REFUND, REFUND.replace('msgstr ""', 'msgstr "Rambursare"'))
+        events: list[str] = []
+        real_fsync = os.fsync
+        real_replace = os.replace
+
+        def observing_fsync(fd: int) -> None:
+            # Reading through a separate descriptor proves the buffered write was flushed.
+            temps = list(po.parent.glob(".django.po.*.tmp"))
+            assert len(temps) == 1
+            assert temps[0].read_bytes() == expected.encode("utf-8")
+            assert po.read_bytes() == ORIGINAL.encode("utf-8")
+            real_fsync(fd)
+            events.append("fsync")
+
+        def observing_replace(source: Path, destination: Path) -> None:
+            assert source.parent == destination.parent == po.parent.resolve()
+            assert source != destination
+            assert source.read_bytes() == expected.encode("utf-8")
+            assert destination.read_bytes() == ORIGINAL.encode("utf-8")
+            assert events == ["fsync"]
+            real_replace(source, destination)
+            events.append("replace")
+
+        monkeypatch.setattr(os, "fsync", observing_fsync)
+        monkeypatch.setattr(os, "replace", observing_replace)
+
+        tp.cmd_apply(self._review(project))
+
+        assert events == ["fsync", "replace"]
+        assert _po_text(project) == expected
+        assert sorted(path.name for path in po.parent.iterdir()) == ["django.po"]
