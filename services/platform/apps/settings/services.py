@@ -126,19 +126,23 @@ class SettingsService:
         Returns:
             Setting value or default
         """
-        # Cache first (ADR-0015 tier order). Sensitive settings are never written
-        # to the cache, so a cache hit is always safe to return directly.
+        # Shared cache entries describe committed state. Transactions must read
+        # their own writes and must never publish values that could roll back.
+        # Signal invalidation remains deferred until commit for other readers.
+        use_cache = transaction.get_connection(SystemSetting.objects.db).get_autocommit()
         cache_key = cls._get_cache_key(key)
-        cached_value = cache.get(cache_key, _CACHE_MISS, version=cls.CACHE_VERSION)
-        if cached_value is not _CACHE_MISS:
-            logger.debug("✅ [Settings] Cache hit for key: %s", key)
-            return cast("SettingValue", cached_value)
+        if use_cache:
+            cached_value = cache.get(cache_key, _CACHE_MISS, version=cls.CACHE_VERSION)
+            if cached_value is not _CACHE_MISS:
+                logger.debug("✅ [Settings] Cache hit for key: %s", key)
+                return cast("SettingValue", cached_value)
 
         try:
             setting = SystemSetting.objects.get(key=key)
         except SystemSetting.DoesNotExist:
             fallback_value = cls.DEFAULT_SETTINGS.get(key, default)
-            cache.set(cache_key, fallback_value, timeout=DEFAULT_FALLBACK_CACHE_TIMEOUT, version=cls.CACHE_VERSION)
+            if use_cache:
+                cache.set(cache_key, fallback_value, timeout=DEFAULT_FALLBACK_CACHE_TIMEOUT, version=cls.CACHE_VERSION)
             logger.warning("⚠️ [Settings] Using default for missing key: %s", key)
             return cast("SettingValue", fallback_value)
 
@@ -147,8 +151,9 @@ class SettingsService:
             return setting.get_typed_value()
 
         value = setting.get_typed_value()
-        cache.set(cache_key, value, timeout=cls.CACHE_TIMEOUT, version=cls.CACHE_VERSION)
-        logger.debug("⚡ [Settings] Database hit for key: %s (cached)", key)
+        if use_cache:
+            cache.set(cache_key, value, timeout=cls.CACHE_TIMEOUT, version=cls.CACHE_VERSION)
+        logger.debug("⚡ [Settings] Database hit for key: %s (cache enabled: %s)", key, use_cache)
         return value
 
     @classmethod
@@ -790,9 +795,9 @@ class SettingsService:
     @monitor_performance()
     def clear_all_cache(cls) -> None:
         """🧹 Clear all settings cache"""
-        # Get all setting keys from database
+        # Missing catalog rows can have cached defaults too.
         try:
-            keys = SystemSetting.objects.values_list("key", flat=True)
+            keys = cls.DEFAULT_SETTINGS.keys() | set(SystemSetting.objects.values_list("key", flat=True))
             cleared_count = 0
 
             for key in keys:

@@ -17,17 +17,36 @@ from __future__ import annotations
 
 import contextlib
 import logging
-from typing import Any
-from unittest import TestResult, TestSuite
+from typing import Any, override
+from unittest import TestCase as UnitTestCase
+from unittest import TestResult, TestSuite, TextTestResult
 
+from django.core.cache import caches
 from django.db import connection, connections
 from django.test.runner import DiscoverRunner
 
 logger = logging.getLogger(__name__)
 
 
+class CacheClearingTestResult(TextTestResult):
+    """Clear each cache alias before test setup; keep caching active within tests."""
+
+    @override
+    def startTest(self, test: UnitTestCase) -> None:
+        for backend in caches.all():
+            backend.clear()
+        super().startTest(test)
+
+
 class PostgreSQLSafeRunner(DiscoverRunner):
-    """DiscoverRunner with connection recovery for PostgreSQL test suites."""
+    """DiscoverRunner with connection recovery and cache isolation for serial CI."""
+
+    def get_resultclass(self) -> type[TextTestResult]:
+        """Preserve Django's SQL-debugging and debugger result behavior."""
+        result_class = super().get_resultclass()
+        if result_class is None:
+            return CacheClearingTestResult
+        return type("CacheClearingResult", (CacheClearingTestResult, result_class), {})
 
     def setup_test_environment(self, **kwargs: Any) -> None:
         """Set up test environment with connection safety patches."""
