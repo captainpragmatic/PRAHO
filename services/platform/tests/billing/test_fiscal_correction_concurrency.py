@@ -29,8 +29,6 @@ HOOK_LOGGER = "apps.billing.signals"
 
 
 class FiscalCorrectionPostgresConcurrencyTests(TransactionTestCase):
-    reset_sequences = True
-
     def setUp(self) -> None:
         if connection.vendor != "postgresql":
             self.skipTest("unique-index waits and aborted transactions require PostgreSQL")

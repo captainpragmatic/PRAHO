@@ -25,8 +25,6 @@ PASSWORD = "correct-horse-battery-staple"  # test fixture, not a credential
 
 
 class TokenSecondFactorPostgresConcurrencyTests(TransactionTestCase):
-    reset_sequences = True
-
     def setUp(self) -> None:
         if connection.vendor != "postgresql":
             self.skipTest("row-lock guarantees require PostgreSQL")

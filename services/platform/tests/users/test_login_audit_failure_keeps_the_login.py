@@ -27,8 +27,6 @@ def _failing_audit_write(*_args: object, **_kwargs: object) -> None:
 
 
 class LoginAuditFailureKeepsTheLoginTests(TransactionTestCase):
-    reset_sequences = True
-
     def setUp(self) -> None:
         if connection.vendor != "postgresql":
             self.skipTest("only PostgreSQL aborts a transaction on a failed statement")
