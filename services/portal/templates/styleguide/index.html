@@ -320,10 +320,10 @@
           Usage: <code class="text-green-400">{% verbatim %}{% input_field name="field" label="Label" %}{% endverbatim %}</code>
         </p>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl">
-          {% input_field "email" label="Email address" type="email" placeholder="user@example.com" icon_left="email" %}
+          {% input_field "email" label="Email address" input_type="email" placeholder="user@example.com" icon_left="email" %}
           {% input_field "domain" label="Domain name" placeholder="example.com" icon_left="domain" %}
-          {% input_field "password" label="Password" type="password" icon_left="lock" %}
-          {% input_field "notes" label="Notes" type="textarea" placeholder="Additional details..." %}
+          {% input_field "password" label="Password" input_type="password" icon_left="lock" %}
+          {% input_field "notes" label="Notes" input_type="textarea" placeholder="Additional details..." %}
           {% checkbox_field "agree" label="I agree to the terms and conditions" variant="primary" %}
         </div>
         <div class="max-w-2xl">
@@ -345,7 +345,7 @@
         </p>
         <div class="mt-4 p-4 rounded-lg bg-slate-700 border border-slate-600">
           <p class="text-xs text-slate-400 mb-2">Standard modal (HTML shell)</p>
-          <button type="button" data-action="modal-open-by-id" data-modal-id="modal-styleguide-modal-1" class="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded transition-colors">Open Modal</button>
+          {% button "Open Modal" size="sm" data_action="modal-open-by-id" attrs='data-modal-id="modal-styleguide-modal-1"' %}
           {% modal "styleguide-modal-1" "Modal Title" content="This is a sample modal body for styleguide verification." %}
         </div>
       </div>

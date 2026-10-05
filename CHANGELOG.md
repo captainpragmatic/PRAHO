@@ -37,6 +37,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The UI template tags no longer drop arguments they do not recognise. An unknown argument now
+  fails while developing and testing, and is logged in production. Templates that passed one
+  are fixed:
+  - Platform's draft invoice editor: "Add Line Item" works again, because its buttons now carry the
+    classes the page script looks them up by.
+  - The Virtualmin restore page renders: a corrupted first line and a bad breadcrumb call meant it
+    could not compile.
+  - The GDPR export row actions have visible labels.
+  - The Portal styleguide's email, password and notes fields have their real types.
 - Platform form fields now get the limits their templates already set. The TOTP code field keeps
   its 6-digit pattern, length and one-time-code autocomplete; TLD, registrar and product price
   fields keep their minimums, maximums and steps; text areas keep their rows. Platform's input

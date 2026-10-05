@@ -83,15 +83,16 @@ class CardHeaderTests(SimpleTestCase):
 class CardFooterTests(SimpleTestCase):
     """Tests card footer rendering."""
 
-    def test_footer_content_shown_when_has_footer(self) -> None:
-        result = _render('{% card has_footer=True footer="Footer text" %}')
+    def test_footer_content_shown_when_given(self) -> None:
+        # The tag derives `has_footer` from `footer`; it never took a `has_footer` argument.
+        result = _render('{% card footer="Footer text" %}')
         self.assertIn("Footer text", result)
 
     def test_footer_has_border_top(self) -> None:
-        result = _render('{% card has_footer=True footer="x" %}')
+        result = _render('{% card footer="x" %}')
         self.assertIn("border-t", result)
 
     def test_no_footer_section_by_default(self) -> None:
         result = _render("{% card %}")
-        # Footer div shouldn't render without has_footer
+        # No footer argument, no footer section
         self.assertNotIn("bg-slate-50", result)

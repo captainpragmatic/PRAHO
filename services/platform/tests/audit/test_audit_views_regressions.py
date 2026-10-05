@@ -947,6 +947,17 @@ class GDPRExportRequestsListTests(AuditViewsBaseTestCase):
         resp = self.client.get(reverse("audit:gdpr_export_requests_list"))
         self.assertEqual(resp.status_code, 200)
 
+    def test_the_row_actions_have_visible_labels(self):
+        """They were empty buttons whose only label was a `title` the button tag dropped."""
+        self._create_data_export(status="pending")
+        self._create_data_export(status="completed")
+        self._create_data_export(status="completed", expires_at=timezone.now() - timedelta(days=1))
+        self.client.login(email="staff@example.com", password="testpass123")
+        resp = self.client.get(reverse("audit:gdpr_export_requests_list"))
+        for label in ("Process Now", "Download Export", "Delete Expired"):
+            with self.subTest(label=label):
+                self.assertRegex(resp.content.decode(), rf"<(button|a)[^>]*class=\"ui-btn[^>]*>\s*(<[^>]+>\s*)*{label}")
+
     def test_with_filters(self):
         self._create_data_export()
         self.client.login(email="staff@example.com", password="testpass123")
