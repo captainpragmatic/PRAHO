@@ -71,15 +71,16 @@ class FinancialReportsScreenTests(BillingReportScreenTestCase):
     def test_the_all_time_total_is_rendered(self) -> None:
         """Counted, not merely found.
 
-        With a single month of data the all-time total and that month's revenue are the same
-        figure by definition, so the card and the row are indistinguishable by value. The count
-        is what separates them: delete either and this drops to one.
+        With a single month of data and no refunds, the fiscal and the cash figures agree, and the
+        all-time card and that month's row are the same figure by definition. Four places carry it:
+        the fiscal card, the cash card, and the month's fiscal and cash cells. Delete any one and
+        the count drops.
         """
         self._paid_invoices()
 
         response = self.client.get(reverse("billing:reports"))
 
-        self.assertContains(response, TOTAL_GROSS, count=2)
+        self.assertContains(response, TOTAL_GROSS, count=4)
 
     def test_the_monthly_series_is_rendered(self) -> None:
         """The series groups by `ExtractMonth` in the active timezone (Europe/Bucharest), so the
@@ -134,7 +135,7 @@ class VatReportPeriodTests(BillingReportScreenTestCase):
     def test_the_default_period_follows_the_local_calendar(self) -> None:
         """At 22:30 UTC on the 27th it is already the 28th in Bucharest.
 
-        `created_at__date` is evaluated in the configured time zone, so an invoice issued at
+        The fiscal date is the Romanian calendar date, so an invoice issued at
         that instant belongs to the 28th. A default period that ends on the UTC date stops at
         the 27th and the screen reports nothing for the current evening.
         """
@@ -145,6 +146,14 @@ class VatReportPeriodTests(BillingReportScreenTestCase):
 
         self.assertContains(response, TOTAL_VAT)
         self.assertEqual(response.context["end_date"].isoformat(), "2026-09-28")
+
+
+    def test_the_last_representable_end_date_falls_back_instead_of_failing(self) -> None:
+        """9999-12-31 parses, but the day after it does not exist; the period must not reach it."""
+        response = self.client.get(reverse("billing:vat_report"), {"end_date": "9999-12-31"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotEqual(response.context["end_date"], date.max)
 
 
 class MixedCurrencyReportTests(TestCase):
@@ -206,9 +215,9 @@ class MixedCurrencyReportTests(TestCase):
 class VatReportTimezoneBoundaryTests(BillingReportScreenTestCase):
     """The VAT report silently dropped everything issued "today" for three hours a night.
 
-    `end_date` defaulted to `timezone.now().date()` - a UTC date - while `created_at__date`
+    `end_date` defaulted to `timezone.now().date()` - a UTC date - while the period lookup
     resolves in the active timezone, which is `Europe/Bucharest`. Between 21:00 and 24:00 UTC
-    those two disagree, so an invoice issued at 01:00 Bucharest carried `created_at__date` of
+    those two disagree, so an invoice issued at 01:00 Bucharest carried a local date of
     tomorrow relative to a range that ended yesterday, and fell outside it.
 
     The screen showed an empty compliance report during exactly the window a Romanian
@@ -223,11 +232,18 @@ class VatReportTimezoneBoundaryTests(BillingReportScreenTestCase):
     UTC_EVENING = datetime(2026, 9, 25, 22, 32, tzinfo=UTC)
 
     def test_an_invoice_issued_after_local_midnight_is_still_reported(self) -> None:
+        """Dated by the issue instant now, not the creation instant: the VAT period is the fiscal date.
+
+        The window is the single local day, the 26th. The default window (1st to 26th) holds the UTC
+        date as well, so it could not tell a Bucharest date from a UTC one.
+        """
         self._paid_invoices()
-        Invoice.objects.filter(customer=self.customer).update(created_at=self.UTC_EVENING)
+        Invoice.objects.filter(customer=self.customer).update(issued_at=self.UTC_EVENING, tax_point_date=None)
 
         with patch.object(timezone, "now", return_value=self.UTC_EVENING):
-            response = self.client.get(reverse("billing:vat_report"))
+            response = self.client.get(
+                reverse("billing:vat_report"), {"start_date": "2026-09-26", "end_date": "2026-09-26"}
+            )
 
         self.assertContains(response, TOTAL_VAT, msg_prefix="collected VAT vanished across the UTC/local date boundary")
         self.assertContains(response, TOTAL_NET)

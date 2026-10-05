@@ -275,6 +275,8 @@ class FiscalCorrection(models.Model):
             models.Index(fields=["state", "created_at"], name="bill_fiscorr_state_created"),
             models.Index(fields=["original", "state"], name="bill_fiscorr_original_state"),
             models.Index(fields=["efactura_status", "created_at"], name="bill_fiscorr_efactura_created"),
+            # A sent credit note's VAT period.
+            models.Index(fields=["fiscal_date"], name="bill_fiscorr_fiscal_date"),
         )
         constraints: ClassVar[list[models.BaseConstraint]] = [
             models.CheckConstraint(

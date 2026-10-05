@@ -59,7 +59,7 @@ class StaffCurrencySummaryTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["stats"]["monthly_revenue_by_currency"], {"EUR": 13000, "RON": 7000})
-        card = self._card_text(response.content, "Monthly Revenue")
+        card = self._card_text(response.content, "Paid invoices this month")
         self.assertIn("130,00 EUR", card)
         self.assertIn("70,00 RON", card)
         self.assertNotIn("200,00 RON", card)

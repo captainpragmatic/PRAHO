@@ -73,22 +73,24 @@
   </div>
   {% endfor %}
 
-  <!-- Detailed VAT Report -->
-  {% if invoices %}
+  {% include "billing/partials/undated_corrections_warning.html" %}
+
+  <!-- Detailed VAT Report: every issued document on its fiscal date, credit notes as negative lines -->
+  {% if documents %}
   <div class="mt-8">
-    <h2 class="text-lg font-medium text-white mb-4">{% trans "Invoice Details" %}</h2>
+    <h2 class="text-lg font-medium text-white mb-4">{% trans "Document Details" %}</h2>
     <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg overflow-hidden">
       <table class="min-w-full divide-y divide-slate-700">
         <thead class="bg-slate-900">
           <tr>
             <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">
-              {% trans "Invoice" %}
+              {% trans "Document" %}
             </th>
             <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">
               {% trans "Customer" %}
             </th>
             <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">
-              {% trans "Date" %}
+              {% trans "Fiscal date" %}
             </th>
             <th class="px-6 py-3 text-right text-xs font-medium text-slate-400 uppercase tracking-wider">
               {% trans "Net Amount" %}
@@ -102,16 +104,21 @@
           </tr>
         </thead>
         <tbody class="bg-slate-800 divide-y divide-slate-700">
-          {% for invoice in invoices %}
+          {% for invoice in documents %}
           <tr>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-white">
               {{ invoice.display_number }}
+              {% if invoice.reverses_invoice %}
+              <span class="block text-xs text-amber-300">
+                {% blocktrans with number=invoice.reverses_invoice.display_number %}Credit note for {{ number }}{% endblocktrans %}
+              </span>
+              {% endif %}
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-white">
               {{ invoice.customer.name }}
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
-              {{ invoice.issued_at|date:"d.m.Y" }}
+              {{ invoice.fiscal_date|date:"d.m.Y" }}
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-white text-right">
               {{ invoice.subtotal_cents|cents_to_currency|romanian_currency:invoice.currency.code }}
@@ -130,7 +137,7 @@
   </div>
   {% else %}
   <div class="mt-8 text-center text-slate-500">
-    {% trans "No invoices found for the selected period" %}
+    {% trans "No documents found for the selected period" %}
   </div>
   {% endif %}
 </div>
