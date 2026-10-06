@@ -8,18 +8,21 @@ payment synchronization, and recurring order management.
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any, TypedDict
 
 from django.core.cache import cache
+from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
+from django.utils.translation import gettext as _
 from django_q.models import Schedule
 from django_q.tasks import async_task, schedule
 
 from apps.audit.services import AuditService
 from apps.billing.models import Payment
 from apps.billing.services import InvoiceService
+from apps.common.types import Result
 from apps.orders.models import Order
 from apps.orders.services import OrderService, StatusChangeData
 
@@ -400,19 +403,62 @@ def _add_updated_order_result(
     )
 
 
+@transaction.atomic
+def _cancel_unpaid_order_on_timeout(order: Order, now: datetime) -> Result[Order, str] | None:
+    """Check fresh payment and lifecycle state before cancelling an expired candidate."""
+    from apps.billing.models import Invoice, ProformaInvoice  # noqa: PLC0415  # ADR-0007
+
+    # Settlement locks its document before lock_document_context locks Orders.
+    # Lock the proforma first when both documents exist, matching conversion.
+    # Never acquire a newly linked document while already holding the Order lock.
+    proforma = (
+        ProformaInvoice.objects.select_for_update(of=("self",)).get(pk=order.proforma_id)
+        if order.proforma_id is not None
+        else None
+    )
+    invoice = (
+        Invoice.objects.select_for_update(of=("self",)).get(pk=order.invoice_id)
+        if order.invoice_id is not None
+        else None
+    )
+    locked_order = Order.objects.select_for_update(of=("self",)).get(pk=order.pk)
+    if (
+        locked_order.status != "awaiting_payment"
+        or locked_order.invoice_id != order.invoice_id
+        or locked_order.proforma_id != order.proforma_id
+        or (invoice is not None and invoice.status == "paid")
+        or (proforma is not None and proforma.status == "converted")
+        or (proforma is not None and Payment.objects.filter(proforma_id=proforma.pk, status="succeeded").exists())
+    ):
+        logger.info(
+            "✅ [OrderProcessor] Skipping timeout cancellation for %s: status, payment, or document changed (status=%s)",
+            locked_order.order_number,
+            locked_order.status,
+        )
+        return None
+
+    return OrderService.update_order_status(
+        locked_order,
+        StatusChangeData(
+            new_status="cancelled",
+            notes=_("[AUTO] Order cancelled due to timeout at %(timestamp)s") % {"timestamp": now},
+        ),
+    )
+
+
 def _handle_order_timeout(order: Order, now: Any, order_result: dict[str, Any], results: dict[str, Any]) -> bool:
-    """Handle order timeout logic."""
+    """Return whether an expired candidate was handled, including stale candidates."""
     deadline, timeout_basis = _order_timeout_deadline(order)
 
     if now <= deadline:
         return False
 
-    # Cancel timed out orders — route through service layer to create OrderStatusHistory
-    status_data = StatusChangeData(
-        new_status="cancelled",
-        notes=f"[AUTO] Order cancelled due to timeout at {now}",
-    )
-    result = OrderService.update_order_status(order, status_data)
+    # Keep the eligibility check and service-layer cancellation in one transaction.
+    result = _cancel_unpaid_order_on_timeout(order, now)
+    if result is None:
+        # Stop using cached documents; still-unconfirmed payments can use recovery below.
+        order.refresh_from_db()
+        return order.status != "awaiting_payment"
     if result.is_err():
         logger.warning(
             "⚠️ [OrderProcessor] Cannot cancel timed-out order %s from status %s: %s",

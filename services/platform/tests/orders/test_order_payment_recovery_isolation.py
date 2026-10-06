@@ -2,23 +2,28 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from decimal import Decimal
+from threading import Event
 from typing import cast
 from unittest.mock import patch
 
 from django.contrib.auth.models import AnonymousUser
 from django.core.cache import cache
-from django.db import DatabaseError, connection, transaction
+from django.db import DatabaseError, close_old_connections, connection, transaction
 from django.template.loader import render_to_string
 from django.test import RequestFactory, TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 from django.utils.translation import override
 
 from apps.audit.services import BusinessEventData
-from apps.billing.models import Currency, Invoice
+from apps.billing.models import Currency, Invoice, Payment
+from apps.billing.payment_convergence import PaymentSuccessService
 from apps.billing.proforma_models import ProformaInvoice
 from apps.billing.proforma_service import ProformaService, send_proforma_email
+from apps.billing.services import ProformaConversionService
 from apps.common.types import Err, Result
 from apps.common.utils import format_romanian_date
 from apps.customers.models import Customer
@@ -26,7 +31,7 @@ from apps.notifications.services import EmailResult
 from apps.orders import signals
 from apps.orders.models import Order, OrderItem
 from apps.orders.services import OrderPaymentConfirmationService, OrderService, StatusChangeData
-from apps.orders.tasks import _order_timeout_deadline, process_pending_orders
+from apps.orders.tasks import OrderProcessingResults, _order_timeout_deadline, process_pending_orders
 from apps.products.models import Product
 from apps.provisioning.models import Service, ServicePlan
 from apps.settings.services import SettingsService
@@ -55,6 +60,33 @@ def make_order(customer: Customer, currency: Currency, *, method: str = "card") 
     )
     force_status(order, "awaiting_payment")
     return order
+
+
+def make_timeout_payment_case(customer: Customer, currency: Currency) -> tuple[Order, Invoice, Payment]:
+    order = make_order(customer, currency)
+    proforma = ProformaInvoice.objects.create(
+        customer=customer,
+        currency=currency,
+        number="PRO-TIMEOUT-RACE",
+        total_cents=12100,
+        valid_until=timezone.now() + timedelta(days=1),
+    )
+    invoice = Invoice.objects.create(customer=customer, currency=currency, number="TIMEOUT-RACE", total_cents=12100)
+    force_status(invoice, "issued")
+    order.proforma = proforma
+    order.invoice = invoice
+    order.save(update_fields=["proforma", "invoice"])
+    Order.objects.filter(pk=order.pk).update(created_at=timezone.now() - timedelta(hours=25))
+    order.refresh_from_db()
+    payment = Payment.objects.create(
+        customer=customer,
+        currency=currency,
+        invoice=invoice,
+        amount_cents=12100,
+        payment_method="stripe",
+        gateway_txn_id="pi_timeout_race",
+    )
+    return order, invoice, payment
 
 
 @override_settings(DISABLE_AUDIT_SIGNALS=False)
@@ -202,6 +234,102 @@ class OrderRecoveryIsolationTests(TestCase):
             self.assertFalse(service.auto_renew)
 
 
+class OrderTimeoutPaymentRaceTests(TestCase):
+    def setUp(self) -> None:
+        self.customer, self.currency = prepare_case(self)
+        self.order, self.invoice, self.payment = make_timeout_payment_case(self.customer, self.currency)
+
+    def _pay_invoice(self) -> None:
+        result = PaymentSuccessService.converge_local_paid_document(self.payment.pk)
+        self.assertTrue(result.is_ok(), str(result))
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.status, "paid")
+
+    def _sweep_after(self, payment_effect: Callable[[], None]) -> OrderProcessingResults:
+        deadline = _order_timeout_deadline
+
+        def pay_after_read(candidate: Order) -> tuple[datetime, str]:
+            self.assertEqual(candidate.status, "awaiting_payment")
+            if candidate.invoice is not None:
+                self.assertEqual(candidate.invoice.status, "issued")
+            else:
+                assert candidate.proforma is not None
+                self.assertEqual(candidate.proforma.status, "draft")
+            payment_effect()
+            return deadline(candidate)
+
+        with patch("apps.orders.tasks._order_timeout_deadline", side_effect=pay_after_read):
+            outcome = process_pending_orders()
+        self.assertTrue(outcome["success"], str(outcome))
+        return cast(OrderProcessingResults, outcome["results"])
+
+    def _assert_not_cancelled(self, expected_status: str, results: OrderProcessingResults) -> None:
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, expected_status)
+        self.assertFalse(self.order.status_history.filter(new_status="cancelled").exists())
+        self.assertEqual(results["timed_out_orders"], 0)
+
+    def test_payment_confirmation_after_sweep_read_preserves_provisioning(self) -> None:
+        def confirm_payment() -> None:
+            self._pay_invoice()
+            result = OrderPaymentConfirmationService.confirm_order(self.order, invoice=self.invoice)
+            self.assertTrue(result.is_ok(), str(result))
+            self.assertEqual(result.unwrap().status, "provisioning")
+
+        results = self._sweep_after(confirm_payment)
+
+        self._assert_not_cancelled("provisioning", results)
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.status, "paid")
+        self.assertEqual(
+            list(self.order.status_history.order_by("created_at").values_list("old_status", "new_status")),
+            [("awaiting_payment", "paid"), ("paid", "provisioning")],
+        )
+
+    def test_paid_invoice_after_sweep_read_preserves_awaiting_payment(self) -> None:
+        # Proforma-linked orders are confirmed separately after settlement.
+        results = self._sweep_after(self._pay_invoice)
+
+        self._assert_not_cancelled("awaiting_payment", results)
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.status, "paid")
+
+    def test_converted_proforma_after_sweep_read_is_not_cancelled(self) -> None:
+        def convert_proforma() -> None:
+            result = ProformaConversionService.convert_to_invoice(str(self.order.proforma_id))
+            self.assertTrue(result.is_ok(), str(result))
+
+        results = self._sweep_after(convert_proforma)
+
+        self._assert_not_cancelled("awaiting_payment", results)
+        assert self.order.proforma is not None
+        self.assertEqual(self.order.proforma.status, "converted")
+
+    def test_succeeded_proforma_payment_after_sweep_read_is_not_cancelled(self) -> None:
+        self.order.invoice = None
+        self.order.save(update_fields=["invoice"])
+        self.payment.invoice = None
+        self.payment.proforma = self.order.proforma
+        self.payment.save(update_fields=["invoice", "proforma"])
+
+        def confirm_gateway_payment() -> None:
+            assert self.payment.gateway_txn_id is not None
+            result = PaymentSuccessService.converge_gateway_success(
+                self.payment.gateway_txn_id, {"amount_received": 12100, "currency": "ron"}
+            )
+            self.assertTrue(result.is_ok(), str(result))
+
+        results = self._sweep_after(confirm_gateway_payment)
+
+        self._assert_not_cancelled("awaiting_payment", results)
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, "succeeded")
+        assert self.order.proforma is not None
+        self.assertEqual(self.order.proforma.status, "converted")
+        assert self.order.invoice is not None
+        self.assertEqual(self.order.invoice.status, "paid")
+
+
 class BankTransferDeadlineTests(TestCase):
     def setUp(self) -> None:
         self.customer, self.currency = prepare_case(self)
@@ -315,3 +443,57 @@ class OrderAuditPostgresIsolationTests(TransactionTestCase):
         with connection.cursor() as cursor:
             cursor.execute("SELECT 1")
             self.assertEqual(cursor.fetchone(), (1,))
+
+    def test_confirmation_commits_between_sweep_read_and_timeout_cancellation(self) -> None:
+        order, invoice, payment = make_timeout_payment_case(self.customer, self.currency)
+        candidate_read = Event()
+        resume_timeout = Event()
+        deadline = _order_timeout_deadline
+
+        def park_after_read(candidate: Order) -> tuple[datetime, str]:
+            self.assertEqual(candidate.status, "awaiting_payment")
+            assert candidate.invoice is not None
+            self.assertEqual(candidate.invoice.status, "issued")
+            candidate_read.set()
+            if not resume_timeout.wait(timeout=10):
+                raise AssertionError("Payment confirmation did not release the timeout sweep")
+            return deadline(candidate)
+
+        def sweep() -> OrderProcessingResults:
+            close_old_connections()
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute("SET lock_timeout = '3s'")
+                    cursor.execute("SET statement_timeout = '5s'")
+                outcome = process_pending_orders()
+                self.assertTrue(outcome["success"], str(outcome))
+                return cast(OrderProcessingResults, outcome["results"])
+            finally:
+                connection.close()
+
+        with (
+            patch("apps.orders.tasks._order_timeout_deadline", side_effect=park_after_read),
+            ThreadPoolExecutor(max_workers=1) as executor,
+        ):
+            pending = executor.submit(sweep)
+            try:
+                self.assertTrue(candidate_read.wait(timeout=10), "Sweep did not read the unpaid candidate")
+                with transaction.atomic():
+                    settled = PaymentSuccessService.converge_local_paid_document(payment.pk)
+                    self.assertTrue(settled.is_ok(), str(settled))
+                    confirmed = OrderPaymentConfirmationService.confirm_order(order, invoice=invoice)
+                    self.assertTrue(confirmed.is_ok(), str(confirmed))
+                    self.assertEqual(confirmed.unwrap().status, "provisioning")
+                # The payment and confirmation have committed on the other connection.
+            finally:
+                resume_timeout.set()
+            results = pending.result(timeout=10)
+
+        order.refresh_from_db()
+        invoice.refresh_from_db()
+        payment.refresh_from_db()
+        self.assertEqual(order.status, "provisioning")
+        self.assertEqual(invoice.status, "paid")
+        self.assertEqual(payment.status, "succeeded")
+        self.assertFalse(order.status_history.filter(new_status="cancelled").exists())
+        self.assertEqual(results["timed_out_orders"], 0)
