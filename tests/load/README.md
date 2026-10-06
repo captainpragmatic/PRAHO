@@ -6,7 +6,7 @@ the main listing pages by weight.
 | File | What it is |
 |---|---|
 | `locustfile.py` | One `StaffUser` class. It validates its login, then every response |
-| `scenarios.py` | The pages and their weights, with no Locust import |
+| `scenarios.py` | The pages and their weights, and the verdict on each response, with no Locust import |
 
 `services/platform/tests/common/test_load_test_scenarios.py` checks that every page in `scenarios.py`
 exists, sits behind the staff login, and renders for staff. A renamed route therefore fails a unit
@@ -44,7 +44,15 @@ if not User.objects.filter(email='loadtest_staff@test.ro').exists():
 "
 ```
 
-`LOCUST_EMAIL` and `LOCUST_PASSWORD` default to that account.
+`LOCUST_EMAIL` and `LOCUST_PASSWORD` default to that account. Give it the `admin` role. A narrower
+role (support, say) is redirected away from pages it may not see, such as the billing listings, and
+each such request is recorded as a failure.
+
+**Login rate limits.** `make dev` enforces them: 8 login POSTs a minute per email, and 15 a minute per
+IP. Every Locust user logs in with the same account from the same machine, so beyond about 8 users
+most logins get a 429 and those users stop. For larger runs, use the E2E stack, which disables rate
+limiting, or start an isolated local platform with `RATE_LIMITING_ENABLED=false make dev`. Never
+disable it on a shared or production server.
 
 ## Running Load Tests
 
@@ -90,5 +98,8 @@ Their numbers show regressions between two runs on the same machine, not product
    the page the login ended on.
 2. **"redirected to the login page" failures**: the session was lost mid-run. Check the session
    settings and the server log.
-3. **Connection refused**: nothing is serving `:8700`. Start `make dev` or `make dev-e2e-bg`.
-4. **Slow pages**: check database performance and N+1 queries for the named page.
+3. **"redirected to /dashboard/" failures**: the account lacks the page's role. Use an `admin` staff
+   account.
+4. **Most users stop at login with 429s**: login rate limiting; see Setup.
+5. **Connection refused**: nothing is serving `:8700`. Start `make dev` or `make dev-e2e-bg`.
+6. **Slow pages**: check database performance and N+1 queries for the named page.

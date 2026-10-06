@@ -19,7 +19,7 @@ _LOAD_DIR = str(Path(__file__).resolve().parents[4] / "tests" / "load")
 if _LOAD_DIR not in sys.path:
     sys.path.insert(0, _LOAD_DIR)
 
-from scenarios import BROWSING  # noqa: E402
+from scenarios import BROWSING, page_failure  # noqa: E402
 
 
 class LoadTestScenarioTests(TestCase):
@@ -43,3 +43,22 @@ class LoadTestScenarioTests(TestCase):
                 response = self.client.get(path)
                 self.assertEqual(response.status_code, 200, path)
                 self.assertTrue(response.content.strip(), path)
+
+
+class LoadTestPageVerdictTests(TestCase):
+    """A 200 only counts as the requested page if the response did not redirect elsewhere."""
+
+    def test_the_requested_page_counts(self) -> None:
+        self.assertIsNone(page_failure("/billing/invoices/", 200, "http://localhost:8700/billing/invoices/?page=1"))
+
+    def test_a_role_redirect_to_the_dashboard_is_a_failure(self) -> None:
+        problem = page_failure("/billing/invoices/", 200, "http://localhost:8700/dashboard/")
+        self.assertIsNotNone(problem)
+        self.assertIn("/dashboard/", problem)
+
+    def test_a_lost_session_is_a_failure(self) -> None:
+        problem = page_failure("/customers/", 200, "http://localhost:8700/auth/login/?next=/customers/")
+        self.assertIn("session was lost", problem)
+
+    def test_an_error_status_is_a_failure(self) -> None:
+        self.assertIn("500", page_failure("/orders/", 500, "http://localhost:8700/orders/"))

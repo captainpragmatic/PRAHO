@@ -6,9 +6,10 @@
 Usage (Platform on :8700; see tests/load/README.md):
     LOCUST_EMAIL=... LOCUST_PASSWORD=... uvx locust -f tests/load/locustfile.py --host=http://localhost:8700
 
-Every login and every page is validated, not just its status code. A failed login, or a response that
-lands back on the login page, is recorded as a Locust failure, because a redirect to the login form
-returns 200 and would otherwise count as success. The account must be staff with no second factor
+Every login and every page is validated, not just its status code. A failed login, or a page that
+redirects anywhere else (the login page, or the dashboard when the account lacks the page's role), is
+recorded as a Locust failure, because the page a redirect lands on answers 200 and would otherwise
+count as success. The account must be staff with no second factor
 enrolled; a staff login with 2FA stops at the code page and the user is stopped.
 
 The pages are in `scenarios.py`; a unit test checks each one exists and renders for staff.
@@ -27,9 +28,8 @@ from locust import HttpUser, between, task
 from locust.exception import StopUser
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from scenarios import BROWSING
+from scenarios import BROWSING, LOGIN_PATH, page_failure
 
-LOGIN_PATH = "/auth/login/"
 DASHBOARD_PATH = "/dashboard/"
 _CSRF_TOKEN = re.compile(r'name="csrfmiddlewaretoken" value="([^"]+)"')
 _NAMES, _PATHS, _WEIGHTS = zip(*BROWSING, strict=True)
@@ -64,7 +64,5 @@ class StaffUser(HttpUser):
     def browse(self) -> None:
         index = random.choices(range(len(_PATHS)), weights=_WEIGHTS)[0]  # noqa: S311  # load mix, not security
         with self.client.get(_PATHS[index], name=_NAMES[index], catch_response=True) as response:
-            if response.status_code != 200:
-                response.failure(f"{_PATHS[index]} answered {response.status_code}")
-            elif urlparse(response.url).path == LOGIN_PATH:
-                response.failure(f"{_PATHS[index]} redirected to the login page: the session was lost")
+            if problem := page_failure(_PATHS[index], response.status_code, response.url):
+                response.failure(problem)
