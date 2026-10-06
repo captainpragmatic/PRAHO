@@ -1,330 +1,70 @@
 # ===============================================================================
 # LOAD TESTING CONFIGURATION FOR PRAHO PLATFORM
 # ===============================================================================
-"""
-Load testing using Locust for PRAHO Platform.
+"""Load test for the PRAHO staff Platform: logged-in staff browsing the listing pages.
 
-Usage (Platform on :8700 via `make dev`; see tests/load/README.md):
-    uvx locust -f tests/load/locustfile.py --host=http://localhost:8700
+Usage (Platform on :8700; see tests/load/README.md):
+    LOCUST_EMAIL=... LOCUST_PASSWORD=... uvx locust -f tests/load/locustfile.py --host=http://localhost:8700
 
-    # Run with specific user count and spawn rate
-    uvx locust -f tests/load/locustfile.py --host=http://localhost:8700 --users=100 --spawn-rate=10
+Every login and every page is validated, not just its status code. A failed login, or a response that
+lands back on the login page, is recorded as a Locust failure, because a redirect to the login form
+returns 200 and would otherwise count as success. The account must be staff with no second factor
+enrolled; a staff login with 2FA stops at the code page and the user is stopped.
 
-    # Run headless
-    uvx locust -f tests/load/locustfile.py --host=http://localhost:8700 --headless -u 100 -r 10 -t 5m
-
-Known stale: logins post `username` (the form takes `email`) and most `/app/<section>/` routes no
-longer exist. The README's "Current state" section has the details; fix those before trusting a run.
+The pages are in `scenarios.py`; a unit test checks each one exists and renders for staff.
 """
 
+from __future__ import annotations
+
+import os
 import random
-import string
-from locust import HttpUser, task, between, tag
+import re
+import sys
+from pathlib import Path
+from urllib.parse import urlparse
+
+from locust import HttpUser, between, task
+from locust.exception import StopUser
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from scenarios import BROWSING
+
+LOGIN_PATH = "/auth/login/"
+DASHBOARD_PATH = "/dashboard/"
+_CSRF_TOKEN = re.compile(r'name="csrfmiddlewaretoken" value="([^"]+)"')
+_NAMES, _PATHS, _WEIGHTS = zip(*BROWSING, strict=True)
 
 
-class PRAHOWebUser(HttpUser):
-    """Simulates regular web users accessing the platform"""
+class StaffUser(HttpUser):
+    """A staff member who logs in once, then browses the listing pages by weight."""
 
-    wait_time = between(1, 5)  # Wait 1-5 seconds between tasks
+    wait_time = between(1, 5)
 
-    def on_start(self):
-        """Login when user starts"""
-        self.login()
+    def on_start(self) -> None:
+        email = os.environ.get("LOCUST_EMAIL", "loadtest_staff@test.ro")
+        password = os.environ.get("LOCUST_PASSWORD", "LoadTest123!")
+        form = self.client.get(LOGIN_PATH, name="login form")
+        token = _CSRF_TOKEN.search(form.text)
+        with self.client.post(
+            LOGIN_PATH,
+            data={"email": email, "password": password, "csrfmiddlewaretoken": token.group(1) if token else ""},
+            headers={"Referer": f"{self.host}{LOGIN_PATH}"},
+            name="login",
+            catch_response=True,
+        ) as response:
+            landed = urlparse(response.url).path
+            if landed != DASHBOARD_PATH:
+                response.failure(
+                    f"login as {email} ended at {landed}, not {DASHBOARD_PATH}: wrong credentials, or the account "
+                    "has 2FA enrolled (use a staff account without a second factor)"
+                )
+                raise StopUser()
 
-    def login(self):
-        """Authenticate user"""
-        # Get CSRF token
-        response = self.client.get("/auth/login/")
-        if response.status_code == 200:
-            # Extract CSRF token from response
-            csrf_token = self._extract_csrf_token(response.text)
-            if csrf_token:
-                self.csrf_token = csrf_token
-                # Attempt login
-                self.client.post("/auth/login/", {
-                    "username": "loadtest_user",
-                    "password": "LoadTest123!",
-                    "csrfmiddlewaretoken": csrf_token,
-                })
-
-    def _extract_csrf_token(self, html: str) -> str | None:
-        """Extract CSRF token from HTML"""
-        import re
-        match = re.search(r'name="csrfmiddlewaretoken" value="([^"]+)"', html)
-        return match.group(1) if match else None
-
-    @task(10)
-    @tag("dashboard")
-    def view_dashboard(self):
-        """View main dashboard - high frequency"""
-        self.client.get("/app/")
-
-    @task(8)
-    @tag("customers")
-    def list_customers(self):
-        """List customers page"""
-        self.client.get("/app/customers/")
-
-    @task(5)
-    @tag("customers")
-    def search_customers(self):
-        """Search customers via HTMX"""
-        search_terms = ["test", "SRL", "bucuresti", "hosting", "domain"]
-        term = random.choice(search_terms)
-        self.client.get(
-            f"/app/customers/search/?q={term}",
-            headers={"HX-Request": "true"}
-        )
-
-    @task(6)
-    @tag("orders")
-    def list_orders(self):
-        """List orders page"""
-        self.client.get("/app/orders/")
-
-    @task(4)
-    @tag("orders")
-    def filter_orders(self):
-        """Filter orders by status"""
-        statuses = ["draft", "pending", "confirmed", "completed"]
-        status = random.choice(statuses)
-        self.client.get(f"/app/orders/?status={status}")
-
-    @task(7)
-    @tag("billing")
-    def list_invoices(self):
-        """List invoices page"""
-        self.client.get("/app/billing/")
-
-    @task(3)
-    @tag("billing")
-    def view_invoice_pdf(self):
-        """View invoice PDF (simulated with random ID)"""
-        # This would need actual invoice IDs in production
-        pass
-
-    @task(5)
-    @tag("products")
-    def list_products(self):
-        """List products page"""
-        self.client.get("/app/products/")
-
-    @task(4)
-    @tag("tickets")
-    def list_tickets(self):
-        """List support tickets"""
-        self.client.get("/app/tickets/")
-
-
-class PRAHOAPIUser(HttpUser):
-    """Simulates API users making programmatic requests"""
-
-    wait_time = between(0.5, 2)  # Faster API requests
-
-    @task(10)
-    @tag("api")
-    def api_customers_list(self):
-        """API: List customers"""
-        self.client.get(
-            "/api/customers/",
-            headers={"Accept": "application/json"}
-        )
-
-    @task(5)
-    @tag("api")
-    def api_customer_search(self):
-        """API: Search customers"""
-        search_terms = ["test", "company", "hosting"]
-        term = random.choice(search_terms)
-        self.client.get(
-            f"/api/customers/?search={term}",
-            headers={"Accept": "application/json"}
-        )
-
-    @task(8)
-    @tag("api")
-    def api_orders_list(self):
-        """API: List orders"""
-        self.client.get(
-            "/api/orders/",
-            headers={"Accept": "application/json"}
-        )
-
-    @task(6)
-    @tag("api")
-    def api_invoices_list(self):
-        """API: List invoices"""
-        self.client.get(
-            "/api/billing/",
-            headers={"Accept": "application/json"}
-        )
-
-
-class PRAHOHeavyUser(HttpUser):
-    """Simulates users performing heavy operations"""
-
-    wait_time = between(5, 15)  # Longer wait for heavy operations
-
-    @task(3)
-    @tag("heavy", "reports")
-    def generate_report(self):
-        """Generate analytics report"""
-        self.client.get("/app/audit/")
-
-    @task(2)
-    @tag("heavy", "export")
-    def export_customers(self):
-        """Export customers to CSV"""
-        self.client.get("/app/customers/export/")
-
-    @task(2)
-    @tag("heavy", "pdf")
-    def generate_multiple_pdfs(self):
-        """Generate multiple invoice PDFs"""
-        # Simulated batch PDF generation
-        pass
-
-
-class PRAHOStaffUser(HttpUser):
-    """Simulates staff performing administrative tasks"""
-
-    wait_time = between(2, 8)
-
-    def on_start(self):
-        """Login as staff"""
-        self.login_staff()
-
-    def login_staff(self):
-        """Authenticate as staff user"""
-        response = self.client.get("/auth/login/")
-        if response.status_code == 200:
-            csrf_token = self._extract_csrf_token(response.text)
-            if csrf_token:
-                self.client.post("/auth/login/", {
-                    "username": "loadtest_staff",
-                    "password": "LoadTest123!",
-                    "csrfmiddlewaretoken": csrf_token,
-                })
-
-    def _extract_csrf_token(self, html: str) -> str | None:
-        """Extract CSRF token from HTML"""
-        import re
-        match = re.search(r'name="csrfmiddlewaretoken" value="([^"]+)"', html)
-        return match.group(1) if match else None
-
-    @task(5)
-    @tag("admin")
-    def view_audit_log(self):
-        """View audit log"""
-        self.client.get("/app/audit/")
-
-    @task(4)
-    @tag("admin")
-    def view_system_settings(self):
-        """View system settings"""
-        self.client.get("/app/settings/")
-
-    @task(3)
-    @tag("admin")
-    def view_user_management(self):
-        """View user management"""
-        self.client.get("/users/")
-
-    @task(6)
-    @tag("admin", "customers")
-    def manage_customers(self):
-        """Staff customer management"""
-        self.client.get("/app/customers/")
-
-    @task(5)
-    @tag("admin", "orders")
-    def manage_orders(self):
-        """Staff order management"""
-        self.client.get("/app/orders/")
-
-    @task(4)
-    @tag("admin", "provisioning")
-    def view_provisioning(self):
-        """View provisioning status"""
-        self.client.get("/app/provisioning/")
-
-
-class PRAHOMixedUser(HttpUser):
-    """Simulates realistic mixed usage patterns"""
-
-    wait_time = between(1, 10)
-
-    def on_start(self):
-        """Login when user starts"""
-        self.login()
-
-    def login(self):
-        """Authenticate user"""
-        response = self.client.get("/auth/login/")
-        if response.status_code == 200:
-            csrf_token = self._extract_csrf_token(response.text)
-            if csrf_token:
-                self.client.post("/auth/login/", {
-                    "username": "loadtest_user",
-                    "password": "LoadTest123!",
-                    "csrfmiddlewaretoken": csrf_token,
-                })
-
-    def _extract_csrf_token(self, html: str) -> str | None:
-        """Extract CSRF token from HTML"""
-        import re
-        match = re.search(r'name="csrfmiddlewaretoken" value="([^"]+)"', html)
-        return match.group(1) if match else None
-
-    @task(20)
-    def browse_dashboard(self):
-        """Most common: view dashboard"""
-        self.client.get("/app/")
-
-    @task(15)
-    def browse_customers(self):
-        """View customer list"""
-        self.client.get("/app/customers/")
-
-    @task(12)
-    def browse_orders(self):
-        """View order list"""
-        self.client.get("/app/orders/")
-
-    @task(10)
-    def browse_invoices(self):
-        """View invoice list"""
-        self.client.get("/app/billing/")
-
-    @task(8)
-    def browse_products(self):
-        """View product catalog"""
-        self.client.get("/app/products/")
-
-    @task(6)
-    def browse_tickets(self):
-        """View support tickets"""
-        self.client.get("/app/tickets/")
-
-    @task(4)
-    def search_htmx(self):
-        """Perform HTMX search"""
-        endpoints = [
-            "/app/customers/search/",
-            "/app/orders/search/",
-        ]
-        endpoint = random.choice(endpoints)
-        self.client.get(
-            f"{endpoint}?q=test",
-            headers={"HX-Request": "true"}
-        )
-
-    @task(2)
-    def view_proformas(self):
-        """View proforma invoices"""
-        self.client.get("/app/billing/proforma/")
-
-    @task(1)
-    def view_domains(self):
-        """View domain management"""
-        self.client.get("/app/domains/")
+    @task
+    def browse(self) -> None:
+        index = random.choices(range(len(_PATHS)), weights=_WEIGHTS)[0]  # noqa: S311  # load mix, not security
+        with self.client.get(_PATHS[index], name=_NAMES[index], catch_response=True) as response:
+            if response.status_code != 200:
+                response.failure(f"{_PATHS[index]} answered {response.status_code}")
+            elif urlparse(response.url).path == LOGIN_PATH:
+                response.failure(f"{_PATHS[index]} redirected to the login page: the session was lost")
