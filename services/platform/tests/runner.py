@@ -22,6 +22,7 @@ from unittest import TestCase as UnitTestCase
 from unittest import TestResult, TestSuite, TextTestResult
 
 from django.core.cache import caches
+from django.core.cache.backends.locmem import LocMemCache
 from django.db import connection, connections
 from django.test.runner import DiscoverRunner
 
@@ -29,12 +30,18 @@ logger = logging.getLogger(__name__)
 
 
 class CacheClearingTestResult(TextTestResult):
-    """Clear each cache alias before test setup; keep caching active within tests."""
+    """Clear in-process caches before test setup without interrupting the run."""
 
     @override
     def startTest(self, test: UnitTestCase) -> None:
+        # Settings overrides reset handlers, but named LocMem stores survive.
+        # Include uninitialized aliases so those stores are cleared as well.
         for backend in caches.all():
-            backend.clear()
+            if isinstance(backend, LocMemCache):
+                try:
+                    backend.clear()
+                except Exception:
+                    logger.warning("Failed to clear LocMem cache before %s", test.id(), exc_info=True)
         super().startTest(test)
 
 

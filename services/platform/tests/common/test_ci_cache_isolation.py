@@ -4,14 +4,15 @@ from __future__ import annotations
 
 from io import StringIO
 from unittest import TestCase as UnitTestCase
-from unittest import TestSuite
+from unittest import TestSuite, TextTestRunner
 from unittest.mock import patch
 
 from django.core.cache import caches
-from django.test import SimpleTestCase, override_settings
+from django.db import connection
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.test.runner import DebugSQLTextTestResult, PDBDebugResult
 
-from tests.runner import PostgreSQLSafeRunner
+from tests.runner import CacheClearingTestResult, PostgreSQLSafeRunner
 
 TEST_CACHES = {
     alias: {"BACKEND": "django.core.cache.backends.locmem.LocMemCache", "LOCATION": f"ci-isolation-{alias}"}
@@ -56,11 +57,15 @@ class CICacheIsolationTests(SimpleTestCase):
             with self.subTest(options=options):
                 for backend in caches.all():
                     backend.set("previous-test", True)
-                result_class = PostgreSQLSafeRunner(verbosity=0, **options).get_resultclass()
+                result_class = PostgreSQLSafeRunner(
+                    verbosity=0,
+                    debug_sql=options.get("debug_sql", False),
+                    pdb=options.get("pdb", False),
+                ).get_resultclass()
                 self.assertIsNotNone(result_class)
                 if result_class is None:
                     self.fail("CI runner must provide a cache-isolating result class")
-                result = result_class(StringIO(), False, 0)
+                result = result_class(TextTestRunner(stream=StringIO()).stream, False, 0)
                 self.assertIsInstance(result, expected_class)
 
                 result.startTest(UnitTestCase())
@@ -68,7 +73,67 @@ class CICacheIsolationTests(SimpleTestCase):
                 for backend in caches.all():
                     self.assertIsNone(backend.get("previous-test"))
 
+    def test_cache_clear_failure_does_not_abort_or_skip_other_locmem_caches(self) -> None:
+        default_cache = caches["default"]
+        secondary_cache = caches["secondary"]
+        secondary_cache.set("previous-test", True)
+        result = CacheClearingTestResult(TextTestRunner(stream=StringIO()).stream, False, 0)
+
+        with (
+            patch.object(default_cache, "clear", side_effect=RuntimeError("cache clear failed")) as clear_default,
+            self.assertLogs("tests.runner", level="WARNING"),
+        ):
+            result.startTest(UnitTestCase())
+
+        clear_default.assert_called_once_with()
+        self.assertEqual(result.testsRun, 1)
+        self.assertEqual(result.errors, [])
+        self.assertIsNone(secondary_cache.get("previous-test"))
+
+    def test_locmem_store_is_cleared_after_settings_reset_cache_handlers(self) -> None:
+        for backend in caches.all():
+            backend.set("previous-test", True)
+
+        with override_settings(CACHES=TEST_CACHES):
+            self.assertEqual(caches.all(initialized_only=True), [])
+            result = CacheClearingTestResult(TextTestRunner(stream=StringIO()).stream, False, 0)
+
+            result.startTest(UnitTestCase())
+
+            self.assertEqual(result.testsRun, 1)
+            for backend in caches.all():
+                self.assertIsNone(backend.get("previous-test"))
+
     @staticmethod
     def _clear_caches() -> None:
         for backend in caches.all():
             backend.clear()
+
+
+@override_settings(
+    CACHES={
+        **TEST_CACHES,
+        "database": {
+            "BACKEND": "django.core.cache.backends.db.DatabaseCache",
+            "LOCATION": "ci_missing_cache_table",
+        },
+    }
+)
+class CIDatabaseCacheIsolationTests(TestCase):
+    def test_start_test_skips_missing_database_cache_table_and_clears_locmem(self) -> None:
+        self.assertNotIn("ci_missing_cache_table", connection.introspection.table_names())
+        database_cache = caches["database"]
+        for alias in TEST_CACHES:
+            backend = caches[alias]
+            self.addCleanup(backend.clear)
+            backend.set("previous-test", True)
+        result = CacheClearingTestResult(TextTestRunner(stream=StringIO()).stream, False, 0)
+
+        with patch.object(database_cache, "clear", wraps=database_cache.clear) as clear_database:
+            result.startTest(UnitTestCase())
+
+        clear_database.assert_not_called()
+        self.assertEqual(result.testsRun, 1)
+        self.assertEqual(result.errors, [])
+        for alias in TEST_CACHES:
+            self.assertIsNone(caches[alias].get("previous-test"))
