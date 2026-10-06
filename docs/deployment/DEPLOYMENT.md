@@ -408,7 +408,7 @@ The database starts empty — no users exist. Create a superuser on the server:
 ssh root@<server-ip>
 cd /opt/praho/src
 sudo -u praho bash -c 'set -a && source /opt/praho/.env && set +a && \
-  source /opt/praho/.venv/bin/activate && \
+  source /opt/praho/.venv-linux/bin/activate && \
   python services/platform/manage.py createsuperuser --email admin@pragmatichost.com'
 ```
 
