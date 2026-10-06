@@ -133,7 +133,7 @@ class StaffCurrencySummaryTests(TestCase):
         SystemSetting.objects.filter(key="billing.default_currency").update(value="EUR")
         response = self.client.get("/provisioning/plans/")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.context["currency"], "EUR")
+        self.assertEqual(response.context["selling_currency"], "EUR")
         self.assertContains(response, "9,99 EUR")
         self.assertContains(response, unpriced.name)
         self.assertContains(response, "Price unavailable")
