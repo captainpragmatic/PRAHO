@@ -82,7 +82,15 @@
               </tr>
             {% endwith %}
           {% empty %}
-            <tr><td colspan="4" class="px-4 py-6 text-center text-slate-400">{% trans "No accounts match this filter." %}</td></tr>
+            <tr>
+              <td colspan="4" class="px-4 py-6 text-center text-slate-400">
+                {% if too_many %}
+                  {% blocktrans with count=too_many limit=account_limit %}{{ count }} accounts match this filter. Narrow it to {{ limit }} or fewer to act on them.{% endblocktrans %}
+                {% else %}
+                  {% trans "No accounts match this filter." %}
+                {% endif %}
+              </td>
+            </tr>
           {% endfor %}
         </tbody>
       </table>

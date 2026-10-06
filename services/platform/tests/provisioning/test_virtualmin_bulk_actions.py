@@ -101,6 +101,19 @@ class BulkPageRendersTests(_BulkBase):
 
         self.assertEqual(set(response.context["selected_ids"]), {str(self.account.pk), str(self.second.pk)})
 
+    def test_a_filter_matching_too_many_accounts_lists_none(self) -> None:
+        """Every listed account is a checkbox field, and Django refuses a POST of more than
+        1,000 fields before any validation. So the page lists none over its cap and asks for
+        a narrower filter, rather than offer a selection it cannot accept.
+        """
+        with patch("apps.provisioning.virtualmin_views.BULK_ACCOUNT_LIMIT", 1, create=True):
+            response = self.client.get(reverse(BULK))
+
+        self.assertEqual(response.status_code, 200)
+        for account in (self.account, self.second):
+            self.assertNotContains(response, f'value="{account.pk}"')
+        self.assertEqual(response.context["too_many"], 2)
+
     def test_a_malformed_server_filter_is_a_bad_request(self) -> None:
         """FAILS on master: an invalid filter must answer 400, not 500."""
         response = self.client.get(reverse(BULK), {"server": "not-a-server"})

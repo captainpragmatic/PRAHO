@@ -68,6 +68,8 @@ def _get_user_email(user: User | AnonymousUser) -> str:
 HEALTH_CHECK_STALE_SECONDS = 3600  # 1 hour in seconds
 MIN_DOMAIN_LENGTH = 3
 _DEFAULT_MAX_CONCURRENT_HEALTH_CHECKS = 10
+# Most accounts the bulk page lists at once: one POST field each, under Django's 1,000-field cap.
+BULK_ACCOUNT_LIMIT = 500
 _DEFAULT_HEALTH_CHECK_TIMEOUT_SECONDS = 30
 HEALTH_CHECK_TIMEOUT_SECONDS = _DEFAULT_HEALTH_CHECK_TIMEOUT_SECONDS
 _DEFAULT_OVERALL_HEALTH_CHECK_TIMEOUT = 300
@@ -1154,6 +1156,13 @@ def virtualmin_bulk_actions(request: HttpRequest) -> HttpResponse:
     if not filter_form.is_valid():
         return HttpResponseBadRequest(str(_("Invalid filter.")))
     accounts = filter_form.accounts()
+    # Each listed account is one POST field, and Django refuses a POST of more than 1,000
+    # fields before any validation. Over the cap the page lists nothing, so nothing above it
+    # can be selected, and asks for a narrower filter instead.
+    matching = accounts.count()
+    too_many = matching if matching > BULK_ACCOUNT_LIMIT else 0
+    if too_many:
+        accounts = accounts.none()
     query = filter_form.query_string()
     page_url = reverse("provisioning:virtualmin_bulk_actions")
 
@@ -1178,6 +1187,8 @@ def virtualmin_bulk_actions(request: HttpRequest) -> HttpResponse:
         "form": form,
         "filter_form": filter_form,
         "accounts": accounts,
+        "too_many": too_many,
+        "account_limit": BULK_ACCOUNT_LIMIT,
         "selected_ids": [str(getattr(value, "pk", value)) for value in selected_value],
         "form_action": f"{page_url}?{query}" if query else page_url,
         "select_all_url": f"{page_url}?{query}&select=all" if query else f"{page_url}?select=all",

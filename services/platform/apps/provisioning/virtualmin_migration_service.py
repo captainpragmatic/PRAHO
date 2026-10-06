@@ -29,6 +29,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+def _reconcile_after_migration(service_id: str) -> None:
+    """Post-commit: converge the account's enabled state once a migration releases it."""
+    from .virtualmin_tasks import reconcile_virtualmin_service_state_async  # noqa: PLC0415  # Circular: same-app
+
+    reconcile_virtualmin_service_state_async(service_id)
+
+
 # Archive staging path ON THE REMOTE VIRTUALMIN NODE (sent as an API parameter),
 # not a local temporary file — S108's local-tempfile race does not apply.
 _REMOTE_ARCHIVE_DIR = "/tmp"  # noqa: S108
@@ -217,6 +225,14 @@ class VirtualminMigrationService:
         with transaction.atomic():
             self._move(migration, token, status, error_detail=error)
             self._audit(migration, status, compensation_failure=compensation_failure, actor=actor)
+            # While the migration held the account the reconciler skipped it (migration_locked),
+            # and the migration restores its own pre-migration snapshot. Any Service or domain
+            # change made meanwhile is applied now, not left for the divergence sweep (ADR-0051).
+            service_id = (
+                VirtualminAccount.objects.filter(pk=migration.account_id).values_list("service_id", flat=True).first()
+            )
+            if service_id is not None:
+                transaction.on_commit(lambda: _reconcile_after_migration(str(service_id)), robust=True)
 
     def _local_preflight(self, account: VirtualminAccount, target: VirtualminServer) -> None:
         if not self.enabled:

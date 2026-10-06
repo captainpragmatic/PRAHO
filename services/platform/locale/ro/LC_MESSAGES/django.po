@@ -20615,3 +20615,7 @@ msgstr "Contul {name} este în curs de migrare; încercați din nou după ce mig
 
 msgid "The service's owner changed while this was checked; try again."
 msgstr "Proprietarul serviciului s-a schimbat în timpul verificării; încercați din nou."
+
+#, python-format
+msgid "%(count)s accounts match this filter. Narrow it to %(limit)s or fewer to act on them."
+msgstr "%(count)s conturi corespund acestui filtru. Restrângeți-l la cel mult %(limit)s pentru a acționa asupra lor."
