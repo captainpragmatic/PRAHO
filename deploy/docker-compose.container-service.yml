@@ -32,7 +32,7 @@ services:
       - PORTAL_HMAC_MODE=${PORTAL_HMAC_MODE:-legacy}
       - PORTAL_HMAC_CREDENTIALS=${PORTAL_HMAC_CREDENTIALS:-}
       - PLATFORM_TO_PORTAL_WEBHOOK_SECRET=${PLATFORM_TO_PORTAL_WEBHOOK_SECRET:?PLATFORM_TO_PORTAL_WEBHOOK_SECRET required}
-      - DJANGO_SETTINGS_MODULE=config.settings.prod
+      - DJANGO_SETTINGS_MODULE=${DJANGO_SETTINGS_MODULE:-config.settings.prod}
       - ALLOWED_HOSTS=${DOMAIN:-localhost},localhost,*.ondigitalocean.app
       - CSRF_TRUSTED_ORIGINS=https://${DOMAIN},https://*.ondigitalocean.app
       - DJANGO_SECURE_SSL_REDIRECT=false
@@ -74,7 +74,7 @@ services:
       - PLATFORM_TO_PORTAL_WEBHOOK_SECRET=${PLATFORM_TO_PORTAL_WEBHOOK_SECRET:?PLATFORM_TO_PORTAL_WEBHOOK_SECRET required}
       - PORTAL_DOMAIN=${DOMAIN:-localhost}
       - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY required}
-      - DJANGO_SETTINGS_MODULE=config.settings.prod
+      - DJANGO_SETTINGS_MODULE=${DJANGO_SETTINGS_MODULE:-config.settings.prod}
       - ALLOWED_HOSTS=${DOMAIN:-localhost},localhost,*.ondigitalocean.app
       - CSRF_TRUSTED_ORIGINS=https://${DOMAIN},https://*.ondigitalocean.app
       - DJANGO_SECURE_SSL_REDIRECT=false

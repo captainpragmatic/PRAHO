@@ -31,7 +31,7 @@ services:
       - PLATFORM_DOMAIN=${PLATFORM_DOMAIN:-platform.localhost}
       - PORTAL_DOMAIN=${PORTAL_DOMAIN:-${DOMAIN:-localhost}}
       - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY required}
-      - DJANGO_SETTINGS_MODULE=config.settings.prod
+      - DJANGO_SETTINGS_MODULE=${DJANGO_SETTINGS_MODULE:-config.settings.prod}
       - ALLOWED_HOSTS=${PORTAL_DOMAIN:-${DOMAIN:-localhost}},localhost,portal
       - CSRF_TRUSTED_ORIGINS=https://${PORTAL_DOMAIN:-${DOMAIN:-localhost}}
       - DJANGO_SECURE_SSL_REDIRECT=false

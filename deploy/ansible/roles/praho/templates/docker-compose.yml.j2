@@ -40,7 +40,7 @@ services:
       - DB_USER=${DB_USER}
       - DB_PASSWORD=${DB_PASSWORD}
       - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY}
-      - DJANGO_SETTINGS_MODULE=config.settings.prod
+      - DJANGO_SETTINGS_MODULE={{ django_settings_module }}
       - PLATFORM_DOMAIN={{ platform_domain }}
       - PORTAL_DOMAIN={{ portal_domain }}
       - ALLOWED_HOSTS={{ platform_domain }},{{ portal_domain }},localhost
@@ -92,7 +92,7 @@ services:
       - PORTAL_TRUSTED_PROXY_CIDRS=${PORTAL_TRUSTED_PROXY_CIDRS:-}
       - PLATFORM_API_ALLOW_INSECURE_HTTP=true
       - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY}
-      - DJANGO_SETTINGS_MODULE=config.settings.prod
+      - DJANGO_SETTINGS_MODULE={{ django_settings_module }}
       - PLATFORM_DOMAIN={{ platform_domain }}
       - PORTAL_DOMAIN={{ portal_domain }}
       - ALLOWED_HOSTS={{ portal_domain }},localhost
