@@ -53,7 +53,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   migration. Every comment in the examples now sits on its own line, with every value unchanged. The
   native deploy refuses a `.env` with an inline comment before anything reads it, naming each line
   and key but never a value. The check follows the shell's comment rule, honouring quotes and
-  escapes, and also catches a comment after a closing quote, which systemd keeps.
+  escapes. It also catches a comment after a closing quote, and a value continued onto the next
+  line with a trailing backslash, both of which systemd keeps.
 - A hosting account is turned on or off by one writer, the provisioning reconciler (#566,
   ADR-0051 accepted). Hosting is on exactly when the service is active and no bound domain
   is expired, suspended or cancelled. A domain status change now queues a reconcile instead

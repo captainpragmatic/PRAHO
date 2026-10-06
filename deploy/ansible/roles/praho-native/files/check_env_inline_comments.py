@@ -8,10 +8,13 @@ exist. So any line where the readers would disagree is refused:
 
 - a `#` that starts a word outside quotes, which is the shell's comment rule (`KEY=value  # note`,
   `KEY=   # note`, `KEY="quoted"  # note`); and
-- a `#` straight after a closing quote (`KEY="quoted"# note`), which systemd glues onto the value.
+- a `#` straight after a closing quote (`KEY="quoted"# note`), which systemd glues onto the value; and
+- a line ending in an unescaped backslash, which systemd joins to the next line (where a comment can
+  hide), while bash drops that comment and the deploy's own parsing keeps the backslash.
 
 A `#` inside quotes, or inside a word (`feature#12`, a URL fragment), is part of the value. Backslash
-escapes are honoured, outside quotes and inside double quotes.
+escapes are honoured, outside quotes and inside double quotes. Like systemd, the check allows
+whitespace around the key (`KEY = value`).
 
 Usage: check_env_inline_comments.py ENV_FILE
 Exit 0 when clean; 1 when lines must change, printed as `line:KEY`, never the value, because the file
@@ -24,7 +27,7 @@ import re
 import sys
 from pathlib import Path
 
-_ASSIGNMENT = re.compile(r"^[ \t]*([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
+_ASSIGNMENT = re.compile(r"^[ \t]*([A-Za-z_][A-Za-z0-9_]*)[ \t]*=(.*)$")
 
 
 def has_inline_comment(value: str) -> bool:
@@ -54,12 +57,17 @@ def has_inline_comment(value: str) -> bool:
     return False
 
 
+def continues_line(value: str) -> bool:
+    """Whether the value ends in an unescaped backslash, which joins it to the next line."""
+    return (len(value) - len(value.rstrip("\\"))) % 2 == 1
+
+
 def offending_lines(text: str) -> list[str]:
-    """`line:KEY` for every assignment whose value carries an inline comment."""
+    """`line:KEY` for every assignment that readers would end in different places."""
     found = []
     for number, line in enumerate(text.splitlines(), start=1):
         match = _ASSIGNMENT.match(line)
-        if match and has_inline_comment(match.group(2)):
+        if match and (has_inline_comment(match.group(2)) or continues_line(match.group(2))):
             found.append(f"{number}:{match.group(1)}")
     return found
 
@@ -79,9 +87,9 @@ def main(argv: list[str]) -> int:
         return 2
     found = offending_lines(text)
     if found:
-        print(f"{path} puts a comment after a value on these lines (line:KEY).")
-        print("systemd and the deploy would read the comment as part of the value.")
-        print("Move each comment onto its own line:")
+        print(f"{path} has a comment after a value, or a value continued with a trailing backslash,")
+        print("on these lines (line:KEY). systemd and the deploy would read them differently from bash.")
+        print("Move each comment onto its own line, and keep each value on one line:")
         print("\n".join(found))
         return 1
     return 0

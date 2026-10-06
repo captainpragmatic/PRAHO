@@ -73,11 +73,14 @@ class TestTheCheckerFollowsTheShellCommentRule:
             'SITE_TITLE="foo"bar  # compound value',
             'SITE_TITLE="pa\\"ss"  # escaped quote',
             "SITE_TITLE=foo\\ bar # escaped space, then a comment",
+            # systemd trims whitespace around the key, and joins a line ending in a backslash
+            "DB_USER = praho  # spaced key",
+            "DB_USER=praho\\\n  # database account",
         ],
     )
     def test_an_inline_comment_fails_the_deploy(self, tmp_path: Path, line: str) -> None:
         result = _check(tmp_path, line)
-        key = line.strip().split("=", 1)[0]
+        key = line.strip().split("=", 1)[0].strip()
         assert result.returncode == 1, result.stdout + result.stderr
         assert f"1:{key}" in result.stdout.splitlines(), result.stdout
 
@@ -95,6 +98,8 @@ class TestTheCheckerFollowsTheShellCommentRule:
             "NOTE='quoted # value'",
             'NOTE="literal \\"#\\" marker"',
             "NOTE=foo\\#bar",
+            "DB_USER = praho",
+            "SHARE=C:\\\\",  # an escaped backslash ends the value; it does not continue the line
         ],
     )
     def test_a_value_without_an_inline_comment_passes(self, tmp_path: Path, line: str) -> None:
