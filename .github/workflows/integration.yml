@@ -59,7 +59,7 @@ jobs:
         uv python install
         uv sync --all-groups
 
-    - name: Lint all services (make lint — 8 phases)
+    - name: Lint all services (every make lint phase)
       run: make lint
 
     - name: Check migration state

@@ -6,8 +6,12 @@
 #
 # Schedule: 2:30 AM UTC daily (4:30 AM Bucharest time)
 # Skips automatically if no commits in the last 24h (saves runner minutes).
-# workflow_dispatch always runs regardless of activity.
-# Security: No untrusted input — triggers are cron and workflow_dispatch only.
+# workflow_dispatch always runs, on the branch it was dispatched from, so a change can be proven
+# before merge.
+# Security: the only caller-chosen value is the dispatched ref. It reaches shell through `env`
+# only, and check-activity refuses anything that is not a plain branch name.
+# A failed SCHEDULED run opens (or comments on) the `nightly-failure` issue: seven red nights
+# once went unseen because a failed scheduled job notifies nobody.
 
 name: Nightly Full Suite
 
@@ -15,6 +19,9 @@ on:
   schedule:
     - cron: '30 2 * * *'
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 env:
   DJANGO_SETTINGS_MODULE: config.settings.test
@@ -29,6 +36,9 @@ jobs:
   # ---------------------------------------------------------------------------
   check-activity:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       branches: ${{ steps.check.outputs.branches }}
     steps:
@@ -40,12 +50,20 @@ jobs:
         id: check
         env:
           EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          # workflow_dispatch: test both branches
+          # workflow_dispatch: test the branch it was dispatched on. The ref is the one
+          # caller-chosen value, so it must be a plain branch name before it is used; the
+          # character class excludes quotes and backslashes, which keeps the JSON below valid.
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            echo 'branches=["master","staging"]' >> "$GITHUB_OUTPUT"
-            echo "Manual dispatch — testing master + staging"
+            if [[ ! "$REF_NAME" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+              echo "::error::Refusing to test the dispatched ref: it is not a plain branch name."
+              exit 1
+            fi
+            printf 'branches=["%s"]\n' "$REF_NAME" >> "$GITHUB_OUTPUT"
+            echo "Manual dispatch: testing $REF_NAME"
             exit 0
           fi
 
@@ -56,7 +74,7 @@ jobs:
           STAGING_COMMITS=$(git log origin/staging --since="$SINCE" --oneline 2>/dev/null | wc -l)
 
           # PR activity counts toward master (PRs target master)
-          PR_COUNT=$(gh api "repos/${{ github.repository }}/pulls?state=all&sort=updated&direction=desc&per_page=10" \
+          PR_COUNT=$(gh api "repos/$REPO/pulls?state=all&sort=updated&direction=desc&per_page=10" \
             --jq "[.[] | select(.updated_at > \"$SINCE\")] | length" 2>/dev/null || echo "0")
 
           echo "master commits: $MASTER_COMMITS, staging commits: $STAGING_COMMITS, active PRs: $PR_COUNT"
@@ -124,7 +142,7 @@ jobs:
         uv python install
         uv sync --all-groups
 
-    - name: Full lint (all 7 phases)
+    - name: Full lint (every make lint phase)
       run: make lint
 
     - name: Concurrency tests (PostgreSQL)
@@ -200,11 +218,19 @@ jobs:
       run: make lint-security
       continue-on-error: true
 
+    # Artifact names may not contain `/`, which a dispatched `fix/...` branch would bring.
+    - name: Name the artifact after the branch
+      id: artifact
+      if: always()
+      env:
+        BRANCH: ${{ matrix.branch }}
+      run: echo "suffix=${BRANCH//\//-}" >> "$GITHUB_OUTPUT"
+
     - name: Upload nightly reports
       uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: nightly-reports-${{ matrix.branch }}
+        name: nightly-reports-${{ steps.artifact.outputs.suffix }}
         path: |
           services/platform/coverage-nightly.xml
         if-no-files-found: warn
@@ -280,11 +306,18 @@ jobs:
     - name: Portal coverage floor, unit and browser suites combined
       run: make coverage-portal-union
 
+    - name: Name the artifact after the branch
+      id: artifact
+      if: always()
+      env:
+        BRANCH: ${{ matrix.branch }}
+      run: echo "suffix=${BRANCH//\//-}" >> "$GITHUB_OUTPUT"
+
     - name: Upload browser evidence and coverage
       uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: nightly-e2e-${{ matrix.branch }}
+        name: nightly-e2e-${{ steps.artifact.outputs.suffix }}
         # `coverage-portal-union.xml` is the gated figure itself. The coverage directory above holds
         # the two half-datasets that were MEASURED; this is the union the portal floor is actually
         # checked against, and without it the one number this job passes or fails on was destroyed
@@ -301,3 +334,35 @@ jobs:
           logs/
         if-no-files-found: warn
         retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # A red SCHEDULED run must reach a person. The browser job failed at Node setup on seven
+  # consecutive nights and nobody saw it, because a failed scheduled job notifies nobody.
+  # One tracking issue, opened on the first failure and commented on by every later one. A person
+  # closes it: an automatic close on the next green run could fire on a night that tested nothing.
+  # Dispatched runs are attended, so they never notify.
+  # ---------------------------------------------------------------------------
+  notify-scheduled-failure:
+    needs: [check-activity, nightly, nightly-e2e]
+    if: always() && github.event_name == 'schedule' && contains(needs.*.result, 'failure')
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+    - name: Open or update the nightly-failure issue
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      run: |
+        gh label create nightly-failure --color B60205 \
+          --description "A scheduled nightly run failed" --force
+        existing=$(gh issue list --label nightly-failure --state open --json number --jq '.[0].number // empty')
+        if [ -n "$existing" ]; then
+          gh issue comment "$existing" --body "The scheduled nightly run failed again: $RUN_URL"
+        else
+          gh issue create --label nightly-failure --title "Nightly suite failing" \
+            --body "The scheduled nightly run failed: $RUN_URL
+
+        Read the failing job's own conclusion, not the run's. Close this issue once a scheduled run is green for every branch it tested."
+        fi

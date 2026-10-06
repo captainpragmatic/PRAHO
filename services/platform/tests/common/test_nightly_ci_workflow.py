@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -109,3 +112,97 @@ class NightlyPostgresConcurrencyWorkflowTests(SimpleTestCase):
         self.assertIn("--settings=config.settings.ci", command)
         self.assertNotIn("config.settings.test", command)
         self.assertNotIn("--parallel", command)
+
+
+def _nightly() -> dict[str, Any]:
+    return yaml.safe_load(_NIGHTLY_WORKFLOW.read_text(encoding="utf-8"))
+
+
+class CheckActivityDispatchTests(SimpleTestCase):
+    """A manual dispatch tests the branch it was dispatched on, so a change can be proven before merge.
+
+    The dispatch path used to hardcode master and staging, whatever ref was dispatched. These tests run
+    check-activity's real script, taken from the workflow file, on the dispatch path, which exits
+    before it needs git or the API.
+    """
+
+    def _dispatch(self, ref_name: str) -> tuple[int, str]:
+        steps = _nightly()["jobs"]["check-activity"]["steps"]
+        script = next(step["run"] for step in steps if step.get("id") == "check")
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "github_output"
+            output.write_text("")
+            completed = subprocess.run(  # noqa: S603 -- the workflow's own script, run by a fixed bash
+                ["bash", "-c", script],  # noqa: S607 -- bash from PATH, as the runner provides it
+                env={
+                    "PATH": os.environ.get("PATH", ""),
+                    "EVENT_NAME": "workflow_dispatch",
+                    "REF_NAME": ref_name,
+                    "GITHUB_OUTPUT": str(output),
+                },
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            return completed.returncode, output.read_text()
+
+    def test_a_dispatch_tests_the_branch_it_was_dispatched_on(self) -> None:
+        for ref in ("master", "staging", "fix/nightly-e2e-shutdown-and-dispatch"):
+            with self.subTest(ref=ref):
+                code, output = self._dispatch(ref)
+                self.assertEqual(code, 0)
+                self.assertEqual(output.strip(), f'branches=["{ref}"]')
+
+    def test_a_ref_that_is_not_a_plain_branch_name_is_refused(self) -> None:
+        for ref in ("", "a;rm -rf /", "$(id)", "two words", 'quote"d', "back\\slash"):
+            with self.subTest(ref=ref):
+                code, output = self._dispatch(ref)
+                self.assertNotEqual(code, 0)
+                self.assertNotIn("branches=", output)
+
+    def test_the_ref_reaches_the_script_through_env_only(self) -> None:
+        step = next(s for s in _nightly()["jobs"]["check-activity"]["steps"] if s.get("id") == "check")
+        self.assertEqual(step["env"]["REF_NAME"], "${{ github.ref_name }}")
+        self.assertNotIn("${{", step["run"])
+
+
+class NightlyArtifactNamesTests(SimpleTestCase):
+    """Artifact names may not contain `/`, so a dispatched `fix/...` branch would fail the upload."""
+
+    def test_uploads_use_a_sanitised_name_and_distinct_prefixes(self) -> None:
+        names = {}
+        for job_name in ("nightly", "nightly-e2e"):
+            for step in _nightly()["jobs"][job_name]["steps"]:
+                if str(step.get("uses", "")).startswith("actions/upload-artifact"):
+                    names[job_name] = step["with"]["name"]
+        self.assertEqual(set(names), {"nightly", "nightly-e2e"})
+        for name in names.values():
+            self.assertNotIn("matrix.branch", name)
+        self.assertNotEqual(names["nightly"], names["nightly-e2e"])
+
+
+class ScheduledFailureNotifierTests(SimpleTestCase):
+    """A red scheduled run must reach a person: the browser job failed seven nights running unseen."""
+
+    def test_a_failed_scheduled_run_opens_or_updates_the_tracking_issue(self) -> None:
+        jobs = _nightly()["jobs"]
+        notifier = jobs["notify-scheduled-failure"]
+        self.assertEqual(set(notifier["needs"]), {"check-activity", "nightly", "nightly-e2e"})
+        for clause in ("always()", "github.event_name == 'schedule'", "contains(needs.*.result, 'failure')"):
+            self.assertIn(clause, notifier["if"])
+        script = "\n".join(str(step.get("run", "")) for step in notifier["steps"])
+        self.assertIn("nightly-failure", script)
+        self.assertIn("gh issue", script)
+
+    def test_only_the_notifier_can_write_and_it_checks_nothing_out(self) -> None:
+        workflow = _nightly()
+        self.assertEqual(workflow["permissions"], {"contents": "read"})
+        notifier = workflow["jobs"]["notify-scheduled-failure"]
+        self.assertEqual(notifier["permissions"], {"issues": "write"})
+        self.assertFalse(any("checkout" in str(step.get("uses", "")) for step in notifier["steps"]))
+        writers = [name for name, job in workflow["jobs"].items() if "write" in str(job.get("permissions", {}))]
+        self.assertEqual(writers, ["notify-scheduled-failure"])
+        self.assertEqual(
+            workflow["jobs"]["check-activity"]["permissions"], {"contents": "read", "pull-requests": "read"}
+        )
