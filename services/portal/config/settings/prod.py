@@ -128,7 +128,7 @@ X_FRAME_OPTIONS = "DENY"
 # HSTS settings
 SECURE_HSTS_SECONDS = 31536000  # 1 year
 SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-SECURE_HSTS_PRELOAD = True
+SECURE_HSTS_PRELOAD = False  # Preloading is a deliberate submission per domain; match the platform
 
 # Static files - served by reverse proxy in production
 STATIC_ROOT = Path(os.environ.get("STATIC_ROOT", str(BASE_DIR / "staticfiles")))

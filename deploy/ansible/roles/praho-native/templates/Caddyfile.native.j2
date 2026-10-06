@@ -7,16 +7,25 @@
 # ---------------------------------------------------------------------------
 # 1. Portal — public-facing customer service
 # ---------------------------------------------------------------------------
+{# Edge HSTS, per environment. A non-empty HSTS_POLICY in the deployed .env wins, with surrounding quotes
+   stripped (a ";"-bearing value must be quoted for `source .env`). Unset or empty falls back by
+   praho_env: one hour on staging, so an existing staging .env without the key still gets it. #}
+{% set hsts_policy = (deployed_env.HSTS_POLICY | default('', true) | trim | trim('"') | trim("'"))
+   or ('max-age=3600' if (praho_env | default('prod')) == 'staging' else 'max-age=31536000; includeSubDomains') %}
 {{ deployed_env.PORTAL_DOMAIN }} {
     tls {{ deployed_env.ACME_EMAIL | default('admin@example.com') }}
 
     # Security headers
+    # HSTS_POLICY sets this per environment (staging: max-age=3600). It is set twice on purpose:
+    # the deferred block below replaces the header Django sends, and this immediate line covers
+    # responses Caddy generates itself (a 502 when the upstream is down), which skip deferred headers.
+    header Strict-Transport-Security "{{ hsts_policy }}"
     header {
         X-Frame-Options "DENY"
         X-Content-Type-Options "nosniff"
         Permissions-Policy "camera=(), microphone=(), geolocation=()"
         Referrer-Policy "strict-origin-when-cross-origin"
-        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        Strict-Transport-Security "{{ hsts_policy }}"
         -Server
     }
 
@@ -60,11 +69,15 @@
 {{ deployed_env.PLATFORM_DOMAIN }} {
     tls {{ deployed_env.ACME_EMAIL | default('admin@example.com') }}
 
+    # HSTS_POLICY sets this per environment (staging: max-age=3600). It is set twice on purpose:
+    # the deferred block below replaces the header Django sends, and this immediate line covers
+    # responses Caddy generates itself (a 502 when the upstream is down), which skip deferred headers.
+    header Strict-Transport-Security "{{ hsts_policy }}"
     header {
         X-Frame-Options "DENY"
         X-Content-Type-Options "nosniff"
         Referrer-Policy "strict-origin-when-cross-origin"
-        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        Strict-Transport-Security "{{ hsts_policy }}"
         Permissions-Policy "camera=(), microphone=(), geolocation=()"
         -Server
     }
