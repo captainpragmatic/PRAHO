@@ -290,11 +290,30 @@ class InvoiceDetailViewTest(BillingViewsTestBase):
 class InvoiceEditViewTest(BillingViewsTestBase):
     """Tests for invoice_edit view."""
 
-    def test_invoice_edit_get_draft(self):
+    def test_invoice_edit_get_draft(self) -> None:
+        from apps.billing.invoice_models import InvoiceLine  # noqa: PLC0415
+
         invoice = self._create_invoice(status="draft")
+        line = InvoiceLine.objects.create(
+            invoice=invoice,
+            kind="service",
+            description="Existing WP14 hosting",
+            quantity=Decimal("2.500"),
+            unit_price_cents=125,
+            tax_rate=Decimal("0.2100"),
+        )
         self.client.force_login(self.staff_user)
         response = self.client.get(f"/billing/invoices/{invoice.pk}/edit/")
-        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Existing WP14 hosting")
+        self.assertContains(response, f'name="line_0_id" value="{line.pk}"')
+        self.assertContains(response, 'value="2.500"')
+        self.assertContains(response, 'value="1.25"')
+        self.assertIn(self.customer, response.context["customers"])
+        for field in ("issued_at", "number", "status", "line_0_vat_rate"):
+            self.assertNotContains(response, f'name="{field}"')
+        self.assertContains(
+            self.client.get(f"/billing/invoices/{invoice.pk}/"), f"/billing/invoices/{invoice.pk}/edit/"
+        )
 
     def test_invoice_edit_non_draft_redirect(self):
         invoice = self._create_invoice(status="issued")
@@ -302,11 +321,67 @@ class InvoiceEditViewTest(BillingViewsTestBase):
         response = self.client.get(f"/billing/invoices/{invoice.pk}/edit/")
         self.assertEqual(response.status_code, 302)
 
-    def test_invoice_edit_post_draft(self):
-        invoice = self._create_invoice(status="draft")
+    def test_invoice_edit_post_draft(self) -> None:
+        from django.contrib.messages import get_messages  # noqa: PLC0415
+
+        from apps.billing.invoice_models import InvoiceLine  # noqa: PLC0415
+        from apps.provisioning.models import Service, ServicePlan  # noqa: PLC0415
+
+        invoice = self._create_invoice(status="draft", number=None, meta={"keep": "untouched"})
+        plan = ServicePlan.objects.create(name="WP14 plan", plan_type="shared_hosting", price_monthly=Decimal("10"))
+        service = Service.objects.create(
+            customer=self.customer,
+            service_plan=plan,
+            currency=self.currency,
+            service_name="WP14 hosting",
+            username="wp14",
+            price=Decimal("10"),
+            billing_cycle="monthly",
+        )
+        line = InvoiceLine.objects.create(
+            invoice=invoice,
+            service=service,
+            kind="service",
+            description="Original hosting",
+            quantity=Decimal("1"),
+            unit_price_cents=1000,
+            tax_rate=Decimal("0.2100"),
+            tax_category_code="S",
+        )
+        removed = InvoiceLine.objects.create(
+            invoice=invoice,
+            kind="misc",
+            description="Remove this line",
+            unit_price_cents=500,
+        )
         self.client.force_login(self.staff_user)
-        response = self.client.post(f"/billing/invoices/{invoice.pk}/edit/")
-        self.assertEqual(response.status_code, 302)
+        response = self.client.post(
+            f"/billing/invoices/{invoice.pk}/edit/",
+            {
+                "customer": str(invoice.customer_id),
+                "currency": invoice.currency_id,
+                "due_at": "2026-11-01",
+                "public_notes": "Updated draft",
+                "line_0_id": str(line.pk),
+                "line_0_description": "Updated hosting",
+                "line_0_quantity": "2.3456",
+                "line_0_unit_price": "10.005",
+            },
+        )
+        line.refresh_from_db()
+        self.assertEqual(line.description, "Updated hosting")
+        self.assertEqual((line.quantity, line.unit_price_cents), (Decimal("2.346"), 1001))
+        self.assertEqual(line.service_id, service.pk)
+        self.assertEqual((line.tax_rate, line.tax_category_code), (Decimal("0.2100"), "S"))
+        self.assertFalse(InvoiceLine.objects.filter(pk=removed.pk).exists())
+        self.assertEqual(list(invoice.lines.values_list("pk", flat=True)), [line.pk])
+        invoice.refresh_from_db()
+        self.assertEqual((invoice.subtotal_cents, invoice.tax_cents, invoice.total_cents), (2348, 493, 2841))
+        self.assertEqual(timezone.localdate(invoice.due_at).isoformat(), "2026-11-01")
+        self.assertEqual(invoice.meta, {"keep": "untouched", "public_notes": "Updated draft"})
+        self.assertEqual((invoice.status, invoice.number, invoice.issued_at), ("draft", None, None))
+        self.assertRedirects(response, f"/billing/invoices/{invoice.pk}/", fetch_redirect_response=False)
+        self.assertIn(invoice.display_number, " ".join(str(message) for message in get_messages(response.wsgi_request)))
 
     def test_invoice_edit_no_access(self):
         other_customer = Customer.objects.create(
@@ -1378,9 +1453,7 @@ class SignedBillingViewsTestBase(HMACTestMixin, BillingViewsTestBase):
 
     def _post_invalid_json(self, url: str) -> HttpResponse:
         body = b"not json"
-        return self.client.post(
-            url, body, content_type="application/json", **hmac_headers("POST", url, body)
-        )
+        return self.client.post(url, body, content_type="application/json", **hmac_headers("POST", url, body))
 
 
 class ApiCreatePaymentIntentTest(SignedBillingViewsTestBase):

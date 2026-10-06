@@ -1,0 +1,23 @@
+{% load i18n ui_components %}
+<div class="invoice-line grid grid-cols-12 gap-3 items-center">
+  <input type="hidden" name="line_{{ index }}_id" value="{{ row.id|default:'' }}">
+  <div class="col-span-4">
+    <input type="text" name="line_{{ index }}_description" value="{{ row.description|default:'' }}"
+           aria-label="{% trans 'Description' %}" required maxlength="500"
+           class="w-full rounded-md border border-slate-600 bg-slate-700 px-3 py-2 text-white">
+  </div>
+  <div class="col-span-2">
+    <input type="number" name="line_{{ index }}_quantity" value="{{ row.quantity|default:'1' }}"
+           aria-label="{% trans 'Quantity' %}" required min="0.001" step="0.001"
+           class="w-full rounded-md border border-slate-600 bg-slate-700 px-3 py-2 text-white">
+  </div>
+  <div class="col-span-2">
+    <input type="number" name="line_{{ index }}_unit_price" value="{{ row.unit_price|default:'0.00' }}"
+           aria-label="{% trans 'Unit Price' %}" required min="0" step="any"
+           class="w-full rounded-md border border-slate-600 bg-slate-700 px-3 py-2 text-white">
+  </div>
+  <div class="col-span-4">
+    {% trans "Remove Line" as remove_line_label %}
+    {% button remove_line_label variant="danger" type="button" icon="x" class_="remove-line" %}
+  </div>
+</div>

@@ -6,23 +6,285 @@ Business logic for invoice management and Romanian e-Factura compliance.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
-from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+import re
+from datetime import datetime, time
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from typing import TYPE_CHECKING, Any, Required, TypedDict
 
 from django.conf import settings
-from django.db import transaction
+from django.core.exceptions import ValidationError
+from django.db import DatabaseError, transaction
 from django.db.models import Sum
 from django.utils import timezone
+from django.utils.dateparse import parse_date
+from django.utils.translation import gettext as _
 
-from apps.billing.document_adjustments import UnsupportedDocumentAdjustmentError
+from apps.billing.document_adjustments import UnsupportedDocumentAdjustmentError, validate_no_unsupported_adjustments
+from apps.common.types import Err, Ok, Result
 
 if TYPE_CHECKING:
     from apps.customers.models import Customer
+    from apps.users.models import User
 
-    from .invoice_models import Invoice
+    from .invoice_models import Invoice, InvoiceLine
 
 logger = logging.getLogger(__name__)
+_MAX_DRAFT_PRICE_CENTS = (1 << 63) - 1
+
+
+class DraftInvoiceLineData(TypedDict, total=False):
+    id: str
+    description: str
+    quantity: str
+    unit_price: str
+    tax_rate: str
+    tax_category_code: str
+
+
+class DraftInvoiceData(TypedDict, total=False):
+    customer: str
+    currency: str
+    due_at: str
+    public_notes: str
+    internal_notes: str
+    lines: Required[list[DraftInvoiceLineData]]
+
+
+def draft_invoice_edit_block_reason(invoice: Invoice) -> str | None:
+    """Read eligibility here; the mutation calls it again under the invoice lock."""
+    from apps.billing.payment_models import CreditLedger  # noqa: PLC0415
+
+    if invoice.status != "draft" or invoice.locked_at is not None:
+        return _("Only an unlocked draft invoice can be edited.")
+    if invoice.issuer_provider != "builtin":
+        return _("External issuer drafts are read-only. Use issuance reconciliation.")
+    if invoice.document_kind == "credit_note":
+        return _("Credit notes cannot be edited.")
+    if (
+        invoice.payments.exists()
+        or CreditLedger.objects.filter(invoice=invoice).exists()
+        or invoice.gift_card_reservations.exists()
+    ):
+        return _("Invoices with payment, credit or gift-card allocations cannot be edited.")
+    try:
+        if invoice.discount_cents:
+            raise UnsupportedDocumentAdjustmentError
+        validate_no_unsupported_adjustments(
+            meta=invoice.meta,
+            line_discount_cents=invoice.lines.values_list("discount_amount_cents", flat=True),
+        )
+    except UnsupportedDocumentAdjustmentError:
+        return _("Invoices with discounts or adjustments cannot be edited.")
+    return None
+
+
+def _draft_decimal(value: str) -> Decimal:
+    if not re.fullmatch(r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?", value):
+        raise ValidationError(_("Line quantities and prices must be valid finite numbers."))
+    try:
+        parsed = Decimal(value)
+    except InvalidOperation as exc:
+        raise ValidationError(_("Line quantities and prices must be valid finite numbers.")) from exc
+    if not parsed.is_finite():
+        raise ValidationError(_("Line quantities and prices must be valid finite numbers."))
+    return parsed
+
+
+def _draft_line_id(value: str) -> int:
+    if not re.fullmatch(r"[1-9][0-9]*", value):
+        raise ValidationError(_("Invalid invoice line ID."))
+    return int(value)
+
+
+def _draft_line_ids(rows: list[DraftInvoiceLineData], existing: dict[int, InvoiceLine]) -> set[int]:
+    seen: set[int] = set()
+    for row in rows:
+        if not row.get("id"):
+            continue
+        line_id = _draft_line_id(row["id"])
+        if line_id not in existing:
+            raise ValidationError(_("An invoice line belongs to another invoice or no longer exists."))
+        if line_id in seen:
+            raise ValidationError(_("Duplicate invoice line ID."))
+        seen.add(line_id)
+    for line_id, line in existing.items():
+        if line_id not in seen and line.billing_cycle_id is not None:
+            raise ValidationError(_("Billing-cycle lines cannot be deleted or repriced."))
+    return seen
+
+
+def _recorded_draft_line_tax(invoice: Invoice) -> tuple[Decimal, str]:
+    from apps.billing.tax_evidence import derive_tax_category, read_vat_evidence  # noqa: PLC0415
+    from apps.common.tax_service import VATCalculationResult  # noqa: PLC0415
+
+    decision = read_vat_evidence(invoice)
+    if decision is None:
+        raise ValidationError(_("A new line requires a recorded invoice tax decision."))
+    result = VATCalculationResult(
+        scenario=decision.scenario,
+        vat_rate=decision.rate,
+        subtotal_cents=decision.subtotal_cents,
+        vat_cents=decision.tax_cents,
+        total_cents=decision.total_cents,
+        country_code=decision.country,
+        is_business=decision.is_business,
+        vat_number=decision.vat_number,
+        reasoning="",
+        audit_data={},
+    )
+    return (decision.rate / Decimal("100")).quantize(Decimal("0.0001")), derive_tax_category(result)
+
+
+def _save_draft_line(invoice: Invoice, row: DraftInvoiceLineData, existing: dict[int, InvoiceLine]) -> None:
+    from apps.billing.invoice_models import InvoiceLine  # noqa: PLC0415
+
+    quantity = _draft_decimal(row.get("quantity", ""))
+    price = _draft_decimal(row.get("unit_price", ""))
+    if quantity <= 0 or quantity > Decimal("999999999.999") or price < 0:
+        raise ValidationError(_("Line quantity must be positive and price must not be negative."))
+    try:
+        quantity = quantity.quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
+        cents = int((price * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    except InvalidOperation as exc:
+        raise ValidationError(_("Line quantities or prices are out of range.")) from exc
+    if quantity <= 0 or cents > _MAX_DRAFT_PRICE_CENTS:
+        raise ValidationError(_("Line quantities or prices are out of range."))
+    if row.get("id"):
+        line = existing[_draft_line_id(row["id"])]
+        if ("tax_rate" in row and row["tax_rate"] != str(line.tax_rate)) or (
+            "tax_category_code" in row and row["tax_category_code"] != line.tax_category_code
+        ):
+            raise ValidationError(_("The recorded VAT rate and category cannot be edited."))
+        if line.billing_cycle_id is not None and (quantity != line.quantity or cents != line.unit_price_cents):
+            raise ValidationError(_("Billing-cycle lines cannot be deleted or repriced."))
+    else:
+        rate, category = _recorded_draft_line_tax(invoice)
+        line = InvoiceLine(invoice=invoice, kind="service", tax_rate=rate, tax_category_code=category)
+    line.description = row.get("description", "").strip()
+    line.quantity = quantity
+    line.unit_price_cents = cents
+    line.calculate_totals()
+    line.full_clean()
+    line.save()
+
+
+def _draft_field_snapshot(invoice: Invoice) -> dict[str, object]:
+    return {
+        "due_at": invoice.due_at.isoformat() if invoice.due_at else None,
+        "public_notes": invoice.meta.get("public_notes", ""),
+        "internal_notes": invoice.meta.get("internal_notes", ""),
+        "subtotal_cents": invoice.subtotal_cents,
+        "tax_cents": invoice.tax_cents,
+        "total_cents": invoice.total_cents,
+    }
+
+
+def _draft_line_snapshot(line: InvoiceLine) -> dict[str, object]:
+    return {
+        "description": line.description,
+        "quantity": str(line.quantity),
+        "unit_price_cents": line.unit_price_cents,
+        "tax_rate": str(line.tax_rate),
+        "tax_category_code": line.tax_category_code,
+        "service_id": str(line.service_id) if line.service_id is not None else None,
+        "billing_cycle_id": str(line.billing_cycle_id) if line.billing_cycle_id is not None else None,
+    }
+
+
+def _update_draft_fields(invoice: Invoice, data: DraftInvoiceData, user: User) -> None:
+    if (
+        not user.is_authenticated
+        or not user.can_manage_financial_data
+        or not user.can_access_customer(invoice.customer)
+    ):
+        raise ValidationError(_("You do not have permission to edit this invoice."))
+    reason = draft_invoice_edit_block_reason(invoice)
+    if reason:
+        raise ValidationError(reason)
+    if data.get("customer", str(invoice.customer_id)) != str(invoice.customer_id):
+        raise ValidationError(_("The invoice customer cannot be changed."))
+    if data.get("currency", invoice.currency_id) != invoice.currency_id:
+        raise ValidationError(_("The invoice currency cannot be changed."))
+    if "due_at" in data:
+        if not data["due_at"]:
+            invoice.due_at = None
+        else:
+            due_date = parse_date(data["due_at"])
+            if due_date is None:
+                raise ValidationError(_("Enter a valid due date."))
+            invoice.due_at = timezone.make_aware(datetime.combine(due_date, time.min))
+    invoice.meta = dict(invoice.meta)
+    if "public_notes" in data:
+        invoice.meta["public_notes"] = data["public_notes"]
+    if "internal_notes" in data:
+        invoice.meta["internal_notes"] = data["internal_notes"]
+
+
+def update_draft_invoice(invoice_id: int, data: DraftInvoiceData, user: User) -> Result[Invoice, str]:
+    """Edit a frozen tax decision's draft lines atomically; never issue the document."""
+    from apps.audit.services import AuditService  # noqa: PLC0415
+    from apps.billing.invoice_models import Invoice  # noqa: PLC0415
+    from apps.billing.tax_evidence import TaxEvidenceError  # noqa: PLC0415
+
+    try:
+        with transaction.atomic():
+            try:
+                invoice = Invoice.objects.select_for_update().get(pk=invoice_id)
+                old_fields = _draft_field_snapshot(invoice)
+                _update_draft_fields(invoice, data, user)
+                existing = {line.pk: line for line in invoice.lines.all()}
+                old_lines = {str(pk): _draft_line_snapshot(line) for pk, line in existing.items()}
+                retained = _draft_line_ids(data["lines"], existing)
+                for row in data["lines"]:
+                    _save_draft_line(invoice, row, existing)
+                for line_id, line in existing.items():
+                    if line_id not in retained:
+                        line.delete()
+                invoice.recalculate_totals()
+                invoice.save(
+                    update_fields=["due_at", "meta", "subtotal_cents", "tax_cents", "total_cents", "updated_at"]
+                )
+                new_fields = _draft_field_snapshot(invoice)
+                new_lines = {str(line.pk): _draft_line_snapshot(line) for line in invoice.lines.all()}
+                AuditService.log_simple_event(
+                    "invoice_edited",
+                    user=user,
+                    content_object=invoice,
+                    description=_("Invoice %(number)s edited.") % {"number": invoice.display_number},
+                    old_values={"fields": old_fields, "lines": old_lines},
+                    new_values={"fields": new_fields, "lines": new_lines},
+                    metadata={
+                        "diff": {
+                            "fields": {
+                                key: {"before": value, "after": new_fields[key]}
+                                for key, value in old_fields.items()
+                                if value != new_fields[key]
+                            },
+                            "lines": {
+                                "created": [key for key in new_lines if key not in old_lines],
+                                "deleted": [key for key in old_lines if key not in new_lines],
+                                "updated": {
+                                    key: {"before": old_lines[key], "after": value}
+                                    for key, value in new_lines.items()
+                                    if key in old_lines and old_lines[key] != value
+                                },
+                            },
+                        }
+                    },
+                )
+                logger.info("✅ [Billing] Edited draft invoice %s", invoice.display_number)
+                return Ok(invoice)
+            except (ValidationError, TaxEvidenceError, InvalidOperation, ValueError) as exc:
+                transaction.set_rollback(True)
+                error = (
+                    "; ".join(exc.messages) if isinstance(exc, ValidationError) else _("Invalid draft invoice data.")
+                )
+                return Err(error)
+    except Invoice.DoesNotExist:
+        return Err(_("Invoice not found."))
+    except DatabaseError:
+        logger.exception("🔥 [Billing] Draft invoice edit failed for %s", invoice_id)
+        return Err(_("The invoice could not be saved. Please try again."))
 
 
 # ===============================================================================

@@ -59,6 +59,7 @@ from apps.common.decorators import (
 )
 from apps.common.mixins import get_search_context
 from apps.common.tax_service import TaxService
+from apps.common.types import Err
 from apps.common.utils import json_error, json_success
 from apps.customers.models import Customer
 from apps.tickets.models import SupportCategory, Ticket
@@ -66,6 +67,12 @@ from apps.ui.table_helpers import prepare_billing_table_data
 from apps.users.models import User
 
 # Service layer imports
+from .invoice_service import (
+    DraftInvoiceData,
+    DraftInvoiceLineData,
+    draft_invoice_edit_block_reason,
+    update_draft_invoice,
+)
 from .models import (
     Currency,
     Invoice,
@@ -726,7 +733,11 @@ def invoice_detail(request: HttpRequest, pk: int) -> HttpResponse:
         "invoice": invoice,
         "items": items,
         "payments": payments,
-        "can_edit": invoice.status == "draft",
+        "can_edit": (
+            isinstance(request.user, User)
+            and can_manage_financial_data(request.user)
+            and draft_invoice_edit_block_reason(invoice) is None
+        ),
         "can_refund": invoice.status in {"paid", "partially_refunded"},
         "refund_request_key": str(uuid.uuid4()),
         "unfinished_refund": invoice.tender_refund_commands.exclude(status="completed").first(),
@@ -1360,34 +1371,115 @@ def proforma_send(request: HttpRequest, pk: int) -> HttpResponse:
     return JsonResponse({"error": "Invalid method"}, status=405)
 
 
+def _invoice_edit_line(post: QueryDict, prefix: str) -> DraftInvoiceLineData:
+    row: DraftInvoiceLineData = {
+        "id": str(post.get(prefix + "id", "")),
+        "description": str(post.get(prefix + "description", "")),
+        "quantity": str(post.get(prefix + "quantity", "")),
+        "unit_price": str(post.get(prefix + "unit_price", "")),
+    }
+    for suffix in ("vat_rate", "tax_rate"):
+        if prefix + suffix in post:
+            if "tax_rate" in row:
+                raise ValidationError(_("Duplicate invoice VAT field."))
+            row["tax_rate"] = str(post.get(prefix + suffix, ""))
+    for suffix in ("vat_category", "tax_category_code"):
+        if prefix + suffix in post:
+            if "tax_category_code" in row:
+                raise ValidationError(_("Duplicate invoice VAT field."))
+            row["tax_category_code"] = str(post.get(prefix + suffix, ""))
+    return row
+
+
+def _invoice_edit_data(post: QueryDict) -> DraftInvoiceData:
+    """Retain raw numeric input for blocking service validation."""
+    for key in post:
+        if len(post.getlist(key)) != 1:
+            raise ValidationError(_("Duplicate invoice form field."))
+    indices = sorted(
+        {
+            key.removeprefix("line_").partition("_")[0]
+            for key in post
+            if key.startswith("line_")
+            and key.removeprefix("line_").partition("_")[0].isascii()
+            and key.removeprefix("line_").partition("_")[0].isdigit()
+        },
+        key=int,
+    )
+    data: DraftInvoiceData = {"lines": [_invoice_edit_line(post, f"line_{index}_") for index in indices]}
+    if "customer" in post:
+        data["customer"] = str(post.get("customer", ""))
+    if "currency" in post:
+        data["currency"] = str(post.get("currency", ""))
+    if "due_at" in post:
+        data["due_at"] = str(post.get("due_at", ""))
+    if "public_notes" in post:
+        data["public_notes"] = str(post.get("public_notes", ""))
+    if "internal_notes" in post:
+        data["internal_notes"] = str(post.get("internal_notes", ""))
+    return data
+
+
 @billing_staff_required
 def invoice_edit(request: HttpRequest, pk: int) -> HttpResponse:
-    """
-    ✏️ Edit draft invoice
-    """
+    """✏️ Edit a builtin issuer draft without changing its recorded tax decision."""
     invoice = get_object_or_404(Invoice, pk=pk)
-
-    # Security and business rule checks - type guard for authenticated user
     if not isinstance(request.user, User) or not request.user.can_access_customer(invoice.customer):
         messages.error(request, _("❌ You do not have permission to edit this invoice."))
         return redirect("billing:invoice_list")
-
-    if invoice.status != "draft":
-        messages.error(request, _("❌ Only draft invoices can be edited."))
+    if request.method != "POST" and (invoice.status != "draft" or invoice.locked_at is not None):
+        messages.error(request, _("❌ Only an unlocked draft invoice can be edited."))
         return redirect("billing:invoice_detail", pk=pk)
 
+    errors: list[str] = []
+    submitted: DraftInvoiceData | None = None
     if request.method == "POST":
-        # Update invoice logic here
-        messages.success(
-            request, _("✅ Invoice #{invoice_number} has been updated!").format(invoice_number=invoice.number)
-        )
-        return redirect("billing:invoice_detail", pk=pk)
+        try:
+            submitted = _invoice_edit_data(request.POST)
+        except ValidationError as exc:
+            errors.extend(exc.messages)
+        else:
+            result = update_draft_invoice(invoice.pk, submitted, request.user)
+            if isinstance(result, Err):
+                errors.append(result.error)
+            else:
+                messages.success(
+                    request,
+                    _("✅ Invoice #{invoice_number} has been updated!").format(
+                        invoice_number=result.value.display_number
+                    ),
+                )
+                return redirect("billing:invoice_detail", pk=pk)
+        invoice = get_object_or_404(Invoice, pk=pk)
 
+    rows: list[DraftInvoiceLineData] = [
+        {
+            "id": str(line.pk),
+            "description": line.description,
+            "quantity": str(line.quantity),
+            "unit_price": str(line.unit_price),
+        }
+        for line in invoice.lines.all()
+    ]
+    values: DraftInvoiceData = {
+        "customer": str(invoice.customer_id),
+        "currency": invoice.currency_id,
+        "due_at": timezone.localtime(invoice.due_at).date().isoformat() if invoice.due_at else "",
+        "public_notes": str(invoice.meta.get("public_notes", "")),
+        "internal_notes": str(invoice.meta.get("internal_notes", "")),
+        "lines": rows,
+    }
+    if submitted is not None:
+        values.update(submitted)
     context = {
         "invoice": invoice,
         "items": invoice.lines.all(),
+        "customers": _get_customers_for_edit_form(request.user),
+        "form_values": values,
+        "form_lines": values["lines"],
+        "errors": errors,
+        "edit_block_reason": draft_invoice_edit_block_reason(invoice),
     }
-
     return render(request, "billing/invoice_form.html", context)
 
 
