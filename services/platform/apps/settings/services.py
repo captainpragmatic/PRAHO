@@ -143,9 +143,13 @@ class SettingsService:
                 return cast("SettingValue", cached_value)
 
         token_key = cls._get_cache_token_key(key)
-        t0: object = cache.get(token_key, version=cls.CACHE_VERSION) if use_cache else None
+        t0: object = None
+        if use_cache:
+            t0 = cache.get_or_set(token_key, uuid.uuid4().hex, timeout=None, version=cls.CACHE_VERSION)
+        # Seed a nonexpiring token so eviction or a cache-wide clear cannot recreate a None -> None ABA.
         # W's token before t0 means W committed before this DB read, which sees the new value.
-        # Between t0 and t1, R deletes its publication; after t1, W's subsequent delete removes it.
+        # Between t0 and t1, R deletes its publication if the token changed or is missing;
+        # after t1, W's subsequent delete removes it.
         try:
             setting = SystemSetting.objects.get(key=key)
         except SystemSetting.DoesNotExist:
@@ -153,7 +157,7 @@ class SettingsService:
             if use_cache:
                 cache.set(cache_key, fallback_value, timeout=DEFAULT_FALLBACK_CACHE_TIMEOUT, version=cls.CACHE_VERSION)
                 t1 = cache.get(token_key, version=cls.CACHE_VERSION)
-                if t1 != t0:
+                if t1 is None or t1 != t0:
                     cache.delete(cache_key, version=cls.CACHE_VERSION)
             logger.warning("⚠️ [Settings] Using default for missing key: %s", key)
             return cast("SettingValue", fallback_value)
@@ -166,7 +170,7 @@ class SettingsService:
         if use_cache:
             cache.set(cache_key, value, timeout=cls.CACHE_TIMEOUT, version=cls.CACHE_VERSION)
             t1 = cache.get(token_key, version=cls.CACHE_VERSION)
-            if t1 != t0:
+            if t1 is None or t1 != t0:
                 cache.delete(cache_key, version=cls.CACHE_VERSION)
         logger.debug("⚡ [Settings] Database hit for key: %s (cache enabled: %s)", key, use_cache)
         return value

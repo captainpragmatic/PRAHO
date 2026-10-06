@@ -126,6 +126,62 @@ class SettingsCacheTransactionTests(TransactionTestCase):
         self.assertEqual(SettingsService.get_setting(self.key), 60)
         self.assertEqual(self._cache_value(), 60)
 
+    def _assert_token_loss_during_miss(self, *, fallback: bool, clear_cache: bool) -> None:
+        if not fallback:
+            self._create(45)
+        # Row creation rotates the token; remove it to reproduce an initially tokenless miss.
+        cache.clear()
+        token_key = SettingsService._get_cache_token_key(self.key)
+        self.assertIsNone(cache.get(token_key, version=SettingsService.CACHE_VERSION))
+        self.assertIsNone(self._cache_value())
+        manager = SystemSetting.objects
+        original_get = manager.get
+
+        def commit_then_remove_token() -> None:
+            with transaction.atomic():
+                if fallback:
+                    self._create(60)
+                else:
+                    writer = original_get(key=self.key)
+                    writer.value = 60
+                    writer.save(update_fields=["value", "updated_at"])
+            # Real on_commit invalidation has rotated the token and deleted the value.
+            self.assertIsInstance(cache.get(token_key, version=SettingsService.CACHE_VERSION), str)
+            self.assertIsNone(self._cache_value())
+            if clear_cache:
+                cache.clear()
+            else:
+                cache.delete(token_key, version=SettingsService.CACHE_VERSION)  # Simulate token culling.
+            self.assertIsNone(cache.get(token_key, version=SettingsService.CACHE_VERSION))
+
+        def read_then_commit(*, key: str) -> SystemSetting:
+            try:
+                old_row = original_get(key=key)
+            except SystemSetting.DoesNotExist:
+                commit_then_remove_token()
+                raise
+            commit_then_remove_token()
+            return old_row
+
+        with patch.object(manager, "get", side_effect=read_then_commit):
+            self.assertEqual(SettingsService.get_setting(self.key), 30 if fallback else 45)
+
+        self.assertIsNone(self._cache_value())
+        self.assertEqual(SettingsService.get_setting(self.key), 60)
+        self.assertEqual(self._cache_value(), 60)
+
+    def test_token_culling_during_miss_does_not_publish_stale_value(self) -> None:
+        self._assert_token_loss_during_miss(fallback=False, clear_cache=False)
+
+    def test_token_culling_during_miss_does_not_publish_stale_fallback(self) -> None:
+        self._assert_token_loss_during_miss(fallback=True, clear_cache=False)
+
+    def test_cache_clear_during_miss_does_not_publish_stale_value(self) -> None:
+        self._assert_token_loss_during_miss(fallback=False, clear_cache=True)
+
+    def test_cache_clear_during_miss_does_not_publish_stale_fallback(self) -> None:
+        self._assert_token_loss_during_miss(fallback=True, clear_cache=True)
+
     def test_cache_hits_only_read_the_value_key(self) -> None:
         self._create(45)
         self.assertEqual(SettingsService.get_setting(self.key), 45)
@@ -136,7 +192,9 @@ class SettingsCacheTransactionTests(TransactionTestCase):
         observed_cache.get.assert_called_once()
         self.assertEqual(observed_cache.get.call_args.args[0], SettingsService._get_cache_key(self.key))
         self.assertEqual(observed_cache.get.call_args.kwargs, {"version": SettingsService.CACHE_VERSION})
+        observed_cache.get_or_set.assert_not_called()
         observed_cache.set.assert_not_called()
+        observed_cache.add.assert_not_called()
         observed_cache.delete.assert_not_called()
 
     def test_invalidation_rotates_nonexpiring_token_before_deleting_value(self) -> None:
