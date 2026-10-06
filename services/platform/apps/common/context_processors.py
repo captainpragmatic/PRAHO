@@ -1,14 +1,12 @@
 """
-Context processors for PRAHO Platform templates
-Romanian business context and common template variables.
+Context processors for PRAHO Platform templates.
+Common template variables.
 """
 
 from typing import Any
 
 from django.conf import settings
 from django.http import HttpRequest
-
-from apps.common.tax_service import TaxService
 
 
 def _maintenance_mode_active() -> bool:
@@ -19,25 +17,6 @@ def _maintenance_mode_active() -> bool:
     from apps.settings.services import SettingsService  # noqa: PLC0415  # Function-level cross-app import (ADR-0007)
 
     return SettingsService.get_boolean_setting("system.maintenance_mode", False)
-
-
-def romanian_business_context(request: HttpRequest) -> dict[str, Any]:
-    """Romanian business information for templates"""
-    from apps.billing.currency_policy import get_selling_currency_policy  # noqa: PLC0415  # ADR-0007
-
-    selling_currency = get_selling_currency_policy().currency_code
-    return {
-        "company_name": "PragmaticHost SRL",
-        "company_cui": "RO12345678",
-        "company_address": "Str. Exemplu 123, București, România",
-        "company_phone": "+40.21.123.4567",
-        "company_email": "contact@pragmatichost.com",
-        "vat_rate": int(TaxService.get_vat_rate("RO", as_decimal=False)),
-        "currency": selling_currency,
-        "currency_symbol": {"RON": "lei", "EUR": "€", "USD": "$"}[selling_currency],
-        "support_hours": "09:00 - 18:00 (Luni - Vineri)",
-        "emergency_phone": "+40.21.987.6543",
-    }
 
 
 def feature_flags(request: HttpRequest) -> dict[str, Any]:
