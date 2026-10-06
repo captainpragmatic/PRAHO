@@ -17,6 +17,7 @@
     <div>
       <h3 class="text-blue-200 font-medium">{{ maintenance_heading|default:_("Temporarily unavailable") }}</h3>
       <p class="text-blue-100/90 mt-1">{{ maintenance_message }}</p>
+      {% if not hide_retry %}
       <a
         href="{{ maintenance_retry_url|default:request.get_full_path }}"
         class="mt-4 inline-flex items-center px-4 py-2 text-sm font-medium rounded-md bg-blue-600 text-white hover:bg-blue-500 transition-colors"
@@ -24,6 +25,7 @@
       >
         {% trans "Try again" %}
       </a>
+      {% endif %}
     </div>
   </div>
 </div>

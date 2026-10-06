@@ -489,7 +489,10 @@ def _service_request_load_error(request: HttpRequest, error: PlatformAPIError, c
             form_error=get_degraded_message(error),
         )
         response = render(
-            request, "services/service_request_action.html", context, status=HTTPStatus.SERVICE_UNAVAILABLE
+            request,
+            "services/service_request_action.html",
+            context,
+            status=HTTPStatus.OK if request.headers.get("HX-Request") == "true" else HTTPStatus.SERVICE_UNAVAILABLE,
         )
         retry_after = get_retry_after_from_error(error)
         if retry_after:

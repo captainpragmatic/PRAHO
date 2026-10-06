@@ -486,8 +486,16 @@ def ticket_reply(request: HttpRequest, ticket_id: int) -> HttpResponse:
         if is_rate_limited_error(e):
             raise
         logger.error(f"🔥 [Tickets View] Error adding reply to ticket {ticket_id} for customer {customer_id}: {e}")
+        htmx_form = request.headers.get("HX-Request") == "true"
         return (
-            render_platform_unavailable(request, e)
+            render_platform_unavailable(
+                request,
+                e,
+                template_name="tickets/partials/status_and_comments.html" if htmx_form else None,
+                extra_context={"ticket": {"id": ticket_id}, "reply_text": request.POST.get("message", "")}
+                if htmx_form
+                else None,
+            )
             if is_unavailable_error(e)
             else _handle_ticket_error_response(
                 request, ticket_id, _("Unable to add reply. Please try again later."), status=500

@@ -8,12 +8,15 @@ from typing import ClassVar
 from unittest.mock import patch
 
 import requests
+from django.contrib.sessions.middleware import SessionMiddleware
 from django.core.cache import cache
-from django.http import HttpResponseBase
-from django.template import Context
-from django.test import Client, SimpleTestCase, override_settings
+from django.http import HttpResponse, HttpResponseBase
+from django.template import Context, Template
+from django.test import Client, RequestFactory, SimpleTestCase, override_settings
 from django.test.utils import ContextList
 
+from apps.api_client.services import PlatformAPIError
+from apps.common.rate_limit_feedback import render_platform_unavailable
 from tests.common.test_maintenance_not_a_server_error import _authenticated_session
 
 OUTAGE_HEADING = "Temporarily unavailable"
@@ -89,17 +92,18 @@ class PlatformUnreachableViewTests(SimpleTestCase):
         _authenticated_session(client, user_id=456, customer_id=123)
         return client
 
-    def _assert_outage(self, response: HttpResponseBase, caller: Caller) -> None:
+    def _assert_outage(self, response: HttpResponseBase, caller: Caller, *, htmx: bool = False) -> None:
+        status = 200 if htmx and not caller.json_response else caller.status
         self.assertNotEqual(response.status_code, 500)
-        self.assertEqual(response.status_code, caller.status)
+        self.assertEqual(response.status_code, status)
         self.assertNotIn("Location", response)
-        self.assertContains(response, OUTAGE_MESSAGE, status_code=caller.status)
+        self.assertContains(response, OUTAGE_MESSAGE, status_code=status)
         if not caller.json_response:
-            self.assertContains(response, OUTAGE_HEADING, status_code=caller.status)
+            self.assertContains(response, OUTAGE_HEADING, status_code=status)
         for empty_state in EMPTY_STATES:
-            self.assertNotContains(response, empty_state, status_code=caller.status)
-        self.assertNotContains(response, "not found or access denied", status_code=caller.status)
-        self.assertNotContains(response, "Scheduled maintenance", status_code=caller.status)
+            self.assertNotContains(response, empty_state, status_code=status)
+        self.assertNotContains(response, "not found or access denied", status_code=status)
+        self.assertNotContains(response, "Scheduled maintenance", status_code=status)
         context: Context | ContextList | None = getattr(response, "context", None)
         if context is not None:
             self.assertFalse(context.get("account_banner"))
@@ -125,7 +129,71 @@ class PlatformUnreachableViewTests(SimpleTestCase):
                                 )
                             else:
                                 response = client.get(caller.path, headers=headers)
-                        self._assert_outage(response, caller)
+                        self._assert_outage(response, caller, htmx=htmx)
+
+    def test_unavailable_response_status_matches_htmx_swapping(self) -> None:
+        error = PlatformAPIError("offline", is_unavailable=True, retry_after=60)
+        factory = RequestFactory()
+        for htmx, status in ((True, 200), (False, 503)):
+            with self.subTest(htmx=htmx):
+                headers = {"HX-Request": "true"} if htmx else {}
+                request = factory.get("/tickets/3/", headers=headers)
+                SessionMiddleware(lambda _request: HttpResponse()).process_request(request)
+                response = render_platform_unavailable(request, error)
+                self.assertEqual(response.status_code, status)
+                self.assertContains(response, OUTAGE_HEADING, status_code=status)
+                self.assertContains(response, "This information is temporarily unavailable.", status_code=status)
+                self.assertEqual(response["Retry-After"], "60")
+
+    def test_ticket_reply_htmx_outage_keeps_the_form_and_typed_message(self) -> None:
+        message = "  Please keep <this> & my reply.\nSecond line.  "
+        for failure_type in (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            with self.subTest(failure=failure_type.__name__):
+                cache.clear()
+                with patch("apps.common.outbound_http._session.request", side_effect=failure_type("offline")):
+                    response = self._client().post(
+                        "/tickets/3/reply/", {"message": message}, headers={"HX-Request": "true"}
+                    )
+                self.assertContains(response, 'id="reply-form"', status_code=response.status_code)
+                self.assertEqual(response.status_code, 200)
+                self.assertTemplateUsed(response, "tickets/partials/status_and_comments.html")
+                self.assertContains(response, OUTAGE_MESSAGE)
+                self.assertContains(response, 'hx-post="/tickets/3/reply/"')
+                self.assertContains(response, 'hx-target="#ticket-status-and-comments"')
+                self.assertContains(response, "  Please keep &lt;this&gt; &amp; my reply.\nSecond line.  </textarea>")
+                self.assertNotContains(response, 'aria-label="Try again"')
+                self.assertNotContains(response, 'id="comments-container"')
+
+    def test_inline_alert_retry_can_be_hidden_without_changing_the_default(self) -> None:
+        template = Template('{% include "components/maintenance_inline_alert.html" with hide_retry=hide_retry %}')
+        for hide_retry in (False, True):
+            with self.subTest(hide_retry=hide_retry):
+                html = template.render(
+                    Context(
+                        {
+                            "hide_retry": hide_retry,
+                            "request": RequestFactory().get("/services/"),
+                            "maintenance_message": OUTAGE_MESSAGE,
+                            "maintenance_retry_url": "/services/",
+                        }
+                    )
+                )
+                self.assertIn(OUTAGE_MESSAGE, html)
+                if hide_retry:
+                    self.assertNotIn('aria-label="Try again"', html)
+                else:
+                    self.assertIn('aria-label="Try again"', html)
+                    self.assertIn('href="/services/"', html)
+
+    def test_login_outage_has_no_get_retry_link(self) -> None:
+        cache.clear()
+        with patch(
+            "apps.common.outbound_http._session.request", side_effect=requests.exceptions.ConnectionError("offline")
+        ):
+            response = Client().post("/login/", {"email": "someone@example.com", "password": "correct-horse"})
+        self.assertContains(response, OUTAGE_MESSAGE)
+        self.assertNotContains(response, 'aria-label="Try again"')
+        self.assertContains(response, 'value="someone@example.com"')
 
     def test_later_service_fetches_cannot_render_missing_usage_or_domains(self) -> None:
         for suffix in ("/usage/", "/domains/"):
@@ -148,7 +216,7 @@ class PlatformUnreachableViewTests(SimpleTestCase):
                         headers = {"HX-Request": "true"} if htmx else {}
                         with patch("apps.common.outbound_http._session.request", side_effect=replies):
                             result = self._client().get("/services/3/", headers=headers)
-                        self._assert_outage(result, Caller("/services/3/", 503))
+                        self._assert_outage(result, Caller("/services/3/", 503), htmx=htmx)
 
     def test_service_request_outage_keeps_the_bound_form_and_submission_id(self) -> None:
         submission_id = "e9c8ab85-8b72-4d59-9f9b-94d43be6ec77"
@@ -212,7 +280,7 @@ class PlatformUnreachableViewTests(SimpleTestCase):
                         "apps.common.outbound_http._session.request",
                         side_effect=requests.exceptions.ConnectionError("offline"),
                     ):
-                        self._assert_outage(self._client().get(path, headers=headers), Caller(path, 503))
+                        self._assert_outage(self._client().get(path, headers=headers), Caller(path, 503), htmx=htmx)
                     for status in (403, 404):
                         response = requests.Response()
                         response.status_code = status

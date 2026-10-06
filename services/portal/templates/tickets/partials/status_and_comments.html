@@ -1,6 +1,9 @@
 {% load i18n %}
 {% load ui_components %}
 
+{% if maintenance %}
+  {% include "components/maintenance_inline_alert.html" with hide_retry=True %}
+{% else %}
 <!-- Status Card -->
 <div class="bg-slate-800 rounded-lg p-6 border border-slate-700 mb-6">
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -76,8 +79,11 @@
     </div>
 </div>
 
+{% endif %}
+
 <!-- Ticket Replies/Comments -->
 <div class="bg-slate-800 rounded-lg border border-slate-700 mb-6" id="replies-section">
+    {% if not maintenance %}
     <div class="px-6 py-4 border-b border-slate-700 relative">
         <h3 class="text-lg font-medium text-white flex items-center">
             {% icon "chat" size="md" css_class="mr-2 text-blue-400" %}
@@ -105,6 +111,8 @@
         </div>
     </div>
 
+    {% endif %}
+
     {% if ticket.status != 'closed' %}
     <div class="border-t border-slate-700 px-6 py-4">
         <form method="post" action="{% url 'tickets:reply' ticket_id=ticket.id %}" class="space-y-4" id="reply-form" hx-post="{% url 'tickets:reply' ticket_id=ticket.id %}" hx-target="#ticket-status-and-comments" hx-swap="innerHTML" data-htmx-after="reset-reply" enctype="multipart/form-data">
@@ -121,7 +129,7 @@
                 <div class="flex-1">
                     <div class="relative">
                         {% trans "Write your reply..." as reply_placeholder %}
-                        {% input_field "message" input_type="textarea" rows=3 placeholder=reply_placeholder required=True %}
+                        {% input_field "message" input_type="textarea" rows=3 placeholder=reply_placeholder required=True value=reply_text %}
 
                         <!-- Character Counter -->
                         <div class="absolute bottom-2 right-2">

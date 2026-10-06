@@ -40,7 +40,7 @@
           <input type="hidden" name="submission_id" value="{{ submission_id }}">
 
           {% if maintenance %}
-          {% include "components/maintenance_inline_alert.html" %}
+          {% include "components/maintenance_inline_alert.html" with hide_retry=True %}
           {% elif form_error %}
           <div role="alert" class="mb-6 rounded-lg border border-yellow-600 bg-yellow-900/20 p-4 text-yellow-200">
             <p>{{ form_error }}</p>

@@ -28,7 +28,7 @@
     {% comment %} The form is disabled rather than hidden: a customer who sees the fields knows they are in
        the right place and that nothing is wrong with their account or their password. {% endcomment %}
     <div class="mt-8">
-      {% include "components/maintenance_inline_alert.html" %}
+      {% include "components/maintenance_inline_alert.html" with hide_retry=True %}
     </div>
     {% endif %}
 

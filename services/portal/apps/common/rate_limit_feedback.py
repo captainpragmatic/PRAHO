@@ -163,15 +163,22 @@ def handle_platform_error(
     return {}
 
 
-def render_platform_unavailable(request: HttpRequest, error: PlatformAPIError, *, status: int = 503) -> HttpResponse:
-    """Render the existing degraded notice without claiming account data is missing."""
-    context = build_maintenance_context(request, error)
-    template = (
-        "components/maintenance_inline_alert.html"
-        if request.headers.get("HX-Request") == "true"
-        else "common/platform_unavailable.html"
+def render_platform_unavailable(
+    request: HttpRequest,
+    error: PlatformAPIError,
+    *,
+    status: int = 503,
+    template_name: str | None = None,
+    extra_context: dict[str, object] | None = None,
+) -> HttpResponse:
+    """Render a swappable HTMX notice or bound form; keep the full-page status."""
+    htmx = request.headers.get("HX-Request") == "true"
+    context: dict[str, object] = dict(extra_context or {})
+    context.update(build_maintenance_context(request, error))
+    template = template_name or (
+        "components/maintenance_inline_alert.html" if htmx else "common/platform_unavailable.html"
     )
-    response = render(request, template, context, status=status)
+    response = render(request, template, context, status=200 if htmx else status)
     retry_after = get_retry_after_from_error(error)
     if retry_after:
         response["Retry-After"] = str(retry_after)

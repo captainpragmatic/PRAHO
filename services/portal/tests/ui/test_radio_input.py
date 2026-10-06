@@ -25,6 +25,29 @@ def _parse(html: str) -> _Elements:
 
 
 class RadioInputTests(SimpleTestCase):
+    def test_radio_feedback_is_linked_after_the_input_label_pair(self) -> None:
+        html = Template(
+            '{% load ui_components %}{% input_field "action" input_type="radio" '
+            'value="cancel_request" html_id="action_cancel_request" label="Cancel request" '
+            'error="Choose another action" help_text="Select an action" help_text_below="You can retry" %}'
+        ).render(Context({}))
+        elements = _parse(html).elements
+        attributes = elements[0][1]
+        self.assertEqual(attributes.get("aria-invalid"), "true")
+        self.assertEqual(
+            attributes.get("aria-describedby"),
+            "action_cancel_request-error action_cancel_request-help action_cancel_request-help-below",
+        )
+        self.assertEqual([tag for tag, _ in elements], ["input", "label", "p", "p", "p"])
+        self.assertEqual(elements[1][1]["for"], attributes["id"])
+        self.assertRegex(html, r"/>\s*<label\b")
+        self.assertEqual(
+            {attrs["id"] for tag, attrs in elements if tag == "p"},
+            {"action_cancel_request-error", "action_cancel_request-help", "action_cancel_request-help-below"},
+        )
+        for text in ("Choose another action", "Select an action", "You can retry"):
+            self.assertIn(text, html)
+
     def test_radio_states_labels_and_peer_siblings(self) -> None:
         tag = (
             '{% load ui_components %}{% input_field "action" input_type="radio" '
