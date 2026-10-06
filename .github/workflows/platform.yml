@@ -20,7 +20,11 @@ on:
       - 'scripts/affected_test_modules.py'
       - 'pyproject.toml'
       - 'uv.lock'
-      - '.github/workflows/platform.yml'
+      - '.github/workflows/**'
+      # Root files tests/common/test_ci_node_lockfile.py reads: a change to them alone must run it.
+      - 'package.json'
+      - 'package-lock.json'
+      - '.gitignore'
   pull_request:
     branches: [master, staging]
     paths:
@@ -29,7 +33,11 @@ on:
       - 'scripts/affected_test_modules.py'
       - 'pyproject.toml'
       - 'uv.lock'
-      - '.github/workflows/platform.yml'
+      - '.github/workflows/**'
+      # Root files tests/common/test_ci_node_lockfile.py reads: a change to them alone must run it.
+      - 'package.json'
+      - 'package-lock.json'
+      - '.gitignore'
   workflow_dispatch:
 
 env:

@@ -15,7 +15,9 @@ that wrote the workflow.
 
 from __future__ import annotations
 
+import posixpath
 import subprocess
+from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +32,12 @@ _LOCKFILE = "package-lock.json"
 _KNOWN_WORKFLOW = "nightly.yml"
 _KNOWN_JOB = "nightly-e2e"
 
+# The workflow that runs this test on a pull request, and the files this test reads. A pull request
+# that changes only these - deleting the lockfile, say - has to run it, or it can merge the very
+# defect this guard exists for and surface it only in the next nightly.
+_GUARD_WORKFLOW = _WORKFLOWS / "platform.yml"
+_GUARD_INPUTS = (_LOCKFILE, "package.json", ".gitignore", ".github/workflows/nightly.yml")
+
 
 def _is_tracked(path: str) -> bool:
     """Whether git tracks ``path`` - the index, not the working tree."""
@@ -42,30 +50,64 @@ def _is_tracked(path: str) -> bool:
     return completed.returncode == 0
 
 
-def _lockfiles_a_step_needs(step: dict[str, Any]) -> list[str]:
+def _run_directory(step: dict[str, Any], job: dict[str, Any], workflow: dict[str, Any]) -> str:
+    """The repository-relative directory a ``run`` step executes in; ``""`` is the root.
+
+    GitHub applies ``defaults.run.working-directory`` at workflow and at job scope, and a step's own
+    ``working-directory`` overrides both - so the nearest scope that sets one wins.
+    """
+    for raw in (
+        step.get("working-directory"),
+        ((job.get("defaults") or {}).get("run") or {}).get("working-directory"),
+        ((workflow.get("defaults") or {}).get("run") or {}).get("working-directory"),
+    ):
+        if raw:
+            directory = posixpath.normpath(str(raw))
+            return "" if directory == "." else directory
+    return ""
+
+
+def _lockfiles_a_step_needs(step: dict[str, Any], job: dict[str, Any], workflow: dict[str, Any]) -> list[str]:
     """Repository-relative lockfiles this step cannot run without."""
     needed: list[str] = []
     settings = step.get("with") or {}
     if str(step.get("uses", "")).startswith("actions/setup-node") and settings.get("cache") == "npm":
+        # An action's inputs are workspace-relative; `defaults.run` never applies to `uses` steps.
         explicit = str(settings.get("cache-dependency-path", "")).split()
         needed.extend(explicit or [_LOCKFILE])
     if "npm ci" in str(step.get("run", "")):
-        directory = str(step.get("working-directory", "")).strip("./")
-        needed.append(f"{directory}/{_LOCKFILE}" if directory else _LOCKFILE)
+        directory = _run_directory(step, job, workflow)
+        needed.append(posixpath.join(directory, _LOCKFILE) if directory else _LOCKFILE)
     return needed
 
 
-def _lockfile_needs() -> dict[str, list[str]]:
-    """Every workflow step that needs a Node lockfile, keyed ``workflow:job:step``."""
+def _lockfile_needs_in(workflow: dict[str, Any], workflow_name: str) -> dict[str, list[str]]:
+    """Every step of one parsed workflow that needs a Node lockfile, keyed ``workflow:job:step``."""
     found: dict[str, list[str]] = {}
-    for workflow in sorted(_WORKFLOWS.glob("*.yml")):
-        jobs = yaml.safe_load(workflow.read_text(encoding="utf-8")).get("jobs") or {}
-        for job_name, job in jobs.items():
-            for index, step in enumerate(job.get("steps") or []):
-                if needed := _lockfiles_a_step_needs(step):
-                    label = step.get("name") or step.get("uses") or f"step {index}"
-                    found[f"{workflow.name}:{job_name}:{label}"] = needed
+    for job_name, job in (workflow.get("jobs") or {}).items():
+        for index, step in enumerate(job.get("steps") or []):
+            if needed := _lockfiles_a_step_needs(step, job, workflow):
+                label = step.get("name") or step.get("uses") or f"step {index}"
+                found[f"{workflow_name}:{job_name}:{label}"] = needed
     return found
+
+
+def _lockfile_needs() -> dict[str, list[str]]:
+    """Every step in this repository's workflows that needs a Node lockfile."""
+    found: dict[str, list[str]] = {}
+    for path in sorted(_WORKFLOWS.glob("*.yml")):
+        found.update(_lockfile_needs_in(yaml.safe_load(path.read_text(encoding="utf-8")), path.name))
+    return found
+
+
+def _pull_request_paths(workflow: dict[str, Any]) -> list[str]:
+    """A workflow's ``pull_request`` path filter.
+
+    PyYAML follows YAML 1.1, where a bare ``on`` is the boolean ``True``, so the trigger block is
+    stored under ``True`` rather than ``"on"``.
+    """
+    triggers = workflow.get("on", workflow.get(True)) or {}
+    return [str(pattern) for pattern in (triggers.get("pull_request") or {}).get("paths") or []]
 
 
 class WorkflowNodeLockfileTests(SimpleTestCase):
@@ -96,3 +138,71 @@ class WorkflowNodeLockfileTests(SimpleTestCase):
         # Both the cache lookup and the install: fixing only the first leaves the second failing.
         self.assertEqual(len(seen), 2, msg=f"expected the setup-node and `npm ci` steps, saw {sorted(seen)}")
         self.assertTrue(all(needed == [_LOCKFILE] for needed in seen.values()))
+
+    def test_a_pull_request_that_changes_only_the_guards_inputs_still_runs_it(self) -> None:
+        paths = _pull_request_paths(yaml.safe_load(_GUARD_WORKFLOW.read_text(encoding="utf-8")))
+        # Canary: an unreadable filter would leave every input "unmatched" for the wrong reason.
+        self.assertIn("services/platform/**", paths)
+
+        # `fnmatch` lets `*` cross `/`, which is how GitHub's `**` behaves for these patterns.
+        unmatched = [path for path in _GUARD_INPUTS if not any(fnmatch(path, pattern) for pattern in paths)]
+        self.assertEqual(
+            unmatched,
+            [],
+            msg=f"{_GUARD_WORKFLOW.name} does not run on a pull request that changes only these files",
+        )
+
+
+class LockfileNeedResolutionTests(SimpleTestCase):
+    """Which lockfile a step needs, on workflows built here rather than read from disk."""
+
+    @staticmethod
+    def _needs(*, step: dict[str, Any], job: dict[str, Any] | None = None, **workflow: Any) -> dict[str, list[str]]:
+        return _lockfile_needs_in({**workflow, "jobs": {"j": {**(job or {}), "steps": [step]}}}, "w.yml")
+
+    @staticmethod
+    def _defaults(directory: str) -> dict[str, Any]:
+        return {"defaults": {"run": {"working-directory": directory}}}
+
+    def test_npm_ci_at_the_root_needs_the_root_lockfile(self) -> None:
+        self.assertEqual(self._needs(step={"name": "i", "run": "npm ci"}), {"w.yml:j:i": [_LOCKFILE]})
+
+    def test_a_step_working_directory_is_normalised(self) -> None:
+        needs = self._needs(step={"name": "i", "run": "npm ci", "working-directory": "./frontend/"})
+        self.assertEqual(needs, {"w.yml:j:i": ["frontend/package-lock.json"]})
+
+    def test_a_job_default_working_directory_is_inherited(self) -> None:
+        needs = self._needs(step={"name": "i", "run": "npm ci"}, job=self._defaults("frontend"))
+        self.assertEqual(needs, {"w.yml:j:i": ["frontend/package-lock.json"]})
+
+    def test_a_workflow_default_working_directory_is_inherited(self) -> None:
+        needs = self._needs(step={"name": "i", "run": "npm ci"}, **self._defaults("frontend"))
+        self.assertEqual(needs, {"w.yml:j:i": ["frontend/package-lock.json"]})
+
+    def test_the_nearest_scope_wins(self) -> None:
+        workflow = self._defaults("outer")
+        job = self._defaults("middle")
+        self.assertEqual(
+            self._needs(step={"name": "i", "run": "npm ci", "working-directory": "inner"}, job=job, **workflow),
+            {"w.yml:j:i": ["inner/package-lock.json"]},
+        )
+        self.assertEqual(
+            self._needs(step={"name": "i", "run": "npm ci"}, job=job, **workflow),
+            {"w.yml:j:i": ["middle/package-lock.json"]},
+        )
+
+    def test_run_defaults_do_not_move_a_setup_node_cache_lookup(self) -> None:
+        step = {"name": "n", "uses": "actions/setup-node@v4", "with": {"cache": "npm"}}
+        self.assertEqual(self._needs(step=step, job=self._defaults("frontend")), {"w.yml:j:n": [_LOCKFILE]})
+
+        explicit = {**step, "with": {"cache": "npm", "cache-dependency-path": "a/package-lock.json\nb/package-lock.json"}}
+        self.assertEqual(self._needs(step=explicit), {"w.yml:j:n": ["a/package-lock.json", "b/package-lock.json"]})
+
+    def test_steps_that_install_from_no_lockfile_need_none(self) -> None:
+        for step in (
+            {"name": "x", "run": "npm install"},
+            {"name": "x", "uses": "actions/setup-node@v4", "with": {"node-version": "20"}},
+            {"name": "x", "uses": "actions/setup-node@v4", "with": {"cache": "yarn"}},
+        ):
+            with self.subTest(step=step):
+                self.assertEqual(self._needs(step=step, job=self._defaults("frontend")), {})
