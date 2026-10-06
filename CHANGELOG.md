@@ -37,6 +37,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The nightly browser job no longer fails before it starts. The job added on 2026-09-28 failed
+  at its Node setup step on every one of its first seven nights, before a browser was installed,
+  because the `package-lock.json` it installs from was gitignored and existed on no CI runner. The
+  lockfile is tracked, a test keeps every workflow that runs `npm ci` installing from a tracked
+  lockfile, and the pinned toolchain builds byte-identical CSS on macOS and Linux. The QA record
+  that said the suite ran nightly is corrected, and its ledger of open items re-verified against
+  the code.
 - The UI template tags no longer drop arguments they do not recognise. An unknown argument now
   fails while developing and testing, and is logged in production. Templates that passed one
   are fixed:
