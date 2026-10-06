@@ -859,7 +859,7 @@ class ChainReviewHardeningTests(AuditChainLedgerTestCase):
                      old_values, new_values, timestamp, is_sensitive, requires_review,
                      user_agent, request_id, session_key, actor_type, content_type_id)
                 VALUES (%s, 'login_success', 'authentication', 'low', 'backdated forgery', '',
-                        '{}', '{}', '{}', %s, 0, 0, '', '', '', 'system', %s)
+                        '{}', '{}', '{}', %s, FALSE, FALSE, '', '', '', 'system', %s)
                 """,
                 [forged_id, old, self.content_type.id],
             )

@@ -37,6 +37,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A changed setting takes effect consistently. Code running inside a transaction now reads the
+  value it just wrote instead of the old cached one, a value from a transaction that rolls back is
+  never cached, and a read that overlaps a save can no longer put the old value back in the cache
+  for an hour.
 - Invoices are no longer silently lost when a database error occurs while handling their
   creation or updates. Optional failures no longer cancel e-Factura submission or emails.
 - The UI template tags no longer drop arguments they do not recognise. An unknown argument now

@@ -17,17 +17,50 @@ from __future__ import annotations
 
 import contextlib
 import logging
-from typing import Any
-from unittest import TestResult, TestSuite
+from typing import Any, cast, override
+from unittest import TestCase as UnitTestCase
+from unittest import TestResult, TestSuite, TextTestResult
 
+from django.core.cache import caches
+from django.core.cache.backends import locmem
+from django.core.cache.backends.locmem import LocMemCache
 from django.db import connection, connections
 from django.test.runner import DiscoverRunner
 
 logger = logging.getLogger(__name__)
 
 
+class CacheClearingTestResult(TextTestResult):
+    """Clear in-process caches before test setup without interrupting the run."""
+
+    @override
+    def startTest(self, test: UnitTestCase) -> None:
+        # Preserve configured instances, including mocked clear methods.
+        backends = [backend for backend in caches.all() if isinstance(backend, LocMemCache)]
+        known_stores = {id(vars(backend)["_cache"]) for backend in backends}
+        # Django 5.2 shares named stores, expiry maps and locks process-wide.
+        # Method-level overrides start after startTest(), so include inactive stores.
+        stores = cast("dict[str, object]", vars(locmem)["_caches"])
+        backends.extend(
+            LocMemCache(name, {}) for name, store in tuple(stores.items()) if id(store) not in known_stores
+        )
+        for backend in backends:
+            try:
+                backend.clear()
+            except Exception:
+                logger.warning("⚠️ [Tests] Failed to clear LocMem cache before %s", test.id(), exc_info=True)
+        super().startTest(test)
+
+
 class PostgreSQLSafeRunner(DiscoverRunner):
-    """DiscoverRunner with connection recovery for PostgreSQL test suites."""
+    """DiscoverRunner with connection recovery and cache isolation for serial CI."""
+
+    def get_resultclass(self) -> type[TextTestResult]:
+        """Preserve Django's SQL-debugging and debugger result behavior."""
+        result_class = super().get_resultclass()
+        if result_class is None:
+            return CacheClearingTestResult
+        return type("CacheClearingResult", (CacheClearingTestResult, result_class), {})
 
     def setup_test_environment(self, **kwargs: Any) -> None:
         """Set up test environment with connection safety patches."""
