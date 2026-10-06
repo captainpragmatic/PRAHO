@@ -33,12 +33,12 @@
 
       <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
         {% input_field name="api_username" label=_("API username") value=form.api_username.value html_id="id_api_username" error=form.api_username.errors.0 %}
-        {% input_field name="api_key" input_type="password" label=_("API key") value=form.api_key.value html_id="id_api_key" error=form.api_key.errors.0 icon_right="password-toggle" %}
-        {% input_field name="api_secret" input_type="password" label=_("API secret") value=form.api_secret.value html_id="id_api_secret" error=form.api_secret.errors.0 icon_right="password-toggle" %}
+        {% input_field name="api_key" input_type="password" label=_("API key") html_id="id_api_key" error=form.api_key.errors.0 icon_right="password-toggle" %}
+        {% input_field name="api_secret" input_type="password" label=_("API secret") html_id="id_api_secret" error=form.api_secret.errors.0 icon_right="password-toggle" %}
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {% input_field name="webhook_secret" input_type="password" label=_("Webhook secret") value=form.webhook_secret.value html_id="id_webhook_secret" help_text=form.fields.webhook_secret.help_text error=form.webhook_secret.errors.0 icon_right="password-toggle" %}
+        {% input_field name="webhook_secret" input_type="password" label=_("Webhook secret") html_id="id_webhook_secret" help_text=form.fields.webhook_secret.help_text error=form.webhook_secret.errors.0 icon_right="password-toggle" %}
         {% input_field name="webhook_endpoint" input_type="url" label=_("Webhook endpoint") value=form.webhook_endpoint.value html_id="id_webhook_endpoint" help_text=form.fields.webhook_endpoint.help_text error=form.webhook_endpoint.errors.0 %}
       </div>
 

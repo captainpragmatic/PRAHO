@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from django import template
 from django.conf import settings
-from django.forms import CheckboxInput, Select, Textarea
+from django.forms import BoundField, CheckboxInput, PasswordInput, Select, Textarea
 from django.template.base import FilterExpression
 from django.template.base import token_kwargs as django_token_kwargs
 from django.utils.html import format_html
@@ -471,7 +471,7 @@ def alert(message: str, *, config: AlertConfig | None = None, **kwargs: Any) -> 
 
 
 @register.inclusion_tag("components/input.html")
-def form_field(field: Any, *, icon_left: str | None = None, **kwargs: str) -> dict[str, Any]:
+def form_field(field: BoundField, *, icon_left: str | None = None, **kwargs: str) -> dict[str, object]:
     """
     Bridge tag: renders a Django BoundField via the {% input_field %} component.
 
@@ -517,9 +517,11 @@ def form_field(field: Any, *, icon_left: str | None = None, **kwargs: str) -> di
         first_error = str(field.errors[0])
 
     # ── Current value ──
-    value = field.value()
-    formatted_value = widget.format_value(value)
-    value_str: str = str(formatted_value) if formatted_value is not None else ""
+    # Match PasswordInput: redisplay a secret only when explicitly enabled.
+    value_str: str | None = None
+    if not isinstance(widget, PasswordInput) or widget.render_value:
+        formatted_value = widget.format_value(field.value())
+        value_str = str(formatted_value) if formatted_value is not None else ""
 
     # ── Label text ──
     label = str(field.label) if field.label else None

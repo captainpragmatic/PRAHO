@@ -32,6 +32,17 @@ MAX_PHONE_PREFIX_DIGITS = 9
 MIN_PHONE_DIGITS = 6
 
 
+class OneTimeCodeInput(forms.TextInput):
+    """A visible code field that, like PasswordInput, never redisplays a submitted value.
+
+    Authenticator and recovery codes are secrets; they must not be echoed back into the page
+    when the form is re-rendered with errors. They stay visible while typing, unlike passwords.
+    """
+
+    def format_value(self, value: object) -> None:
+        return None
+
+
 class CustomerLoginForm(forms.Form):
     """
     Customer login form with dark theme styling.
@@ -65,7 +76,7 @@ class CustomerLoginForm(forms.Form):
         required=False,
         max_length=8,
         help_text=_("Required only when two-factor authentication is enabled."),
-        widget=forms.TextInput(attrs={"autocomplete": "one-time-code", "inputmode": "numeric"}),
+        widget=OneTimeCodeInput(attrs={"autocomplete": "one-time-code", "inputmode": "numeric"}),
     )
 
     remember_me = forms.BooleanField(
