@@ -32,7 +32,6 @@ services:
       dockerfile: deploy/platform/Dockerfile
 {% endif %}
     container_name: praho_platform
-    working_dir: /app/services/platform
     environment:
       - DEBUG=0
       - DB_HOST=${DB_HOST}
@@ -54,9 +53,9 @@ services:
       - DJANGO_SECURE_SSL_REDIRECT=${DJANGO_SECURE_SSL_REDIRECT:-false}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
-      - static_files:/app/services/platform/staticfiles
-      - media_files:/app/services/platform/media
-      - logs:/app/services/platform/logs
+      - static_files:/app/staticfiles
+      - media_files:/app/media
+      - logs:/app/logs
 {% if deploy_database %}
     depends_on:
       db:
@@ -83,7 +82,6 @@ services:
       dockerfile: deploy/portal/Dockerfile
 {% endif %}
     container_name: praho_portal
-    working_dir: /app/services/portal
     environment:
       - DEBUG=0
       - PLATFORM_API_BASE_URL=${PLATFORM_API_BASE_URL}
@@ -103,8 +101,8 @@ services:
       - DJANGO_SECURE_SSL_REDIRECT=${DJANGO_SECURE_SSL_REDIRECT:-false}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
-      - portal_static:/app/services/portal/staticfiles
-      - portal_logs:/app/services/portal/logs
+      - portal_static:/app/staticfiles
+      - portal_logs:/app/logs
 {% if deploy_platform %}
     depends_on:
       platform:

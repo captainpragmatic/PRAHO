@@ -69,11 +69,17 @@ COPY shared/ /app/shared/
 # Copy entrypoint script
 COPY deploy/platform/entrypoint.sh /app/deploy/platform/entrypoint.sh
 
-# Create required runtime directories
+# Preserve legacy volume destinations while settings keep their service-relative paths
 RUN mkdir -p /app/services/platform/staticfiles \
     && mkdir -p /app/services/platform/media \
     && mkdir -p /app/services/platform/logs \
-    && mkdir -p /var/log/praho
+    && mkdir -p /var/log/praho \
+    && mv /app/services/platform/staticfiles /app/staticfiles \
+    && ln -s /app/staticfiles /app/services/platform/staticfiles \
+    && mv /app/services/platform/media /app/media \
+    && ln -s /app/media /app/services/platform/media \
+    && mv /app/services/platform/logs /app/logs \
+    && ln -s /app/logs /app/services/platform/logs
 
 # Create non-root user
 RUN addgroup --system django \

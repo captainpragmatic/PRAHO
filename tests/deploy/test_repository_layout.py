@@ -1,4 +1,4 @@
-"""Keep production images and Compose mounts in the repository layout."""
+"""Keep the repository image layout compatible with pre-layout rollback images."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from typing import cast
 
 import yaml
 from django.test import SimpleTestCase
+from jinja2 import Environment, StrictUndefined
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -57,25 +58,89 @@ class DockerRepositoryLayoutTests(SimpleTestCase):
     def test_portal_image_preserves_repository_layout(self) -> None:
         self._assert_runtime_layout("portal")
 
+    def _assert_legacy_runtime_paths(self, service: str, directories: tuple[str, ...]) -> None:
+        instructions = _runtime_instructions(service)
+        # Only commands executed before dropping privileges can prepare writable paths.
+        user_index = instructions.index(("USER", "django"))
+        commands = [
+            shlex.split(command.strip())
+            for keyword, argument in instructions[:user_index]
+            if keyword == "RUN"
+            for command in argument.split("&&")
+        ]
+        ownership = commands.index(["chown", "-R", "django:django", "/app"])
+        for directory in directories:
+            legacy = f"/app/{directory}"
+            relative = f"/app/services/{service}/{directory}"
+            move = ["mv", relative, legacy]
+            mkdir = ["mkdir", "-p", relative]
+            link = ["ln", "-s", legacy, relative]
+            with self.subTest(service=service, directory=directory):
+                self.assertIn(move, commands)
+                self.assertIn(mkdir, commands)
+                self.assertIn(link, commands)
+                self.assertLess(commands.index(mkdir), commands.index(move))
+                self.assertLess(commands.index(move), commands.index(link))
+                self.assertLess(commands.index(link), ownership)
+
+    def test_platform_image_uses_legacy_runtime_paths(self) -> None:
+        self._assert_legacy_runtime_paths("platform", ("staticfiles", "media", "logs"))
+
+    def test_portal_image_uses_legacy_runtime_paths(self) -> None:
+        self._assert_legacy_runtime_paths("portal", ("staticfiles", "logs"))
+
+    def test_portal_image_keeps_the_legacy_default_session_database(self) -> None:
+        environments = [
+            token
+            for keyword, argument in _runtime_instructions("portal")
+            if keyword == "ENV"
+            for token in shlex.split(argument)
+        ]
+        self.assertIn("SESSION_DB_PATH=/app/portal.sqlite3", environments)
+
     def test_compose_workdirs_and_mounts_match_the_images(self) -> None:
+        expected_volumes: dict[str, dict[str, list[str]]] = {
+            "docker-compose.container-service.yml": {
+                "platform": [],
+                "portal": ["portal_sessions:/app/data"],
+            },
+            "docker-compose.platform-only.yml": {
+                "platform": ["static_files:/app/staticfiles", "media_files:/app/media", "logs:/app/logs"],
+            },
+            "docker-compose.portal-only.yml": {
+                "portal": ["portal_static:/app/staticfiles", "portal_logs:/app/logs", "portal_sessions:/app/data"],
+            },
+            "docker-compose.services.yml": {
+                "platform": ["static_volume:/app/staticfiles", "media_volume:/app/media", "logs_volume:/app/logs"],
+                "portal": [
+                    "portal_static_volume:/app/staticfiles",
+                    "portal_logs_volume:/app/logs",
+                    "portal_sessions_volume:/app/data",
+                ],
+            },
+            "docker-compose.single-server.yml": {
+                "platform": ["static_files:/app/staticfiles", "media_files:/app/media", "logs:/app/logs"],
+                "portal": ["portal_static:/app/staticfiles", "portal_logs:/app/logs", "portal_sessions:/app/data"],
+            },
+        }
         paths = sorted((ROOT / "deploy").glob("docker-compose*.yml"))
-        self.assertEqual(len(paths), 6)
+        self.assertEqual({path.name for path in paths}, {*expected_volumes, "docker-compose.dev.yml"})
         checked = 0
         for path in paths:
             compose = cast(dict[str, dict[str, dict[str, object]]], yaml.safe_load(path.read_text(encoding="utf-8")))
+            services = compose["services"]
+            if path.name != "docker-compose.dev.yml":
+                self.assertEqual(set(services) & {"platform", "portal"}, set(expected_volumes[path.name]))
             for service in ("platform", "portal"):
-                if service not in compose["services"]:
+                if service not in services:
                     continue
                 checked += 1
-                config = compose["services"][service]
+                config = services[service]
                 with self.subTest(path=path.name, service=service):
-                    self.assertEqual(config.get("working_dir"), f"/app/services/{service}")
                     volumes = config.get("volumes", [])
                     self.assertIsInstance(volumes, list)
-                    for volume in cast(list[str], volumes):
-                        target = volume.split(":")[1]
-                        self.assertNotIn(target, {"/app", "/app/staticfiles", "/app/media", "/app/logs"})
                     if path.name == "docker-compose.dev.yml":
+                        self.assertEqual(config.get("working_dir"), f"/app/services/{service}")
                         self.assertIn(f"../services/{service}:/app/services/{service}:delegated", volumes)
                         self.assertIn("../shared:/app/shared:delegated", volumes)
                         self.assertEqual(
@@ -87,4 +152,64 @@ class DockerRepositoryLayoutTests(SimpleTestCase):
                                 f"0.0.0.0:{8700 if service == 'platform' else 8701}",
                             ],
                         )
+                    else:
+                        self.assertNotIn("working_dir", config)
+                        self.assertEqual(volumes, expected_volumes[path.name][service])
+                        self.assertNotIn("entrypoint", config)
+                        self.assertNotIn("command", config)
         self.assertEqual(checked, 10)
+
+    def test_ansible_compose_keeps_the_same_runtime_config_for_old_and_new_images(self) -> None:
+        source = (ROOT / "deploy/ansible/roles/praho/templates/docker-compose.yml.j2").read_text(encoding="utf-8")
+        environment = Environment(undefined=StrictUndefined, autoescape=False)  # noqa: S701  # YAML, not HTML.
+        template = environment.from_string(source)
+        for platform, portal in ((True, True), (True, False), (False, True)):
+            rendered = template.render(
+                ansible_date_time={"iso8601": "2026-10-06"},
+                deploy_database=True,
+                deploy_platform=platform,
+                deploy_portal=portal,
+                deploy_caddy=True,
+                build_from_source=False,
+                db_name="praho",
+                db_user="praho",
+                backup_directory="/backups",
+                platform_domain="platform.example.com",
+                portal_domain="portal.example.com",
+                platform_port=8700,
+                portal_port=8701,
+            )
+            configurations: list[dict[str, dict[str, object]]] = []
+            for version in ("pre-layout", "repository-layout"):
+                compose = cast(
+                    dict[str, dict[str, dict[str, object]]],
+                    yaml.safe_load(rendered.replace("${VERSION:-latest}", version)),
+                )
+                services = compose["services"]
+                expected = {name for name, enabled in (("platform", platform), ("portal", portal)) if enabled}
+                self.assertEqual(set(services) & {"platform", "portal"}, expected)
+                runtime: dict[str, dict[str, object]] = {}
+                for service in sorted(expected):
+                    config = services[service]
+                    with self.subTest(platform=platform, portal=portal, version=version, service=service):
+                        self.assertNotIn("working_dir", config)
+                        self.assertNotIn("entrypoint", config)
+                        self.assertNotIn("command", config)
+                        self.assertEqual(config["image"], f"${{REGISTRY:-}}praho-{service}:{version}")
+                        self.assertEqual(
+                            config["volumes"],
+                            ["static_files:/app/staticfiles", "media_files:/app/media", "logs:/app/logs"]
+                            if service == "platform"
+                            else ["portal_static:/app/staticfiles", "portal_logs:/app/logs"],
+                        )
+                    runtime[service] = {key: value for key, value in config.items() if key != "image"}
+                configurations.append(runtime)
+            self.assertEqual(configurations[0], configurations[1])
+
+    def test_ansible_environment_keeps_legacy_static_and_media_paths(self) -> None:
+        source = (ROOT / "deploy/ansible/roles/praho/templates/env.j2").read_text(encoding="utf-8")
+        values = dict(
+            line.split("=", 1) for line in source.splitlines() if line.startswith(("STATIC_ROOT=", "MEDIA_ROOT="))
+        )
+        self.assertEqual(values.get("STATIC_ROOT"), "/app/staticfiles")
+        self.assertEqual(values.get("MEDIA_ROOT"), "/app/media")

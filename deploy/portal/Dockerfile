@@ -33,6 +33,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     DJANGO_SETTINGS_MODULE=config.settings.prod \
     PYTHONPATH=/app/services/portal \
+    SESSION_DB_PATH=/app/portal.sqlite3 \
     SERVICE_NAME=portal
 
 # Portal uses config.settings.prod (not config.settings) because portal has a
@@ -62,11 +63,15 @@ COPY shared/ /app/shared/
 # Copy entrypoint script
 COPY deploy/portal/entrypoint.sh /app/deploy/portal/entrypoint.sh
 
-# Create required directories
+# Preserve legacy volume destinations while settings keep their service-relative paths
 RUN mkdir -p /app/services/portal/staticfiles \
     && mkdir -p /app/services/portal/logs \
     && mkdir -p /app/data \
-    && mkdir -p /var/log/praho/portal
+    && mkdir -p /var/log/praho/portal \
+    && mv /app/services/portal/staticfiles /app/staticfiles \
+    && ln -s /app/staticfiles /app/services/portal/staticfiles \
+    && mv /app/services/portal/logs /app/logs \
+    && ln -s /app/logs /app/services/portal/logs
 
 # Create non-root user
 RUN addgroup --system django \
