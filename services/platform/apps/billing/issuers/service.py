@@ -19,9 +19,11 @@ from __future__ import annotations
 
 import logging
 import uuid
+from functools import partial
 from typing import TYPE_CHECKING, Any, assert_never
 
 from django.db import connection, transaction
+from django.utils.translation import gettext as _
 
 from apps.billing.credit_note_lines import mirror_lines_negated
 from apps.billing.invoice_models import (
@@ -32,6 +34,7 @@ from apps.billing.invoice_models import (
     Invoice,
 )
 from apps.billing.tax_evidence import capture_credit_note_evidence
+from apps.common.transactions import best_effort_atomic
 from apps.common.types import Err, Ok, Result
 
 from .base import Ambiguous, Issued, PreparedDocument, Rejected
@@ -86,7 +89,8 @@ def issue_invoice_externally(  # noqa: PLR0911  # One return per distinct refusa
         return Err("A credit note is issued through the reversal endpoint, not as a new invoice")
 
     if invoice.number:
-        # Already numbered. Re-issuing would create a second legal document.
+        # A retry settles local state without submitting another legal document.
+        _settle_issued_document(invoice.pk)
         return Ok(invoice.number)
 
     issuer = resolve_issuer(invoice)
@@ -199,11 +203,64 @@ def _converge_issued_payments(invoice: Invoice) -> Result[None, str]:
         return Ok(None)
     lock_document_context(invoice)
     payment_ids = list(invoice.payments.filter(status="succeeded").order_by("pk").values_list("pk", flat=True))
+    if invoice.total_cents == 0 and not payment_ids:
+        # A fully discounted document has no payment row to drive convergence.
+        invoice.update_status_from_payments()
+        if invoice.status != "paid":
+            return Err(_("Zero-total invoice could not be settled."))
     for payment_id in payment_ids:
         convergence = PaymentSuccessService.converge_local_paid_document(payment_id)
         if convergence.is_err():
             return Err(convergence.unwrap_err())
     return Ok(None)
+
+
+def _settle_issued_document(invoice_id: int) -> None:
+    """Settle local state after issuance commits; failures never undo provider facts."""
+    error: str | None = None
+    try:
+        with transaction.atomic():
+            invoice = Invoice.objects.select_for_update().get(pk=invoice_id)
+            if invoice.status in {"void", "refunded"}:
+                return
+            settlement = _converge_issued_payments(invoice)
+            if settlement.is_err():
+                error = settlement.unwrap_err()
+                transaction.set_rollback(True)
+    except Exception as exc:
+        error = str(exc)
+        logger.exception("🔥 [Issuance] Settlement raised for issued invoice %s", invoice_id)
+
+    if error is not None:
+        logger.error("🔥 [Issuance] Invoice %s is issued but settlement failed: %s", invoice_id, error)
+        # Alert storage is optional; its own failed SQL must not hide the issued document.
+        with best_effort_atomic(logger=logger, scope="Issuance", message="Could not record settlement alert"):
+            from apps.audit.models import AuditAlert  # noqa: PLC0415
+
+            invoice = Invoice.objects.get(pk=invoice_id)
+            issuance = ProviderIssuance.objects.get(invoice_id=invoice_id)
+            AuditAlert.objects.update_or_create(
+                alert_type="data_integrity",
+                status="active",
+                metadata={"source": "provider_issuance_settlement", "invoice_id": invoice_id},
+                defaults={
+                    "severity": "high",
+                    "title": _("Issued invoice settlement failed"),
+                    "description": _(
+                        "Invoice %(number)s was issued, but settlement failed: %(error)s. "
+                        "Review the failure and retry the invoice issuance task to settle the existing document."
+                    )
+                    % {"number": invoice.number, "error": error},
+                    "evidence": {
+                        "invoice_number": invoice.number,
+                        "issuance_id": str(issuance.pk),
+                        "provider_document_id": issuance.provider_document_id,
+                        "error": error,
+                    },
+                },
+            )
+        return
+    _settle_correction_with(invoice)
 
 
 def _finalize(
@@ -253,15 +310,8 @@ def _finalize(
                 invoice.sequence_scope = SEQUENCE_SCOPE_DEFAULT
             invoice.issue()
             invoice.save()
-            # Money may already have been recorded against this document while it was
-            # an unnumbered draft - customer credit applied at creation, typically.
-            # `mark_as_paid` only accepts an issued invoice, so that convergence has
-            # to happen here, the moment the document legally exists.
-            settlement = _converge_issued_payments(invoice)
-            if settlement.is_err():
-                transaction.set_rollback(True)
-                return Err(settlement.unwrap_err())
-            _settle_correction_with(invoice)
+            # Provider facts commit before settlement can reject entitlement or fail.
+            transaction.on_commit(partial(_settle_issued_document, invoice_id))
             logger.info(f"✅ [Issuance] Invoice {invoice_id} issued as {outcome.legal_number}")
             return Ok(outcome.legal_number)
 
@@ -386,18 +436,9 @@ def reconcile_confirmed_issued(
         invoice.number = legal_number
         invoice.issue()
         invoice.save()
-        # The same convergence `_finalize` performs the moment a document legally exists,
-        # and for the same reason: money may already be recorded against what was an
-        # unnumbered draft. Without it an invoice already covered by payment or customer
-        # credit stays `issued` at a zero balance, so `paid_at` is never set, payment
-        # history and pending-service activation never run, and the issue signal can
-        # schedule reminders for a customer who owes nothing. It is a no-op for a credit
-        # note, which `update_status_from_payments` refuses to collect.
-        settlement = _converge_issued_payments(invoice)
-        if settlement.is_err():
-            transaction.set_rollback(True)
-            return Err(settlement.unwrap_err())
-        _settle_correction_with(invoice)
+        # The caller may also be recording operator attribution. Wait for its commit
+        # so settlement cannot roll back the adopted number or that audit record.
+        transaction.on_commit(partial(_settle_issued_document, invoice.pk))
     logger.info(f"✅ [Issuance] Invoice {invoice.pk} reconciled to {legal_number} by operator")
     return Ok(legal_number)
 

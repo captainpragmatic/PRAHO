@@ -1018,7 +1018,10 @@ class UsageInvoiceServiceTestCase(TestCase):
         token = uuid4()
         issuance.claim(token=token, payload={}, payload_hash="wp13-credit")
         issuance.save()
-        finalized = _finalize(invoice.pk, issuance.pk, token, Issued(number="WP13-001", series="FCT"))
+        # Settlement runs after the confirmed issuance commits, so a refused settlement can never
+        # undo the provider's number; run the commit callbacks the way production does.
+        with self.captureOnCommitCallbacks(execute=True):
+            finalized = _finalize(invoice.pk, issuance.pk, token, Issued(number="WP13-001", series="FCT"))
         self.assertTrue(finalized.is_ok(), str(finalized))
         invoice.refresh_from_db()
         self.billing_cycle.refresh_from_db()
