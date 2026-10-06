@@ -202,6 +202,7 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0915
                 retry_afters.append(retry_after)
         elif is_unavailable_error(error):
             sections_unavailable.add(section)
+            context["platform_available"] = False
             # Warning, not error: paging someone about their own maintenance window is how alerts get
             # ignored. The same choice `handle_platform_error` makes, for the same reason.
             logger.warning("⚠️ [Dashboard] %s unavailable for customer %s: %s", section, customer_id, error)
