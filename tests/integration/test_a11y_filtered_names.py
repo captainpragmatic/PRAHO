@@ -38,7 +38,12 @@ class FilteredComponentNameTests(SimpleTestCase):
         with patch.object(Path, "read_text", return_value=content):
             return [finding.code for finding in self.check_file(REPO_ROOT / "filtered-names.html")]
 
-    def _assert_cases(self, cases: tuple[tuple[str, str | None, bool], ...]) -> None:
+    def _assert_cases(
+        self,
+        cases: tuple[tuple[str, str | None, bool], ...],
+        *,
+        keys: tuple[str, ...] = ("label", "aria_label"),
+    ) -> None:
         for service in ("platform", "portal"):
             engine = Engine(
                 dirs=[str(REPO_ROOT / "shared" / "ui" / "templates")],
@@ -47,7 +52,7 @@ class FilteredComponentNameTests(SimpleTestCase):
                     "static": "django.templatetags.static",
                 },
             )
-            for key in ("label", "aria_label"):
+            for key in keys:
                 for value, name, source_has_name in cases:
                     source = '{% input_field "control" ' + key + "=" + value + " %}"
                     rendered = engine.from_string("{% load ui_components %}" + source).render(
@@ -110,5 +115,38 @@ class FilteredComponentNameTests(SimpleTestCase):
                 ('"Name"|default:""', "Name", False),
                 ('""|default:caption', "Name", False),
                 ('""|default:"Name"|slice:":0"', None, False),
+            )
+        )
+
+    def test_default_html_fallback_uses_element_or_attribute_text(self) -> None:
+        self._assert_cases(
+            (
+                ('""|default:"<b></b>"', None, False),
+                ('""|default:"<b> </b>"', None, False),
+                ('""|default:"<b>&nbsp;&#8195;</b>"', None, False),
+                ('""|default:"<b>Name</b>"', "Name", True),
+                ('""|default:"&lt;b&gt;&lt;/b&gt;"', "&lt;b&gt;&lt;/b&gt;", True),
+                ('""|default:"<b></b>"|force_escape', "&lt;b&gt;&lt;/b&gt;", True),
+            ),
+            keys=("label",),
+        )
+        self._assert_cases(
+            (
+                ('""|default:"<b></b>"', "<b></b>", True),
+                ('""|default:"<b> </b>"', "<b> </b>", True),
+                ('""|default:"<b>&nbsp;&#8195;</b>"', "<b>&nbsp;&#8195;</b>", True),
+            ),
+            keys=("aria_label",),
+        )
+
+    def test_default_entity_whitespace_has_no_accessible_name(self) -> None:
+        self._assert_cases(
+            (
+                ('""|default:"&nbsp;"', None, False),
+                ('""|default:"&#160;"', None, False),
+                ('""|default:"&#xA0;"', None, False),
+                ('""|default:"&#8195;&#9;&#10;"', None, False),
+                ('""|default:" &nbsp;&#160;&#xA0; "', None, False),
+                ('""|default:"&nbsp;Name&nbsp;"', "&nbsp;Name&nbsp;", True),
             )
         )

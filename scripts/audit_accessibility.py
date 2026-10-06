@@ -33,6 +33,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from gettext import gettext
+from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -228,8 +229,8 @@ def _component_literal_text(value: str) -> str | None:
     return SafeString(text) if isinstance(text, str) else None
 
 
-def _component_argument_has_text(value: str) -> bool:
-    """Verify literal filter chains; keep the existing acceptance of variables."""
+def _component_argument_has_text(value: str, *, is_attribute: bool = False) -> bool:
+    """Verify literal accessible text; keep the existing acceptance of variables."""
     expression = COMPONENT_FILTER_EXPRESSION.fullmatch(value)
     if expression is None:
         return not value.startswith(('"', "'")) and value.strip() not in {"", "None", "False"}
@@ -251,7 +252,10 @@ def _component_argument_has_text(value: str) -> bool:
                 # Unknown/erasing filters cannot prove a literal accessible name.
                 return False
             text = transform(text)
-    return bool(text.strip())
+    # Strip markup before decoding: escaped tags are accessible literal text.
+    if not is_attribute:
+        text = defaultfilters.striptags(text)
+    return bool(unescape(text).strip())
 
 
 def _check_form_labels(content: str, path: Path) -> list[A11yViolation]:
@@ -287,7 +291,11 @@ def _check_form_labels(content: str, path: Path) -> list[A11yViolation]:
         if component == "input_field" and arguments.get("input_type") in {'"hidden"', "'hidden'"}:
             continue
         label_keys = {"label", "aria_label"} if component == "input_field" else {"label"}
-        has_label = any(_component_argument_has_text(arguments[key]) for key in label_keys if key in arguments)
+        has_label = any(
+            _component_argument_has_text(arguments[key], is_attribute=key == "aria_label")
+            for key in label_keys
+            if key in arguments
+        )
         if not has_label:
             violations.append(
                 A11yViolation(
