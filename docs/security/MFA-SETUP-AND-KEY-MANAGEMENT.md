@@ -160,7 +160,8 @@ DJANGO_ENCRYPTION_KEY=VCxwdmuZL09WGdWLI203O64yhNs48IiafhjFIq0o_JE=
 # Optional - Customize 2FA settings
 TOTP_ISSUER_NAME="PRAHO Platform"
 BACKUP_CODES_COUNT=8
-TOTP_PERIOD=30  # seconds
+# TOTP step, in seconds
+TOTP_PERIOD=30
 TOTP_DIGITS=6
 ```
 

@@ -57,6 +57,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Native deployments no longer read a `.env` comment as part of a value. The env examples put comments
+  after values (`DJANGO_SETTINGS_MODULE=config.settings.staging  # note`) on 80 lines. systemd's
+  `EnvironmentFile=` and the native role's own parsing keep that comment in the value. A deploy from a
+  copied example therefore named a settings module that does not exist, and failed at its first
+  migration. Every comment in the examples now sits on its own line, with every value unchanged. The
+  native deploy refuses a `.env` with an inline comment before anything reads it, naming each line
+  and key but never a value. The check follows the shell's comment rule, honouring quotes and
+  escapes. It also catches a comment after a closing quote, and a value continued onto the next
+  line with a trailing backslash, both of which systemd keeps.
 - A hosting account is turned on or off by one writer, the provisioning reconciler (#566,
   ADR-0051 accepted). Hosting is on exactly when the service is active and no bound domain
   is expired, suspended or cancelled. A domain status change now queues a reconcile instead

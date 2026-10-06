@@ -11,6 +11,10 @@
 # 0. Parse .env file for use throughout this role
 # ---------------------------------------------------------------------------
 
+# Refuse a .env whose comments would become part of values (see env_preflight.yml).
+- name: Reject inline comments in the .env file
+  include_tasks: env_preflight.yml
+
 - name: Read .env file locally for role variables
   shell: "grep -E '^[A-Z_]+=' {{ env_file_path }} | grep -v '^#'"
   delegate_to: localhost
