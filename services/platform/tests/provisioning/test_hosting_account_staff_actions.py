@@ -147,6 +147,31 @@ class StaffActivateTests(_StaffButtonBase):
         self.assertEqual(gateway.get_calls(), [])
         self.assertEqual(queued, [str(self.service.id)])
 
+    def test_activate_on_an_active_service_still_checks_the_customer(self) -> None:
+        """Activate on an active service queues a reconcile, but only for an eligible customer.
+
+        If the customer was suspended and its cascade has not yet suspended this service, the
+        staff button must not help turn hosting back on.
+        """
+        self._set(service="active", account="suspended")
+        Customer.objects.filter(pk=self.customer.pk).update(status="suspended")
+
+        gateway, queued = self._press("activate", account_enabled=False)
+
+        self._assert_untouched(gateway, "active")
+        self.assertEqual(queued, [])
+
+    def test_activate_is_refused_for_a_soft_deleted_customer(self) -> None:
+        """The default customer manager hides soft-deleted rows, so a deleted customer must
+        not read as "no status" and pass as eligible."""
+        self._set(service="suspended", account="suspended", reason=STAFF_TOKEN)
+        Customer.all_objects.filter(pk=self.customer.pk).update(deleted_at=timezone.now())
+
+        gateway, queued = self._press("activate", account_enabled=False)
+
+        self._assert_untouched(gateway, "suspended")
+        self.assertEqual(queued, [])
+
     def test_activate_is_refused_while_a_bound_domain_holds_hosting_off(self) -> None:
         """FAILS on master: the button enabled a domain-held account."""
         self._set(service="active", account="suspended")

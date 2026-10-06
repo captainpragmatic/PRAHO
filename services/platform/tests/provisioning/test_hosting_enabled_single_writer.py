@@ -156,3 +156,32 @@ class SuspendRetryUnderADomainHoldTests(_SingleWriterBase):
         self.account.refresh_from_db()
         self.assertEqual(self.account.status, "suspended")
         enqueue.assert_not_called()
+
+    def test_a_domain_that_expires_during_an_unsuspend_retry_queues_another_reconcile(self) -> None:
+        """The retry's post-call check watches the domain hold too, like the reconciler's.
+
+        The pre-call check passed, then the domain expired while enable-domain ran. The
+        domain's own reconcile can run before this retry records the account as active, see
+        it still suspended and do nothing, so the retry itself must queue the follow-up.
+        """
+        self.account.status = "suspended"
+        self.account.save(update_fields=["status"])
+        domain = self._domain("active", service=self.service)
+        job = self._failed_job(operation="unsuspend_domain", status="pending", retry_count=1, claimed_at=timezone.now())
+        gateway = self._gateway(enabled=False)
+        real_call = gateway.call
+
+        def expire_mid_flight(program: str, params: dict[str, Any], **kwargs: Any) -> Any:
+            if program == "enable-domain":
+                Domain.objects.filter(pk=domain.pk).update(status="expired")
+            return real_call(program, params, **kwargs)
+
+        with (
+            patch(GATEWAY, return_value=gateway),
+            patch.object(gateway, "call", side_effect=expire_mid_flight),
+            patch(ENQUEUE) as enqueue,
+        ):
+            result = retry_virtualmin_job(str(job.id))
+
+        self.assertTrue(result["success"], result)
+        enqueue.assert_called_once_with(str(self.service.id))

@@ -20606,3 +20606,6 @@ msgstr "Înțeleg că această acțiune va afecta fiecare cont selectat"
 
 msgid "Run action"
 msgstr "Rulează acțiunea"
+
+msgid "The customer has been deleted; hosting stays off."
+msgstr "Clientul a fost șters; găzduirea rămâne oprită."

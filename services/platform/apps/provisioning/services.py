@@ -17,6 +17,8 @@ from apps.common.types import Err, Ok, Result
 from .provisioning_service import ProvisioningService
 
 if TYPE_CHECKING:
+    from apps.customers.models import Customer
+
     from .service_models import Service
     from .virtualmin_models import VirtualminAccount
 
@@ -269,19 +271,34 @@ def _queue_reconcile_on_commit(service_id: Any) -> None:
     db_transaction.on_commit(lambda: reconcile_virtualmin_service_state_async(sid), robust=True)
 
 
-def _staff_resume_refusal(service: Service) -> str | None:
-    """Why staff may not resume this suspended Service from the account page, or None.
+def _eligibility_refusal(service: Service, customer: Customer | None) -> str | None:
+    """Why staff may not turn this service's hosting on, or None.
 
-    Only a suspension staff made there can be lifted there. A suspended or closed customer
-    blocks it (the customer cascade skips a Service that is already suspended, so nothing
-    else would), and so does an unpaid subscription, the same guard as the cascade's resume.
+    Shared by every Activate path, including the one that only queues a reconcile for an
+    already-active service. ``customer`` is the row the caller locked, read through
+    ``all_objects``: the default manager hides soft-deleted customers, and a hidden row must
+    not read as "no status" and pass. An unpaid subscription blocks it too, the same guard
+    as the customer cascade's resume.
     """
     from apps.billing.subscription_models import Subscription  # noqa: PLC0415  # ADR-0007: cross-app
-    from apps.customers.models import Customer  # noqa: PLC0415  # ADR-0007: cross-app
     from apps.customers.signals import (  # noqa: PLC0415  # ADR-0007: importing it registers receivers
         DELINQUENT_SUBSCRIPTION_STATES,
     )
 
+    if customer is None or customer.deleted_at is not None:
+        return str(_("The customer has been deleted; hosting stays off."))
+    if customer.status in _INELIGIBLE_CUSTOMER_STATUSES:
+        return str(_("The customer is {status}; reactivate the customer first.").format(status=customer.status))
+    if Subscription.objects.filter(service_id=service.pk, status__in=DELINQUENT_SUBSCRIPTION_STATES).exists():
+        return str(_("The service's subscription is not paid up; settle it in billing first."))
+    return None
+
+
+def _staff_resume_refusal(service: Service, customer: Customer | None) -> str | None:
+    """Why staff may not resume this suspended Service from the account page, or None.
+
+    Only a suspension staff made there can be lifted there; then the customer must be eligible.
+    """
     if service.status != "suspended" or service.suspension_reason != STAFF_ACCOUNT_SUSPENSION_REASON:
         return str(
             _(
@@ -289,12 +306,7 @@ def _staff_resume_refusal(service: Service) -> str | None:
                 "service page, billing or the customer."
             ).format(name=service.service_name, status=service.status, reason=service.suspension_reason or "-")
         )
-    customer_status = Customer.objects.filter(pk=service.customer_id).values_list("status", flat=True).first()
-    if customer_status in _INELIGIBLE_CUSTOMER_STATUSES:
-        return str(_("The customer is {status}; reactivate the customer first.").format(status=customer_status))
-    if Subscription.objects.filter(service_id=service.pk, status__in=DELINQUENT_SUBSCRIPTION_STATES).exists():
-        return str(_("The service's subscription is not paid up; settle it in billing first."))
-    return None
+    return _eligibility_refusal(service, customer)
 
 
 class HostingAccountStaffActions:
@@ -304,10 +316,13 @@ class HostingAccountStaffActions:
     Virtualmin. Each one re-reads the Service under a row lock, checks every guard on that
     row, and either transitions it or queues a reconcile, in one short transaction.
 
-    Only the Service row is locked. The customer and subscription are plain reads, as in
-    the customer cascade's resume, so there is no lock-order inversion against billing's
-    customer → subscription → Service order. If billing marks the subscription past due
-    after the read, it then waits on this lock, finds the Service active, and suspends it.
+    Activate also locks the customer row, before the Service: billing's customer → Service
+    order, so there is no inversion. A customer suspension that has not committed waits for
+    it; one that has is what the locked read sees. Without that lock the suspension could
+    commit between the check and the resume, and its cascade, which selects only active
+    services, would skip this one. The subscription stays a plain read: if billing marks it
+    past due after the read, billing then waits on the Service lock, finds it active and
+    suspends it.
 
     Returns ``Ok("queued")`` or ``Ok("resumed")``, or ``Err`` with a message for staff.
     """
@@ -337,10 +352,19 @@ class HostingAccountStaffActions:
 
     @staticmethod
     def activate(account: VirtualminAccount) -> Result[str, str]:
+        from apps.customers.models import Customer  # noqa: PLC0415  # ADR-0007: cross-app
         from apps.provisioning.domain_veto import domain_disables_hosting  # noqa: PLC0415  # Circular: same-app
         from apps.provisioning.models import Service  # noqa: PLC0415  # Circular: same-app
 
+        # A service never changes customer, so reading the id before locking is safe.
+        customer_id = Service.objects.filter(pk=account.service_id).values_list("customer_id", flat=True).first()
         with db_transaction.atomic():
+            # Customer first, then Service (see the class docstring for why).
+            customer = (
+                Customer.all_objects.select_for_update().filter(pk=customer_id).first()
+                if customer_id is not None
+                else None
+            )
             service = Service.objects.select_for_update(of=("self",)).filter(pk=account.service_id).first()
             if service is None:
                 return Err(_("This account has no service."))
@@ -353,11 +377,14 @@ class HostingAccountStaffActions:
                             "so its hosting stays off."
                         ).format(name=service.service_name)
                     )
+                refusal = _eligibility_refusal(service, customer)
+                if refusal is not None:
+                    return Err(refusal)
                 # Hosting should already be on; let the reconciler repair whatever is off.
                 _queue_reconcile_on_commit(service.pk)
                 return Ok("queued")
 
-            refusal = _staff_resume_refusal(service)
+            refusal = _staff_resume_refusal(service, customer)
             if refusal is not None:
                 return Err(refusal)
 
