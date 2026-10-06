@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from decimal import Decimal
 from threading import Event
+from time import monotonic, sleep
 from typing import cast
 from unittest.mock import patch
 
@@ -33,6 +34,7 @@ from apps.orders.models import Order, OrderItem
 from apps.orders.services import OrderPaymentConfirmationService, OrderService, StatusChangeData
 from apps.orders.tasks import OrderProcessingResults, _order_timeout_deadline, process_pending_orders
 from apps.products.models import Product
+from apps.promotions.models import GiftCard, GiftCardReservation
 from apps.provisioning.models import Service, ServicePlan
 from apps.settings.services import SettingsService
 from tests.helpers.fsm_helpers import force_status
@@ -330,6 +332,55 @@ class OrderTimeoutPaymentRaceTests(TestCase):
         self.assertEqual(self.order.invoice.status, "paid")
 
 
+class OrderGatewayCommitBoundaryTests(TransactionTestCase):
+    def setUp(self) -> None:
+        self.customer, self.currency = prepare_case(self)
+
+    def test_invoice_gateway_success_commits_before_timeout_sweep_and_settlement(self) -> None:
+        order, invoice, payment = make_timeout_payment_case(self.customer, self.currency)
+        boundary_statuses: list[str] = []
+        sweep_results: list[OrderProcessingResults] = []
+        converge = PaymentSuccessService.converge_local_paid_document
+
+        def sweep_before_settlement(payment_id: int) -> Result[Payment, str]:
+            self.assertTrue(connection.get_autocommit())
+            payment.refresh_from_db()
+            invoice.refresh_from_db()
+            self.assertEqual(payment.status, "succeeded")
+            self.assertEqual(payment.invoice_id, invoice.pk)
+            self.assertIsNone(payment.proforma_id)
+            self.assertEqual(invoice.status, "issued")
+            outcome = process_pending_orders()
+            self.assertTrue(outcome["success"], str(outcome))
+            sweep_results.append(cast(OrderProcessingResults, outcome["results"]))
+            order.refresh_from_db()
+            boundary_statuses.append(order.status)
+            return converge(payment_id)
+
+        with patch.object(PaymentSuccessService, "converge_local_paid_document", side_effect=sweep_before_settlement):
+            assert payment.gateway_txn_id is not None
+            settled = PaymentSuccessService.converge_gateway_success(
+                payment.gateway_txn_id, {"amount_received": 12100, "currency": "ron"}
+            )
+
+        self.assertEqual(boundary_statuses, ["awaiting_payment"])
+        self.assertEqual(sweep_results[0]["timed_out_orders"], 0)
+        self.assertTrue(settled.is_ok(), str(settled))
+        order.refresh_from_db()
+        invoice.refresh_from_db()
+        payment.refresh_from_db()
+        self.assertFalse(order.status_history.filter(new_status="cancelled").exists())
+        self.assertEqual(invoice.status, "paid")
+        self.assertEqual(payment.status, "succeeded")
+
+        recovered = process_pending_orders()
+
+        self.assertTrue(recovered["success"], str(recovered))
+        order.refresh_from_db()
+        self.assertEqual(order.status, "provisioning")
+        self.assertEqual(recovered["results"]["confirmed_orders"], 1)
+
+
 class BankTransferDeadlineTests(TestCase):
     def setUp(self) -> None:
         self.customer, self.currency = prepare_case(self)
@@ -443,6 +494,117 @@ class OrderAuditPostgresIsolationTests(TransactionTestCase):
         with connection.cursor() as cursor:
             cursor.execute("SELECT 1")
             self.assertEqual(cursor.fetchone(), (1,))
+
+    def test_staff_cancellation_overlaps_sweep(self) -> None:  # noqa: PLR0915  # Two-connection interleaving
+        order, _invoice, payment = make_timeout_payment_case(self.customer, self.currency)
+        payment.delete()
+        assert order.proforma is not None
+        proforma = order.proforma
+        force_status(proforma, "sent")
+        order.meta = {"promotion_version": 2}
+        order.save(update_fields=["meta"])
+        card = GiftCard.objects.create(
+            code="TIMEOUT-LOCK-RACE",
+            currency=self.currency,
+            initial_value_cents=2000,
+            current_balance_cents=2000,
+            reserved_cents=1000,
+        )
+        hold = GiftCardReservation.objects.create(
+            gift_card=card,
+            customer=self.customer,
+            proforma=proforma,
+            amount_cents=1000,
+            operation_key="timeout-lock-race",
+        )
+        document_locked = Event()
+        resume_sweep = Event()
+        staff_ready = Event()
+        backend_pids: dict[str, int] = {}
+        database_errors: list[str] = []
+
+        def run_worker(name: str, operation: Callable[[], object]) -> object:
+            close_old_connections()
+
+            def observe_sql(
+                execute: Callable[..., object], sql: str, params: object, many: bool, context: dict[str, object]
+            ) -> object:
+                try:
+                    result = execute(sql, params, many, context)
+                except DatabaseError as exc:
+                    database_errors.append(str(exc))
+                    raise
+                if (
+                    name == "sweep"
+                    and not document_locked.is_set()
+                    and f'"{ProformaInvoice._meta.db_table}"' in sql
+                    and "FOR UPDATE" in sql
+                ):
+                    document_locked.set()
+                    if not resume_sweep.wait(timeout=10):
+                        raise AssertionError("Staff cancellation did not reach the document lock")
+                return result
+
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute("SET lock_timeout = '10s'")
+                    cursor.execute("SET statement_timeout = '15s'")
+                    cursor.execute("SELECT pg_backend_pid()")
+                    row = cursor.fetchone()
+                    assert row is not None
+                    backend_pids[name] = row[0]
+                if name == "staff":
+                    staff_ready.set()
+                with connection.execute_wrapper(observe_sql):
+                    return operation()
+            finally:
+                connection.close()
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            sweeping = executor.submit(run_worker, "sweep", process_pending_orders)
+            try:
+                self.assertTrue(document_locked.wait(timeout=10), "Sweep did not lock the proforma")
+                cancelling = executor.submit(
+                    run_worker,
+                    "staff",
+                    lambda: OrderService.update_order_status(order, StatusChangeData(new_status="cancelled")),
+                )
+                self.assertTrue(staff_ready.wait(timeout=10), "Staff connection did not start")
+                wait_deadline = monotonic() + 5
+                while True:
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            "SELECT %s = ANY(pg_blocking_pids(%s))",
+                            [backend_pids["sweep"], backend_pids["staff"]],
+                        )
+                        row = cursor.fetchone()
+                    if row is not None and row[0]:
+                        break
+                    self.assertLess(monotonic(), wait_deadline, "Staff cancellation never waited on the sweep")
+                    sleep(0.01)
+            finally:
+                resume_sweep.set()
+            sweep_outcome = cast(dict[str, object], sweeping.result(timeout=20))
+            staff_outcome = cast(Result[Order, str], cancelling.result(timeout=20))
+
+        self.assertEqual(database_errors, [])
+        self.assertTrue(sweep_outcome["success"], str(sweep_outcome))
+        if staff_outcome.is_err():
+            self.assertEqual(staff_outcome.unwrap_err(), "No transition from 'cancelled' to 'cancelled'")
+        else:
+            self.assertEqual(staff_outcome.unwrap().status, "cancelled")
+        order.refresh_from_db()
+        proforma.refresh_from_db()
+        hold.refresh_from_db()
+        card.refresh_from_db()
+        self.assertEqual(order.status, "cancelled")
+        self.assertEqual(proforma.status, "expired")
+        self.assertEqual(hold.status, "released")
+        self.assertEqual(card.reserved_cents, 0)
+        self.assertEqual(card.current_balance_cents, 2000)
+        self.assertEqual(order.status_history.filter(new_status="cancelled").count(), 1)
+        results = cast(OrderProcessingResults, sweep_outcome["results"])
+        self.assertEqual(results["timed_out_orders"], 1)
 
     def test_confirmation_commits_between_sweep_read_and_timeout_cancellation(self) -> None:
         order, invoice, payment = make_timeout_payment_case(self.customer, self.currency)

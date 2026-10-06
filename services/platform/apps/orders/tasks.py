@@ -428,6 +428,7 @@ def _cancel_unpaid_order_on_timeout(order: Order, now: datetime) -> Result[Order
         or locked_order.proforma_id != order.proforma_id
         or (invoice is not None and invoice.status == "paid")
         or (proforma is not None and proforma.status == "converted")
+        or (invoice is not None and Payment.objects.filter(invoice_id=invoice.pk, status="succeeded").exists())
         or (proforma is not None and Payment.objects.filter(proforma_id=proforma.pk, status="succeeded").exists())
     ):
         logger.info(

@@ -10,6 +10,7 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import IntegrityError, NotSupportedError, models, transaction
 from django.utils import timezone
+from django.utils.translation import gettext as _
 from django_fsm import ConcurrentTransition, TransitionNotAllowed
 
 from apps.billing.models import Currency
@@ -106,6 +107,21 @@ def _release_promotions_for_cancelled_order(order: Order) -> None:
             order.order_number,
             exc_info=True,
         )
+
+
+def _lock_cancellation_documents(order: Order) -> Order:
+    """Lock fresh cancellation documents before the caller locks the order."""
+    from apps.billing.models import Invoice, ProformaInvoice  # noqa: PLC0415  # ADR-0007
+
+    from .models import Order as OrderModel  # noqa: PLC0415
+
+    # Match timeout cancellation and settlement: proforma, invoice, then order.
+    candidate = OrderModel.objects.only("proforma_id", "invoice_id").get(pk=order.pk)
+    if candidate.proforma_id is not None:
+        ProformaInvoice.objects.select_for_update(of=("self",)).get(pk=candidate.proforma_id)
+    if candidate.invoice_id is not None:
+        Invoice.objects.select_for_update(of=("self",)).get(pk=candidate.invoice_id)
+    return candidate
 
 
 # ===============================================================================
@@ -645,7 +661,16 @@ class OrderService:
         try:
             from .models import Order as OrderModel  # noqa: PLC0415
 
+            cancellation_order = _lock_cancellation_documents(order) if status_data.new_status == "cancelled" else None
             order = OrderModel.objects.select_for_update(of=("self",)).get(pk=order.pk)
+            if cancellation_order is not None and (
+                order.proforma_id != cancellation_order.proforma_id or order.invoice_id != cancellation_order.invoice_id
+            ):
+                logger.warning(
+                    "⚠️ [Orders] Payment documents changed while locking cancellation for %s",
+                    order.order_number,
+                )
+                return Err(_("Order payment documents changed; please retry cancellation."))
             old_status = order.status
 
             if status_data.new_status == "cancelled" and order.proforma_id is not None:
