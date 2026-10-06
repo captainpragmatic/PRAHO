@@ -4,6 +4,7 @@ Auto-creation of user profiles and comprehensive audit logging.
 """
 
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from django.conf import settings
@@ -28,8 +29,8 @@ from apps.audit.services import (
 )
 from apps.common.transactions import best_effort_atomic
 
-from .mfa import LOGIN_METHOD_REQUEST_ATTR
-from .models import User, UserProfile
+from .mfa import LOGIN_METHOD_REQUEST_ATTR, WebAuthnCredential
+from .models import APIToken, User, UserProfile
 
 logger = logging.getLogger(__name__)
 
@@ -55,85 +56,73 @@ def save_user_profile(sender: type[User], instance: User, **kwargs: Any) -> None
         instance.profile.save()
 
 
-def _log_user_model_event(  # Django signal parameters  # noqa: PLR0913  # Business logic parameters
-    *,
-    event_type: str,
-    instance: Any,
-    description: str,
-    new_values: dict[str, Any] | None = None,
-    old_values: dict[str, Any] | None = None,
-    metadata: dict[str, Any] | None = None,
+def _log_user_model_event(
+    event_data: Callable[[], AuditEventData], *, metadata: dict[str, object] | None = None
 ) -> None:
-    """Log lightweight user model lifecycle events."""
+    """Build and log one optional user lifecycle event inside its savepoint."""
     if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
         return
 
     with best_effort_atomic(logger=logger, scope="users", message="_log_user_model_event failed"):
-        event_metadata = {
+        event_metadata: dict[str, object] = {
             "source_app": "users",
             "model_lifecycle": True,
         }
         if metadata:
             event_metadata.update(metadata)
 
-        AuditService.log_event(
-            AuditEventData(
-                event_type=event_type,
-                content_object=instance,
-                old_values=old_values or {},
-                new_values=new_values or {},
-                description=description,
-            ),
-            context=AuditContext(actor_type="system", metadata=event_metadata),
-        )
+        AuditService.log_event(event_data(), context=AuditContext(actor_type="system", metadata=event_metadata))
 
 
 @receiver(post_save, sender="users.WebAuthnCredential")
-def audit_webauthn_credential_lifecycle(sender: Any, instance: Any, created: bool, **kwargs: Any) -> None:
+def audit_webauthn_credential_lifecycle(
+    sender: type[WebAuthnCredential], instance: WebAuthnCredential, created: bool, **kwargs: object
+) -> None:
     """Audit lifecycle events for WebAuthnCredential model."""
-    credential_id = str(getattr(instance, "credential_id", "") or "")
-    credential_preview = credential_id[:16] if credential_id else ""
     event_type = "webauthn_credential_created" if created else "webauthn_credential_updated"
 
     _log_user_model_event(
-        event_type=event_type,
-        instance=instance,
-        description=f"WebAuthn credential {'created' if created else 'updated'} for user {instance.user_id}",
-        new_values={
-            "credential_pk": str(instance.pk),
-            "user_id": str(instance.user_id),
-            "credential_preview": credential_preview,
-            "credential_type": instance.credential_type,
-            "is_active": instance.is_active,
-            "sign_count": instance.sign_count,
-        },
+        lambda: AuditEventData(
+            event_type=event_type,
+            content_object=instance,
+            description=f"WebAuthn credential {'created' if created else 'updated'} for user {instance.user_id}",
+            new_values={
+                "credential_pk": str(instance.pk),
+                "user_id": str(instance.user_id),
+                "credential_preview": str(instance.credential_id or "")[:16],
+                "credential_type": instance.credential_type,
+                "is_active": instance.is_active,
+                "sign_count": instance.sign_count,
+            },
+        ),
         metadata={"model": "WebAuthnCredential"},
     )
 
 
 @receiver(pre_delete, sender="users.WebAuthnCredential")
-def audit_webauthn_credential_deleted(sender: Any, instance: Any, **kwargs: Any) -> None:
+def audit_webauthn_credential_deleted(
+    sender: type[WebAuthnCredential], instance: WebAuthnCredential, **kwargs: object
+) -> None:
     """Audit deletion events for WebAuthnCredential model."""
-    credential_id = str(getattr(instance, "credential_id", "") or "")
-    credential_preview = credential_id[:16] if credential_id else ""
-
     _log_user_model_event(
-        event_type="webauthn_credential_deleted",
-        instance=instance,
-        description=f"WebAuthn credential deleted for user {instance.user_id}",
-        old_values={
-            "credential_pk": str(instance.pk),
-            "user_id": str(instance.user_id),
-            "credential_preview": credential_preview,
-            "credential_type": instance.credential_type,
-            "is_active": instance.is_active,
-            "sign_count": instance.sign_count,
-        },
+        lambda: AuditEventData(
+            event_type="webauthn_credential_deleted",
+            content_object=instance,
+            description=f"WebAuthn credential deleted for user {instance.user_id}",
+            old_values={
+                "credential_pk": str(instance.pk),
+                "user_id": str(instance.user_id),
+                "credential_preview": str(instance.credential_id or "")[:16],
+                "credential_type": instance.credential_type,
+                "is_active": instance.is_active,
+                "sign_count": instance.sign_count,
+            },
+        ),
         metadata={"model": "WebAuthnCredential"},
     )
 
 
-def _api_token_audit_values(instance: Any) -> dict[str, Any]:
+def _api_token_audit_values(instance: APIToken) -> dict[str, object]:
     """Structured audit payload for an APIToken — never the raw key or its hash."""
     return {
         "token_pk": str(instance.pk),
@@ -145,7 +134,7 @@ def _api_token_audit_values(instance: Any) -> dict[str, Any]:
 
 
 @receiver(post_save, sender="users.APIToken")
-def audit_api_token_created(sender: Any, instance: Any, created: bool, **kwargs: Any) -> None:
+def audit_api_token_created(sender: type[APIToken], instance: APIToken, created: bool, **kwargs: object) -> None:
     """Audit APIToken issuance (ADR-0016).
 
     Only creation is audited: the sole post-create mutation is the throttled
@@ -156,22 +145,26 @@ def audit_api_token_created(sender: Any, instance: Any, created: bool, **kwargs:
     if not created:
         return
     _log_user_model_event(
-        event_type="api_token_created",
-        instance=instance,
-        description=f"API token ({instance.key_prefix}…) created for user {instance.user_id}",
-        new_values=_api_token_audit_values(instance),
+        lambda: AuditEventData(
+            event_type="api_token_created",
+            content_object=instance,
+            description=f"API token ({instance.key_prefix}…) created for user {instance.user_id}",
+            new_values=_api_token_audit_values(instance),
+        ),
         metadata={"model": "APIToken"},
     )
 
 
 @receiver(pre_delete, sender="users.APIToken")
-def audit_api_token_deleted(sender: Any, instance: Any, **kwargs: Any) -> None:
+def audit_api_token_deleted(sender: type[APIToken], instance: APIToken, **kwargs: object) -> None:
     """Audit APIToken deletion — API revocation, purge command, admin, or cascade."""
     _log_user_model_event(
-        event_type="api_token_deleted",
-        instance=instance,
-        description=f"API token ({instance.key_prefix}…) deleted for user {instance.user_id}",
-        old_values=_api_token_audit_values(instance),
+        lambda: AuditEventData(
+            event_type="api_token_deleted",
+            content_object=instance,
+            description=f"API token ({instance.key_prefix}…) deleted for user {instance.user_id}",
+            old_values=_api_token_audit_values(instance),
+        ),
         metadata={"model": "APIToken"},
     )
 

@@ -4,6 +4,7 @@ Implements industry-standard user action auditing (GDPR, ISO 27001, NIST, SOX, P
 """
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -181,7 +182,7 @@ def _get_action_category_severity(action: str) -> tuple[str, str, bool, bool]:
 
 
 def _create_audit_event(  # Audit event creation requires comprehensive parameter set for full context capture  # audit trail fields  # noqa: PLR0913  # Business logic parameters
-    event_data: AuditEventCreationData | None = None,
+    event_data: AuditEventCreationData | Callable[[], AuditEventCreationData] | None = None,
     *,
     action: str | None = None,
     user: User | None = None,
@@ -198,6 +199,10 @@ def _create_audit_event(  # Audit event creation requires comprehensive paramete
     Supports both new dataclass API and legacy keyword arguments for backward compatibility.
     """
     with best_effort_atomic(logger=logger, scope="audit", message="_create_audit_event failed"):
+        # Deferred fields and related objects must be read inside this event's savepoint.
+        if callable(event_data):
+            event_data = event_data()
+
         # Handle backward compatibility - convert keyword arguments to dataclass
         if event_data is None:
             if action is None:
@@ -317,7 +322,7 @@ def audit_user_profile_changes(  # Complexity: multi-step business logic
                 for field in changed_fields:
                     if field == "email":
                         _create_audit_event(
-                            AuditEventCreationData(
+                            lambda: AuditEventCreationData(
                                 action="email_changed",
                                 user=instance,
                                 content_object=instance,
@@ -328,7 +333,7 @@ def audit_user_profile_changes(  # Complexity: multi-step business logic
                         )
                     elif field in ["first_name", "last_name"]:
                         _create_audit_event(
-                            AuditEventCreationData(
+                            lambda: AuditEventCreationData(
                                 action="name_changed",
                                 user=instance,
                                 content_object=instance,
@@ -339,7 +344,7 @@ def audit_user_profile_changes(  # Complexity: multi-step business logic
                         )
                     elif field == "phone":
                         _create_audit_event(
-                            AuditEventCreationData(
+                            lambda: AuditEventCreationData(
                                 action="phone_updated",
                                 user=instance,
                                 content_object=instance,
@@ -350,7 +355,7 @@ def audit_user_profile_changes(  # Complexity: multi-step business logic
                         )
                     elif field == "staff_role":
                         _create_audit_event(
-                            AuditEventCreationData(
+                            lambda: AuditEventCreationData(
                                 action="staff_role_changed",
                                 user=instance,
                                 content_object=instance,
@@ -360,10 +365,9 @@ def audit_user_profile_changes(  # Complexity: multi-step business logic
                             )
                         )
                     elif field == "two_factor_enabled":
-                        action = "2fa_enabled" if instance.two_factor_enabled else "2fa_disabled"
                         _create_audit_event(
-                            AuditEventCreationData(
-                                action=action,
+                            lambda: AuditEventCreationData(
+                                action="2fa_enabled" if instance.two_factor_enabled else "2fa_disabled",
                                 user=instance,
                                 content_object=instance,
                                 new_values={"two_factor_enabled": instance.two_factor_enabled},
@@ -375,12 +379,13 @@ def audit_user_profile_changes(  # Complexity: multi-step business logic
                             )
                         )
                     elif field == "accepts_marketing":
-                        action = (
-                            "marketing_consent_granted" if instance.accepts_marketing else "marketing_consent_withdrawn"
-                        )
                         _create_audit_event(
-                            AuditEventCreationData(
-                                action=action,
+                            lambda: AuditEventCreationData(
+                                action=(
+                                    "marketing_consent_granted"
+                                    if instance.accepts_marketing
+                                    else "marketing_consent_withdrawn"
+                                ),
                                 user=instance,
                                 content_object=instance,
                                 new_values={"accepts_marketing": instance.accepts_marketing},
@@ -391,7 +396,7 @@ def audit_user_profile_changes(  # Complexity: multi-step business logic
         else:
             # If no specific update_fields, log a general profile update
             _create_audit_event(
-                AuditEventCreationData(
+                lambda: AuditEventCreationData(
                     action="profile_updated",
                     user=instance,
                     content_object=instance,
@@ -439,7 +444,7 @@ def audit_user_profile_preferences(
                 for field in changed_fields:
                     if field == "preferred_language":
                         _create_audit_event(
-                            AuditEventCreationData(
+                            lambda: AuditEventCreationData(
                                 action="language_preference_changed",
                                 user=audit_user,
                                 content_object=instance,
@@ -450,7 +455,7 @@ def audit_user_profile_preferences(
                         )
                     elif field == "timezone":
                         _create_audit_event(
-                            AuditEventCreationData(
+                            lambda: AuditEventCreationData(
                                 action="timezone_changed",
                                 user=audit_user,
                                 content_object=instance,
@@ -461,20 +466,19 @@ def audit_user_profile_preferences(
                         )
                     elif field in ["email_notifications", "sms_notifications", "marketing_emails"]:
                         # Handle notification settings changes
-                        notification_data = {field: getattr(instance, field)}
                         _create_audit_event(
-                            AuditEventCreationData(
+                            lambda field=field: AuditEventCreationData(
                                 action="notification_settings_changed",
                                 user=audit_user,
                                 content_object=instance,
-                                new_values=notification_data,
+                                new_values={field: getattr(instance, field)},
                                 description=f"Notification preference changed: {field}",
                                 metadata={"notification_change": True, "channel": field},
                             )
                         )
                     elif field in ["emergency_contact_name", "emergency_contact_phone"]:
                         _create_audit_event(
-                            AuditEventCreationData(
+                            lambda: AuditEventCreationData(
                                 action="emergency_contact_updated",
                                 user=audit_user,
                                 content_object=instance,
@@ -489,7 +493,7 @@ def audit_user_profile_preferences(
         else:
             # General profile preferences update
             _create_audit_event(
-                AuditEventCreationData(
+                lambda: AuditEventCreationData(
                     action="profile_updated",
                     user=audit_user,
                     content_object=instance,
@@ -524,7 +528,7 @@ def audit_customer_membership_changes(
     with swallow_application_errors(logger=logger, scope="audit", message="audit_customer_membership_changes failed"):
         if created:
             _create_audit_event(
-                AuditEventCreationData(
+                lambda: AuditEventCreationData(
                     action="customer_membership_created",
                     user=audit_user,
                     content_object=instance,
@@ -544,7 +548,7 @@ def audit_customer_membership_changes(
             if update_fields:
                 if "role" in update_fields:
                     _create_audit_event(
-                        AuditEventCreationData(
+                        lambda: AuditEventCreationData(
                             action="customer_role_changed",
                             user=audit_user,
                             content_object=instance,
@@ -560,7 +564,7 @@ def audit_customer_membership_changes(
 
                 if "is_primary" in update_fields and instance.is_primary:
                     _create_audit_event(
-                        AuditEventCreationData(
+                        lambda: AuditEventCreationData(
                             action="primary_customer_changed",
                             user=audit_user,
                             content_object=instance,
@@ -572,7 +576,7 @@ def audit_customer_membership_changes(
             else:
                 # General membership update
                 _create_audit_event(
-                    AuditEventCreationData(
+                    lambda: AuditEventCreationData(
                         action="customer_membership_updated",
                         user=audit_user,
                         content_object=instance,
@@ -593,7 +597,7 @@ def audit_customer_membership_deletion(
 
     with best_effort_atomic(logger=logger, scope="audit", message="audit_customer_membership_deletion failed"):
         _create_audit_event(
-            AuditEventCreationData(
+            lambda: AuditEventCreationData(
                 action="customer_membership_deleted",
                 user=instance.user,
                 content_object=instance,
@@ -628,7 +632,7 @@ def audit_privacy_settings_change(
 ) -> None:
     """Audit privacy settings changes"""
     _create_audit_event(
-        AuditEventCreationData(
+        lambda: AuditEventCreationData(
             action="privacy_settings_changed",
             user=user,
             content_object=user,
@@ -647,7 +651,7 @@ def audit_api_key_generation(
 ) -> None:
     """Audit API key generation"""
     _create_audit_event(
-        AuditEventCreationData(
+        lambda: AuditEventCreationData(
             action="api_key_generated",
             user=user,
             content_object=user,
@@ -665,7 +669,7 @@ def audit_api_key_revocation(
 ) -> None:
     """Audit API key revocation"""
     _create_audit_event(
-        AuditEventCreationData(
+        lambda: AuditEventCreationData(
             action="api_key_revoked",
             user=user,
             content_object=user,
@@ -698,7 +702,7 @@ def audit_cookie_consent_change(
         ComplianceEventRequest,
     )
 
-    with swallow_application_errors(logger=logger, scope="audit", message="audit_cookie_consent_change failed"):
+    def build_event() -> AuditEventCreationData:
         categories_enabled = []
         if consent.functional_cookies:
             categories_enabled.append("functional")
@@ -709,46 +713,47 @@ def audit_cookie_consent_change(
 
         identifier = user.email if user else f"cookie:{consent.cookie_id[:8]}"
 
-        _create_audit_event(
-            AuditEventCreationData(
-                action="cookie_consent_updated",
-                user=user,
-                content_object=consent,
-                new_values={
-                    "status": consent.status,
-                    "functional": consent.functional_cookies,
-                    "analytics": consent.analytics_cookies,
-                    "marketing": consent.marketing_cookies,
-                },
-                description=f"Cookie consent {consent.status} by {identifier}",
-                metadata={
-                    "gdpr_compliance": True,
-                    "consent_version": consent.consent_version,
-                    "categories_enabled": categories_enabled,
-                    "source": "portal",
-                    "ip_address": ip_address,
-                    "is_anonymous": user is None,
-                },
-            )
+        return AuditEventCreationData(
+            action="cookie_consent_updated",
+            user=user,
+            content_object=consent,
+            new_values={
+                "status": consent.status,
+                "functional": consent.functional_cookies,
+                "analytics": consent.analytics_cookies,
+                "marketing": consent.marketing_cookies,
+            },
+            description=f"Cookie consent {consent.status} by {identifier}",
+            metadata={
+                "gdpr_compliance": True,
+                "consent_version": consent.consent_version,
+                "categories_enabled": categories_enabled,
+                "source": "portal",
+                "ip_address": ip_address,
+                "is_anonymous": user is None,
+            },
         )
 
-        with best_effort_atomic(logger=logger, scope="Audit", message="Cookie compliance audit failed"):
-            # Also log as compliance event for GDPR reporting
-            compliance_request = ComplianceEventRequest(
-                compliance_type="gdpr_consent",
-                reference_id=f"cookie_consent_{consent.id}",
-                description=f"Cookie consent {consent.status} by {identifier}",
-                user=user,
-                status="success",
-                evidence={
-                    "consent_status": consent.status,
-                    "categories_enabled": categories_enabled,
-                    "consent_version": consent.consent_version,
-                    "cookie_id": consent.cookie_id,
-                },
-                metadata={"ip_address": ip_address, "user_agent": user_agent[:200] if user_agent else ""},
-            )
-            AuditService.log_compliance_event(compliance_request)
+    _create_audit_event(build_event)
+
+    with best_effort_atomic(logger=logger, scope="Audit", message="Cookie compliance audit failed"):
+        event_data = build_event()
+        # Also log as compliance event for GDPR reporting
+        compliance_request = ComplianceEventRequest(
+            compliance_type="gdpr_consent",
+            reference_id=f"cookie_consent_{consent.id}",
+            description=event_data.description,
+            user=user,
+            status="success",
+            evidence={
+                "consent_status": consent.status,
+                "categories_enabled": event_data.metadata["categories_enabled"],
+                "consent_version": consent.consent_version,
+                "cookie_id": consent.cookie_id,
+            },
+            metadata={"ip_address": ip_address, "user_agent": user_agent[:200] if user_agent else ""},
+        )
+        AuditService.log_compliance_event(compliance_request)
 
 
 @receiver(customer_context_switched)
@@ -757,7 +762,7 @@ def audit_customer_context_switch(
 ) -> None:
     """Audit customer context switching"""
     _create_audit_event(
-        AuditEventCreationData(
+        lambda: AuditEventCreationData(
             action="customer_context_switched",
             user=user,
             content_object=user,

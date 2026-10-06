@@ -69,15 +69,6 @@ def handle_customer_created_or_updated(
     try:
         # Get previous values for audit trail
         old_values = getattr(instance, "_original_customer_values", {}) if not created else {}
-        new_values = {
-            "name": instance.name,
-            "customer_type": instance.customer_type,
-            "status": instance.status,
-            "company_name": instance.company_name,
-            "primary_email": instance.primary_email,
-            "primary_phone": instance.primary_phone,
-        }
-
         # Enhanced customer audit logging
         if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
             from apps.audit.services import CustomersAuditService
@@ -88,6 +79,14 @@ def handle_customer_created_or_updated(
             # neither poison the surrounding transaction nor skip the consent-change handlers
             # below (the canonical audit path for marketing/GDPR consent — issue #182).
             with best_effort_atomic(logger=logger, scope="Customers", message="Customer audit failed"):
+                new_values = {
+                    "name": instance.name,
+                    "customer_type": instance.customer_type,
+                    "status": instance.status,
+                    "company_name": instance.company_name,
+                    "primary_email": instance.primary_email,
+                    "primary_phone": instance.primary_phone,
+                }
                 CustomersAuditService.log_customer_event(
                     event_type=event_type,
                     customer=instance,
@@ -175,10 +174,9 @@ def handle_customer_deletion(sender: type[Customer], instance: Customer, **kwarg
     with swallow_application_errors(logger=logger, scope="customers", message="handle_customer_deletion failed"):
         # Verify this is a soft delete, not hard delete
         if not instance.is_deleted:
-            logger.warning(f"⚠️ [Customer] Hard deletion attempted for {instance.get_display_name()}")
-
             # Log critical compliance event
             with best_effort_atomic(logger=logger, scope="Customers", message="log_security_event failed"):
+                logger.warning(f"⚠️ [Customer] Hard deletion attempted for {instance.get_display_name()}")
                 log_security_event(
                     "customer_hard_deletion_attempted",
                     {
@@ -190,15 +188,18 @@ def handle_customer_deletion(sender: type[Customer], instance: Customer, **kwarg
                 )
 
         # Audit the deletion
-        event_data = AuditEventData(
-            event_type="customer_deleted",
-            content_object=instance,
-            description=f"Customer {'soft' if instance.is_deleted else 'hard'} deleted: {instance.get_display_name()}",
-        )
         with best_effort_atomic(logger=logger, scope="Customers", message="log_event failed"):
+            event_data = AuditEventData(
+                event_type="customer_deleted",
+                content_object=instance,
+                description=(
+                    f"Customer {'soft' if instance.is_deleted else 'hard'} deleted: {instance.get_display_name()}"
+                ),
+            )
             AuditService.log_event(event_data)
 
-        logger.info(f"🗑️ [Customer] Customer deletion logged: {instance.get_display_name()}")
+        with best_effort_atomic(logger=logger, scope="Customers", message="Customer deletion display logging failed"):
+            logger.info(f"🗑️ [Customer] Customer deletion logged: {instance.get_display_name()}")
 
 
 # ===============================================================================
@@ -288,20 +289,20 @@ def handle_tax_profile_changes(
 
         # Compliance logging for Romanian tax authorities
         if is_romanian_registration:
-            compliance_request = ComplianceEventRequest(
-                compliance_type="romanian_tax_registration",
-                reference_id=instance.cui,
-                description=f"Romanian tax profile {'registered' if created else 'updated'}: {instance.cui}",
-                status="success",
-                evidence={
-                    "cui": instance.cui,
-                    "is_vat_payer": instance.is_vat_payer,
-                    "vat_rate": float(instance.vat_rate) if instance.vat_rate is not None else None,
-                    "vat_rate_reason": instance.vat_rate_reason,
-                    "customer_id": str(instance.customer_id),
-                },
-            )
             with best_effort_atomic(logger=logger, scope="Customers", message="Customer audit failed"):
+                compliance_request = ComplianceEventRequest(
+                    compliance_type="romanian_tax_registration",
+                    reference_id=instance.cui,
+                    description=f"Romanian tax profile {'registered' if created else 'updated'}: {instance.cui}",
+                    status="success",
+                    evidence={
+                        "cui": instance.cui,
+                        "is_vat_payer": instance.is_vat_payer,
+                        "vat_rate": float(instance.vat_rate) if instance.vat_rate is not None else None,
+                        "vat_rate_reason": instance.vat_rate_reason,
+                        "customer_id": str(instance.customer_id),
+                    },
+                )
                 AuditService.log_compliance_event(compliance_request)
 
         with best_effort_atomic(logger=logger, scope="Customers", message="Tax profile display logging failed"):
@@ -362,17 +363,16 @@ def handle_billing_profile_changes(
         event_type = "customer_billing_profile_created" if created else "customer_billing_profile_updated"
 
         old_values = getattr(instance, "_original_billing_values", {}) if not created else {}
-        new_values = {
-            "payment_terms": instance.payment_terms,
-            "credit_limit": float(instance.credit_limit),
-            "preferred_currency": instance.preferred_currency,
-        }
-
         # Enhanced billing profile audit logging
         if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
             from apps.audit.services import CustomersAuditService
 
             with best_effort_atomic(logger=logger, scope="Customers", message="log_billing_profile_event failed"):
+                new_values = {
+                    "payment_terms": instance.payment_terms,
+                    "credit_limit": float(instance.credit_limit),
+                    "preferred_currency": instance.preferred_currency,
+                }
                 CustomersAuditService.log_billing_profile_event(
                     event_type=event_type,
                     billing_profile=instance,
@@ -657,7 +657,10 @@ def handle_payment_method_deletion(
             )
             AuditService.log_event(event_data)
 
-        logger.info(f"🗑️ [Customer] Payment method deleted: {instance.display_name}")
+        with best_effort_atomic(
+            logger=logger, scope="Customers", message="Payment method deletion display logging failed"
+        ):
+            logger.info(f"🗑️ [Customer] Payment method deleted: {instance.display_name}")
 
 
 # ===============================================================================
@@ -725,18 +728,19 @@ def _handle_new_customer_creation(customer: Customer) -> None:
 def _handle_customer_status_change(customer: Customer, old_status: str, new_status: str) -> None:
     """Handle customer status changes"""
     with swallow_application_errors(logger=logger, scope="customers", message="_handle_customer_status_change failed"):
-        logger.info(f"🔄 [Customer] Status change {customer.get_display_name()}: {old_status} → {new_status}")
+        with best_effort_atomic(logger=logger, scope="Customers", message="Customer status security logging failed"):
+            logger.info(f"🔄 [Customer] Status change {customer.get_display_name()}: {old_status} → {new_status}")
 
-        # Security event for status changes
-        log_security_event(
-            "customer_status_changed",
-            {
-                "customer_id": str(customer.id),
-                "customer_name": customer.get_display_name(),
-                "old_status": old_status,
-                "new_status": new_status,
-            },
-        )
+            # Security event for status changes
+            log_security_event(
+                "customer_status_changed",
+                {
+                    "customer_id": str(customer.id),
+                    "customer_name": customer.get_display_name(),
+                    "old_status": old_status,
+                    "new_status": new_status,
+                },
+            )
 
         # Handle specific status transitions
         if new_status == Customer.CustomerStatus.ACTIVE and old_status == Customer.CustomerStatus.PROSPECT:
@@ -783,7 +787,8 @@ def _handle_gdpr_consent_change(customer: Customer, old_consent: bool, new_conse
         if new_consent and not customer.gdpr_consent_date:
             Customer.objects.filter(pk=customer.pk).update(gdpr_consent_date=timezone.now())
 
-        logger.info(f"🛡️ [Customer] GDPR consent {consent_action}: {customer.get_display_name()}")
+        with best_effort_atomic(logger=logger, scope="Customers", message="GDPR consent display logging failed"):
+            logger.info(f"🛡️ [Customer] GDPR consent {consent_action}: {customer.get_display_name()}")
 
     except Exception:
         raise
@@ -838,7 +843,8 @@ def _handle_marketing_consent_change(customer: Customer, old_consent: bool, new_
     except Exception:
         logger.exception("🔥 [Customer Signal] Marketing consent audit failed")
 
-    logger.info(f"📧 [Customer] Marketing consent {consent_action}: {customer.get_display_name()}")
+    with best_effort_atomic(logger=logger, scope="Customers", message="Marketing consent display logging failed"):
+        logger.info(f"📧 [Customer] Marketing consent {consent_action}: {customer.get_display_name()}")
 
 
 def _verify_romanian_company_compliance(customer: Customer) -> None:
@@ -1024,7 +1030,8 @@ def _enqueue_customer_feedback(note_id: str) -> None:
 def _handle_customer_activation(customer: Customer) -> None:
     """Handle customer activation from prospect to active."""
     with swallow_application_errors(logger=logger, scope="customers", message="_handle_customer_activation failed"):
-        logger.info(f"✅ [Customer] Customer activated: {customer.get_display_name()}")
+        with best_effort_atomic(logger=logger, scope="Customers", message="Customer activation display logging failed"):
+            logger.info(f"✅ [Customer] Customer activated: {customer.get_display_name()}")
 
         # Send activation welcome email after transaction commits.
         transaction.on_commit(lambda inst=customer: _send_customer_activation_email(inst))
@@ -1036,7 +1043,8 @@ def _handle_customer_activation(customer: Customer) -> None:
 def _handle_customer_suspension(customer: Customer, old_status: str) -> None:
     """Handle customer suspension."""
     with swallow_application_errors(logger=logger, scope="customers", message="_handle_customer_suspension failed"):
-        logger.warning(f"⚠️ [Customer] Customer suspended: {customer.get_display_name()}")
+        with best_effort_atomic(logger=logger, scope="Customers", message="Customer suspension display logging failed"):
+            logger.warning(f"⚠️ [Customer] Customer suspended: {customer.get_display_name()}")
 
         # Suspend related services after transaction commits so status is visible.
         transaction.on_commit(lambda inst=customer: _suspend_customer_services(inst))
@@ -1048,7 +1056,10 @@ def _handle_customer_suspension(customer: Customer, old_status: str) -> None:
 def _handle_customer_deactivation(customer: Customer) -> None:
     """Handle customer deactivation."""
     try:
-        logger.info(f"💤 [Customer] Customer deactivated: {customer.get_display_name()}")
+        with best_effort_atomic(
+            logger=logger, scope="Customers", message="Customer deactivation display logging failed"
+        ):
+            logger.info(f"💤 [Customer] Customer deactivated: {customer.get_display_name()}")
 
         # Send deactivation notification after transaction commits.
         transaction.on_commit(lambda inst=customer: _send_customer_deactivation_email(inst))
@@ -1175,7 +1186,10 @@ def _activate_customer_services(customer: Customer) -> None:
 def _handle_customer_unsuspension(customer: Customer) -> None:
     """Handle a customer returning from suspended to active."""
     with swallow_application_errors(logger=logger, scope="customers", message="_handle_customer_unsuspension failed"):
-        logger.info(f"⚡ [Customer] Customer unsuspended: {customer.get_display_name()}")
+        with best_effort_atomic(
+            logger=logger, scope="Customers", message="Customer unsuspension display logging failed"
+        ):
+            logger.info(f"⚡ [Customer] Customer unsuspended: {customer.get_display_name()}")
 
         transaction.on_commit(lambda inst=customer: _resume_cascade_suspended_services(inst))
 

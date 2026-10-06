@@ -243,10 +243,12 @@ def handle_domain_cleanup(sender: type[Domain], instance: Domain, **kwargs: Any)
         # Clean up domain-related caches
         _invalidate_domain_caches(instance)
 
-        # Cancel any pending domain renewal tasks
-        _cancel_domain_renewal_tasks(instance)
+        # A deferred display field can fail even after the security audit was isolated.
+        with best_effort_atomic(logger=logger, scope="Domains", message="Domain renewal cleanup logging failed"):
+            _cancel_domain_renewal_tasks(instance)
 
-        logger.warning(f"🗑️ [Domain] Cleaned up deleted domain {instance.name}")
+        with best_effort_atomic(logger=logger, scope="Domains", message="Domain cleanup display logging failed"):
+            logger.warning(f"🗑️ [Domain] Cleaned up deleted domain {instance.name}")
 
 
 # ===============================================================================
@@ -394,7 +396,8 @@ def handle_registrar_created_or_updated(
         # Invalidate registrar-related caches
         _invalidate_registrar_caches(instance)
 
-        logger.info(f"🔧 [Registrar] {'Created' if created else 'Updated'} {instance.name}")
+        with best_effort_atomic(logger=logger, scope="Domains", message="Registrar display logging failed"):
+            logger.info(f"🔧 [Registrar] {'Created' if created else 'Updated'} {instance.name}")
 
 
 @receiver(pre_save, sender=Registrar)
@@ -510,9 +513,11 @@ def handle_domain_order_item_processing(
         else:
             # Check for processing status changes
             # This would typically involve checking order item status fields
-            _handle_domain_order_processing(instance, old_values, new_values)
+            with best_effort_atomic(logger=logger, scope="Domains", message="Domain order processing logging failed"):
+                _handle_domain_order_processing(instance, old_values, new_values)
 
-        logger.info(f"📋 [Domain Order] {instance.action} for {instance.domain_name}")
+        with best_effort_atomic(logger=logger, scope="Domains", message="Domain order display logging failed"):
+            logger.info(f"📋 [Domain Order] {instance.action} for {instance.domain_name}")
 
 
 @receiver(pre_save, sender=DomainOrderItem)

@@ -16,7 +16,7 @@ from django.core.cache import cache
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 
-from apps.common.transactions import best_effort_atomic, swallow_application_errors
+from apps.common.transactions import best_effort_atomic
 from apps.common.validators import log_security_event
 
 logger = logging.getLogger(__name__)
@@ -55,7 +55,7 @@ def handle_anymail_post_send(sender: Any, message: Any, status: Any, esp_name: s
 
     Called after an email is sent (or attempted) through Anymail.
     """
-    with swallow_application_errors(logger=logger, scope="notifications", message="handle_anymail_post_send failed"):
+    with best_effort_atomic(logger=logger, scope="notifications", message="handle_anymail_post_send failed"):
         message_id = status.message_id if status else None
         send_status = status.status if status else "unknown"
 
