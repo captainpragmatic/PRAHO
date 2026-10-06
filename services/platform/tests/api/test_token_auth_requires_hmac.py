@@ -5,12 +5,12 @@ The public token endpoint issues a key valid for `API_TOKEN_DEFAULT_TTL_DAYS` (9
 yielded a 90-day key even for an account with two-factor turned on. It now verifies the
 second factor the same way `portal_login_api` does.
 
-This guard stays, because the second factor at issuance is not the only precondition for
-letting a bare token in. Token authentication is a project DEFAULT, so most DRF views
-accept a key; what makes a key unspendable from outside is that those views all sit
-behind the HMAC gate. Keys minted before #565 never passed a second factor, and the staff
-web UI can still mint keys from a session that did not either. ADR-0031 "Current
-limitations" lists what has to be true before any token-accepting view loses the gate.
+This guard stays. Token authentication is a project DEFAULT, so most DRF views accept a
+key; what keeps a key away from business data is that those views all sit behind the HMAC
+gate. Exactly two routes are deliberately public to a bare token (#569): `token/me/` and
+`token/revoke/`. They read or delete the caller's own token and nothing else. Every other
+token-accepting view must keep the gate. ADR-0031, "What a bare token can reach", records
+why those two are safe and what would have to hold before any other one opens.
 
 Six public endpoints were in exactly that position and are fixed alongside this test. They
 inherited the default classes, so a caller could authenticate to them with any valid key.
@@ -44,8 +44,11 @@ from apps.api.users.authentication import HashedTokenAuthentication
 #
 # Listed explicitly so adding a token-authenticated view that answers without the service
 # signature is a conscious act with a reviewer attached, rather than something that slips
-# in behind a passing suite.
-EXPECTED_TOKEN_AUTHENTICATED_PUBLIC_ROUTES: set[str] = set()
+# in behind a passing suite. These two touch only the token that authenticated the request.
+EXPECTED_TOKEN_AUTHENTICATED_PUBLIC_ROUTES: set[str] = {
+    "api/users/token/me/",
+    "api/users/token/revoke/",
+}
 
 
 def _walk(patterns: list, prefix: str = "") -> list[tuple[str, object]]:

@@ -47,7 +47,8 @@ PUBLIC_ROUTED_PATHS = {"/api/users/health", "/api/orders/products"}
 # Views carrying @public_api_endpoint. The middleware no longer keeps a parallel path
 # list; it resolves the request and reads this marker, so this set IS the contract for
 # what bypasses HMAC authentication. The previous hardcoded path list named only two of
-# these eight, which is why the other six answered 401 while being documented as public.
+# the eight public views of the time, which is why the other six answered 401 while being
+# documented as public. revoke_token and token_info joined for bare-token callers (#569).
 PUBLIC_API_VIEWS = {
     "available_service_plans_api",
     "currencies_api",
@@ -56,7 +57,9 @@ PUBLIC_API_VIEWS = {
     "obtain_token",
     "product_detail",
     "product_list",
+    "revoke_token",
     "support_categories_api",
+    "token_info",
 }
 STAFF_SESSION_PREFIXES = ["/api/customers/"]
 # Equal to Django's DATA_UPLOAD_MAX_MEMORY_SIZE (10485760). That limit excludes file uploads,

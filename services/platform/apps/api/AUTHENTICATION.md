@@ -38,10 +38,11 @@ Notes:
 - **Method**: Authorization header with token
 - **Setup**: Obtain token via API endpoint
 
-> **Not usable with a bare token today (#569).** Only `POST /api/users/token/` is public.
-> Every other `/api/` route, including `token/me/` and `token/revoke/`, sits behind the
-> Portal's HMAC gate, so a request carrying only a token is rejected before the view runs.
-> The examples below show the intended shape. See ADR-0031, "Current limitations".
+> **A bare token reaches its own lifecycle only (#569).** `POST /api/users/token/`,
+> `GET /api/users/token/me/` and `DELETE /api/users/token/revoke/` answer without the
+> Portal's signature. Every other `/api/` route sits behind the Portal's HMAC gate, so a
+> request carrying only a token is rejected there before the view runs. See ADR-0031,
+> "What a bare token can reach".
 
 ## Getting API Tokens
 
@@ -61,21 +62,27 @@ Content-Type: application/json
 TOTP code or an unused backup code. Every refusal returns the same `401 Invalid
 credentials` body, whether the password or the code was wrong.
 
-**Response:**
+Optional fields: `name`, `description`, and `ttl_days` (1 to 365; the default lifetime is 90 days).
+
+**Response** (the raw token is shown once and never again):
 ```json
 {
     "token": "9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b",
     "user_id": 123,
-    "email": "user@example.com"
+    "email": "user@example.com",
+    "key_prefix": "9944b091",
+    "name": "ci-pipeline",
+    "description": "Production deploys",
+    "expires_at": "2026-12-30T09:00:00+00:00"
 }
 ```
 
 ### **Using Tokens**
-Include the token in the Authorization header:
+Include the token in the Authorization header, with either the `Bearer` or the `Token` scheme:
 
 ```bash
-curl -H "Authorization: Token 9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b" \
-     https://platform.praho.com/api/customers/search/?q=test
+curl -H "Authorization: Bearer 9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b" \
+     https://platform.praho.com/api/users/token/me/
 ```
 
 ### **Verify Token**
@@ -127,9 +134,8 @@ Authorization: Token 9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b
 
 | User Type | Limit | Usage |
 |-----------|-------|--------|
-| **Anonymous** | 100/hour | Public endpoints only |
-| **Authenticated** | 1000/hour | General API usage |
-| **Burst** | 60/min | Search/autocomplete |
+| **Anonymous** | 40/min per client (`anon`) | Public reference-data endpoints |
+| **Token lifecycle** | 120/min and 2000/hour per user (`api_burst`, `sustained`) | `token/me/`, `token/revoke/`. Counted only once the token is valid |
 | **Auth endpoints** | 10/min per client (`auth`) | Login/token requests |
 | **Token requests** | 5/min per submitted address (`token_request`) | `/api/users/token/` |
 | **Credential endpoints** | Account lockout | `/users/login/`, `/api/users/login/`. `/api/users/token/` refuses locked accounts; a wrong password does not count toward the lock (it is public), a failed second factor does |
@@ -175,11 +181,13 @@ portal.
 
 ## Security Best Practices
 
-### **For Portal Service**
-1. **Service Account**: Create dedicated user for portal service
-2. **Environment Variables**: Store tokens in environment, never in code
-3. **Token Rotation**: Periodically revoke and regenerate tokens
+### **For Scripts and Service Accounts**
+1. **Service Account**: Create a dedicated user per script, with the minimum `staff_role`
+2. **Environment Variables**: Store tokens in environment or a vault, never in code
+3. **Token Rotation**: Revoke and re-issue tokens periodically; pick a short `ttl_days` for CI
 4. **HTTPS Only**: Never send tokens over HTTP
+
+The Portal does not use tokens; it signs every request (see above).
 
 ### **For Users**
 1. **Secure Storage**: Store tokens securely (encrypted storage)
@@ -193,14 +201,12 @@ portal.
 
 #### **401 Unauthorized**
 ```bash
-# Check token format
-curl -H "Authorization: Token YOUR_TOKEN_HERE" /api/users/token/verify/
-
-# Verify token exists
-python manage.py shell
->>> from rest_framework.authtoken.models import Token
->>> Token.objects.filter(key='YOUR_TOKEN_HERE').exists()
+# Check the token: 200 shows its user and expiry, 401 means unknown, expired or disabled
+curl -H "Authorization: Bearer YOUR_TOKEN_HERE" /api/users/token/me/
 ```
+
+A 401 with `{"error": "HMAC authentication failed"}` means the route is not one a bare
+token can reach; only the token lifecycle routes are.
 
 #### **403 Forbidden**
 - User doesn't have access to requested resource
@@ -210,20 +216,10 @@ python manage.py shell
 - Rate limit exceeded
 - Wait for reset time or reduce request frequency
 
-### **Django Shell Helpers**
-```python
-# Create token for user
-from django.contrib.auth import get_user_model
-from rest_framework.authtoken.models import Token
-
-User = get_user_model()
-user = User.objects.get(email='user@example.com')
-token, created = Token.objects.get_or_create(user=user)
-print(f"Token: {token.key}")
-
-# Revoke all tokens for user
-Token.objects.filter(user=user).delete()
-```
+### **Managing Tokens**
+Staff create, list and revoke their own tokens at `/settings/api-tokens/`. Tokens are
+stored hashed (`APIToken.key_hash`), so a lost key cannot be recovered; revoke it and
+issue a new one. Deleting a token writes an `api_token_deleted` audit event.
 
 ## Authentication by Consumer
 
@@ -231,7 +227,7 @@ Token.objects.filter(user=user).delete()
 |----------|--------|-----------------|
 | Portal service | HMAC-signed requests | `HMAC_SECRET` env var, `PortalServiceHMACMiddleware` |
 | Platform web UI (staff) | Django session cookies | Automatic for logged-in staff |
-| CLI tools / external API clients | DRF token (`Authorization: Token ...`) | `POST /api/users/token/` to obtain |
+| CLI tools / external API clients | API token (`Authorization: Bearer ...`), token lifecycle routes only | `POST /api/users/token/` to obtain |
 | Platform→Portal webhooks | Dedicated HMAC (`PLATFORM_TO_PORTAL_WEBHOOK_SECRET`) | `X-Platform-Signature` + `X-Platform-Timestamp` headers |
 
 ## Platform→Portal Webhook Authentication (System 2)
