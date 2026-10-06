@@ -58,3 +58,7 @@ make test-e2e-coverage   # browser suite, both services live, server-side covera
 make coverage-portal-union
 make coverage-platform-packages
 ```
+
+One manual instrument, run against `make dev`: `make qa-settings-sweep`. It changes every setting
+through the real save endpoints, checks that each change is persisted, delivered and audited, then
+restores it. It writes to the dev database's settings, so it is not part of `make test`.
