@@ -9,7 +9,7 @@ graph TB
     end
 
     subgraph "Reverse Proxy Layer"
-        Nginx[Nginx Reverse Proxy<br/>:80/:443]
+        Caddy[Caddy Edge<br/>:80/:443, automatic HTTPS]
     end
 
     subgraph "Portal Service (Customer-Facing)"
@@ -34,10 +34,10 @@ graph TB
         ANAF[ANAF e-Factura<br/>Romanian Tax]
     end
 
-    WebBrowser --> Nginx
-    MobileApp --> Nginx
-    Nginx -->|/portal/*| PortalApp
-    Nginx -->|/platform/*| PlatformApp
+    WebBrowser --> Caddy
+    MobileApp --> Caddy
+    Caddy -->|portal domain| PortalApp
+    Caddy -->|platform domain, staff CIDRs only| PlatformApp
 
     PortalApp -->|HMAC-Signed<br/>HTTP Requests| PlatformApp
 
@@ -56,4 +56,4 @@ graph TB
     class PlatformApp,CacheTable platform
     class PlatformDB db
     class Virtualmin,ROTLD,Stripe,ANAF external
-    class WebBrowser,MobileApp,Nginx client
+    class WebBrowser,MobileApp,Caddy client
