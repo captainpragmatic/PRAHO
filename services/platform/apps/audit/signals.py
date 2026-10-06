@@ -5,7 +5,7 @@ Implements industry-standard user action auditing (GDPR, ISO 27001, NIST, SOX, P
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
 from django.db.models.signals import post_save, pre_delete, pre_save
@@ -19,10 +19,14 @@ from django.dispatch import Signal, receiver
 from django.http import HttpRequest
 
 from apps.common.request_ip import get_safe_client_ip
+from apps.common.transactions import best_effort_atomic, swallow_application_errors
 from apps.users.models import CustomerMembership, User, UserProfile
 
 from .models import AuditEvent, audit_mutation_allowed
 from .services import AuditContext, AuditEventData, AuditService
+
+if TYPE_CHECKING:
+    from apps.customers.models import Customer
 
 # Bumped when _calculate_event_hash changes shape, so old hashes are not compared against a new
 # algorithm and misreported as tampering. Its presence also marks an event as belonging to the
@@ -193,7 +197,7 @@ def _create_audit_event(  # Audit event creation requires comprehensive paramete
 
     Supports both new dataclass API and legacy keyword arguments for backward compatibility.
     """
-    try:
+    with best_effort_atomic(logger=logger, scope="audit", message="_create_audit_event failed"):
         # Handle backward compatibility - convert keyword arguments to dataclass
         if event_data is None:
             if action is None:
@@ -246,11 +250,6 @@ def _create_audit_event(  # Audit event creation requires comprehensive paramete
             f"✅ [Audit Signal] {event_data.action} logged for user {event_data.user.email if event_data.user else 'System'} ({category}/{severity})"
         )
 
-    except Exception as e:
-        # Never let audit logging break application functionality
-        action_desc = event_data.action if event_data else action or "unknown action"
-        logger.error(f"🔥 [Audit Signal] Failed to log {action_desc}: {e}")
-
 
 # ===============================================================================
 # USER PROFILE & ACCOUNT MANAGEMENT SIGNALS
@@ -258,7 +257,7 @@ def _create_audit_event(  # Audit event creation requires comprehensive paramete
 
 
 @receiver(post_save, sender=User)
-def audit_user_profile_changes(  # noqa: C901, PLR0912  # Complexity: multi-step business logic
+def audit_user_profile_changes(  # Complexity: multi-step business logic
     sender: type[User], instance: User, created: bool, **kwargs: Any
 ) -> None:  # Complexity: audit signal dispatch  # Complexity: multi-step business logic
     """
@@ -280,7 +279,7 @@ def audit_user_profile_changes(  # noqa: C901, PLR0912  # Complexity: multi-step
     if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
         return
 
-    try:
+    with swallow_application_errors(logger=logger, scope="audit", message="audit_user_profile_changes failed"):
         # Check if we have update_fields specified - this helps detect specific changes
         update_fields = kwargs.get("update_fields")
 
@@ -401,9 +400,6 @@ def audit_user_profile_changes(  # noqa: C901, PLR0912  # Complexity: multi-step
                 )
             )
 
-    except Exception as e:
-        logger.error(f"🔥 [Audit Signal] Failed to audit user profile changes for {instance.email}: {e}")
-
 
 @receiver(post_save, sender=UserProfile)
 def audit_user_profile_preferences(
@@ -417,7 +413,13 @@ def audit_user_profile_preferences(
     if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
         return
 
-    try:
+    audit_user: User | None = None
+    with best_effort_atomic(logger=logger, scope="Audit", message="Profile audit context failed"):
+        audit_user = instance.user
+    if audit_user is None:
+        return
+
+    with swallow_application_errors(logger=logger, scope="audit", message="audit_user_profile_preferences failed"):
         # Similar to User model, we'll use update_fields when available
         update_fields = kwargs.get("update_fields")
 
@@ -439,7 +441,7 @@ def audit_user_profile_preferences(
                         _create_audit_event(
                             AuditEventCreationData(
                                 action="language_preference_changed",
-                                user=instance.user,
+                                user=audit_user,
                                 content_object=instance,
                                 new_values={"preferred_language": instance.preferred_language},
                                 description=f"Language preference changed to {instance.preferred_language}",
@@ -450,7 +452,7 @@ def audit_user_profile_preferences(
                         _create_audit_event(
                             AuditEventCreationData(
                                 action="timezone_changed",
-                                user=instance.user,
+                                user=audit_user,
                                 content_object=instance,
                                 new_values={"timezone": instance.timezone},
                                 description=f"Timezone changed to {instance.timezone}",
@@ -463,7 +465,7 @@ def audit_user_profile_preferences(
                         _create_audit_event(
                             AuditEventCreationData(
                                 action="notification_settings_changed",
-                                user=instance.user,
+                                user=audit_user,
                                 content_object=instance,
                                 new_values=notification_data,
                                 description=f"Notification preference changed: {field}",
@@ -474,7 +476,7 @@ def audit_user_profile_preferences(
                         _create_audit_event(
                             AuditEventCreationData(
                                 action="emergency_contact_updated",
-                                user=instance.user,
+                                user=audit_user,
                                 content_object=instance,
                                 new_values={
                                     "name": instance.emergency_contact_name,
@@ -489,15 +491,12 @@ def audit_user_profile_preferences(
             _create_audit_event(
                 AuditEventCreationData(
                     action="profile_updated",
-                    user=instance.user,
+                    user=audit_user,
                     content_object=instance,
                     description="User profile preferences updated",
                     metadata={"preferences_update": True},
                 )
             )
-
-    except Exception as e:
-        logger.error(f"🔥 [Audit Signal] Failed to audit user profile preferences for {instance.user.email}: {e}")
 
 
 # ===============================================================================
@@ -514,20 +513,28 @@ def audit_customer_membership_changes(
     if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
         return
 
-    try:
+    audit_user: User | None = None
+    audit_customer: Customer | None = None
+    with best_effort_atomic(logger=logger, scope="Audit", message="Membership audit context failed"):
+        audit_user = instance.user
+        audit_customer = instance.customer
+    if audit_user is None or audit_customer is None:
+        return
+
+    with swallow_application_errors(logger=logger, scope="audit", message="audit_customer_membership_changes failed"):
         if created:
             _create_audit_event(
                 AuditEventCreationData(
                     action="customer_membership_created",
-                    user=instance.user,
+                    user=audit_user,
                     content_object=instance,
                     new_values={
-                        "customer": str(instance.customer),
+                        "customer": str(audit_customer),
                         "role": instance.role,
                         "is_primary": instance.is_primary,
                     },
-                    description=f"Customer membership created: {instance.user.email} → {instance.customer.company_name} ({instance.role})",
-                    metadata={"authorization_change": True, "customer_id": str(instance.customer.id)},
+                    description=f"Customer membership created: {audit_user.email} → {audit_customer.company_name} ({instance.role})",
+                    metadata={"authorization_change": True, "customer_id": str(audit_customer.id)},
                 )
             )
         else:
@@ -539,13 +546,13 @@ def audit_customer_membership_changes(
                     _create_audit_event(
                         AuditEventCreationData(
                             action="customer_role_changed",
-                            user=instance.user,
+                            user=audit_user,
                             content_object=instance,
                             new_values={"role": instance.role},
                             description=f"Customer role changed to {instance.role}",
                             metadata={
                                 "authorization_change": True,
-                                "customer_id": str(instance.customer.id),
+                                "customer_id": str(audit_customer.id),
                                 "requires_review": True,
                             },
                         )
@@ -555,11 +562,11 @@ def audit_customer_membership_changes(
                     _create_audit_event(
                         AuditEventCreationData(
                             action="primary_customer_changed",
-                            user=instance.user,
+                            user=audit_user,
                             content_object=instance,
-                            new_values={"new_primary": str(instance.customer)},
-                            description=f"Primary customer set to {instance.customer.company_name}",
-                            metadata={"authorization_change": True, "customer_id": str(instance.customer.id)},
+                            new_values={"new_primary": str(audit_customer)},
+                            description=f"Primary customer set to {audit_customer.company_name}",
+                            metadata={"authorization_change": True, "customer_id": str(audit_customer.id)},
                         )
                     )
             else:
@@ -567,15 +574,12 @@ def audit_customer_membership_changes(
                 _create_audit_event(
                     AuditEventCreationData(
                         action="customer_membership_updated",
-                        user=instance.user,
+                        user=audit_user,
                         content_object=instance,
-                        description=f"Customer membership updated: {instance.user.email} → {instance.customer.company_name}",
-                        metadata={"authorization_change": True, "customer_id": str(instance.customer.id)},
+                        description=f"Customer membership updated: {audit_user.email} → {audit_customer.company_name}",
+                        metadata={"authorization_change": True, "customer_id": str(audit_customer.id)},
                     )
                 )
-
-    except Exception as e:
-        logger.error(f"🔥 [Audit Signal] Failed to audit customer membership changes: {e}")
 
 
 @receiver(pre_delete, sender=CustomerMembership)
@@ -587,7 +591,7 @@ def audit_customer_membership_deletion(
     if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
         return
 
-    try:
+    with best_effort_atomic(logger=logger, scope="audit", message="audit_customer_membership_deletion failed"):
         _create_audit_event(
             AuditEventCreationData(
                 action="customer_membership_deleted",
@@ -606,8 +610,6 @@ def audit_customer_membership_deletion(
                 },
             )
         )
-    except Exception as e:
-        logger.error(f"🔥 [Audit Signal] Failed to audit customer membership deletion: {e}")
 
 
 # ===============================================================================
@@ -696,7 +698,7 @@ def audit_cookie_consent_change(
         ComplianceEventRequest,
     )
 
-    try:
+    with swallow_application_errors(logger=logger, scope="audit", message="audit_cookie_consent_change failed"):
         categories_enabled = []
         if consent.functional_cookies:
             categories_enabled.append("functional")
@@ -730,25 +732,23 @@ def audit_cookie_consent_change(
             )
         )
 
-        # Also log as compliance event for GDPR reporting
-        compliance_request = ComplianceEventRequest(
-            compliance_type="gdpr_consent",
-            reference_id=f"cookie_consent_{consent.id}",
-            description=f"Cookie consent {consent.status} by {identifier}",
-            user=user,
-            status="success",
-            evidence={
-                "consent_status": consent.status,
-                "categories_enabled": categories_enabled,
-                "consent_version": consent.consent_version,
-                "cookie_id": consent.cookie_id,
-            },
-            metadata={"ip_address": ip_address, "user_agent": user_agent[:200] if user_agent else ""},
-        )
-        AuditService.log_compliance_event(compliance_request)
-
-    except Exception as e:
-        logger.error(f"🔥 [Audit Signal] Failed to audit cookie consent change: {e}")
+        with best_effort_atomic(logger=logger, scope="Audit", message="Cookie compliance audit failed"):
+            # Also log as compliance event for GDPR reporting
+            compliance_request = ComplianceEventRequest(
+                compliance_type="gdpr_consent",
+                reference_id=f"cookie_consent_{consent.id}",
+                description=f"Cookie consent {consent.status} by {identifier}",
+                user=user,
+                status="success",
+                evidence={
+                    "consent_status": consent.status,
+                    "categories_enabled": categories_enabled,
+                    "consent_version": consent.consent_version,
+                    "cookie_id": consent.cookie_id,
+                },
+                metadata={"ip_address": ip_address, "user_agent": user_agent[:200] if user_agent else ""},
+            )
+            AuditService.log_compliance_event(compliance_request)
 
 
 @receiver(customer_context_switched)

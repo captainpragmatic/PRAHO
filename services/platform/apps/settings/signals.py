@@ -13,6 +13,7 @@ from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 
 from apps.audit.services import AuditService
+from apps.common.transactions import best_effort_atomic, swallow_application_errors
 
 from .models import SystemSetting
 from .services import SettingsService
@@ -38,42 +39,40 @@ def handle_setting_saved(sender: Any, instance: SystemSetting, created: bool, **
     - Log audit event
     - Send notifications if needed
     """
-    try:
+    with swallow_application_errors(logger=logger, scope="settings", message="handle_setting_saved failed"):
         # Do not invalidate before the database value is visible to other
         # transactions; an early reader could otherwise repopulate the old value.
         transaction.on_commit(lambda key=instance.key: SettingsService._clear_setting_cache(key))
 
-        # Service writes attach a transient context (actor, reason, change set,
-        # old/new display values); direct ORM writes fall back to an unattributed event.
-        context = instance._audit_context
-        instance._audit_context = None
-
         action = "create" if created else "update"
-        user = None
-        metadata = {
-            "setting_key": instance.key,
-            "category": instance.category,
-            "is_sensitive": instance.is_sensitive,
-            "is_required": instance.is_required,
-            "setting_value": instance.get_display_value() if not instance.is_sensitive else "(hidden)",
-            "data_type": instance.data_type,
-        }
-        old_values: dict[str, Any] | None = None
-        new_values: dict[str, Any] | None = None
-        if context is not None:
-            if context.get("user_id") is not None:
-                from apps.users.models import User  # noqa: PLC0415  # Function-level cross-app import (ADR-0007)
+        with best_effort_atomic(logger=logger, scope="Settings", message="Setting audit failed"):
+            # Service writes attach a transient context (actor, reason, change set,
+            # old/new display values); direct ORM writes fall back to an unattributed event.
+            context = instance._audit_context
+            instance._audit_context = None
 
-                user = User.objects.filter(pk=context["user_id"]).first()
-            metadata["reason"] = context.get("reason")
-            metadata["change_set_id"] = context.get("change_set_id")
-            old_values = {"value": context.get("old_value")}
-            new_values = {"value": context.get("new_value")}
+            action = "create" if created else "update"
+            user = None
+            metadata = {
+                "setting_key": instance.key,
+                "category": instance.category,
+                "is_sensitive": instance.is_sensitive,
+                "is_required": instance.is_required,
+                "setting_value": instance.get_display_value() if not instance.is_sensitive else "(hidden)",
+                "data_type": instance.data_type,
+            }
+            old_values: dict[str, object] | None = None
+            new_values: dict[str, object] | None = None
+            if context is not None:
+                if context.get("user_id") is not None:
+                    from apps.users.models import User  # noqa: PLC0415  # Function-level cross-app import (ADR-0007)
 
-        # Savepoint isolation (customers/signals.py pattern): a DB-level audit failure
-        # must not poison the caller's transaction — catching the Python exception alone
-        # does not recover the connection.
-        with transaction.atomic():
+                    user = User.objects.filter(pk=context["user_id"]).first()
+                metadata["reason"] = context.get("reason")
+                metadata["change_set_id"] = context.get("change_set_id")
+                old_values = {"value": context.get("old_value")}
+                new_values = {"value": context.get("new_value")}
+
             AuditService.log_simple_event(
                 event_type=action,
                 user=user,
@@ -99,9 +98,6 @@ def handle_setting_saved(sender: Any, instance: SystemSetting, created: bool, **
         if _is_critical_setting(instance.key):
             transaction.on_commit(lambda: _send_critical_setting_notification(instance, action))
 
-    except Exception as e:
-        logger.error("🔥 [Settings Signal] Error handling save for setting %s: %s", instance.key, str(e))
-
 
 @receiver(post_delete, sender=SystemSetting)
 def handle_setting_deleted(sender: Any, instance: SystemSetting, **kwargs: Any) -> None:
@@ -112,12 +108,12 @@ def handle_setting_deleted(sender: Any, instance: SystemSetting, **kwargs: Any) 
     - Clear cache for the setting
     - Log audit event
     """
-    try:
+    with swallow_application_errors(logger=logger, scope="settings", message="handle_setting_deleted failed"):
         transaction.on_commit(lambda key=instance.key: SettingsService._clear_setting_cache(key))
 
         # Savepoint: same rationale as handle_setting_saved — audit failure must not
         # poison the caller's transaction.
-        with transaction.atomic():
+        with best_effort_atomic(logger=logger, scope="Settings", message="Setting deletion audit failed"):
             AuditService.log_simple_event(
                 event_type="delete",
                 user=None,
@@ -135,9 +131,6 @@ def handle_setting_deleted(sender: Any, instance: SystemSetting, **kwargs: Any) 
         # Send notifications for critical settings deletion
         if _is_critical_setting(instance.key):
             _send_critical_setting_notification(instance, "deleted")
-
-    except Exception as e:
-        logger.error("🔥 [Settings Signal] Error handling deletion for setting %s: %s", instance.key, str(e))
 
 
 def _is_critical_setting(key: str) -> bool:
@@ -161,7 +154,7 @@ def _send_critical_setting_notification(setting: SystemSetting, action: str) -> 
     - Audit team
     - Relevant stakeholders
     """
-    try:
+    with best_effort_atomic(logger=logger, scope="settings", message="_send_critical_setting_notification failed"):
         # Check if NotificationService is available
         if NotificationService is None:
             logger.debug("⚠️ [Settings Signal] Notifications service not available for %s", setting.key)
@@ -194,6 +187,3 @@ def _send_critical_setting_notification(setting: SystemSetting, action: str) -> 
         )
 
         logger.info("📧 [Settings Signal] Critical setting notification sent for %s %s", setting.key, action)
-
-    except Exception as e:
-        logger.error("🔥 [Settings Signal] Error sending notification for %s: %s", setting.key, str(e))

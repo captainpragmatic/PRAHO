@@ -179,6 +179,7 @@ jobs:
           tests.billing.test_fiscal_correction_concurrency \
           tests.billing.test_builtin_storno_concurrency \
           tests.billing.test_invoice_signal_transaction_isolation \
+          tests.audit.test_membership_signal_postgres_isolation \
           tests.common.test_transactions \
           --settings=config.settings.ci --verbosity=2
 

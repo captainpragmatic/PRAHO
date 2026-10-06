@@ -10,6 +10,7 @@ Includes:
 """
 
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from django.conf import settings
@@ -22,6 +23,7 @@ from apps.audit.services import (
     AuditEventData,
     AuditService,
 )
+from apps.common.transactions import best_effort_atomic, swallow_application_errors
 from apps.common.validators import log_security_event
 
 from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob
@@ -32,6 +34,14 @@ logger = logging.getLogger(__name__)
 # ===============================================================================
 # VIRTUALMIN INTEGRATION SIGNALS
 # ===============================================================================
+
+
+def _log_optional_virtualmin_event(
+    event_data: Callable[[], AuditEventData], *, context: Callable[[], AuditContext]
+) -> None:
+    # Build the payload inside the savepoint too: it may load server/account relations.
+    with best_effort_atomic(logger=logger, scope="Virtualmin", message="Virtualmin audit failed"):
+        AuditService.log_event(event_data(), context=context())
 
 
 @receiver(post_save, sender=VirtualminAccount)
@@ -51,11 +61,13 @@ def audit_virtualmin_account_changes(
     if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
         return
 
-    try:
+    with swallow_application_errors(
+        logger=logger, scope="provisioning", message="audit_virtualmin_account_changes failed"
+    ):
         if created:
             # Log account creation
-            AuditService.log_event(
-                AuditEventData(
+            _log_optional_virtualmin_event(
+                lambda: AuditEventData(
                     event_type="virtualmin_account_created",
                     content_object=instance,
                     new_values={
@@ -67,7 +79,7 @@ def audit_virtualmin_account_changes(
                     },
                     description=f"Virtualmin account created for domain {instance.domain}",
                 ),
-                context=AuditContext(
+                context=lambda: AuditContext(
                     actor_type="system",
                     metadata={
                         "source_app": "provisioning",
@@ -88,14 +100,14 @@ def audit_virtualmin_account_changes(
             if update_fields:
                 if "status" in update_fields:
                     # Status change is critical for compliance
-                    AuditService.log_event(
-                        AuditEventData(
+                    _log_optional_virtualmin_event(
+                        lambda: AuditEventData(
                             event_type="virtualmin_account_status_changed",
                             content_object=instance,
                             new_values={"status": instance.status},
                             description=f"Virtualmin account status changed to {instance.status} for {instance.domain}",
                         ),
-                        context=AuditContext(
+                        context=lambda: AuditContext(
                             actor_type="system",
                             metadata={
                                 "source_app": "provisioning",
@@ -109,14 +121,14 @@ def audit_virtualmin_account_changes(
 
                 if "server" in update_fields:
                     # Server migration
-                    AuditService.log_event(
-                        AuditEventData(
+                    _log_optional_virtualmin_event(
+                        lambda: AuditEventData(
                             event_type="virtualmin_account_server_migrated",
                             content_object=instance,
                             new_values={"server": str(instance.server.hostname) if instance.server else None},
                             description=f"Virtualmin account migrated to server {instance.server.hostname if instance.server else 'None'} for {instance.domain}",
                         ),
-                        context=AuditContext(
+                        context=lambda: AuditContext(
                             user=None,
                             actor_type="system",
                             metadata={
@@ -130,13 +142,13 @@ def audit_virtualmin_account_changes(
                     )
             else:
                 # General update
-                AuditService.log_event(
-                    AuditEventData(
+                _log_optional_virtualmin_event(
+                    lambda: AuditEventData(
                         event_type="virtualmin_account_updated",
                         content_object=instance,
                         description=f"Virtualmin account updated for {instance.domain}",
                     ),
-                    context=AuditContext(
+                    context=lambda: AuditContext(
                         user=None,
                         actor_type="system",
                         metadata={
@@ -147,9 +159,6 @@ def audit_virtualmin_account_changes(
                         },
                     ),
                 )
-
-    except Exception as e:
-        logger.error(f"🔥 [ProvisioningAudit] Failed to audit Virtualmin account changes: {e}")
 
 
 @receiver(pre_delete, sender=VirtualminAccount)
@@ -165,9 +174,11 @@ def audit_virtualmin_account_deletion(
     if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
         return
 
-    try:
-        AuditService.log_event(
-            AuditEventData(
+    with swallow_application_errors(
+        logger=logger, scope="provisioning", message="audit_virtualmin_account_deletion failed"
+    ):
+        _log_optional_virtualmin_event(
+            lambda: AuditEventData(
                 event_type="virtualmin_account_deleted",
                 content_object=instance,
                 old_values={
@@ -179,7 +190,7 @@ def audit_virtualmin_account_deletion(
                 },
                 description=f"Virtualmin account deleted for domain {instance.domain}",
             ),
-            context=AuditContext(
+            context=lambda: AuditContext(
                 actor_type="system",
                 metadata={
                     "source_app": "provisioning",
@@ -194,9 +205,6 @@ def audit_virtualmin_account_deletion(
         )
 
         logger.info(f"🗑️ [ProvisioningAudit] Deleted Virtualmin account for {instance.domain}")
-
-    except Exception as e:
-        logger.error(f"🔥 [ProvisioningAudit] Failed to audit Virtualmin account deletion: {e}")
 
 
 def audit_job_status_transition(
@@ -252,11 +260,13 @@ def audit_virtualmin_provisioning_jobs(
     if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
         return
 
-    try:
+    with swallow_application_errors(
+        logger=logger, scope="provisioning", message="audit_virtualmin_provisioning_jobs failed"
+    ):
         if created:
             # Log job creation
-            AuditService.log_event(
-                AuditEventData(
+            _log_optional_virtualmin_event(
+                lambda: AuditEventData(
                     event_type="virtualmin_provisioning_job_created",
                     content_object=instance,
                     new_values={
@@ -268,7 +278,7 @@ def audit_virtualmin_provisioning_jobs(
                     },
                     description=f"Virtualmin provisioning job created: {instance.operation} for {instance.account.domain if instance.account else 'unknown'}",
                 ),
-                context=AuditContext(
+                context=lambda: AuditContext(
                     actor_type="system",
                     metadata={
                         "source_app": "provisioning",
@@ -287,8 +297,8 @@ def audit_virtualmin_provisioning_jobs(
                 # Job status change
                 event_action = f"virtualmin_provisioning_job_{instance.status}"
 
-                AuditService.log_event(
-                    AuditEventData(
+                _log_optional_virtualmin_event(
+                    lambda: AuditEventData(
                         event_type=event_action,
                         content_object=instance,
                         new_values={
@@ -298,7 +308,7 @@ def audit_virtualmin_provisioning_jobs(
                         },
                         description=f"Virtualmin provisioning job {instance.status}: {instance.operation} for {instance.account.domain if instance.account else 'unknown'}",
                     ),
-                    context=AuditContext(
+                    context=lambda: AuditContext(
                         actor_type="system",
                         metadata={
                             "source_app": "provisioning",
@@ -312,9 +322,6 @@ def audit_virtualmin_provisioning_jobs(
                     ),
                 )
 
-    except Exception as e:
-        logger.error(f"🔥 [ProvisioningAudit] Failed to audit Virtualmin provisioning job: {e}")
-
 
 # ===============================================================================
 # VIRTUALMIN HELPER FUNCTIONS
@@ -327,7 +334,7 @@ def log_virtualmin_security_event(event_type: str, details: dict[str, Any], ip_a
 
     Used by services for logging authentication failures, suspicious activity, etc.
     """
-    try:
+    with best_effort_atomic(logger=logger, scope="provisioning", message="log_virtualmin_security_event failed"):
         log_security_event(
             event_type,
             {
@@ -341,9 +348,6 @@ def log_virtualmin_security_event(event_type: str, details: dict[str, Any], ip_a
 
         logger.warning(f"🔒 [VirtualminSecurity] {event_type}: {details}")
 
-    except Exception as e:
-        logger.error(f"🔥 [VirtualminSecurity] Failed to log security event: {e}")
-
 
 def notify_provisioning_completion(
     account: VirtualminAccount, success: bool, details: dict[str, Any] | None = None
@@ -353,7 +357,7 @@ def notify_provisioning_completion(
 
     Can be used by provisioning services to trigger cross-app workflows.
     """
-    try:
+    with best_effort_atomic(logger=logger, scope="provisioning", message="notify_provisioning_completion failed"):
         # Log completion for audit trail
         AuditService.log_event(
             AuditEventData(
@@ -388,6 +392,3 @@ def notify_provisioning_completion(
         logger.info(
             f"🔔 [ProvisioningNotification] Notified provisioning completion for {account.domain}: {'success' if success else 'failure'}"
         )
-
-    except Exception as e:
-        logger.error(f"🔥 [ProvisioningNotification] Failed to notify provisioning completion: {e}")

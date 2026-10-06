@@ -7,7 +7,11 @@ import logging
 from typing import Any
 
 from django.conf import settings
-from django.contrib.auth.signals import user_logged_in, user_logged_out, user_login_failed
+from django.contrib.auth.signals import (
+    user_logged_in,
+    user_logged_out,
+    user_login_failed,
+)
 from django.db import transaction
 from django.db.models.signals import post_save, pre_delete
 from django.dispatch import receiver
@@ -22,6 +26,7 @@ from apps.audit.services import (
     LoginFailureEventData,
     LogoutEventData,
 )
+from apps.common.transactions import best_effort_atomic
 
 from .mfa import LOGIN_METHOD_REQUEST_ATTR
 from .models import User, UserProfile
@@ -63,7 +68,7 @@ def _log_user_model_event(  # Django signal parameters  # noqa: PLR0913  # Busin
     if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
         return
 
-    try:
+    with best_effort_atomic(logger=logger, scope="users", message="_log_user_model_event failed"):
         event_metadata = {
             "source_app": "users",
             "model_lifecycle": True,
@@ -81,8 +86,6 @@ def _log_user_model_event(  # Django signal parameters  # noqa: PLR0913  # Busin
             ),
             context=AuditContext(actor_type="system", metadata=event_metadata),
         )
-    except Exception as e:
-        logger.exception(f"🔥 [Users Lifecycle] Failed to log {event_type}: {e}")
 
 
 @receiver(post_save, sender="users.WebAuthnCredential")
@@ -181,7 +184,7 @@ def log_user_login(sender: Any, request: HttpRequest, user: User, **kwargs: Any)
     This signal handler captures all successful logins regardless of the authentication method.
     It works in conjunction with view-level logging to provide comprehensive coverage.
     """
-    try:
+    with best_effort_atomic(logger=logger, scope="users", message="log_user_login failed"):
         # mfa_verify names the second factor it accepted; every other login is password-only.
         authentication_method = str(getattr(request, LOGIN_METHOD_REQUEST_ATTR, "") or "password")
 
@@ -203,10 +206,6 @@ def log_user_login(sender: Any, request: HttpRequest, user: User, **kwargs: Any)
 
         logger.info(f"✅ [Auth Signal] Login success logged for {user.email} via {authentication_method}")
 
-    except Exception as e:
-        # Never let audit logging break authentication
-        logger.error(f"🔥 [Auth Signal] Failed to log login for {user.email}: {e}")
-
 
 @receiver(user_logged_out)
 def log_user_logout(sender: Any, request: HttpRequest, user: User | None, **kwargs: Any) -> None:
@@ -216,7 +215,7 @@ def log_user_logout(sender: Any, request: HttpRequest, user: User | None, **kwar
     This signal is triggered after the user has been logged out and session cleared.
     We try to capture as much context as possible before the session is destroyed.
     """
-    try:
+    with best_effort_atomic(logger=logger, scope="users", message="log_user_logout failed"):
         if not user:
             logger.warning("⚠️ [Auth Signal] Logout signal triggered with no user")
             return
@@ -242,10 +241,6 @@ def log_user_logout(sender: Any, request: HttpRequest, user: User | None, **kwar
 
         logger.info(f"✅ [Auth Signal] Logout logged for {user.email}")
 
-    except Exception as e:
-        # Never let audit logging break logout functionality
-        logger.error(f"🔥 [Auth Signal] Failed to log logout: {e}")
-
 
 @receiver(user_login_failed)
 def log_failed_login(sender: Any, credentials: dict[str, Any], request: HttpRequest, **kwargs: Any) -> None:
@@ -255,7 +250,7 @@ def log_failed_login(sender: Any, credentials: dict[str, Any], request: HttpRequ
     This signal captures login failures at the authentication backend level.
     It works alongside view-level logging to ensure comprehensive coverage.
     """
-    try:
+    with best_effort_atomic(logger=logger, scope="users", message="log_failed_login failed"):
         # Extract attempted email from credentials
         email = credentials.get("username") or credentials.get("email")
 
@@ -291,7 +286,3 @@ def log_failed_login(sender: Any, credentials: dict[str, Any], request: HttpRequ
         AuthenticationAuditService.log_login_failed(failure_event_data)
 
         logger.info(f"✅ [Auth Signal] Login failure logged for {email}: {failure_reason}")
-
-    except Exception as e:
-        # Never let audit logging break authentication
-        logger.error(f"🔥 [Auth Signal] Failed to log login failure: {e}")

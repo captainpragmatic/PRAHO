@@ -29,6 +29,7 @@ from apps.audit.services import (
     AuditEventData,
     AuditService,
 )
+from apps.common.transactions import best_effort_atomic, swallow_application_errors
 from apps.common.validators import log_security_event
 from apps.settings.services import SettingsService
 
@@ -393,14 +394,12 @@ def handle_service_virtualmin_reconciliation(
     service_id = str(instance.pk)
 
     def _enqueue() -> None:
-        try:
-            from apps.provisioning.virtualmin_tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
-                reconcile_virtualmin_service_state_async,  # Circular: cross-app
+        with best_effort_atomic(logger=logger, scope="Provisioning", message="Reconciliation enqueue failed"):
+            from apps.provisioning.virtualmin_tasks import (  # noqa: PLC0415  # ADR-0007
+                reconcile_virtualmin_service_state_async,
             )
 
             reconcile_virtualmin_service_state_async(service_id)
-        except Exception as e:
-            logger.exception(f"🔥 [Service] Failed to queue Virtualmin reconciliation for {service_id}: {e}")
 
     transaction.on_commit(_enqueue)
 
@@ -681,7 +680,9 @@ def log_virtualmin_security_event(event_type: str, details: dict[str, Any], ip_a
         details: Dictionary containing event details
         ip_address: IP address of the source of the event
     """
-    try:
+    with swallow_application_errors(
+        logger=logger, scope="provisioning", message="log_virtualmin_security_event failed"
+    ):
         # Enhance details with Virtualmin-specific metadata
         enhanced_details = details.copy()
         enhanced_details.update(
@@ -695,9 +696,6 @@ def log_virtualmin_security_event(event_type: str, details: dict[str, Any], ip_a
         log_security_event(event_type, enhanced_details, ip_address)
 
         logger.info(f"🔒 [Security] Virtualmin {event_type}: {details}")
-
-    except Exception as e:
-        logger.error(f"🔥 [Security] Failed to log Virtualmin security event: {e}")
 
 
 def notify_provisioning_completion(account: Any, success: bool = True, details: dict[str, Any] | None = None) -> None:
@@ -845,18 +843,19 @@ def _schedule_provisioning_task(
     secure_params: SecureTaskParameters, validated_params: dict[str, str]
 ) -> tuple[bool, str | None]:
     """Schedule the async provisioning task."""
-    try:
+    task_id = None
+    with best_effort_atomic(logger=logger, scope="AutoProvisioning", message="Task scheduling failed"):
         task_id = provision_virtualmin_account_async(secure_params)
+    if task_id is not None:
         return True, task_id
-    except Exception as task_error:
-        logger.error(f"🔥 [AutoProvisioning] Task scheduling failed: {task_error}")
-        log_security_event_safe(
-            "virtualmin_task_scheduling_failed",
-            {"error": str(task_error)},
-            validated_params["service_id"],
-            validated_params["domain"],
-        )
-        return False, None
+
+    log_security_event_safe(
+        "virtualmin_task_scheduling_failed",
+        {"error": "Task scheduling failed"},
+        validated_params["service_id"],
+        validated_params["domain"],
+    )
+    return False, None
 
 
 def _log_audit_event(service: Service, audit_data: dict[str, Any]) -> None:
@@ -1015,3 +1014,4 @@ def _trigger_automatic_virtualmin_provisioning(service: Service) -> None:
         # Clear any partial idempotency state
         if "idempotency_key" in locals() and idempotency_key:
             IdempotencyManager.clear(idempotency_key)
+        raise

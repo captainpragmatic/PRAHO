@@ -11,6 +11,7 @@ from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 
 from apps.audit.services import AuditService, TicketsAuditService
+from apps.common.transactions import best_effort_atomic, swallow_application_errors
 
 from .models import Ticket
 
@@ -18,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 @receiver(pre_save, sender=Ticket)
+@best_effort_atomic(logger=logger, scope="tickets", message="capture_ticket_status_change failed")
 def capture_ticket_status_change(sender: type[Ticket], instance: Ticket, **kwargs: Any) -> None:
     """
     Capture ticket status changes for audit logging.
@@ -38,6 +40,7 @@ def capture_ticket_status_change(sender: type[Ticket], instance: Ticket, **kwarg
     except Exception as e:
         logger.error(f"🔥 [Tickets Signal] Failed to capture old status for ticket {instance.pk}: {e}")
         instance._old_status = None
+        raise
 
 
 @receiver(post_save, sender=Ticket)
@@ -50,7 +53,7 @@ def log_ticket_lifecycle_events(sender: type[Ticket], instance: Ticket, created:
     - Status changes
     - Customer service quality metrics
     """
-    try:
+    with swallow_application_errors(logger=logger, scope="tickets", message="log_ticket_lifecycle_events failed"):
         # Handle new ticket creation
         if created:
             _log_ticket_opened(instance)
@@ -61,14 +64,10 @@ def log_ticket_lifecycle_events(sender: type[Ticket], instance: Ticket, created:
         if old_status and old_status != instance.status:
             _handle_status_change(instance, old_status, instance.status)
 
-    except Exception as e:
-        # Never let audit logging break ticket operations
-        logger.error(f"🔥 [Tickets Signal] Failed to log ticket event for {instance.ticket_number}: {e}")
-
 
 def _log_ticket_opened(ticket: Ticket) -> None:
     """Log ticket creation event"""
-    try:
+    with best_effort_atomic(logger=logger, scope="tickets", message="_log_ticket_opened failed"):
         TicketsAuditService.log_ticket_opened(
             ticket=ticket,
             user=ticket.created_by,
@@ -82,9 +81,6 @@ def _log_ticket_opened(ticket: Ticket) -> None:
         )
 
         logger.info(f"✅ [Tickets] Opened ticket {ticket.ticket_number} for {ticket.customer}")
-
-    except Exception as e:
-        logger.error(f"🔥 [Tickets] Failed to log ticket opened: {e}")
 
 
 def _handle_status_change(ticket: Ticket, old_status: str, new_status: str) -> None:
@@ -108,7 +104,7 @@ def _handle_status_change(ticket: Ticket, old_status: str, new_status: str) -> N
 
 def _log_ticket_closed(ticket: Ticket, old_status: str, new_status: str) -> None:
     """Log ticket closure with service metrics"""
-    try:
+    with best_effort_atomic(logger=logger, scope="tickets", message="_log_ticket_closed failed"):
         # Calculate customer service metrics
         service_metrics = _calculate_service_metrics(ticket)
 
@@ -127,13 +123,10 @@ def _log_ticket_closed(ticket: Ticket, old_status: str, new_status: str) -> None
 
         logger.info(f"✅ [Tickets] Closed ticket {ticket.ticket_number} with resolution: {ticket.resolution_code}")
 
-    except Exception as e:
-        logger.error(f"🔥 [Tickets] Failed to log ticket closure: {e}")
-
 
 def _log_status_change(ticket: Ticket, old_status: str, new_status: str) -> None:
     """Log significant status changes to audit trail"""
-    try:
+    with best_effort_atomic(logger=logger, scope="tickets", message="_log_status_change failed"):
         # Log meaningful status transitions
         significant_changes = {
             ("open", "in_progress"): "agent_started_work",
@@ -163,9 +156,6 @@ def _log_status_change(ticket: Ticket, old_status: str, new_status: str) -> None
                 },
                 actor_type="support_system",
             )
-
-    except Exception as e:
-        logger.error(f"🔥 [Tickets] Failed to log status change: {e}")
 
 
 def _calculate_service_metrics(ticket: Ticket) -> dict[str, Any]:

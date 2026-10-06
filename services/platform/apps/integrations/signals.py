@@ -10,6 +10,7 @@ from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 
 from apps.audit.services import IntegrationsAuditService
+from apps.common.transactions import best_effort_atomic, swallow_application_errors
 
 from .models import WebhookDelivery, WebhookEvent
 
@@ -42,6 +43,7 @@ ROMANIAN_SERVICE_PRIORITIES: dict[str, str] = {
 
 
 @receiver(pre_save, sender=WebhookEvent)
+@best_effort_atomic(logger=logger, scope="integrations", message="capture_webhook_status_change failed")
 def capture_webhook_status_change(sender: type[WebhookEvent], instance: WebhookEvent, **kwargs: Any) -> None:
     """
     Capture webhook status changes to track processing transitions.
@@ -82,6 +84,7 @@ def capture_webhook_status_change(sender: type[WebhookEvent], instance: WebhookE
         instance._old_processed_at = None
         instance._old_retry_count = 0
         instance._response_time_ms = None
+        raise
 
 
 @receiver(post_save, sender=WebhookEvent)
@@ -97,7 +100,9 @@ def log_webhook_reliability_events(
     - Retry exhaustion (when max attempts reached)
     - Security indicators (suspicious patterns)
     """
-    try:
+    with swallow_application_errors(
+        logger=logger, scope="integrations", message="log_webhook_reliability_events failed"
+    ):
         # Skip logging for newly created pending webhooks
         if created and instance.status == "pending":
             return
@@ -129,10 +134,6 @@ def log_webhook_reliability_events(
                 f"📋 [Integrations] Webhook skipped: {instance.source}.{instance.event_type} - {instance.error_message}"
             )
 
-    except Exception as e:
-        # Never let audit logging break webhook processing
-        logger.error(f"🔥 [Integrations Signal] Failed to log webhook event for {instance.event_id}: {e}")
-
 
 @receiver(post_save, sender=WebhookDelivery)
 def log_outbound_webhook_events(
@@ -143,18 +144,15 @@ def log_outbound_webhook_events(
 
     This tracks webhooks we send TO customers about their services.
     """
-    try:
+    with swallow_application_errors(logger=logger, scope="integrations", message="log_outbound_webhook_events failed"):
         # Only log when delivery status changes to final states
         if not created and instance.status in ["delivered", "failed"]:
             _log_outbound_webhook_result(instance)
 
-    except Exception as e:
-        logger.error(f"🔥 [Integrations Signal] Failed to log outbound webhook for {instance.id}: {e}")
-
 
 def _log_webhook_success(webhook_event: WebhookEvent, response_time_ms: int) -> None:
     """Log successful webhook processing with performance analysis"""
-    try:
+    with best_effort_atomic(logger=logger, scope="integrations", message="_log_webhook_success failed"):
         # Analyze performance metrics
         performance_grade = "excellent"
         if response_time_ms > WEBHOOK_RELIABILITY_THRESHOLDS["response_time_poor_ms"]:
@@ -185,13 +183,10 @@ def _log_webhook_success(webhook_event: WebhookEvent, response_time_ms: int) -> 
             f"✅ [Integrations] Webhook processed: {webhook_event.source}.{webhook_event.event_type} ({response_time_ms}ms, {performance_grade})"
         )
 
-    except Exception as e:
-        logger.error(f"🔥 [Integrations] Failed to log webhook success: {e}")
-
 
 def _log_webhook_failure(webhook_event: WebhookEvent, is_retry: bool = False) -> None:
     """Log webhook processing failure with error analysis"""
-    try:
+    with best_effort_atomic(logger=logger, scope="integrations", message="_log_webhook_failure failed"):
         # Analyze error patterns
         error_type = _classify_error_type(webhook_event.error_message)
         security_flags = _analyze_security_indicators(webhook_event)
@@ -230,13 +225,10 @@ def _log_webhook_failure(webhook_event: WebhookEvent, is_retry: bool = False) ->
             f"❌ [Integrations] Webhook failed: {webhook_event.source}.{webhook_event.event_type} - {error_type}{retry_info}"
         )
 
-    except Exception as e:
-        logger.error(f"🔥 [Integrations] Failed to log webhook failure: {e}")
-
 
 def _log_webhook_retry_exhausted(webhook_event: WebhookEvent) -> None:
     """Log webhook retry exhaustion for alerting and investigation"""
-    try:
+    with best_effort_atomic(logger=logger, scope="integrations", message="_log_webhook_retry_exhausted failed"):
         service_priority = ROMANIAN_SERVICE_PRIORITIES.get(webhook_event.source, "low")
 
         # Build reliability impact assessment
@@ -266,13 +258,10 @@ def _log_webhook_retry_exhausted(webhook_event: WebhookEvent) -> None:
                 f"🔥 [Integrations] Webhook retry exhausted: {webhook_event.source}.{webhook_event.event_type} after {webhook_event.retry_count} attempts"
             )
 
-    except Exception as e:
-        logger.error(f"🔥 [Integrations] Failed to log retry exhaustion: {e}")
-
 
 def _log_outbound_webhook_result(webhook_delivery: WebhookDelivery) -> None:
     """Log outbound webhook delivery results for customer service reliability"""
-    try:
+    with best_effort_atomic(logger=logger, scope="integrations", message="_log_outbound_webhook_result failed"):
         if webhook_delivery.status == "delivered":
             # Calculate response time if available
             response_time_ms = 0
@@ -288,9 +277,6 @@ def _log_outbound_webhook_result(webhook_delivery: WebhookDelivery) -> None:
             logger.warning(
                 f"📤 [Integrations] Outbound webhook failed: {webhook_delivery.customer} - {webhook_delivery.event_type} (retry {webhook_delivery.retry_count})"
             )
-
-    except Exception as e:
-        logger.error(f"🔥 [Integrations] Failed to log outbound webhook: {e}")
 
 
 def _classify_error_type(error_message: str) -> str:

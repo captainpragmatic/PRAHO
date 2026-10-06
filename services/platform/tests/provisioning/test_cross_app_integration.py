@@ -55,30 +55,22 @@ class BillingProvisioningIntegrationTest(TestCase):
         )
 
         # Create user and membership
-        self.user = User.objects.create_user(
-            email="test@example.com",
-            password="testpass123"
-        )
+        self.user = User.objects.create_user(email="test@example.com", password="testpass123")
 
         self.membership = CustomerMembership.objects.create(
-            user=self.user,
-            customer=self.customer,
-            role="owner",
-            is_primary=True
+            user=self.user, customer=self.customer, role="owner", is_primary=True
         )
 
         # Create currency
         self.currency, _ = Currency.objects.get_or_create(
-            code="RON",
-            defaults={"name": "Romanian Leu", "symbol": "RON"}
+            code="RON", defaults={"name": "Romanian Leu", "symbol": "RON"}
         )
 
         # Create product
         from apps.products.models import Product
+
         self.product = Product.objects.create(
-            slug="shared-hosting",
-            name="Shared Hosting",
-            product_type="shared_hosting"
+            slug="shared-hosting", name="Shared Hosting", product_type="shared_hosting"
         )
 
         # Create service plan
@@ -86,7 +78,7 @@ class BillingProvisioningIntegrationTest(TestCase):
             name="Shared Hosting Plan",
             plan_type="shared_hosting",
             price_monthly=Decimal("29.99"),
-            setup_fee=Decimal("0.00")
+            setup_fee=Decimal("0.00"),
         )
 
         # Create service
@@ -98,7 +90,7 @@ class BillingProvisioningIntegrationTest(TestCase):
             domain="example.com",
             username="testuser",
             price=Decimal("29.99"),
-            status="active"
+            status="active",
         )
 
         # Create order
@@ -106,7 +98,7 @@ class BillingProvisioningIntegrationTest(TestCase):
             customer=self.customer,
             total_cents=2999,  # €29.99 in cents
             currency=self.currency,
-            status="completed"
+            status="completed",
         )
 
         # Create order item
@@ -124,7 +116,7 @@ class BillingProvisioningIntegrationTest(TestCase):
             number="INV-001",
             total_cents=2999,  # 29.99 RON in cents
             currency=self.currency,
-            status="issued"
+            status="issued",
         )
 
         # Link order to invoice
@@ -188,16 +180,16 @@ class DomainsProvisioningIntegrationTest(TestCase):
             customer_type="company",
         )
 
-        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
 
         # Create TLD and registrar
         self.tld = TLD.objects.create(
             extension="com",
             description="Commercial domains",
             registration_price_cents=1500,  # 15.00 RON in cents
-            renewal_price_cents=1500,       # 15.00 RON in cents
-            transfer_price_cents=1500,      # 15.00 RON in cents
-            is_active=True
+            renewal_price_cents=1500,  # 15.00 RON in cents
+            transfer_price_cents=1500,  # 15.00 RON in cents
+            is_active=True,
         )
 
         self.registrar = Registrar.objects.create(
@@ -205,7 +197,7 @@ class DomainsProvisioningIntegrationTest(TestCase):
             display_name="Test Registrar",
             website_url="https://registrar.com",
             api_endpoint="https://api.registrar.com",
-            status="active"
+            status="active",
         )
 
         # Create domain
@@ -215,14 +207,12 @@ class DomainsProvisioningIntegrationTest(TestCase):
             tld=self.tld,
             registrar=self.registrar,
             status="active",
-            expires_at=timezone.now() + timezone.timedelta(days=365)
+            expires_at=timezone.now() + timezone.timedelta(days=365),
         )
 
         # Create service plan and service
         self.service_plan = ServicePlan.objects.create(
-            name="Shared Hosting Plan",
-            plan_type="shared_hosting",
-            price_monthly=Decimal("29.99")
+            name="Shared Hosting Plan", plan_type="shared_hosting", price_monthly=Decimal("29.99")
         )
 
         self.service = Service.objects.create(
@@ -233,33 +223,26 @@ class DomainsProvisioningIntegrationTest(TestCase):
             domain="example.com",
             username="testuser",
             price=Decimal("29.99"),
-            status="active"
+            status="active",
         )
 
         # Create Virtualmin server and account
-        self.server = VirtualminServer.objects.create(
-            hostname="vm1.example.com",
-            capacity=1000,
-            status="healthy"
-        )
+        self.server = VirtualminServer.objects.create(hostname="vm1.example.com", capacity=1000, status="healthy")
 
         self.virtualmin_account = VirtualminAccount.objects.create(
             domain="example.com",
             service=self.service,
             server=self.server,
             virtualmin_username="testuser",
-            status="active"
+            status="active",
         )
 
         # Create ServiceDomain relationship so domain sync can find the service
         from apps.provisioning.relationship_models import ServiceDomain
-        ServiceDomain.objects.create(
-            service=self.service,
-            domain=self.domain,
-            domain_type="primary"
-        )
 
-    @patch('apps.provisioning.virtualmin_service.VirtualminProvisioningService.suspend_account')
+        ServiceDomain.objects.create(service=self.service, domain=self.domain, domain_type="primary")
+
+    @patch("apps.provisioning.virtualmin_service.VirtualminProvisioningService.suspend_account")
     def test_domain_status_change_suspends_virtualmin_account(self, mock_suspend):
         """Test that domain status change suspends Virtualmin account via post_save signal"""
         mock_suspend.return_value = Ok(True)
@@ -272,12 +255,9 @@ class DomainsProvisioningIntegrationTest(TestCase):
             self.domain.save()
 
         # Verify suspension was called (by the signal, not manually)
-        mock_suspend.assert_called_once_with(
-            self.virtualmin_account,
-            reason="Domain status changed to suspended"
-        )
+        mock_suspend.assert_called_once_with(self.virtualmin_account, reason="Domain status changed to suspended")
 
-    @patch('apps.provisioning.virtualmin_service.VirtualminProvisioningService.unsuspend_account')
+    @patch("apps.provisioning.virtualmin_service.VirtualminProvisioningService.unsuspend_account")
     def test_domain_reactivation_unsuspends_virtualmin_account(self, mock_unsuspend):
         """Test that domain reactivation unsuspends Virtualmin account via post_save signal"""
         mock_unsuspend.return_value = Ok(True)
@@ -330,12 +310,10 @@ class ProvisioningAuditIntegrationTest(TestCase):
 
         # Create service
         self.service_plan = ServicePlan.objects.create(
-            name="Test Plan",
-            plan_type="shared_hosting",
-            price_monthly=Decimal("29.99")
+            name="Test Plan", plan_type="shared_hosting", price_monthly=Decimal("29.99")
         )
 
-        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
 
         self.service = Service.objects.create(
             customer=self.customer,
@@ -344,18 +322,14 @@ class ProvisioningAuditIntegrationTest(TestCase):
             service_name="Test Hosting",
             domain="example.com",
             username="testuser",
-            price=Decimal("29.99")
+            price=Decimal("29.99"),
         )
 
         # Create Virtualmin server
-        self.server = VirtualminServer.objects.create(
-            hostname="vm1.example.com",
-            capacity=1000,
-            status="healthy"
-        )
+        self.server = VirtualminServer.objects.create(hostname="vm1.example.com", capacity=1000, status="healthy")
 
     @override_settings(DISABLE_AUDIT_SIGNALS=False)
-    @patch('apps.audit.services.AuditService.log_event')
+    @patch("apps.audit.services.AuditService.log_event")
     def test_virtualmin_account_creation_audit(self, mock_audit):
         """Test that Virtualmin account creation is audited"""
         # Create Virtualmin account
@@ -364,20 +338,20 @@ class ProvisioningAuditIntegrationTest(TestCase):
             service=self.service,
             server=self.server,
             virtualmin_username="testuser",
-            status="provisioning"
+            status="provisioning",
         )
 
         # Verify audit logging was called
         mock_audit.assert_called_once()
         call_args = mock_audit.call_args[0][0]  # Get AuditEventData
-        context_args = mock_audit.call_args[1]['context']  # Get AuditContext
+        context_args = mock_audit.call_args[1]["context"]  # Get AuditContext
         self.assertEqual(call_args.event_type, "virtualmin_account_created")
         self.assertEqual(call_args.new_values["domain"], "example.com")
         self.assertTrue(context_args.metadata["compliance_event"])
         self.assertTrue(context_args.metadata["provisioning_action"])
 
     @override_settings(DISABLE_AUDIT_SIGNALS=False)
-    @patch('apps.audit.services.AuditService.log_event')
+    @patch("apps.audit.services.AuditService.log_event")
     def test_virtualmin_account_status_change_audit(self, mock_audit):
         """Test that Virtualmin account status changes are audited"""
         # Create account
@@ -386,7 +360,7 @@ class ProvisioningAuditIntegrationTest(TestCase):
             service=self.service,
             server=self.server,
             virtualmin_username="testuser",
-            status="provisioning"
+            status="provisioning",
         )
 
         # Clear mock calls from creation
@@ -399,13 +373,13 @@ class ProvisioningAuditIntegrationTest(TestCase):
         # Verify audit logging was called for status change
         mock_audit.assert_called_once()
         call_args = mock_audit.call_args[0][0]  # Get AuditEventData
-        context_args = mock_audit.call_args[1]['context']  # Get AuditContext
+        context_args = mock_audit.call_args[1]["context"]  # Get AuditContext
         self.assertEqual(call_args.event_type, "virtualmin_account_status_changed")
         self.assertEqual(call_args.new_values["status"], "active")
         self.assertTrue(context_args.metadata["status_change"])
 
     @override_settings(DISABLE_AUDIT_SIGNALS=False)
-    @patch('apps.audit.services.AuditService.log_event')
+    @patch("apps.audit.services.AuditService.log_event")
     def test_virtualmin_account_deletion_audit(self, mock_audit):
         """Test that Virtualmin account deletion is audited"""
         # Create account
@@ -414,7 +388,7 @@ class ProvisioningAuditIntegrationTest(TestCase):
             service=self.service,
             server=self.server,
             virtualmin_username="testuser",
-            status="active"
+            status="active",
         )
 
         # Clear mock calls from creation
@@ -426,14 +400,14 @@ class ProvisioningAuditIntegrationTest(TestCase):
         # Verify audit logging was called for deletion
         mock_audit.assert_called_once()
         call_args = mock_audit.call_args[0][0]  # Get AuditEventData
-        context_args = mock_audit.call_args[1]['context']  # Get AuditContext
+        context_args = mock_audit.call_args[1]["context"]  # Get AuditContext
         self.assertEqual(call_args.event_type, "virtualmin_account_deleted")
         self.assertEqual(call_args.old_values["domain"], "example.com")
         self.assertTrue(context_args.metadata["account_termination"])
         self.assertTrue(context_args.metadata["requires_gdpr_logging"])
 
     @override_settings(DISABLE_AUDIT_SIGNALS=True)
-    @patch('apps.audit.services.AuditService.log_event')
+    @patch("apps.audit.services.AuditService.log_event")
     def test_audit_signals_can_be_disabled(self, mock_audit):
         """Test that audit signals can be disabled for testing"""
         # Create account with audit signals disabled
@@ -442,14 +416,14 @@ class ProvisioningAuditIntegrationTest(TestCase):
             service=self.service,
             server=self.server,
             virtualmin_username="testuser",
-            status="provisioning"
+            status="provisioning",
         )
 
         # Verify no audit logging occurred
         mock_audit.assert_not_called()
 
     @override_settings(DISABLE_AUDIT_SIGNALS=False)
-    @patch('apps.audit.services.AuditService.log_event')
+    @patch("apps.audit.services.AuditService.log_event")
     def test_virtualmin_provisioning_job_audit(self, mock_audit):
         """Test that provisioning job lifecycle is audited"""
         # Create account
@@ -458,7 +432,7 @@ class ProvisioningAuditIntegrationTest(TestCase):
             service=self.service,
             server=self.server,
             virtualmin_username="testuser",
-            status="provisioning"
+            status="provisioning",
         )
 
         # Clear mock calls from account creation
@@ -466,23 +440,18 @@ class ProvisioningAuditIntegrationTest(TestCase):
 
         # Create provisioning job
         job = VirtualminProvisioningJob.objects.create(
-            operation="create_domain",
-            server=self.server,
-            account=account,
-            correlation_id="test-123",
-            status="pending"
+            operation="create_domain", server=self.server, account=account, correlation_id="test-123", status="pending"
         )
 
         # Verify audit logging was called for job creation
         mock_audit.assert_called_once()
         call_args = mock_audit.call_args[0][0]  # Get AuditEventData
-        context_args = mock_audit.call_args[1]['context']  # Get AuditContext
+        context_args = mock_audit.call_args[1]["context"]  # Get AuditContext
         self.assertEqual(call_args.event_type, "virtualmin_provisioning_job_created")
         self.assertEqual(call_args.new_values["operation"], "create_domain")
         self.assertTrue(context_args.metadata["provisioning_job"])
 
-
-    @patch('apps.audit.services.AuditService.log_event')
+    @patch("apps.audit.services.AuditService.log_event")
     def test_provisioning_completion_notification(self, mock_audit):
         """Test provisioning completion notification helper"""
         # Create account
@@ -491,23 +460,19 @@ class ProvisioningAuditIntegrationTest(TestCase):
             service=self.service,
             server=self.server,
             virtualmin_username="testuser",
-            status="active"
+            status="active",
         )
 
         # Clear mock calls from creation
         mock_audit.reset_mock()
 
         # Notify completion
-        notify_provisioning_completion(
-            account,
-            success=True,
-            details={"server": "vm1.example.com"}
-        )
+        notify_provisioning_completion(account, success=True, details={"server": "vm1.example.com"})
 
         # Verify audit logging was called
         mock_audit.assert_called_once()
         call_args = mock_audit.call_args[0][0]  # Get AuditEventData
-        context_args = mock_audit.call_args[1]['context']  # Get AuditContext
+        context_args = mock_audit.call_args[1]["context"]  # Get AuditContext
         self.assertEqual(call_args.event_type, "virtualmin_provisioning_completed")
         self.assertTrue(call_args.new_values["success"])
         self.assertTrue(context_args.metadata["provisioning_completion"])
@@ -526,26 +491,18 @@ class CustomerProvisioningIntegrationTest(TestCase):
         )
 
         # Create user and membership
-        self.user = User.objects.create_user(
-            email="test@example.com",
-            password="testpass123"
-        )
+        self.user = User.objects.create_user(email="test@example.com", password="testpass123")
 
         self.membership = CustomerMembership.objects.create(
-            user=self.user,
-            customer=self.customer,
-            role="owner",
-            is_primary=True
+            user=self.user, customer=self.customer, role="owner", is_primary=True
         )
 
         # Create service
         self.service_plan = ServicePlan.objects.create(
-            name="Test Plan",
-            plan_type="shared_hosting",
-            price_monthly=Decimal("29.99")
+            name="Test Plan", plan_type="shared_hosting", price_monthly=Decimal("29.99")
         )
 
-        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
 
         self.service = Service.objects.create(
             customer=self.customer,
@@ -554,15 +511,11 @@ class CustomerProvisioningIntegrationTest(TestCase):
             service_name="Test Hosting",
             domain="example.com",
             username="testuser",
-            price=Decimal("29.99")
+            price=Decimal("29.99"),
         )
 
         # Create Virtualmin server
-        self.server = VirtualminServer.objects.create(
-            hostname="vm1.example.com",
-            capacity=1000,
-            status="healthy"
-        )
+        self.server = VirtualminServer.objects.create(hostname="vm1.example.com", capacity=1000, status="healthy")
 
     def test_virtualmin_account_customer_membership_link(self):
         """Test linking Virtualmin account to customer membership"""
@@ -573,7 +526,7 @@ class CustomerProvisioningIntegrationTest(TestCase):
             server=self.server,
             virtualmin_username="testuser",
             customer_membership=self.membership,
-            status="active"
+            status="active",
         )
 
         # Verify the link
@@ -588,7 +541,7 @@ class CustomerProvisioningIntegrationTest(TestCase):
             service=self.service,
             server=self.server,
             virtualmin_username="testuser",
-            status="active"
+            status="active",
         )
 
         # Should work fine (nullable field)
@@ -603,7 +556,7 @@ class CustomerProvisioningIntegrationTest(TestCase):
             server=self.server,
             virtualmin_username="testuser",
             customer_membership=self.membership,
-            status="active"
+            status="active",
         )
 
         # Verify reverse relationship
@@ -626,8 +579,7 @@ class CrossAppIntegrationPerformanceTest(TestCase):
 
         # Create currency
         self.currency, _ = Currency.objects.get_or_create(
-            code="RON",
-            defaults={"name": "Romanian Leu", "symbol": "RON"}
+            code="RON", defaults={"name": "Romanian Leu", "symbol": "RON"}
         )
 
     def test_domain_sync_query_efficiency(self):
@@ -638,7 +590,7 @@ class CrossAppIntegrationPerformanceTest(TestCase):
             registration_price_cents=1500,  # €15.00 in cents
             renewal_price_cents=1500,  # €15.00 in cents
             transfer_price_cents=1500,  # €15.00 in cents
-            is_active=True
+            is_active=True,
         )
 
         registrar = Registrar.objects.create(
@@ -646,7 +598,7 @@ class CrossAppIntegrationPerformanceTest(TestCase):
             display_name="Test Registrar",
             website_url="https://registrar.com",
             api_endpoint="https://api.registrar.com",
-            status="active"
+            status="active",
         )
 
         domain = Domain.objects.create(
@@ -655,7 +607,7 @@ class CrossAppIntegrationPerformanceTest(TestCase):
             tld=tld,
             registrar=registrar,
             status="active",
-            expires_at=timezone.now() + timezone.timedelta(days=365)
+            expires_at=timezone.now() + timezone.timedelta(days=365),
         )
 
         # Create hosting service and service plan for the domain
@@ -663,9 +615,7 @@ class CrossAppIntegrationPerformanceTest(TestCase):
         from apps.provisioning.relationship_models import ServiceDomain
 
         service_plan = ServicePlan.objects.create(
-            name="Test Hosting Plan",
-            plan_type="shared_hosting",
-            price_monthly=Decimal("29.99")
+            name="Test Hosting Plan", plan_type="shared_hosting", price_monthly=Decimal("29.99")
         )
 
         service = Service.objects.create(
@@ -676,16 +626,19 @@ class CrossAppIntegrationPerformanceTest(TestCase):
             domain="example.com",
             username="testuser",
             price=Decimal("29.99"),
-            status="active"
+            status="active",
         )
 
         # Link domain to service
-        ServiceDomain.objects.create(
-            service=service,
-            domain=domain,
-            domain_type="primary"
-        )
+        ServiceDomain.objects.create(service=service, domain=domain, domain_type="primary")
 
-        # Test query efficiency
-        with self.assertNumQueries(2):  # Should be efficient
+        # Test query efficiency: one lookup per model, no N+1. Each optional read runs in its
+        # own savepoint so a failed query cannot abort the caller's transaction; those
+        # SAVEPOINT/RELEASE statements are not data queries.
+        from django.db import connection  # noqa: PLC0415
+        from django.test.utils import CaptureQueriesContext  # noqa: PLC0415
+
+        with CaptureQueriesContext(connection) as captured:
             sync_domain_to_virtualmin(domain)
+        data_queries = [q["sql"] for q in captured.captured_queries if "SAVEPOINT" not in q["sql"]]
+        self.assertEqual(len(data_queries), 2, data_queries)

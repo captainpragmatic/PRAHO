@@ -29,6 +29,7 @@ from apps.audit.services import (
     ComplianceEventRequest,
 )
 from apps.common.localisation import normalize_country_code
+from apps.common.transactions import best_effort_atomic, swallow_application_errors
 from apps.common.validators import log_security_event
 from apps.settings.services import SettingsService
 
@@ -86,22 +87,15 @@ def handle_customer_created_or_updated(
             # Best-effort + savepoint-isolated: a failure in this generic audit write must
             # neither poison the surrounding transaction nor skip the consent-change handlers
             # below (the canonical audit path for marketing/GDPR consent — issue #182).
-            try:
-                with transaction.atomic():
-                    CustomersAuditService.log_customer_event(
-                        event_type=event_type,
-                        customer=instance,
-                        user=getattr(instance, "_audit_user", None),
-                        context=AuditContext(actor_type="system"),
-                        old_values=old_values,
-                        new_values=new_values,
-                        description=f"Customer {instance.get_display_name()} {'created' if created else 'updated'}",
-                    )
-            except Exception:
-                logger.exception(
-                    "🔥 [Customer Signal] Generic customer audit write failed (customer_id=%s, %s)",
-                    instance.pk,
-                    "created" if created else "updated",
+            with best_effort_atomic(logger=logger, scope="Customers", message="Customer audit failed"):
+                CustomersAuditService.log_customer_event(
+                    event_type=event_type,
+                    customer=instance,
+                    user=getattr(instance, "_audit_user", None),
+                    context=AuditContext(actor_type="system"),
+                    old_values=old_values,
+                    new_values=new_values,
+                    description=f"Customer {instance.get_display_name()} {'created' if created else 'updated'}",
                 )
 
         if created:
@@ -129,8 +123,8 @@ def handle_customer_created_or_updated(
         if instance.customer_type == Customer.CustomerType.COMPANY and instance.company_name:
             _verify_romanian_company_compliance(instance)
 
-    except Exception as e:
-        logger.exception(f"🔥 [Customer Signal] Failed to handle customer save: {e}")
+    except Exception:
+        raise
     finally:
         # Consume all transient per-save attribution on EVERY save (including saves that do
         # not flip consent, where the consent handler never runs), so a stale source/category
@@ -166,8 +160,8 @@ def store_original_customer_values(sender: type[Customer], instance: Customer, *
                 }
             except Customer.DoesNotExist:
                 instance._original_customer_values = {}
-    except Exception as e:
-        logger.exception(f"🔥 [Customer Signal] Failed to store original values: {e}")
+    except Exception:
+        raise
 
 
 @receiver(pre_delete, sender=Customer)
@@ -178,21 +172,22 @@ def handle_customer_deletion(sender: type[Customer], instance: Customer, **kwarg
     Romanian compliance: Customer data must be archived, not permanently deleted
     unless explicit GDPR deletion request.
     """
-    try:
+    with swallow_application_errors(logger=logger, scope="customers", message="handle_customer_deletion failed"):
         # Verify this is a soft delete, not hard delete
         if not instance.is_deleted:
             logger.warning(f"⚠️ [Customer] Hard deletion attempted for {instance.get_display_name()}")
 
             # Log critical compliance event
-            log_security_event(
-                "customer_hard_deletion_attempted",
-                {
-                    "customer_id": str(instance.id),
-                    "customer_name": instance.get_display_name(),
-                    "customer_type": instance.customer_type,
-                    "primary_email": instance.primary_email,
-                },
-            )
+            with best_effort_atomic(logger=logger, scope="Customers", message="log_security_event failed"):
+                log_security_event(
+                    "customer_hard_deletion_attempted",
+                    {
+                        "customer_id": str(instance.id),
+                        "customer_name": instance.get_display_name(),
+                        "customer_type": instance.customer_type,
+                        "primary_email": instance.primary_email,
+                    },
+                )
 
         # Audit the deletion
         event_data = AuditEventData(
@@ -200,12 +195,10 @@ def handle_customer_deletion(sender: type[Customer], instance: Customer, **kwarg
             content_object=instance,
             description=f"Customer {'soft' if instance.is_deleted else 'hard'} deleted: {instance.get_display_name()}",
         )
-        AuditService.log_event(event_data)
+        with best_effort_atomic(logger=logger, scope="Customers", message="log_event failed"):
+            AuditService.log_event(event_data)
 
         logger.info(f"🗑️ [Customer] Customer deletion logged: {instance.get_display_name()}")
-
-    except Exception as e:
-        logger.exception(f"🔥 [Customer Signal] Failed to handle customer deletion: {e}")
 
 
 # ===============================================================================
@@ -253,15 +246,16 @@ def handle_tax_profile_changes(
         if not is_romanian_registration and not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
             from apps.audit.services import CustomersAuditService
 
-            CustomersAuditService.log_tax_profile_event(
-                event_type=event_type,
-                tax_profile=instance,
-                user=getattr(instance, "_audit_user", None),
-                context=AuditContext(actor_type="system"),
-                old_values=old_values,
-                new_values=new_values,
-                description=f"Tax profile {'created' if created else 'updated'} for {instance.customer.get_display_name()}",
-            )
+            with best_effort_atomic(logger=logger, scope="Customers", message="log_tax_profile_event failed"):
+                CustomersAuditService.log_tax_profile_event(
+                    event_type=event_type,
+                    tax_profile=instance,
+                    user=getattr(instance, "_audit_user", None),
+                    context=AuditContext(actor_type="system"),
+                    old_values=old_values,
+                    new_values=new_values,
+                    description=f"Tax profile {'created' if created else 'updated'} for {instance.customer.get_display_name()}",
+                )
 
         # Romanian compliance validation (only when the CUI itself is new or changed)
         if instance.cui and (created or old_values.get("cui") != instance.cui):
@@ -304,21 +298,19 @@ def handle_tax_profile_changes(
                     "is_vat_payer": instance.is_vat_payer,
                     "vat_rate": float(instance.vat_rate) if instance.vat_rate is not None else None,
                     "vat_rate_reason": instance.vat_rate_reason,
-                    "customer_id": str(instance.customer.id),
+                    "customer_id": str(instance.customer_id),
                 },
             )
-            try:
-                with transaction.atomic():
-                    AuditService.log_compliance_event(compliance_request)
-            except Exception:
-                logger.exception("🔥 [Customer Signal] Romanian tax registration audit failed")
+            with best_effort_atomic(logger=logger, scope="Customers", message="Customer audit failed"):
+                AuditService.log_compliance_event(compliance_request)
 
-        logger.info(
-            f"🏛️ [Customer] Tax profile {'created' if created else 'updated'}: {instance.customer.get_display_name()}"
-        )
+        with best_effort_atomic(logger=logger, scope="Customers", message="Tax profile display logging failed"):
+            logger.info(
+                f"🏛️ [Customer] Tax profile {'created' if created else 'updated'}: {instance.customer.get_display_name()}"
+            )
 
-    except Exception as e:
-        logger.exception(f"🔥 [Customer Signal] Failed to handle tax profile change: {e}")
+    except Exception:
+        raise
     finally:
         # The snapshot belongs to one save only. Reusing a model instance must
         # never attribute an earlier tax change to a later unrelated save.
@@ -345,8 +337,8 @@ def store_original_tax_values(sender: type[CustomerTaxProfile], instance: Custom
                 }
             except CustomerTaxProfile.DoesNotExist:
                 instance._original_tax_values = {}
-    except Exception as e:
-        logger.exception(f"🔥 [Customer Signal] Failed to store original tax values: {e}")
+    except Exception:
+        raise
 
 
 # ===============================================================================
@@ -380,17 +372,18 @@ def handle_billing_profile_changes(
         if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
             from apps.audit.services import CustomersAuditService
 
-            CustomersAuditService.log_billing_profile_event(
-                event_type=event_type,
-                billing_profile=instance,
-                user=getattr(instance, "_audit_user", None),
-                context=AuditContext(actor_type="system"),
-                old_values=old_values,
-                new_values=new_values,
-                description=f"Billing profile {'created' if created else 'updated'} for {instance.customer.get_display_name()}",
-            )
+            with best_effort_atomic(logger=logger, scope="Customers", message="log_billing_profile_event failed"):
+                CustomersAuditService.log_billing_profile_event(
+                    event_type=event_type,
+                    billing_profile=instance,
+                    user=getattr(instance, "_audit_user", None),
+                    context=AuditContext(actor_type="system"),
+                    old_values=old_values,
+                    new_values=new_values,
+                    description=f"Billing profile {'created' if created else 'updated'} for {instance.customer.get_display_name()}",
+                )
 
-        if not created:
+        if not created and hasattr(instance, "_original_billing_values"):
             # Check for credit limit changes
             old_credit_limit = old_values.get("credit_limit", 0)
             if old_credit_limit != float(instance.credit_limit):
@@ -401,12 +394,13 @@ def handle_billing_profile_changes(
             if old_payment_terms != instance.payment_terms:
                 _handle_payment_terms_change(instance, old_payment_terms, instance.payment_terms)
 
-        logger.info(
-            f"💰 [Customer] Billing profile {'created' if created else 'updated'}: {instance.customer.get_display_name()}"
-        )
+        with best_effort_atomic(logger=logger, scope="Customers", message="Customer display logging failed"):
+            logger.info(
+                f"💰 [Customer] Billing profile {'created' if created else 'updated'}: {instance.customer.get_display_name()}"
+            )
 
-    except Exception as e:
-        logger.exception(f"🔥 [Customer Signal] Failed to handle billing profile change: {e}")
+    except Exception:
+        raise
     finally:
         # One-save snapshot: never let a later unrelated save on the same
         # instance replay this save's change detection.
@@ -414,10 +408,12 @@ def handle_billing_profile_changes(
 
 
 @receiver(pre_save, sender=CustomerBillingProfile)
+@best_effort_atomic(logger=logger, scope="customers", message="store_original_billing_values failed")
 def store_original_billing_values(
     sender: type[CustomerBillingProfile], instance: CustomerBillingProfile, **kwargs: Any
 ) -> None:
     """Store original billing profile values for comparison"""
+    instance.__dict__.pop("_original_billing_values", None)
     try:
         # No update_fields shortcut here — a stale snapshot would let a later
         # timestamp-only save re-fire credit-limit/payment-terms alerts.
@@ -433,6 +429,7 @@ def store_original_billing_values(
                 instance._original_billing_values = {}
     except Exception as e:
         logger.exception(f"🔥 [Customer Signal] Failed to store original billing values: {e}")
+        raise
 
 
 # ===============================================================================
@@ -453,7 +450,7 @@ def handle_address_changes(
     - Romanian postal system integration
     - Compliance logging for legal addresses
     """
-    try:
+    with best_effort_atomic(logger=logger, scope="Customers", message="handle_address_changes failed"):
         event_type = "customer_address_created" if created else "customer_address_updated"
 
         # Enhanced address audit logging
@@ -485,6 +482,7 @@ def handle_address_changes(
                 description=f"Address ({address_role}) {'created' if created else 'updated'} for {instance.customer.get_display_name()}",
             )
 
+    with swallow_application_errors(logger=logger, scope="Customers", message="Customer follow-up failed"):
         # Address validation for Romanian addresses
         if normalize_country_code(instance.country) == "RO" and not instance.is_validated:
             _trigger_romanian_address_validation(instance)
@@ -495,17 +493,17 @@ def handle_address_changes(
         # The model's save() enforces flag exclusivity; is_current tracks versioning
         # per address record, not per customer.
 
-        logger.info(
-            f"🏠 [Customer] Address {'created' if created else 'updated'}: {instance.customer.get_display_name()}"
-        )
-
-    except Exception as e:
-        logger.exception(f"🔥 [Customer Signal] Failed to handle address change: {e}")
+        with best_effort_atomic(logger=logger, scope="Customers", message="Customer display logging failed"):
+            logger.info(
+                f"🏠 [Customer] Address {'created' if created else 'updated'}: {instance.customer.get_display_name()}"
+            )
 
 
 @receiver(pre_save, sender=CustomerAddress)
+@best_effort_atomic(logger=logger, scope="customers", message="store_original_address_values failed")
 def store_original_address_values(sender: type[CustomerAddress], instance: CustomerAddress, **kwargs: Any) -> None:
     """Store original address values for comparison"""
+    instance.__dict__.pop("_original_address_values", None)
     try:
         update_fields = kwargs.get("update_fields")
         if update_fields and set(update_fields).issubset({"updated_at", "is_current"}):
@@ -530,6 +528,7 @@ def store_original_address_values(sender: type[CustomerAddress], instance: Custo
                 instance._original_address_values = {}
     except Exception as e:
         logger.exception(f"🔥 [Customer Signal] Failed to store original address values: {e}")
+        raise
 
 
 # ===============================================================================
@@ -550,7 +549,7 @@ def handle_payment_method_changes(
     - Default payment method management
     - Security logging for payment changes
     """
-    try:
+    with best_effort_atomic(logger=logger, scope="Customers", message="handle_payment_method_changes failed"):
         event_type = "customer_payment_method_created" if created else "customer_payment_method_updated"
 
         # Enhanced payment method audit logging
@@ -578,16 +577,18 @@ def handle_payment_method_changes(
                 description=f"Payment method {instance.method_type} {'created' if created else 'updated'} for {instance.customer.get_display_name()}",
             )
 
+    with swallow_application_errors(logger=logger, scope="Customers", message="Customer follow-up failed"):
         # Security logging for payment method changes
-        log_security_event(
-            "customer_payment_method_changed",
-            {
-                "customer_id": str(instance.customer.id),
-                "method_type": instance.method_type,
-                "is_default": instance.is_default,
-                "action": "created" if created else "updated",
-            },
-        )
+        with best_effort_atomic(logger=logger, scope="Customers", message="log_security_event failed"):
+            log_security_event(
+                "customer_payment_method_changed",
+                {
+                    "customer_id": str(instance.customer.id),
+                    "method_type": instance.method_type,
+                    "is_default": instance.is_default,
+                    "action": "created" if created else "updated",
+                },
+            )
 
         # Note: Default payment method deduplication handled in CustomerPaymentMethod.save()
 
@@ -595,19 +596,19 @@ def handle_payment_method_changes(
         if instance.method_type == "stripe_card" and instance.stripe_payment_method_id:
             _validate_stripe_payment_method(instance)
 
-        logger.info(
-            f"💳 [Customer] Payment method {instance.method_type} {'created' if created else 'updated'}: {instance.customer.get_display_name()}"
-        )
-
-    except Exception as e:
-        logger.exception(f"🔥 [Customer Signal] Failed to handle payment method change: {e}")
+        with best_effort_atomic(logger=logger, scope="Customers", message="Customer display logging failed"):
+            logger.info(
+                f"💳 [Customer] Payment method {instance.method_type} {'created' if created else 'updated'}: {instance.customer.get_display_name()}"
+            )
 
 
 @receiver(pre_save, sender=CustomerPaymentMethod)
+@best_effort_atomic(logger=logger, scope="customers", message="store_original_payment_values failed")
 def store_original_payment_values(
     sender: type[CustomerPaymentMethod], instance: CustomerPaymentMethod, **kwargs: Any
 ) -> None:
     """Store original payment method values for comparison"""
+    instance.__dict__.pop("_original_payment_values", None)
     try:
         update_fields = kwargs.get("update_fields")
         if update_fields and set(update_fields).issubset({"updated_at", "is_default", "is_active"}):
@@ -626,6 +627,7 @@ def store_original_payment_values(
                 instance._original_payment_values = {}
     except Exception as e:
         logger.exception(f"🔥 [Customer Signal] Failed to store original payment values: {e}")
+        raise
 
 
 @receiver(pre_delete, sender=CustomerPaymentMethod)
@@ -633,30 +635,29 @@ def handle_payment_method_deletion(
     sender: type[CustomerPaymentMethod], instance: CustomerPaymentMethod, **kwargs: Any
 ) -> None:
     """Handle payment method deletion with security logging"""
-    try:
+    with swallow_application_errors(logger=logger, scope="customers", message="handle_payment_method_deletion failed"):
         # Security logging for payment method deletion
-        log_security_event(
-            "customer_payment_method_deleted",
-            {
-                "customer_id": str(instance.customer.id),
-                "method_type": instance.method_type,
-                "display_name": instance.display_name,
-                "was_default": instance.is_default,
-            },
-        )
+        with best_effort_atomic(logger=logger, scope="Customers", message="log_security_event failed"):
+            log_security_event(
+                "customer_payment_method_deleted",
+                {
+                    "customer_id": str(instance.customer.id),
+                    "method_type": instance.method_type,
+                    "display_name": instance.display_name,
+                    "was_default": instance.is_default,
+                },
+            )
 
         # Audit the deletion
-        event_data = AuditEventData(
-            event_type="customer_payment_method_deleted",
-            content_object=instance,
-            description=f"Payment method deleted: {instance.display_name} for {instance.customer.get_display_name()}",
-        )
-        AuditService.log_event(event_data)
+        with best_effort_atomic(logger=logger, scope="Customers", message="log_event failed"):
+            event_data = AuditEventData(
+                event_type="customer_payment_method_deleted",
+                content_object=instance,
+                description=f"Payment method deleted: {instance.display_name} for {instance.customer.get_display_name()}",
+            )
+            AuditService.log_event(event_data)
 
         logger.info(f"🗑️ [Customer] Payment method deleted: {instance.display_name}")
-
-    except Exception as e:
-        logger.exception(f"🔥 [Customer Signal] Failed to handle payment method deletion: {e}")
 
 
 # ===============================================================================
@@ -676,19 +677,20 @@ def handle_customer_note_changes(
     - Important note alerts
     - Complaint/compliment processing
     """
-    try:
+    with swallow_application_errors(logger=logger, scope="customers", message="handle_customer_note_changes failed"):
         if created:
             # Enhanced customer note audit logging
             if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
                 from apps.audit.services import CustomersAuditService
 
-                CustomersAuditService.log_note_event(
-                    event_type="customer_note_created",
-                    note=instance,
-                    user=instance.created_by,
-                    context=AuditContext(actor_type="user" if instance.created_by else "system"),
-                    description=f"Note created: {instance.title} for {instance.customer.get_display_name()}",
-                )
+                with best_effort_atomic(logger=logger, scope="Customers", message="log_note_event failed"):
+                    CustomersAuditService.log_note_event(
+                        event_type="customer_note_created",
+                        note=instance,
+                        user=instance.created_by,
+                        context=AuditContext(actor_type="user" if instance.created_by else "system"),
+                        description=f"Note created: {instance.title} for {instance.customer.get_display_name()}",
+                    )
 
             # Handle important notes
             if instance.is_important:
@@ -700,9 +702,6 @@ def handle_customer_note_changes(
 
             logger.info(f"📝 [Customer] Note created: {instance.title} ({instance.note_type})")
 
-    except Exception as e:
-        logger.exception(f"🔥 [Customer Signal] Failed to handle customer note: {e}")
-
 
 # ===============================================================================
 # BUSINESS LOGIC FUNCTIONS
@@ -711,7 +710,7 @@ def handle_customer_note_changes(
 
 def _handle_new_customer_creation(customer: Customer) -> None:
     """Handle new customer creation tasks."""
-    try:
+    with swallow_application_errors(logger=logger, scope="customers", message="_handle_new_customer_creation failed"):
         # Do not auto-create tax/billing profiles here.
         # Profiles are created explicitly by dedicated workflows (registration/forms/API/services)
         # and may legitimately be absent for newly created customers.
@@ -722,13 +721,10 @@ def _handle_new_customer_creation(customer: Customer) -> None:
         # Trigger customer onboarding workflow after transaction commits.
         transaction.on_commit(lambda inst=customer: _trigger_customer_onboarding(inst))
 
-    except Exception as e:
-        logger.exception(f"🔥 [Customer Signal] New customer creation handling failed: {e}")
-
 
 def _handle_customer_status_change(customer: Customer, old_status: str, new_status: str) -> None:
     """Handle customer status changes"""
-    try:
+    with swallow_application_errors(logger=logger, scope="customers", message="_handle_customer_status_change failed"):
         logger.info(f"🔄 [Customer] Status change {customer.get_display_name()}: {old_status} → {new_status}")
 
         # Security event for status changes
@@ -755,9 +751,6 @@ def _handle_customer_status_change(customer: Customer, old_status: str, new_stat
         elif new_status == Customer.CustomerStatus.INACTIVE and old_status == Customer.CustomerStatus.ACTIVE:
             _handle_customer_deactivation(customer)
 
-    except Exception as e:
-        logger.exception(f"🔥 [Customer Signal] Status change handling failed: {e}")
-
 
 def _handle_gdpr_consent_change(customer: Customer, old_consent: bool, new_consent: bool) -> None:
     """Handle GDPR consent changes.
@@ -782,11 +775,8 @@ def _handle_gdpr_consent_change(customer: Customer, old_consent: bool, new_conse
                 "consent_date": timezone.now().isoformat(),
             },
         )
-        try:
-            with transaction.atomic():
-                AuditService.log_compliance_event(compliance_request)
-        except Exception:
-            logger.exception("🔥 [Customer Signal] GDPR consent audit failed")
+        with best_effort_atomic(logger=logger, scope="Customers", message="Customer audit failed"):
+            AuditService.log_compliance_event(compliance_request)
 
         # Update consent timestamp (must run regardless of audit outcome —
         # GDPR Art. 7(1) requires the controller to record when consent was given).
@@ -795,8 +785,8 @@ def _handle_gdpr_consent_change(customer: Customer, old_consent: bool, new_conse
 
         logger.info(f"🛡️ [Customer] GDPR consent {consent_action}: {customer.get_display_name()}")
 
-    except Exception as e:
-        logger.exception(f"🔥 [Customer Signal] GDPR consent change failed: {e}")
+    except Exception:
+        raise
 
 
 def _handle_marketing_consent_change(customer: Customer, old_consent: bool, new_consent: bool) -> None:
@@ -853,7 +843,7 @@ def _handle_marketing_consent_change(customer: Customer, old_consent: bool, new_
 
 def _verify_romanian_company_compliance(customer: Customer) -> None:
     """Verify Romanian company compliance requirements"""
-    try:
+    with best_effort_atomic(logger=logger, scope="customers", message="_verify_romanian_company_compliance failed"):
         if customer.customer_type == Customer.CustomerType.COMPANY:
             # Check if tax profile exists and has CUI
             tax_profile = customer.get_tax_profile()
@@ -868,19 +858,12 @@ def _verify_romanian_company_compliance(customer: Customer) -> None:
                     status="warning",
                     evidence={"customer_type": customer.customer_type, "missing": "cui"},
                 )
-                try:
-                    with transaction.atomic():
-                        AuditService.log_compliance_event(compliance_request)
-                except Exception:
-                    logger.exception("🔥 [Customer Signal] Romanian CUI compliance audit failed")
-
-    except Exception as e:
-        logger.exception(f"🔥 [Customer Signal] Romanian compliance verification failed: {e}")
+                AuditService.log_compliance_event(compliance_request)
 
 
 def _validate_romanian_cui(tax_profile: CustomerTaxProfile) -> None:
     """Validate Romanian CUI format and registration"""
-    try:
+    with best_effort_atomic(logger=logger, scope="customers", message="_validate_romanian_cui failed"):
         if tax_profile.cui and tax_profile.cui.startswith("RO"):
             # Validate CUI format
             if tax_profile.validate_cui():
@@ -896,14 +879,7 @@ def _validate_romanian_cui(tax_profile: CustomerTaxProfile) -> None:
                     status="validation_failed",
                     evidence={"cui": tax_profile.cui, "customer_id": str(tax_profile.customer.id)},
                 )
-                try:
-                    with transaction.atomic():
-                        AuditService.log_compliance_event(compliance_request)
-                except Exception:
-                    logger.exception("🔥 [Customer Signal] CUI validation audit failed")
-
-    except Exception as e:
-        logger.exception(f"🔥 [Customer Signal] CUI validation failed: {e}")
+                AuditService.log_compliance_event(compliance_request)
 
 
 def _trigger_vat_validation(tax_profile: CustomerTaxProfile) -> None:
@@ -923,7 +899,7 @@ def _trigger_vat_validation(tax_profile: CustomerTaxProfile) -> None:
 
 def _handle_credit_limit_change(billing_profile: CustomerBillingProfile, old_limit: float, new_limit: float) -> None:
     """Handle customer credit limit changes"""
-    try:
+    with best_effort_atomic(logger=logger, scope="customers", message="_handle_credit_limit_change failed"):
         change_type = "increased" if new_limit > old_limit else "decreased"
         change_amount = abs(new_limit - old_limit)
 
@@ -946,13 +922,10 @@ def _handle_credit_limit_change(billing_profile: CustomerBillingProfile, old_lim
                 },
             )
 
-    except Exception as e:
-        logger.exception(f"🔥 [Customer Signal] Credit limit change handling failed: {e}")
-
 
 def _handle_payment_terms_change(billing_profile: CustomerBillingProfile, old_terms: int, new_terms: int) -> None:
     """Handle payment terms changes for Romanian compliance"""
-    try:
+    with best_effort_atomic(logger=logger, scope="customers", message="_handle_payment_terms_change failed"):
         logger.info(
             f"📅 [Customer] Payment terms changed from {old_terms} to {new_terms} days: {billing_profile.customer.get_display_name()}"
         )
@@ -977,14 +950,7 @@ def _handle_payment_terms_change(billing_profile: CustomerBillingProfile, old_te
                     "customer_type": billing_profile.customer.customer_type,
                 },
             )
-            try:
-                with transaction.atomic():
-                    AuditService.log_compliance_event(compliance_request)
-            except Exception:
-                logger.exception("🔥 [Customer Signal] Extended payment terms audit failed")
-
-    except Exception as e:
-        logger.exception(f"🔥 [Customer Signal] Payment terms change handling failed: {e}")
+            AuditService.log_compliance_event(compliance_request)
 
 
 def _trigger_romanian_address_validation(address: CustomerAddress) -> None:
@@ -1004,7 +970,7 @@ def _trigger_romanian_address_validation(address: CustomerAddress) -> None:
 
 def _verify_primary_address_compliance(address: CustomerAddress) -> None:
     """Verify primary address compliance for Romanian companies"""
-    try:
+    with best_effort_atomic(logger=logger, scope="customers", message="_verify_primary_address_compliance failed"):
         if address.is_primary and normalize_country_code(address.country) == "RO":
             # Romanian companies must have primary address in Romania
             compliance_request = ComplianceEventRequest(
@@ -1019,14 +985,7 @@ def _verify_primary_address_compliance(address: CustomerAddress) -> None:
                     "postal_code": address.postal_code,
                 },
             )
-            try:
-                with transaction.atomic():
-                    AuditService.log_compliance_event(compliance_request)
-            except Exception:
-                logger.exception("🔥 [Customer Signal] Primary address compliance audit failed")
-
-    except Exception as e:
-        logger.exception(f"🔥 [Customer Signal] Primary address compliance verification failed: {e}")
+            AuditService.log_compliance_event(compliance_request)
 
 
 def _validate_stripe_payment_method(payment_method: CustomerPaymentMethod) -> None:
@@ -1041,36 +1000,30 @@ def _validate_stripe_payment_method(payment_method: CustomerPaymentMethod) -> No
 
 def _handle_important_note(note: CustomerNote) -> None:
     """Handle important customer notes."""
-    try:
+    with best_effort_atomic(logger=logger, scope="customers", message="_handle_important_note failed"):
         # Send notification to account manager after transaction commits.
         if note.customer.assigned_account_manager:
             transaction.on_commit(lambda n=note: _send_important_note_notification(n))
 
         logger.info(f"🚨 [Customer] Important note created: {note.title}")
 
-    except Exception as e:
-        logger.exception(f"🔥 [Customer Signal] Important note handling failed: {e}")
-
 
 def _handle_feedback_note(note: CustomerNote) -> None:
     """Enqueue feedback processing task after transaction commits."""
-    try:
+    transaction.on_commit(lambda note_id=str(note.id): _enqueue_customer_feedback(note_id))
+    logger.info(f"🗣️ [Customer] Customer {note.note_type} recorded: {note.title}")
+
+
+def _enqueue_customer_feedback(note_id: str) -> None:
+    with best_effort_atomic(logger=logger, scope="Customers", message="Feedback enqueue failed"):
         from django_q.tasks import async_task
 
-        transaction.on_commit(
-            lambda note_id=str(note.id): async_task("apps.customers.tasks.process_customer_feedback", note_id)
-        )
-        logger.info(f"🗣️ [Customer] Customer {note.note_type} recorded: {note.title}")
-    except ImportError:
-        logger.info(
-            "📝 [Customer] Feedback processing skipped (task runner not available)",
-            extra={"note_id": note.id, "customer_id": note.customer_id},
-        )
+        async_task("apps.customers.tasks.process_customer_feedback", note_id)
 
 
 def _handle_customer_activation(customer: Customer) -> None:
     """Handle customer activation from prospect to active."""
-    try:
+    with swallow_application_errors(logger=logger, scope="customers", message="_handle_customer_activation failed"):
         logger.info(f"✅ [Customer] Customer activated: {customer.get_display_name()}")
 
         # Send activation welcome email after transaction commits.
@@ -1079,13 +1032,10 @@ def _handle_customer_activation(customer: Customer) -> None:
         # Enable services if any were pending — after transaction commits so status is visible.
         transaction.on_commit(lambda inst=customer: _activate_customer_services(inst))
 
-    except Exception as e:
-        logger.exception(f"🔥 [Customer Signal] Customer activation failed: {e}")
-
 
 def _handle_customer_suspension(customer: Customer, old_status: str) -> None:
     """Handle customer suspension."""
-    try:
+    with swallow_application_errors(logger=logger, scope="customers", message="_handle_customer_suspension failed"):
         logger.warning(f"⚠️ [Customer] Customer suspended: {customer.get_display_name()}")
 
         # Suspend related services after transaction commits so status is visible.
@@ -1093,9 +1043,6 @@ def _handle_customer_suspension(customer: Customer, old_status: str) -> None:
 
         # Send suspension notification after transaction commits.
         transaction.on_commit(lambda inst=customer: _send_customer_suspension_email(inst))
-
-    except Exception as e:
-        logger.exception(f"🔥 [Customer Signal] Customer suspension failed: {e}")
 
 
 def _handle_customer_deactivation(customer: Customer) -> None:
@@ -1117,7 +1064,7 @@ def _handle_customer_deactivation(customer: Customer) -> None:
 
 def _send_customer_welcome_email(customer: Customer) -> None:
     """Send welcome email to new customers"""
-    try:
+    with best_effort_atomic(logger=logger, scope="customers", message="_send_customer_welcome_email failed"):
         from apps.notifications.services import EmailService
 
         EmailService.send_template_email(
@@ -1126,13 +1073,11 @@ def _send_customer_welcome_email(customer: Customer) -> None:
             context={"customer": customer},
             priority="normal",
         )
-    except Exception as e:
-        logger.exception(f"🔥 [Customer] Failed to send welcome email: {e}")
 
 
 def _send_customer_activation_email(customer: Customer) -> None:
     """Send activation confirmation email"""
-    try:
+    with best_effort_atomic(logger=logger, scope="customers", message="_send_customer_activation_email failed"):
         from apps.notifications.services import EmailService
 
         EmailService.send_template_email(
@@ -1141,13 +1086,11 @@ def _send_customer_activation_email(customer: Customer) -> None:
             context={"customer": customer},
             priority="high",
         )
-    except Exception as e:
-        logger.exception(f"🔥 [Customer] Failed to send activation email: {e}")
 
 
 def _send_customer_suspension_email(customer: Customer) -> None:
     """Send suspension notification email"""
-    try:
+    with best_effort_atomic(logger=logger, scope="customers", message="_send_customer_suspension_email failed"):
         from apps.notifications.services import EmailService
 
         EmailService.send_template_email(
@@ -1156,8 +1099,6 @@ def _send_customer_suspension_email(customer: Customer) -> None:
             context={"customer": customer},
             priority="high",
         )
-    except Exception as e:
-        logger.exception(f"🔥 [Customer] Failed to send suspension email: {e}")
 
 
 def _send_customer_deactivation_email(customer: Customer) -> None:
@@ -1174,7 +1115,7 @@ def _send_customer_deactivation_email(customer: Customer) -> None:
 
 def _send_important_note_notification(note: CustomerNote) -> None:
     """Send notification about important customer note"""
-    try:
+    with best_effort_atomic(logger=logger, scope="customers", message="_send_important_note_notification failed"):
         from apps.notifications.services import EmailService
 
         if note.customer.assigned_account_manager:
@@ -1184,8 +1125,6 @@ def _send_important_note_notification(note: CustomerNote) -> None:
                 context={"note": note, "customer": note.customer},
                 priority="high",
             )
-    except Exception as e:
-        logger.exception(f"🔥 [Customer] Failed to send important note notification: {e}")
 
 
 def _trigger_customer_onboarding(customer: Customer) -> None:
@@ -1194,7 +1133,8 @@ def _trigger_customer_onboarding(customer: Customer) -> None:
         from django_q.tasks import async_task
 
         # Called via transaction.on_commit() from _handle_new_customer_creation — already deferred.
-        async_task("apps.customers.tasks.start_customer_onboarding", str(customer.id))
+        with best_effort_atomic(logger=logger, scope="Customers", message="Onboarding enqueue failed"):
+            async_task("apps.customers.tasks.start_customer_onboarding", str(customer.id))
         logger.info(f"🚀 [Customer] Onboarding queued: {customer.get_display_name()}")
     except ImportError:
         logger.info(f"🚀 [Customer] Would start onboarding (task runner not available): {customer.get_display_name()}")
@@ -1217,31 +1157,27 @@ CUSTOMER_SUSPENSION_REASON = "customer_suspended"
 
 def _activate_customer_services(customer: Customer) -> None:
     """Activate customer services when customer becomes active"""
-    try:
-        # Find all pending services for this customer and activate them
-        from apps.provisioning.models import Service
-        from apps.provisioning.services import ServiceActivationService
+    from apps.provisioning.models import Service
+    from apps.provisioning.services import ServiceActivationService
 
-        pending_services = Service.objects.filter(customer=customer, status="pending")
+    pending_services: list[Service] = []
+    with best_effort_atomic(logger=logger, scope="Customers", message="Pending service lookup failed"):
+        pending_services = list(Service.objects.filter(customer=customer, status="pending"))
 
-        for service in pending_services:
+    for service in pending_services:
+        with best_effort_atomic(logger=logger, scope="Customers", message="Service activation failed"):
             result = ServiceActivationService.activate_service(service=service, activation_reason="Customer activated")
-            if result.is_ok():
-                logger.info(f"⚡ [Customer] Service activated: {service.id}")
-
-    except Exception as e:
-        logger.exception(f"🔥 [Customer] Service activation failed: {e}")
+            if result.is_err():
+                raise RuntimeError(str(result.unwrap_err()))
+            logger.info(f"✅ [Customer] Service activated: {service.id}")
 
 
 def _handle_customer_unsuspension(customer: Customer) -> None:
     """Handle a customer returning from suspended to active."""
-    try:
+    with swallow_application_errors(logger=logger, scope="customers", message="_handle_customer_unsuspension failed"):
         logger.info(f"⚡ [Customer] Customer unsuspended: {customer.get_display_name()}")
 
         transaction.on_commit(lambda inst=customer: _resume_cascade_suspended_services(inst))
-
-    except Exception as e:
-        logger.exception(f"🔥 [Customer Signal] Customer unsuspension failed: {e}")
 
 
 # A subscription in any of these states is not paid up. Resuming its service would be
@@ -1267,21 +1203,23 @@ def _resume_cascade_suspended_services(customer: Customer) -> None:
     Each row is re-read under a lock before it is resumed. The queryset is evaluated once,
     and another worker can change a later row's reason between that read and its turn.
     """
-    try:
-        from django.db import transaction as db_transaction
-
+    with swallow_application_errors(
+        logger=logger, scope="customers", message="_resume_cascade_suspended_services failed"
+    ):
         from apps.billing.subscription_models import Subscription
         from apps.provisioning.models import Service
         from apps.provisioning.services import ServiceManagementService
 
-        candidate_ids = list(
-            Service.objects.filter(
-                customer=customer, status="suspended", suspension_reason=CUSTOMER_SUSPENSION_REASON
-            ).values_list("id", flat=True)
-        )
+        candidate_ids = []
+        with best_effort_atomic(logger=logger, scope="Customers", message="Suspended service lookup failed"):
+            candidate_ids = list(
+                Service.objects.filter(
+                    customer=customer, status="suspended", suspension_reason=CUSTOMER_SUSPENSION_REASON
+                ).values_list("id", flat=True)
+            )
 
         for service_id in candidate_ids:
-            with db_transaction.atomic():
+            with best_effort_atomic(logger=logger, scope="Customers", message="Service resume failed"):
                 service = (
                     Service.objects.select_for_update(of=("self",))
                     .filter(id=service_id, status="suspended", suspension_reason=CUSTOMER_SUSPENSION_REASON)
@@ -1301,10 +1239,7 @@ def _resume_cascade_suspended_services(customer: Customer) -> None:
                 if result.is_ok():
                     logger.info(f"⚡ [Customer] Service resumed: {service_id}")
                 else:
-                    logger.error(f"🔥 [Customer] Service resume failed for {service_id}: {result.unwrap_err()}")
-
-    except Exception as e:
-        logger.exception(f"🔥 [Customer] Service resume failed: {e}")
+                    raise RuntimeError(str(result.unwrap_err()))
 
 
 def _suspend_customer_services(customer: Customer) -> None:
