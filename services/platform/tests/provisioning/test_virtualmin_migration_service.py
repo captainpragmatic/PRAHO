@@ -489,6 +489,23 @@ class MigrationTests(MigrationTestBase):
                     self.assertEqual(migration.status, expected)
                 transaction.set_rollback(True)
 
+    def test_a_finished_migration_queues_a_hosting_reconcile(self) -> None:
+        """When a migration releases the account, the reconciler converges it (#566, ADR-0051).
+
+        While the migration held the account the reconciler skipped it (migration_locked),
+        and the migration restores its own pre-migration snapshot. A Service change made
+        meanwhile, by staff, billing or the customer cascade, stayed unapplied until the
+        divergence sweep, unless the end of the migration queues a reconcile.
+        """
+        migration = self._start()
+        with self.captureOnCommitCallbacks(execute=True):
+            migration = self._run(migration)
+
+        self.assertEqual(migration.status, "completed")
+        reconcile_task = "apps.provisioning.virtualmin_tasks.reconcile_virtualmin_service_state"
+        queued = [call.args[1] for call in self.enqueue.call_args_list if call.args and call.args[0] == reconcile_task]
+        self.assertEqual(queued, [str(self.service.id)])
+
     def test_presuspended_account_stays_suspended(self) -> None:
         # fsm-bypass: establish a previously suspended account fixture.
         VirtualminAccount.objects.filter(pk=self.account.pk).update(status="suspended")

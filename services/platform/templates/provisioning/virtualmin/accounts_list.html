@@ -35,6 +35,7 @@
                 {% trans "Syncing..." as bt_syncing %}{% badge bt_syncing variant="info" icon="refresh" %}
             </div>
             {% url 'provisioning:virtualmin_account_new' as new_account_url %}
+            {% trans "Bulk Actions" as bt_bulk %}{% button bt_bulk href=bulk_actions_url variant="secondary" %}
             {% trans "New Account" as bt1 %}{% button bt1 href=new_account_url variant="primary" %}
         </div>
     </div>

@@ -7,15 +7,17 @@ import pyotp
 from django.contrib.auth.tokens import default_token_generator
 from django.contrib.sessions.models import Session
 from django.core.cache import cache
+from django.db import connection
 from django.http import HttpResponse
 from django.test import Client, RequestFactory, TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils.crypto import salted_hmac
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
 
 from apps.users.mfa import MFAService, WebAuthnCredential, WebAuthnService
-from apps.users.models import User, UserSession
+from apps.users.models import User, UserCredentialVersion, UserSession
 from apps.users.services import SessionSecurityService
 from apps.users.session_backend import SessionStore
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin, hmac_headers
@@ -52,6 +54,22 @@ class SessionAuthHashBindingTests(HMACTestMixin, TestCase):
         body = response.json()
         self.assertEqual(body["session_auth_hash"], self.user.get_session_auth_hash())
         self.assertNotIn("session_auth_hash", body["user"])
+
+    def test_validation_reads_the_credential_version_in_the_user_query(self) -> None:
+        """FAILS on master: the Portal's per-request validation read the version separately (#553).
+
+        The joined form reads ``FROM "users" LEFT OUTER JOIN "users_usercredentialversion"``,
+        so a standalone read is the only query whose FROM is the version table.
+        """
+        UserCredentialVersion.objects.create(user=self.user, version=2)
+        current_hash = User.objects.get(pk=self.user.pk).get_session_auth_hash()
+
+        with CaptureQueriesContext(connection) as captured:
+            response = self.validate_session(current_hash)
+
+        self.assertEqual(response.status_code, 200, response.content)
+        standalone = [q["sql"] for q in captured.captured_queries if 'FROM "users_usercredentialversion"' in q["sql"]]
+        self.assertEqual(standalone, [])
 
     def test_validate_requires_matching_hash(self) -> None:
         current_hash = self.user.get_session_auth_hash()

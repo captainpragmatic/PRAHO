@@ -511,13 +511,11 @@ class SessionSecurityIntegrationTest(TestCase):
         # 5. Rotate session
         SessionSecurityService.rotate_session_on_2fa_change(request)
 
-        # Verify security events were logged (at least 3 major ones)
-        self.assertGreaterEqual(mock_log.call_count, 3)
-
-        # Verify event types
+        # The exact events, in order. Shared-device mode already set the 900-second
+        # timeout, so step 4 changes nothing and is not audited (#553); step 3 saw one
+        # IP, below the suspicious-activity threshold.
         logged_events = [call[0][0] for call in mock_log.call_args_list]
-        self.assertIn('shared_device_mode_enabled', logged_events)
-        self.assertIn('session_rotated_2fa_change', logged_events)
+        self.assertEqual(logged_events, ['shared_device_mode_enabled', 'session_rotated_2fa_change'])
 
 
 # Test cleanup function

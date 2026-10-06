@@ -715,7 +715,8 @@ class APIToken(models.Model):
 class UserSession(models.Model):
     """Map persisted authenticated sessions to their owner for revocation.
 
-    The session store writes a row on every save of an authenticated session. A session
+    The session store writes a row when a session's key or user changes, not on every
+    save; `reconcile_session_index` repairs rows a worker missed (#553). A session
     outlives a hard-deleted user (Django only anonymises the request), so the reference
     carries no database constraint: with one, that browser's next request would fail at
     commit instead of being redirected to login. The ORM still cascades on user deletion.

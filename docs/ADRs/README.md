@@ -80,7 +80,7 @@ providing a historical record of why the system is built the way it is.
 | [ADR-0048](ADR-0048-external-invoice-issuer.md) | External Invoice Issuer (SmartBill) | Accepted | 2026-09-22 |
 | [ADR-0049](ADR-0049-reverse-charge-requires-vies-evidence.md) | Reverse Charge Requires VIES Evidence | Accepted | 2026-09-27 |
 | [ADR-0050](ADR-0050-portal-infrastructure-tables.md) | Portal Infrastructure Tables | Accepted | 2026-09-28 |
-| [ADR-0051](ADR-0051-hosting-account-enabled-state-ownership.md) | Hosting Account Enabled-State Ownership | Proposed | 2026-10-01 |
+| [ADR-0051](ADR-0051-hosting-account-enabled-state-ownership.md) | Hosting Account Enabled-State Ownership | Accepted | 2026-10-01 |
 | [ADR-0052](ADR-0052-disposable-databases-and-migration-reset.md) | All Databases Are Disposable Until the First One That Must Be Preserved | Accepted | 2026-10-02 |
 | [ADR-0053](ADR-0053-every-settled-refund-issues-a-storno.md) | Every Settled Refund Issues a Storno Credit Note | Accepted | 2026-10-03 |
 

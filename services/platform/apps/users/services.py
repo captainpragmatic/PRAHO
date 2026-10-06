@@ -1225,9 +1225,16 @@ class SessionSecurityService:
             return
 
         timeout_seconds = cls.get_appropriate_timeout(request)
+        # The session's own record, not get_expiry_age(): that falls back to
+        # SESSION_COOKIE_AGE, which in production equals the standard policy, so the
+        # timeout a session starts with would never be audited.
+        previous_timeout = request.session.get("_session_expiry")
+        # Always set, so the expiry keeps sliding forward with activity.
         request.session.set_expiry(timeout_seconds)
+        if previous_timeout == timeout_seconds:
+            # Runs on every authenticated request; audit the change, not the request (#553).
+            return
 
-        # Log timeout update
         log_security_event(
             "session_timeout_updated",
             {

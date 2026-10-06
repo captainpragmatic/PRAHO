@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% load ui_components %}
+{% load i18n %}
+
+{% block title %}{{ page_title }} - {% trans "Virtualmin Accounts" %}{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+  <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+    <div>
+      <h1 class="text-2xl font-bold text-slate-100 mt-2">{{ page_title }}</h1>
+      <p class="mt-2 text-sm text-slate-400">
+        {% trans "Suspend and Activate change each account's service; the reconciler applies them to Virtualmin." %}
+      </p>
+    </div>
+    <div class="mt-4 sm:mt-0">
+      {% trans "Back to accounts" as bt_back %}{% button bt_back href=cancel_url variant="secondary" %}
+    </div>
+  </div>
+
+  <form method="get" class="bg-slate-800 rounded-lg border border-slate-700 p-4 flex flex-col sm:flex-row gap-4 sm:items-end">
+    <div class="sm:w-64">
+      <label for="{{ filter_form.server.id_for_label }}" class="block text-sm text-slate-300 mb-1">{% trans "Server" %}</label>
+      {{ filter_form.server }}
+    </div>
+    <div class="sm:w-48">
+      <label for="{{ filter_form.status.id_for_label }}" class="block text-sm text-slate-300 mb-1">{% trans "Status" %}</label>
+      {{ filter_form.status }}
+    </div>
+    <div class="flex gap-3">
+      {% trans "Filter" as bt_filter %}{% button bt_filter type="submit" variant="secondary" %}
+      {% trans "Select all listed" as bt_all %}{% button bt_all href=select_all_url variant="secondary" %}
+    </div>
+  </form>
+
+  <form method="post" action="{{ form_action }}" class="space-y-6">
+    {% csrf_token %}
+
+    {% if form.non_field_errors %}
+      <div class="rounded-md border border-red-700 bg-red-900/30 p-3 text-sm text-red-200">{{ form.non_field_errors }}</div>
+    {% endif %}
+
+    <div class="bg-slate-800 rounded-lg border border-slate-700 p-4 grid gap-4 sm:grid-cols-2">
+      <div>
+        <label for="{{ form.action.id_for_label }}" class="block text-sm text-slate-300 mb-1">{% trans "Action" %}</label>
+        {{ form.action }}
+        {% if form.action.errors %}<p class="mt-1 text-sm text-red-400">{{ form.action.errors.0 }}</p>{% endif %}
+      </div>
+      <div>
+        <label for="{{ form.backup_type.id_for_label }}" class="block text-sm text-slate-300 mb-1">{% trans "Backup type (backup only)" %}</label>
+        {{ form.backup_type }}
+      </div>
+    </div>
+
+    <div class="bg-slate-800 rounded-lg border border-slate-700 overflow-x-auto">
+      {% if form.selected_accounts.errors %}
+        <p class="p-3 text-sm text-red-400">{{ form.selected_accounts.errors.0 }}</p>
+      {% endif %}
+      <table class="min-w-full divide-y divide-slate-700 text-sm">
+        <thead>
+          <tr class="text-left text-slate-400">
+            <th class="px-4 py-2">{% trans "Domain" %}</th>
+            <th class="px-4 py-2">{% trans "Server" %}</th>
+            <th class="px-4 py-2">{% trans "Account" %}</th>
+            <th class="px-4 py-2">{% trans "Service" %}</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-700 text-slate-200">
+          {% for account in accounts %}
+            {% with account_id=account.pk|stringformat:"s" %}
+              <tr>
+                <td class="px-4 py-2">
+                  {% if account_id in selected_ids %}
+                    {% checkbox_field "selected_accounts" value=account_id checked=True html_id="account-"|add:account_id label=account.domain %}
+                  {% else %}
+                    {% checkbox_field "selected_accounts" value=account_id html_id="account-"|add:account_id label=account.domain %}
+                  {% endif %}
+                </td>
+                <td class="px-4 py-2">{{ account.server.name }}</td>
+                <td class="px-4 py-2">{{ account.get_status_display }}</td>
+                <td class="px-4 py-2">{{ account.service.get_status_display }}</td>
+              </tr>
+            {% endwith %}
+          {% empty %}
+            <tr>
+              <td colspan="4" class="px-4 py-6 text-center text-slate-400">
+                {% if too_many %}
+                  {% blocktrans with count=too_many limit=account_limit %}{{ count }} accounts match this filter. Narrow it to {{ limit }} or fewer to act on them.{% endblocktrans %}
+                {% else %}
+                  {% trans "No accounts match this filter." %}
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="space-y-4">
+      {% trans "I understand this action will affect every selected account" as confirm_label %}
+      {% checkbox_field "confirm_bulk_action" label=confirm_label required=True variant="warning" error=form.confirm_bulk_action.errors.0 %}
+      {% trans "Run action" as bt_run %}{% button bt_run type="submit" variant="danger" %}
+    </div>
+  </form>
+</div>
+{% endblock %}

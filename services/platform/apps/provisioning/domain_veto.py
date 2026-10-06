@@ -1,14 +1,13 @@
-"""Domain-status veto on re-enabling a hosting account (#566, ADR-0051).
+"""The domain half of a hosting account's enabled state (#566, ADR-0051).
 
-Two writers decide whether a Virtualmin account is enabled: the Service reconciler and
-the domain status sync. The reconciler reads ``Service.status`` alone, so it used to
-re-enable an account the domain path had just disabled for an expired domain. Until
-ADR-0051 settles single ownership, paths that only read the Service must not re-enable
-an account whose linked domain is in a hosting-disabling status.
+Hosting is enabled exactly when the Service is active and no domain bound to it is in
+``Domain.HOSTING_DISABLING_STATUSES``. The provisioning reconciler is the single writer of
+that state; this module answers the domain question for it, its divergence sweep and the
+lifecycle-job retries, so all of them read the same predicate.
 
-The match mirrors the domain path exactly: a ``ServiceDomain`` binding to the account's
-service AND ``Domain.name == VirtualminAccount.domain``. A same-name domain row that is not
-bound to the service could never have suspended the account, so it does not block it.
+The match: a ``ServiceDomain`` binding to the account's service AND
+``Domain.name == VirtualminAccount.domain``. A domain bound under another name (an add-on
+or a parked domain) does not hold the account's own hosting off.
 """
 
 from __future__ import annotations
@@ -29,13 +28,32 @@ def _blocking_links() -> QuerySet[ServiceDomain]:
     return ServiceDomain.objects.filter(domain__status__in=Domain.HOSTING_DISABLING_STATUSES)
 
 
+def blocking_domain_status(account: VirtualminAccount) -> str | None:
+    """The status of a bound domain holding the account's hosting off, or None."""
+    status: str | None = (
+        _blocking_links()
+        .filter(service_id=account.service_id, domain__name=account.domain)
+        .order_by("domain__status")
+        .values_list("domain__status", flat=True)
+        .first()
+    )
+    return status
+
+
 def domain_disables_hosting(account: VirtualminAccount) -> bool:
     """True when a domain bound to the account's service currently disables hosting."""
-    return _blocking_links().filter(service_id=account.service_id, domain__name=account.domain).exists()
+    return blocking_domain_status(account) is not None
+
+
+def _held_off() -> Exists:
+    return Exists(_blocking_links().filter(service_id=OuterRef("service_id"), domain__name=OuterRef("domain")))
 
 
 def exclude_domain_disabled(accounts: QuerySet[VirtualminAccount]) -> QuerySet[VirtualminAccount]:
     """Drop accounts held off by their domain, so sweeps do not re-queue them forever."""
-    return accounts.exclude(
-        Exists(_blocking_links().filter(service_id=OuterRef("service_id"), domain__name=OuterRef("domain")))
-    )
+    return accounts.exclude(_held_off())
+
+
+def only_domain_disabled(accounts: QuerySet[VirtualminAccount]) -> QuerySet[VirtualminAccount]:
+    """Keep only accounts held off by their domain: the same match, so the two sets partition."""
+    return accounts.filter(_held_off())

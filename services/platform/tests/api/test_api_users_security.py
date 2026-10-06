@@ -226,8 +226,13 @@ class AccountLockoutTokenTests(TestCase):
 # ===============================================================================
 
 
+@override_settings(PLATFORM_API_SECRET=HMAC_TEST_SECRET, MIDDLEWARE=HMAC_TEST_MIDDLEWARE)
 class TokenInfoTests(TestCase):
-    """GET /api/users/token/me/ must use TokenAuthentication, not HMAC."""
+    """GET /api/users/token/me/ must use TokenAuthentication, not HMAC.
+
+    Runs through the real HMAC middleware. config/settings/test.py strips it, and without
+    it these tests passed while production answered the HMAC 401 (#569).
+    """
 
     def setUp(self) -> None:
         self.client = APIClient()

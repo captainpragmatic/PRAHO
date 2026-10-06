@@ -26,7 +26,7 @@ from rest_framework.exceptions import ValidationError as APIValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
-from apps.api.core.throttling import AuthThrottle, TokenRequestAccountThrottle
+from apps.api.core.throttling import AuthThrottle, BurstAPIThrottle, StandardAPIThrottle, TokenRequestAccountThrottle
 from apps.api.secure_auth import (
     public_api_endpoint,
     require_customer_authentication,
@@ -258,7 +258,7 @@ def _authenticate_token_request(request: HttpRequest) -> User | Response:
     # backup-code hash, so a slow refusal can confirm the password even though the body
     # is the same. That is narrower than before #565, when the correct password simply
     # returned a token, and TokenRequestAccountThrottle caps sampling at 5/min per
-    # address. ADR-0031 "Current limitations" records it.
+    # address. ADR-0031 "What a bare token can reach" records it.
     user = authenticate(request, username=email, password=password)
 
     if user is None:
@@ -362,8 +362,8 @@ def obtain_token(request: HttpRequest) -> Response:
     """
     🔐 Obtain authentication token for API access -- intentionally public.
 
-    Token auth requires email/password credentials, no HMAC needed.
-    Used by portal service to authenticate with platform API.
+    Token auth requires email/password credentials, no HMAC needed. For CLI tools and
+    scripts; the Portal never calls it (it signs every request with HMAC instead).
 
     POST /api/users/token/
     {
@@ -402,11 +402,18 @@ def obtain_token(request: HttpRequest) -> Response:
     return _issue_token_under_lock(request, user_or_error, params)
 
 
+@public_api_endpoint
 @api_view(["DELETE"])
 @authentication_classes([HashedTokenAuthentication])
 @permission_classes([IsAuthenticated])
+@throttle_classes([BurstAPIThrottle, StandardAPIThrottle])
 def revoke_token(request: HttpRequest) -> Response:
-    """🗑️ Revoke the caller's own authentication token."""
+    """🗑️ Revoke the caller's own authentication token -- public to a bare token (#569).
+
+    Exempt from the HMAC gate so a token holder can revoke the key it holds. It reaches
+    only ``request.auth``, the token that authenticated this request. The deletion is
+    audited by the APIToken ``pre_delete`` signal (ADR-0031, "What a bare token can reach").
+    """
     token = request.auth  # Set by HashedTokenAuthentication — no extra DB query needed
     user_email = _mask_email(token.user.email)
     token_label = f"'{token.name}' ({token.key_prefix}\u2026)"
@@ -417,21 +424,22 @@ def revoke_token(request: HttpRequest) -> Response:
     return Response({"message": "Token revoked successfully"})
 
 
+@public_api_endpoint
 @api_view(["GET"])
 @authentication_classes([HashedTokenAuthentication])
 @permission_classes([IsAuthenticated])
+@throttle_classes([BurstAPIThrottle, StandardAPIThrottle])
 def token_info(request: HttpRequest) -> Response:
     """
-    Return identity of the authenticated token caller.
+    Return identity of the authenticated token caller -- public to a bare token (#569).
 
     GET /api/users/token/me/
     Authorization: Bearer <key>   (or Token <key>)
 
-    Designed for CLI tools and scripts to confirm their token is valid and
-    see which user it belongs to. The view authenticates with
-    HashedTokenAuthentication only, but the route is not public: the
-    inter-service HMAC gate still runs first, so a bare token is rejected
-    today (#569, ADR-0031 "Current limitations").
+    Designed for CLI tools and scripts to confirm their token is valid and see which
+    user it belongs to. Exempt from the HMAC gate, and it reads only the caller's own
+    token. Business routes still require the Portal's signature (ADR-0031, "What a bare
+    token can reach").
     """
     user = cast(User, request.user)
     token: APIToken = request.auth
@@ -595,7 +603,8 @@ def validate_session_secure(request: HttpRequest) -> Response:  # noqa: PLR0911 
 
         # Validate user exists and is active
         try:
-            user = User.objects.get(id=user_id, is_active=True)
+            # Joined: the hash below reads credential_version on every Portal request (#553).
+            user = User.objects.select_related("credential_version").get(id=user_id, is_active=True)
             current_auth_hash = user.get_session_auth_hash()
             if not isinstance(session_auth_hash, str) or not (
                 constant_time_compare(session_auth_hash, current_auth_hash)
