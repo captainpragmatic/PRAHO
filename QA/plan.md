@@ -62,7 +62,10 @@ We need a full manual QA walkthrough of the Portal service (localhost:8701) usin
    same two ports — a human walk and the suite therefore never see the same data, and the e2e stack
    refuses to start while `make dev` holds the ports.
 2. **Load fixtures**: Run `make fixtures` to seed demo data (users, products, invoices, services, tickets).
-   `make dev` already runs the same command at start-up.
+   `make dev` seeds only a small set at start-up: core initial data and two customers' worth of samples.
+   `make fixtures` also loads the business initial data, syncs infrastructure providers and generates
+   the full sample set, which is what a walk across every page needs. Both create the primary
+   credential below, because `generate_sample_data` always ensures the e2e users.
 3. **Create the cycle folder** (`QA/cycle-NN-vX.Y.Z/`; cycle folders are frozen once the cycle closes):
 ```
 QA/
