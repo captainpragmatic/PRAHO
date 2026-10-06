@@ -1454,6 +1454,10 @@ def unsuspend_virtualmin_account(account_id: str) -> dict[str, Any]:
 
         if result.is_ok():
             logger.info(f"✅ [VirtualminTask] Unsuspended {account.domain} successfully")
+            # Re-check after the call, as the reconciler and retry paths do: a Service suspended
+            # or a domain expired while enable-domain ran must not leave hosting on.
+            if not _hosting_enabled(account):
+                reconcile_virtualmin_service_state_async(str(account.service_id))
             return {"success": True, "account_id": str(account.id), "domain": account.domain}
         else:
             error_msg = result.unwrap_err()

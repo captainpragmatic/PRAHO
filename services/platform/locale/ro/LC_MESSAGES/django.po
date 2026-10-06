@@ -20609,3 +20609,9 @@ msgstr "Rulează acțiunea"
 
 msgid "The customer has been deleted; hosting stays off."
 msgstr "Clientul a fost șters; găzduirea rămâne oprită."
+
+msgid "Account {name} is being migrated; try again when the migration finishes."
+msgstr "Contul {name} este în curs de migrare; încercați din nou după ce migrarea se încheie."
+
+msgid "The service's owner changed while this was checked; try again."
+msgstr "Proprietarul serviciului s-a schimbat în timpul verificării; încercați din nou."

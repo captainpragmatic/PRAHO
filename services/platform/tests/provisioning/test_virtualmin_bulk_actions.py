@@ -151,11 +151,16 @@ class BulkFormValidationTests(_BulkBase):
         self.assertEqual(queued, [])
 
     def test_a_health_check_over_the_concurrency_cap_is_refused(self) -> None:
-        """FAILS on master. Every check must run in one wave, with nothing queued behind it."""
-        accounts = [self._hosted(f"cap{i}.example.com", server=self.server) for i in range(11)]
+        """FAILS on master. Every check must run in one wave, with nothing queued behind it.
+
+        The cap is the `provisioning.max_concurrent_health_checks` setting (default 5), the
+        same value the executor uses, not a hardcoded constant.
+        """
+        accounts = [self._hosted(f"cap{i}.example.com", server=self.server) for i in range(6)]
 
         response, _gateway, _queued = self._post("health_check", accounts)
 
+        self.assertEqual(response.status_code, 200)
         self.assertIn("selected_accounts", response.context["form"].errors)
 
 

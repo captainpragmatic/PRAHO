@@ -19,6 +19,7 @@ from apps.customers.models import Customer
 from apps.products.models import Product
 from apps.provisioning.models import Service
 from apps.provisioning.services import HostingAccountStaffActions
+from apps.provisioning.virtualmin_migration_models import VirtualminMigration
 from apps.provisioning.virtualmin_models import VirtualminAccount
 from apps.provisioning.virtualmin_tasks import reconcile_divergent_services_task, reconcile_virtualmin_service_state
 from apps.users.models import User
@@ -226,7 +227,52 @@ class StaffActivateTests(_StaffButtonBase):
                 self.assertEqual(queued, [])
 
 
+class StaffActionsDuringMigrationTests(_StaffButtonBase):
+    def test_suspend_and_activate_are_refused_during_an_active_migration(self) -> None:
+        """A migration owns the account until it finishes, and restores its own snapshot.
+
+        A staff change made mid-migration would be reported as done, then overwritten by that
+        snapshot with no reconcile queued, so the old direct paths refused it, and so must these.
+        """
+        VirtualminMigration.objects.create(
+            account=self.account, source_server=self.server, target_server=self.server, reason="manual"
+        )
+        self._set(service="active", account="active")
+        gateway, queued = self._press("suspend", account_enabled=True)
+        self._assert_untouched(gateway, "active")
+        self.assertEqual(queued, [])
+
+        self._set(service="suspended", account="suspended", reason=STAFF_TOKEN)
+        gateway, queued = self._press("activate", account_enabled=False)
+        self._assert_untouched(gateway, "suspended")
+        self.assertEqual(queued, [])
+
+
 class StaffActionsRereadUnderLockTests(_StaffButtonBase):
+    def test_activate_refuses_when_the_owner_changed_before_the_lock(self) -> None:
+        """A service can change owner (staff edit), so the owner read before locking can be
+        stale. Activate must not approve on the former owner's status.
+
+        The service belongs to a suspended customer, but the pre-lock read still returns the
+        former, active owner, as if the edit committed between the read and the lock.
+        """
+        suspended_owner = Customer.objects.create(
+            name="New Owner SRL", customer_type="company", status="suspended", primary_email="owner@example.com"
+        )
+        self._set(service="suspended", account="suspended", reason=STAFF_TOKEN)
+        Service.objects.filter(pk=self.service.pk).update(customer=suspended_owner)
+
+        with (
+            patch("apps.provisioning.services._service_customer_id", return_value=self.customer.pk),
+            patch(ENQUEUE),
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            result = HostingAccountStaffActions.activate(VirtualminAccount.objects.get(pk=self.account.pk))
+
+        self.assertTrue(result.is_err())
+        self.service.refresh_from_db()
+        self.assertEqual(self.service.status, "suspended")
+
     def test_activate_decides_on_the_row_it_locks_not_on_a_stale_copy(self) -> None:
         """The guards and the transition are one locked step.
 

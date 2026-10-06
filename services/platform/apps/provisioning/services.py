@@ -261,6 +261,13 @@ _PIPELINE_OWNED_STATUSES: Final = frozenset({"pending", "provisioning", "failed"
 _INELIGIBLE_CUSTOMER_STATUSES: Final = frozenset({"suspended", "inactive"})
 
 
+def _service_customer_id(service_id: Any) -> Any:
+    """The service's owner, read before any lock so the customer can be locked first."""
+    from apps.provisioning.models import Service  # noqa: PLC0415  # Circular: same-app
+
+    return Service.objects.filter(pk=service_id).values_list("customer_id", flat=True).first()
+
+
 def _queue_reconcile_on_commit(service_id: Any) -> None:
     from apps.provisioning.virtualmin_tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
         reconcile_virtualmin_service_state_async,  # Circular: same-app
@@ -292,6 +299,42 @@ def _eligibility_refusal(service: Service, customer: Customer | None) -> str | N
     if Subscription.objects.filter(service_id=service.pk, status__in=DELINQUENT_SUBSCRIPTION_STATES).exists():
         return str(_("The service's subscription is not paid up; settle it in billing first."))
     return None
+
+
+def _locked_refusal(service: Service, account: VirtualminAccount, *, expected_customer_id: Any = None) -> str | None:
+    """Why no staff change may be made to this locked service right now, or None.
+
+    - A migration owns the account until it finishes, then restores its own pre-migration
+      snapshot without queuing a reconcile; a change made meanwhile would be overwritten.
+    - Activate locks the customer it read before taking the Service lock. A service can change
+      owner (staff edit), so if it did in between, the locked customer is the wrong one.
+    """
+    from apps.provisioning.virtualmin_migration_models import (  # noqa: PLC0415  # Circular: same-app
+        account_has_active_migration,
+    )
+
+    if account_has_active_migration(account):
+        return str(
+            _("Account {name} is being migrated; try again when the migration finishes.").format(
+                name=account.virtualmin_username
+            )
+        )
+    if expected_customer_id is not None and service.customer_id != expected_customer_id:
+        return str(_("The service's owner changed while this was checked; try again."))
+    return None
+
+
+def _active_repair_refusal(service: Service, account: VirtualminAccount, customer: Customer | None) -> str | None:
+    """Why staff may not ask the reconciler to repair an active service's hosting, or None."""
+    from apps.provisioning.domain_veto import domain_disables_hosting  # noqa: PLC0415  # Circular: same-app
+
+    if domain_disables_hosting(account):
+        return str(
+            _("A domain bound to service {name} is expired, suspended or cancelled, so its hosting stays off.").format(
+                name=service.service_name
+            )
+        )
+    return _eligibility_refusal(service, customer)
 
 
 def _staff_resume_refusal(service: Service, customer: Customer | None) -> str | None:
@@ -335,6 +378,9 @@ class HostingAccountStaffActions:
             service = Service.objects.select_for_update(of=("self",)).filter(pk=account.service_id).first()
             if service is None:
                 return Err(_("This account has no service."))
+            refusal = _locked_refusal(service, account)
+            if refusal is not None:
+                return Err(refusal)
             if service.status in _PIPELINE_OWNED_STATUSES:
                 return Err(
                     _("Service {name} is {status}; manage it from the service page.").format(
@@ -353,11 +399,9 @@ class HostingAccountStaffActions:
     @staticmethod
     def activate(account: VirtualminAccount) -> Result[str, str]:
         from apps.customers.models import Customer  # noqa: PLC0415  # ADR-0007: cross-app
-        from apps.provisioning.domain_veto import domain_disables_hosting  # noqa: PLC0415  # Circular: same-app
         from apps.provisioning.models import Service  # noqa: PLC0415  # Circular: same-app
 
-        # A service never changes customer, so reading the id before locking is safe.
-        customer_id = Service.objects.filter(pk=account.service_id).values_list("customer_id", flat=True).first()
+        customer_id = _service_customer_id(account.service_id)
         with db_transaction.atomic():
             # Customer first, then Service (see the class docstring for why).
             customer = (
@@ -368,16 +412,12 @@ class HostingAccountStaffActions:
             service = Service.objects.select_for_update(of=("self",)).filter(pk=account.service_id).first()
             if service is None:
                 return Err(_("This account has no service."))
+            refusal = _locked_refusal(service, account, expected_customer_id=customer_id)
+            if refusal is not None:
+                return Err(refusal)
 
             if service.status == "active":
-                if domain_disables_hosting(account):
-                    return Err(
-                        _(
-                            "A domain bound to service {name} is expired, suspended or cancelled, "
-                            "so its hosting stays off."
-                        ).format(name=service.service_name)
-                    )
-                refusal = _eligibility_refusal(service, customer)
+                refusal = _active_repair_refusal(service, account, customer)
                 if refusal is not None:
                     return Err(refusal)
                 # Hosting should already be on; let the reconciler repair whatever is off.

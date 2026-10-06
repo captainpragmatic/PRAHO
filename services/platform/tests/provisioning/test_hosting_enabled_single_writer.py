@@ -17,7 +17,11 @@ from django.utils import timezone
 from apps.domains.models import Domain
 from apps.provisioning.models import Service
 from apps.provisioning.virtualmin_models import VirtualminAccount
-from apps.provisioning.virtualmin_tasks import reconcile_divergent_services_task, retry_virtualmin_job
+from apps.provisioning.virtualmin_tasks import (
+    reconcile_divergent_services_task,
+    retry_virtualmin_job,
+    unsuspend_virtualmin_account,
+)
 from tests.mocks.virtualmin_mock import MockVirtualminGateway
 from tests.provisioning.test_virtualmin_domain_veto import _DomainVetoBase
 
@@ -182,6 +186,33 @@ class SuspendRetryUnderADomainHoldTests(_SingleWriterBase):
             patch(ENQUEUE) as enqueue,
         ):
             result = retry_virtualmin_job(str(job.id))
+
+        self.assertTrue(result["success"], result)
+        enqueue.assert_called_once_with(str(self.service.id))
+
+    def test_a_domain_that_expires_during_a_direct_unsuspend_queues_a_reconcile(self) -> None:
+        """The direct unsuspend task rechecks the enabled state after its gateway call too.
+
+        It checked only before the call. A domain that expired while enable-domain ran would
+        leave the account recorded active with nothing queued to correct it.
+        """
+        self.account.status = "suspended"
+        self.account.save(update_fields=["status"])
+        domain = self._domain("active", service=self.service)
+        gateway = self._gateway(enabled=False)
+        real_call = gateway.call
+
+        def expire_mid_flight(program: str, params: dict[str, Any], **kwargs: Any) -> Any:
+            if program == "enable-domain":
+                Domain.objects.filter(pk=domain.pk).update(status="expired")
+            return real_call(program, params, **kwargs)
+
+        with (
+            patch(GATEWAY, return_value=gateway),
+            patch.object(gateway, "call", side_effect=expire_mid_flight),
+            patch(ENQUEUE) as enqueue,
+        ):
+            result = unsuspend_virtualmin_account(str(self.account.id))
 
         self.assertTrue(result["success"], result)
         enqueue.assert_called_once_with(str(self.service.id))

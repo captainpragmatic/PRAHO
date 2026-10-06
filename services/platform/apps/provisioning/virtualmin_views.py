@@ -68,7 +68,6 @@ def _get_user_email(user: User | AnonymousUser) -> str:
 HEALTH_CHECK_STALE_SECONDS = 3600  # 1 hour in seconds
 MIN_DOMAIN_LENGTH = 3
 _DEFAULT_MAX_CONCURRENT_HEALTH_CHECKS = 10
-MAX_CONCURRENT_HEALTH_CHECKS = _DEFAULT_MAX_CONCURRENT_HEALTH_CHECKS
 _DEFAULT_HEALTH_CHECK_TIMEOUT_SECONDS = 30
 HEALTH_CHECK_TIMEOUT_SECONDS = _DEFAULT_HEALTH_CHECK_TIMEOUT_SECONDS
 _DEFAULT_OVERALL_HEALTH_CHECK_TIMEOUT = 300
@@ -1159,7 +1158,10 @@ def virtualmin_bulk_actions(request: HttpRequest) -> HttpResponse:
     page_url = reverse("provisioning:virtualmin_bulk_actions")
 
     if request.method == "POST":
-        form = VirtualminBulkActionForm(request.POST, accounts=accounts, max_health_checks=MAX_CONCURRENT_HEALTH_CHECKS)
+        # The same configured limit the executor uses, so every check runs in one wave.
+        form = VirtualminBulkActionForm(
+            request.POST, accounts=accounts, max_health_checks=get_max_concurrent_health_checks()
+        )
         if form.is_valid():
             action = form.cleaned_data["action"]
             selected = list(form.cleaned_data["selected_accounts"])
@@ -1543,7 +1545,8 @@ def _execute_bulk_health_check(accounts: list[VirtualminAccount]) -> BulkOperati
 
     try:
         # Use thread pool for parallel health checks (with reasonable concurrency limit)
-        max_workers = min(MAX_CONCURRENT_HEALTH_CHECKS, len(accounts))  # Limit concurrent checks to prevent overload
+        # The provisioning.max_concurrent_health_checks setting, as the form's cap.
+        max_workers = min(get_max_concurrent_health_checks(), len(accounts))
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             # Submit all health check tasks
