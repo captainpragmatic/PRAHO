@@ -10,6 +10,7 @@ end. A whole-file rewrite through polib changes all three, whatever wrapwidth it
 from __future__ import annotations
 
 import importlib.util
+import logging
 import os
 import sys
 from pathlib import Path
@@ -515,6 +516,10 @@ class TestIncompletePlurals:
         changed_plural: bytes,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
+        # Capture the script's warning whatever DJANGO_SETTINGS_MODULE configured: config.settings.test
+        # (and ci, which imports it) set the root logger to CRITICAL, so without this the warning is
+        # dropped before pytest sees it. That is why this passed under base and failed nightly under ci.
+        caplog.set_level(logging.WARNING, logger=tp.logger.name)
         tp.cmd_apply(reviewed_plural)
 
         assert (incomplete / PO_REL).read_bytes() == changed_plural
