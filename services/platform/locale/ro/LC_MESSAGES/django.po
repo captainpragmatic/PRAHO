@@ -20543,3 +20543,79 @@ msgstr "Descarcă exportul"
 
 msgid "Delete Expired"
 msgstr "Șterge exportul expirat"
+
+msgid "This account has no service."
+msgstr "Acest cont nu are niciun serviciu."
+
+msgid "Service {name} is {status}; manage it from the service page."
+msgstr "Serviciul {name} este {status}; gestionați-l din pagina serviciului."
+
+msgid "A domain bound to service {name} is expired, suspended or cancelled, so its hosting stays off."
+msgstr "Un domeniu asociat serviciului {name} este expirat, suspendat sau anulat, așa că găzduirea rămâne oprită."
+
+msgid "Service {name} is {status} by another process ({reason}); lift it from the service page, billing or the customer."
+msgstr "Serviciul {name} este {status} de un alt proces ({reason}); ridicați suspendarea din pagina serviciului, din facturare sau din client."
+
+msgid "The customer is {status}; reactivate the customer first."
+msgstr "Clientul este {status}; reactivați mai întâi clientul."
+
+msgid "The service's subscription is not paid up; settle it in billing first."
+msgstr "Abonamentul serviciului nu este plătit la zi; reglați-l mai întâi în facturare."
+
+msgid "Suspension of {account} is queued; its service is suspended."
+msgstr "Suspendarea contului {account} este în coadă; serviciul său este suspendat."
+
+msgid "Activation of {account} is queued."
+msgstr "Activarea contului {account} este în coadă."
+
+msgid "Invalid filter."
+msgstr "Filtru invalid."
+
+msgid "Bulk Actions"
+msgstr "Acțiuni în masă"
+
+msgid "Queued {done} of {total} accounts; the reconciler applies each change."
+msgstr "Au fost puse în coadă {done} din {total} conturi; reconcilierea aplică fiecare modificare."
+
+msgid "{count} refused: {reasons}{more}"
+msgstr "{count} refuzate: {reasons}{more}"
+
+msgid "Health checks run on at most {limit} accounts at a time."
+msgstr "Verificările de sănătate rulează pe cel mult {limit} conturi odată."
+
+msgid "All servers"
+msgstr "Toate serverele"
+
+msgid "Suspend and Activate change each account's service; the reconciler applies them to Virtualmin."
+msgstr "Suspendarea și activarea modifică serviciul fiecărui cont; reconcilierea le aplică în Virtualmin."
+
+msgid "Back to accounts"
+msgstr "Înapoi la conturi"
+
+msgid "Select all listed"
+msgstr "Selectează toate conturile listate"
+
+msgid "Backup type (backup only)"
+msgstr "Tip de backup (doar pentru backup)"
+
+msgid "No accounts match this filter."
+msgstr "Niciun cont nu corespunde acestui filtru."
+
+msgid "I understand this action will affect every selected account"
+msgstr "Înțeleg că această acțiune va afecta fiecare cont selectat"
+
+msgid "Run action"
+msgstr "Rulează acțiunea"
+
+msgid "The customer has been deleted; hosting stays off."
+msgstr "Clientul a fost șters; găzduirea rămâne oprită."
+
+msgid "Account {name} is being migrated; try again when the migration finishes."
+msgstr "Contul {name} este în curs de migrare; încercați din nou după ce migrarea se încheie."
+
+msgid "The service's owner changed while this was checked; try again."
+msgstr "Proprietarul serviciului s-a schimbat în timpul verificării; încercați din nou."
+
+#, python-format
+msgid "%(count)s accounts match this filter. Narrow it to %(limit)s or fewer to act on them."
+msgstr "%(count)s conturi corespund acestui filtru. Restrângeți-l la cel mult %(limit)s pentru a acționa asupra lor."

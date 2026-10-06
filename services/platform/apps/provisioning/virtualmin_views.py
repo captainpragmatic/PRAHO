@@ -5,17 +5,19 @@ Staff interface for managing Virtualmin servers, accounts, and backups.
 
 import logging
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any, TypedDict, cast
+from urllib.parse import urlencode
 from uuid import UUID
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.contrib.auth.models import AnonymousUser
 from django.core.paginator import Paginator
-from django.db import models, transaction
-from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.db import connections, models, transaction
+from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -28,15 +30,18 @@ from apps.common.security_decorators import (
     audit_service_call,
     monitor_performance,
 )
+from apps.common.types import Result
 from apps.customers.models import Customer
 from apps.users.models import User
 
 from .service_models import Service, ServicePlan
+from .services import HostingAccountStaffActions
 from .virtualmin_backup_service import BackupConfig, RestoreConfig, VirtualminBackupService
 from .virtualmin_forms import (
     VirtualminAccountForm,
     VirtualminBackupForm,
     VirtualminBulkActionForm,
+    VirtualminBulkFilterForm,
     VirtualminMigrationForm,
     VirtualminRestoreForm,
     VirtualminServerForm,
@@ -61,28 +66,16 @@ def _get_user_email(user: User | AnonymousUser) -> str:
 
 # Health check constants
 HEALTH_CHECK_STALE_SECONDS = 3600  # 1 hour in seconds
-_DEFAULT_BULK_OPERATION_THRESHOLD = 10
-BULK_OPERATION_THRESHOLD = _DEFAULT_BULK_OPERATION_THRESHOLD
 MIN_DOMAIN_LENGTH = 3
 _DEFAULT_MAX_CONCURRENT_HEALTH_CHECKS = 10
-MAX_CONCURRENT_HEALTH_CHECKS = _DEFAULT_MAX_CONCURRENT_HEALTH_CHECKS
+# Most accounts the bulk page lists at once: one POST field each, under Django's 1,000-field cap.
+BULK_ACCOUNT_LIMIT = 500
 _DEFAULT_HEALTH_CHECK_TIMEOUT_SECONDS = 30
 HEALTH_CHECK_TIMEOUT_SECONDS = _DEFAULT_HEALTH_CHECK_TIMEOUT_SECONDS
 _DEFAULT_OVERALL_HEALTH_CHECK_TIMEOUT = 300
 OVERALL_HEALTH_CHECK_TIMEOUT = _DEFAULT_OVERALL_HEALTH_CHECK_TIMEOUT
 _DEFAULT_MAX_ERROR_DISPLAY = 3
 MAX_ERROR_DISPLAY = _DEFAULT_MAX_ERROR_DISPLAY
-
-
-def get_bulk_operation_threshold() -> int:
-    """Get bulk operation threshold from SettingsService (runtime)."""
-    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
-        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
-    )
-
-    return SettingsService.get_integer_setting(
-        "provisioning.bulk_operation_threshold", _DEFAULT_BULK_OPERATION_THRESHOLD
-    )
 
 
 def get_max_concurrent_health_checks() -> int:
@@ -403,8 +396,14 @@ def virtualmin_accounts_list(request: HttpRequest) -> HttpResponse:
         {"text": "Accounts"},  # Current page - no URL
     ]
 
+    bulk_filters = urlencode(
+        {key: value for key, value in (("server", server_filter), ("status", status_filter)) if value}
+    )
+    bulk_url = reverse("provisioning:virtualmin_bulk_actions")
+
     context = {
         "page_title": "Virtualmin Accounts",
+        "bulk_actions_url": f"{bulk_url}?{bulk_filters}" if bulk_filters else bulk_url,
         "accounts_page": accounts_page,
         "accounts": accounts_page,  # For template compatibility
         "table_data": table_data,
@@ -1148,37 +1147,51 @@ def virtualmin_backups_list(request: HttpRequest) -> HttpResponse:
 @user_passes_test(is_staff_or_superuser)
 @monitor_performance(max_duration_seconds=30.0, alert_threshold=5.0)
 def virtualmin_bulk_actions(request: HttpRequest) -> HttpResponse:
-    """🔄 Perform bulk actions on multiple Virtualmin accounts."""
+    """🔄 Perform bulk actions on multiple Virtualmin accounts.
+
+    GET and POST build the account list from the same validated filters, so a POST can only
+    act on accounts the page listed. Suspend and Activate go through the Service (ADR-0051).
+    """
+    filter_form = VirtualminBulkFilterForm(request.GET)
+    if not filter_form.is_valid():
+        return HttpResponseBadRequest(str(_("Invalid filter.")))
+    accounts = filter_form.accounts()
+    # Each listed account is one POST field, and Django refuses a POST of more than 1,000
+    # fields before any validation. Over the cap the page lists nothing, so nothing above it
+    # can be selected, and asks for a narrower filter instead.
+    matching = accounts.count()
+    too_many = matching if matching > BULK_ACCOUNT_LIMIT else 0
+    if too_many:
+        accounts = accounts.none()
+    query = filter_form.query_string()
+    page_url = reverse("provisioning:virtualmin_bulk_actions")
 
     if request.method == "POST":
-        form = VirtualminBulkActionForm(request.POST)
+        # The same configured limit the executor uses, so every check runs in one wave.
+        form = VirtualminBulkActionForm(
+            request.POST, accounts=accounts, max_health_checks=get_max_concurrent_health_checks()
+        )
         if form.is_valid():
             action = form.cleaned_data["action"]
-            account_ids = form.cleaned_data["selected_accounts"]
-
-            try:
-                # Get accounts
-                accounts = VirtualminAccount.objects.filter(id__in=account_ids).select_related("server")
-
-                if not accounts:
-                    messages.error(request, _("No valid accounts found for bulk action"))
-                    return redirect("provisioning:virtualmin_accounts")
-
-                # Execute bulk action and handle result
-                result = _execute_bulk_action(action, list(accounts), form.cleaned_data)
-                _handle_bulk_action_result(request, action, result)
-
-                return redirect("provisioning:virtualmin_accounts")
-
-            except Exception as e:
-                messages.error(request, f"Bulk action failed: {e!s}")
+            selected = list(form.cleaned_data["selected_accounts"])
+            result = _execute_bulk_action(action, selected, form.cleaned_data)
+            _handle_bulk_action_result(request, action, result)
+            return redirect("provisioning:virtualmin_accounts")
     else:
-        form = VirtualminBulkActionForm()
+        initial = {"selected_accounts": list(accounts)} if request.GET.get("select") == "all" else {}
+        form = VirtualminBulkActionForm(accounts=accounts, initial=initial)
 
+    selected_value = form["selected_accounts"].value() or []
     context = {
-        "page_title": "Bulk Actions",
+        "page_title": _("Bulk Actions"),
         "form": form,
-        "form_action": reverse("provisioning:virtualmin_bulk_actions"),
+        "filter_form": filter_form,
+        "accounts": accounts,
+        "too_many": too_many,
+        "account_limit": BULK_ACCOUNT_LIMIT,
+        "selected_ids": [str(getattr(value, "pk", value)) for value in selected_value],
+        "form_action": f"{page_url}?{query}" if query else page_url,
+        "select_all_url": f"{page_url}?{query}&select=all" if query else f"{page_url}?select=all",
         "cancel_url": reverse("provisioning:virtualmin_accounts"),
     }
 
@@ -1237,40 +1250,21 @@ def _handle_backup_action_result(request: HttpRequest, result: BulkOperationResu
             messages.warning(request, f"{result.failed_count} backup operations failed. Check logs for details.")
 
 
-def _handle_suspend_action_result(request: HttpRequest, result: BulkOperationResult) -> None:
-    """Handle suspend action result and add appropriate messages."""
-    if result.rollback_performed:
-        messages.error(
+def _handle_staff_action_result(request: HttpRequest, result: BulkOperationResult) -> None:
+    """Report a bulk Suspend or Activate: what was queued, and why the rest was refused."""
+    messages.success(
+        request,
+        _("Queued {done} of {total} accounts; the reconciler applies each change.").format(
+            done=result.successful_count, total=result.total_processed
+        ),
+    )
+    if result.errors:
+        shown = "; ".join(result.errors[:MAX_ERROR_DISPLAY])
+        more = "…" if len(result.errors) > MAX_ERROR_DISPLAY else ""
+        messages.warning(
             request,
-            f"Suspend operation failed and was rolled back. "
-            f"No accounts were modified. Error: {result.errors[0] if result.errors else 'Unknown error'}",
+            _("{count} refused: {reasons}{more}").format(count=result.failed_count, reasons=shown, more=more),
         )
-    else:
-        messages.success(
-            request,
-            f"Suspended {result.successful_count}/{result.total_processed} accounts "
-            f"({result.success_rate:.1f}% success) in {result.processing_time_seconds:.2f}s",
-        )
-        if result.failed_count > 0:
-            messages.warning(request, f"{result.failed_count} accounts could not be suspended. Check logs for details.")
-
-
-def _handle_activate_action_result(request: HttpRequest, result: BulkOperationResult) -> None:
-    """Handle activate action result and add appropriate messages."""
-    if result.rollback_performed:
-        messages.error(
-            request,
-            f"Activate operation failed and was rolled back. "
-            f"No accounts were modified. Error: {result.errors[0] if result.errors else 'Unknown error'}",
-        )
-    else:
-        messages.success(
-            request,
-            f"Activated {result.successful_count}/{result.total_processed} accounts "
-            f"({result.success_rate:.1f}% success) in {result.processing_time_seconds:.2f}s",
-        )
-        if result.failed_count > 0:
-            messages.warning(request, f"{result.failed_count} accounts could not be activated. Check logs for details.")
 
 
 def _handle_health_check_action_result(request: HttpRequest, result: BulkOperationResult) -> None:
@@ -1294,9 +1288,9 @@ def _execute_bulk_action(
     if action == "backup":
         return _execute_bulk_backup(accounts, form_data)
     elif action == "suspend":
-        return _execute_bulk_suspend(accounts)
+        return _execute_bulk_staff_action(accounts, HostingAccountStaffActions.suspend)
     elif action == "activate":
-        return _execute_bulk_activate(accounts)
+        return _execute_bulk_staff_action(accounts, HostingAccountStaffActions.activate)
     elif action == "health_check":
         return _execute_bulk_health_check(accounts)
     else:
@@ -1313,10 +1307,8 @@ def _handle_bulk_action_result(request: HttpRequest, action: str, result: BulkOp
     """Handle bulk action result based on action type."""
     if action == "backup":
         _handle_backup_action_result(request, result)
-    elif action == "suspend":
-        _handle_suspend_action_result(request, result)
-    elif action == "activate":
-        _handle_activate_action_result(request, result)
+    elif action in ("suspend", "activate"):
+        _handle_staff_action_result(request, result)
     elif action == "health_check":
         _handle_health_check_action_result(request, result)
 
@@ -1425,236 +1417,31 @@ def _execute_bulk_backup(accounts: list[VirtualminAccount], form_data: dict[str,
         )
 
 
-@transaction.atomic
-def _execute_bulk_suspend(accounts: list[VirtualminAccount]) -> BulkOperationResult:
-    """
-    Suspend multiple accounts with atomic transaction management.
+def _execute_bulk_staff_action(
+    accounts: list[VirtualminAccount], action: Callable[[VirtualminAccount], Result[str, str]]
+) -> BulkOperationResult:
+    """Apply a staff Suspend or Activate to each account through the Service (#566, ADR-0051).
 
-    Algorithm Complexity: O(n) where n is the number of accounts
-
-    Performance Optimizations:
-    - Atomic database operations with rollback safety
-    - Batch updates using Django's bulk operations
-    - Pre-filtering of eligible accounts
-    - Comprehensive audit logging
-
-    Args:
-        accounts: List of VirtualminAccount objects to suspend
-
-    Returns:
-        BulkOperationResult with detailed operation statistics
-
-    Transaction Safety:
-        - All status changes are atomic
-        - Failed operations trigger complete rollback
-        - Database consistency is maintained
-        - Audit trail for all modifications
+    Deliberately not one transaction: each account is its own short locked step inside the
+    helper, so one refusal never undoes another, and each reconcile is queued on its own
+    commit. The helpers never call Virtualmin; the reconciler applies every change.
     """
     start_time = time.perf_counter()
-    errors = []
-    eligible_accounts = []
-
-    # Pre-filter eligible accounts for suspension
+    errors: list[str] = []
+    done = 0
     for account in accounts:
-        if account.status == "active":
-            eligible_accounts.append(account)
+        result = action(account)
+        if result.is_ok():
+            done += 1
         else:
-            errors.append(f"Account {account.domain} is not active (current status: {account.status})")
-
-    logger.info(f"🚫 [Bulk Suspend] Processing {len(eligible_accounts)} eligible accounts")
-
-    try:
-        # Create savepoint for partial rollback capability
-        savepoint = transaction.savepoint()
-
-        successful_accounts = []
-
-        # Use bulk update for better performance when possible
-        if len(eligible_accounts) > BULK_OPERATION_THRESHOLD:  # Use bulk operations for larger datasets
-            try:
-                # Bulk update status
-                account_ids = [acc.id for acc in eligible_accounts]
-                updated_count = VirtualminAccount.objects.filter(id__in=account_ids, status="active").update(
-                    status="suspended", last_modified=timezone.now()
-                )
-
-                successful_accounts = eligible_accounts[:updated_count]
-                logger.info(f"📦 [Bulk Suspend] Bulk updated {updated_count} accounts")
-
-            except Exception as e:
-                # Fallback to individual updates if bulk operation fails
-                logger.warning(f"⚠️ [Bulk Suspend] Bulk operation failed, falling back to individual updates: {e}")
-                transaction.savepoint_rollback(savepoint)
-                savepoint = transaction.savepoint()
-
-                for account in eligible_accounts:
-                    try:
-                        account.status = "suspended"
-                        account.save(update_fields=["status", "last_modified"])
-                        successful_accounts.append(account)
-
-                    except Exception as individual_error:
-                        error_msg = f"Failed to suspend {account.domain}: {individual_error!s}"
-                        errors.append(error_msg)
-                        logger.warning(f"🔥 [Bulk Suspend] {error_msg}")
-        else:
-            # Process individually for smaller datasets
-            for account in eligible_accounts:
-                try:
-                    account.status = "suspended"
-                    account.save(update_fields=["status", "last_modified"])
-                    successful_accounts.append(account)
-
-                except Exception as e:
-                    error_msg = f"Failed to suspend {account.domain}: {e!s}"
-                    errors.append(error_msg)
-                    logger.warning(f"🔥 [Bulk Suspend] {error_msg}")
-
-        # Commit the savepoint
-        transaction.savepoint_commit(savepoint)
-
-        processing_time = time.perf_counter() - start_time
-        result = BulkOperationResult(
-            total_processed=len(accounts),
-            successful_count=len(successful_accounts),
-            failed_count=len(accounts) - len(successful_accounts),
-            errors=errors,
-            rollback_performed=False,
-            processing_time_seconds=processing_time,
-        )
-
-        logger.info(
-            f"✅ [Bulk Suspend] Completed: {result.successful_count}/{result.total_processed} suspended "
-            f"({result.success_rate:.1f}%) in {result.processing_time_seconds:.2f}s"
-        )
-
-        return result
-
-    except Exception as e:
-        # Transaction will be automatically rolled back
-        processing_time = time.perf_counter() - start_time
-        error_msg = f"Bulk suspend operation failed with critical error: {e!s}"
-
-        logger.error(f"🔥 [Bulk Suspend] Transaction rolled back: {error_msg}")
-
-        return BulkOperationResult(
-            total_processed=len(accounts),
-            successful_count=0,
-            failed_count=len(accounts),
-            errors=[error_msg, *errors],
-            rollback_performed=True,
-            processing_time_seconds=processing_time,
-        )
-
-
-@transaction.atomic
-def _execute_bulk_activate(accounts: list[VirtualminAccount]) -> BulkOperationResult:
-    """
-    Activate multiple accounts with atomic transaction management.
-
-    Algorithm Complexity: O(n) where n is the number of accounts
-
-    Performance Optimizations:
-    - Atomic database operations with rollback safety
-    - Batch updates using Django's bulk operations
-    - Pre-filtering of eligible accounts
-    - Optimized for high-volume operations
-
-    Args:
-        accounts: List of VirtualminAccount objects to activate
-
-    Returns:
-        BulkOperationResult with detailed operation statistics
-
-    Transaction Safety:
-        - All status changes are atomic
-        - Database consistency maintained
-        - Complete rollback on critical failures
-    """
-    start_time = time.perf_counter()
-    errors = []
-    eligible_accounts = []
-
-    # Pre-filter eligible accounts for activation
-    for account in accounts:
-        if account.status == "suspended":
-            eligible_accounts.append(account)
-        else:
-            errors.append(f"Account {account.domain} is not suspended (current status: {account.status})")
-
-    logger.info(f"🔓 [Bulk Activate] Processing {len(eligible_accounts)} eligible accounts")
-
-    try:
-        successful_accounts = []
-
-        # Use bulk update for better performance
-        if len(eligible_accounts) > BULK_OPERATION_THRESHOLD:
-            try:
-                account_ids = [acc.id for acc in eligible_accounts]
-                updated_count = VirtualminAccount.objects.filter(id__in=account_ids, status="suspended").update(
-                    status="active", last_modified=timezone.now()
-                )
-
-                successful_accounts = eligible_accounts[:updated_count]
-                logger.info(f"📦 [Bulk Activate] Bulk updated {updated_count} accounts")
-
-            except Exception as e:
-                logger.warning(f"⚠️ [Bulk Activate] Bulk operation failed, using individual updates: {e}")
-
-                for account in eligible_accounts:
-                    try:
-                        account.status = "active"
-                        account.save(update_fields=["status", "last_modified"])
-                        successful_accounts.append(account)
-
-                    except Exception as individual_error:
-                        error_msg = f"Failed to activate {account.domain}: {individual_error!s}"
-                        errors.append(error_msg)
-                        logger.warning(f"🔥 [Bulk Activate] {error_msg}")
-        else:
-            # Individual processing for smaller datasets
-            for account in eligible_accounts:
-                try:
-                    account.status = "active"
-                    account.save(update_fields=["status", "last_modified"])
-                    successful_accounts.append(account)
-
-                except Exception as e:
-                    error_msg = f"Failed to activate {account.domain}: {e!s}"
-                    errors.append(error_msg)
-                    logger.warning(f"🔥 [Bulk Activate] {error_msg}")
-
-        processing_time = time.perf_counter() - start_time
-        result = BulkOperationResult(
-            total_processed=len(accounts),
-            successful_count=len(successful_accounts),
-            failed_count=len(accounts) - len(successful_accounts),
-            errors=errors,
-            rollback_performed=False,
-            processing_time_seconds=processing_time,
-        )
-
-        logger.info(
-            f"✅ [Bulk Activate] Completed: {result.successful_count}/{result.total_processed} activated "
-            f"({result.success_rate:.1f}%) in {result.processing_time_seconds:.2f}s"
-        )
-
-        return result
-
-    except Exception as e:
-        processing_time = time.perf_counter() - start_time
-        error_msg = f"Bulk activate operation failed with critical error: {e!s}"
-
-        logger.error(f"🔥 [Bulk Activate] Transaction rolled back: {error_msg}")
-
-        return BulkOperationResult(
-            total_processed=len(accounts),
-            successful_count=0,
-            failed_count=len(accounts),
-            errors=[error_msg, *errors],
-            rollback_performed=True,
-            processing_time_seconds=processing_time,
-        )
+            errors.append(f"{account.domain}: {result.unwrap_err()}")
+    return BulkOperationResult(
+        total_processed=len(accounts),
+        successful_count=done,
+        failed_count=len(errors),
+        errors=errors,
+        processing_time_seconds=time.perf_counter() - start_time,
+    )
 
 
 def _validate_account_status(account: VirtualminAccount) -> tuple[bool, str]:
@@ -1727,8 +1514,14 @@ def _perform_single_health_check(account: VirtualminAccount) -> tuple[Virtualmin
     except Exception as e:
         return account, False, f"Health check exception: {e!s}"
 
+    finally:
+        # Runs in a pool thread. The ping resolves credentials through the vault, which opens
+        # this thread's own database connection; Django closes connections only for the
+        # request thread, so without this every worker would leave one open.
+        connections.close_all()
 
-@transaction.atomic
+
+# Not atomic: it writes nothing, and a transaction would stay open across network pings.
 def _execute_bulk_health_check(accounts: list[VirtualminAccount]) -> BulkOperationResult:
     """
     Perform health check on multiple accounts with comprehensive monitoring.
@@ -1763,7 +1556,8 @@ def _execute_bulk_health_check(accounts: list[VirtualminAccount]) -> BulkOperati
 
     try:
         # Use thread pool for parallel health checks (with reasonable concurrency limit)
-        max_workers = min(MAX_CONCURRENT_HEALTH_CHECKS, len(accounts))  # Limit concurrent checks to prevent overload
+        # The provisioning.max_concurrent_health_checks setting, as the form's cap.
+        max_workers = min(get_max_concurrent_health_checks(), len(accounts))
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             # Submit all health check tasks
@@ -2122,26 +1916,27 @@ def virtualmin_account_new(request: HttpRequest) -> HttpResponse:
 @audit_service_call("virtualmin_account_suspend")
 @monitor_performance(max_duration_seconds=15.0, alert_threshold=5.0)
 def virtualmin_account_suspend(request: HttpRequest, account_id: str) -> HttpResponse:
-    """🚫 Suspend a Virtualmin account."""
+    """🚫 Suspend a hosting account by suspending its Service (#566, ADR-0051).
+
+    The reconciler applies it to Virtualmin, so this never calls the panel itself.
+    """
     account = get_object_or_404(VirtualminAccount, id=account_id)
+    user_email = _get_user_email(request.user)
 
-    try:
-        # Call Virtualmin API to actually suspend the account
-        provisioning_service = VirtualminProvisioningService()
-        user_email = _get_user_email(request.user)
-        result = provisioning_service.suspend_account(account, reason=f"Suspended by {user_email}")
-
-        if result.is_ok():
-            messages.success(request, f"Account {account.virtualmin_username} has been suspended on the server.")
-            logger.info(f"✅ [AccountSuspend] Account {account.virtualmin_username} suspended by {user_email}")
-        else:
-            error_msg = result.unwrap_err()
-            messages.error(request, f"Failed to suspend account {account.virtualmin_username}: {error_msg}")
-            logger.error(f"❌ [AccountSuspend] Failed to suspend {account.virtualmin_username}: {error_msg}")
-
-    except Exception as e:
-        messages.error(request, f"Failed to suspend account {account.virtualmin_username}: {e!s}")
-        logger.error(f"❌ [AccountSuspend] Failed to suspend {account.virtualmin_username}: {e}")
+    result = HostingAccountStaffActions.suspend(account)
+    if result.is_ok():
+        messages.success(
+            request,
+            _("Suspension of {account} is queued; its service is suspended.").format(
+                account=account.virtualmin_username
+            ),
+        )
+        logger.info(f"✅ [AccountSuspend] {account.virtualmin_username} suspension queued by {user_email}")
+    else:
+        messages.error(request, result.unwrap_err())
+        logger.warning(
+            f"⚠️ [AccountSuspend] {account.virtualmin_username} refused for {user_email}: {result.unwrap_err()}"
+        )
 
     # If HTMX request, check where we came from
     if request.headers.get("HX-Request"):
@@ -2166,27 +1961,26 @@ def virtualmin_account_suspend(request: HttpRequest, account_id: str) -> HttpRes
 @audit_service_call("virtualmin_account_activate")
 @monitor_performance(max_duration_seconds=15.0, alert_threshold=5.0)
 def virtualmin_account_activate(request: HttpRequest, account_id: str) -> HttpResponse:
-    """✅ Activate a Virtualmin account."""
+    """✅ Activate a hosting account by resuming its Service, or by queueing a reconcile (#566).
+
+    Only a suspension staff made here can be lifted here; billing's and the customer's
+    stay with their owners. The reconciler applies the result to Virtualmin.
+    """
     account = get_object_or_404(VirtualminAccount, id=account_id)
+    user_email = _get_user_email(request.user)
 
-    try:
-        # Call Virtualmin API to actually activate the account
-        provisioning_service = VirtualminProvisioningService()
-        result = provisioning_service.unsuspend_account(account)
-
-        if result.is_ok():
-            messages.success(request, f"Account {account.virtualmin_username} has been activated on the server.")
-            logger.info(
-                f"✅ [AccountActivate] Account {account.virtualmin_username} activated by {_get_user_email(request.user)}"
-            )
-        else:
-            error_msg = result.unwrap_err()
-            messages.error(request, f"Failed to activate account {account.virtualmin_username}: {error_msg}")
-            logger.error(f"❌ [AccountActivate] Failed to activate {account.virtualmin_username}: {error_msg}")
-
-    except Exception as e:
-        messages.error(request, f"Failed to activate account {account.virtualmin_username}: {e!s}")
-        logger.error(f"❌ [AccountActivate] Failed to activate {account.virtualmin_username}: {e}")
+    result = HostingAccountStaffActions.activate(account)
+    if result.is_ok():
+        messages.success(
+            request,
+            _("Activation of {account} is queued.").format(account=account.virtualmin_username),
+        )
+        logger.info(f"✅ [AccountActivate] {account.virtualmin_username} {result.unwrap()} by {user_email}")
+    else:
+        messages.error(request, result.unwrap_err())
+        logger.warning(
+            f"⚠️ [AccountActivate] {account.virtualmin_username} refused for {user_email}: {result.unwrap_err()}"
+        )
 
     # If HTMX request, check where we came from
     if request.headers.get("HX-Request"):
