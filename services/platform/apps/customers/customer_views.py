@@ -8,7 +8,6 @@ from __future__ import annotations
 import logging
 from contextlib import suppress
 from typing import TYPE_CHECKING, Any, cast
-from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -24,6 +23,7 @@ from django.utils.translation import gettext_lazy as _
 
 from apps.common.constants import SEARCH_QUERY_MIN_LENGTH
 from apps.common.decorators import staff_required
+from apps.common.pagination import pagination_query
 from apps.common.rate_limiting import rate_limit
 from apps.common.types import Err
 from apps.customers.contact_models import CustomerAddress
@@ -145,15 +145,8 @@ def customer_list(request: HttpRequest) -> HttpResponse:
     page_number = request.GET.get("page")
     customers_page = paginator.get_page(page_number)
 
-    # Build URL-safe extra params for pagination links
-    params: dict[str, str] = {}
-    if search_query:
-        params["q"] = search_query
-    if status_filter:
-        params["status"] = status_filter
-    if type_filter:
-        params["type"] = type_filter
-    extra_params = urlencode(params) if params else ""
+    # Preserve encoded query parameters for pagination links
+    extra_params = pagination_query(request)
 
     # Status tabs for filter UI
     status_tabs = [

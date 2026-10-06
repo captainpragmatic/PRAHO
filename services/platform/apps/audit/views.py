@@ -30,6 +30,7 @@ from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_POST
 
 from apps.common.decorators import staff_required_strict
+from apps.common.pagination import pagination_query
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.types import Err, Ok
 
@@ -663,6 +664,7 @@ def logs_list(request: HttpRequest) -> HttpResponse:
         "query_info": query_info,
         "total_results": paginator.count,
         "page_size": page_size,
+        "extra_params": pagination_query(request),
     }
 
     # Check if HTMX request
@@ -920,7 +922,11 @@ def gdpr_export_requests_list(request: HttpRequest) -> HttpResponse:
     paginator = Paginator(queryset, 25)
     export_requests = paginator.get_page(page)
 
-    context = {"export_requests": export_requests, "current_time": timezone.now()}
+    context = {
+        "export_requests": export_requests,
+        "current_time": timezone.now(),
+        "extra_params": pagination_query(request),
+    }
 
     # Check if HTMX request
     if request.headers.get("HX-Request"):

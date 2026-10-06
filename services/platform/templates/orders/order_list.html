@@ -395,14 +395,7 @@
     </div>
 
     <!-- Pagination -->
-    {% if search_query or current_status %}
-      {% with search_param="&search="|add:search_query status_param="&status="|add:current_status %}
-      {% with extra=search_param|add:status_param %}
-      {% include "components/pagination.html" with page_obj=orders extra_params=extra %}
-      {% endwith %}{% endwith %}
-    {% else %}
-      {% include "components/pagination.html" with page_obj=orders %}
-    {% endif %}
+    {% include "components/pagination.html" with page_obj=orders extra_params=extra_params %}
 
   {% else %}
     <!-- Empty State -->

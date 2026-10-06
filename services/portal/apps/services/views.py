@@ -16,7 +16,7 @@ from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_http_methods
 
 from apps.common.decorators import _get_user_role_for_customer, _render_role_check_degraded
-from apps.common.pagination import PaginatorData, build_pagination_params
+from apps.common.pagination import PaginatorData, pagination_query
 from apps.common.rate_limit_feedback import (
     build_maintenance_context,
     get_degraded_message,
@@ -219,7 +219,7 @@ def service_list(request: HttpRequest) -> HttpResponse:
         active_count = summary.get("active_services", 0)
 
         paginator_data = PaginatorData(total_count=total_count, current_page=page, page_size=20)
-        pagination_params = build_pagination_params(status=status_filter, q=search_query)
+        pagination_params = pagination_query(request)
 
         context = {
             "services": services,
@@ -275,7 +275,7 @@ def service_search_api(request: HttpRequest) -> HttpResponse:
         total_count = response.get("count", 0)
 
         paginator_data = PaginatorData(total_count=total_count, current_page=1, page_size=20)
-        pagination_params = build_pagination_params(status=status_filter, q=search_query)
+        pagination_params = pagination_query(request)
 
         return render(
             request,

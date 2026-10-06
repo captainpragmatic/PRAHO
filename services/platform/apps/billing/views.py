@@ -58,6 +58,7 @@ from apps.common.decorators import (
     staff_rate_limit,
 )
 from apps.common.mixins import get_search_context
+from apps.common.pagination import pagination_query
 from apps.common.tax_service import TaxService
 from apps.common.types import Err
 from apps.common.utils import json_error, json_success
@@ -443,7 +444,7 @@ def billing_list(request: HttpRequest) -> HttpResponse:
         pagination_context = {
             "page_obj": page_obj,
             "is_paginated": page_obj.has_other_pages(),
-            "extra_params": {k: v for k, v in request.GET.items() if k != "page"},
+            "extra_params": pagination_query(request),
         }
 
         # Platform is staff-only
@@ -482,7 +483,7 @@ def billing_list(request: HttpRequest) -> HttpResponse:
             "is_staff_user": False,
             "page_obj": None,
             "is_paginated": False,
-            "extra_params": {},
+            "extra_params": pagination_query(request),
             "search_query": "",
             "has_search": False,
             "error_message": "Unable to load billing data. Please try again later.",
@@ -547,7 +548,7 @@ def proforma_list(request: HttpRequest) -> HttpResponse:
         pagination_context = {
             "page_obj": page_obj,
             "is_paginated": page_obj.has_other_pages(),
-            "extra_params": {k: v for k, v in request.GET.items() if k != "page"},
+            "extra_params": pagination_query(request),
         }
 
         # Platform is staff-only
@@ -583,7 +584,7 @@ def proforma_list(request: HttpRequest) -> HttpResponse:
             "is_staff_user": False,
             "page_obj": None,
             "is_paginated": False,
-            "extra_params": {},
+            "extra_params": pagination_query(request),
             "search_query": "",
             "has_search": False,
             "error_message": "Unable to load proforma data. Please try again later.",
@@ -681,11 +682,8 @@ def billing_list_htmx(request: HttpRequest) -> HttpResponse:
         page_number = request.GET.get("page")
         page_obj = paginator.get_page(page_number)
 
-        # Build extra_params for pagination
-        extra_params_dict = {k: v for k, v in request.GET.items() if k != "page"}
-        extra_params = "&".join([f"{k}={v}" for k, v in extra_params_dict.items()])
-        if extra_params:
-            extra_params = "&" + extra_params
+        # Preserve encoded query parameters for pagination
+        extra_params = pagination_query(request)
 
         # Prepare data for standardized table component
         table_data = prepare_billing_table_data(list(page_obj), request.user)

@@ -17,7 +17,7 @@ from django.views.decorators.http import require_http_methods
 
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 from apps.common.decorators import log_access_attempt, require_billing_access
-from apps.common.pagination import PaginatorData, build_pagination_params
+from apps.common.pagination import PaginatorData, pagination_query
 from apps.common.rate_limit_feedback import (
     get_degraded_message,
     handle_platform_error,
@@ -225,7 +225,7 @@ def invoices_list_view(request: HttpRequest) -> HttpResponse:
             current_page=page_data.current_page,
             page_size=page_data.page_size,
         )
-        pagination_params = build_pagination_params(type=doc_type, status=status_filter, q=search_query)
+        pagination_params = pagination_query(request)
 
         context = {
             "invoices": page_data.documents,
@@ -305,7 +305,7 @@ def invoices_search_api(request: HttpRequest) -> HttpResponse:
             current_page=page_data.current_page,
             page_size=page_data.page_size,
         )
-        pagination_params = build_pagination_params(type=doc_type, status=status_filter, q=search_query)
+        pagination_params = pagination_query(request)
 
         return render(
             request,

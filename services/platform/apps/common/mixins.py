@@ -20,6 +20,7 @@ from django.http import HttpRequest
 
 # Generic type variable removed for Python 3.13 compatibility
 from apps.common.constants import DEFAULT_PAGE_SIZE
+from apps.common.pagination import pagination_query
 
 _DEFAULT_DEFAULT_ORPHANS = 3
 DEFAULT_ORPHANS = _DEFAULT_DEFAULT_ORPHANS
@@ -82,11 +83,7 @@ def get_pagination_context(
     page_obj = paginator.get_page(page_number)
 
     # Build preserved query parameters (exclude page parameter)
-    query_params = request.GET.copy()
-    if page_param in query_params:
-        del query_params[page_param]
-
-    preserved_params = "&" + query_params.urlencode() if query_params else ""
+    preserved_params = pagination_query(request, exclude=(page_param,))
 
     return {
         "page_obj": page_obj,
@@ -165,9 +162,6 @@ class PaginationMixin:
 
         # Add preserved query parameters for pagination links
         if hasattr(self, "request"):
-            query_params = self.request.GET.copy()
-            if "page" in query_params:
-                del query_params["page"]
-            context["extra_params"] = "&" + query_params.urlencode() if query_params else ""
+            context["extra_params"] = pagination_query(self.request)
 
         return context

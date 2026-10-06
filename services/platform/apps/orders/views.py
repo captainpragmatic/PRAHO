@@ -38,6 +38,7 @@ from apps.billing.fiscal_identity import billing_country_code
 from apps.billing.refund_service import RefundData, RefundService
 from apps.common.decorators import billing_staff_api_required, staff_required_strict
 from apps.common.mixins import get_search_context
+from apps.common.pagination import pagination_query
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.utils import json_error, json_success
 from apps.common.validators import log_security_event
@@ -442,6 +443,7 @@ def order_list(request: HttpRequest) -> HttpResponse:
 
     context = {
         "orders": orders,
+        "extra_params": pagination_query(request),
         "status_counts": status_counts,
         "other_status_summary": other_status_summary,
         "current_status": status_filter,
@@ -495,11 +497,8 @@ def order_list_htmx(request: HttpRequest) -> HttpResponse:
     page_number = request.GET.get("page")
     orders = paginator.get_page(page_number)
 
-    # Build extra_params for pagination
-    extra_params_dict = {k: v for k, v in request.GET.items() if k != "page"}
-    extra_params = "&".join([f"{k}={v}" for k, v in extra_params_dict.items()])
-    if extra_params:
-        extra_params = "&" + extra_params
+    # Preserve encoded query parameters for pagination
+    extra_params = pagination_query(request)
 
     context = {
         "orders": orders,

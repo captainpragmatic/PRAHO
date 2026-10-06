@@ -4,7 +4,6 @@
 
 import base64
 import logging
-from urllib.parse import quote
 
 from django.contrib import messages
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
@@ -17,7 +16,7 @@ from django.views.decorators.http import require_http_methods
 
 from apps.common.api_utils import DictAsObj
 from apps.common.decorators import _get_user_role_for_customer, _render_role_check_degraded, require_support_access
-from apps.common.pagination import PaginatorData, build_pagination_params
+from apps.common.pagination import PaginatorData, pagination_query
 from apps.common.rate_limit_feedback import (
     handle_platform_error,
     is_rate_limited_error,
@@ -173,9 +172,7 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
 
         # Pagination uses the same limit as the Platform request.
         paginator_data = PaginatorData(total_count=total_count, current_page=page, page_size=TICKET_PAGE_SIZE)
-        pagination_params = build_pagination_params(
-            q=quote(search_query, safe=""), status=status_filter, priority=quote(priority_filter, safe="")
-        )
+        pagination_params = pagination_query(request)
 
         context = {
             "tickets": tickets,
@@ -556,9 +553,7 @@ def ticket_search_api(request: HttpRequest) -> HttpResponse:
         total_count = response.get("count", 0)
 
         paginator_data = PaginatorData(total_count=total_count, current_page=page, page_size=TICKET_PAGE_SIZE)
-        pagination_params = build_pagination_params(
-            q=quote(search_query, safe=""), status=status_filter, priority=quote(priority_filter, safe="")
-        )
+        pagination_params = pagination_query(request)
 
         return render(
             request,

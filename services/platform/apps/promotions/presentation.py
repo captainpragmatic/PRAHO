@@ -11,6 +11,7 @@ from django.utils.translation import gettext as _
 
 from apps.common.localisation import DisplayLocalisation, format_localised_date
 from apps.common.localisation_services import get_request_localisation
+from apps.common.pagination import pagination_query
 
 from .models import GiftCard, Referral
 
@@ -125,9 +126,7 @@ def staff_context(request: HttpRequest, context: dict[str, Any]) -> dict[str, An
     context["promotion_navigation"] = [
         {"label": _(label), "url": reverse(f"promotions:{name}"), "active": name == route} for name, label in SECTIONS
     ]
-    parameters = request.GET.copy()
-    parameters.pop("page", None)
-    context["extra_params"] = "&" + parameters.urlencode() if parameters else ""
+    context["extra_params"] = pagination_query(request)
     if route == "gift_card_list":
         context["statuses"] = [{"value": value, "label": label} for value, label in GiftCard.STATUS_CHOICES]
     if route == "referral_list":
