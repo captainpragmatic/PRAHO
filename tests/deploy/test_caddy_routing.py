@@ -78,7 +78,9 @@ def _read(path: str) -> str:
     return (ROOT / path).read_text()
 
 
-def _config(name: str, allowed: list[str] | None = None, hsts_policy: str | None = None) -> str:
+def _config(
+    name: str, allowed: list[str] | None = None, hsts_policy: str | None = None, praho_env: str = "prod"
+) -> str:
     source = _read(CONFIGS[name])
     if name in {"native", "docker"}:
         context: dict[str, object] = {
@@ -90,6 +92,7 @@ def _config(name: str, allowed: list[str] | None = None, hsts_policy: str | None
             },
             # The Docker role's default (deploy/ansible/roles/praho/defaults/main.yml) for prod.
             "hsts_policy": hsts_policy or "max-age=31536000; includeSubDomains",
+            "praho_env": praho_env,
             "portal_domain": PORTAL_HOST,
             "platform_domain": PLATFORM_HOST,
             "acme_email": "admin@example.test",
@@ -303,15 +306,17 @@ def test_compose_forwards_domains_hosts_and_staff_cidrs(topology: str) -> None:
 
 
 @pytest.mark.parametrize(
-    ("deployed", "expected"),
+    ("deployed", "praho_env", "expected"),
     [
-        (None, "max-age=31536000; includeSubDomains"),
-        ("", "max-age=31536000; includeSubDomains"),  # empty must not become an empty header
-        ("max-age=3600", "max-age=3600"),
+        (None, "prod", "max-age=31536000; includeSubDomains"),
+        ("", "prod", "max-age=31536000; includeSubDomains"),  # empty must not become an empty header
+        ("max-age=3600", "prod", "max-age=3600"),
+        (None, "staging", "max-age=3600"),  # an upgraded staging .env without the key
+        ('"max-age=31536000; includeSubDomains; preload"', "prod", "max-age=31536000; includeSubDomains; preload"),
     ],
 )
-def test_native_template_renders_the_deployed_hsts_policy(deployed: str | None, expected: str) -> None:
-    rendered = _config("native", hsts_policy=deployed)
+def test_native_template_renders_the_deployed_hsts_policy(deployed: str | None, praho_env: str, expected: str) -> None:
+    rendered = _config("native", hsts_policy=deployed, praho_env=praho_env)
     values = re.findall(r'Strict-Transport-Security "([^"]*)"', rendered)
     assert values and set(values) == {expected}
 

@@ -7,8 +7,11 @@
 # ---------------------------------------------------------------------------
 # 1. Portal — public-facing customer service
 # ---------------------------------------------------------------------------
-{# Edge HSTS, per environment, from the deployed .env. Empty or unset falls back to one year. #}
-{% set hsts_policy = deployed_env.HSTS_POLICY | default('max-age=31536000; includeSubDomains', true) %}
+{# Edge HSTS, per environment. A non-empty HSTS_POLICY in the deployed .env wins, with surrounding quotes
+   stripped (a ";"-bearing value must be quoted for `source .env`). Unset or empty falls back by
+   praho_env: one hour on staging, so an existing staging .env without the key still gets it. #}
+{% set hsts_policy = (deployed_env.HSTS_POLICY | default('', true) | trim | trim('"') | trim("'"))
+   or ('max-age=3600' if (praho_env | default('prod')) == 'staging' else 'max-age=31536000; includeSubDomains') %}
 {{ deployed_env.PORTAL_DOMAIN }} {
     tls {{ deployed_env.ACME_EMAIL | default('admin@example.com') }}
 

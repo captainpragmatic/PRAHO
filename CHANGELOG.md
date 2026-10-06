@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `max-age=3600` on staging, which the Docker Ansible role derives from `praho_env`. Caddy's own
   502s now carry it too. Where no edge fronts the portal, its `SECURE_HSTS_*` settings now take
   effect; a hardcoded header in its middleware had blocked them. Nothing preloads by default.
+  **Upgrading a Docker Compose staging deployment:** add `HSTS_POLICY=max-age=3600` to its `.env`, or
+  it keeps the one-year production default. Native staging deploys fall back to one hour on their own.
 - Staff with two-factor authentication enrolled are now asked for their code at the web
   login. The password alone used to sign them in, because the step that hands a login over
   to the code page was never wired (#590). The code page now uses the same check as the API

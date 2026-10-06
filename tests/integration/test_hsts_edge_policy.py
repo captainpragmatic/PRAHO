@@ -111,7 +111,9 @@ class TestEdgeHstsPolicy:
     @pytest.mark.security
     def test_both_ansible_roles_resolve_the_policy_with_a_default(self):
         native = (DEPLOY / "ansible/roles/praho-native/templates/Caddyfile.native.j2").read_text()
-        assert f"deployed_env.HSTS_POLICY | default('{DEFAULT_POLICY}', true)" in native
+        assert "deployed_env.HSTS_POLICY" in native
+        assert "'max-age=3600' if (praho_env | default('prod')) == 'staging'" in native  # upgraded staging
+        assert DEFAULT_POLICY in native
         docker_defaults = (DEPLOY / "ansible/roles/praho/defaults/main.yml").read_text()
         assert "hsts_policy:" in docker_defaults
         assert "max-age=3600" in docker_defaults

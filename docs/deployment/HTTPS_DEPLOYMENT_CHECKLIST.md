@@ -40,8 +40,11 @@ Nothing in this table is an operator decision. It tells you what to expect when 
 >   upstream down).
 > - **Set but empty would send an empty header, which turns HSTS off.** So every compose file and
 >   both Ansible roles repeat the non-empty default.
-> - **Never quote the value.** The production value contains `;`, so leave it unset there rather
->   than writing it into a `.env` that gets `source`d.
+> - **Quote a value that contains `;`** (for example, adding `; preload`). `source .env`, Docker
+>   Compose and the native template all strip the double quotes.
+> - **Upgrading an existing staging deployment:** Compose falls back to the one-year default when
+>   `HSTS_POLICY` is missing, so add `HSTS_POLICY=max-age=3600` to the staging `.env`. Native
+>   deploys fall back to one hour on their own when `praho_env` is `staging`.
 >
 > A staging host under a parent domain that sends `includeSubDomains` still inherits the parent's
 > longer policy. To preload a domain, submit it at hstspreload.org and add `; preload` to its
