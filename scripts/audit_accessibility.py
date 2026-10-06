@@ -30,10 +30,14 @@ import argparse
 import ast
 import re
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from gettext import gettext
 from html.parser import HTMLParser
 from pathlib import Path
+
+from django.template import defaultfilters
+from django.utils.safestring import SafeString
 
 # ===============================================================================
 # CONFIGURATION
@@ -94,10 +98,22 @@ COMPONENT_FIELD = re.compile(
 COMPONENT_ARGUMENT = re.compile(r"""(?:[^\s'"]+|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')+""")
 QUOTED_LITERAL = r"""(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')"""
 TRANSLATED_LITERAL = rf"(?:_|gettext)\({QUOTED_LITERAL}\)"
+COMPONENT_FILTER = re.compile(rf"\|(?P<name>\w+)(?::(?P<argument>{QUOTED_LITERAL}|{TRANSLATED_LITERAL}|[\w.+-]+))?")
 COMPONENT_FILTER_EXPRESSION = re.compile(
-    rf"(?P<literal>{QUOTED_LITERAL}|{TRANSLATED_LITERAL})"
-    rf"(?:\|\w+(?::(?:{QUOTED_LITERAL}|{TRANSLATED_LITERAL}|[\w.+-]+))?)*"
+    rf"(?P<literal>{QUOTED_LITERAL}|{TRANSLATED_LITERAL})(?P<filters>(?:{COMPONENT_FILTER.pattern})*)"
 )
+# Case changes retain characters; escaping retains text; safe changes only HTML safety.
+# striptags can erase text, so check the resulting value after the complete chain.
+COMPONENT_NAME_FILTERS: dict[str, Callable[[str], str]] = {
+    "capfirst": defaultfilters.capfirst,
+    "title": defaultfilters.title,
+    "lower": defaultfilters.lower,
+    "upper": defaultfilters.upper,
+    "escape": defaultfilters.escape_filter,
+    "force_escape": defaultfilters.force_escape,
+    "safe": defaultfilters.safe,
+    "striptags": defaultfilters.striptags,
+}
 POSITIVE_TABINDEX = re.compile(r"tabindex\s*=\s*[\"']([1-9]\d*)[\"']", re.IGNORECASE)
 ONCLICK_NON_INTERACTIVE = re.compile(
     r"<(?:div|span|p|li|td)\b[^>]*(?:onclick|@click|x-on:click)[^>]*>",
@@ -199,21 +215,43 @@ class _FormLabelParser(HTMLParser):
             label.text += _strip_django_tags(data)
 
 
-def _component_argument_has_text(value: str) -> bool:
-    """Judge the base literal of a filter expression without executing filters."""
-    expression = COMPONENT_FILTER_EXPRESSION.fullmatch(value)
-    if expression:
-        value = expression.group("literal")
+def _component_literal_text(value: str) -> str | None:
+    """Read literal text, retaining Django's safe-string semantics."""
     translation = re.fullmatch(r"(?:_|gettext)\((.*)\)", value, flags=re.DOTALL)
     if translation:
         value = translation.group(1)
-    if value.startswith(('"', "'")):
-        try:
-            text: object = ast.literal_eval(value)
-        except (SyntaxError, ValueError):
-            return False
-        return isinstance(text, str) and bool(text.strip())
-    return value.strip() not in {"", "None", "False"}
+    try:
+        text: object = ast.literal_eval(value)
+    except (SyntaxError, ValueError):
+        return None
+    # Django treats quoted filter-expression constants as safe strings.
+    return SafeString(text) if isinstance(text, str) else None
+
+
+def _component_argument_has_text(value: str) -> bool:
+    """Verify literal filter chains; keep the existing acceptance of variables."""
+    expression = COMPONENT_FILTER_EXPRESSION.fullmatch(value)
+    if expression is None:
+        return not value.startswith(('"', "'")) and value.strip() not in {"", "None", "False"}
+    text = _component_literal_text(expression.group("literal"))
+    if text is None:
+        return False
+    for filter_match in COMPONENT_FILTER.finditer(expression.group("filters")):
+        name = filter_match.group("name")
+        argument = filter_match.group("argument")
+        if name == "default":
+            # A literal nonblank fallback can fill an empty value, but not whitespace.
+            fallback = _component_literal_text(argument) if argument is not None else None
+            if fallback is None or not fallback.strip():
+                return False
+            text = text or fallback
+        else:
+            transform = COMPONENT_NAME_FILTERS.get(name)
+            if transform is None or argument is not None:
+                # Unknown/erasing filters cannot prove a literal accessible name.
+                return False
+            text = transform(text)
+    return bool(text.strip())
 
 
 def _check_form_labels(content: str, path: Path) -> list[A11yViolation]:
