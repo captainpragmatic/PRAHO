@@ -71,13 +71,23 @@ def derive_tax_category(result: VATCalculationResult) -> str:
     return "Z" if result.vat_rate == 0 else "S"
 
 
-def capture_vat_evidence(result: VATCalculationResult) -> dict[str, Any]:
-    """Copy the decision and any contemporaneous cached validation, without I/O to VIES."""
+def capture_vat_evidence(
+    result: VATCalculationResult, *, recorded_evidence: dict[str, object] | None = None
+) -> dict[str, object]:
+    """Capture a decision, or refresh only amounts while preserving a recorded decision and proof."""
+    if recorded_evidence is not None:
+        return {
+            **deepcopy(recorded_evidence),
+            "subtotal_cents": result.subtotal_cents,
+            "tax_cents": result.vat_cents,
+            "total_cents": result.total_cents,
+        }
+
     from apps.billing.config import get_vies_evidence_max_age_days  # noqa: PLC0415
     from apps.billing.tax_models import VATValidation  # noqa: PLC0415  # Avoid a billing model import cycle.
 
     calculated_at = result.audit_data["calculated_at"]
-    evidence: dict[str, Any] = {
+    evidence: dict[str, object] = {
         "version": EVIDENCE_VERSION,
         "scenario": result.scenario.value,
         "category": derive_tax_category(result),

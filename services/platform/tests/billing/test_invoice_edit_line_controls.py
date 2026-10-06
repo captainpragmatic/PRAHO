@@ -28,6 +28,30 @@ class InvoiceEditLineControlsTests(TestCase):
         self.assertRegex(html, r'<button[^>]*class="ui-btn[^"]*\badd-line-btn\b')
         self.assertRegex(html, r'<button[^>]*class="ui-btn[^"]*\bremove-line\b')
 
+    def test_last_line_removal_has_a_nonce_protected_guard(self) -> None:
+        invoice = Invoice.objects.create(customer=create_customer(), currency=create_currency(), status="draft")
+        InvoiceLine.objects.create(invoice=invoice, kind="service", description="Last hosting line")
+        self.client.force_login(create_admin_user())
+
+        response = self.client.get(reverse("billing:invoice_edit", args=[invoice.pk]))
+
+        self.assertContains(response, 'id="invoice-lines"')
+        doc = etree.HTML(response.content)
+        scripts = [
+            script
+            for script in doc.xpath("//script")
+            if "document.getElementById('invoice-lines')" in (script.text or "")
+        ]
+        self.assertEqual(len(scripts), 1)
+        self.assertIn(
+            "if (button && container.querySelectorAll('.invoice-line').length > 1)",
+            scripts[0].text or "",
+        )
+        nonce = scripts[0].get("nonce")
+        self.assertTrue(nonce)
+        self.assertIn(f"'nonce-{nonce}'", response.headers["Content-Security-Policy"])
+        self.assertEqual(doc.xpath("//*[@id='invoice-lines']//button/@onclick"), [])
+
     def test_existing_and_cloned_lines_render_component_remove_buttons(self) -> None:
         invoice = Invoice.objects.create(customer=create_customer(), currency=create_currency(), status="draft")
         line = InvoiceLine.objects.create(invoice=invoice, kind="service", description="Existing hosting")

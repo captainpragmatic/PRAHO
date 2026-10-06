@@ -268,7 +268,9 @@ document.addEventListener('DOMContentLoaded', function () {
   container.addEventListener('click', function (event) {
     if (!(event.target instanceof Element)) return;
     const button = event.target.closest('.remove-line');
-    if (button) button.closest('.invoice-line').remove();
+    if (button && container.querySelectorAll('.invoice-line').length > 1) {
+      button.closest('.invoice-line').remove();
+    }
   });
 });
 </script>

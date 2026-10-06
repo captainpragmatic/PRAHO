@@ -11,11 +11,14 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.audit.models import AuditEvent
+from apps.billing.ec_sales_service import ReportingPeriod, aggregate_ec_services
 from apps.billing.invoice_models import Invoice, InvoiceLine
+from apps.billing.invoice_service import update_draft_invoice
 from apps.billing.metering_models import BillingCycle
 from apps.billing.payment_models import CreditLedger, Payment
 from apps.billing.subscription_models import Subscription
-from apps.billing.tax_evidence import capture_vat_evidence
+from apps.billing.tax_evidence import capture_vat_evidence, read_vat_evidence
+from apps.billing.tax_models import VATValidation
 from apps.common.tax_service import VATCalculationResult, VATScenario
 from apps.common.types import Err
 from apps.customers.models import Customer
@@ -135,8 +138,118 @@ class DraftInvoiceEditTests(TestCase):
                 added = invoice.lines.get(description="Added line")
                 self.assertEqual((added.tax_rate, added.tax_category_code), (rate / 100, category))
                 invoice.refresh_from_db()
-                self.assertEqual(invoice.vat_evidence, evidence)
+                amounts = {
+                    "subtotal_cents": invoice.subtotal_cents,
+                    "tax_cents": invoice.tax_cents,
+                    "total_cents": invoice.total_cents,
+                }
+                self.assertEqual(invoice.vat_evidence, {**evidence, **amounts})
                 self.assertEqual(invoice.total_cents, 1331 if category == "S" else 1100)
+
+    def test_edited_reverse_charge_draft_is_included_in_ec_sales(self) -> None:
+        invoice, line = self._draft(scenario=VATScenario.EU_B2B_REVERSE_CHARGE, rate=Decimal("0"))
+        validation = VATValidation.objects.create(
+            country_code="DE",
+            vat_number="136695976",
+            full_vat_number="DE136695976",
+            is_valid=True,
+            is_active=True,
+            consultation_reference="wp14-original-proof",
+            validation_source="vies",
+            validation_date=timezone.now() - timezone.timedelta(hours=1),
+            expires_at=timezone.now() + timezone.timedelta(days=1),
+        )
+        invoice.vat_evidence = capture_vat_evidence(
+            VATCalculationResult(
+                scenario=VATScenario.EU_B2B_REVERSE_CHARGE,
+                vat_rate=Decimal("0"),
+                subtotal_cents=1000,
+                vat_cents=0,
+                total_cents=1000,
+                country_code="DE",
+                is_business=True,
+                vat_number="DE136695976",
+                reasoning="Original reverse-charge decision",
+                audit_data={"calculated_at": timezone.now().isoformat()},
+            )
+        )
+        invoice.bill_to_name = "WP14 GmbH"
+        invoice.bill_to_country = "DE"
+        invoice.bill_to_tax_id = "DE136695976"
+        invoice.save()
+        evidence = dict(invoice.vat_evidence)
+        self.assertEqual(evidence["vies"]["consultation_reference"], "wp14-original-proof")
+        VATValidation.objects.filter(pk=validation.pk).update(is_valid=False, consultation_reference="wp14-later-proof")
+        data = self._post_data(invoice, line)
+        data["line_0_unit_price"] = "20.00"
+
+        response = self.client.post(reverse("billing:invoice_edit", args=[invoice.pk]), data)
+
+        self.assertRedirects(response, reverse("billing:invoice_detail", args=[invoice.pk]))
+        invoice.refresh_from_db()
+        self.assertEqual((invoice.subtotal_cents, invoice.tax_cents, invoice.total_cents), (2000, 0, 2000))
+        invoice.issue()
+        invoice.save()
+        invoice.refresh_from_db()
+        self.assertIsNotNone(invoice.tax_point_date)
+        assert invoice.tax_point_date is not None
+        report = aggregate_ec_services(ReportingPeriod(invoice.tax_point_date.year, invoice.tax_point_date.month))
+        self.assertTrue(report.can_export, report.exceptions)
+        self.assertEqual(report.exceptions, ())
+        self.assertEqual(len(report.contributions), 1)
+        contribution = report.contributions[0]
+        self.assertEqual(
+            (contribution.invoice_id, contribution.line_id, contribution.gross_cents),
+            (invoice.pk, line.pk, 2000),
+        )
+        self.assertEqual(contribution.base_ron, Decimal("20"))
+        self.assertEqual(contribution.consultation_reference, "wp14-original-proof")
+        self.assertEqual(contribution.vies_status, "vies:valid")
+        self.assertEqual(report.base_ron, Decimal("20"))
+        self.assertEqual(
+            invoice.vat_evidence, {**evidence, "subtotal_cents": 2000, "tax_cents": 0, "total_cents": 2000}
+        )
+        decision = read_vat_evidence(invoice)
+        self.assertIsNotNone(decision)
+        assert decision is not None
+        self.assertEqual((decision.subtotal_cents, decision.tax_cents, decision.total_cents), (2000, 0, 2000))
+
+    def test_empty_final_line_list_is_refused_without_mutation(self) -> None:
+        invoice, _ = self._draft()
+        before = list(invoice.lines.order_by("pk").values())
+        metadata = dict(invoice.meta)
+        evidence = dict(invoice.vat_evidence)
+        due_at = invoice.due_at
+        totals = (invoice.subtotal_cents, invoice.tax_cents, invoice.total_cents)
+
+        result = update_draft_invoice(
+            invoice.pk,
+            {"lines": [], "public_notes": "Must not persist", "due_at": ""},
+            self.staff,
+        )
+
+        self.assertIsInstance(result, Err)
+        if isinstance(result, Err):
+            self.assertEqual(result.error, "An invoice must contain at least one line.")
+        invoice.refresh_from_db()
+        self.assertEqual(list(invoice.lines.order_by("pk").values()), before)
+        self.assertEqual(invoice.meta, metadata)
+        self.assertEqual(invoice.vat_evidence, evidence)
+        self.assertEqual(invoice.due_at, due_at)
+        self.assertEqual((invoice.subtotal_cents, invoice.tax_cents, invoice.total_cents), totals)
+        self.assertFalse(AuditEvent.objects.filter(action="invoice_edited", object_id=str(invoice.pk)).exists())
+
+    def test_extreme_price_is_refused_over_http_without_mutation(self) -> None:
+        invoice, line = self._draft()
+        data = self._post_data(invoice, line)
+        data["public_notes"] = "Must roll back"
+        data["line_0_unit_price"] = "1e1000000"
+        evidence = dict(invoice.vat_evidence)
+        self.client.raise_request_exception = False
+
+        self._assert_refused(invoice, data, "Line quantities or prices are out of range.")
+
+        self.assertEqual(invoice.vat_evidence, evidence)
 
     def test_customer_and_recorded_vat_edits_are_refused(self) -> None:
         other = Customer.objects.create(name="Another Romanian customer", customer_type="company")
@@ -289,7 +402,7 @@ class DraftInvoiceEditTests(TestCase):
                 elif case.startswith("cycle_"):
                     self._link_cycle(line)
                     data = (
-                        {"customer": str(self.customer.pk), "currency": self.currency.pk}
+                        {key: value for key, value in data.items() if key != "line_0_id"}
                         if case == "cycle_delete"
                         else {**data, "line_0_unit_price" if case == "cycle_price" else "line_0_quantity": "2"}
                     )
@@ -329,8 +442,6 @@ class DraftInvoiceEditTests(TestCase):
         data = self._post_data(invoice, line)
         data["customer"] = str(foreign.pk)
         self._assert_refused(invoice, data, "The invoice customer cannot be changed.")
-
-        from apps.billing.invoice_service import update_draft_invoice  # noqa: PLC0415
 
         for role in ("support", ""):
             with self.subTest(role=role):

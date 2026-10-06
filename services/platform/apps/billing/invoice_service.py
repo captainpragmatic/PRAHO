@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 import re
 from datetime import datetime, time
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, DecimalException
 from typing import TYPE_CHECKING, Any, Required, TypedDict
 
 from django.conf import settings
@@ -83,7 +83,7 @@ def _draft_decimal(value: str) -> Decimal:
         raise ValidationError(_("Line quantities and prices must be valid finite numbers."))
     try:
         parsed = Decimal(value)
-    except InvalidOperation as exc:
+    except DecimalException as exc:
         raise ValidationError(_("Line quantities and prices must be valid finite numbers.")) from exc
     if not parsed.is_finite():
         raise ValidationError(_("Line quantities and prices must be valid finite numbers."))
@@ -142,10 +142,12 @@ def _save_draft_line(invoice: Invoice, row: DraftInvoiceLineData, existing: dict
     price = _draft_decimal(row.get("unit_price", ""))
     if quantity <= 0 or quantity > Decimal("999999999.999") or price < 0:
         raise ValidationError(_("Line quantity must be positive and price must not be negative."))
+    if price > Decimal(_MAX_DRAFT_PRICE_CENTS) / 100:
+        raise ValidationError(_("Line quantities or prices are out of range."))
     try:
         quantity = quantity.quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
         cents = int((price * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
-    except InvalidOperation as exc:
+    except DecimalException as exc:
         raise ValidationError(_("Line quantities or prices are out of range.")) from exc
     if quantity <= 0 or cents > _MAX_DRAFT_PRICE_CENTS:
         raise ValidationError(_("Line quantities or prices are out of range."))
@@ -166,6 +168,28 @@ def _save_draft_line(invoice: Invoice, row: DraftInvoiceLineData, existing: dict
     line.calculate_totals()
     line.full_clean()
     line.save()
+
+
+def _refresh_draft_vat_evidence(invoice: Invoice) -> None:
+    from apps.billing.tax_evidence import capture_vat_evidence, read_vat_evidence  # noqa: PLC0415
+    from apps.common.tax_service import VATCalculationResult  # noqa: PLC0415
+
+    decision = read_vat_evidence(invoice)
+    if decision is None:
+        return
+    result = VATCalculationResult(
+        scenario=decision.scenario,
+        vat_rate=decision.rate,
+        subtotal_cents=invoice.subtotal_cents,
+        vat_cents=invoice.tax_cents,
+        total_cents=invoice.total_cents,
+        country_code=decision.country,
+        is_business=decision.is_business,
+        vat_number=decision.vat_number,
+        reasoning="",
+        audit_data={},
+    )
+    invoice.vat_evidence = capture_vat_evidence(result, recorded_evidence=invoice.vat_evidence)
 
 
 def _draft_field_snapshot(invoice: Invoice) -> dict[str, object]:
@@ -205,6 +229,8 @@ def _update_draft_fields(invoice: Invoice, data: DraftInvoiceData, user: User) -
         raise ValidationError(_("The invoice customer cannot be changed."))
     if data.get("currency", invoice.currency_id) != invoice.currency_id:
         raise ValidationError(_("The invoice currency cannot be changed."))
+    if not data["lines"]:
+        raise ValidationError(_("An invoice must contain at least one line."))
     if "due_at" in data:
         if not data["due_at"]:
             invoice.due_at = None
@@ -241,8 +267,17 @@ def update_draft_invoice(invoice_id: int, data: DraftInvoiceData, user: User) ->
                     if line_id not in retained:
                         line.delete()
                 invoice.recalculate_totals()
+                _refresh_draft_vat_evidence(invoice)
                 invoice.save(
-                    update_fields=["due_at", "meta", "subtotal_cents", "tax_cents", "total_cents", "updated_at"]
+                    update_fields=[
+                        "due_at",
+                        "meta",
+                        "subtotal_cents",
+                        "tax_cents",
+                        "total_cents",
+                        "vat_evidence",
+                        "updated_at",
+                    ]
                 )
                 new_fields = _draft_field_snapshot(invoice)
                 new_lines = {str(line.pk): _draft_line_snapshot(line) for line in invoice.lines.all()}
@@ -274,11 +309,14 @@ def update_draft_invoice(invoice_id: int, data: DraftInvoiceData, user: User) ->
                 )
                 logger.info("✅ [Billing] Edited draft invoice %s", invoice.display_number)
                 return Ok(invoice)
-            except (ValidationError, TaxEvidenceError, InvalidOperation, ValueError) as exc:
+            except (ValidationError, TaxEvidenceError, DecimalException, ValueError) as exc:
                 transaction.set_rollback(True)
-                error = (
-                    "; ".join(exc.messages) if isinstance(exc, ValidationError) else _("Invalid draft invoice data.")
-                )
+                if isinstance(exc, ValidationError):
+                    error = "; ".join(exc.messages)
+                elif isinstance(exc, DecimalException):
+                    error = _("Line quantities or prices are out of range.")
+                else:
+                    error = _("Invalid draft invoice data.")
                 return Err(error)
     except Invoice.DoesNotExist:
         return Err(_("Invoice not found."))
