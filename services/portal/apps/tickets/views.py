@@ -14,7 +14,7 @@ from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_http_methods
 
 from apps.common.api_utils import DictAsObj
-from apps.common.decorators import _get_user_role_for_customer, require_support_access
+from apps.common.decorators import _get_user_role_for_customer, _render_role_check_degraded, require_support_access
 from apps.common.pagination import PaginatorData, build_pagination_params
 from apps.common.rate_limit_feedback import (
     handle_platform_error,
@@ -263,7 +263,7 @@ def ticket_detail(request: HttpRequest, ticket_id: int) -> HttpResponse:
 
     except PlatformAPIError as e:
         if is_rate_limited_error(e):
-            raise
+            return _render_role_check_degraded(request, e)
         if is_unavailable_error(e):
             return render_platform_unavailable(request, e)
         logger.error(f"🔥 [Tickets View] Error loading ticket {ticket_id} for customer {customer_id}: {e}")

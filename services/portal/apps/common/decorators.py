@@ -47,7 +47,12 @@ def _render_role_check_degraded(request: HttpRequest, error: PlatformAPIError) -
             if request.headers.get("HX-Request") == "true"
             else "common/rate_limited.html"
         )
-        response = render(request, template, build_rate_limited_context(request, error), status=status)
+        response = render(
+            request,
+            template,
+            build_rate_limited_context(request, error),
+            status=200 if request.headers.get("HX-Request") == "true" else status,
+        )
     else:
         return render_platform_unavailable(request, error)
 

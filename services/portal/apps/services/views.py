@@ -15,7 +15,7 @@ from django.utils.translation import gettext_lazy
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_http_methods
 
-from apps.common.decorators import _get_user_role_for_customer
+from apps.common.decorators import _get_user_role_for_customer, _render_role_check_degraded
 from apps.common.pagination import PaginatorData, build_pagination_params
 from apps.common.rate_limit_feedback import (
     build_maintenance_context,
@@ -336,7 +336,7 @@ def service_detail(request: HttpRequest, service_id: int) -> HttpResponse:
 
     except PlatformAPIError as e:
         if is_rate_limited_error(e):
-            raise
+            return _render_role_check_degraded(request, e)
         if is_unavailable_error(e):
             return render_platform_unavailable(request, e)
         _report_platform_failure(
@@ -507,12 +507,28 @@ def _service_request_load_error(request: HttpRequest, error: PlatformAPIError, c
 
 @require_http_methods(["GET", "POST"])
 @csrf_protect
-def service_request_action(request: HttpRequest, service_id: int) -> HttpResponse:
+def service_request_action(request: HttpRequest, service_id: int) -> HttpResponse:  # noqa: PLR0911  # HTTP guards
     """Create a support ticket for staff review without changing the hosting service."""
     customer_id, user_id = _get_session_identity(request)
     if not customer_id or not user_id:
         return redirect("/login/")
-    role = _get_user_role_for_customer(request, str(customer_id))
+    try:
+        role = _get_user_role_for_customer(request, str(customer_id))
+    except PlatformAPIError as error:
+        if is_rate_limited_error(error):
+            return _render_role_check_degraded(request, error)
+        _submission_key, submission_id = _service_submission_id(request, customer_id, user_id, service_id)
+        return _service_request_load_error(
+            request,
+            error,
+            {
+                "service_id": service_id,
+                "submission_id": submission_id,
+                "selected_action": request.POST.get("action", ""),
+                "reason": request.POST.get("reason", "").strip(),
+                "action_types": [],
+            },
+        )
     billing_action = request.method == "POST" and request.POST.get("action") in {"suspend_request", "cancel_request"}
     if role not in {"owner", "billing", "tech"} or (billing_action and role == "tech"):
         return HttpResponseForbidden(_("You do not have permission to request service changes."))

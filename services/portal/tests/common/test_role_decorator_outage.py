@@ -86,7 +86,7 @@ class RoleDecoratorOutageTests(SimpleTestCase):
 
     def _assert_degraded(self, response: HttpResponse, failure: Failure, kind: RequestKind) -> None:
         # HTMX does not swap 4xx/5xx responses, so an HTMX outage notice is sent with 200.
-        status = 429 if failure == "rate_limit" else 200 if kind == "htmx" else 503
+        status = 200 if kind == "htmx" else 429 if failure == "rate_limit" else 503
         self.assertEqual(VIEW_CALLS, [])
         self.assertNotContains(response, VIEW_MARKER, status_code=response.status_code)
         self.assertEqual(response.status_code, status)
