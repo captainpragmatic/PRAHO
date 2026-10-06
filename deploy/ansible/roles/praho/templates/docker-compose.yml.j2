@@ -41,6 +41,7 @@ services:
       - DB_PASSWORD=${DB_PASSWORD}
       - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY}
       - DJANGO_SETTINGS_MODULE={{ docker_django_settings_module }}
+      - STATIC_ROOT=/app/staticfiles
       - PLATFORM_DOMAIN={{ platform_domain }}
       - PORTAL_DOMAIN={{ portal_domain }}
       - ALLOWED_HOSTS={{ platform_domain }},{{ portal_domain }},localhost

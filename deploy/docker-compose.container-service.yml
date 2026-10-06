@@ -33,6 +33,7 @@ services:
       - PORTAL_HMAC_CREDENTIALS=${PORTAL_HMAC_CREDENTIALS:-}
       - PLATFORM_TO_PORTAL_WEBHOOK_SECRET=${PLATFORM_TO_PORTAL_WEBHOOK_SECRET:?PLATFORM_TO_PORTAL_WEBHOOK_SECRET required}
       - DJANGO_SETTINGS_MODULE=${DJANGO_SETTINGS_MODULE:-config.settings.prod}
+      - STATIC_ROOT=/app/staticfiles
       - ALLOWED_HOSTS=${DOMAIN:-localhost},localhost,*.ondigitalocean.app
       - CSRF_TRUSTED_ORIGINS=https://${DOMAIN},https://*.ondigitalocean.app
       - DJANGO_SECURE_SSL_REDIRECT=false
