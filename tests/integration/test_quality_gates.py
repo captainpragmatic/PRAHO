@@ -82,7 +82,7 @@ class TestQualityGates(SimpleTestCase):
     def test_link_text_translation_boundaries(self) -> None:
         path = self._seed(
             '<a href="/">{% trans "Open" %}</a>\n'
-            '<a href="/">{% translate \'Open\' %}</a>\n'
+            "<a href=\"/\">{% translate 'Open' %}</a>\n"
             '<a href="/">{% blocktrans %}Open {{ name }}{% endblocktrans %}</a>\n'
             '<a href="/">{{ caption }}</a>\n'
             '<a href="/">{% trans "" %}</a>\n'
@@ -166,6 +166,101 @@ class TestQualityGates(SimpleTestCase):
                     path = self._seed(unlabelled.render(Context({})), name="rendered.html")
                     self.assertEqual([v.code for v in self._check(self.a11y, path)], ["A11Y003"])
 
+    def test_one_image_marker_exempts_only_one_element(self) -> None:
+        path = self._seed(
+            "{# a11y-allow A11Y001: decorative exception #}\n"
+            '<img src="one"><img src="two">\n'
+            '<img src="three"><img src="four">\n'
+        )
+        self.assertEqual(self._lines(self._check(self.a11y, path), "A11Y001"), [2, 3, 3])
+
+    def test_one_link_marker_exempts_only_one_element(self) -> None:
+        empty = '<a href="/"></a>'
+        icon = '<a href="/"><svg class="icon" /></a>'
+        for links in (empty + empty, icon + icon, empty + icon, icon + empty):
+            with self.subTest(links=links):
+                path = self._seed("{# a11y-allow A11Y002: deliberate exception #}\n" + links + "\n" + links + "\n")
+                self.assertEqual(self._lines(self._check(self.a11y, path), "A11Y002"), [2, 3, 3])
+
+    def test_aria_label_is_rendered_on_each_input_branch(self) -> None:
+        for service in ("platform", "portal"):
+            engine = Engine(
+                dirs=[str(REPO_ROOT / "shared" / "ui" / "templates")],
+                libraries={
+                    "ui_components": f"services.{service}.apps.ui.templatetags.ui_components",
+                    "static": "django.templatetags.static",
+                },
+            )
+            for input_type in ("select", "textarea", "text", "radio"):
+                with self.subTest(service=service, input_type=input_type):
+                    source = '{% input_field "control" input_type="' + input_type + '" aria_label="Accessible name" %}'
+                    rendered = engine.from_string("{% load ui_components %}" + source).render(Context({}))
+                    self.assertIn('aria-label="Accessible name"', rendered)
+                    for content in (source, rendered):
+                        path = self._seed(content, name="aria-labelled.html")
+                        self.assertEqual(self._check(self.a11y, path), [])
+
+    def test_components_without_aria_label_support_require_a_label(self) -> None:
+        for tag in ('checkbox_field "agree"', 'filter_select "status" choices'):
+            with self.subTest(tag=tag):
+                path = self._seed(
+                    "{% " + tag + ' aria_label="Unsupported name" %}\n{% ' + tag + ' label="Visible name" %}\n'
+                )
+                self.assertEqual(self._lines(self._check(self.a11y, path), "A11Y003"), [1])
+
+    def test_hidden_component_inputs_are_ignored_in_source_and_rendered_output(self) -> None:
+        for service in ("platform", "portal"):
+            engine = Engine(
+                dirs=[str(REPO_ROOT / "shared" / "ui" / "templates")],
+                libraries={
+                    "ui_components": f"services.{service}.apps.ui.templatetags.ui_components",
+                    "static": "django.templatetags.static",
+                },
+            )
+            source = (
+                '{% input_field "token" input_type="hidden" %}\n'
+                "{% input_field 'other-token' input_type='hidden' %}\n"
+                '{% input_field "visible" input_type="text" %}\n'
+            )
+            rendered = engine.from_string("{% load ui_components %}" + source).render(Context({}))
+            self.assertIn('type="hidden"', rendered)
+            for kind, content in (("source", source), ("rendered", rendered)):
+                with self.subTest(service=service, kind=kind):
+                    path = self._seed(content, name="hidden-controls.html")
+                    self.assertEqual([v.code for v in self._check(self.a11y, path)], ["A11Y003"])
+
+    def test_captured_translations_do_not_supply_link_text(self) -> None:
+        path = self._seed(
+            '<a href="/">{% trans "Name" as name %}</a>\n'
+            "<a href=\"/\">{% translate 'Name' as name %}</a>\n"
+            '<a href="/">{% trans "Name" as name %}{{ name }}</a>\n'
+            '<a href="/">{% trans "Use as name" %}</a>\n'
+        )
+        self.assertEqual(self._lines(self._check(self.a11y, path), "A11Y002"), [1, 2])
+
+    def test_captured_translations_do_not_supply_label_text(self) -> None:
+        path = self._seed(
+            '<label>{% trans "Name" as name %}<input name="first"></label>\n'
+            "<label>{% translate 'Name' as name %}<input name=\"second\"></label>\n"
+            '<label for="third">{% trans "Name" as name %}</label><input id="third">\n'
+            '<label for="fourth">{% translate \'Name\' as name %}</label><input id="fourth">\n'
+            '<label>{% trans "Name" as name %}{{ name }}<input name="labelled"></label>\n'
+            '<label>{% trans "Use as name" %}<input name="literal"></label>\n'
+        )
+        self.assertEqual(self._lines(self._check(self.a11y, path), "A11Y003"), [1, 2, 3, 4])
+
+    def test_whitespace_only_component_labels_are_empty(self) -> None:
+        for key in ("label", "aria_label"):
+            for value in ('_(" ")', "_(' ')", 'gettext(" ")', "gettext(' ')", '" "', "' '"):
+                with self.subTest(key=key, value=value):
+                    path = self._seed(
+                        '{% input_field "blank" ' + key + "=" + value + " %}\n"
+                        '{% input_field "named" ' + key + '=_("Name") %}\n'
+                        '{% input_field "dynamic" ' + key + "=caption %}\n"
+                        '{% input_field "literal" ' + key + '=_("None") %}\n'
+                    )
+                    self.assertEqual(self._lines(self._check(self.a11y, path), "A11Y003"), [1])
+
     def test_emails_directory_is_skipped_without_skipping_similar_names(self) -> None:
         email = self._seed('<p style="color: red">Welcome</p>', name="emails/welcome.html")
         page = self._seed('<p style="color: red">Welcome</p>', name="email_assets/page.html")
@@ -174,10 +269,7 @@ class TestQualityGates(SimpleTestCase):
 
     def test_tmpl_allow_accepts_punctuation_and_only_exempts_one_element(self) -> None:
         reason = "Issue #123: keep <button>, @click & state (for now)."
-        path = self._seed(
-            "{# tmpl-allow TMPL002: " + reason + " #}\n"
-            '<button>First</button><button>Second</button>\n'
-        )
+        path = self._seed("{# tmpl-allow TMPL002: " + reason + " #}\n<button>First</button><button>Second</button>\n")
         buttons = [v for v in self._scan(path) if v.code == "TMPL002"]
         self.assertEqual([v.exempted for v in buttons], [True, False])
         self.assertEqual(buttons[0].reason, reason)

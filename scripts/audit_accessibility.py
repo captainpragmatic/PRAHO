@@ -27,8 +27,8 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import ast
 import re
-import shlex
 import sys
 from dataclasses import dataclass
 from gettext import gettext
@@ -91,6 +91,7 @@ COMPONENT_FIELD = re.compile(
     r"\{%\s*(input_field|checkbox_field|select_field|textarea_field|filter_select)\b((?:(?!%\}).)*)%\}",
     re.DOTALL,
 )
+COMPONENT_ARGUMENT = re.compile(r"""(?:[^\s'"]+|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')+""")
 POSITIVE_TABINDEX = re.compile(r"tabindex\s*=\s*[\"']([1-9]\d*)[\"']", re.IGNORECASE)
 ONCLICK_NON_INTERACTIVE = re.compile(
     r"<(?:div|span|p|li|td)\b[^>]*(?:onclick|@click|x-on:click)[^>]*>",
@@ -139,6 +140,8 @@ def _strip_django_tags(line: str, *, preserve_variables: bool = False) -> str:
         tag = match.group()
         translation = re.match(r"""\{%\s*(?:trans|translate)\s+(?:"([^"]*)"|'([^']*)')""", tag)
         text = (translation.group(1) or translation.group(2) or "") if translation else ""
+        if translation and re.search(r"\s+as\s+\w+\s*%}", tag[translation.end() :]):
+            text = ""
         return text + "\n" * tag.count("\n")
 
     line = re.sub(r"\{%.*?%\}", replace_tag, line, flags=re.DOTALL)
@@ -188,6 +191,20 @@ class _FormLabelParser(HTMLParser):
             label.text += _strip_django_tags(data)
 
 
+def _component_argument_has_text(value: str) -> bool:
+    """Inspect literal labels before accepting dynamic template expressions."""
+    translation = re.fullmatch(r"(?:_|gettext)\((.*)\)", value, flags=re.DOTALL)
+    if translation:
+        value = translation.group(1)
+    if value.startswith(('"', "'")):
+        try:
+            text: object = ast.literal_eval(value)
+        except (SyntaxError, ValueError):
+            return False
+        return isinstance(text, str) and bool(text.strip())
+    return value.strip() not in {"", "None", "False"}
+
+
 def _check_form_labels(content: str, path: Path) -> list[A11yViolation]:
     """Check raw controls and component invocations rather than trusting id= alone."""
     source = _strip_django_comments(content)
@@ -212,16 +229,16 @@ def _check_form_labels(content: str, path: Path) -> list[A11yViolation]:
             )
 
     for match in COMPONENT_FIELD.finditer(source):
-        try:
-            arguments = shlex.split(match.group(2))
-        except ValueError:
-            arguments = []
-        has_label = False
-        for argument in arguments:
+        arguments: dict[str, str] = {}
+        for argument in COMPONENT_ARGUMENT.findall(match.group(2)):
             key, separator, value = argument.partition("=")
-            if key in {"label", "aria_label"} and separator and value.strip() not in {"", "None", "False", "_()"}:
-                has_label = True
-                break
+            if separator:
+                arguments[key] = value
+        component = match.group(1)
+        if component == "input_field" and arguments.get("input_type") in {'"hidden"', "'hidden'"}:
+            continue
+        label_keys = {"label", "aria_label"} if component == "input_field" else {"label"}
+        has_label = any(_component_argument_has_text(arguments[key]) for key in label_keys if key in arguments)
         if not has_label:
             violations.append(
                 A11yViolation(
@@ -303,39 +320,37 @@ def check_file(path: Path, *, verbose: bool = False) -> list[A11yViolation]:
     # ── A11Y001: <img> without alt ──────────────────────────────────────
     for i, raw_line in enumerate(lines, 1):
         line = _strip_django_comments(raw_line)
-        if IMG_NO_ALT.search(line):
-            violations.append(
-                A11yViolation(
-                    code="A11Y001",
-                    severity=SEVERITY_CRITICAL,
-                    file=path,
-                    line=i,
-                    message="<img> missing alt attribute",
-                )
+        violations.extend(
+            A11yViolation(
+                code="A11Y001",
+                severity=SEVERITY_CRITICAL,
+                file=path,
+                line=i,
+                message=gettext("<img> missing alt attribute"),
             )
+            for _match in IMG_NO_ALT.finditer(line)
+        )
 
     # ── A11Y002: Empty links / icon-only links without aria-label ───────
     for i, raw_line in enumerate(lines, 1):
         line = _strip_django_comments(raw_line)
         cleaned = _strip_django_tags(line)
-        if EMPTY_LINK.search(cleaned):
-            violations.append(
-                A11yViolation(
-                    code="A11Y002",
-                    severity=SEVERITY_SERIOUS,
-                    file=path,
-                    line=i,
-                    message="<a> with no discernible text content",
-                )
+        matches = [
+            (match.start(), message)
+            for pattern, message in (
+                (EMPTY_LINK, gettext("<a> with no discernible text content")),
+                (ICON_ONLY_LINK, gettext("Icon-only <a> missing aria-label")),
             )
-        elif ICON_ONLY_LINK.search(cleaned):
+            for match in pattern.finditer(cleaned)
+        ]
+        for _position, message in sorted(matches):
             violations.append(
                 A11yViolation(
                     code="A11Y002",
                     severity=SEVERITY_SERIOUS,
                     file=path,
                     line=i,
-                    message="Icon-only <a> missing aria-label",
+                    message=message,
                 )
             )
 
