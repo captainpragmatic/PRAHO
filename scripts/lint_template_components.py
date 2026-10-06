@@ -11,6 +11,7 @@ Checks:
   TMPL007  Inline <script> block in a component template (JS must live in static/)
   TMPL008  Emoji character in template (should use {% icon %} or remove)
   TMPL009  Raw <svg> in component template not allowlisted as complex visual
+  TMPL010  Malformed tmpl-allow marker (warning)
 
 Exit codes:
     0 — no violations
@@ -29,6 +30,7 @@ import re
 import sys
 from dataclasses import dataclass
 from functools import lru_cache
+from gettext import gettext
 from pathlib import Path
 
 # ===============================================================================
@@ -91,12 +93,9 @@ _RAW_TEXTAREA_RE = re.compile(r"<textarea\b", re.IGNORECASE)
 # have both legitimate blockers to fix and legitimate exceptions on different lines - a file-level
 # allowlist would exempt every future raw element in the file, not just the one it was written for.
 #
-# The reason group excludes "#" entirely, not just "#}" - a plain .*? would backtrack PAST the
-# first marker's own closing #} to satisfy fullmatch() against a line holding two markers back to
-# back, silently absorbing the second marker's "{# tmpl-allow ... #}" into the first one's reason
-# text instead of failing to match. Django's own {# #} syntax can't contain "#}" in a comment
-# either way, so excluding "#" costs nothing a real reason would ever need.
-_TMPL_ALLOW_RE = re.compile(r"\{#\s*tmpl-allow\s+(TMPL\d{3})\s*:\s*([^#]*?)\s*#\}")
+# Reasons may contain punctuation, including "#", but never the Django comment terminator.
+# A tempered match stops at the first "#}", so two markers cannot merge into one reason.
+_TMPL_ALLOW_RE = re.compile(r"\{#\s*tmpl-allow\s+(TMPL\d{3})\s*:\s*((?:(?!#\}).)*?)\s*#\}")
 
 # TMPL005: Raw semantic color classes used as status indicators
 _SEMANTIC_COLOR_RE = re.compile(r"\b(bg|text)-(green|red|yellow|blue|orange|purple|pink)-\d{2,3}\b")
@@ -203,10 +202,25 @@ def _find_tmpl_allow_markers(lines: list[str], path: Path) -> tuple[dict[int, tu
     markers: dict[int, tuple[str, str]] = {}
     meta_violations: list[Violation] = []
     for line_no, raw_line in enumerate(lines, start=1):
-        if not _TMPL_ALLOW_RE.search(raw_line):
+        if not re.search(r"\{#\s*tmpl-allow\b", raw_line):
             continue
 
         clean_match = _TMPL_ALLOW_RE.fullmatch(raw_line.strip())
+        if clean_match is None or not clean_match.group(2).strip():
+            meta_violations.append(
+                Violation(
+                    "TMPL010",
+                    SEVERITY_WARNING,
+                    path,
+                    line_no,
+                    gettext("Malformed tmpl-allow marker — use {# tmpl-allow CODE: reason #} on its own line"),
+                    snippet=raw_line.strip()[:120],
+                )
+            )
+        # Retain the existing blocker diagnostics for previously recognised malformed markers.
+        if not _TMPL_ALLOW_RE.search(raw_line):
+            continue
+
         if clean_match is None:
             meta_violations.append(
                 Violation(
@@ -264,7 +278,10 @@ def scan_file(path: Path) -> list[Violation]:
     except (OSError, UnicodeDecodeError):
         return violations
 
-    tmpl_allow_markers, tmpl_allow_meta_violations = _find_tmpl_allow_markers(lines, path) if is_feature else ({}, [])
+    tmpl_allow_markers, tmpl_allow_meta_violations = _find_tmpl_allow_markers(lines, path)
+    if not is_feature:
+        tmpl_allow_markers = {}
+        tmpl_allow_meta_violations = [v for v in tmpl_allow_meta_violations if v.code == "TMPL010"]
     consumed_marker_lines: set[int] = set()
 
     for line_no, raw_line in enumerate(lines, start=1):
@@ -496,6 +513,7 @@ def main() -> int:
             ("TMPL007", SEVERITY_WARNING, "Inline <script> block in component template"),
             ("TMPL008", SEVERITY_BLOCKER, "Emoji character in template"),
             ("TMPL009", SEVERITY_WARNING, "Raw <svg> in component template not allowlisted"),
+            ("TMPL010", SEVERITY_WARNING, gettext("Malformed tmpl-allow marker")),
             ("TMPL_ALLOW_STALE", SEVERITY_BLOCKER, "tmpl-allow marker with no matching violation below it"),
             ("TMPL_ALLOW_NO_REASON", SEVERITY_BLOCKER, "tmpl-allow marker with an empty reason"),
         ]

@@ -12,6 +12,7 @@ Static checks (no browser required):
   A11Y008  <table> without <caption> or aria-label
   A11Y009  Positive tabindex (should use 0 or -1)
   A11Y010  aria-hidden="true" on focusable element
+  A11Y011  Malformed a11y-allow marker (warning)
 
 Exit codes:
     0 — no violations
@@ -27,8 +28,11 @@ from __future__ import annotations
 
 import argparse
 import re
+import shlex
 import sys
 from dataclasses import dataclass
+from gettext import gettext
+from html.parser import HTMLParser
 from pathlib import Path
 
 # ===============================================================================
@@ -40,11 +44,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 PORTAL_TEMPLATES = REPO_ROOT / "services" / "portal" / "templates"
 PLATFORM_TEMPLATES = REPO_ROOT / "services" / "platform" / "templates"
+SHARED_TEMPLATES = REPO_ROOT / "shared" / "ui" / "templates"
 
 # Severity levels
 SEVERITY_CRITICAL = "critical"  # Must fix for WCAG AA
 SEVERITY_SERIOUS = "serious"  # Should fix for WCAG AA
 SEVERITY_MINOR = "minor"  # Nice-to-have
+SEVERITY_WARNING = "warning"  # Invalid exemption syntax; does not fail the default gate
 
 # ===============================================================================
 # VIOLATION MODEL
@@ -81,9 +87,9 @@ ICON_ONLY_BUTTON = re.compile(
     r"<button\b(?![^>]*\baria-label)[^>]*>\s*(?:<(?:i|svg|span)\b[^>]*(?:class=\"[^\"]*icon[^\"]*\")[^>]*/?>)\s*</button>",
     re.IGNORECASE,
 )
-INPUT_NO_LABEL = re.compile(
-    r"<(?:input|select|textarea)\b(?![^>]*(?:\baria-label|\baria-labelledby|\bid\s*=))[^>]*>",
-    re.IGNORECASE,
+COMPONENT_FIELD = re.compile(
+    r"\{%\s*(input_field|checkbox_field|select_field|textarea_field|filter_select)\b((?:(?!%\}).)*)%\}",
+    re.DOTALL,
 )
 POSITIVE_TABINDEX = re.compile(r"tabindex\s*=\s*[\"']([1-9]\d*)[\"']", re.IGNORECASE)
 ONCLICK_NON_INTERACTIVE = re.compile(
@@ -108,8 +114,9 @@ AUTOFOCUS_INPUT = re.compile(
     re.IGNORECASE,
 )
 
-# Template-aware patterns - skip lines that are Django comments
-DJANGO_COMMENT = re.compile(r"\{#.*#\}")
+# Preserve line numbers when stripping comments or multi-line template tags.
+DJANGO_COMMENT = re.compile(r"\{#.*?#\}", re.DOTALL)
+A11Y_ALLOW = re.compile(r"\{#\s*a11y-allow\s+(A11Y\d{3})\s*:\s*((?:(?!#\}).)*?)\s*#\}")
 
 # Lines to ignore: component templates handle their own a11y
 COMPONENT_DIRS = {"components"}
@@ -121,14 +128,141 @@ def _is_component_template(path: Path) -> bool:
 
 
 def _strip_django_comments(line: str) -> str:
-    """Remove Django template comments from a line."""
-    return DJANGO_COMMENT.sub("", line)
+    """Remove Django comments without shifting subsequent line numbers."""
+    return DJANGO_COMMENT.sub(lambda match: "\n" * match.group().count("\n"), line)
 
 
-def _strip_django_tags(line: str) -> str:
-    """Remove Django template tags and variables for cleaner HTML analysis."""
-    line = re.sub(r"\{%.*?%\}", "", line)
-    return re.sub(r"\{\{.*?\}\}", "TEXT", line)
+def _strip_django_tags(line: str, *, preserve_variables: bool = False) -> str:
+    """Keep literal translations and non-empty variables as discernible text."""
+
+    def replace_tag(match: re.Match[str]) -> str:
+        tag = match.group()
+        translation = re.match(r"""\{%\s*(?:trans|translate)\s+(?:"([^"]*)"|'([^']*)')""", tag)
+        text = (translation.group(1) or translation.group(2) or "") if translation else ""
+        return text + "\n" * tag.count("\n")
+
+    line = re.sub(r"\{%.*?%\}", replace_tag, line, flags=re.DOTALL)
+    if preserve_variables:
+        return line
+    return re.sub(
+        r"\{\{(.*?)\}\}",
+        lambda match: ("TEXT" if match.group(1).strip() else "") + "\n" * match.group().count("\n"),
+        line,
+        flags=re.DOTALL,
+    )
+
+
+@dataclass
+class _FormLabel:
+    target: str
+    text: str = ""
+
+
+class _FormLabelParser(HTMLParser):
+    """Associate controls with explicit or wrapping labels, including multi-line markup."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.labels: list[_FormLabel] = []
+        self.label_stack: list[_FormLabel] = []
+        self.controls: list[tuple[int, dict[str, str], _FormLabel | None]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = {name: value or "" for name, value in attrs}
+        if tag == "label":
+            label = _FormLabel(attributes.get("for", "").strip())
+            self.labels.append(label)
+            self.label_stack.append(label)
+        elif tag in {"input", "select", "textarea"}:
+            if tag == "input" and attributes.get("type", "").strip().lower() == "hidden":
+                return
+            wrapping_label = self.label_stack[-1] if self.label_stack else None
+            self.controls.append((self.getpos()[0], attributes, wrapping_label))
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "label" and self.label_stack:
+            self.label_stack.pop()
+
+    def handle_data(self, data: str) -> None:
+        for label in self.label_stack:
+            label.text += _strip_django_tags(data)
+
+
+def _check_form_labels(content: str, path: Path) -> list[A11yViolation]:
+    """Check raw controls and component invocations rather than trusting id= alone."""
+    source = _strip_django_comments(content)
+    parser = _FormLabelParser()
+    parser.feed(_strip_django_tags(source, preserve_variables=True))
+    parser.close()
+    labelled_ids = {label.target for label in parser.labels if label.target and label.text.strip()}
+    violations: list[A11yViolation] = []
+    for line_no, attributes, wrapping_label in parser.controls:
+        has_aria = bool(attributes.get("aria-label", "").strip() or attributes.get("aria-labelledby", "").strip())
+        has_explicit_label = attributes.get("id", "").strip() in labelled_ids
+        has_wrapping_label = wrapping_label is not None and bool(wrapping_label.text.strip())
+        if not (has_aria or has_explicit_label or has_wrapping_label):
+            violations.append(
+                A11yViolation(
+                    "A11Y003",
+                    SEVERITY_CRITICAL,
+                    path,
+                    line_no,
+                    gettext("Form input missing label or aria-label"),
+                )
+            )
+
+    for match in COMPONENT_FIELD.finditer(source):
+        try:
+            arguments = shlex.split(match.group(2))
+        except ValueError:
+            arguments = []
+        has_label = False
+        for argument in arguments:
+            key, separator, value = argument.partition("=")
+            if key in {"label", "aria_label"} and separator and value.strip() not in {"", "None", "False", "_()"}:
+                has_label = True
+                break
+        if not has_label:
+            violations.append(
+                A11yViolation(
+                    "A11Y003",
+                    SEVERITY_CRITICAL,
+                    path,
+                    source.count("\n", 0, match.start()) + 1,
+                    gettext("Form component missing non-empty label or aria_label argument"),
+                )
+            )
+    return violations
+
+
+def _apply_a11y_allow(lines: list[str], path: Path, violations: list[A11yViolation]) -> list[A11yViolation]:
+    """One standalone marker exempts the first matching finding on the next line."""
+    markers: dict[int, str] = {}
+    warnings: list[A11yViolation] = []
+    for line_no, raw_line in enumerate(lines, 1):
+        if not re.search(r"\{#\s*a11y-allow\b", raw_line):
+            continue
+        match = A11Y_ALLOW.fullmatch(raw_line.strip())
+        if match is None or not match.group(2).strip():
+            warnings.append(
+                A11yViolation(
+                    "A11Y011",
+                    SEVERITY_WARNING,
+                    path,
+                    line_no,
+                    gettext("Malformed a11y-allow marker — use {# a11y-allow CODE: reason #} on its own line"),
+                )
+            )
+        else:
+            markers[line_no + 1] = match.group(1)
+
+    findings: list[A11yViolation] = []
+    for violation in violations:
+        if markers.get(violation.line) == violation.code:
+            del markers[violation.line]
+        else:
+            findings.append(violation)
+    return findings + warnings
 
 
 def check_file(path: Path, *, verbose: bool = False) -> list[A11yViolation]:
@@ -137,10 +271,9 @@ def check_file(path: Path, *, verbose: bool = False) -> list[A11yViolation]:
     Returns:
         List of violations found in the file.
 
-    ⚠️  KNOWN LIMITATION: All checks are single-line regex only.
-    Multi-line HTML tags (e.g. <img\n  alt="..."> spread across lines) may
-    produce false negatives. Proper multi-line parsing would require an
-    HTML parser rather than regex.
+    ⚠️  KNOWN LIMITATION: Checks other than form labelling remain single-line regexes.
+    Multi-line HTML tags may produce false negatives in those checks.
+    Form labelling uses an HTML parser; component invocations may span lines.
     """
     violations: list[A11yViolation] = []
     is_component = _is_component_template(path)
@@ -206,24 +339,10 @@ def check_file(path: Path, *, verbose: bool = False) -> list[A11yViolation]:
                 )
             )
 
-    # ── A11Y003: Form inputs without labels ─────────────────────────────
-    # Skip component templates (they define the components that add labels)
+    # ── A11Y003: Form inputs and component invocations without labels ──
+    # Component definitions are checked through rendered representative controls in tests.
     if not is_component:
-        for i, raw_line in enumerate(lines, 1):
-            line = _strip_django_comments(raw_line)
-            # Skip lines that use Django template component tags
-            if re.search(r"\{%\s*(?:input_field|checkbox_field|select_field)", raw_line):
-                continue
-            if INPUT_NO_LABEL.search(line):
-                violations.append(
-                    A11yViolation(
-                        code="A11Y003",
-                        severity=SEVERITY_CRITICAL,
-                        file=path,
-                        line=i,
-                        message="Form input missing label or aria-label",
-                    )
-                )
+        violations.extend(_check_form_labels(content, path))
 
     # ── A11Y005: Icon-only buttons without aria-label ───────────────────
     for i, raw_line in enumerate(lines, 1):
@@ -324,7 +443,7 @@ def check_file(path: Path, *, verbose: bool = False) -> list[A11yViolation]:
                 )
             )
 
-    return violations
+    return _apply_a11y_allow(lines, path, violations)
 
 
 # ===============================================================================
@@ -336,7 +455,7 @@ def discover_templates(paths: list[str] | None = None) -> list[Path]:
     """Find all HTML templates to audit.
 
     Args:
-        paths: Optional specific paths to audit. If None, audits both services.
+        paths: Optional specific paths to audit. If None, audits both services and shared UI.
 
     Returns:
         Sorted list of template file paths.
@@ -354,7 +473,7 @@ def discover_templates(paths: list[str] | None = None) -> list[Path]:
         return sorted(set(result))
 
     templates: list[Path] = []
-    for tmpl_dir in [PORTAL_TEMPLATES, PLATFORM_TEMPLATES]:
+    for tmpl_dir in [PORTAL_TEMPLATES, PLATFORM_TEMPLATES, SHARED_TEMPLATES]:
         if tmpl_dir.exists():
             templates.extend(tmpl_dir.rglob("*.html"))
     return sorted(set(templates))
@@ -384,12 +503,14 @@ def print_report(violations: list[A11yViolation], *, verbose: bool = False) -> N
     critical_count = len(by_severity.get(SEVERITY_CRITICAL, []))
     serious_count = len(by_severity.get(SEVERITY_SERIOUS, []))
     minor_count = len(by_severity.get(SEVERITY_MINOR, []))
+    warning_count = len(by_severity.get(SEVERITY_WARNING, []))
 
     print("\n🔍 [A11Y] Accessibility Audit Results")
     print(f"{'─' * 60}")
     print(f"  🔥 Critical: {critical_count}")
     print(f"  ⚠️  Serious:  {serious_count}")
     print(f"  📝 Minor:    {minor_count}")
+    print(gettext("  ⚠️  Warnings: {count}").format(count=warning_count))
     print(f"  Total:       {len(violations)}")
     print()
 
@@ -400,10 +521,15 @@ def print_report(violations: list[A11yViolation], *, verbose: bool = False) -> N
     print()
 
     if verbose:
-        for severity in [SEVERITY_CRITICAL, SEVERITY_SERIOUS, SEVERITY_MINOR]:
+        for severity in [SEVERITY_CRITICAL, SEVERITY_SERIOUS, SEVERITY_MINOR, SEVERITY_WARNING]:
             items = by_severity.get(severity, [])
             if items:
-                label = {"critical": "🔥 CRITICAL", "serious": "⚠️  SERIOUS", "minor": "📝 MINOR"}[severity]
+                label = {
+                    "critical": "🔥 CRITICAL",
+                    "serious": "⚠️  SERIOUS",
+                    "minor": "📝 MINOR",
+                    "warning": gettext("⚠️  WARNING"),
+                }[severity]
                 print(f"\n{label} ({len(items)}):")
                 print(f"{'─' * 60}")
                 for v in items:

@@ -10,6 +10,7 @@ Checks:
   DM003  Hardcoded light-only border (border-gray-200/300) without dark: variant
   DM004  Inline style with color/background (bypasses dark mode system)
   DM005  Non-token color class (uses numbered gray- instead of slate- palette)
+  DM006  Malformed dm-allow marker (warning)
 
 Exit codes:
     0 — no violations
@@ -27,6 +28,7 @@ import argparse
 import re
 import sys
 from dataclasses import dataclass
+from gettext import gettext
 from pathlib import Path
 
 # ===============================================================================
@@ -89,11 +91,13 @@ INLINE_COLOR_STYLE = re.compile(
 NON_TOKEN_GRAY = re.compile(r"""\b((?:bg|text|border|ring|divide)-gray-\d+)\b""")
 
 # Django template comment
-DJANGO_COMMENT = re.compile(r"\{#.*#\}")
+DJANGO_COMMENT = re.compile(r"\{#.*?#\}")
+DM_ALLOW = re.compile(r"\{#\s*dm-allow\s+(DM\d{3})\s*:\s*((?:(?!#\}).)*?)\s*#\}")
 
 # Skip these template dirs (error pages, emails, etc.)
 SKIP_PATTERNS = {
     "email",
+    "emails",
     "admin",
 }
 
@@ -126,8 +130,39 @@ def _has_dark_variant_nearby(lines: list[str], line_idx: int, cls: str) -> bool:
 
     start = max(0, line_idx - 1)
     end = min(len(lines), line_idx + 2)
-    window = " ".join(lines[start:end])
+    window = " ".join(_strip_comments(line) for line in lines[start:end])
     return dark_pattern in window
+
+
+def _apply_dm_allow(lines: list[str], path: Path, violations: list[DarkModeViolation]) -> list[DarkModeViolation]:
+    """One standalone marker exempts the first matching finding on the next line."""
+    markers: dict[int, str] = {}
+    warnings: list[DarkModeViolation] = []
+    for line_no, raw_line in enumerate(lines, 1):
+        if not re.search(r"\{#\s*dm-allow\b", raw_line):
+            continue
+        match = DM_ALLOW.fullmatch(raw_line.strip())
+        if match is None or not match.group(2).strip():
+            warnings.append(
+                DarkModeViolation(
+                    "DM006",
+                    SEVERITY_WARNING,
+                    path,
+                    line_no,
+                    gettext("Malformed dm-allow marker — use {# dm-allow CODE: reason #} on its own line"),
+                    raw_line.strip()[:60],
+                )
+            )
+        else:
+            markers[line_no + 1] = match.group(1)
+
+    findings: list[DarkModeViolation] = []
+    for violation in violations:
+        if markers.get(violation.line) == violation.code:
+            del markers[violation.line]
+        else:
+            findings.append(violation)
+    return findings + warnings
 
 
 def check_file(path: Path, *, verbose: bool = False) -> list[DarkModeViolation]:
@@ -237,7 +272,7 @@ def check_file(path: Path, *, verbose: bool = False) -> list[DarkModeViolation]:
                 )
             )
 
-    return violations
+    return _apply_dm_allow(lines, path, violations)
 
 
 # ===============================================================================
