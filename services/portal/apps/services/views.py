@@ -320,7 +320,7 @@ def service_detail(request: HttpRequest, service_id: int) -> HttpResponse:
         usage = services_api.get_service_usage(customer_id, user_id, service_id, period="30d")
 
         # Get associated domains
-        domains = services_api.get_service_domains(customer_id, service_id)
+        domains = services_api.get_service_domains(customer_id, user_id, service_id)
 
         context = {
             "service": service,

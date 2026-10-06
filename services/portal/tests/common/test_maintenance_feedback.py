@@ -420,7 +420,7 @@ class TheServicesAppWasSkippedByTheWideningTests(SimpleTestCase):
         return {
             "get_services_summary": lambda: client.get_services_summary(1, 2),
             "get_service_usage": lambda: client.get_service_usage(1, 2, 3),
-            "get_service_domains": lambda: client.get_service_domains(1, 3),
+            "get_service_domains": lambda: client.get_service_domains(1, 2, 3),
             "get_available_plans": lambda: client.get_available_plans(1),
         }
 
@@ -435,7 +435,7 @@ class TheServicesAppWasSkippedByTheWideningTests(SimpleTestCase):
         client = ServicesAPIClient()
         with self._platform_raising(self.ORDINARY):
             self.assertEqual(client.get_available_plans(1), [])
-            self.assertEqual(client.get_service_domains(1, 3), [])
+            self.assertEqual(client.get_service_domains(1, 2, 3), [])
             self.assertEqual(client.get_services_summary(1, 2).get("active_services"), 0)
             self.assertEqual(client.get_service_usage(1, 2, 3).get("bandwidth_used"), 0)
 

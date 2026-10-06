@@ -316,32 +316,24 @@ class ServicesAPIClient(PlatformAPIClient):
             # Return empty summary on error
             return _empty_services_summary()
 
-    def get_service_domains(self, customer_id: int, service_id: int) -> list[dict[str, Any]]:
-        """
-        Get domains associated with a specific service.
-
-        Args:
-            customer_id: Customer ID for authorization
-            service_id: Service ID to get domains for
-
-        Returns:
-            List of domain dictionaries
-        """
+    def get_service_domains(self, customer_id: int, user_id: int, service_id: int) -> list[dict[str, object]]:
+        """Get domain relationships for the customer's service using the signed user identity."""
         try:
-            data = {"customer_id": customer_id}
-            response = self._make_request("POST", f"/services/{service_id}/domains/", data=data, idempotent=True)
+            data = {"customer_id": customer_id, "user_id": user_id}
+            response = self._make_request(
+                "POST", f"/services/{service_id}/domains/", user_id=user_id, data=data, idempotent=True
+            )
 
             logger.info(f"✅ [Services API] Retrieved domains for service {service_id} for customer {customer_id}")
-            return cast(list[dict[str, Any]], response.get("domains", []))
+            return cast(list[dict[str, object]], response.get("data", {}).get("domains", []))
 
         except PlatformAPIError as e:
             _raise_if_degraded(e)
-            # Domains API endpoint not yet implemented on platform (returns 404).
-            # Gracefully degrade — log as warning, not error.
-            http_not_found = 404
-            log_level = logger.warning if getattr(e, "status_code", 500) == http_not_found else logger.error
-            log_level(
-                f"⚠️ [Services API] Could not retrieve domains for service {service_id} for customer {customer_id}: {e}"
+            logger.error(
+                "🔥 [Services API] Could not retrieve domains for service %s for customer %s: %s",
+                service_id,
+                customer_id,
+                e,
             )
             return []
 

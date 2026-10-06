@@ -131,7 +131,7 @@ class ServiceRequestViewTests(SimpleTestCase):
         }
         self.api.get_available_plans.return_value = [{"name": "Plus", "price_monthly": "20.00"}]
         self.api.get_service_usage.return_value = {}
-        self.api.get_service_domains.return_value = []
+        self.api.get_service_domains.return_value = [{"name": "wp8-example.com", "status": "active"}]
         self.receipt = {"request_id": str(uuid4()), "ticket_id": 91, "ticket_number": "TKT-2026-000091"}
         self.api.request_service_action.return_value = self.receipt
 
@@ -158,6 +158,24 @@ class ServiceRequestViewTests(SimpleTestCase):
             {"submission_id": submission_id, "action": "upgrade_request", "reason": "More storage"} | overrides,
         )
         return service_request_action(request, service_id=55), request
+
+    def test_detail_lists_domains_from_the_signed_platform_response(self) -> None:
+        domains = [{"name": "blog.wp8-example.com", "status": "active", "domain_type": "subdomain"}]
+        self.api.get_service_domains.side_effect = ServicesAPIClient().get_service_domains
+        with patch.object(
+            ServicesAPIClient, "_make_request", return_value={"success": True, "data": {"domains": domains}}
+        ) as send:
+            response = service_detail(self._request(), service_id=55)
+
+        self.assertContains(response, "blog.wp8-example.com")
+        self.assertContains(response, "Associated Domains")
+        send.assert_called_once_with(
+            "POST",
+            "/services/55/domains/",
+            user_id=7,
+            data={"customer_id": 101, "user_id": 7},
+            idempotent=True,
+        )
 
     def test_get_keeps_same_submission_id_until_a_request_is_accepted(self) -> None:
         first, _ = self._open_form()
