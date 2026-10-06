@@ -67,10 +67,10 @@ Optional fields: `name`, `description`, and `ttl_days` (1 to 365; the default li
 **Response** (the raw token is shown once and never again):
 ```json
 {
-    "token": "9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b",
+    "token": "<40-char-hex-key>",
     "user_id": 123,
     "email": "user@example.com",
-    "key_prefix": "9944b091",
+    "key_prefix": "<first-8-chars>",
     "name": "ci-pipeline",
     "description": "Production deploys",
     "expires_at": "2026-12-30T09:00:00+00:00"
@@ -81,14 +81,14 @@ Optional fields: `name`, `description`, and `ttl_days` (1 to 365; the default li
 Include the token in the Authorization header, with either the `Bearer` or the `Token` scheme:
 
 ```bash
-curl -H "Authorization: Bearer 9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b" \
+curl -H "Authorization: Bearer $PRAHO_API_TOKEN" \
      https://platform.praho.com/api/users/token/me/
 ```
 
 ### **Verify Token**
 ```bash
 GET /api/users/token/me/
-Authorization: Token 9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b
+Authorization: Token <your-token>
 ```
 
 **Response:**
@@ -100,7 +100,7 @@ Authorization: Token 9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b
     "is_active": true,
     "token_name": "ci-pipeline",
     "token_description": "Production deploys",
-    "key_prefix": "9944b091",
+    "key_prefix": "<first-8-chars>",
     "created_at": "2026-10-01T09:00:00+00:00",
     "expires_at": "2026-12-30T09:00:00+00:00",
     "last_used_at": null
@@ -114,7 +114,7 @@ No body needed; the token in the `Authorization` header is the one deleted.
 
 ```bash
 DELETE /api/users/token/revoke/
-Authorization: Token 9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b
+Authorization: Token <your-token>
 ```
 
 **Response:**
