@@ -510,15 +510,15 @@ class PlatformAPIClient:
             raise PlatformAPIError(f"Security policy violation: {e}") from e
         except requests.exceptions.ConnectionError as e:
             logger.error(f"🔥 [API Client] Connection failed to platform service: {url}")
-            raise PlatformAPIError("Platform service unavailable") from e
+            raise PlatformAPIError("Platform service unavailable", is_unavailable=True) from e
         except requests.exceptions.Timeout as e:
             logger.error(f"🔥 [API Client] Timeout connecting to platform service: {url}")
-            raise PlatformAPIError("Platform service timeout") from e
+            raise PlatformAPIError("Platform service timeout", is_unavailable=True) from e
         except requests.exceptions.RequestException as e:
             logger.error(f"🔥 [API Client] Request error: {e}")
             raise PlatformAPIError(f"Request failed: {e!s}") from e
 
-        raise PlatformAPIError("Request failed: no response after retries")
+        raise PlatformAPIError("Request failed: no response after retries", is_unavailable=True)
 
     def _handle_binary_response(self, response: requests.Response, endpoint: str) -> bytes:
         if HTTP_OK <= response.status_code < HTTP_MULTIPLE_CHOICES:
@@ -570,10 +570,10 @@ class PlatformAPIClient:
             raise PlatformAPIError(f"Security policy violation: {e}") from e
         except requests.exceptions.ConnectionError as e:
             logger.error(f"🔥 [API Client Binary] Connection failed to platform service: {url}")
-            raise PlatformAPIError("Platform service unavailable") from e
+            raise PlatformAPIError("Platform service unavailable", is_unavailable=True) from e
         except requests.exceptions.Timeout as e:
             logger.error(f"🔥 [API Client Binary] Timeout connecting to platform service: {url}")
-            raise PlatformAPIError("Platform service timeout") from e
+            raise PlatformAPIError("Platform service timeout", is_unavailable=True) from e
         except requests.exceptions.RequestException as e:
             logger.error(f"🔥 [API Client Binary] Request error: {e}")
             raise PlatformAPIError(f"Binary request failed: {e!s}") from e
@@ -607,10 +607,10 @@ class PlatformAPIClient:
             raise PlatformAPIError(f"Security policy violation: {e}") from e
         except requests.exceptions.ConnectionError as e:
             logger.error(f"🔥 [API Client Binary+Headers] Connection failed to platform service: {url}")
-            raise PlatformAPIError("Platform service unavailable") from e
+            raise PlatformAPIError("Platform service unavailable", is_unavailable=True) from e
         except requests.exceptions.Timeout as e:
             logger.error(f"🔥 [API Client Binary+Headers] Timeout connecting to platform service: {url}")
-            raise PlatformAPIError("Platform service timeout") from e
+            raise PlatformAPIError("Platform service timeout", is_unavailable=True) from e
         except requests.exceptions.RequestException as e:
             logger.error(f"🔥 [API Client Binary+Headers] Request error: {e}")
             raise PlatformAPIError(f"Binary request with headers failed: {e!s}") from e

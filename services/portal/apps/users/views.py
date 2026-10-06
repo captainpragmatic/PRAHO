@@ -34,6 +34,8 @@ from apps.common.rate_limit_feedback import (
     get_degraded_message,
     get_rate_limit_message,
     is_rate_limited_error,
+    is_unavailable_error,
+    render_platform_unavailable,
 )
 from apps.common.rate_limiting import mark_auth_failure, mark_auth_success
 from apps.common.request_ip import get_safe_client_ip
@@ -951,7 +953,9 @@ def consent_history_view(request: HttpRequest) -> HttpResponse:
             if result.get("success"):
                 consent_history = result.get("consent_history", [])
                 cookie_consent_history = result.get("cookie_consent_history", [])
-    except PlatformAPIError:  # rate-limit-aware — informational history fetch, graceful degradation
+    except PlatformAPIError as exc:
+        if is_unavailable_error(exc):
+            return render_platform_unavailable(request, exc, status=200)
         logger.warning("⚠️ [Portal Consent] Failed to fetch consent history from Platform")
 
     context = {
@@ -1160,6 +1164,8 @@ def company_profile_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, P
                             billing_addr = addr
                             break
             except Exception as addr_err:
+                if isinstance(addr_err, PlatformAPIError) and is_unavailable_error(addr_err):
+                    return render_platform_unavailable(request, addr_err, status=200)
                 logger.debug("Could not fetch billing address: %s", addr_err)
 
             company_data = {
@@ -1188,6 +1194,8 @@ def company_profile_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, P
     except PlatformAPIError as e:
         if is_rate_limited_error(e):
             raise
+        if is_unavailable_error(e):
+            return render_platform_unavailable(request, e, status=200)
         logger.error(f"🔥 [Portal] Company profile API error: {e}")
         messages.error(request, _("Error loading company profile. Please try again."))
     except Exception as e:

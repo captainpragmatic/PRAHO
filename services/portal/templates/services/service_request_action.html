@@ -39,7 +39,9 @@
           {% csrf_token %}
           <input type="hidden" name="submission_id" value="{{ submission_id }}">
 
-          {% if form_error %}
+          {% if maintenance %}
+          {% include "components/maintenance_inline_alert.html" %}
+          {% elif form_error %}
           <div role="alert" class="mb-6 rounded-lg border border-yellow-600 bg-yellow-900/20 p-4 text-yellow-200">
             <p>{{ form_error }}</p>
             {% if submission_conflict %}
@@ -52,12 +54,13 @@
           <div class="space-y-4 mb-8">
             {% for action_value, action_label in action_types %}
             <div class="relative">
-              <input type="radio"
-                     id="action_{{ action_value }}"
-                     name="action"
-                     value="{{ action_value }}"
-                     class="sr-only peer"
-                     {% if action_value == selected_action %}checked{% endif %}>
+              {% with rid="action_"|add:action_value cls="sr-only peer" %}
+                {% if action_value == selected_action %}
+                  {% input_field "action" input_type="radio" value=action_value html_id=rid css_class=cls checked=True %}
+                {% else %}
+                  {% input_field "action" input_type="radio" value=action_value html_id=rid css_class=cls %}
+                {% endif %}
+              {% endwith %}
 
               <label for="action_{{ action_value }}"
                      class="flex items-center p-4 border-2 border-slate-700 rounded-lg cursor-pointer
@@ -170,15 +173,10 @@
               {% trans "Reason" %}
               <span id="reason-required" class="text-red-400 hidden">*</span>
             </label>
-            <textarea
-              id="reason"
-              name="reason"
-              rows="4"
-              maxlength="4000"
-              class="w-full bg-slate-700 border border-slate-600 text-white rounded-lg px-4 py-2
-                     focus:ring-2 focus:ring-blue-500 focus:border-transparent
-                     placeholder-slate-400 resize-none"
-              placeholder="{% trans 'Please provide a detailed reason for this request...' %}">{{ reason }}</textarea>
+            {% trans 'Please provide a detailed reason for this request...' as reason_placeholder %}
+            {% with reason_id="reason" %}
+              {% input_field "reason" input_type="textarea" html_id=reason_id rows=4 maxlength=4000 placeholder=reason_placeholder value=reason %}
+            {% endwith %}
             <div class="text-xs text-slate-400 mt-1">
               {% trans "This information helps our team process your request faster" %}
             </div>
@@ -186,12 +184,10 @@
 
           <!-- Submit Buttons -->
           <div class="flex flex-col sm:flex-row gap-3">
-            <button type="submit"
-                    class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-6 rounded-lg
-                           transition-colors flex items-center justify-center">
-              {% icon "send" size="sm" css_class="mr-2" %}
-              {% trans "Submit Request" %}
-            </button>
+            {% trans "Submit Request" as submit_label %}
+            {% with submit_classes="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-6 rounded-lg transition-colors flex items-center justify-center" %}
+              {% button submit_label type="submit" icon="send" css_class=submit_classes %}
+            {% endwith %}
 
             <a href="{% url 'services:detail' service_id=service_id %}"
                class="flex-1 border border-slate-600 hover:border-slate-500 text-slate-300 hover:text-white

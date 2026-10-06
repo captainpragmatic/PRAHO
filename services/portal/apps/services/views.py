@@ -24,6 +24,7 @@ from apps.common.rate_limit_feedback import (
     handle_platform_error,
     is_rate_limited_error,
     is_unavailable_error,
+    render_platform_unavailable,
 )
 
 from .services import PlatformAPIError, services_api
@@ -336,8 +337,8 @@ def service_detail(request: HttpRequest, service_id: int) -> HttpResponse:
     except PlatformAPIError as e:
         if is_rate_limited_error(e):
             raise
-        # The list is where the maintenance alert lives, so a degraded platform sends them there
-        # with an explanation rather than a claim that their service is gone.
+        if is_unavailable_error(e):
+            return render_platform_unavailable(request, e)
         _report_platform_failure(
             request, e, subject=f"Service {service_id}", fallback=_("Service not found or access denied.")
         )
@@ -443,6 +444,7 @@ def _submit_service_request(
             context["form_status"] = HTTPStatus.CONFLICT
             context["submission_conflict"] = True
         elif is_unavailable_error(exc):
+            context.update(build_maintenance_context(request, exc))
             context["form_error"] = get_degraded_message(exc)
         else:
             context["form_error"] = _("Unable to submit service request. Please try again later.")
@@ -472,10 +474,14 @@ def _service_request_load_error(request: HttpRequest, error: PlatformAPIError, c
     """Keep an unsubmitted form recoverable when the service lookup is unavailable."""
     if is_rate_limited_error(error):
         raise error
-    logger.warning("Service request form for service %s unavailable: %s", context["service_id"], error)
+    logger.warning("⚠️ [Services View] Service request form for %s unavailable: %s", context["service_id"], error)
+    if request.method == "GET" and is_unavailable_error(error):
+        return render_platform_unavailable(request, error)
     if request.method == "POST" and (
         error.status_code is None or error.status_code >= HTTPStatus.INTERNAL_SERVER_ERROR
     ):
+        if is_unavailable_error(error):
+            context.update(build_maintenance_context(request, error))
         context.update(
             service={"service_name": _("Hosting service")},
             service_details_unavailable=True,
@@ -594,6 +600,8 @@ def service_plans(request: HttpRequest) -> HttpResponse:
         return render(request, "services/plans_list.html", context)
 
     except PlatformAPIError as e:
+        if is_unavailable_error(e):
+            return render_platform_unavailable(request, e, status=200)
         error_ctx = handle_platform_error(
             request, e, logger, fallback_message=_("Unable to load hosting plans. Please try again later.")
         )

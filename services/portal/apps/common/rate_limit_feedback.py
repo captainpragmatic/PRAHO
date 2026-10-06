@@ -8,7 +8,8 @@ import logging
 from typing import Any
 
 from django.contrib import messages
-from django.http import HttpRequest
+from django.http import HttpRequest, HttpResponse
+from django.shortcuts import render
 from django.utils.translation import gettext as _
 
 from apps.api_client.services import PlatformAPIError
@@ -160,3 +161,18 @@ def handle_platform_error(
     if fallback_message:
         messages.error(request, fallback_message)
     return {}
+
+
+def render_platform_unavailable(request: HttpRequest, error: PlatformAPIError, *, status: int = 503) -> HttpResponse:
+    """Render the existing degraded notice without claiming account data is missing."""
+    context = build_maintenance_context(request, error)
+    template = (
+        "components/maintenance_inline_alert.html"
+        if request.headers.get("HX-Request") == "true"
+        else "common/platform_unavailable.html"
+    )
+    response = render(request, template, context, status=status)
+    retry_after = get_retry_after_from_error(error)
+    if retry_after:
+        response["Retry-After"] = str(retry_after)
+    return response

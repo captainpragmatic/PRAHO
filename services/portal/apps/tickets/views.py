@@ -16,7 +16,12 @@ from django.views.decorators.http import require_http_methods
 from apps.common.api_utils import DictAsObj
 from apps.common.decorators import _get_user_role_for_customer, require_support_access
 from apps.common.pagination import PaginatorData, build_pagination_params
-from apps.common.rate_limit_feedback import handle_platform_error, is_rate_limited_error
+from apps.common.rate_limit_feedback import (
+    handle_platform_error,
+    is_rate_limited_error,
+    is_unavailable_error,
+    render_platform_unavailable,
+)
 from apps.services.services import services_api
 
 from .services import PlatformAPIError, TicketCreateRequest, TicketFilters, tickets_api
@@ -259,6 +264,8 @@ def ticket_detail(request: HttpRequest, ticket_id: int) -> HttpResponse:
     except PlatformAPIError as e:
         if is_rate_limited_error(e):
             raise
+        if is_unavailable_error(e):
+            return render_platform_unavailable(request, e)
         logger.error(f"🔥 [Tickets View] Error loading ticket {ticket_id} for customer {customer_id}: {e}")
         messages.error(request, _("Ticket not found or access denied."))
         return redirect("tickets:list")
@@ -326,14 +333,12 @@ def ticket_create(request: HttpRequest) -> HttpResponse:
             logger.info(f"✅ [Tickets View] Created ticket {ticket_id} for customer {customer_id}")
 
             # Handle missing ticket ID gracefully
-            if ticket_id:
-                return redirect("tickets:detail", ticket_id=ticket_id)
-            else:
+            if not ticket_id:
                 logger.error(f"🔥 [Tickets View] No ticket ID returned from platform API: {ticket}")
                 messages.error(
                     request, _("Ticket created but unable to redirect to details. Please check your tickets list.")
                 )
-                return redirect("tickets:list")
+            return redirect("tickets:detail", ticket_id=ticket_id) if ticket_id else redirect("tickets:list")
 
         except PlatformAPIError as e:
             if is_rate_limited_error(e):
@@ -364,7 +369,9 @@ def ticket_create(request: HttpRequest) -> HttpResponse:
         try:
             svc = services_api.get_service_detail(customer_id, user_id, int(service_id))
             service_name = svc.get("service_name", "") or svc.get("name", "")
-        except Exception:
+        except Exception as exc:
+            if isinstance(exc, PlatformAPIError) and is_unavailable_error(exc):
+                return render_platform_unavailable(request, exc)
             logger.warning(f"⚠️ [Tickets View] Could not resolve service {service_id}, passing ID only")
             # Keep service_id even if name resolution fails — Platform will validate on create
 
@@ -394,6 +401,8 @@ def ticket_attachment_download(request: HttpRequest, ticket_id: int, attachment_
             raise Http404("Attachment not found") from exc
         if is_rate_limited_error(exc):
             raise
+        if is_unavailable_error(exc):
+            return render_platform_unavailable(request, exc)
         return HttpResponse(_("Attachment temporarily unavailable."), status=503)
     headers = {key.lower(): value for key, value in headers.items()}
     response = HttpResponse(content, content_type=headers.get("content-type", "application/octet-stream"))
@@ -477,8 +486,12 @@ def ticket_reply(request: HttpRequest, ticket_id: int) -> HttpResponse:
         if is_rate_limited_error(e):
             raise
         logger.error(f"🔥 [Tickets View] Error adding reply to ticket {ticket_id} for customer {customer_id}: {e}")
-        return _handle_ticket_error_response(
-            request, ticket_id, _("Unable to add reply. Please try again later."), status=500
+        return (
+            render_platform_unavailable(request, e)
+            if is_unavailable_error(e)
+            else _handle_ticket_error_response(
+                request, ticket_id, _("Unable to add reply. Please try again later."), status=500
+            )
         )
 
 

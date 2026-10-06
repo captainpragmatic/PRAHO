@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import time
+from html.parser import HTMLParser
 from typing import Any
 from unittest.mock import MagicMock, patch
 from uuid import UUID, uuid4
@@ -16,6 +17,18 @@ from django.urls import reverse
 from apps.api_client.services import PlatformAPIError
 from apps.services.services import ServicesAPIClient
 from apps.services.views import service_detail, service_request_action
+
+
+class _ActionRadioParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.radios: dict[str, dict[str, str | None]] = {}
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = dict(attrs)
+        value = attributes.get("value")
+        if tag == "input" and attributes.get("type") == "radio" and value is not None:
+            self.radios[value] = attributes
 
 
 class ServiceRequestAPIContractTests(SimpleTestCase):
@@ -335,7 +348,15 @@ class ServiceRequestViewTests(SimpleTestCase):
                 response, _ = self._post(submission_id, action="cancel_request", reason="No longer needed")
                 self.assertContains(response, submission_id, status_code=503)
                 self.assertContains(response, "No longer needed", status_code=503)
-                self.assertRegex(response.content.decode(), r'value="cancel_request"\s+class="sr-only peer"\s+checked')
+                radios = _ActionRadioParser()
+                radios.feed(response.content.decode())
+                radios.close()
+                self.assertIn("cancel_request", radios.radios)
+                cancel_radio = radios.radios["cancel_request"]
+                self.assertEqual(cancel_radio["name"], "action")
+                self.assertEqual(cancel_radio["id"], "action_cancel_request")
+                self.assertEqual(cancel_radio["class"], "sr-only peer")
+                self.assertIn("checked", cancel_radio)
                 self.assertContains(response, "Service details are temporarily unavailable", status_code=503)
                 self.assertEqual(response.headers["Retry-After"], "45")
                 self.assertNotContains(response, "Monthly Cost", status_code=503)
