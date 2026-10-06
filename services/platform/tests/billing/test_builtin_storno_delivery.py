@@ -56,9 +56,11 @@ def pdf_rows(document: Invoice) -> list[str]:
 
 
 def _anaf_document(invoice: Invoice, status: str) -> EFacturaDocument:
-    document = EFacturaDocument.objects.create(
-        invoice=invoice, document_type=EFacturaDocumentType.INVOICE.value, environment="test"
+    document, _ = EFacturaDocument.objects.get_or_create(
+        invoice=invoice,
+        defaults={"document_type": EFacturaDocumentType.INVOICE.value, "environment": "test"},
     )
+    # fsm-bypass: historical ANAF response fixture.
     EFacturaDocument.objects.filter(pk=document.pk).update(status=status)
     return EFacturaDocument.objects.get(pk=document.pk)
 
@@ -313,8 +315,9 @@ class InFlightUploadTests(StornoTestCase):
         original = self.original()
         payment = self.collected(original, original.total_cents)
         correction = self.process(self.refund(original, payment, 1000))
-        EFacturaDocument.objects.create(
-            invoice=original, document_type=EFacturaDocumentType.INVOICE.value, environment="test"
+        EFacturaDocument.objects.get_or_create(
+            invoice=original,
+            defaults={"document_type": EFacturaDocumentType.INVOICE.value, "environment": "test"},
         )
         EFacturaDocument.objects.filter(invoice=original).update(status=EFacturaStatus.ACCEPTED.value)
         uploading = EFacturaDocument(status=EFacturaStatus.UPLOADING.value)

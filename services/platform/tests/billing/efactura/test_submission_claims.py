@@ -17,22 +17,31 @@ from apps.billing.efactura.client import EFacturaClient, NetworkError, UploadRes
 from apps.billing.efactura.models import EFacturaDocument, EFacturaStatus
 from apps.billing.efactura.service import EFacturaService
 from apps.billing.efactura.validator import ValidationResult
+from apps.billing.invoice_models import Invoice
 
 
 class _SubmissionClaimFixture:
-    def create_invoice(self, number: str):
-        from tests.factories import CurrencyFactory, CustomerFactory, InvoiceFactory  # noqa: PLC0415
+    def create_invoice(self, number: str) -> Invoice:
+        from tests.factories import CurrencyFactory, CustomerFactory  # noqa: PLC0415
 
         currency = CurrencyFactory(code="RON")
         customer = CustomerFactory()
-        return InvoiceFactory(
-            customer=customer,
-            currency=currency,
-            number=number,
-            bill_to_country="RO",
-            bill_to_tax_id="RO12345678",
-            status="issued",
-        )
+        # Historical claim fixtures bypass issuance; each test constructs its own document state.
+        return Invoice.objects.bulk_create(
+            [
+                Invoice(
+                    customer=customer,
+                    currency=currency,
+                    number=number,
+                    bill_to_name="Test Company SRL",
+                    bill_to_country="RO",
+                    bill_to_tax_id="RO12345678",
+                    status="issued",
+                    subtotal_cents=10000,
+                    total_cents=10000,
+                )
+            ]
+        )[0]
 
     @staticmethod
     def service(client: EFacturaClient) -> EFacturaService:
@@ -74,9 +83,7 @@ class SubmissionClaimLifecycleTests(_SubmissionClaimFixture, TestCase):
         invoice is corrected, retry regenerates and sends the new bytes."""
         invoice = self.create_invoice("INV-REFUSED-REGEN")
         client = Mock(spec=EFacturaClient)
-        client.upload_invoice.return_value = UploadResponse(
-            success=False, message="refused", errors=["bad field"]
-        )
+        client.upload_invoice.return_value = UploadResponse(success=False, message="refused", errors=["bad field"])
         service = self.service(client)
         with (
             patch.object(service, "_is_b2c", return_value=False),
@@ -283,9 +290,7 @@ class SubmissionClaimPostgresConcurrencyTests(_SubmissionClaimFixture, Transacti
             close_old_connections()
             try:
                 service = self.service(client)
-                with patch.object(service, "_is_b2c", return_value=False), patch.object(
-                    service, "_log_audit_event"
-                ):
+                with patch.object(service, "_is_b2c", return_value=False), patch.object(service, "_log_audit_event"):
                     return service.submit_invoice(type(self.invoice).objects.get(pk=self.invoice.pk))
             finally:
                 connection.close()

@@ -598,6 +598,13 @@ def handle_invoice_created_or_updated(sender: type[Invoice], instance: Invoice, 
     - Cross-app order synchronization
     - Post-refund side effects
     """
+    # Required in BOTH issuance paths, before the outer dispatch wrapper can swallow anything.
+    original_values: dict[str, object] = getattr(instance, "_original_invoice_values", {})
+    if instance.status == "issued" and (created or original_values.get("status") == "draft"):
+        from apps.billing.efactura.intents import ensure_efactura_intent
+
+        ensure_efactura_intent(instance)
+
     with swallow_application_errors(logger=logger, scope="Invoice Signal", message="Failed to handle invoice save"):
         # Enhanced audit logging using BillingAuditService
         event_type = "invoice_created" if created else "invoice_status_changed"
@@ -1840,12 +1847,10 @@ def _requires_efactura_submission(invoice: Invoice) -> bool:
 
 
 def _trigger_efactura_submission(invoice: Invoice) -> None:
-    """Queue Romanian e-Factura submission only after the invoice commit succeeds."""
-    from apps.billing.issuers.policy import efactura_submission_denied_reason
+    """Queue the fast path post-commit; synchronous tasks must see committed rows."""
+    from apps.billing.efactura.intents import efactura_intent_required
 
-    denied = efactura_submission_denied_reason(invoice)
-    if denied is not None:
-        logger.info(f"⏭️ [e-Factura] Not queueing {invoice.display_number}: {denied}")
+    if not efactura_intent_required(invoice):
         return
 
     invoice_id = str(invoice.id)

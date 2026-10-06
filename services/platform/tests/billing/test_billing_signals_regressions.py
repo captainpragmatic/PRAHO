@@ -1894,6 +1894,14 @@ class TestRequiresEfacturaSubmission(TestCase):
 
 
 class TestTriggerEfacturaSubmission(TestCase):
+    def setUp(self) -> None:
+        from apps.settings.models import SystemSetting  # noqa: PLC0415
+
+        SystemSetting.objects.update_or_create(
+            key="efactura.enabled",
+            defaults={"name": "e-Factura", "data_type": "boolean", "value": True, "default_value": False},
+        )
+
     @patch("apps.billing.efactura.tasks.queue_efactura_submission")
     def test_successful_queue(self, mock_queue):
         mock_queue.return_value = "task-123"
@@ -1902,6 +1910,8 @@ class TestTriggerEfacturaSubmission(TestCase):
         # The guard fails closed on unknown provenance, so a bare MagicMock is
         # (correctly) refused. The double has to state which system issued it.
         invoice.issuer_provider = ISSUER_BUILTIN
+        invoice.bill_to_country = "RO"
+        invoice.document_kind = DOCUMENT_KIND_INVOICE
         with self.captureOnCommitCallbacks(execute=True) as callbacks:
             _trigger_efactura_submission(invoice)
             mock_queue.assert_not_called()

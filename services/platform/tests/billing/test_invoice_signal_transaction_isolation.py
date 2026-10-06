@@ -22,6 +22,12 @@ from tests.factories.billing_factories import CurrencyFactory, CustomerFactory
 
 
 def _quiet_delivery(test: SimpleTestCase) -> MagicMock:
+    from apps.settings.models import SystemSetting  # noqa: PLC0415
+
+    SystemSetting.objects.update_or_create(
+        key="efactura.enabled",
+        defaults={"name": "e-Factura", "data_type": "boolean", "value": True, "default_value": False},
+    )
     for target in ("django_q.tasks.async_task", "apps.notifications.services.EmailService.send_template_email"):
         delivery = patch(target, return_value="test-job")
         delivery.start()

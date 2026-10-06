@@ -780,3 +780,8 @@ class EFacturaSettings:
 
 # Global settings instance
 efactura_settings = EFacturaSettings()
+
+
+def efactura_enabled() -> bool:
+    """Stored efactura.enabled first, then Django EFACTURA_ENABLED; read on every use."""
+    return efactura_settings.enabled

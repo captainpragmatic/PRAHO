@@ -558,16 +558,26 @@ class EFacturaDocument(models.Model):
 
     @classmethod
     def get_pending_submissions(cls, limit: int = 100) -> models.QuerySet[EFacturaDocument]:
-        """Get queued work plus expired claims that must be quarantined, never replayed."""
+        """Exclude permanent gate failures before the batch limit, including credit notes."""
+        from apps.billing.invoice_models import DOCUMENT_KIND_CREDIT_NOTE, ISSUER_BUILTIN  # noqa: PLC0415
+
         now = timezone.now()
-        return cls.objects.filter(
-            Q(status=EFacturaStatus.QUEUED.value)
-            | Q(
-                status=EFacturaStatus.UPLOADING.value,
-                submission_claim_expires_at__isnull=False,
-                submission_claim_expires_at__lte=now,
+        return (
+            cls.objects.filter(
+                Q(status=EFacturaStatus.QUEUED.value)
+                | Q(
+                    status=EFacturaStatus.UPLOADING.value,
+                    submission_claim_expires_at__isnull=False,
+                    submission_claim_expires_at__lte=now,
+                ),
+                invoice__issuer_provider=ISSUER_BUILTIN,
+                invoice__bill_to_country__iexact="RO",
             )
-        ).order_by("created_at")[:limit]
+            .exclude(invoice__document_kind=DOCUMENT_KIND_CREDIT_NOTE)
+            .exclude(document_type=EFacturaDocumentType.CREDIT_NOTE.value)
+            .select_related("invoice")
+            .order_by("created_at")[:limit]
+        )
 
     @classmethod
     def get_awaiting_response(cls, limit: int = 100) -> models.QuerySet[EFacturaDocument]:

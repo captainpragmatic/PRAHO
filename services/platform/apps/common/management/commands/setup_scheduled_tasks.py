@@ -4,11 +4,13 @@ Consolidated management command to set up all scheduled tasks for PRAHO Platform
 This command registers every PRAHO scheduled-task category.
 """
 
-from typing import Any
+from collections.abc import Callable
 
 from django.core.management.base import BaseCommand, CommandError, CommandParser
+from django.utils.translation import gettext as _
 
 from apps.audit.tasks import setup_audit_scheduled_tasks
+from apps.billing.efactura.tasks import schedule_efactura_tasks
 from apps.billing.tasks import setup_billing_scheduled_tasks, setup_fx_scheduled_tasks
 from apps.common.tasks import setup_system_status_scheduled_tasks
 from apps.domains.tasks import setup_domain_scheduled_tasks
@@ -44,6 +46,11 @@ class Command(BaseCommand):
             help="Set up only billing and usage tasks",
         )
         parser.add_argument(
+            "--efactura-only",
+            action="store_true",
+            help=_("Set up only e-Factura tasks"),
+        )
+        parser.add_argument(
             "--orders-only",
             action="store_true",
             help="Set up only order processing tasks",
@@ -69,48 +76,33 @@ class Command(BaseCommand):
             help="Set up only domain lifecycle tasks",
         )
 
-    def _validate_options(self, options: dict[str, Any]) -> dict[str, bool]:
+    def _validate_options(self, options: dict[str, object]) -> dict[str, bool]:
         """Validate mutually exclusive command options."""
-        virtualmin_only = options.get("virtualmin_only", False)
-        security_only = options.get("security_only", False)
-        billing_only = options.get("billing_only", False)
-        orders_only = options.get("orders_only", False)
-        status_only = options.get("status_only", False)
-        audit_only = options.get("audit_only", False)
-        tickets_only = options.get("tickets_only", False)
-        domains_only = options.get("domains_only", False)
-
-        # Check for mutually exclusive flags
-        exclusive_flags = [
-            virtualmin_only,
-            security_only,
-            billing_only,
-            orders_only,
-            status_only,
-            audit_only,
-            tickets_only,
-            domains_only,
-        ]
-        if sum(exclusive_flags) > 1:
+        names = (
+            "virtualmin_only",
+            "security_only",
+            "billing_only",
+            "efactura_only",
+            "orders_only",
+            "status_only",
+            "audit_only",
+            "tickets_only",
+            "domains_only",
+        )
+        flags = {name: bool(options.get(name, False)) for name in names}
+        if sum(flags.values()) > 1:
             raise CommandError(
-                "Cannot specify multiple exclusive flags "
-                "(--virtualmin-only, --security-only, --billing-only, --orders-only, "
-                "--status-only, --audit-only, --tickets-only, --domains-only)"
+                _("Cannot specify multiple exclusive flags (%(flags)s)")
+                % {"flags": ", ".join("--" + name.replace("_", "-") for name in names)}
             )
-
-        return {
-            "virtualmin_only": virtualmin_only,
-            "security_only": security_only,
-            "billing_only": billing_only,
-            "orders_only": orders_only,
-            "status_only": status_only,
-            "audit_only": audit_only,
-            "tickets_only": tickets_only,
-            "domains_only": domains_only,
-        }
+        return flags
 
     def _setup_task_category(
-        self, category_name: str, emoji: str, setup_function: Any, results_dict: dict[str, str]
+        self,
+        category_name: str,
+        emoji: str,
+        setup_function: Callable[[], dict[str, str]],
+        results_dict: dict[str, str],
     ) -> None:
         """Set up a category of scheduled tasks and display results."""
         self.stdout.write("")
@@ -138,6 +130,10 @@ class Command(BaseCommand):
         self.stdout.write("")
         self.stdout.write("📋 Complete Task Schedule:")
 
+        if run_all or flags["efactura_only"] or flags["billing_only"]:
+            self.stdout.write(_("🏛️ e-Factura: submissions every 5 minutes; status every 15 minutes; retries hourly."))
+            self.stdout.write(_("  - Deadlines, response archives and document reconciliation: Daily"))
+
         if run_all or flags["virtualmin_only"]:
             self.stdout.write("")
             self.stdout.write("🔧 Virtualmin Provisioning:")
@@ -159,6 +155,10 @@ class Command(BaseCommand):
             self.stdout.write("  - Process Pending Orders: Every 5 minutes")
             self.stdout.write("  - Sync Payment Status: Every 15 minutes")
 
+        self._print_operations_schedule(flags, run_all)
+
+    def _print_operations_schedule(self, flags: dict[str, bool], run_all: bool) -> None:
+        """Print the billing, status, audit, ticket and domain sections of the schedule."""
         if run_all or flags["billing_only"]:
             self.stdout.write("")
             self.stdout.write("💳 Billing:")
@@ -194,7 +194,7 @@ class Command(BaseCommand):
         self.stdout.write("🔧 Start workers: python manage.py qcluster")
         self.stdout.write("📊 Monitor tasks: /admin/django_q/")
 
-    def handle(self, *args: Any, **options: Any) -> None:
+    def handle(self, *args: object, **options: object) -> None:
         self.stdout.write("🚀 Setting up PRAHO Platform scheduled tasks...")
 
         # Validate options
@@ -204,6 +204,9 @@ class Command(BaseCommand):
         try:
             only_flags = [k for k, v in flags.items() if v]
             run_all = not only_flags
+
+            if run_all or flags["efactura_only"] or flags["billing_only"]:
+                self._setup_task_category("efactura", "🏛️", schedule_efactura_tasks, all_results)
 
             # Set up Virtualmin tasks
             if run_all or flags["virtualmin_only"]:

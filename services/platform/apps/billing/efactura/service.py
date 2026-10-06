@@ -95,8 +95,10 @@ class SubmissionResult:
 
 
 def is_efactura_enabled() -> bool:
-    """Whether PRAHO files anything with ANAF at all: the one switch `submit_invoice` obeys."""
-    return bool(getattr(settings, "EFACTURA_ENABLED", False))
+    """The correction worker and submission service share authoritative enablement."""
+    from .settings import efactura_enabled  # noqa: PLC0415
+
+    return efactura_enabled()
 
 
 def credit_note_submission_gate(invoice: Invoice) -> str:
@@ -689,38 +691,38 @@ class EFacturaService:
         Returns:
             List of documents approaching deadline
         """
-        from apps.billing.invoice_models import Invoice  # noqa: PLC0415  # Deferred: avoids circular import
-        from apps.settings.services import SettingsService  # noqa: PLC0415  # Deferred: avoids circular import
+        from apps.settings.services import SettingsService  # noqa: PLC0415
 
-        deadline_days = SettingsService.get_integer_setting("billing.efactura_submission_deadline_days", 5)
+        from .intents import (  # noqa: PLC0415
+            LEGALLY_ISSUED_STATUSES,
+            efactura_intent_required,
+            reconcile_efactura_documents,
+        )
 
-        # Coarse pre-filter on issue date: a WORKING-day deadline spans MORE calendar days than the
-        # raw count (weekends + holidays are skipped), so look back generously and let the precise,
-        # working-day-aware per-document deadline check below do the real filtering.
-        # NOTE: `+7` buffer assumes deadline_days <= 5. The worst calendar span for 5 working days
-        # is the Easter cluster (Good Friday + 2 weekends + Easter Monday) = 5 + 4 skipped = 9 days,
-        # plus a 24h warning window comfortably fits in 12 (5+7). If deadline_days is ever raised,
-        # widen this buffer proportionally (rule-of-thumb: deadline_days + max(holiday_cluster_span)).
+        reconcile_efactura_documents()
+        if not is_efactura_enabled():
+            return []
         now = timezone.now()
+        warning = timedelta(hours=max(0, hours))
+        deadline_days = SettingsService.get_integer_setting("billing.efactura_submission_deadline_days", 5)
         warning_days = (max(0, hours) + 23) // 24
         lookback = timedelta(days=deadline_days + 7 + warning_days)
-
-        invoices = Invoice.objects.filter(
-            issued_at__gte=now - lookback,
-            issued_at__lte=now,
-            bill_to_country__iexact="RO",
-            status__in=["issued", "paid", "overdue", "void", "refunded", "partially_refunded"],
-        ).exclude(efactura_document__status=EFacturaStatus.ACCEPTED.value)
-
-        approaching = []
-        for invoice in invoices:
-            # Recover visibility when the issue signal or task queue failed
-            # before an EFacturaDocument was created.
-            doc = self._get_existing_document(invoice) or self._get_or_create_document(invoice)
-            deadline = doc.submission_deadline
-            if deadline is not None and now >= deadline - timedelta(hours=max(0, hours)):
-                approaching.append(doc)
-
+        documents = (
+            EFacturaDocument.objects.select_related("invoice")
+            .filter(
+                invoice__issued_at__gte=now - lookback,
+                invoice__issued_at__lte=now,
+                invoice__status__in=LEGALLY_ISSUED_STATUSES,
+            )
+            .exclude(status=EFacturaStatus.ACCEPTED.value)
+        )
+        approaching: list[EFacturaDocument] = []
+        for document in documents.iterator():
+            if not efactura_intent_required(document.invoice):
+                continue
+            deadline = document.submission_deadline
+            if deadline is not None and now >= deadline - warning:
+                approaching.append(document)
         return approaching
 
     # --- Helper Methods ---
