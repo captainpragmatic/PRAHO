@@ -121,7 +121,11 @@ Strict-Transport-Security: max-age=31536000; includeSubDomains
 Django settings (`config/settings/prod.py`):
 - `SECURE_HSTS_SECONDS = 31536000` (1 year)
 - `SECURE_HSTS_INCLUDE_SUBDOMAINS = True`
-- `SECURE_HSTS_PRELOAD = False` (nginx template enables preload independently — coordinate before enabling in Django)
+- `SECURE_HSTS_PRELOAD = False` in both services
+
+Behind Caddy, the edge owns the header: every Caddy config sends `HSTS_POLICY` and replaces
+Django's. Production leaves it unset (the value above); staging sets `max-age=3600`. The Django
+settings apply only where no edge fronts the service. See `docs/deployment/HTTPS_DEPLOYMENT_CHECKLIST.md`.
 
 ### Nginx SSL Setup
 
