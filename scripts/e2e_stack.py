@@ -333,6 +333,9 @@ def serve(instance: str) -> None:
                     report_coverage()
                 except Exception as error:  # never mask the real shutdown reason
                     print(f"E2E coverage: reporting failed ({error}). Data kept in {COVERAGE_DIR}.")
+            # Releasing the state file tells stop() we are done, so everything printed must be on
+            # disk first: the Makefile greps the coverage verdict as soon as stop() returns.
+            sys.stdout.flush()
             if STATE.exists() and json.loads(STATE.read_text()).get("instance") == instance:
                 STATE.unlink()
 
@@ -343,7 +346,8 @@ def start() -> None:
     instance = uuid4().hex
     with (LOGS / "e2e-supervisor.log").open("w") as log:
         process = subprocess.Popen(
-            [sys.executable, str(Path(__file__).resolve()), "serve", "--instance", instance],
+            # Unbuffered, so the coverage verdict is on disk before the state file is released.
+            [sys.executable, "-u", str(Path(__file__).resolve()), "serve", "--instance", instance],
             cwd=ROOT,
             stdout=log,
             stderr=subprocess.STDOUT,
@@ -359,14 +363,26 @@ def start() -> None:
                 return
         time.sleep(0.5)
     process.terminate()
-    process.wait(timeout=20)
+    process.wait(timeout=_shutdown_budget_seconds(os.environ.get("E2E_COVERAGE") == "1"))
     raise RuntimeError("E2E setup timed out; stopped only the supervisor created by this command.")
+
+
+# How long a supervisor gets to shut down. With coverage on, its shutdown also combines and
+# reports coverage for both services before it releases the state file, and the Makefile reads
+# that verdict straight after stop(). On a GitHub runner the reporting alone outran 20 seconds.
+_SHUTDOWN_SECONDS = 20
+_COVERAGE_SHUTDOWN_SECONDS = 600
+
+
+def _shutdown_budget_seconds(coverage: bool) -> int:
+    return _COVERAGE_SHUTDOWN_SECONDS if coverage else _SHUTDOWN_SECONDS
 
 
 def stop() -> None:
     state = read_state()
     os.kill(state["pid"], signal.SIGTERM)
-    for _ in range(200):
+    deadline = time.monotonic() + _shutdown_budget_seconds(bool(state.get("coverage")))
+    while time.monotonic() < deadline:
         if not STATE.exists() or json.loads(STATE.read_text()).get("instance") != state["instance"]:
             return
         time.sleep(0.1)
