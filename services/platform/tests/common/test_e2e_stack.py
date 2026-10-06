@@ -453,3 +453,92 @@ class CoverageUnionGateCanFailTests(TestCase):
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("at or above the", result.stdout)
+
+
+class _FakeClock:
+    """A clock that only moves when the code under test sleeps, and frees the state file on cue."""
+
+    def __init__(self, state_file: Path, release_after: float | None) -> None:
+        self.now = 0.0
+        self.raised = False
+        self.state_file = state_file
+        self.release_after = release_after
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
+        if self.release_after is not None and self.now >= self.release_after and self.state_file.exists():
+            self.state_file.unlink()
+
+
+class StopWaitsForCoverageTests(TestCase):
+    """`stop()` must outlast the supervisor's coverage reporting.
+
+    The supervisor combines and reports coverage for both services inside its own shutdown, before it
+    releases the state file, and the Makefile reads the coverage verdict straight after `stop()`. On a
+    GitHub runner that reporting took longer than the 20 seconds `stop()` allowed: run 37472257524
+    passed all 317 browser tests, reported coverage OK, and still failed the job.
+    """
+
+    def setUp(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.state = Path(directory.name) / "e2e-stack.json"
+        override = patch.object(stack, "STATE", self.state)
+        override.start()
+        self.addCleanup(override.stop)
+
+    def _stop(self, *, coverage: bool, release_after: float | None) -> _FakeClock:
+        state = {"pid": 4242, "instance": "owned-nonce", "ready": True, "coverage": coverage}
+        self.state.write_text(json.dumps(state))
+        clock = _FakeClock(self.state, release_after)
+        with (
+            patch.object(stack, "read_state", return_value=state),
+            patch.object(stack.os, "kill"),
+            patch.object(stack.time, "monotonic", clock.monotonic),
+            patch.object(stack.time, "sleep", clock.sleep),
+        ):
+            try:
+                stack.stop()
+            except RuntimeError as error:
+                self.assertIn("did not finish stopping", str(error))
+                clock.raised = True
+        return clock
+
+    def test_a_coverage_stack_is_given_time_to_finish_reporting(self) -> None:
+        clock = self._stop(coverage=True, release_after=120)
+        self.assertFalse(clock.raised)
+
+    def test_a_plain_stack_gives_up_at_20_seconds(self) -> None:
+        clock = self._stop(coverage=False, release_after=None)
+        self.assertTrue(clock.raised)
+        self.assertGreaterEqual(clock.now, 20)
+        self.assertLess(clock.now, 20.2)
+
+    def test_a_coverage_stack_gives_up_at_600_seconds(self) -> None:
+        clock = self._stop(coverage=True, release_after=None)
+        self.assertTrue(clock.raised)
+        self.assertGreaterEqual(clock.now, 600)
+        self.assertLess(clock.now, 600.2)
+
+
+class SupervisorOutputIsUnbufferedTests(TestCase):
+    """The coverage verdict must be on disk before the Makefile reads the supervisor's log."""
+
+    def test_the_supervisor_is_launched_unbuffered(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        logs = Path(directory.name)
+        launched = Mock()
+        launched.poll.return_value = 1  # exits at once, so start() reports the failed setup
+        with (
+            patch.object(stack, "LOGS", logs),
+            patch.object(stack, "require_free_ports"),
+            patch.object(stack.subprocess, "Popen", return_value=launched) as popen,
+            self.assertRaisesRegex(RuntimeError, "E2E setup failed"),
+        ):
+            stack.start()
+        command = popen.call_args.args[0]
+        self.assertEqual(command[:2], [sys.executable, "-u"])
