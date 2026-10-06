@@ -6,6 +6,23 @@
 {% load static %}
 {% load ui_components %}
 
+{% if input_type == "radio" %}
+<input type="radio"{% if html_id %} id="{{ html_id }}"{% endif %}
+  {% if name %}name="{{ name }}"{% endif %}{% if value is not None %} value="{{ value }}"{% endif %}
+  class="{{ css_class }}"{% if checked %} checked{% endif %}{% if required %} required{% endif %}
+  {% if disabled %}disabled{% endif %}{% if aria_label %} aria-label="{{ aria_label }}"{% endif %}
+  {% if hx_get %}hx-get="{{ hx_get }}"{% endif %}{% if hx_post %} hx-post="{{ hx_post }}"{% endif %}
+  {% if hx_trigger %}hx-trigger="{{ hx_trigger }}"{% endif %}{% if hx_target %} hx-target="{{ hx_target }}"{% endif %}
+  {% if hx_swap %}hx-swap="{{ hx_swap }}"{% endif %}{% if hx_include %} hx-include="{{ hx_include }}"{% endif %}
+  {% if hx_sync %}hx-sync="{{ hx_sync }}"{% endif %}{% if hx_indicator %} hx-indicator="{{ hx_indicator }}"{% endif %}
+  {% for key, value in data_attrs.items %}data-{{ key }}="{{ value }}" {% endfor %}/>
+{% if label %}
+<label for="{{ html_id }}"
+  class="text-sm font-medium leading-none text-slate-300 peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+  {{ label }}{% if required %}<span class="text-red-500 ml-1">*</span>{% endif %}
+</label>
+{% endif %}
+{% else %}
 {# Container wrapper #}
 <div class="{% if container_class %}{{ container_class }}{% else %}space-y-2{% endif %}">
   {# Label #}
@@ -76,3 +93,4 @@
   <p id="{{ html_id }}-help-below" class="text-xs text-slate-500 dark:text-slate-400">{{ help_text_below }}</p>
   {% endif %}
 </div>
+{% endif %}

@@ -123,6 +123,7 @@ class InputConfig:
     """Parameter object for input field configuration"""
 
     input_type: str = "text"
+    checked: bool = False
     value: str | None = None
     label: str | None = None
     placeholder: str | None = None
@@ -337,6 +338,7 @@ def input_field(
     return {
         "name": name,
         "input_type": config.input_type,
+        "checked": config.checked,
         "value": config.value,
         "label": config.label,
         "placeholder": config.placeholder,

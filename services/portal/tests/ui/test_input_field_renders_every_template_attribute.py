@@ -84,9 +84,11 @@ class InputTemplateParityTests(SimpleTestCase):
     def test_the_tag_passes_every_variable_the_template_reads(self) -> None:
         read = template_variables(get_template("components/input.html").template.nodelist)
         # The walker itself must see the template, or the subset check below passes on nothing.
-        self.assertTrue({"label", "hx_include", "maxlength", "data_attrs"} <= read, read)
+        self.assertTrue({"label", "hx_include", "maxlength", "data_attrs", "checked"} <= read, read)
 
         self.assertEqual(read - set(input_field("f").keys()), set())
+        self.assertIs(input_field("f")["checked"], False)
+        self.assertIs(input_field("f", checked=True)["checked"], True)
 
     def test_help_below_renders_under_the_field(self) -> None:
         self.assertIn("Below the field", _render('{% input_field "f" help_text_below="Below the field" %}'))

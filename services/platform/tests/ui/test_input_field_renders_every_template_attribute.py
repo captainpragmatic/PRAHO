@@ -88,9 +88,11 @@ class InputTemplateParityTests(SimpleTestCase):
     def test_the_tag_passes_every_variable_the_template_reads(self) -> None:
         read = template_variables(get_template("components/input.html").template.nodelist)
         # The walker itself must see the template, or the subset check below passes on nothing.
-        self.assertTrue({"label", "hx_include", "maxlength", "data_attrs"} <= read, read)
+        self.assertTrue({"label", "hx_include", "maxlength", "data_attrs", "checked"} <= read, read)
 
         self.assertEqual(read - set(input_field("f").keys()), set())
+        self.assertIs(input_field("f")["checked"], False)
+        self.assertIs(input_field("f", checked=True)["checked"], True)
 
     def test_help_below_is_announced_with_its_own_id(self) -> None:
         for kind in ("", ' input_type="textarea"', ' input_type="select"'):
@@ -106,10 +108,10 @@ class InputTemplateParityTests(SimpleTestCase):
 class InputAttributesRenderTests(SimpleTestCase):
     def test_each_input_attribute_reaches_the_element(self) -> None:
         cases = {
-            'min=0': 'min="0"',
-            'max=10': 'max="10"',
-            'step=1': 'step="1"',
-            'maxlength=6': 'maxlength="6"',
+            "min=0": 'min="0"',
+            "max=10": 'max="10"',
+            "step=1": 'step="1"',
+            "maxlength=6": 'maxlength="6"',
             'pattern="[0-9]{6}"': 'pattern="[0-9]{6}"',
             'autocomplete="one-time-code"': 'autocomplete="one-time-code"',
             "autofocus=True": " autofocus",
@@ -165,6 +167,4 @@ class FormsReceiveTheirDeclaredHintsTests(TestCase):
         self.assertEqual(response.status_code, 200)
         for name in ("semiannual_discount_percent", "annual_discount_percent"):
             with self.subTest(field=name):
-                self.assertRegex(
-                    response.content.decode(), rf'name="{name}"[^>]*min="0"[^>]*max="100"[^>]*step="0.01"'
-                )
+                self.assertRegex(response.content.decode(), rf'name="{name}"[^>]*min="0"[^>]*max="100"[^>]*step="0.01"')
