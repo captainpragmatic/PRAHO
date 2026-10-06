@@ -518,15 +518,17 @@ def service_request_action(request: HttpRequest, service_id: int) -> HttpRespons
         if is_rate_limited_error(error):
             return _render_role_check_degraded(request, error)
         _submission_key, submission_id = _service_submission_id(request, customer_id, user_id, service_id)
+        selected_action = request.POST.get("action", "")
+        # Keep only the submitted choice; every retry must pass the role check above.
         return _service_request_load_error(
             request,
             error,
             {
                 "service_id": service_id,
                 "submission_id": submission_id,
-                "selected_action": request.POST.get("action", ""),
+                "selected_action": selected_action,
                 "reason": request.POST.get("reason", "").strip(),
-                "action_types": [],
+                "action_types": [action for action in SERVICE_REQUEST_ACTIONS if action[0] == selected_action],
             },
         )
     billing_action = request.method == "POST" and request.POST.get("action") in {"suspend_request", "cancel_request"}

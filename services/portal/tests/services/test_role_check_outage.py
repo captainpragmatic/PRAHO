@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from html.parser import HTMLParser
 from typing import Literal
 from unittest.mock import patch
 
@@ -17,6 +18,49 @@ from tests.common.test_role_decorator_outage import FAILURES, Failure, _api_resp
 Endpoint = Literal["detail", "request_get", "request_post"]
 SUBMISSION_ID = "11111111-1111-4111-8111-111111111111"
 REASON = "Keep <my> hosting"
+
+
+class _ServiceRequestFormParser(HTMLParser):
+    """Collect successful controls from the service request form only."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.fields: dict[str, str] = {}
+        self.actions: list[str] = []
+        self._in_form = False
+        self._textarea_name: str | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = dict(attrs)
+        if tag == "form":
+            self._in_form = attributes.get("id") == "service-request-form"
+        if not self._in_form or "disabled" in attributes:
+            return
+        name = attributes.get("name")
+        if not name:
+            return
+        if tag == "textarea":
+            self._textarea_name = name
+            self.fields[name] = ""
+        elif tag == "input":
+            input_type = attributes.get("type", "text")
+            value = attributes.get("value", "")
+            if name == "action" and value is not None:
+                self.actions.append(value)
+            if input_type in {"radio", "checkbox"} and "checked" not in attributes:
+                return
+            if input_type not in {"submit", "button", "reset", "file", "image"}:
+                self.fields[name] = value if value is not None else ""
+
+    def handle_data(self, data: str) -> None:
+        if self._textarea_name is not None:
+            self.fields[self._textarea_name] += data
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "textarea":
+            self._textarea_name = None
+        elif tag == "form":
+            self._in_form = False
 
 
 @override_settings(
@@ -79,9 +123,12 @@ class ServiceRoleCheckOutageTests(SimpleTestCase):
             self.assertTemplateUsed(response, "services/service_request_action.html")
             self.assertContains(response, SUBMISSION_ID, status_code=status)
             self.assertContains(response, escape(REASON), status_code=status)
-            self.assertEqual(response.context["selected_action"], "cancel_request")
-            self.assertEqual(response.context["action_types"], [])
-            self.assertTrue(response.context["service_details_unavailable"])
+            form = _ServiceRequestFormParser()
+            form.feed(response.content.decode())
+            self.assertEqual(form.actions, ["cancel_request"])
+            self.assertEqual(form.fields["action"], "cancel_request")
+            self.assertEqual(form.fields["reason"], REASON)
+            self.assertEqual(form.fields["submission_id"], SUBMISSION_ID)
             self.assertNotContains(response, "Monthly Cost", status_code=status)
         else:
             template = (
@@ -166,3 +213,87 @@ class ServiceRoleCheckOutageTests(SimpleTestCase):
 
     def test_request_post_membership_outage_matrix(self) -> None:
         self._assert_matrix("request_post")
+
+    def test_role_outage_rendered_form_retries_after_recovery(self) -> None:
+        path = reverse("services:request_action", args=[3])
+        cases = (
+            ("owner", "upgrade_request", 302),
+            ("owner", "downgrade_request", 302),
+            ("owner", "suspend_request", 302),
+            ("owner", "cancel_request", 302),
+            ("billing", "cancel_request", 302),
+            ("tech", "upgrade_request", 302),
+            ("tech", "cancel_request", 403),
+            ("viewer", "cancel_request", 403),
+        )
+        for state in ("cold", "expired"):
+            for failure in ("connection", "maintenance"):
+                for htmx in (False, True):
+                    for role, action, expected_status in cases:
+                        with self.subTest(state=state, failure=failure, htmx=htmx, role=role, action=action):
+                            client = self._client(state)
+                            headers = {"HX-Request": "true"} if htmx else {}
+                            with (
+                                patch("apps.services.views.services_api") as services,
+                                patch(
+                                    "apps.common.outbound_http._session.request",
+                                    side_effect=requests.exceptions.ConnectionError("offline")
+                                    if failure == "connection"
+                                    else None,
+                                    return_value=_api_response(503, {"error": "maintenance"}, retry_after=60),
+                                ) as upstream,
+                            ):
+                                services.get_service_detail.return_value = {
+                                    "id": 3,
+                                    "status": "active",
+                                    "service_name": "Private hosting detail",
+                                }
+                                services.request_service_action.side_effect = AssertionError(
+                                    "Unverified role submitted"
+                                )
+                                outage = client.post(
+                                    path,
+                                    {"action": action, "reason": REASON, "submission_id": SUBMISSION_ID},
+                                    headers=headers,
+                                )
+                                self.assertEqual(outage.status_code, 200 if htmx else 503)
+                                self.assertNotContains(outage, "Private hosting detail", status_code=outage.status_code)
+                                form = _ServiceRequestFormParser()
+                                form.feed(outage.content.decode())
+
+                                # Recover the HTTP boundary; the real role lookup must run again.
+                                upstream.side_effect = None
+                                upstream.return_value = _api_response(
+                                    200, {"success": True, "results": [{"id": 123, "role": role}]}
+                                )
+                                services.request_service_action.side_effect = None
+                                services.request_service_action.return_value = {
+                                    "request_id": SUBMISSION_ID,
+                                    "ticket_id": 91,
+                                    "ticket_number": "TKT-2026-000091",
+                                }
+                                retry = client.post(path, form.fields, headers=headers)
+                                self.assertEqual(retry.status_code, expected_status)
+                                self.assertEqual(form.actions, [action])
+                                self.assertEqual(form.fields["action"], action)
+                                self.assertEqual(form.fields["reason"], REASON)
+                                self.assertEqual(form.fields["submission_id"], SUBMISSION_ID)
+                                self.assertTrue(form.fields["csrfmiddlewaretoken"])
+                                if expected_status == 302:
+                                    self.assertEqual(retry["Location"], reverse("tickets:detail", args=[91]))
+                                    self.assertEqual(
+                                        services.request_service_action.call_args.kwargs,
+                                        {
+                                            "customer_id": 123,
+                                            "user_id": 456,
+                                            "service_id": 3,
+                                            "action": action,
+                                            "reason": REASON,
+                                            "submission_id": SUBMISSION_ID,
+                                        },
+                                    )
+                                else:
+                                    self.assertContains(
+                                        retry, "You do not have permission to request service changes.", status_code=403
+                                    )
+                                    services.request_service_action.assert_not_called()
