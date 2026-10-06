@@ -46,8 +46,8 @@ def _make_setting(key: str, value: object, data_type: str, **extra: object) -> S
 
 
 @override_settings(CACHES=LOCMEM_TEST_CACHE)
-class CacheFirstReadTests(TestCase):
-    """get_setting must serve warm reads from cache without touching the database."""
+class CacheFirstReadTests(TransactionTestCase):
+    """Committed warm reads use the cache without touching the database."""
 
     def setUp(self) -> None:
         cache.clear()

@@ -43,6 +43,7 @@ from apps.billing.proforma_models import ProformaSequence
 from apps.billing.recurring_billing import unmanaged_auto_renew_service_count
 from apps.billing.refund_models import Refund
 from apps.billing.subscription_models import Subscription, SubscriptionItem
+from apps.common.cnp_validator import CNPValidator
 from apps.common.financial_arithmetic import calculate_line_totals
 from apps.customers.models import (
     Customer,
@@ -1681,14 +1682,13 @@ class Command(BaseCommand):
                 reverse_charge_eligible=False,
             )
         elif customer.customer_type == "individual":
-            # All individuals get a CNP for tax/invoice purposes
-            # Vary century digit (1=male, 2=female) and birth year
-            # Romanian CNP: S(1) + YY(2) + MM(2) + DD(2) + CC(2) + NNN(3) + C(1) = 13 digits
-            century_digit = 1 if idx % 2 == 0 else 2
-            birth_year = 85 + idx * 3
+            # CNP uses a two-digit year, a century/sex digit, and a checksum.
+            birth_year = 1985 + idx * 3
+            century_digit = (1 if idx % 2 == 0 else 2) + (4 if birth_year >= 2000 else 0)
+            cnp_body = f"{century_digit}{birth_year % 100:02d}0101{40 + idx:02d}{idx:03d}"
             CustomerTaxProfile.objects.create(
                 customer=customer,
-                cnp=f"{century_digit}{birth_year:02d}0101{40 + idx:02d}{idx:03d}1",
+                cnp=f"{cnp_body}{CNPValidator._calculate_check_digit(cnp_body)}",
                 is_vat_payer=False,
             )
 

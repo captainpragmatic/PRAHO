@@ -44,6 +44,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lockfile, and the pinned toolchain builds byte-identical CSS on macOS and Linux. The QA record
   that said the suite ran nightly is corrected, and its ledger of open items re-verified against
   the code.
+- A changed setting takes effect consistently. Code running inside a transaction now reads the
+  value it just wrote instead of the old cached one, a value from a transaction that rolls back is
+  never cached, and a read that overlaps a save can no longer put the old value back in the cache
+  for an hour.
 - Invoices are no longer silently lost when a database error occurs while handling their
   creation or updates. Optional failures no longer cancel e-Factura submission or emails.
 - The UI template tags no longer drop arguments they do not recognise. An unknown argument now
