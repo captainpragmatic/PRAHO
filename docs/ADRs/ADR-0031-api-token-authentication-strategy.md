@@ -1,7 +1,7 @@
 # ADR-0031: API Token Authentication Strategy
 
 **Status:** Accepted
-**Date:** 2026-03-06 (updated 2026-10-01)
+**Date:** 2026-03-06 (updated 2026-10-06)
 **Authors:** Development Team
 **Related:** ADR-0017 (Portal Auth Fail-Open), ADR-0024 (User Role Clarification)
 **Gap tracking:** [Issue #77 — close ADR-0031 token authentication gaps](https://github.com/captainpragmatic/PRAHO/issues/77)
@@ -17,7 +17,7 @@ against it:
 |----------|-----------|--------|
 | Portal service (backend) | HMAC-signed `X-User-Context` requests | Production-ready |
 | Platform web UI (staff) | Django session cookies | Production-ready |
-| Scripts, CLI tools, automation | Opaque bearer tokens (`APIToken`) | Issuance works; use is blocked by the HMAC gate (Gap 1, #569) |
+| Scripts, CLI tools, automation | Opaque bearer tokens (`APIToken`) | Issue, inspect and revoke work with a bare token; business routes still require the HMAC signature (#569) |
 
 This ADR covers the third category: **API token authentication for direct API consumers**
 such as operator scripts, future CLI tools, and future mobile clients.
@@ -71,10 +71,9 @@ class Token(models.Model):
 
 ### Intended Script / CLI Usage
 
-> **Not usable as written today (#569).** Every `/api/` route except token issuance sits
-> behind the Portal's HMAC gate, so steps 2 and 3 are rejected without the shared
-> signature that only the Portal holds. The example shows the intended shape; see Gap 1
-> and "Current limitations" below.
+> A bare token reaches its own lifecycle only (#569): issue, inspect, revoke. Business
+> routes such as `/api/customers/search/` still require the Portal's HMAC signature; see
+> "What a bare token can reach" below.
 
 ```bash
 # 1. Obtain token (use a dedicated service-account staff user, minimal role)
@@ -83,9 +82,9 @@ TOKEN=$(curl -s -X POST https://platform.example.com/api/users/token/ \
   -d '{"email":"automation@pragmatichost.com","password":"<password>"}' \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
 
-# 2. Make authenticated requests
-curl -H "Authorization: Token $TOKEN" \
-  https://platform.example.com/api/customers/search/?q=test
+# 2. Confirm which user and expiry the token carries
+curl -H "Authorization: Bearer $TOKEN" \
+  https://platform.example.com/api/users/token/me/
 
 # 3. Revoke when done
 curl -X DELETE https://platform.example.com/api/users/token/revoke/ \
@@ -192,7 +191,7 @@ in `apps/api/users/authentication.py`. No external dependencies were added.
 | ---------- | ---------------------- | ---------------- |
 | Tokens per user | 1 (OneToOneField) | Multiple (ForeignKey), capped by `API_TOKEN_MAX_ACTIVE_PER_USER` (default 20) |
 | Storage | Plaintext | SHA-256 hashed |
-| Expiry | None | Default 90-day TTL (`API_TOKEN_DEFAULT_TTL_DAYS`); callers may shorten via `ttl_days`, clamped to `API_TOKEN_MAX_TTL_DAYS` (365) — only the server default can select "no expiry" |
+| Expiry | None | Default 90-day TTL (`API_TOKEN_DEFAULT_TTL_DAYS`); callers may pick any `ttl_days` from 1 to `API_TOKEN_MAX_TTL_DAYS` (365), shorter or longer than the default — only the server default can select "no expiry" |
 | Usage tracking | None | `last_used_at` (throttled to 5-min intervals, condition evaluated in SQL) |
 | Token naming | None | `name` + `description` through both API and staff UI |
 | Auth header | `Token` only | `Bearer` and `Token`; malformed recognized schemes fail closed |
@@ -204,8 +203,9 @@ in `apps/api/users/authentication.py`. No external dependencies were added.
 
 1. **Use a dedicated service-account `User`** per script/integration with the minimum
    `staff_role` needed. Never use a personal staff account's token in automation.
-2. **Expiry is on by default** (90 days). Pass `ttl_days` to shorten it for CI/CD or
-   temporary automation; callers cannot opt out of expiry.
+2. **Expiry is on by default** (90 days). Pass `ttl_days` to choose a lifetime between 1 and
+   365 days; prefer a short one for CI/CD or temporary automation. Callers cannot opt out of
+   expiry.
 3. **Store tokens in secrets management** (environment variables, a vault) — never
    hardcode in scripts or commit to version control.
 4. **Expired tokens are purged automatically** — the `user-api-token-purge` Django-Q
@@ -227,29 +227,42 @@ mechanism is authoritative. `tests/api/test_api_token_auth.py::StrayAuthorizatio
 locks this in; the CI auth-coverage test (`public_api_endpoint` marker) enforces that every
 API view has an explicit auth posture.
 
-### Current limitations (#569)
+### What a bare token can reach (#569)
 
-Token authentication is a project default, but every `/api/` route that accepts a token
-also sits behind the inter-service HMAC gate. Only `POST /api/users/token/` is public. A
-token holder without the Portal's signing secret can therefore obtain a key but cannot use
-it, introspect it (`GET /api/users/token/me/`) or revoke it (`DELETE
-/api/users/token/revoke/`). `tests/api/test_token_auth_requires_hmac.py` asserts this shape
-and fails the build if a token-accepting route becomes reachable without the signature.
+Token authentication is a project default, but every business route that accepts a token
+also sits behind the inter-service HMAC gate. A bare token, with no Portal signature,
+reaches exactly three routes:
 
-Whether to open these routes to bare-token callers is an open product decision (#569).
-Before any route is opened:
+| Route | What it touches |
+|---|---|
+| `POST /api/users/token/` | Issues a key after password and, when enrolled, the second factor |
+| `GET /api/users/token/me/` | Reads the token that authenticated the request |
+| `DELETE /api/users/token/revoke/` | Deletes the token that authenticated the request; the `APIToken` `pre_delete` signal audits it |
+
+Nothing else. Every other `/api/` route requires the Portal's signature before its view
+runs, so a valid token alone cannot reach customer, billing or service data. `tests/api/test_token_auth_requires_hmac.py` pins the set of token-accepting public
+routes to the two lifecycle routes and fails the build if any other one loses the gate.
+`tests/api/test_token_lifecycle_public.py` runs the real middleware and asserts both
+directions: the lifecycle routes answer a bare token, and a business route still refuses it.
+
+The preconditions recorded before opening these two routes:
 
 1. Token issuance verifies the second factor for accounts that have one. **Done (#565).**
-2. Tokens issued before that change, which a password alone could mint, must be revoked or
-   rejected. Token authentication checks the key, the user's active flag and expiry, not
-   how the key was obtained, and a server default can issue keys that never expire.
-3. The staff web login must enforce the second factor. A staff session can mint tokens at
-   `/settings/api-tokens/`. **Done for new logins (#590):** an enrolled account now stops at
-   the password step and gets a session only from `mfa_verify`, through the same check as
-   the token endpoint, and a web password reset keeps the second factor (#595). Sessions
-   granted on a password alone before that change are not revoked by it: before the first
-   deployment that relies on 2FA, revoke the sessions of enrolled staff.
-4. The tripwire's expected set must be updated deliberately, with a reviewer attached.
+2. Tokens issued before that change must be revoked or rejected. **Moot:** no preserved
+   database exists (ADR-0052), so no such token exists anywhere. If one ever did, it could
+   still only inspect or revoke itself.
+3. The staff web login enforces the second factor. **Done (#590, #595).** Sessions granted
+   on a password alone before #590 are likewise moot under ADR-0052.
+4. The tripwire's expected set is updated deliberately, with a reviewer. **Done (#569).**
+
+Opening any business route to a bare token is a separate decision. It would need a
+per-token scope, because a token today carries the full authority of its user.
+
+**Accepted risk on the two lifecycle routes.** Public routes skip the HMAC middleware's own
+rate limiter, and DRF checks throttles after authentication. So a guess with an invalid
+token is rate-limited at no layer; only valid tokens hit the per-user `api_burst` and
+`sustained` throttles. Keys are 160-bit random values looked up by one indexed hash, so
+guessing is not a practical attack.
 
 Residual on the issuance endpoint after #565: refusals all share the wrong-password body,
 but not its timing. With the correct password, a 2FA account goes on to verify the code,
@@ -346,7 +359,7 @@ auth).
 
 | Gap | Description | Status | Closed by |
 | --- | ----------- | ------ | --------- |
-| 1 | `verify_token` broken for token consumers | **Open** (#569) | `GET /api/users/token/me/` exists, but like `token/revoke/` it sits behind the HMAC gate, so a bare-token caller still cannot introspect or revoke. Opening them is a pending product decision; prerequisites under "Current limitations" |
+| 1 | `verify_token` broken for token consumers | Closed | `GET /api/users/token/me/` and `DELETE /api/users/token/revoke/` answer a bare token (#569); business routes keep the HMAC gate. See "What a bare token can reach" |
 | 2 | No token expiry | Closed | Default 90-day TTL on issuance, `HashedTokenAuthentication` expiry check, daily scheduled purge; startup checks (`security.E062/E063/E064`) keep issuance policy coherent |
 | 3 | No `last_used_at` tracking | Closed | `APIToken.last_used_at` field, updated at 5-min intervals (SQL-side condition) |
 | 4 | One token per user (OneToOneField) | Closed | `APIToken` uses `ForeignKey(User)` — multiple tokens, capped by `API_TOKEN_MAX_ACTIVE_PER_USER` (default 20) |

@@ -30,6 +30,8 @@ PUBLIC_PATHS = [
     "/api/customers/register/",
     "/api/services/plans/",
     "/api/tickets/categories/",
+    "/api/users/token/me/",
+    "/api/users/token/revoke/",
 ]
 
 HMAC_REJECTION = {"error": "HMAC authentication failed"}
@@ -48,6 +50,9 @@ EXPECTED_PUBLIC_ROUTES = {
     "api/tickets/categories/",
     "api/users/health/",
     "api/users/token/",
+    # A bare token's own lifecycle, nothing else (#569, ADR-0031).
+    "api/users/token/me/",
+    "api/users/token/revoke/",
 }
 
 

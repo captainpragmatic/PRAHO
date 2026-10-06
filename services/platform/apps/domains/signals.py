@@ -955,37 +955,6 @@ def _invalidate_billing_tld_caches(tld: TLD) -> None:
 # ===============================================================================
 
 
-def _handle_existing_virtualmin_account(domain: Domain, virtualmin_account: Any) -> None:
-    """Handle updates to existing Virtualmin account based on domain status changes"""
-    from apps.provisioning.virtualmin_service import (  # noqa: PLC0415  # Deferred: avoids circular import
-        VirtualminProvisioningService,  # Circular: cross-app
-    )
-
-    if domain.status != "active" and virtualmin_account.status == "active":
-        # Domain became inactive - suspend Virtualmin account
-        provisioning_service = VirtualminProvisioningService()
-        result = provisioning_service.suspend_account(
-            virtualmin_account, reason=f"Domain status changed to {domain.status}"
-        )
-
-        if result.is_ok():
-            logger.info(f"🚫 [CrossApp] Suspended Virtualmin account for {domain.name}")
-        else:
-            logger.error(f"🔥 [CrossApp] Failed to suspend Virtualmin account for {domain.name}: {result.unwrap_err()}")
-
-    elif domain.status == "active" and virtualmin_account.status == "suspended":
-        # Domain became active - unsuspend Virtualmin account
-        provisioning_service = VirtualminProvisioningService()
-        result = provisioning_service.unsuspend_account(virtualmin_account)
-
-        if result.is_ok():
-            logger.info(f"✅ [CrossApp] Unsuspended Virtualmin account for {domain.name}")
-        else:
-            logger.error(
-                f"🔥 [CrossApp] Failed to unsuspend Virtualmin account for {domain.name}: {result.unwrap_err()}"
-            )
-
-
 def _sync_domain_to_virtualmin_by_pk(domain_pk: Any) -> None:
     """Reload the committed domain and sync it. Post-commit entry point.
 
@@ -1002,51 +971,35 @@ def _sync_domain_to_virtualmin_by_pk(domain_pk: Any) -> None:
 
 def sync_domain_to_virtualmin(domain: Domain) -> None:
     """
-    Sync domain creation/updates to Virtualmin control panel.
+    Queue a hosting reconcile for every service this domain is bound to (#566, ADR-0051).
+
+    The domain no longer calls Virtualmin. Whether an account's hosting is on is decided
+    by the provisioning reconciler alone, which reads the domain's status through its
+    ``ServiceDomain`` bindings. One retry owner, and no race between two writers.
 
     Cross-app integration point: domains → provisioning
     """
     try:
-        # Import here to avoid circular imports
-        from apps.provisioning.models import (  # noqa: PLC0415  # Deferred: avoids circular import
-            Service,  # Circular: cross-app  # Deferred: avoids circular import
+        from apps.provisioning.relationship_models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            ServiceDomain,  # Circular: cross-app
         )
-        from apps.provisioning.virtualmin_models import (  # noqa: PLC0415  # Deferred: avoids circular import
-            VirtualminAccount,  # Circular: cross-app  # Deferred: avoids circular import
+        from apps.provisioning.virtualmin_tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
+            reconcile_virtualmin_service_state_async,  # Circular: cross-app
         )
 
-        # Find hosting services associated with this domain
-        hosting_services = Service.objects.filter(
-            domains__domain__name=domain.name, status__in=["active", "provisioning"]
-        ).distinct()
-
-        if hosting_services:
-            logger.info(
-                f"🔄 [CrossApp] Syncing domain {domain.name} to Virtualmin for {len(hosting_services)} services"
-            )
-
-            for service in hosting_services:
-                try:
-                    # Check if Virtualmin account already exists
-                    virtualmin_account = VirtualminAccount.objects.filter(domain=domain.name, service=service).first()
-
-                    if virtualmin_account:
-                        # Update existing account if needed
-                        _handle_existing_virtualmin_account(domain, virtualmin_account)
-                    else:
-                        # No existing account - this might need provisioning
-                        logger.debug(
-                            f"📋 [CrossApp] No Virtualmin account found for domain {domain.name}, may need provisioning"
-                        )
-
-                except Exception as e:
-                    logger.error(f"🔥 [CrossApp] Failed to sync domain {domain.name} to service {service.id}: {e}")
-
-        else:
-            logger.debug(f"📋 [CrossApp] No hosting services found for domain {domain.name}, skipping Virtualmin sync")
-
+        service_ids = list(ServiceDomain.objects.filter(domain=domain).values_list("service_id", flat=True).distinct())
     except Exception as e:
-        logger.error(f"🔥 [CrossApp] Failed to sync domain {domain.name} to Virtualmin: {e}")
+        logger.error(f"🔥 [CrossApp] Failed to find services bound to domain {domain.name}: {e}")
+        return
+
+    for service_id in service_ids:
+        # One failed enqueue must not skip the rest; the divergence sweep re-queues it.
+        try:
+            reconcile_virtualmin_service_state_async(str(service_id))
+        except Exception as e:
+            logger.error(f"🔥 [CrossApp] Failed to queue a hosting reconcile for service {service_id}: {e}")
+    if service_ids:
+        logger.info(f"🔄 [CrossApp] Domain {domain.name} queued hosting reconciles for {len(service_ids)} services")
 
 
 def _handle_domain_status_change_with_virtualmin_sync(domain: Domain, old_status: str, new_status: str) -> None:
@@ -1060,10 +1013,9 @@ def _handle_domain_status_change_with_virtualmin_sync(domain: Domain, old_status
         _handle_domain_status_change(domain, old_status, new_status)
 
         # Add Virtualmin synchronization for status changes.
-        # Deferred to post-commit: this reaches gateway.call("disable-domain", ...), a
-        # real provider mutation. Fired inline it runs inside the caller's still-open
-        # transaction, so a later rollback leaves the panel disabled while the database
-        # says active, and nothing reconciles it back (ADR-0045).
+        # Deferred to post-commit: it queues hosting reconciles, and the reconciler must
+        # read the domain status that committed. Queued inside the caller's still-open
+        # transaction, a rolled-back change would still be reconciled (ADR-0045).
         # The pk is captured, not the instance, so the callback reads committed state
         # rather than a mutable object someone may have changed in the meantime.
         if old_status != new_status:

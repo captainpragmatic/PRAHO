@@ -235,6 +235,12 @@ class AccountTaskRetryContractTests(SimpleTestCase):
         patcher = patch.object(virtualmin_tasks, "_migration_locked", return_value=False)
         patcher.start()
         self.addCleanup(patcher.stop)
+        # Same reason for the ADR-0051 enabled-state check on the unsuspend task: it
+        # queries the Service and its domain bindings. Its behaviour is pinned against real
+        # rows in test_hosting_enabled_single_writer.
+        enabled = patch.object(virtualmin_tasks, "_hosting_enabled", return_value=True)
+        enabled.start()
+        self.addCleanup(enabled.stop)
 
     def _account(self) -> MagicMock:
         account = MagicMock()

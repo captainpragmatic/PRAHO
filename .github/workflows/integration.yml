@@ -180,6 +180,7 @@ jobs:
           tests.billing.test_builtin_storno_concurrency \
           tests.billing.test_invoice_signal_transaction_isolation \
           tests.common.test_transactions \
+          tests.provisioning.test_hosting_account_staff_actions_concurrency \
           --settings=config.settings.ci --verbosity=2
 
     - name: Service isolation security tests (make test-security)
