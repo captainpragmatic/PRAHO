@@ -261,6 +261,120 @@ class TestQualityGates(SimpleTestCase):
                     )
                     self.assertEqual(self._lines(self._check(self.a11y, path), "A11Y003"), [1])
 
+    def test_filtered_component_names_match_rendered_names(self) -> None:
+        values = (
+            ('"Name"|capfirst', "Name"),
+            ("'Name'|lower|capfirst", "Name"),
+            ('_("Name")|capfirst', "Name"),
+            ("_('Name')|lower|capfirst", "Name"),
+            ('"Name|Surname"|capfirst', "Name|Surname"),
+            ('"Name"|default:"use as name|fallback"|capfirst', "Name"),
+        )
+        for service in ("platform", "portal"):
+            engine = Engine(
+                dirs=[str(REPO_ROOT / "shared" / "ui" / "templates")],
+                libraries={
+                    "ui_components": f"services.{service}.apps.ui.templatetags.ui_components",
+                    "static": "django.templatetags.static",
+                },
+            )
+            for key in ("label", "aria_label"):
+                for value, expected in values:
+                    source = '{% input_field "control" ' + key + "=" + value + " %}"
+                    rendered = engine.from_string("{% load ui_components %}" + source).render(Context({}))
+                    if key == "aria_label":
+                        self.assertIn('aria-label="' + expected + '"', rendered)
+                    else:
+                        self.assertIn(expected, rendered)
+                    for kind, content in (("source", source), ("rendered", rendered)):
+                        with self.subTest(service=service, key=key, value=value, kind=kind):
+                            path = self._seed(content, name="filtered-names.html")
+                            self.assertEqual(self._check(self.a11y, path), [])
+
+    def test_filtered_blank_component_names_are_empty(self) -> None:
+        for key in ("label", "aria_label"):
+            for value in ('" "|capfirst', "' '|lower", '_(" ")|capfirst', "_(' ')|lower|capfirst"):
+                with self.subTest(key=key, value=value):
+                    path = self._seed('{% input_field "blank" ' + key + "=" + value + " %}\n")
+                    self.assertEqual(self._lines(self._check(self.a11y, path), "A11Y003"), [1])
+
+    def test_capture_options_do_not_supply_link_text(self) -> None:
+        engine = Engine(libraries={"i18n": "django.templatetags.i18n"})
+        for tag in ("trans", "translate"):
+            for options in (
+                "as name noop",
+                'as name context "greeting"',
+                "noop as name",
+                'context "greeting" as name',
+            ):
+                capture = "{% " + tag + ' "Name" ' + options + " %}"
+                source = (
+                    '<a href="/">' + capture + "</a>\n"
+                    '<a href="/">' + capture + "{{ name }}</a>\n"
+                    '<a href="/">{% ' + tag + ' "Name" context "use as name" %}</a>\n'
+                )
+                rendered = engine.from_string("{% load i18n %}" + source).render(Context({}))
+                for kind, content in (("source", source), ("rendered", rendered)):
+                    with self.subTest(tag=tag, options=options, kind=kind):
+                        path = self._seed(content, name="captured-links.html")
+                        self.assertEqual(self._lines(self._check(self.a11y, path), "A11Y002"), [1])
+
+    def test_capture_options_do_not_supply_label_text(self) -> None:
+        engine = Engine(libraries={"i18n": "django.templatetags.i18n"})
+        for tag in ("trans", "translate"):
+            for options in (
+                "as name noop",
+                'as name context "greeting"',
+                "noop as name",
+                'context "greeting" as name',
+            ):
+                capture = "{% " + tag + " 'Name' " + options + " %}"
+                source = (
+                    "<label>" + capture + '<input name="first"></label>\n'
+                    '<label for="second">' + capture + '</label><input id="second">\n'
+                    "<label>" + capture + '{{ name }}<input name="named"></label>\n'
+                    "<label>{% " + tag + ' "Name" context "use as name" %}<input name="literal"></label>\n'
+                )
+                rendered = engine.from_string("{% load i18n %}" + source).render(Context({}))
+                for kind, content in (("source", source), ("rendered", rendered)):
+                    with self.subTest(tag=tag, options=options, kind=kind):
+                        path = self._seed(content, name="captured-labels.html")
+                        self.assertEqual(self._lines(self._check(self.a11y, path), "A11Y003"), [1, 2])
+
+    def test_one_button_marker_exempts_only_one_element(self) -> None:
+        buttons = '<button><svg class="icon" /></button>' * 2
+        path = self._seed("{# a11y-allow A11Y005: deliberate exception #}\n" + buttons + "\n" + buttons + "\n")
+        self.assertEqual(self._lines(self._check(self.a11y, path), "A11Y005"), [2, 3, 3])
+
+    def test_element_markers_exempt_only_one_matching_element(self) -> None:
+        cases = (
+            ("A11Y004", "<html><html>"),
+            (
+                "A11Y006",
+                '<div onclick="open()"></div>'
+                '<span onclick="open()" role="button" tabindex="0"></span>'
+                '<p onclick="open()"></p>',
+            ),
+            ("A11Y007", '<input aria-label="Name" autofocus>' * 2),
+            ("A11Y008", "<table></table>" * 2),
+            ("A11Y009", '<button tabindex="1">One</button><button tabindex="2">Two</button>'),
+            ("A11Y010", '<button aria-hidden="true">One</button><button aria-hidden="true">Two</button>'),
+        )
+        for code, elements in cases:
+            with self.subTest(code=code):
+                prefix = '<input aria-label="First" autofocus>\n' if code == "A11Y007" else ""
+                path = self._seed(
+                    prefix + "{# a11y-allow " + code + ": deliberate exception #}\n" + elements + "\n" + elements + "\n"
+                )
+                offset = prefix.count("\n")
+                self.assertEqual(self._lines(self._check(self.a11y, path), code), [2 + offset, 3 + offset, 3 + offset])
+
+    def test_table_captions_only_name_their_own_element(self) -> None:
+        path = self._seed(
+            "<table><caption>Named</caption></table><table></table>\n<table><caption>Other</caption></table>\n"
+        )
+        self.assertEqual(self._lines(self._check(self.a11y, path), "A11Y008"), [1])
+
     def test_emails_directory_is_skipped_without_skipping_similar_names(self) -> None:
         email = self._seed('<p style="color: red">Welcome</p>', name="emails/welcome.html")
         page = self._seed('<p style="color: red">Welcome</p>', name="email_assets/page.html")

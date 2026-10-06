@@ -92,6 +92,12 @@ COMPONENT_FIELD = re.compile(
     re.DOTALL,
 )
 COMPONENT_ARGUMENT = re.compile(r"""(?:[^\s'"]+|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')+""")
+QUOTED_LITERAL = r"""(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')"""
+TRANSLATED_LITERAL = rf"(?:_|gettext)\({QUOTED_LITERAL}\)"
+COMPONENT_FILTER_EXPRESSION = re.compile(
+    rf"(?P<literal>{QUOTED_LITERAL}|{TRANSLATED_LITERAL})"
+    rf"(?:\|\w+(?::(?:{QUOTED_LITERAL}|{TRANSLATED_LITERAL}|[\w.+-]+))?)*"
+)
 POSITIVE_TABINDEX = re.compile(r"tabindex\s*=\s*[\"']([1-9]\d*)[\"']", re.IGNORECASE)
 ONCLICK_NON_INTERACTIVE = re.compile(
     r"<(?:div|span|p|li|td)\b[^>]*(?:onclick|@click|x-on:click)[^>]*>",
@@ -140,8 +146,10 @@ def _strip_django_tags(line: str, *, preserve_variables: bool = False) -> str:
         tag = match.group()
         translation = re.match(r"""\{%\s*(?:trans|translate)\s+(?:"([^"]*)"|'([^']*)')""", tag)
         text = (translation.group(1) or translation.group(2) or "") if translation else ""
-        if translation and re.search(r"\s+as\s+\w+\s*%}", tag[translation.end() :]):
-            text = ""
+        if translation:
+            options = COMPONENT_ARGUMENT.findall(tag[translation.end() : -2])
+            if any(option == "as" for option in options[:-1]):
+                text = ""
         return text + "\n" * tag.count("\n")
 
     line = re.sub(r"\{%.*?%\}", replace_tag, line, flags=re.DOTALL)
@@ -192,7 +200,10 @@ class _FormLabelParser(HTMLParser):
 
 
 def _component_argument_has_text(value: str) -> bool:
-    """Inspect literal labels before accepting dynamic template expressions."""
+    """Judge the base literal of a filter expression without executing filters."""
+    expression = COMPONENT_FILTER_EXPRESSION.fullmatch(value)
+    if expression:
+        value = expression.group("literal")
     translation = re.fullmatch(r"(?:_|gettext)\((.*)\)", value, flags=re.DOTALL)
     if translation:
         value = translation.group(1)
@@ -306,16 +317,16 @@ def check_file(path: Path, *, verbose: bool = False) -> list[A11yViolation]:
     # Only check the first 10 lines where <html> normally appears
     for i, raw_line in enumerate(lines[:10], 1):
         line = _strip_django_comments(raw_line)
-        if HTML_MISSING_LANG.search(line):
-            violations.append(
-                A11yViolation(
-                    code="A11Y004",
-                    severity=SEVERITY_CRITICAL,
-                    file=path,
-                    line=i,
-                    message="<html> element missing lang attribute",
-                )
+        violations.extend(
+            A11yViolation(
+                code="A11Y004",
+                severity=SEVERITY_CRITICAL,
+                file=path,
+                line=i,
+                message=gettext("<html> element missing lang attribute"),
             )
+            for _match in HTML_MISSING_LANG.finditer(line)
+        )
 
     # ── A11Y001: <img> without alt ──────────────────────────────────────
     for i, raw_line in enumerate(lines, 1):
@@ -363,30 +374,31 @@ def check_file(path: Path, *, verbose: bool = False) -> list[A11yViolation]:
     for i, raw_line in enumerate(lines, 1):
         line = _strip_django_comments(raw_line)
         cleaned = _strip_django_tags(line)
-        if ICON_ONLY_BUTTON.search(cleaned):
-            violations.append(
-                A11yViolation(
-                    code="A11Y005",
-                    severity=SEVERITY_SERIOUS,
-                    file=path,
-                    line=i,
-                    message="Icon-only <button> missing aria-label",
-                )
+        violations.extend(
+            A11yViolation(
+                code="A11Y005",
+                severity=SEVERITY_SERIOUS,
+                file=path,
+                line=i,
+                message=gettext("Icon-only <button> missing aria-label"),
             )
+            for _match in ICON_ONLY_BUTTON.finditer(cleaned)
+        )
 
     # ── A11Y006: Click handlers on non-interactive elements ─────────────
     for i, raw_line in enumerate(lines, 1):
         line = _strip_django_comments(raw_line)
-        if ONCLICK_NON_INTERACTIVE.search(line):
-            # Check if it has role and tabindex
-            if not re.search(r"\brole\s*=", line) or not re.search(r"\btabindex\s*=", line):
+        for match in ONCLICK_NON_INTERACTIVE.finditer(line):
+            # Role and tabindex must belong to this element.
+            element = match.group()
+            if not re.search(r"\brole\s*=", element) or not re.search(r"\btabindex\s*=", element):
                 violations.append(
                     A11yViolation(
                         code="A11Y006",
                         severity=SEVERITY_SERIOUS,
                         file=path,
                         line=i,
-                        message="Click handler on non-interactive element without role/tabindex",
+                        message=gettext("Click handler on non-interactive element without role/tabindex"),
                     )
                 )
 
@@ -397,7 +409,7 @@ def check_file(path: Path, *, verbose: bool = False) -> list[A11yViolation]:
         autofocus_count = 0
         for i, raw_line in enumerate(lines, 1):
             line = _strip_django_comments(raw_line)
-            if AUTOFOCUS_INPUT.search(line):
+            for _match in AUTOFOCUS_INPUT.finditer(line):
                 autofocus_count += 1
                 if autofocus_count > 1:
                     violations.append(
@@ -406,7 +418,7 @@ def check_file(path: Path, *, verbose: bool = False) -> list[A11yViolation]:
                             severity=SEVERITY_SERIOUS,
                             file=path,
                             line=i,
-                            message="autofocus on non-first input — only one autofocus per page is acceptable",
+                            message=gettext("autofocus on non-first input — only one autofocus per page is acceptable"),
                         )
                     )
 
@@ -414,49 +426,52 @@ def check_file(path: Path, *, verbose: bool = False) -> list[A11yViolation]:
     if not is_component:
         for i, raw_line in enumerate(lines, 1):
             line = _strip_django_comments(raw_line)
-            if TABLE_NO_CAPTION.search(line):
-                # Check if next few lines have a <caption> (widened to 5 lines
-                # to handle blank lines between <table> and <caption>)
-                following = "\n".join(lines[i : i + 5])
-                if "<caption" not in following.lower():
+            for match in TABLE_NO_CAPTION.finditer(line):
+                # Keep the five-line lookahead, bounded by this table's body.
+                following = (
+                    line[match.end() :] + "\n" + "\n".join(_strip_django_comments(raw) for raw in lines[i : i + 5])
+                )
+                body = re.split(r"</?table\b", following, maxsplit=1, flags=re.IGNORECASE)[0]
+                if "<caption" not in body.lower():
                     violations.append(
                         A11yViolation(
                             code="A11Y008",
                             severity=SEVERITY_MINOR,
                             file=path,
                             line=i,
-                            message="<table> missing <caption> or aria-label",
+                            message=gettext("<table> missing <caption> or aria-label"),
                         )
                     )
 
     # ── A11Y009: Positive tabindex ──────────────────────────────────────
     for i, raw_line in enumerate(lines, 1):
         line = _strip_django_comments(raw_line)
-        match = POSITIVE_TABINDEX.search(line)
-        if match:
-            violations.append(
-                A11yViolation(
-                    code="A11Y009",
-                    severity=SEVERITY_SERIOUS,
-                    file=path,
-                    line=i,
-                    message=f"Positive tabindex={match.group(1)} disrupts tab order (use 0 or -1)",
-                )
+        violations.extend(
+            A11yViolation(
+                code="A11Y009",
+                severity=SEVERITY_SERIOUS,
+                file=path,
+                line=i,
+                message=gettext("Positive tabindex={value} disrupts tab order (use 0 or -1)").format(
+                    value=match.group(1)
+                ),
             )
+            for match in POSITIVE_TABINDEX.finditer(line)
+        )
 
     # ── A11Y010: aria-hidden on focusable element ───────────────────────
     for i, raw_line in enumerate(lines, 1):
         line = _strip_django_comments(raw_line)
-        if ARIA_HIDDEN_FOCUSABLE.search(line):
-            violations.append(
-                A11yViolation(
-                    code="A11Y010",
-                    severity=SEVERITY_CRITICAL,
-                    file=path,
-                    line=i,
-                    message="aria-hidden='true' on focusable element hides it from assistive tech",
-                )
+        violations.extend(
+            A11yViolation(
+                code="A11Y010",
+                severity=SEVERITY_CRITICAL,
+                file=path,
+                line=i,
+                message=gettext("aria-hidden='true' on focusable element hides it from assistive tech"),
             )
+            for _match in ARIA_HIDDEN_FOCUSABLE.finditer(line)
+        )
 
     return _apply_a11y_allow(lines, path, violations)
 
