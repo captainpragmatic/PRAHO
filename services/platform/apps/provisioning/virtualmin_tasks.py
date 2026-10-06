@@ -22,7 +22,12 @@ from apps.audit.services import AuditContext, AuditEventData, AuditService
 from apps.common.types import Retriability, retriability_of
 from apps.provisioning.models import Service
 
-from .domain_veto import domain_disables_hosting, exclude_domain_disabled
+from .domain_veto import (
+    blocking_domain_status,
+    domain_disables_hosting,
+    exclude_domain_disabled,
+    only_domain_disabled,
+)
 from .security_utils import (
     IdempotencyManager,
     ProvisioningErrorClassifier,
@@ -1175,11 +1180,14 @@ def reconcile_virtualmin_service_state(  # noqa: PLR0911  # Convergence matrix: 
     make Virtualmin match it (#325 defect 4 — suspension/termination never
     propagated; reactivation was silently absorbed).
 
+    The single writer of a hosting account's enabled state (ADR-0051): hosting is on
+    exactly when the Service is active and no bound domain holds it off.
+
     active + no account      -> auto-provision (kill-switch gated, ADR-0019)
-    active + suspended acct  -> unsuspend, unless a bound domain disables
-                                hosting (#566, ADR-0051): then leave it off
+    active + account         -> on, or off while a bound domain holds it (#566)
     suspended/terminated/expired + active acct -> suspend (never delete —
     deletion stays protected/manual)
+    pending/provisioning/failed -> untouched; the provisioning pipeline owns them
     """
     from apps.provisioning.virtualmin_service import (  # noqa: PLC0415  # Deferred: avoids circular import
         VirtualminProvisioningService,  # Circular: cross-app
@@ -1204,16 +1212,7 @@ def reconcile_virtualmin_service_state(  # noqa: PLR0911  # Convergence matrix: 
 
             _trigger_automatic_virtualmin_provisioning(service)
             return {"success": True, "action": "provisioning_triggered"}
-        if account.status == "suspended":
-            if domain_disables_hosting(account):
-                logger.info("⏭️ [VirtualminTask] Domain disables hosting; leaving %s suspended", account.domain)
-                return {"success": True, "action": "domain_disabled"}
-            result = VirtualminProvisioningService(account.server).unsuspend_account(account)
-            if result.is_err():
-                return {"success": False, "action": "unsuspend", "error": str(result.unwrap_err())}
-            _reconcile_again_if_state_moved(service, expected_status="active")
-            return {"success": True, "action": "unsuspended"}
-        return {"success": True, "action": "noop"}
+        return _converge_active_service(service, account)
 
     if service.status in ("suspended", "terminated", "expired"):
         if account is not None and account.status == "active":
@@ -1228,22 +1227,67 @@ def reconcile_virtualmin_service_state(  # noqa: PLR0911  # Convergence matrix: 
     return {"success": True, "action": "noop"}
 
 
-def _reconcile_again_if_state_moved(service: Service, expected_status: str) -> None:
+def _converge_active_service(service: Service, account: VirtualminAccount) -> dict[str, Any]:
+    """Active Service: hosting is on unless a bound domain holds it off (#566, ADR-0051)."""
+    from apps.provisioning.virtualmin_service import (  # noqa: PLC0415  # Deferred: avoids circular import
+        VirtualminProvisioningService,  # Circular: cross-app
+    )
+
+    # Snapshot before any gateway call, so a domain that changes mid-flight is caught below.
+    hold = blocking_domain_status(account)
+    if account.status == "active" and hold is not None:
+        result = VirtualminProvisioningService(account.server).suspend_account(account, f"domain_{hold}")
+        if result.is_err():
+            return {"success": False, "action": "suspend", "error": str(result.unwrap_err())}
+        _reconcile_again_if_state_moved(service, expected_status="active", account=account, held_by_domain=True)
+        return {"success": True, "action": "domain_suspended"}
+    if account.status == "suspended" and hold is not None:
+        logger.info("⏭️ [VirtualminTask] Domain disables hosting; leaving %s suspended", account.domain)
+        return {"success": True, "action": "domain_disabled"}
+    if account.status == "suspended":
+        result = VirtualminProvisioningService(account.server).unsuspend_account(account)
+        if result.is_err():
+            return {"success": False, "action": "unsuspend", "error": str(result.unwrap_err())}
+        _reconcile_again_if_state_moved(service, expected_status="active", account=account, held_by_domain=False)
+        return {"success": True, "action": "unsuspended"}
+    return {"success": True, "action": "noop"}
+
+
+def _reconcile_again_if_state_moved(
+    service: Service,
+    expected_status: str,
+    *,
+    account: VirtualminAccount | None = None,
+    held_by_domain: bool | None = None,
+) -> None:
     """
     Snapshot-race guard: if the Service transitioned while our gateway call was
     in flight (e.g. terminated mid-unsuspend), the state we just converged to
     is already stale — queue one more reconcile to converge on the new truth.
+
+    With ``account`` and ``held_by_domain`` it also watches the domain hold: a domain
+    that expired while an unsuspend was in flight must not leave hosting on (#566).
     """
     current = Service.objects.filter(pk=service.pk).values_list("status", flat=True).first()
-    if current is None or current == expected_status:
+    if current is None:
         return
     # For the suspend branch expected_status is the snapshot status; any of the
     # suspended-family statuses still map to the same converged account state.
     suspend_family = ("suspended", "terminated", "expired")
-    if expected_status in suspend_family and current in suspend_family:
+    status_moved = current != expected_status and not (expected_status in suspend_family and current in suspend_family)
+    hold_moved = (
+        account is not None and held_by_domain is not None and domain_disables_hosting(account) != held_by_domain
+    )
+    if not (status_moved or hold_moved):
         return
-    logger.info(f"🔄 [VirtualminTask] Service {service.pk} moved to '{current}' mid-reconcile — re-queuing")
+    logger.info(f"🔄 [VirtualminTask] Service {service.pk} or its domain moved mid-reconcile — re-queuing")
     reconcile_virtualmin_service_state_async(str(service.pk))
+
+
+def _hosting_enabled(account: VirtualminAccount) -> bool:
+    """ADR-0051's predicate: the Service is active and no bound domain holds hosting off."""
+    service_status = Service.objects.filter(pk=account.service_id).values_list("status", flat=True).first()
+    return service_status == "active" and not domain_disables_hosting(account)
 
 
 def reconcile_divergent_services_task() -> dict[str, Any]:
@@ -1265,6 +1309,15 @@ def reconcile_divergent_services_task() -> dict[str, Any]:
     # run would starve the accounts that are (#566).
     for sid in (
         exclude_domain_disabled(VirtualminAccount.objects.filter(status="suspended", service__status="active"))
+        .order_by("pk")
+        .values_list("service_id", flat=True)[:50]
+    ):
+        divergent_ids.add(str(sid))
+    # (d) active Service with a live account that a bound domain holds off (ADR-0051).
+    # The exact complement of (b)'s exclusion, filtered before the cap: an add-on domain
+    # bound under another name does not hold the account off, so it is never queued.
+    for sid in (
+        only_domain_disabled(VirtualminAccount.objects.filter(status="active", service__status="active"))
         .order_by("pk")
         .values_list("service_id", flat=True)[:50]
     ):
@@ -1390,6 +1443,11 @@ def unsuspend_virtualmin_account(account_id: str) -> dict[str, Any]:
 
         if _migration_locked(account):
             return {"success": True, "action": "migration_locked"}
+
+        # The reconciler owns the enabled state (ADR-0051); this task may only agree with it.
+        if not _hosting_enabled(account):
+            logger.info("⏭️ [VirtualminTask] Hosting is not enabled for %s; not unsuspending", account.domain)
+            return {"success": False, "error": "Hosting is not enabled for this service", "action": "not_enabled"}
 
         # Execute unsuspension
         result = provisioning_service.unsuspend_account(account)

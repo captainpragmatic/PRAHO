@@ -15,30 +15,25 @@ Tests the integration between:
 🔒 Security: Tests audit logging and GDPR compliance
 """
 
-import unittest
 from decimal import Decimal
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-from django.conf import settings
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
+from apps.billing.models import Currency, Invoice
 from apps.customers.models import Customer
-from apps.billing.models import Invoice, Payment, Currency
-from apps.common.types import Ok
-from apps.domains.models import Domain, TLD, Registrar
+from apps.domains.models import TLD, Domain, Registrar
 from apps.domains.signals import sync_domain_to_virtualmin
 from apps.orders.models import Order, OrderItem
+from apps.products.models import Product
 from apps.provisioning.models import Service, ServicePlan
+from apps.provisioning.relationship_models import ServiceDomain
+from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
 from apps.provisioning.virtualmin_signals import (
-    audit_virtualmin_account_changes,
-    audit_virtualmin_account_deletion,
-    audit_virtualmin_provisioning_jobs,
-    log_virtualmin_security_event,
     notify_provisioning_completion,
 )
-from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminServer, VirtualminProvisioningJob
-from apps.users.models import User, CustomerMembership
+from apps.users.models import CustomerMembership, User
 from tests.helpers.fsm_helpers import force_status
 
 
@@ -74,7 +69,6 @@ class BillingProvisioningIntegrationTest(TestCase):
         )
 
         # Create product
-        from apps.products.models import Product
         self.product = Product.objects.create(
             slug="shared-hosting",
             name="Shared Hosting",
@@ -252,37 +246,28 @@ class DomainsProvisioningIntegrationTest(TestCase):
         )
 
         # Create ServiceDomain relationship so domain sync can find the service
-        from apps.provisioning.relationship_models import ServiceDomain
         ServiceDomain.objects.create(
             service=self.service,
             domain=self.domain,
             domain_type="primary"
         )
 
+    @patch('apps.provisioning.virtualmin_tasks.reconcile_virtualmin_service_state_async')
     @patch('apps.provisioning.virtualmin_service.VirtualminProvisioningService.suspend_account')
-    def test_domain_status_change_suspends_virtualmin_account(self, mock_suspend):
-        """Test that domain status change suspends Virtualmin account via post_save signal"""
-        mock_suspend.return_value = Ok(True)
-
-        # Change domain status via FSM — post_save defers the sync to post-commit, so a
-        # rollback cannot leave the panel disabled while the database says active.
-        # The guarantee under test is unchanged; only its timing moved.
+    def test_domain_status_change_queues_a_hosting_reconcile(self, mock_suspend, mock_enqueue):
+        """A domain suspension reaches hosting through the reconciler, not a direct call (ADR-0051)."""
+        # post_save defers to post-commit, so a rolled-back change is never reconciled.
         with self.captureOnCommitCallbacks(execute=True):
             self.domain.suspend()
             self.domain.save()
 
-        # Verify suspension was called (by the signal, not manually)
-        mock_suspend.assert_called_once_with(
-            self.virtualmin_account,
-            reason="Domain status changed to suspended"
-        )
+        mock_enqueue.assert_called_once_with(str(self.service.id))
+        mock_suspend.assert_not_called()
 
+    @patch('apps.provisioning.virtualmin_tasks.reconcile_virtualmin_service_state_async')
     @patch('apps.provisioning.virtualmin_service.VirtualminProvisioningService.unsuspend_account')
-    def test_domain_reactivation_unsuspends_virtualmin_account(self, mock_unsuspend):
-        """Test that domain reactivation unsuspends Virtualmin account via post_save signal"""
-        mock_unsuspend.return_value = Ok(True)
-
-        # Set account as suspended
+    def test_domain_reactivation_queues_a_hosting_reconcile(self, mock_unsuspend, mock_enqueue):
+        """A reactivated domain also goes through the reconciler (ADR-0051)."""
         self.virtualmin_account.status = "suspended"
         self.virtualmin_account.save()
 
@@ -290,14 +275,12 @@ class DomainsProvisioningIntegrationTest(TestCase):
         force_status(self.domain, "suspended")
         self.domain.refresh_from_db()
 
-        # Change domain status back to active via FSM — the sync is deferred to
-        # post-commit, so the callbacks must be drained for it to run.
         with self.captureOnCommitCallbacks(execute=True):
             self.domain.activate()
             self.domain.save()
 
-        # Verify unsuspension was called (by the signal, not manually)
-        mock_unsuspend.assert_called_once_with(self.virtualmin_account)
+        mock_enqueue.assert_called_once_with(str(self.service.id))
+        mock_unsuspend.assert_not_called()
 
     def test_domain_sync_handles_missing_virtualmin_account(self):
         """Test that domain sync handles missing Virtualmin account gracefully"""
@@ -359,7 +342,7 @@ class ProvisioningAuditIntegrationTest(TestCase):
     def test_virtualmin_account_creation_audit(self, mock_audit):
         """Test that Virtualmin account creation is audited"""
         # Create Virtualmin account
-        account = VirtualminAccount.objects.create(
+        VirtualminAccount.objects.create(
             domain="example.com",
             service=self.service,
             server=self.server,
@@ -465,7 +448,7 @@ class ProvisioningAuditIntegrationTest(TestCase):
         mock_audit.reset_mock()
 
         # Create provisioning job
-        job = VirtualminProvisioningJob.objects.create(
+        VirtualminProvisioningJob.objects.create(
             operation="create_domain",
             server=self.server,
             account=account,
@@ -659,9 +642,6 @@ class CrossAppIntegrationPerformanceTest(TestCase):
         )
 
         # Create hosting service and service plan for the domain
-        from apps.provisioning.models import ServicePlan, Service
-        from apps.provisioning.relationship_models import ServiceDomain
-
         service_plan = ServicePlan.objects.create(
             name="Test Hosting Plan",
             plan_type="shared_hosting",
@@ -686,6 +666,12 @@ class CrossAppIntegrationPerformanceTest(TestCase):
             domain_type="primary"
         )
 
-        # Test query efficiency
-        with self.assertNumQueries(2):  # Should be efficient
+        # One query for the bindings, then one queued reconcile per bound service (ADR-0051).
+        # The queue is patched: with the ORM broker its INSERT would also count as a query.
+        with (
+            patch("apps.provisioning.virtualmin_tasks.reconcile_virtualmin_service_state_async") as enqueue,
+            self.assertNumQueries(1),
+        ):
             sync_domain_to_virtualmin(domain)
+
+        enqueue.assert_called_once_with(str(service.id))

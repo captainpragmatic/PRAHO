@@ -20,7 +20,7 @@ from typing import Any
 
 from django.conf import settings
 from django.db import transaction
-from django.db.models.signals import post_save, pre_delete
+from django.db.models.signals import post_delete, post_save, pre_delete
 from django.dispatch import receiver
 from django.utils import timezone
 
@@ -515,6 +515,35 @@ def handle_service_domain_changes(
 
     except Exception as e:
         logger.exception(f"🔥 [ServiceDomain] Failed to handle domain changes: {e}")
+
+
+@receiver(post_save, sender=ServiceDomain)
+@receiver(post_delete, sender=ServiceDomain)
+def reconcile_hosting_on_domain_binding_change(
+    sender: type[ServiceDomain], instance: ServiceDomain, **kwargs: Any
+) -> None:
+    """Binding or unbinding a domain can change whether its service's hosting is on (ADR-0051).
+
+    Not behind DISABLE_AUDIT_SIGNALS, for the same reason as the Service reconcile receiver:
+    this is hosting state, not auditing. Queued on commit so the reconciler reads the
+    binding that committed; a lost enqueue is re-found by the divergence sweep.
+    """
+    if kwargs.get("raw"):
+        return
+
+    service_id = str(instance.service_id)
+
+    def _enqueue() -> None:
+        try:
+            from apps.provisioning.virtualmin_tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
+                reconcile_virtualmin_service_state_async,  # Circular: cross-app
+            )
+
+            reconcile_virtualmin_service_state_async(service_id)
+        except Exception as e:
+            logger.exception(f"🔥 [ServiceDomain] Failed to queue a hosting reconcile for {service_id}: {e}")
+
+    transaction.on_commit(_enqueue)
 
 
 # ===============================================================================

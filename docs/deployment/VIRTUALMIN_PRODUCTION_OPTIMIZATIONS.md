@@ -103,44 +103,25 @@ def create_error_context(operation, params, server, correlation_id=None):
     }
 ```
 
-### 4. Atomic Transaction Management for Bulk Operations ✅
+### 4. Bulk Account Actions
 
-**Location**: `apps/provisioning/virtualmin_views.py`
+**Location**: `apps/provisioning/virtualmin_views.py` (`virtualmin_bulk_actions`, reached from the accounts list)
 
-**Key Features**:
-- **Atomic Operations**: All bulk operations wrapped in database transactions
-- **Rollback Safety**: Failed operations trigger complete rollback
-- **Batch Processing**: Optimized batch sizes for performance and memory usage
-- **Progress Tracking**: Comprehensive progress and performance metrics
-- **Error Aggregation**: Detailed error reporting with success/failure statistics
+> Corrected 2026-10-06 (#566). This section used to describe atomic bulk suspension with
+> rollback. The page had never rendered (its template did not exist), and the suspend and
+> activate helpers wrote a field the model does not have. What follows is what it does now.
 
-**Implementation Highlights**:
-```python
-@dataclass
-class BulkOperationResult:
-    total_processed: int
-    successful_count: int
-    failed_count: int
-    errors: list[str]
-    rollback_performed: bool = False
-    processing_time_seconds: float = 0.0
-
-    @property
-    def success_rate(self) -> float:
-        return (self.successful_count / self.total_processed) * 100
-
-@transaction.atomic
-def _execute_bulk_suspend(accounts: list[VirtualminAccount]) -> BulkOperationResult:
-    """
-    Atomic bulk operations with comprehensive error handling
-    """
-```
-
-**Bulk Operation Features**:
-- **Backup Operations**: Atomic backup job creation with rollback
-- **Account Suspension/Activation**: Bulk status changes with consistency
-- **Health Checks**: Parallel health checking with timeout management
-- **Performance Metrics**: Detailed timing and success rate tracking
+- **Selection**: the page lists accounts narrowed by the same `server` and `status` filters as
+  the accounts list, and a POST is validated against that same filtered list. "Select all"
+  is rendered server-side.
+- **Suspend / Activate**: a per-account loop over `HostingAccountStaffActions`, the same helper
+  as the account page. Each account is its own short transaction, so one refusal never
+  undoes another. Suspend changes the Service; the reconciler applies it to Virtualmin
+  (ADR-0051). Activate lifts only a staff suspension.
+- **Backup**: one backup job admitted per account through `create_backup_job`.
+- **Health check**: parallel checks, capped at `MAX_CONCURRENT_HEALTH_CHECKS` accounts so they
+  run in one wave; each worker thread closes its own database connection.
+- **Reporting**: `BulkOperationResult` counts successes and keeps the first refusal messages.
 
 ### 5. Comprehensive Algorithm Documentation ✅
 

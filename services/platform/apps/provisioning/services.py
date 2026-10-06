@@ -6,17 +6,19 @@ Re-exports all service classes for existing imports.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final
 
 from django.db import transaction as db_transaction
 from django.utils import timezone
+from django.utils.translation import gettext as _
 
 from apps.common.types import Err, Ok, Result
 
 from .provisioning_service import ProvisioningService
 
 if TYPE_CHECKING:
-    pass
+    from .service_models import Service
+    from .virtualmin_models import VirtualminAccount
 
 # Logger for backward compatibility with tests
 logger = logging.getLogger(__name__)
@@ -249,8 +251,126 @@ class ServiceGroupService:
             return Err(f"Failed to {action} group: {e}")
 
 
+# The suspension_reason a staff Suspend writes, and the only one a staff Activate lifts.
+# A machine token, matched like "payment_overdue" and "customer_suspended".
+STAFF_ACCOUNT_SUSPENSION_REASON: Final = "staff_account_suspend"
+# The provisioning pipeline owns these; an account only turns on when it completes.
+_PIPELINE_OWNED_STATUSES: Final = frozenset({"pending", "provisioning", "failed"})
+_INELIGIBLE_CUSTOMER_STATUSES: Final = frozenset({"suspended", "inactive"})
+
+
+def _queue_reconcile_on_commit(service_id: Any) -> None:
+    from apps.provisioning.virtualmin_tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
+        reconcile_virtualmin_service_state_async,  # Circular: same-app
+    )
+
+    sid = str(service_id)
+    # robust: a lost enqueue must not fail the staff action; the divergence sweep re-finds it.
+    db_transaction.on_commit(lambda: reconcile_virtualmin_service_state_async(sid), robust=True)
+
+
+def _staff_resume_refusal(service: Service) -> str | None:
+    """Why staff may not resume this suspended Service from the account page, or None.
+
+    Only a suspension staff made there can be lifted there. A suspended or closed customer
+    blocks it (the customer cascade skips a Service that is already suspended, so nothing
+    else would), and so does an unpaid subscription, the same guard as the cascade's resume.
+    """
+    from apps.billing.subscription_models import Subscription  # noqa: PLC0415  # ADR-0007: cross-app
+    from apps.customers.models import Customer  # noqa: PLC0415  # ADR-0007: cross-app
+    from apps.customers.signals import (  # noqa: PLC0415  # ADR-0007: importing it registers receivers
+        DELINQUENT_SUBSCRIPTION_STATES,
+    )
+
+    if service.status != "suspended" or service.suspension_reason != STAFF_ACCOUNT_SUSPENSION_REASON:
+        return str(
+            _(
+                "Service {name} is {status} by another process ({reason}); lift it from the "
+                "service page, billing or the customer."
+            ).format(name=service.service_name, status=service.status, reason=service.suspension_reason or "-")
+        )
+    customer_status = Customer.objects.filter(pk=service.customer_id).values_list("status", flat=True).first()
+    if customer_status in _INELIGIBLE_CUSTOMER_STATUSES:
+        return str(_("The customer is {status}; reactivate the customer first.").format(status=customer_status))
+    if Subscription.objects.filter(service_id=service.pk, status__in=DELINQUENT_SUBSCRIPTION_STATES).exists():
+        return str(_("The service's subscription is not paid up; settle it in billing first."))
+    return None
+
+
+class HostingAccountStaffActions:
+    """Staff Suspend and Activate for a hosting account, applied to its Service (#566, ADR-0051).
+
+    The reconciler is the single writer of an account's enabled state, so these never call
+    Virtualmin. Each one re-reads the Service under a row lock, checks every guard on that
+    row, and either transitions it or queues a reconcile, in one short transaction.
+
+    Only the Service row is locked. The customer and subscription are plain reads, as in
+    the customer cascade's resume, so there is no lock-order inversion against billing's
+    customer → subscription → Service order. If billing marks the subscription past due
+    after the read, it then waits on this lock, finds the Service active, and suspends it.
+
+    Returns ``Ok("queued")`` or ``Ok("resumed")``, or ``Err`` with a message for staff.
+    """
+
+    @staticmethod
+    def suspend(account: VirtualminAccount) -> Result[str, str]:
+        from apps.provisioning.models import Service  # noqa: PLC0415  # Circular: same-app
+
+        with db_transaction.atomic():
+            service = Service.objects.select_for_update(of=("self",)).filter(pk=account.service_id).first()
+            if service is None:
+                return Err(_("This account has no service."))
+            if service.status in _PIPELINE_OWNED_STATUSES:
+                return Err(
+                    _("Service {name} is {status}; manage it from the service page.").format(
+                        name=service.service_name, status=service.status
+                    )
+                )
+            if service.status == "active":
+                service.suspend(reason=STAFF_ACCOUNT_SUSPENSION_REASON)
+                # The Service post_save receiver queues the reconcile that disables hosting.
+                service.save(update_fields=["status", "suspended_at", "suspension_reason", "updated_at"])
+                return Ok("queued")
+            # Suspended, terminated or expired: hosting is already meant to be off. Converge.
+            _queue_reconcile_on_commit(service.pk)
+            return Ok("queued")
+
+    @staticmethod
+    def activate(account: VirtualminAccount) -> Result[str, str]:
+        from apps.provisioning.domain_veto import domain_disables_hosting  # noqa: PLC0415  # Circular: same-app
+        from apps.provisioning.models import Service  # noqa: PLC0415  # Circular: same-app
+
+        with db_transaction.atomic():
+            service = Service.objects.select_for_update(of=("self",)).filter(pk=account.service_id).first()
+            if service is None:
+                return Err(_("This account has no service."))
+
+            if service.status == "active":
+                if domain_disables_hosting(account):
+                    return Err(
+                        _(
+                            "A domain bound to service {name} is expired, suspended or cancelled, "
+                            "so its hosting stays off."
+                        ).format(name=service.service_name)
+                    )
+                # Hosting should already be on; let the reconciler repair whatever is off.
+                _queue_reconcile_on_commit(service.pk)
+                return Ok("queued")
+
+            refusal = _staff_resume_refusal(service)
+            if refusal is not None:
+                return Err(refusal)
+
+            service.activate()
+            # The Service post_save receiver queues the reconcile that enables hosting.
+            service.save(update_fields=["status", "activated_at", "suspended_at", "suspension_reason", "updated_at"])
+            return Ok("resumed")
+
+
 # Re-export for backward compatibility
 __all__ = [
+    "STAFF_ACCOUNT_SUSPENSION_REASON",
+    "HostingAccountStaffActions",
     "ProvisioningService",
     "ServiceActivationService",  # Legacy name
     "ServiceGroupService",
