@@ -37,8 +37,15 @@ Read the nightly's real results first. Every number below is only as good as the
 it, and this programme has now twice believed a gate that was not running:
 
 ```bash
-gh run list --workflow nightly.yml -L 7   # both jobs green, on the branch you are about to claim
+gh run list --workflow nightly.yml -L 7 --json databaseId,createdAt,conclusion
+gh run view <databaseId> --json jobs --jq '.jobs[] | "\(.name)\t\(.conclusion)"'
 ```
+
+A run's own conclusion proves nothing. When `check-activity` selects no branch, both test jobs are
+skipped and the run still shows green. The run's branch is not the evidence either: it is the ref the
+workflow ran from, not the branch each matrix leg checked out. The claim needs the job itself:
+`nightly-e2e (master)` and `nightly (master)` concluding `success`, with the branch you are claiming
+in the job name.
 
 Then:
 
