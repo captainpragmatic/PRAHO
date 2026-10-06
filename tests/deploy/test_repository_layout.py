@@ -98,6 +98,52 @@ class DockerRepositoryLayoutTests(SimpleTestCase):
         ]
         self.assertIn("SESSION_DB_PATH=/app/portal.sqlite3", environments)
 
+    def test_portal_session_database_is_inside_a_persistent_compose_mount(self) -> None:
+        image_environment = dict(
+            token.split("=", 1)
+            for keyword, argument in _runtime_instructions("portal")
+            if keyword == "ENV"
+            for token in shlex.split(argument)
+        )
+        expected_portal_files = {
+            "docker-compose.container-service.yml",
+            "docker-compose.dev.yml",
+            "docker-compose.portal-only.yml",
+            "docker-compose.services.yml",
+            "docker-compose.single-server.yml",
+        }
+        checked: set[str] = set()
+        for path in sorted((ROOT / "deploy").glob("docker-compose*.yml")):
+            compose = cast(dict[str, dict[str, dict[str, object]]], yaml.safe_load(path.read_text(encoding="utf-8")))
+            if "portal" not in compose["services"]:
+                continue
+            checked.add(path.name)
+            config = compose["services"]["portal"]
+            with self.subTest(path=path.name):
+                raw_environment = config.get("environment", [])
+                self.assertIsInstance(raw_environment, list)
+                environment = dict(entry.split("=", 1) for entry in cast(list[str], raw_environment) if "=" in entry)
+                session_path = PurePosixPath(environment.get("SESSION_DB_PATH", image_environment["SESSION_DB_PATH"]))
+                self.assertTrue(session_path.is_absolute())
+                raw_mounts = config.get("volumes", [])
+                self.assertIsInstance(raw_mounts, list)
+                persistent_destinations: list[PurePosixPath] = []
+                for mount in cast(list[str], raw_mounts):
+                    parts = mount.split(":")
+                    if len(parts) < 2:
+                        continue  # Anonymous volumes are not stable across container replacement.
+                    source, destination = parts[:2]
+                    if source in compose.get("volumes", {}) or source.startswith((".", "/")):
+                        persistent_destinations.append(PurePosixPath(destination))
+                self.assertTrue(
+                    any(
+                        session_path != destination and session_path.is_relative_to(destination)
+                        for destination in persistent_destinations
+                    ),
+                    f"{path.name}: {session_path} is outside persistent mounts {persistent_destinations}",
+                )
+        self.assertEqual(checked, expected_portal_files)
+
     def test_compose_workdirs_and_mounts_match_the_images(self) -> None:
         expected_volumes: dict[str, dict[str, list[str]]] = {
             "docker-compose.container-service.yml": {

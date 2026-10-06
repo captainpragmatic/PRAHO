@@ -88,6 +88,7 @@ services:
       - DJANGO_SECRET_KEY=dev-secret-key-for-development-only
       - DJANGO_SETTINGS_MODULE=config.settings.dev
       - SERVICE_NAME=portal
+      - SESSION_DB_PATH=/app/services/portal/portal.sqlite3
     depends_on:
       - platform
     restart: unless-stopped
