@@ -4,6 +4,7 @@
 
 import base64
 import logging
+from urllib.parse import quote
 
 from django.contrib import messages
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
@@ -25,7 +26,7 @@ from apps.common.rate_limit_feedback import (
 )
 from apps.services.services import services_api
 
-from .services import PlatformAPIError, TicketCreateRequest, TicketFilters, tickets_api
+from .services import TICKET_PAGE_SIZE, PlatformAPIError, TicketCreateRequest, TicketFilters, tickets_api
 
 # Keep the JSON transport below the Platform request body limit.
 MAX_REPLY_ATTACHMENTS = 5
@@ -150,9 +151,9 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
     # Get filter parameters
     status_filter = _validated_status_filter(request.GET.get("status", ""))
     priority_filter = request.GET.get("priority", "")
-    search_query = request.GET.get("search", "")
+    search_query = request.GET.get("q", "").strip()
     try:
-        page = int(request.GET.get("page", 1))
+        page = max(1, int(request.GET.get("page", 1)))
     except (ValueError, TypeError):
         page = 1
 
@@ -170,9 +171,11 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
         summary = tickets_api.get_tickets_summary(customer_id, user_id)
         open_count = summary.get("open_tickets", 0)
 
-        # Pagination via shared utility
-        paginator_data = PaginatorData(total_count=total_count, current_page=page, page_size=25)
-        pagination_params = build_pagination_params(search=search_query, status=status_filter, priority=priority_filter)
+        # Pagination uses the same limit as the Platform request.
+        paginator_data = PaginatorData(total_count=total_count, current_page=page, page_size=TICKET_PAGE_SIZE)
+        pagination_params = build_pagination_params(
+            q=quote(search_query, safe=""), status=status_filter, priority=quote(priority_filter, safe="")
+        )
 
         context = {
             "tickets": tickets,
@@ -189,7 +192,7 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
             "page_title": _("Tickets"),
             "page_title_mobile": _("Tickets"),
             "page_subtitle": _("Get help with your hosting services"),
-            "search_placeholder": _("Search by ticket number, subject, description, status, or date…"),
+            "search_placeholder": _("Search by ticket number, subject, description, or status…"),
             "header_stats": [
                 {"value": str(open_count), "label": _("Open Tickets"), "color": "text-amber-400"},
                 {"value": str(total_count), "label": _("Total Tickets"), "color": "text-white"},
@@ -203,7 +206,7 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
         error_ctx = handle_platform_error(
             request, e, logger, fallback_message=_("Unable to load support tickets. Please try again later.")
         )
-        paginator_data = PaginatorData(total_count=0, current_page=1, page_size=25)
+        paginator_data = PaginatorData(total_count=0, current_page=1, page_size=TICKET_PAGE_SIZE)
 
         context = {
             "tickets": [],
@@ -218,7 +221,7 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
             "page_title": _("Tickets"),
             "page_title_mobile": _("Tickets"),
             "page_subtitle": _("Get help with your hosting services"),
-            "search_placeholder": _("Search by ticket number, subject, description, status, or date…"),
+            "search_placeholder": _("Search by ticket number, subject, description, or status…"),
             "header_stats": [
                 {"value": "0", "label": _("Open Tickets"), "color": "text-amber-400"},
                 {"value": "0", "label": _("Total Tickets"), "color": "text-white"},
@@ -532,13 +535,17 @@ def ticket_search_api(request: HttpRequest) -> HttpResponse:
     search_query = request.GET.get("q", "").strip()
     status_filter = _validated_status_filter(request.GET.get("status", ""))
     priority_filter = request.GET.get("priority", "")
+    try:
+        page = max(1, int(request.GET.get("page", 1)))
+    except (ValueError, TypeError):
+        page = 1
 
     try:
         response = tickets_api.get_customer_tickets(
             customer_id=customer_id,
             user_id=user_id,
             filters=TicketFilters(
-                page=1,
+                page=page,
                 status=status_filter,
                 priority=priority_filter,
                 search=search_query,
@@ -548,8 +555,10 @@ def ticket_search_api(request: HttpRequest) -> HttpResponse:
         tickets = [DictAsObj(t) for t in response.get("results", [])]
         total_count = response.get("count", 0)
 
-        paginator_data = PaginatorData(total_count=total_count, current_page=1, page_size=25)
-        pagination_params = build_pagination_params(search=search_query, status=status_filter, priority=priority_filter)
+        paginator_data = PaginatorData(total_count=total_count, current_page=page, page_size=TICKET_PAGE_SIZE)
+        pagination_params = build_pagination_params(
+            q=quote(search_query, safe=""), status=status_filter, priority=quote(priority_filter, safe="")
+        )
 
         return render(
             request,
@@ -563,7 +572,7 @@ def ticket_search_api(request: HttpRequest) -> HttpResponse:
 
     except PlatformAPIError as e:
         error_ctx = handle_platform_error(request, e, logger)
-        paginator_data = PaginatorData(total_count=0, current_page=1, page_size=25)
+        paginator_data = PaginatorData(total_count=0, current_page=1, page_size=TICKET_PAGE_SIZE)
 
         context = {
             "tickets": [],

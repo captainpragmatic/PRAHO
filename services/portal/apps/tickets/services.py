@@ -12,6 +12,8 @@ from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 
 logger = logging.getLogger(__name__)
 
+TICKET_PAGE_SIZE = 20
+
 
 def _raise_if_degraded(exc: Exception) -> None:
     """Re-raise a degraded-platform error so the view can say what happened.
@@ -102,7 +104,7 @@ class TicketsAPIClient(PlatformAPIClient):
                 "customer_id": customer_id,
                 "user_id": user_id,
                 "page": filters.page,
-                "page_size": 20,  # Customer portal pagination
+                "limit": TICKET_PAGE_SIZE,
             }
 
             if filters.status:
