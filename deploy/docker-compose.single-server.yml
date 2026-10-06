@@ -64,7 +64,8 @@ services:
       - PORTAL_HMAC_MODE=${PORTAL_HMAC_MODE:-legacy}
       - PORTAL_HMAC_CREDENTIALS=${PORTAL_HMAC_CREDENTIALS:-}
       - PLATFORM_TO_PORTAL_WEBHOOK_SECRET=${PLATFORM_TO_PORTAL_WEBHOOK_SECRET:?PLATFORM_TO_PORTAL_WEBHOOK_SECRET required}
-      - DJANGO_SETTINGS_MODULE=config.settings.prod
+      - DJANGO_SETTINGS_MODULE=${DJANGO_SETTINGS_MODULE:-config.settings.prod}
+      - STATIC_ROOT=/app/staticfiles
       - PLATFORM_DOMAIN=${PLATFORM_DOMAIN:-platform.localhost}
       - PORTAL_DOMAIN=${PORTAL_DOMAIN:-${DOMAIN:-localhost}}
       - ALLOWED_HOSTS=${PLATFORM_DOMAIN:-platform.localhost},localhost,platform
@@ -119,7 +120,7 @@ services:
       - PLATFORM_DOMAIN=${PLATFORM_DOMAIN:-platform.localhost}
       - PORTAL_DOMAIN=${PORTAL_DOMAIN:-${DOMAIN:-localhost}}
       - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY required}
-      - DJANGO_SETTINGS_MODULE=config.settings.prod
+      - DJANGO_SETTINGS_MODULE=${DJANGO_SETTINGS_MODULE:-config.settings.prod}
       - ALLOWED_HOSTS=${PORTAL_DOMAIN:-${DOMAIN:-localhost}},localhost,portal
       - CSRF_TRUSTED_ORIGINS=https://${PORTAL_DOMAIN:-${DOMAIN:-localhost}}
       - DJANGO_SECURE_SSL_REDIRECT=false
