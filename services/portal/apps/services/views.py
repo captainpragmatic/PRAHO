@@ -330,6 +330,11 @@ def service_detail(request: HttpRequest, service_id: int) -> HttpResponse:
             "can_manage": service.get("status") in {"active", "suspended"}
             and _get_user_role_for_customer(request, str(customer_id)) in {"owner", "billing", "tech"},
             "usage_period": "30d",
+            "usage_history_period_options": [
+                {"value": "7d", "label": _("Last 7 days")},
+                {"value": "30d", "label": _("Last 30 days")},
+                {"value": "90d", "label": _("Last 90 days")},
+            ],
         }
 
         logger.info(f"✅ [Services View] Loaded service {service_id} details for customer {customer_id}")

@@ -172,7 +172,11 @@ class PortalAuthenticationMiddleware:
         to the production PUBLIC_URLS list.
         """
         extra_public_urls = getattr(settings, "PORTAL_EXTRA_PUBLIC_URLS", ())
-        return any(path.startswith(public_url) for public_url in (*self.PUBLIC_URLS, *extra_public_urls))
+        # Resolve development-only prefixes per request; never mutate the shared class list.
+        debug_public_urls = ("/__debug__/",) if settings.DEBUG and "debug_toolbar" in settings.INSTALLED_APPS else ()
+        return any(
+            path.startswith(public_url) for public_url in (*self.PUBLIC_URLS, *extra_public_urls, *debug_public_urls)
+        )
 
     def redirect_to_login(self, request: HttpRequest) -> HttpResponse:
         """Redirect to login preserving the originally requested URL."""

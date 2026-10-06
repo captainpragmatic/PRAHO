@@ -45,7 +45,7 @@
 
             <!-- Service Info -->
             <div class="flex-1 min-w-0">
-              <h1 class="text-2xl sm:text-3xl font-bold text-white truncate">
+              <h1 class="text-2xl sm:text-3xl font-bold text-white break-words">
                 {% if service.service_name %}
                   {{ service.service_name|cut:" [Active]"|cut:" [Suspended]"|cut:" [Pending]" }}
                 {% else %}
@@ -163,32 +163,7 @@
       <!-- Navigation Tabs -->
       <div class="bg-slate-800 rounded-lg border border-slate-700">
         <div class="border-b border-slate-700 overflow-x-auto">
-          <nav class="-mb-px flex min-w-max sm:min-w-0">
-            <button @click="activeTab = 'overview'"
-                    :class="tabClass('overview')"
-                    class="whitespace-nowrap border-b-2 py-3 px-6 text-sm font-medium transition-colors">
-              {% trans "Overview" %}
-            </button>
-            {% if service.status == 'active' %}
-            <button @click="activeTab = 'usage'"
-                    :class="tabClass('usage')"
-                    class="whitespace-nowrap border-b-2 py-3 px-6 text-sm font-medium transition-colors">
-              {% trans "Usage & Performance" %}
-            </button>
-            {% endif %}
-            <button @click="activeTab = 'billing'"
-                    :class="tabClass('billing')"
-                    class="whitespace-nowrap border-b-2 py-3 px-6 text-sm font-medium transition-colors">
-              {% trans "Billing" %}
-            </button>
-            {% if domains %}
-            <button @click="activeTab = 'domains'"
-                    :class="tabClass('domains')"
-                    class="whitespace-nowrap border-b-2 py-3 px-6 text-sm font-medium transition-colors">
-              {% trans "Domains" %}
-            </button>
-            {% endif %}
-          </nav>
+          {% include "components/service_detail_tabs.html" with service_status=service.status show_domains=domains only %}
         </div>
 
         <!-- Tab Content -->
@@ -581,11 +556,10 @@
               <div class="bg-slate-700/30 rounded-lg p-6">
                 <div class="flex items-center justify-between mb-4">
                   <h4 class="text-lg font-medium text-white">{% trans "Usage History" %}</h4>
-                  <select class="bg-slate-700 border border-slate-600 text-white text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 px-3 py-1">
-                    <option value="7d">{% trans "Last 7 days" %}</option>
-                    <option value="30d">{% trans "Last 30 days" %}</option>
-                    <option value="90d">{% trans "Last 90 days" %}</option>
-                  </select>
+                  {% trans "Usage history period" as usage_history_period_label %}
+                  {% with period_classes="text-sm rounded-lg px-3 py-1" %}
+                    {% input_field "usage-history-period" input_type="select" options=usage_history_period_options value="7d" aria_label=usage_history_period_label css_class=period_classes %}
+                  {% endwith %}
                 </div>
                 <div class="h-64 flex items-center justify-center text-slate-400">
                   <div class="text-center">

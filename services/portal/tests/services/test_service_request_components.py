@@ -38,3 +38,11 @@ class ServiceRequestComponentGateTests(SimpleTestCase):
         self.assertTrue(path.is_file())
         blockers = [finding.code for finding in scan(path) if finding.severity == "blocker" and not finding.exempted]
         self.assertEqual(blockers, [])
+
+    def test_service_detail_has_zero_template_blockers(self) -> None:
+        module = _load_script("lint_template_components")
+        scan = cast(Callable[[Path], list[_TemplateFinding]], module.scan_file)
+        path = REPO_ROOT / "services/portal/templates/services/service_detail.html"
+        self.assertTrue(path.is_file())
+        blockers = [finding.code for finding in scan(path) if finding.severity == "blocker" and not finding.exempted]
+        self.assertEqual(blockers, [])
