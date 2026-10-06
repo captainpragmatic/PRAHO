@@ -24,6 +24,13 @@ T = TypeVar("T")
 MIN_VAT_DIGITS = 6  # Minimum number of digits in Romanian VAT number
 
 
+class OneTimeCodeInput(forms.TextInput):
+    """Keep authentication codes visible while typing without redisplaying submitted values."""
+
+    def format_value(self, value: object) -> None:
+        return None
+
+
 def _api_token_default_ttl_initial() -> int | None:
     """Mirror the deployment token-expiry default in the creation form."""
     default_ttl = int(getattr(settings, "API_TOKEN_DEFAULT_TTL_DAYS", 90))
@@ -346,7 +353,7 @@ class TwoFactorSetupForm(forms.Form):
         label=_("Verification code"),
         max_length=6,
         min_length=6,
-        widget=forms.TextInput(
+        widget=OneTimeCodeInput(
             attrs={
                 "class": "form-input text-center",
                 "placeholder": "123456",
@@ -372,7 +379,7 @@ class TwoFactorVerifyForm(forms.Form):
         label=_("2FA Code"),
         max_length=8,  # Support both TOTP (6 digits) and backup codes (8 digits)
         min_length=6,
-        widget=forms.TextInput(
+        widget=OneTimeCodeInput(
             attrs={
                 "class": "form-input text-center",
                 "placeholder": "123456",
