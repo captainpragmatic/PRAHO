@@ -1567,36 +1567,44 @@ class TestHandlePaymentSuccess(TestCase):
     @patch("apps.billing.signals._update_customer_payment_history")
     @patch("apps.billing.signals._send_payment_success_email")
     @patch("apps.billing.signals._trigger_virtualmin_provisioning_on_payment")
-    def test_invoice_fully_paid(self, mock_vm, mock_email, mock_history, mock_cancel):
-        payment = MagicMock()
-        payment.invoice.get_remaining_amount.return_value = 0
+    def test_invoice_fully_paid(
+        self, mock_vm: MagicMock, mock_email: MagicMock, mock_history: MagicMock, mock_cancel: MagicMock
+    ) -> None:
+        invoice = InvoiceFactory(bill_to_country="DE")
+        payment = _make_payment(invoice.customer, invoice=invoice, amount_cents=invoice.total_cents)
         with self.captureOnCommitCallbacks(execute=True):
             _handle_payment_success(payment)
-        mock_email.assert_called_once()
-        mock_history.assert_called_once()
-        mock_cancel.assert_called_once()
-        mock_vm.assert_called_once()
-        payment.invoice.save.assert_called_once()
+            mock_vm.assert_not_called()
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, "paid")
+        self.assertIsNotNone(invoice.paid_at)
+        mock_email.assert_called_once_with(payment)
+        mock_history.assert_called_with(payment.customer, "positive")
+        mock_cancel.assert_called_once_with(payment)
+        self.assertEqual(mock_vm.call_args.args[0].pk, invoice.pk)
 
     @patch("apps.billing.signals._cancel_payment_retries")
     @patch("apps.billing.signals._update_customer_payment_history")
     @patch("apps.billing.signals._send_payment_success_email")
-    def test_partial_payment(self, mock_email, mock_history, mock_cancel):
-        payment = MagicMock()
-        payment.invoice.get_remaining_amount.return_value = 5000
+    def test_partial_payment(self, mock_email: MagicMock, mock_history: MagicMock, mock_cancel: MagicMock) -> None:
+        invoice = InvoiceFactory(bill_to_country="DE")
+        payment = _make_payment(invoice.customer, invoice=invoice, amount_cents=5000)
         with self.captureOnCommitCallbacks(execute=True):
             _handle_payment_success(payment)
-        payment.invoice.save.assert_not_called()
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, "issued")
+        self.assertIsNone(invoice.paid_at)
+        self.assertEqual(invoice.get_remaining_amount(), 5000)
 
     @patch("apps.billing.signals._cancel_payment_retries")
     @patch("apps.billing.signals._update_customer_payment_history")
     @patch("apps.billing.signals._send_payment_success_email")
-    def test_no_invoice(self, mock_email, mock_history, mock_cancel):
-        payment = MagicMock()
-        payment.invoice = None
+    def test_no_invoice(self, mock_email: MagicMock, mock_history: MagicMock, mock_cancel: MagicMock) -> None:
+        payment = _make_payment(CustomerFactory())
         with self.captureOnCommitCallbacks(execute=True):
             _handle_payment_success(payment)
-        mock_email.assert_called_once()
+        self.assertIsNone(Payment.objects.get(pk=payment.pk).invoice_id)
+        mock_email.assert_called_once_with(payment)
 
 
 class TestHandlePaymentFailure(TestCase):
@@ -1680,11 +1688,13 @@ class TestHandlePaymentRefund(TestCase):
 
 class TestHandleRetryCompletion(TestCase):
     @patch("apps.billing.signals._send_retry_success_email")
-    def test_success(self, mock_email):
+    def test_success(self, mock_email: MagicMock) -> None:
         retry = MagicMock()
         retry.status = "success"
-        _handle_retry_completion(retry)
-        mock_email.assert_called_once()
+        with self.captureOnCommitCallbacks(execute=True):
+            _handle_retry_completion(retry)
+            mock_email.assert_not_called()
+        mock_email.assert_called_once_with(retry)
 
     @patch("apps.billing.signals._handle_final_retry_failure")
     def test_final_failure(self, mock_final):
@@ -2127,7 +2137,13 @@ class TestInvalidateBillingDashboardCache(TestCase):
             _invalidate_billing_dashboard_cache(123)
             mock_delete.assert_not_called()
         mock_delete.assert_called_once_with(
-            ("billing_dashboard:123", "customer_invoices:123", "customer_payments:123", "billing_totals", "monthly_revenue")
+            (
+                "billing_dashboard:123",
+                "customer_invoices:123",
+                "customer_payments:123",
+                "billing_totals",
+                "monthly_revenue",
+            )
         )
 
 
@@ -2162,12 +2178,14 @@ class TestCleanupInvoiceFiles(TestCase):
 
 class TestCleanupPaymentFiles(TestCase):
     @patch("apps.billing.signals.default_storage")
-    def test_deletes_receipt(self, mock_storage):
+    def test_deletes_receipt(self, mock_storage: MagicMock) -> None:
         mock_storage.exists.return_value = True
         payment = MagicMock()
         payment.meta = {"receipt_file": "receipts/r001.pdf"}
-        _cleanup_payment_files(payment)
-        mock_storage.delete.assert_called_once()
+        with self.captureOnCommitCallbacks(execute=True):
+            _cleanup_payment_files(payment)
+            mock_storage.delete.assert_not_called()
+        mock_storage.delete.assert_called_once_with("receipts/r001.pdf")
 
     @patch("apps.billing.signals.default_storage")
     def test_no_receipt(self, mock_storage):
@@ -2285,10 +2303,8 @@ class TestPaymentHandlersOnCommitDeferred(TestCase):
         self, mock_email: MagicMock, mock_history: MagicMock, mock_cancel: MagicMock
     ) -> None:
         """Side-effects must not fire if the enclosing transaction rolls back."""
-        payment = MagicMock()
-        payment.invoice = None
-        payment.amount = "100.00"
-        payment.currency.code = "RON"
+        payment = _make_payment(CustomerFactory())
+        self.assertIsNone(payment.invoice_id)
 
         with self.assertRaises(RuntimeError), transaction.atomic():
             _handle_payment_success(payment)

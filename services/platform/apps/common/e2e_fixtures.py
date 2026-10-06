@@ -164,9 +164,11 @@ def _document(customer: Customer, key: str, *, proforma: bool = False, paid: boo
             amount_cents=document.total_cents,
             payment_method="bank",
         )
-        payment.succeed()
-        payment.save()
-        # The payment signal settles the invoice; do not apply the FSM twice.
+        from apps.billing.payment_convergence import PaymentSuccessService  # noqa: PLC0415
+
+        convergence = PaymentSuccessService.converge_local_paid_document(payment.pk)
+        if convergence.is_err():
+            raise CommandError(f"Seed payment failed: {convergence.unwrap_err()}")
         document.refresh_from_db()
         if document.status != "paid":
             raise CommandError(f"Seed payment did not settle {document.number}")

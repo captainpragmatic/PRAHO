@@ -519,6 +519,7 @@ class ProformaPaymentService:
             from django_fsm import TransitionNotAllowed as _TransitionNotAllowed2  # noqa: PLC0415
 
             try:
+                payment._defer_document_settlement = True
                 payment.succeed()
                 payment.save(update_fields=["status", "updated_at"])
             except (_TransitionNotAllowed2, _ConcurrentTransition):

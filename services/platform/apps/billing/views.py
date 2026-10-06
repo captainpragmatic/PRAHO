@@ -1703,15 +1703,18 @@ def process_payment(  # noqa: C901, PLR0911  # Explicit financial validation and
                 created_by=request.user,
                 meta={"source": "staff_offline_payment"},
             )
+            payment._defer_document_settlement = True
             payment.succeed()
             payment.save(update_fields=["status", "updated_at"])
             convergence = PaymentSuccessService.converge_local_paid_document(payment.id)
             if convergence.is_err():
                 transaction.set_rollback(True)
                 logger.error(
-                    "Offline payment convergence failed for invoice %s: %s", invoice.id, convergence.unwrap_err()
+                    "🔥 [Billing] Offline payment convergence failed for invoice %s: %s",
+                    invoice.id,
+                    convergence.unwrap_err(),
                 )
-                return JsonResponse({"error": "Payment could not be applied safely"}, status=409)
+                return JsonResponse({"error": _("Payment could not be applied safely")}, status=409)
 
         messages.success(request, _("✅ Payment of {amount} RON has been registered!").format(amount=amount))
         return JsonResponse({"success": True})

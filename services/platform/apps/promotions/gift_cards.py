@@ -430,6 +430,7 @@ def capture_reservations(document: Any, invoice: Any) -> list[Payment]:
             idempotency_key=f"gift:{hold.pk}",
             meta={"gift_card_id": str(card.pk), "ledger_version": 2},
         )
+        payment._defer_document_settlement = True
         payment.succeed()
         payment.save(update_fields=["status", "updated_at"])
         card.current_balance_cents -= hold.amount_cents

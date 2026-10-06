@@ -10,11 +10,13 @@ UsageAlertService and UsageInvoiceService.
 from __future__ import annotations
 
 import hashlib
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import timedelta
 from decimal import Decimal
 from functools import cached_property
 from unittest.mock import MagicMock, patch
 
+from django.conf import settings
 from django.db.models import Sum
 from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
@@ -264,9 +266,9 @@ class MeteringServiceTransactionTests(TransactionTestCase):
         verifies sequential behavior there, but exercises the full path.
         In PostgreSQL/MySQL, the database constraint handles true concurrency.
         """
-        from django.conf import settings
-
         # Check if using SQLite (which doesn't support concurrent writes)
+        # PostgreSQL exercises concurrent writes in the branch below.
+
         db_engine = settings.DATABASES["default"]["ENGINE"]
         is_sqlite = "sqlite" in db_engine
 
@@ -301,9 +303,8 @@ class MeteringServiceTransactionTests(TransactionTestCase):
             self.assertEqual(event_count, 1)
         else:
             # Full concurrent test for PostgreSQL/MySQL
-            from concurrent.futures import ThreadPoolExecutor, as_completed
-
             idempotency_key = "concurrent-test-key"
+            # The worker helpers below share the same constraint under contention.
             results = []
             errors = []
 
@@ -997,6 +998,37 @@ class UsageInvoiceServiceTestCase(TestCase):
             "the generation must have committed, not rolled back",
         )
 
+    def test_external_credit_settlement_finalizes_usage_cycle(self) -> None:
+        from uuid import uuid4  # noqa: PLC0415
+
+        from apps.billing.issuers.base import Issued  # noqa: PLC0415
+        from apps.billing.issuers.service import _finalize  # noqa: PLC0415
+
+        selected = SettingsService.update_setting("billing.invoice_issuer", ISSUER_SMARTBILL, reason="test")
+        self.assertTrue(selected.is_ok(), str(selected))
+        CreditLedger.objects.create(
+            customer=self.customer, currency=self.currency, delta_cents=500_000, reason="prepayment for test"
+        )
+        generated = self.service.generate_invoice_from_cycle(str(self.billing_cycle.pk))
+        self.assertTrue(generated.is_ok(), str(generated))
+        invoice = Invoice.objects.get(pk=generated.unwrap()["invoice_id"])
+        payment = Payment.objects.get(invoice=invoice, meta__source="customer_credit")
+        self.assertEqual((invoice.status, payment.status), ("draft", "succeeded"))
+        issuance = ProviderIssuance.objects.get(invoice=invoice)
+        token = uuid4()
+        issuance.claim(token=token, payload={}, payload_hash="wp13-credit")
+        issuance.save()
+        finalized = _finalize(invoice.pk, issuance.pk, token, Issued(number="WP13-001", series="FCT"))
+        self.assertTrue(finalized.is_ok(), str(finalized))
+        invoice.refresh_from_db()
+        self.billing_cycle.refresh_from_db()
+        self.aggregation.refresh_from_db()
+        self.assertEqual(invoice.status, "paid")
+        self.assertIsNotNone(invoice.paid_at)
+        self.assertEqual(self.billing_cycle.status, "finalized")
+        self.assertEqual(self.aggregation.status, "finalized")
+        self.assertEqual(Payment.objects.filter(invoice=invoice, status="succeeded").count(), 1)
+
     def test_usage_invoice_snapshots_individual_cnp(self):
         from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415
 
@@ -1031,8 +1063,12 @@ class UsageInvoiceServiceTestCase(TestCase):
 
     def test_usage_invoice_records_reverse_charge_decision_and_category(self):
         CustomerTaxProfile.objects.create(
-            customer=self.customer, vat_number="DE136695976", is_vat_payer=True, vies_verification_status="valid",
-            vies_verified_at=timezone.now(), vies_consultation_reference="test-reference",
+            customer=self.customer,
+            vat_number="DE136695976",
+            is_vat_payer=True,
+            vies_verification_status="valid",
+            vies_verified_at=timezone.now(),
+            vies_consultation_reference="test-reference",
         )
 
         CustomerAddress.objects.create(
@@ -1343,9 +1379,9 @@ class UsageInvoiceServiceTestCase(TestCase):
         self.assertEqual(credit.reason, "Promotional credit")
 
         # Verify credit can be queried for customer
-        credits = CreditLedger.objects.filter(customer=self.customer)
-        self.assertEqual(credits.count(), 1)
-        self.assertEqual(credits.first().delta_cents, 1000)
+        entries = CreditLedger.objects.filter(customer=self.customer)
+        self.assertEqual(entries.count(), 1)
+        self.assertEqual(entries.first().delta_cents, 1000)
 
     def test_issue_invoice_not_found(self):
         """Test issuing a non-existent invoice."""

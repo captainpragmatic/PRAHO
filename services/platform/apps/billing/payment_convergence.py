@@ -290,10 +290,14 @@ class PaymentSuccessService:
                     invoice = Invoice.objects.select_for_update().get(pk=invoice_id)
                     lock_document_context(invoice)
                 payment = Payment.objects.select_for_update(of=("self",)).select_related("invoice").get(id=payment_id)
-                if payment.status != "succeeded":
+                if payment.status not in {"pending", "succeeded"}:
                     return Err(f"Payment state mismatch: payment {payment.id} is '{payment.status}'")
                 if payment.invoice_id is None:
                     return Err(f"Payment document mismatch: payment {payment.id} has no invoice")
+                if payment.status == "pending":
+                    payment._defer_document_settlement = True
+                    payment.succeed()
+                    payment.save(update_fields=["status", "updated_at"])
                 convergence_error = PaymentSuccessService._converge_paid_invoice(payment)
                 if convergence_error:
                     transaction.set_rollback(True)

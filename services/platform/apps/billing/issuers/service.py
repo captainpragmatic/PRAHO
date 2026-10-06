@@ -190,6 +190,22 @@ def _defer_claim(issuance_id: uuid.UUID, deferred: RateGateWait) -> Result[str, 
     return Err(f"Deferred by pacing until {deferred.available_at.isoformat()}")
 
 
+def _converge_issued_payments(invoice: Invoice) -> Result[None, str]:
+    """Converge pre-issuance credit and its usage cycle after legal issuance."""
+    from apps.billing.payment_convergence import PaymentSuccessService  # noqa: PLC0415
+    from apps.promotions.locking import lock_document_context  # noqa: PLC0415
+
+    if invoice.document_kind != DOCUMENT_KIND_INVOICE:
+        return Ok(None)
+    lock_document_context(invoice)
+    payment_ids = list(invoice.payments.filter(status="succeeded").order_by("pk").values_list("pk", flat=True))
+    for payment_id in payment_ids:
+        convergence = PaymentSuccessService.converge_local_paid_document(payment_id)
+        if convergence.is_err():
+            return Err(convergence.unwrap_err())
+    return Ok(None)
+
+
 def _finalize(
     invoice_id: int,
     issuance_id: uuid.UUID,
@@ -241,7 +257,10 @@ def _finalize(
             # an unnumbered draft - customer credit applied at creation, typically.
             # `mark_as_paid` only accepts an issued invoice, so that convergence has
             # to happen here, the moment the document legally exists.
-            invoice.update_status_from_payments()
+            settlement = _converge_issued_payments(invoice)
+            if settlement.is_err():
+                transaction.set_rollback(True)
+                return Err(settlement.unwrap_err())
             _settle_correction_with(invoice)
             logger.info(f"✅ [Issuance] Invoice {invoice_id} issued as {outcome.legal_number}")
             return Ok(outcome.legal_number)
@@ -374,7 +393,10 @@ def reconcile_confirmed_issued(
         # history and pending-service activation never run, and the issue signal can
         # schedule reminders for a customer who owes nothing. It is a no-op for a credit
         # note, which `update_status_from_payments` refuses to collect.
-        invoice.update_status_from_payments()
+        settlement = _converge_issued_payments(invoice)
+        if settlement.is_err():
+            transaction.set_rollback(True)
+            return Err(settlement.unwrap_err())
         _settle_correction_with(invoice)
     logger.info(f"✅ [Issuance] Invoice {invoice.pk} reconciled to {legal_number} by operator")
     return Ok(legal_number)
