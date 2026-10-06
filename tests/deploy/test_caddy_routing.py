@@ -78,7 +78,7 @@ def _read(path: str) -> str:
     return (ROOT / path).read_text()
 
 
-def _config(name: str, allowed: list[str] | None = None) -> str:
+def _config(name: str, allowed: list[str] | None = None, hsts_policy: str | None = None) -> str:
     source = _read(CONFIGS[name])
     if name in {"native", "docker"}:
         context: dict[str, object] = {
@@ -86,7 +86,10 @@ def _config(name: str, allowed: list[str] | None = None) -> str:
                 "PORTAL_DOMAIN": PORTAL_HOST,
                 "PLATFORM_DOMAIN": PLATFORM_HOST,
                 "ACME_EMAIL": "admin@example.test",
+                **({} if hsts_policy is None else {"HSTS_POLICY": hsts_policy}),
             },
+            # The Docker role's default (deploy/ansible/roles/praho/defaults/main.yml) for prod.
+            "hsts_policy": hsts_policy or "max-age=31536000; includeSubDomains",
             "portal_domain": PORTAL_HOST,
             "platform_domain": PLATFORM_HOST,
             "acme_email": "admin@example.test",
@@ -297,6 +300,20 @@ def test_compose_forwards_domains_hosts_and_staff_cidrs(topology: str) -> None:
             host = platform if service == "platform" else portal
             assert env["ALLOWED_HOSTS"] == f"{host},localhost,{service}"
             assert env["CSRF_TRUSTED_ORIGINS"] == f"https://{host}"
+
+
+@pytest.mark.parametrize(
+    ("deployed", "expected"),
+    [
+        (None, "max-age=31536000; includeSubDomains"),
+        ("", "max-age=31536000; includeSubDomains"),  # empty must not become an empty header
+        ("max-age=3600", "max-age=3600"),
+    ],
+)
+def test_native_template_renders_the_deployed_hsts_policy(deployed: str | None, expected: str) -> None:
+    rendered = _config("native", hsts_policy=deployed)
+    values = re.findall(r'Strict-Transport-Security "([^"]*)"', rendered)
+    assert values and set(values) == {expected}
 
 
 def _docker(*args: str, source: str | None = None) -> subprocess.CompletedProcess[str]:

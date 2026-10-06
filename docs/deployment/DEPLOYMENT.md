@@ -360,7 +360,7 @@ The Ansible infrastructure is fully unified — one inventory, one playbook, one
 Staging settings exist to prevent real-world side effects during testing:
 - **Email**: console backend (prevents sending real emails)
 - **e-Factura**: test mode (prevents submitting invoices to Romanian ANAF)
-- **HSTS**: 1 hour instead of 1 year (allows rolling back to HTTP)
+- **HSTS**: 1 hour instead of 1 year (allows rolling back to HTTP), via `HSTS_POLICY=max-age=3600` at the Caddy edge
 - **Sessions**: longer lifetime, no browser-close expiry (more lenient for testing)
 - **Logging**: DEBUG level with smaller log files
 

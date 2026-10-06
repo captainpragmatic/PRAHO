@@ -1,3 +1,7 @@
 # Staff access uses the immediate peer IP; override with staff/VPN CIDRs at upgrade.
 # An empty list also falls back to loopback; it never enables unrestricted access.
 platform_allowed_ips: ["127.0.0.1/32", "::1/128"]
+
+# Edge HSTS, per environment, rendered into the Caddyfile. Staging stays short, so a broken HTTPS
+# rollout there can still be undone. Neither environment preloads.
+hsts_policy: "{{ 'max-age=3600' if (praho_env | default('prod')) == 'staging' else 'max-age=31536000; includeSubDomains' }}"

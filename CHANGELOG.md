@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- HSTS now follows the environment. Every Caddy configuration hardcoded a one-year header with
+  `preload` and replaced whatever Django sent, so staging's one-hour policy never reached a
+  browser, and `preload` went out for a domain never submitted to the preload list. The edge now
+  sends `HSTS_POLICY`: unset in production (one year with `includeSubDomains`), and
+  `max-age=3600` on staging, which the Docker Ansible role derives from `praho_env`. Caddy's own
+  502s now carry it too. Where no edge fronts the portal, its `SECURE_HSTS_*` settings now take
+  effect; a hardcoded header in its middleware had blocked them. Nothing preloads by default.
 - Staff with two-factor authentication enrolled are now asked for their code at the web
   login. The password alone used to sign them in, because the step that hands a login over
   to the code page was never wired (#590). The code page now uses the same check as the API
