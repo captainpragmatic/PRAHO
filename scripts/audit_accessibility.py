@@ -30,7 +30,7 @@ import argparse
 import ast
 import re
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from gettext import gettext
 from html import unescape
@@ -230,7 +230,23 @@ def _component_literal_text(value: str) -> str | None:
     return SafeString(text) if isinstance(text, str) else None
 
 
-def _component_argument_has_text(value: str, *, is_attribute: bool = False) -> bool:
+def _component_fields_with_autoescape(source: str) -> Iterator[tuple[re.Match[str], bool]]:
+    """Pair component invocations with their lexically active autoescape state."""
+    states = [True]
+    for tag in re.finditer(r"\{%.*?%\}", source, flags=re.DOTALL):
+        tokens = tag.group()[2:-2].split()
+        if len(tokens) == 2 and tokens[0] == "autoescape" and tokens[1] in {"on", "off"}:
+            states.append(tokens[1] == "on")
+        elif tokens == ["endautoescape"]:
+            if len(states) > 1:
+                states.pop()
+        else:
+            component = COMPONENT_FIELD.fullmatch(source, tag.start(), tag.end())
+            if component is not None:
+                yield component, states[-1]
+
+
+def _component_argument_has_text(value: str, *, is_attribute: bool = False, autoescape: bool = True) -> bool:
     """Verify literal accessible text; keep the existing acceptance of variables."""
     expression = COMPONENT_FILTER_EXPRESSION.fullmatch(value)
     if expression is None:
@@ -253,8 +269,9 @@ def _component_argument_has_text(value: str, *, is_attribute: bool = False) -> b
                 # Unknown/erasing filters cannot prove a literal accessible name.
                 return False
             text = transform(text)
-    # Match template autoescaping when a filter removes string safety.
-    text = conditional_escape(text)
+    # Match the invocation's autoescape state when a filter removes string safety.
+    if autoescape:
+        text = conditional_escape(text)
     # Strip markup before decoding: escaped tags are accessible literal text.
     if not is_attribute:
         text = defaultfilters.striptags(text)
@@ -284,7 +301,7 @@ def _check_form_labels(content: str, path: Path) -> list[A11yViolation]:
                 )
             )
 
-    for match in COMPONENT_FIELD.finditer(source):
+    for match, autoescape in _component_fields_with_autoescape(source):
         arguments: dict[str, str] = {}
         for argument in COMPONENT_ARGUMENT.findall(match.group(2)):
             key, separator, value = argument.partition("=")
@@ -295,7 +312,7 @@ def _check_form_labels(content: str, path: Path) -> list[A11yViolation]:
             continue
         label_keys = {"label", "aria_label"} if component == "input_field" else {"label"}
         has_label = any(
-            _component_argument_has_text(arguments[key], is_attribute=key == "aria_label")
+            _component_argument_has_text(arguments[key], is_attribute=key == "aria_label", autoescape=autoescape)
             for key in label_keys
             if key in arguments
         )
