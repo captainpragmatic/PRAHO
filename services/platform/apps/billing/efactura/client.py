@@ -36,6 +36,8 @@ from django.utils.translation import gettext as _
 from apps.common.outbound_http import OutboundPolicy, safe_request
 from apps.settings.services import SettingsService
 
+from .settings import efactura_environment
+
 logger = logging.getLogger(__name__)
 
 EFACTURA_POLICY = OutboundPolicy(
@@ -86,8 +88,8 @@ class EFacturaConfig:
 
     @classmethod
     def from_settings(cls) -> EFacturaConfig:
-        """Create config from Django settings and SettingsService."""
-        env_str = getattr(settings, "EFACTURA_ENVIRONMENT", "test")
+        """Create config from stored environment, Django settings and SettingsService."""
+        env_str = efactura_environment().value
         environment = EFacturaEnvironment.PRODUCTION if env_str == "production" else EFacturaEnvironment.TEST
 
         return cls(

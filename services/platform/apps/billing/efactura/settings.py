@@ -785,3 +785,8 @@ efactura_settings = EFacturaSettings()
 def efactura_enabled() -> bool:
     """Stored efactura.enabled first, then Django EFACTURA_ENABLED; read on every use."""
     return efactura_settings.enabled
+
+
+def efactura_environment() -> EFacturaEnvironment:
+    """Stored efactura.environment first, then Django EFACTURA_ENVIRONMENT; read on every use."""
+    return efactura_settings.environment

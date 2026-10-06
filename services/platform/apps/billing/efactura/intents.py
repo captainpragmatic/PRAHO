@@ -15,7 +15,7 @@ from apps.billing.fiscal_identity import normalize_country_code
 from apps.billing.issuers.policy import efactura_submission_denied_reason
 
 from .models import EFacturaDocument, EFacturaDocumentType, EFacturaStatus
-from .settings import ROMANIA_TIMEZONE, EFacturaSettings, efactura_enabled, ro_local_date
+from .settings import ROMANIA_TIMEZONE, efactura_enabled, efactura_environment, ro_local_date
 from .working_days import submission_deadline_datetime
 
 if TYPE_CHECKING:
@@ -48,7 +48,7 @@ def ensure_efactura_intent(invoice: Invoice) -> EFacturaDocument | None:
         invoice=invoice,
         defaults={
             "document_type": _document_type_for(invoice),
-            "environment": EFacturaSettings().environment.value,
+            "environment": efactura_environment().value,
             "status": EFacturaStatus.QUEUED.value,
         },
     )

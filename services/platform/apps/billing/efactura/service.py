@@ -25,7 +25,6 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
-from django.conf import settings
 from django.core.files.base import ContentFile
 from django.db import transaction
 from django.utils import timezone
@@ -44,6 +43,7 @@ from .client import (
     validate_response_archive,
 )
 from .models import EFacturaDocument, EFacturaDocumentType, EFacturaStatus
+from .settings import efactura_environment
 from .validator import CIUSROValidator, ValidationResult
 from .xml_builder import XMLBuilderError, builder_for
 
@@ -348,7 +348,7 @@ class EFacturaService:
             defaults={
                 "document_type": _document_type_for(invoice),
                 "status": EFacturaStatus.DRAFT.value,
-                "environment": getattr(settings, "EFACTURA_ENVIRONMENT", "test"),
+                "environment": efactura_environment().value,
             },
         )
         # Under the lock, before anything reads `document.document_type` to choose a
@@ -765,7 +765,7 @@ class EFacturaService:
             defaults={
                 "document_type": _document_type_for(invoice),
                 "status": EFacturaStatus.DRAFT.value,
-                "environment": getattr(settings, "EFACTURA_ENVIRONMENT", "test"),
+                "environment": efactura_environment().value,
             },
         )
         _repair_stale_document_type(document, invoice)
