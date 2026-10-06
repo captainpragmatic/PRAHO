@@ -329,9 +329,9 @@ class SecurityHeadersMiddleware:
         response["X-XSS-Protection"] = "1; mode=block"
         response.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
 
-        # Strict Transport Security (HTTPS only)
-        if request.is_secure():
-            response["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        # Strict-Transport-Security is NOT set here. Django's SecurityMiddleware sets it from the
+        # SECURE_HSTS_* settings, and only when the header is absent, so a hardcoded value here made
+        # those settings dead (staging's one-hour policy included).
 
         # CSP rollout profiles (#104 [M7]) separate policy qualification from
         # disposition. "current" preserves unsafe-inline until nonce migration

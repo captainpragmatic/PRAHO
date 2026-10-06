@@ -1,6 +1,9 @@
 # QA cycle 2 — findings
 
-**Status:** in progress. Started 2026-09-26 on `fix/coverage-measurement-and-vat-timezone`.
+**Status:** in progress. Started 2026-09-26 on `fix/coverage-measurement-and-vat-timezone`; the
+"Still open" ledger and the carried list were re-verified against `57e9c124` on 2026-10-06, after
+32 commits had landed without this file moving. Dated corrections are inline; nothing earlier is
+rewritten.
 **Trigger:** one reported defect — enabling `system.maintenance_mode` on the platform produced no
 maintenance experience in the portal. A logged-in customer saw no warning and found their tickets,
 invoices and services simply *missing*; an anonymous visitor got the identical error to a wrong
@@ -11,7 +14,7 @@ function in both services. What follows is what has been established so far, wit
 
 ## Accounting rules for this document
 
-Cycle 1 recorded "11/11 checks PASS" beside a body describing known breakage, because PASS was
+Cycle 1 (closed; read at `57e9c124:QA/cycle-01-v0.21.0/`) recorded "11/11 checks PASS" beside a body describing known breakage, because PASS was
 doing duty for "I looked at it". This cycle uses four verdicts and never averages them:
 
 | Verdict | Means |
@@ -65,6 +68,18 @@ is why the walkthrough stayed manual, why it went stale, and why a setting could
 while its customer-facing consequence was untested. Fixed in #543: the browser suite runs
 nightly, reports server-side coverage, and portal's floor is gated on the union.
 
+**Correction, 2026-10-06: the sentence above was never true.** The `nightly-e2e` job #543 added
+failed at its "Set up Node" step on every one of its first seven scheduled runs (2026-09-29 to
+10-05), before Playwright was installed, because `actions/setup-node` with `cache: npm` and then
+`npm ci` both need a `package-lock.json`, and `.gitignore` had excluded that file since the service
+split — it existed on every developer machine and in no checkout. The workflow never runs on a pull
+request, so its first execution was its first night, and a red scheduled job notifies nobody. The
+root cause named in this section — invisible to every gate — recurred one level up, on the fix
+itself. Tracked since 2026-10-06, guarded by `services/platform/tests/common/test_ci_node_lockfile.py` (red before,
+green after), reproduced both ways in a Linux Node 20 container, and the suite passes locally at
+`a4fab59b` (317 passed, 0 skipped, 9m25s, coverage reported). The first green nightly is the proof
+this sentence lacked; `QA/README.md` now puts reading the nightly's real result before every gate.
+
 ---
 
 ## 2. Maintenance mode — FAIL, then fixed
@@ -101,7 +116,7 @@ discriminating marker was `b" disabled>"`: 1 with the fix, 0 without.
 
 ---
 
-## 3. Settings — 43 are editable and provably inert
+## 3. Settings — 56 are editable and provably inert (54 since #589)
 
 **This is the cycle's largest finding.** Phase 3 set out to write effect tests for settings that
 had none; measuring first found something worth more.
@@ -124,7 +139,7 @@ could see.
 The full list is `scripts/settings_inert_baseline.txt`, gated by check 6 of
 `scripts/lint_settings_coverage.py`. The first count was 43 and was too low for two reasons an
 independent review found, both now fixed and both regression-tested in
-`services/platform/tests/common/test_lint_settings_coverage.py`:
+`services/platform/tests/common/test_settings_lint_detectors.py`:
 
 - **Name collisions.** The caller sweep matched a bare function name anywhere in the tree. Three
   modules define `get_task_time_limit()`; `customers/tasks.py` calls its own, and that call made the
@@ -310,33 +325,53 @@ buys a per-render settings read for nothing.
 
 ## Still open
 
-| Item | Verdict | Note |
+The first two columns are as written on 2026-09-28. The third is the re-verification of
+2026-10-06, by the same rule: PASS names the test that fails if the fix is reverted.
+
+| Item | 2026-09-28 | 2026-10-06 |
 |---|---|---|
-| Version bump to 0.30.0 | NOT-RUN | Also: `README.md` carries a stale `tests-7,000+` badge (actual 10,964) and no coverage badge |
-| The 56 inert settings | FAIL | Baselined and gated; each fix is its own change |
-| The 12 fallback/catalog drifts | FAIL | Baselined and gated; each needs its intended value decided |
-| `company.legal_name` hardcoded in legal prose | FAIL | Pinned by a test; fix costs 5 translated msgids |
-| Portal templates hardcoding company identity | FAIL | Needs the settings contract extended across HMAC |
-| `company.email_noreply` shadowed by `DEFAULT_FROM_EMAIL` | FAIL | Precedence pinned by a test |
-| Price-override path (§4) | FAIL | Tracked as #542 |
-| `romanian_business_context` (§5) | FAIL | Deletion, separate commit |
-| Effect tests for the business zone | **PASS** | Every testable key in `company`, `orders`, `billing`, `customers`, `security`, `support`, `domains`, `localisation` and `platform` now has one. The four that do not — the two `orders.max_price_override_*`, `orders.max_payment_failures_before_fail`, `billing.subscription_grace_period_days` — have no effect to test, because they are inert |
-| Effect tests for `integrations` (149 keys) and `advanced` (90) | NOT-RUN | The deferred cut. `efactura` alone is 43 |
-| Portal coverage 72.02% → 90-95% | NOT-RUN | |
-| `provisioning` 55.50% → 80% | NOT-RUN | |
-| Route and button sweep (398 platform + 80 portal named routes) | NOT-RUN | `scripts/lint_template_components.py` is portal-only; 91 live TMPL blockers are hidden behind `\|\| true` in the Makefile |
-| Migrating `plan.md`'s 7 phases into `tests/e2e/portal/` | NOT-RUN | |
+| Version bump to 0.30.0 | NOT-RUN | **Done** (#559). README badge reads `tests-11,000+`; still no coverage badge |
+| The 56 inert settings | FAIL | **FAIL, 54.** The two `orders.max_price_override_*` keys became live in #589 and left `scripts/settings_inert_baseline.txt`; the other 54 remain, baselined and gated |
+| The 12 fallback/catalog drifts | FAIL | **FAIL, 11.** `orders.max_price_override_cents` left `settings_drift_baseline.txt` in #589 |
+| `company.legal_name` hardcoded in legal prose | FAIL | **FAIL.** Five `PragmaticHost SRL` literals remain in `templates/legal/` (4 ToS, 1 privacy); `LegalProseHardcodesTheCompanyNameTests` still pins it |
+| Portal templates hardcoding company identity | FAIL | **FAIL.** Still ten portal templates |
+| `company.email_noreply` shadowed by `DEFAULT_FROM_EMAIL` | FAIL | **FAIL.** `notifications/services.py:336-337` unchanged; `NoReplyAddressPrecedenceTests` pins it |
+| Price-override path (§4) | FAIL | **PASS** (#589, 2026-10-02). `_validate_manual_price_override` is now called at `orders/views.py:242` and `:250`; `tests/orders/test_price_override_enforcement.py` (`CreatePriceOverrideTests`, `EditPriceOverrideTests`) fails if the calls are removed. #542 closed |
+| `romanian_business_context` (§5) | FAIL | **FAIL.** Still registered at `config/settings/base.py:99` |
+| Effect tests for the business zone | **PASS** | PASS, unchanged. The two `orders.max_price_override_*` keys now have effects and effect tests (`test_order_settings_effects.py`, extended in #589) |
+| Effect tests for `integrations` (149 keys) and `advanced` (90) | NOT-RUN | **NOT-RUN.** `settings_effect_baseline.txt` still holds 56 keys. The catalog has grown since (277 `SettingDef` entries by grep at `57e9c124`), so the denominator is no longer 262 |
+| Portal coverage 72.02% → 90-95% | NOT-RUN | **NOT-RUN, now 78.65%.** Union of unit (74%) and browser (56.44%) halves, computed locally at `a4fab59b` on 2026-10-06 with the nightly's own targets (`make test-e2e-coverage`, `coverage-portal`, `coverage-portal-union`, floor 70). Never yet computed in CI, because the nightly job never got that far |
+| `provisioning` 55.50% → 80% | NOT-RUN | **NOT-RUN.** 56.82% on 2026-10-05 against a floor of 55 |
+| Route and button sweep (398 platform + 80 portal named routes) | NOT-RUN | **Partly done.** Measured as 396 / 79 in `phase-4-survey.md` (the figures here were rounded from memory). The status-only ratchet is in `make lint` (#570, 51 baselined); #571/#572 added content-assertion tests for the two dashboard widgets and untested billing/infrastructure routes; the portal ticket-search API still has no test. TMPL blockers 73 (from 91), still behind `\|\| true`, linter still portal-only |
+| Migrating `plan.md`'s 7 phases into `tests/e2e/portal/` | NOT-RUN | **Re-audited instead of migrated.** 21 of 47 checks fully asserted, 24 partly, 2 not at all — the per-check table is in `plan.md`'s header |
+| The nightly browser job (§1) | — | **Was FAIL 7/7 nights; Node setup fixed 2026-10-06 (#610)** — see the correction in §1. The first run past Node setup (37472257524, dispatched after the merge) passed all 317 browser tests and reported coverage OK, then failed: `e2e_stack.py stop()` gave the supervisor 20 s while it was still writing coverage reports. Fixed on `fix/nightly-e2e-shutdown-and-dispatch`, and proven there: run 37486451264, dispatched from that branch, is the first green `nightly-e2e` job (job concluded `success`). The first green run on master follows that branch's merge |
+| Cycle 1 M5 — a service's Domains tab can never render | — | **FAIL, carried from cycle 1.** The portal POSTs `/services/{id}/domains/` (`portal/apps/services/services.py:332`); the platform API has never had that route, and the 404 is logged and flattened to `[]`. The browser test named for it asserts only "no Server Error", which this never produced |
+| Cycle 1 L3 — currency formatting inconsistent | — | **FAIL, partly fixed.** The services list now uses `romanian_currency`; the order confirmation page and the gift-card payment partial still render period decimals, and `test_selling_currency.py` pins `10.00 EUR` on the confirmation page |
+| Cycle 1 L6 — long service names truncated in the detail `<h1>` on mobile | — | **FAIL, cosmetic.** `templates/services/service_detail.html:48` still truncates; the e2e fixture name is too short to show it |
+| Cycle 1 L1 — debug-toolbar console flood on unauthenticated pages | — | **FAIL by reading, dev-only.** `portal/config/settings/dev.py` still enables the toolbar for localhost and `/__debug__/` is not a public path; not re-run in a browser |
 
 ### Carried, deliberately unfixed, with reasons
 
-- `common/decorators.py:77` — a cold membership cache yields a plain-text `403 Role not found`.
-- `dashboard/views.py:149` — `platform_available` is never falsified.
-- 502 and 504 share 503's response shape, so the portal cannot tell a gateway error from a
-  maintenance window.
-- Three money-critical `timezone.now().date()` sites that pick **VAT rates** by date:
-  `tax_service.py:234`, `tax_models.py:134`, `tax_models.py:145`. Same class as the bug fixed in
-  #543; they deserve their own pass rather than a drive-by.
-- `portal/apps/billing/schemas.py:134` — drives the customer-facing overdue flag from UTC.
+Re-verified 2026-10-06; line numbers updated where the code moved.
+
+- `portal/apps/common/decorators.py:227-236` (was cited as `common/decorators.py:77`) — a cold
+  membership cache still yields a plain-text `403 Role not found`. **Still open.**
+- `portal/apps/dashboard/views.py:180` (was `:149`) — `platform_available` is still never
+  falsified in `dashboard_view`; degraded sections now go through `sections_unavailable` and the
+  maintenance alert instead, so the flag and the red banner it gates are dead on that page.
+  **Still open, cosmetic.**
+- 502 and 504 share 503's response shape — **fixed in #544 itself**: `PlatformAPIError.is_maintenance`
+  is now the narrower claim only the platform's gate may make, and `is_unavailable` carries 502/504
+  (`api_client/services.py:116-143`). What #544 did not cover: a refused connection carries no status
+  at all and still renders the list pages' empty state (see `plan.md` header). **Still open as a
+  different defect.**
+- Three money-critical `timezone.now().date()` sites that pick **VAT rates** by date —
+  **fixed in #598** (2026-10-03): `tax_service.py` and `tax_models.py:134,145` use
+  `timezone.localdate()`; `tests/common/test_tax_rate_local_date.py`
+  (`RuleSelectionUsesTheLocalDateTests`, `CachedRateExpiresAtLocalMidnightTests`) fails on revert.
+  **PASS.**
+- `portal/apps/billing/schemas.py:135` (was `:134`) — still drives the customer-facing overdue flag
+  from UTC. **Still open.**
 
 ---
 

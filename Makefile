@@ -63,6 +63,7 @@ help:
 	@echo "  make test-e2e-orm      - ORM E2E subset (requires the healthy owned stack)"
 	@echo "  make test-security     - Validate service isolation"
 	@echo "  make show-test-deps    - Print the test dependency graph"
+	@echo "  make qa-settings-sweep - Change, verify, audit and restore every setting (needs make dev)"
 	@echo ""
 	@echo "🔧 DATABASE & ASSETS:"
 	@echo "  make migrate         - Run platform database migrations"
@@ -521,6 +522,13 @@ test-with-e2e: test-e2e
 #
 # E2E_PATHS scopes it, e.g. make test-e2e-coverage E2E_PATHS=tests/e2e/portal/
 E2E_PATHS ?=
+
+# Drives every setting in the catalog through the real save endpoints of a running dev platform
+# (make dev), checks it is persisted, delivered and audited, then restores it. Writes and restores
+# the dev database's settings, so it is a manual QA instrument, never part of make test.
+.PHONY: qa-settings-sweep
+qa-settings-sweep: check-venv-platform
+	@$(PYTHON_SHARED) scripts/qa_settings_sweep.py
 
 .PHONY: test-e2e-coverage
 test-e2e-coverage: check-venv-platform build-css

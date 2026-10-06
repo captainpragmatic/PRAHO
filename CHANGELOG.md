@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- HSTS now follows the environment. Every Caddy configuration hardcoded a one-year header with
+  `preload` and replaced whatever Django sent, so staging's one-hour policy never reached a
+  browser, and `preload` went out for a domain never submitted to the preload list. The edge now
+  sends `HSTS_POLICY`: unset in production (one year with `includeSubDomains`), and
+  `max-age=3600` on staging, which the Docker Ansible role derives from `praho_env`. Caddy's own
+  502s now carry it too. Where no edge fronts the portal, its `SECURE_HSTS_*` settings now take
+  effect; a hardcoded header in its middleware had blocked them. Nothing preloads by default.
+  **Upgrading a Docker Compose staging deployment:** add `HSTS_POLICY=max-age=3600` to its `.env`, or
+  it keeps the one-year production default. Native staging deploys fall back to one hour on their own.
 - Staff with two-factor authentication enrolled are now asked for their code at the web
   login. The password alone used to sign them in, because the step that hands a login over
   to the code page was never wired (#590). The code page now uses the same check as the API
@@ -57,6 +66,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Authenticated requests no longer write an audit row each, and load the session user in one
   query instead of two (#553). The session timeout is audited only when it changes. Existing
   sessions are signed out once by the new authentication backend.
+- The nightly browser job no longer fails before it starts. The job added on 2026-09-28 failed
+  at its Node setup step on every one of its first seven nights, before a browser was installed,
+  because the `package-lock.json` it installs from was gitignored and existed on no CI runner. The
+  lockfile is tracked, a test keeps every workflow that runs `npm ci` installing from a tracked
+  lockfile, and the pinned toolchain builds byte-identical CSS on macOS and Linux. The QA record
+  that said the suite ran nightly is corrected, and its ledger of open items re-verified against
+  the code.
 - A changed setting takes effect consistently. Code running inside a transaction now reads the
   value it just wrote instead of the old cached one, a value from a transaction that rolls back is
   never cached, and a read that overlaps a save can no longer put the old value back in the cache

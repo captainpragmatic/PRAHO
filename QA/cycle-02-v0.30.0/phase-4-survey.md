@@ -1,6 +1,7 @@
 # Phase 4 survey — routes, interactions, and what the gates are hiding
 
-**Status:** survey complete, first instrument landed. Started 2026-09-26.
+**Status:** survey complete, first instrument landed. Started 2026-09-26; the "lands next" list
+and the gate table were re-measured on 2026-10-06 (annotations dated inline).
 
 The plan's Phase 4 was a route and button sweep. Measuring first changed two of its premises, which is
 now the third time in this programme that the measurement was the finding.
@@ -63,13 +64,18 @@ page whose rendering is unverified. That gap belongs to the route sweep proper.
 `Makefile` runs these with `|| true`, so each prints findings and exits 0. A gate that cannot fail is
 the same defect class as a getter nobody calls, at the CI level.
 
-| Gate | Suppressed today | Note |
-|---|---|---|
-| `lint_template_components.py` | **91 blockers** (27 TMPL001, 48 TMPL002, 11 TMPL003, 5 TMPL004) plus 551 TMPL005 warnings | The tool calls them blockers and prints *"Non-zero exit: 91 blocker violation(s)"* — into a pipeline that discards it |
-| `audit_accessibility.py` | **136 violations** (A11Y003: 84, A11Y002: 51, A11Y008: 49, A11Y004: 1) | |
-| `audit_dark_mode.py` | **70 violations** | |
-| `error_handling_scan.py` | ~~5 HIGH~~ **0 — fixed, and the gate now blocks** | See §4 |
-| `code_health_scan.py` | 0 | Already clean; the `\|\| true` is harmless here |
+| Gate | Suppressed today | Note | 2026-10-06 |
+|---|---|---|---|
+| `lint_template_components.py` | **91 blockers** (27 TMPL001, 48 TMPL002, 11 TMPL003, 5 TMPL004) plus 551 TMPL005 warnings | The tool calls them blockers and prints *"Non-zero exit: 91 blocker violation(s)"* — into a pipeline that discards it | **73 blockers**, 548 warnings; still `\|\| true` (`Makefile:950`), still portal-only |
+| `audit_accessibility.py` | **136 violations** (A11Y003: 84, A11Y002: 51, A11Y008: 49, A11Y004: 1) | | **155** — risen; still `\|\| true` (`:961`) |
+| `audit_dark_mode.py` | **70 violations** | | **70**; still `\|\| true` (`:971`) |
+| `error_handling_scan.py` | ~~5 HIGH~~ **0 — fixed, and the gate now blocks** | See §4 | blocking, Phase 9 |
+| `code_health_scan.py` | 0 | Already clean; the `\|\| true` is harmless here | blocking, Phase 6 |
+
+A sixth, found 2026-10-06 and not in the first survey: inside `make lint` Phase 1, the platform
+mypy step runs `\|\| echo "⚠️ MyPy check skipped"` (`Makefile:701`), so it cannot fail either. It is
+compensated by `make check-types-platform`, which `platform.yml` runs as its own blocking step — the
+same shape as `lint-security` above: harmless only because a different gate carries the weight.
 
 **And the template linter is portal-only** (`PORTAL_TEMPLATES` is its sole root), so the platform's 172
 templates and `shared/ui`'s 25 are unlinted entirely. The 91 blockers are portal's alone; extending the
@@ -78,13 +84,21 @@ scope will raise the count before it falls.
 ## What lands next, in this order
 
 1. ~~The 5 error-handling HIGHs, then remove that `|| true`.~~ **Done — §4.**
-2. **Wire `audit_test_assertion_quality.py` into `make lint`** with its own detector tests, the way
-   `test_settings_lint_detectors.py` covers the settings gate. It has already been wrong twice; a gate
-   that blocks builds earns tests before it gates.
-3. **The six untouched portal routes**, each with a content assertion.
+2. ~~**Wire `audit_test_assertion_quality.py` into `make lint`** with its own detector tests.~~
+   **Done — #570 (2026-10-01):** Phase 10 of `make lint`, detector tests in
+   `tests/common/test_assertion_quality_detector.py`, baseline holding at 51 with 0 new.
+3. **The six untouched portal routes**, each with a content assertion. **Five of six done
+   (2026-10-06 check):** the two dashboard widgets (#571 — they 500ed on every request, which is
+   what an untested route looks like), the recurring-authorization withdraw and subscription toggle
+   (`tests/billing/test_recurring_authorization_management.py`), the invoice search API
+   (`test_role_guards.py`, `test_invoice_detail_refund_modal.py`). **Still untested:** the ticket
+   search API (`tickets:search_api`) — no unit or browser test references it.
 4. **The 91 TMPL blockers**, then extend the linter to platform and `shared/ui` and remove the
-   `|| true`. Largest item; the count will rise on extension before it falls.
-5. **Accessibility and dark mode**, ratcheted rather than cleared in one pass.
+   `|| true`. Largest item; the count will rise on extension before it falls. **In progress:** 73
+   on 2026-10-06 after #573/#583/#585/#592/#604/#605; linter still portal-only; `|| true` still
+   there, and `integration.yml:74` still says "fix 90 blockers".
+5. **Accessibility and dark mode**, ratcheted rather than cleared in one pass. **Not started;**
+   accessibility rose from 136 to 155 because nothing ratchets it.
 
 ## What the plan proposed and this survey does not
 
@@ -132,6 +146,9 @@ mutation-verified: reverting the fix fails exactly the named test while its pair
 quiet-path test stays green.
 
 ### Two side findings, not fixed
+
+Both re-verified still present on 2026-10-06 (`portal/config/settings/prod.py:140`;
+`portal/apps/users/middleware.py:103` and `:111`).
 
 - **The portal uses `LocMemCache` in every environment, production included.** So the payment
   idempotency key is per-gunicorn-worker and lost on restart: two workers do not see each other's

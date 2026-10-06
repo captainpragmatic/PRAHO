@@ -68,7 +68,9 @@ node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-package-lock.json
+# package-lock.json is TRACKED, deliberately. It was ignored here until the nightly browser
+# job became the first thing in CI to run `npm ci`, which cannot install without it - the job
+# failed at Node setup every night while the file sat on every developer machine.
 yarn.lock
 pnpm-lock.yaml
 
