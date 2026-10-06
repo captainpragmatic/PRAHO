@@ -48,7 +48,7 @@ class SessionIndexTests(TestCase):
 
     def authenticated_request(self) -> HttpRequest:
         request = self.request()
-        login(request, self.user, backend="django.contrib.auth.backends.ModelBackend")
+        login(request, self.user, backend=settings.AUTHENTICATION_BACKENDS[0])
         self.persist(request)
         return request
 
@@ -92,7 +92,7 @@ class SessionIndexTests(TestCase):
         self.user.save(update_fields=["password"])
         request = self.request(stale)
 
-        login(request, self.user, backend="django.contrib.auth.backends.ModelBackend")
+        login(request, self.user, backend=settings.AUTHENTICATION_BACKENDS[0])
 
         self.assertIsNone(request.session.session_key)
         key = self.persist(request)

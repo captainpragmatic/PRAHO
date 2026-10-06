@@ -274,7 +274,7 @@ class StaffLoginSecondFactorTests(TestCase):
             remember_me=False,
             next=NEXT,
             auth_hash=self.user.get_session_auth_hash(),
-            backend="django.contrib.auth.backends.ModelBackend",
+            backend=settings.AUTHENTICATION_BACKENDS[0],
         )
         with (
             patch.object(SessionSecurityService, "update_session_timeout", side_effect=RuntimeError("boom")),
