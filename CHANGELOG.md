@@ -44,6 +44,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   removed its only rate limit, because presenting a valid token made the request count as
   authenticated and its limit applies to anonymous callers only.
 
+### Removed
+
+- The legacy nginx edge and the local nginx stack. Every supported deployment, Docker or native, runs
+  Caddy, which obtains and renews its own certificates. `deploy/nginx/`, the certbot kit in
+  `deploy/ssl/` and `deploy/docker-compose.services.yml` are gone, with the `make docker-prod`,
+  `docker-test`, `docker-logs-platform` and `docker-logs-portal` targets. That stack could not start:
+  it ran `config.settings.dev` in the production images, which fails on import there. The security
+  guide, architecture doc and diagrams now describe the Caddy edge. Its tests now check the production
+  Compose files and every Caddyfile: no Redis anywhere, a portal with no database settings and no
+  network shared with the database, and no edge-set Content-Security-Policy.
+
 ### Fixed
 
 - A hosting account is turned on or off by one writer, the provisioning reconciler (#566,

@@ -93,9 +93,7 @@ help:
 	@echo "🐳 DOCKER (Dev):"
 	@echo "  make docker-build    - Build platform + portal Docker images"
 	@echo "  make docker-dev      - Start development services with hot reload"
-	@echo "  make docker-prod     - Start production services with nginx"
 	@echo "  make docker-stop     - Stop all Docker services"
-	@echo "  make docker-test     - Test Docker services health"
 	@echo "  make docker-clean    - Clean up Docker containers and images"
 	@echo ""
 	@echo "🚀 PRODUCTION DEPLOYMENT:"
@@ -1162,47 +1160,14 @@ docker-dev:
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@docker-compose -f deploy/docker-compose.dev.yml up --build
 
-docker-prod:
-	@echo "🌐 [Docker] Starting production services (no Redis)..."
-	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@docker-compose -f deploy/docker-compose.services.yml up -d
-
 docker-stop:
 	@echo "🛑 [Docker] Stopping all services..."
 	@docker-compose -f deploy/docker-compose.dev.yml down || true
-	@docker-compose -f deploy/docker-compose.services.yml down || true
-
-docker-logs-platform:
-	@echo "📋 [Docker] Platform service logs..."
-	@docker-compose -f deploy/docker-compose.services.yml logs -f platform
-
-docker-logs-portal:
-	@echo "📋 [Docker] Portal service logs..."
-	@docker-compose -f deploy/docker-compose.services.yml logs -f portal
 
 docker-clean:
 	@echo "🧹 [Docker] Cleaning up containers and images..."
 	@docker-compose -f deploy/docker-compose.dev.yml down --volumes --rmi all || true
-	@docker-compose -f deploy/docker-compose.services.yml down --volumes --rmi all || true
 	@docker system prune -f
-
-docker-test:
-	@echo "🧪 [Docker] Testing services isolation (no Redis)..."
-	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo "🚀 Building and starting services..."
-	@docker-compose -f deploy/docker-compose.services.yml up -d --build
-	@echo "⏳ Waiting for services to be healthy..."
-	@sleep 30
-	@echo "🧪 Testing platform service..."
-	@curl -f http://localhost:8700/users/login/ || (echo "❌ Platform health check failed" && exit 1)
-	@echo "✅ Platform service healthy!"
-	@echo "🧪 Testing portal service..."
-	@curl -f http://localhost:8701/ || (echo "❌ Portal health check failed" && exit 1)
-	@echo "✅ Portal service healthy!"
-	@echo "🧪 Testing nginx proxy..."
-	@curl -f http://localhost/ || (echo "❌ Nginx proxy failed" && exit 1)
-	@echo "✅ All services are healthy!"
-	@docker-compose -f deploy/docker-compose.services.yml down
 
 clean-cache:
 	@echo "🧹 Cleaning build artifacts across services..."
@@ -1291,8 +1256,7 @@ deploy-status:
 
 deploy-logs:
 	@echo "📋 [Deploy] Service logs..."
-	@docker compose -f deploy/docker-compose.single-server.yml logs -f 2>/dev/null || \
-		docker compose -f deploy/docker-compose.services.yml logs -f
+	@docker compose -f deploy/docker-compose.single-server.yml logs -f
 
 # ===============================================================================
 # DATABASE BACKUP & RESTORE 💾

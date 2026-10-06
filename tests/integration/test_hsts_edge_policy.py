@@ -89,7 +89,7 @@ class TestEdgeHstsPolicy:
     @pytest.mark.integration
     @pytest.mark.security
     def test_no_edge_default_preloads(self):
-        for path in [*_caddy_configs(), DEPLOY / "nginx" / "nginx-ssl.conf"]:
+        for path in _caddy_configs():
             hsts_lines = [line for line in path.read_text().splitlines() if "strict-transport-security" in line.lower()]
             assert not any("preload" in line for line in hsts_lines), _relative(path)
 
