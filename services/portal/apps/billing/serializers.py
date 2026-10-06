@@ -55,6 +55,7 @@ def create_invoice_from_api(data: dict[str, Any], lines: list[dict[str, Any]] | 
     # Create invoice - only use fields available from platform API
     invoice = Invoice(
         amount_due=data.get("amount_due"),
+        platform_is_overdue=cast(bool | None, data.get("is_overdue")),
         id=data["id"],
         number=data["number"],
         status=data["status"],

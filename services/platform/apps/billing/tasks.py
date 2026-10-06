@@ -380,7 +380,7 @@ def start_dunning_process(invoice_id: str) -> dict[str, Any]:  # noqa: PLR0912  
                 "invoice_id": str(invoice.id),
                 "invoice_number": invoice.number,
                 "customer_id": str(invoice.customer.id),
-                "days_overdue": max(0, (timezone.now().date() - invoice.due_at.date()).days),
+                "days_overdue": max(0, (timezone.localdate() - timezone.localtime(invoice.due_at).date()).days),
                 "source_app": "billing",
             },
         )
