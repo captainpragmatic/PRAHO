@@ -38,6 +38,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 from django.template import defaultfilters
+from django.template.base import Lexer, Token, TokenType
 from django.utils.html import conditional_escape
 from django.utils.safestring import SafeString
 
@@ -93,10 +94,7 @@ ICON_ONLY_BUTTON = re.compile(
     r"<button\b(?![^>]*\baria-label)[^>]*>\s*(?:<(?:i|svg|span)\b[^>]*(?:class=\"[^\"]*icon[^\"]*\")[^>]*/?>)\s*</button>",
     re.IGNORECASE,
 )
-COMPONENT_FIELD = re.compile(
-    r"\{%\s*(input_field|checkbox_field|select_field|textarea_field|filter_select)\b((?:(?!%\}).)*)%\}",
-    re.DOTALL,
-)
+COMPONENT_FIELDS = {"input_field", "checkbox_field", "select_field", "textarea_field", "filter_select"}
 COMPONENT_ARGUMENT = re.compile(r"""(?:[^\s'"]+|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')+""")
 QUOTED_LITERAL = r"""(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')"""
 TRANSLATED_LITERAL = rf"(?:_|gettext)\({QUOTED_LITERAL}\)"
@@ -230,20 +228,54 @@ def _component_literal_text(value: str) -> str | None:
     return SafeString(text) if isinstance(text, str) else None
 
 
-def _component_fields_with_autoescape(source: str) -> Iterator[tuple[re.Match[str], bool]]:
-    """Pair component invocations with their lexically active autoescape state."""
+def _template_tokens(source: str) -> Iterator[Token]:
+    """Use Django's lexer and omit content discarded by comment blocks."""
+    in_comment = False
+    for token in Lexer(source).tokenize():
+        if in_comment:
+            if token.token_type == TokenType.BLOCK and token.contents == "endcomment":
+                in_comment = False
+            continue
+        if token.token_type == TokenType.COMMENT:
+            continue
+        if token.token_type == TokenType.BLOCK and token.contents.split()[:1] == ["comment"]:
+            in_comment = True
+            continue
+        # The lexer already emits verbatim content as TEXT, including named blocks.
+        yield token
+
+
+def _form_label_source(tokens: list[Token]) -> str:
+    """Prepare HTML for label checks without reparsing template delimiters in text."""
+    parts: list[str] = []
+    line_no = 1
+    for token in tokens:
+        parts.append("\n" * (token.lineno - line_no))
+        if token.token_type == TokenType.TEXT:
+            text = token.contents
+        elif token.token_type == TokenType.VAR:
+            text = "{{" + token.contents + "}}"
+        else:
+            text = _strip_django_tags("{% " + token.contents + " %}", preserve_variables=True)
+        parts.append(text)
+        line_no = token.lineno + text.count("\n")
+    return "".join(parts)
+
+
+def _component_fields_with_autoescape(tokens: list[Token]) -> Iterator[tuple[Token, bool]]:
+    """Pair executable component tokens with their active autoescape state."""
     states = [True]
-    for tag in re.finditer(r"\{%.*?%\}", source, flags=re.DOTALL):
-        tokens = tag.group()[2:-2].split()
-        if len(tokens) == 2 and tokens[0] == "autoescape" and tokens[1] in {"on", "off"}:
-            states.append(tokens[1] == "on")
-        elif tokens == ["endautoescape"]:
+    for token in tokens:
+        if token.token_type != TokenType.BLOCK:
+            continue
+        bits = token.contents.split()
+        if len(bits) == 2 and bits[0] == "autoescape" and bits[1] in {"on", "off"}:
+            states.append(bits[1] == "on")
+        elif bits == ["endautoescape"]:
             if len(states) > 1:
                 states.pop()
-        else:
-            component = COMPONENT_FIELD.fullmatch(source, tag.start(), tag.end())
-            if component is not None:
-                yield component, states[-1]
+        elif bits and bits[0] in COMPONENT_FIELDS:
+            yield token, states[-1]
 
 
 def _component_argument_has_text(value: str, *, is_attribute: bool = False, autoescape: bool = True) -> bool:
@@ -280,9 +312,9 @@ def _component_argument_has_text(value: str, *, is_attribute: bool = False, auto
 
 def _check_form_labels(content: str, path: Path) -> list[A11yViolation]:
     """Check raw controls and component invocations rather than trusting id= alone."""
-    source = _strip_django_comments(content)
+    tokens = list(_template_tokens(content))
     parser = _FormLabelParser()
-    parser.feed(_strip_django_tags(source, preserve_variables=True))
+    parser.feed(_form_label_source(tokens))
     parser.close()
     labelled_ids = {label.target for label in parser.labels if label.target and label.text.strip()}
     violations: list[A11yViolation] = []
@@ -301,13 +333,14 @@ def _check_form_labels(content: str, path: Path) -> list[A11yViolation]:
                 )
             )
 
-    for match, autoescape in _component_fields_with_autoescape(source):
+    for token, autoescape in _component_fields_with_autoescape(tokens):
+        bits = token.contents.split(maxsplit=1)
+        component = bits[0]
         arguments: dict[str, str] = {}
-        for argument in COMPONENT_ARGUMENT.findall(match.group(2)):
+        for argument in COMPONENT_ARGUMENT.findall(bits[1] if len(bits) > 1 else ""):
             key, separator, value = argument.partition("=")
             if separator:
                 arguments[key] = value
-        component = match.group(1)
         if component == "input_field" and arguments.get("input_type") in {'"hidden"', "'hidden'"}:
             continue
         label_keys = {"label", "aria_label"} if component == "input_field" else {"label"}
@@ -322,7 +355,7 @@ def _check_form_labels(content: str, path: Path) -> list[A11yViolation]:
                     "A11Y003",
                     SEVERITY_CRITICAL,
                     path,
-                    source.count("\n", 0, match.start()) + 1,
+                    token.lineno,
                     gettext("Form component missing non-empty label or aria_label argument"),
                 )
             )
@@ -367,7 +400,7 @@ def check_file(path: Path, *, verbose: bool = False) -> list[A11yViolation]:
 
     ⚠️  KNOWN LIMITATION: Checks other than form labelling remain single-line regexes.
     Multi-line HTML tags may produce false negatives in those checks.
-    Form labelling uses an HTML parser; component invocations may span lines.
+    Form labelling uses an HTML parser and Django's template lexer.
     """
     violations: list[A11yViolation] = []
     is_component = _is_component_template(path)

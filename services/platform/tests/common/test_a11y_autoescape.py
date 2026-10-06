@@ -105,3 +105,72 @@ class ComponentAutoescapeTests(SimpleTestCase):
             "{% endautoescape %}\n",
             [3],
         )
+
+    def test_block_comments_do_not_change_autoescape_state(self) -> None:
+        for mode, ignored_mode, expected_lines in (("on", "off", []), ("off", "on", [5])):
+            for key, value in (("label", "<b></b>"), ("aria_label", "&#160;")):
+                with self.subTest(mode=mode, key=key):
+                    self._assert_parity(
+                        "{% autoescape " + mode + " %}\n"
+                        "{% comment ignored tags %}\n"
+                        "{% autoescape " + ignored_mode + " %}\n"
+                        "{% endcomment %}\n"
+                        '{% input_field "control" ' + key + '=""|default:"' + value + '"|upper %}\n'
+                        "{% endautoescape %}\n",
+                        expected_lines,
+                    )
+
+    def test_verbatim_tags_do_not_change_autoescape_state(self) -> None:
+        for block in ("verbatim", "verbatim example"):
+            for mode, ignored_mode, expected_lines in (("on", "off", []), ("off", "on", [5])):
+                with self.subTest(block=block, mode=mode):
+                    self._assert_parity(
+                        "{% autoescape " + mode + " %}\n"
+                        "{% " + block + " %}\n"
+                        "{% autoescape " + ignored_mode + " %}\n"
+                        "{% end" + block + " %}\n"
+                        '{% input_field "control" label=""|default:"<b></b>"|upper %}\n'
+                        "{% endautoescape %}\n",
+                        expected_lines,
+                    )
+
+    def test_variable_tag_literal_does_not_hide_the_next_component(self) -> None:
+        self._assert_parity(
+            '{{ "{%" }}\n{% input_field "unlabelled" %}\n{% input_field "named" label="Name" %}\n',
+            [2],
+        )
+
+    def test_nested_autoescape_restores_states_after_ignored_tags(self) -> None:
+        for block in ("comment", "verbatim example"):
+            for key, value in (("label", "<b></b>"), ("aria_label", "&#160;")):
+                with self.subTest(block=block, key=key):
+                    argument = key + '=""|default:"' + value + '"|upper'
+                    self._assert_parity(
+                        "{% autoescape off %}\n"
+                        '{% input_field "outer_off" ' + argument + " %}\n"
+                        "{% autoescape on %}\n"
+                        "{% " + block + " %}\n"
+                        "{% autoescape off %}\n"
+                        "{% end" + block + " %}\n"
+                        '{% input_field "inner_on" ' + argument + " %}\n"
+                        "{% autoescape off %}\n"
+                        '{% input_field "inner_off" ' + argument + " %}\n"
+                        "{% endautoescape %}\n"
+                        '{% input_field "restored_on" ' + argument + " %}\n"
+                        "{% endautoescape %}\n"
+                        '{% input_field "restored_off" ' + argument + " %}\n"
+                        "{% endautoescape %}\n"
+                        '{% input_field "default_on" ' + argument + " %}\n",
+                        [2, 9, 13],
+                    )
+
+    def test_comment_block_controls_are_not_checked(self) -> None:
+        self._assert_parity(
+            "{% comment %}\n"
+            '{% input_field "ignored" %}\n'
+            '<input name="ignored-raw">\n'
+            "{% endcomment %}\n"
+            '{% input_field "unlabelled" %}\n'
+            '{% input_field "named" label="Name" %}\n',
+            [5],
+        )
