@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
+from django.utils.translation import gettext as _
 
 from apps.common.types import Err, Ok, Result
 
@@ -18,6 +19,11 @@ from .payment_models import Payment, PaymentRetryAttempt, PaymentRetryPolicy
 from .recurring_billing import fixed_renewal_schedule
 from .subscription_models import Subscription
 from .validators import log_security_event
+
+if TYPE_CHECKING:
+    from apps.provisioning.models import Service
+
+    from .invoice_models import Invoice
 
 logger = logging.getLogger(__name__)
 
@@ -310,6 +316,30 @@ class PaymentSuccessService:
             return Err(f"Local payment convergence failed: {exc}")
 
     @staticmethod
+    def converge_zero_total_invoice(invoice_id: int) -> Result[Invoice, str]:
+        """Converge a fully discounted document and its cycles without inventing a payment."""
+        from apps.promotions.locking import lock_document_context  # noqa: PLC0415
+
+        from .invoice_models import Invoice  # noqa: PLC0415
+
+        try:
+            with transaction.atomic():
+                invoice = Invoice.objects.select_for_update().get(pk=invoice_id)
+                lock_document_context(invoice)
+                if invoice.total_cents != 0:
+                    return Err(_("Only zero-total invoices can settle without a payment."))
+                error = PaymentSuccessService._converge_invoice(invoice)
+                if error:
+                    transaction.set_rollback(True)
+                    return Err(error)
+                return Ok(invoice)
+        except Invoice.DoesNotExist:
+            return Err(_("Invoice not found: %(invoice_id)s") % {"invoice_id": invoice_id})
+        except Exception as exc:
+            logger.exception("🔥 [Billing] Zero-total convergence failed for invoice %s", invoice_id)
+            return Err(_("Zero-total invoice convergence failed: %(error)s") % {"error": str(exc)})
+
+    @staticmethod
     def _validate_gateway_facts(  # noqa: PLR0911  # Fail closed with a precise mismatch reason per Stripe fact
         payment: Payment, gateway_facts: Mapping[str, Any]
     ) -> str | None:
@@ -388,14 +418,21 @@ class PaymentSuccessService:
         )
 
     @staticmethod
-    def _converge_paid_invoice(  # noqa: C901, PLR0911, PLR0912  # Explicit financial lifecycle rejections
-        payment: Payment,
-    ) -> str | None:
+    def _converge_paid_invoice(payment: Payment) -> str | None:
         from .invoice_models import Invoice  # noqa: PLC0415
 
         if payment.invoice_id is None:
             return f"Payment document mismatch: payment {payment.id} has no invoice"
         invoice = Invoice.objects.select_for_update(of=("self",)).get(id=payment.invoice_id)
+        return PaymentSuccessService._converge_invoice(invoice, payment=payment)
+
+    @staticmethod
+    def _converge_invoice(  # noqa: C901, PLR0912  # Explicit financial lifecycle rejections
+        invoice: Invoice,
+        *,
+        payment: Payment | None = None,
+    ) -> str | None:
+        """Caller holds the document and benefit locks; converge all required invoice state."""
         invoice.update_status_from_payments()
         invoice.refresh_from_db()
         if invoice.get_remaining_amount() > 0:
@@ -436,7 +473,7 @@ class PaymentSuccessService:
             {subscription.service_id for subscription in subscriptions.values() if subscription.service_id},
             key=str,
         )
-        services: dict[object, Any] = {}
+        services: dict[object, Service] = {}
         if service_ids:
             from apps.provisioning.models import Service  # noqa: PLC0415
 

@@ -236,3 +236,65 @@ def sweep_abandoned_claims(limit: int = 100) -> dict[str, int]:
             f"reconciliation; a document may exist at the provider for each."
         )
     return {"quarantined": quarantined}
+
+
+def sweep_issued_settlements(limit: int = 100) -> dict[str, int]:
+    """Recover committed issuance whose settlement callback was lost; never call the provider."""
+    from django.db import transaction  # noqa: PLC0415
+    from django.db.models import F, Sum  # noqa: PLC0415
+
+    from apps.billing.invoice_models import DOCUMENT_KIND_INVOICE, ISSUER_BUILTIN, Invoice  # noqa: PLC0415
+
+    from .models import IssuanceState  # noqa: PLC0415
+    from .service import _settle_issued_document  # noqa: PLC0415
+
+    candidates = (
+        Invoice.objects.filter(
+            document_kind=DOCUMENT_KIND_INVOICE,
+            status__in=("issued", "overdue"),
+            number__isnull=False,
+            issued_at__isnull=False,
+            provider_issuance__state=IssuanceState.ISSUED.value,
+        )
+        .exclude(issuer_provider=ISSUER_BUILTIN)
+        .exclude(number="")
+        .annotate(collected=Sum("payments__amount_cents", filter=Q(payments__status="succeeded"), default=0))
+        .filter(Q(total_cents=0) | Q(collected__gte=F("total_cents")))
+        .order_by("pk")
+    )
+    # Rotate past failed rows so a persistent failure cannot starve later invoices.
+    cursor_key = "billing:issued-settlement-sweep-cursor"
+    cursor = cache.get(cursor_key)
+    owed = list((candidates.filter(pk__gt=cursor) if cursor is not None else candidates)[:limit])
+    if not owed and cursor is not None:
+        owed = list(candidates[:limit])
+    cache.set(cursor_key, owed[-1].pk if owed else None, timeout=None)
+
+    results = {"settled": 0, "failed": 0, "skipped": 0}
+    for candidate in owed:
+        with transaction.atomic():
+            invoice = Invoice.objects.select_for_update().get(pk=candidate.pk)
+            # Another worker may have settled it. Refunds may have reduced the balance.
+            if invoice.status not in {"issued", "overdue"} or invoice.get_remaining_amount() > 0:
+                results["skipped"] += 1
+                continue
+            settlement = _settle_issued_document(invoice.pk)
+            results["failed" if settlement.is_err() else "settled"] += 1
+    return results
+
+
+def setup_issuance_scheduled_tasks() -> dict[str, str]:
+    """Install settlement recovery even when no external provider is currently enabled."""
+    from django_q.models import Schedule  # noqa: PLC0415
+
+    _schedule, created = Schedule.objects.update_or_create(
+        name="billing-issued-settlement-sweep",
+        defaults={
+            "func": "apps.billing.issuers.tasks.sweep_issued_settlements",
+            "schedule_type": Schedule.MINUTES,
+            "minutes": 5,
+            "repeats": -1,
+        },
+    )
+    logger.info("✅ [Issuance] Settlement recovery schedule configured")
+    return {"issued_settlements": "created" if created else "already_exists"}

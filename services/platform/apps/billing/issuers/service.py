@@ -204,10 +204,9 @@ def _converge_issued_payments(invoice: Invoice) -> Result[None, str]:
     lock_document_context(invoice)
     payment_ids = list(invoice.payments.filter(status="succeeded").order_by("pk").values_list("pk", flat=True))
     if invoice.total_cents == 0 and not payment_ids:
-        # A fully discounted document has no payment row to drive convergence.
-        invoice.update_status_from_payments()
-        if invoice.status != "paid":
-            return Err(_("Zero-total invoice could not be settled."))
+        document_convergence = PaymentSuccessService.converge_zero_total_invoice(invoice.pk)
+        if document_convergence.is_err():
+            return Err(document_convergence.unwrap_err())
     for payment_id in payment_ids:
         convergence = PaymentSuccessService.converge_local_paid_document(payment_id)
         if convergence.is_err():
@@ -215,14 +214,14 @@ def _converge_issued_payments(invoice: Invoice) -> Result[None, str]:
     return Ok(None)
 
 
-def _settle_issued_document(invoice_id: int) -> None:
+def _settle_issued_document(invoice_id: int) -> Result[None, str]:
     """Settle local state after issuance commits; failures never undo provider facts."""
     error: str | None = None
     try:
         with transaction.atomic():
             invoice = Invoice.objects.select_for_update().get(pk=invoice_id)
             if invoice.status in {"void", "refunded"}:
-                return
+                return Ok(None)
             settlement = _converge_issued_payments(invoice)
             if settlement.is_err():
                 error = settlement.unwrap_err()
@@ -248,7 +247,7 @@ def _settle_issued_document(invoice_id: int) -> None:
                     "title": _("Issued invoice settlement failed"),
                     "description": _(
                         "Invoice %(number)s was issued, but settlement failed: %(error)s. "
-                        "Review the failure and retry the invoice issuance task to settle the existing document."
+                        "Review the failure; the settlement recovery sweep retries the existing document."
                     )
                     % {"number": invoice.number, "error": error},
                     "evidence": {
@@ -259,8 +258,9 @@ def _settle_issued_document(invoice_id: int) -> None:
                     },
                 },
             )
-        return
+        return Err(error)
     _settle_correction_with(invoice)
+    return Ok(None)
 
 
 def _finalize(

@@ -11,6 +11,7 @@ from django.utils.translation import gettext as _
 
 from apps.audit.tasks import setup_audit_scheduled_tasks
 from apps.billing.efactura.tasks import schedule_efactura_tasks
+from apps.billing.issuers.tasks import setup_issuance_scheduled_tasks
 from apps.billing.tasks import setup_billing_scheduled_tasks, setup_fx_scheduled_tasks
 from apps.common.tasks import setup_system_status_scheduled_tasks
 from apps.domains.tasks import setup_domain_scheduled_tasks
@@ -168,6 +169,7 @@ class Command(BaseCommand):
             self.stdout.write("  - Expire unpaid trials: Daily at 00:30")
             self.stdout.write("  - Apply grace-period lifecycle: Daily at 01:00")
             self.stdout.write("  - Process and rate local usage: Periodic")
+            self.stdout.write(_("  - Recover issued invoice settlement: Every 5 minutes"))
 
         if run_all or flags["status_only"]:
             self.stdout.write("")
@@ -223,6 +225,7 @@ class Command(BaseCommand):
             # FX registration runs BEFORE billing so the billing auto-renew guard's
             # RuntimeError cannot abort the command before the FX schedule is installed (#103).
             if run_all or flags["billing_only"]:
+                self._setup_task_category("issuance", "🧾", setup_issuance_scheduled_tasks, all_results)
                 self._setup_task_category("fx rates", "💱", setup_fx_scheduled_tasks, all_results)
                 self._setup_task_category("gift funding", "🎁", setup_gift_scheduled_tasks, all_results)
 

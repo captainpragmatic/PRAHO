@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import timedelta
+from decimal import Decimal
+from io import StringIO
 from unittest.mock import patch
 from uuid import uuid4
 
+from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.db import DatabaseError, transaction
 from django.test import TestCase
 from django.utils import timezone
@@ -14,7 +19,7 @@ from apps.audit.models import AuditAlert
 from apps.billing.issuers import service
 from apps.billing.issuers.base import Issued
 from apps.billing.issuers.models import IssuanceState, ProviderIssuance
-from apps.billing.metering_models import BillingCycle
+from apps.billing.metering_models import BillingCycle, UsageAggregation, UsageMeter
 from apps.billing.models import Currency, Invoice, Payment
 from apps.billing.subscription_models import Subscription
 from apps.common.types import Result
@@ -69,12 +74,12 @@ class IssuedDocumentSettlementTests(TestCase):
         self.issuance.mark_outcome_unknown(reason="Response lost")
         self.issuance.save()
 
-    def fund(self) -> Payment:
+    def fund(self, *, amount_cents: int | None = None) -> Payment:
         payment = Payment(
             customer=self.customer,
             invoice=self.invoice,
             currency=self.currency,
-            amount_cents=self.invoice.total_cents,
+            amount_cents=self.invoice.total_cents if amount_cents is None else amount_cents,
             payment_method="other",
         )
         payment._defer_document_settlement = True
@@ -164,8 +169,9 @@ class IssuedDocumentSettlementTests(TestCase):
 
     def assert_zero_total_paid(self, *, reconciled: bool) -> None:
         self.invoice.subtotal_cents = 0
+        self.invoice.discount_cents = 10000
         self.invoice.total_cents = 0
-        self.invoice.save(update_fields=["subtotal_cents", "total_cents"])
+        self.invoice.save(update_fields=["subtotal_cents", "discount_cents", "total_cents"])
         if reconciled:
             self.quarantine()
         activated: list[Invoice] = []
@@ -213,3 +219,223 @@ class IssuedDocumentSettlementTests(TestCase):
             result = self.confirm()
         self.assert_issued_with_failure("Settlement unavailable")
         self.assertTrue(result.is_ok(), str(result))
+
+    def usage_records(self) -> tuple[BillingCycle, UsageAggregation]:
+        subscription, cycle = self.cancelled_renewal()
+        # Postpaid usage settles the completed period without renewing entitlement.
+        BillingCycle.objects.filter(pk=cycle.pk).update(
+            invoice=None,
+            usage_invoice=self.invoice,
+            status="invoiced",
+            collection_status="paid",
+            period_start=subscription.current_period_start,
+            period_end=subscription.current_period_end,
+        )
+        cycle.refresh_from_db()
+        aggregation = UsageAggregation.objects.create(
+            meter=UsageMeter.objects.create(
+                name="settlement-bandwidth", display_name="Bandwidth", aggregation_type="sum", unit="gb"
+            ),
+            customer=self.customer,
+            subscription=subscription,
+            billing_cycle=cycle,
+            period_start=cycle.period_start,
+            period_end=cycle.period_end,
+            total_value=Decimal("10"),
+            overage_value=Decimal("10"),
+            charge_cents=10000,
+            status="invoiced",
+        )
+        return cycle, aggregation
+
+    def recovery_sweep(self) -> dict[str, int]:
+        from apps.billing.issuers import tasks  # noqa: PLC0415
+
+        sweep: Callable[[], dict[str, int]] | None = getattr(tasks, "sweep_issued_settlements", None)
+        self.assertIsNotNone(sweep, "Issued-invoice settlement recovery sweep is missing")
+        assert sweep is not None
+        return sweep()
+
+    def test_lost_confirmation_callback_is_recovered_once(self) -> None:
+        payments = [self.fund(amount_cents=4000), self.fund(amount_cents=6000)]
+        cycle, aggregation = self.usage_records()
+        activated: list[Invoice] = []
+        with self.captureOnCommitCallbacks(execute=False), transaction.atomic():
+            result = self.confirm()
+        self.assertTrue(result.is_ok(), str(result))
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.status, "issued")
+        self.assertIsNone(self.invoice.paid_at)
+        with (
+            patch(
+                "apps.billing.issuers.smartbill.issuer.SmartBillIssuer.submit",
+                side_effect=AssertionError("Resubmitted"),
+            ),
+            patch("apps.billing.signals._trigger_virtualmin_provisioning_on_payment", side_effect=activated.append),
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            first = self.recovery_sweep()
+            self.invoice.refresh_from_db()
+            cycle.refresh_from_db()
+            aggregation.refresh_from_db()
+            self.assertEqual(self.invoice.status, "paid")
+            self.assertEqual((cycle.status, aggregation.status), ("finalized", "finalized"))
+            paid_at, finalized_at = self.invoice.paid_at, cycle.finalized_at
+            second = self.recovery_sweep()
+        self.assertEqual(first, {"settled": 1, "failed": 0, "skipped": 0})
+        self.assertEqual(second, {"settled": 0, "failed": 0, "skipped": 0})
+        self.invoice.refresh_from_db()
+        cycle.refresh_from_db()
+        self.assertEqual((self.invoice.paid_at, cycle.finalized_at), (paid_at, finalized_at))
+        self.assertEqual([invoice.pk for invoice in activated], [self.invoice.pk])
+        self.assertEqual(ProviderIssuance.objects.get(pk=self.issuance.pk).submissions, 1)
+        self.assertEqual(
+            list(Payment.objects.filter(invoice=self.invoice).order_by("pk").values_list("pk", flat=True)),
+            [payment.pk for payment in payments],
+        )
+
+    def test_lost_zero_total_reconciliation_callback_recovers_usage(self) -> None:
+        self.invoice.subtotal_cents = 0
+        self.invoice.discount_cents = 10000
+        self.invoice.total_cents = 0
+        self.invoice.save(update_fields=["subtotal_cents", "discount_cents", "total_cents"])
+        cycle, aggregation = self.usage_records()
+        self.quarantine()
+        with self.captureOnCommitCallbacks(execute=False), transaction.atomic():
+            result = self.reconcile()
+        self.assertTrue(result.is_ok(), str(result))
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.status, "issued")
+        with self.captureOnCommitCallbacks(execute=True):
+            first = self.recovery_sweep()
+            second = self.recovery_sweep()
+        self.invoice.refresh_from_db()
+        cycle.refresh_from_db()
+        aggregation.refresh_from_db()
+        self.assertEqual((self.invoice.status, cycle.status, aggregation.status), ("paid", "finalized", "finalized"))
+        self.assertFalse(self.invoice.payments.exists())
+        self.assertEqual(first, {"settled": 1, "failed": 0, "skipped": 0})
+        self.assertEqual(second, {"settled": 0, "failed": 0, "skipped": 0})
+        self.assertEqual(ProviderIssuance.objects.get(pk=self.issuance.pk).submissions, 0)
+
+    def test_repeated_recovery_failure_keeps_one_alert_and_can_retry(self) -> None:
+        payment = self.fund()
+        subscription, cycle = self.cancelled_renewal()
+        with self.captureOnCommitCallbacks(execute=False):
+            self.confirm()
+        for _attempt in range(2):
+            self.assertEqual(self.recovery_sweep(), {"settled": 0, "failed": 1, "skipped": 0})
+            self.assert_issued_with_failure("no longer permits renewal entitlement")
+        self.assertEqual(
+            AuditAlert.objects.filter(
+                metadata={"source": "provider_issuance_settlement", "invoice_id": self.invoice.pk}
+            ).count(),
+            1,
+        )
+        cycle.refresh_from_db()
+        self.assertEqual(cycle.collection_status, "processing")
+        self.assertIsNone(cycle.entitlement_applied_at)
+        subscription.cancel_at_period_end = False
+        subscription.save(update_fields=["cancel_at_period_end"])
+        with self.captureOnCommitCallbacks(execute=True):
+            self.assertEqual(self.recovery_sweep(), {"settled": 1, "failed": 0, "skipped": 0})
+        self.invoice.refresh_from_db()
+        cycle.refresh_from_db()
+        self.assertEqual((self.invoice.status, cycle.collection_status), ("paid", "paid"))
+        self.assertIsNotNone(cycle.entitlement_applied_at)
+        self.assertEqual(Payment.objects.get(pk=payment.pk).status, "succeeded")
+        self.assertEqual(ProviderIssuance.objects.get(pk=self.issuance.pk).submissions, 1)
+
+    def assert_zero_total_usage_finalized(self, *, reconciled: bool) -> None:
+        cycle, aggregation = self.usage_records()
+        paid_through = Subscription.objects.get(pk=cycle.subscription_id).current_period_end
+        self.assert_zero_total_paid(reconciled=reconciled)
+        cycle.refresh_from_db()
+        aggregation.refresh_from_db()
+        self.assertEqual(cycle.status, "finalized")
+        self.assertIsNotNone(cycle.finalized_at)
+        self.assertEqual(aggregation.status, "finalized")
+        self.assertIsNone(cycle.entitlement_applied_at)
+        self.assertEqual(Subscription.objects.get(pk=cycle.subscription_id).current_period_end, paid_through)
+
+    def test_zero_total_confirmation_finalizes_usage_records(self) -> None:
+        self.assert_zero_total_usage_finalized(reconciled=False)
+
+    def test_zero_total_reconciliation_finalizes_usage_records(self) -> None:
+        self.assert_zero_total_usage_finalized(reconciled=True)
+
+    def test_recovery_excludes_unissued_builtin_and_insufficient_funding(self) -> None:
+        self.fund()
+        with self.captureOnCommitCallbacks(execute=False):
+            self.confirm()
+        excluded: list[Invoice] = []
+        cases = (
+            ("partial", "smartbill", True, IssuanceState.ISSUED.value, "succeeded", 9999),
+            ("pending", "smartbill", True, IssuanceState.ISSUED.value, "pending", 10000),
+            ("builtin", "builtin", True, IssuanceState.ISSUED.value, "succeeded", 10000),
+            ("unissued", "smartbill", False, IssuanceState.PENDING.value, "succeeded", 10000),
+            ("unknown", "smartbill", False, IssuanceState.OUTCOME_UNKNOWN.value, "succeeded", 10000),
+        )
+        for name, provider, issued, state, payment_status, amount in cases:
+            invoice = Invoice.objects.create(
+                customer=self.customer,
+                currency=self.currency,
+                number=None,
+                issuer_provider=provider,
+                subtotal_cents=10000,
+                total_cents=10000,
+                bill_to_country="DE",
+            )
+            if issued:
+                invoice.number = f"EXCLUDED-{name}"
+                invoice.issue()
+                invoice.save()
+            ProviderIssuance.objects.create(invoice=invoice, provider=provider, state=state)
+            payment = Payment(
+                customer=self.customer,
+                invoice=invoice,
+                currency=self.currency,
+                amount_cents=amount,
+                payment_method="other",
+            )
+            payment._defer_document_settlement = True
+            if payment_status == "succeeded":
+                payment.succeed()
+            payment.save()
+            excluded.append(invoice)
+        with self.captureOnCommitCallbacks(execute=True):
+            self.assertEqual(self.recovery_sweep(), {"settled": 1, "failed": 0, "skipped": 0})
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.status, "paid")
+        for invoice in excluded:
+            expected_status = invoice.status
+            invoice.refresh_from_db()
+            self.assertEqual(invoice.status, expected_status)
+            self.assertIsNone(invoice.paid_at)
+
+    def test_recovery_schedule_is_installed_once_by_setup_command(self) -> None:
+        from django_q.models import Schedule  # noqa: PLC0415
+
+        Schedule.objects.all().delete()
+        for _run in range(2):
+            call_command("setup_scheduled_tasks", billing_only=True, stdout=StringIO())
+        schedules = Schedule.objects.filter(name="billing-issued-settlement-sweep")
+        self.assertEqual(schedules.count(), 1)
+        schedule = schedules.get()
+        self.assertEqual(schedule.func, "apps.billing.issuers.tasks.sweep_issued_settlements")
+        self.assertEqual((schedule.schedule_type, schedule.minutes, schedule.repeats), (Schedule.MINUTES, 5, -1))
+
+    def test_recovery_registration_failure_fails_setup_command(self) -> None:
+        from django_q.models import Schedule  # noqa: PLC0415
+
+        Schedule.objects.all().delete()
+        failure = DatabaseError("settlement schedule store unavailable")
+        with patch(
+            "apps.common.management.commands.setup_scheduled_tasks.setup_issuance_scheduled_tasks",
+            side_effect=failure,
+            create=True,
+        ):
+            with self.assertRaisesMessage(CommandError, str(failure)) as caught:
+                call_command("setup_scheduled_tasks", billing_only=True, stdout=StringIO())
+            self.assertIs(caught.exception.__cause__, failure)
+        self.assertFalse(Schedule.objects.filter(name="billing-issued-settlement-sweep").exists())
