@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from io import StringIO
 from unittest import TestCase as UnitTestCase
 from unittest import TestSuite, TextTestRunner
@@ -49,29 +50,83 @@ class CICacheIsolationTests(SimpleTestCase):
         self.assertEqual(result.errors, [])
         self.assertEqual(result.failures, [])
 
+    def test_method_level_cache_overrides_are_isolated_between_identical_tests(self) -> None:
+        method_caches = {
+            alias: {"BACKEND": "django.core.cache.backends.locmem.LocMemCache", "LOCATION": f"ci-method-{alias}"}
+            for alias in TEST_CACHES
+        }
+        with override_settings(CACHES=method_caches):
+            for backend in caches.all():
+                backend.clear()
+                self.addCleanup(backend.clear)
+
+        class CacheConsumer(UnitTestCase):
+            @override_settings(CACHES=method_caches)
+            def test_cache_is_functional(self) -> None:
+                for backend in caches.all():
+                    self.assertIsNone(backend.get("previous-method-test"))
+                    backend.set("previous-method-test", 42)
+                    self.assertEqual(backend.get("previous-method-test"), 42)
+
+        runner = PostgreSQLSafeRunner(verbosity=0)
+        suite = TestSuite([CacheConsumer("test_cache_is_functional"), CacheConsumer("test_cache_is_functional")])
+        with patch("tests.runner._ensure_healthy_connection"), patch("sys.stderr", new=StringIO()):
+            result = runner.run_suite(suite)
+
+        self.assertEqual(result.testsRun, 2)
+        self.assertEqual(result.errors, [])
+        self.assertEqual(result.failures, [])
+
+    def test_debug_mode_test_restores_sql_logger_state(self) -> None:
+        sql_logger = logging.getLogger("django.db.backends")
+        handlers_before = sql_logger.handlers[:]
+        level_before = sql_logger.level
+        try:
+            self.test_debug_result_modes_keep_django_behavior_and_cache_isolation()
+            self.assertEqual(sql_logger.handlers, handlers_before)
+            self.assertEqual(sql_logger.level, level_before)
+        finally:
+            sql_logger.handlers[:] = handlers_before
+            sql_logger.setLevel(level_before)
+
     def test_debug_result_modes_keep_django_behavior_and_cache_isolation(self) -> None:
-        for options, expected_class in (
-            ({"debug_sql": True}, DebugSQLTextTestResult),
-            ({"pdb": True}, PDBDebugResult),
-        ):
-            with self.subTest(options=options):
-                for backend in caches.all():
-                    backend.set("previous-test", True)
-                result_class = PostgreSQLSafeRunner(
-                    verbosity=0,
-                    debug_sql=options.get("debug_sql", False),
-                    pdb=options.get("pdb", False),
-                ).get_resultclass()
-                self.assertIsNotNone(result_class)
-                if result_class is None:
-                    self.fail("CI runner must provide a cache-isolating result class")
-                result = result_class(TextTestRunner(stream=StringIO()).stream, False, 0)
-                self.assertIsInstance(result, expected_class)
+        sql_logger = logging.getLogger("django.db.backends")
+        handlers_before = sql_logger.handlers[:]
+        level_before = sql_logger.level
+        try:
+            for options, expected_class in (
+                ({"debug_sql": True}, DebugSQLTextTestResult),
+                ({"pdb": True}, PDBDebugResult),
+            ):
+                with self.subTest(options=options):
+                    for backend in caches.all():
+                        backend.set("previous-test", True)
+                    result_class = PostgreSQLSafeRunner(
+                        verbosity=0,
+                        debug_sql=options.get("debug_sql", False),
+                        pdb=options.get("pdb", False),
+                    ).get_resultclass()
+                    self.assertIsNotNone(result_class)
+                    if result_class is None:
+                        self.fail("CI runner must provide a cache-isolating result class")
+                    result = result_class(TextTestRunner(stream=StringIO()).stream, False, 0)
+                    self.assertIsInstance(result, expected_class)
 
-                result.startTest(UnitTestCase())
+                    test = UnitTestCase()
+                    result.startTest(test)
+                    try:
+                        for backend in caches.all():
+                            self.assertIsNone(backend.get("previous-test"))
+                    finally:
+                        result.stopTest(test)
 
-                for backend in caches.all():
-                    self.assertIsNone(backend.get("previous-test"))
+                    self.assertEqual(sql_logger.handlers, handlers_before)
+        finally:
+            sql_logger.handlers[:] = handlers_before
+            sql_logger.setLevel(level_before)
+
+        self.assertEqual(sql_logger.handlers, handlers_before)
+        self.assertEqual(sql_logger.level, level_before)
 
     def test_cache_clear_failure_does_not_abort_or_skip_other_locmem_caches(self) -> None:
         default_cache = caches["default"]

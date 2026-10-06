@@ -17,11 +17,12 @@ from __future__ import annotations
 
 import contextlib
 import logging
-from typing import Any, override
+from typing import Any, cast, override
 from unittest import TestCase as UnitTestCase
 from unittest import TestResult, TestSuite, TextTestResult
 
 from django.core.cache import caches
+from django.core.cache.backends import locmem
 from django.core.cache.backends.locmem import LocMemCache
 from django.db import connection, connections
 from django.test.runner import DiscoverRunner
@@ -34,14 +35,20 @@ class CacheClearingTestResult(TextTestResult):
 
     @override
     def startTest(self, test: UnitTestCase) -> None:
-        # Settings overrides reset handlers, but named LocMem stores survive.
-        # Include uninitialized aliases so those stores are cleared as well.
-        for backend in caches.all():
-            if isinstance(backend, LocMemCache):
-                try:
-                    backend.clear()
-                except Exception:
-                    logger.warning("Failed to clear LocMem cache before %s", test.id(), exc_info=True)
+        # Preserve configured instances, including mocked clear methods.
+        backends = [backend for backend in caches.all() if isinstance(backend, LocMemCache)]
+        known_stores = {id(vars(backend)["_cache"]) for backend in backends}
+        # Django 5.2 shares named stores, expiry maps and locks process-wide.
+        # Method-level overrides start after startTest(), so include inactive stores.
+        stores = cast("dict[str, object]", vars(locmem)["_caches"])
+        backends.extend(
+            LocMemCache(name, {}) for name, store in tuple(stores.items()) if id(store) not in known_stores
+        )
+        for backend in backends:
+            try:
+                backend.clear()
+            except Exception:
+                logger.warning("⚠️ [Tests] Failed to clear LocMem cache before %s", test.id(), exc_info=True)
         super().startTest(test)
 
 

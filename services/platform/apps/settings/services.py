@@ -114,6 +114,11 @@ class SettingsService:
         return f"{cls.CACHE_PREFIX}:{key}"
 
     @classmethod
+    def _get_cache_token_key(cls, key: str) -> str:
+        """Keep invalidation tokens in a namespace separate from setting values."""
+        return f"{cls.CACHE_PREFIX}_token:{key}"
+
+    @classmethod
     @monitor_performance()
     def get_setting(cls, key: str, default: Any = None) -> SettingValue:
         """
@@ -137,12 +142,19 @@ class SettingsService:
                 logger.debug("✅ [Settings] Cache hit for key: %s", key)
                 return cast("SettingValue", cached_value)
 
+        token_key = cls._get_cache_token_key(key)
+        t0: object = cache.get(token_key, version=cls.CACHE_VERSION) if use_cache else None
+        # W's token before t0 means W committed before this DB read, which sees the new value.
+        # Between t0 and t1, R deletes its publication; after t1, W's subsequent delete removes it.
         try:
             setting = SystemSetting.objects.get(key=key)
         except SystemSetting.DoesNotExist:
             fallback_value = cls.DEFAULT_SETTINGS.get(key, default)
             if use_cache:
                 cache.set(cache_key, fallback_value, timeout=DEFAULT_FALLBACK_CACHE_TIMEOUT, version=cls.CACHE_VERSION)
+                t1 = cache.get(token_key, version=cls.CACHE_VERSION)
+                if t1 != t0:
+                    cache.delete(cache_key, version=cls.CACHE_VERSION)
             logger.warning("⚠️ [Settings] Using default for missing key: %s", key)
             return cast("SettingValue", fallback_value)
 
@@ -153,6 +165,9 @@ class SettingsService:
         value = setting.get_typed_value()
         if use_cache:
             cache.set(cache_key, value, timeout=cls.CACHE_TIMEOUT, version=cls.CACHE_VERSION)
+            t1 = cache.get(token_key, version=cls.CACHE_VERSION)
+            if t1 != t0:
+                cache.delete(cache_key, version=cls.CACHE_VERSION)
         logger.debug("⚡ [Settings] Database hit for key: %s (cache enabled: %s)", key, use_cache)
         return value
 
@@ -695,7 +710,8 @@ class SettingsService:
 
     @classmethod
     def _clear_setting_cache(cls, key: str) -> None:
-        """Clear cached setting value"""
+        """Invalidate in-flight publications before deleting the cached value."""
+        cache.set(cls._get_cache_token_key(key), uuid.uuid4().hex, timeout=None, version=cls.CACHE_VERSION)
         cache_key = cls._get_cache_key(key)
         cache.delete(cache_key, version=cls.CACHE_VERSION)
         logger.debug("🧹 [Settings] Cleared cache for key: %s", key)
@@ -801,6 +817,7 @@ class SettingsService:
             cleared_count = 0
 
             for key in keys:
+                cache.set(cls._get_cache_token_key(key), uuid.uuid4().hex, timeout=None, version=cls.CACHE_VERSION)
                 cache_key = cls._get_cache_key(key)
                 if cache.delete(cache_key, version=cls.CACHE_VERSION):
                     cleared_count += 1
