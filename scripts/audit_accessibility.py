@@ -38,6 +38,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 from django.template import defaultfilters
+from django.utils.html import conditional_escape
 from django.utils.safestring import SafeString
 
 # ===============================================================================
@@ -252,6 +253,8 @@ def _component_argument_has_text(value: str, *, is_attribute: bool = False) -> b
                 # Unknown/erasing filters cannot prove a literal accessible name.
                 return False
             text = transform(text)
+    # Match template autoescaping when a filter removes string safety.
+    text = conditional_escape(text)
     # Strip markup before decoding: escaped tags are accessible literal text.
     if not is_attribute:
         text = defaultfilters.striptags(text)

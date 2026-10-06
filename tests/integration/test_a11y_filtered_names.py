@@ -118,6 +118,28 @@ class FilteredComponentNameTests(SimpleTestCase):
             )
         )
 
+    def test_label_autoescapes_unsafe_filter_results(self) -> None:
+        self._assert_cases(
+            (
+                ('""|default:"<b></b>"|upper', "&lt;B&gt;&lt;/B&gt;", True),
+                ('""|default:"&#160;"|upper', "&amp;#160;", True),
+                ('""|default:"<b></b>"|upper|safe', None, False),
+                ('""|default:"&#160;"|upper|safe', None, False),
+            ),
+            keys=("label",),
+        )
+
+    def test_aria_label_autoescapes_unsafe_filter_results(self) -> None:
+        self._assert_cases(
+            (
+                ('""|default:"<b></b>"|upper', "&lt;B&gt;&lt;/B&gt;", True),
+                ('""|default:"&#160;"|upper', "&amp;#160;", True),
+                ('""|default:"<b></b>"|upper|safe', "<B></B>", True),
+                ('""|default:"&#160;"|upper|safe', None, False),
+            ),
+            keys=("aria_label",),
+        )
+
     def test_default_html_fallback_uses_element_or_attribute_text(self) -> None:
         self._assert_cases(
             (
