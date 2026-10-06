@@ -222,9 +222,15 @@ def test_portal_isolation():
 | Service | Role | Networks |
 |---|---|---|
 | `caddy` | Edge: automatic HTTPS, routing by hostname, edge headers | `web` |
-| `platform` | Staff app and API (Gunicorn, :8700), reachable only from staff CIDRs | `web`, `internal` |
+| `platform` | Staff app and API (Gunicorn, :8700); see the routing note below | `web`, `internal` |
 | `portal` | Customer app (Gunicorn, :8701) | `web` |
 | `db` | PostgreSQL | `internal` |
+
+On the platform domain, Caddy routes these paths to anyone: `/api/*` (the portal's HMAC-signed calls
+and API tokens), `/api/users/health/*`, `/integrations/webhooks/*`, `/notifications/webhooks/*` and
+`/notifications/unsubscribe/*`. Everything else, meaning the staff UI, `/static/` and `/media/`, is
+served only to `PLATFORM_ALLOWED_CIDRS` and answers 403 elsewhere. Both Caddy configs route the same
+way.
 
 `docker-compose.platform-only.yml`, `docker-compose.portal-only.yml` and
 `docker-compose.container-service.yml` split the same services across hosts or a managed container

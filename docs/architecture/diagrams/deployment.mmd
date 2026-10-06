@@ -16,7 +16,7 @@ graph TB
         Platform[Platform Service<br/>:8700<br/>joins web and internal]
 
         Caddy -->|portal domain| Portal
-        Caddy -->|platform domain<br/>staff CIDRs only| Platform
+        Caddy -->|platform domain<br/>staff UI: staff CIDRs only<br/>public: /api, webhooks,<br/>unsubscribe, health| Platform
         Platform <-->|Full Access| PostgreSQL
         Portal -.->|HTTP API<br/>HMAC Auth| Platform
     end
