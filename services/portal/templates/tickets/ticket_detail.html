@@ -224,6 +224,9 @@ document.addEventListener('htmx:afterRequest', function(e) {
         if (submitBtn) submitBtn.disabled = false;
         if (submitText) submitText.textContent = '{% trans "Send Reply" %}';
         if (submitSpinner) submitSpinner.classList.add('hidden');
+
+        // Only clear draft state after the reply form has actually been replaced.
+        if (document.body.contains(e.detail.elt)) return;
         if (charCounter) charCounter.textContent = '0';
 
         // Clear file attachments

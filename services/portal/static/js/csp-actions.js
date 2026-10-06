@@ -213,6 +213,10 @@
         break;
       }
       case "reset-reply": {
+        // A retargeted notice or failed request leaves the unsent form in place.
+        if (document.body.contains(el)) {
+          break;
+        }
         if (typeof el.reset === "function") {
           el.reset();
         }

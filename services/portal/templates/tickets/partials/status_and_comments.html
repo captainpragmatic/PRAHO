@@ -2,7 +2,13 @@
 {% load ui_components %}
 
 {% if maintenance %}
-  {% include "components/maintenance_inline_alert.html" with hide_retry=True %}
+  {% if reply_sent %}
+    {% trans "Reply added successfully." as reply_sent_message %}
+    {% alert reply_sent_message variant="success" %}
+    {% include "components/maintenance_inline_alert.html" %}
+  {% else %}
+    {% include "components/maintenance_inline_alert.html" with hide_retry=True %}
+  {% endif %}
 {% else %}
 <!-- Status Card -->
 <div class="bg-slate-800 rounded-lg p-6 border border-slate-700 mb-6">

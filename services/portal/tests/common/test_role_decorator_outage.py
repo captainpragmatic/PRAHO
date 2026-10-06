@@ -14,7 +14,7 @@ from django.test import Client, SimpleTestCase, override_settings
 from django.urls import include, path
 from django.utils.html import escape
 
-from apps.common.decorators import _fetch_user_memberships, require_customer_role
+from apps.common.decorators import _fetch_user_memberships, require_customer_role, require_support_access
 
 Failure = Literal["connection", "maintenance", "rate_limit"]
 RequestKind = Literal["page", "json", "htmx"]
@@ -31,6 +31,7 @@ def _sentinel(request: HttpRequest) -> HttpResponse:
 
 
 urlpatterns = [
+    path("role-check/reply/", require_support_access()(_sentinel)),
     path("role-check/", require_customer_role(["owner"])(_sentinel)),
     path("role-check/realtime/", require_customer_role(["owner"], realtime_verification=True)(_sentinel)),
     path("", include("config.urls")),
@@ -169,6 +170,43 @@ class RoleDecoratorOutageTests(SimpleTestCase):
                         recovered = self._get(client, kind, realtime=state == "realtime")
                     self.assertContains(recovered, VIEW_MARKER)
                     self.assertEqual(VIEW_CALLS, ["/role-check/realtime/" if state == "realtime" else "/role-check/"])
+
+    def test_expired_cache_reply_post_keeps_form_and_blocks_support_view(self) -> None:
+        for failure in FAILURES:
+            with self.subTest(failure=failure):
+                client = self._client(expired=True)
+                unavailable = _api_response(
+                    429 if failure == "rate_limit" else 503,
+                    {"error": "rate_limited" if failure == "rate_limit" else "maintenance"},
+                    retry_after=60,
+                )
+                with patch(
+                    "apps.common.outbound_http._session.request",
+                    side_effect=requests.exceptions.ConnectionError("offline") if failure == "connection" else None,
+                    return_value=unavailable,
+                ):
+                    response = client.post(
+                        "/role-check/reply/",
+                        {"message": "An unsent draft"},
+                        headers={"HX-Request": "true", "HX-Target": "ticket-status-and-comments"},
+                    )
+
+                self.assertEqual(response.get("HX-Retarget"), "#toast-container")
+                self.assertEqual(response.get("HX-Reswap"), "beforeend")
+                self.assertEqual(response.status_code, 200)
+                self.assertTemplateUsed(response, "components/toast.html")
+                self.assertContains(response, 'role="alert"')
+                self.assertContains(
+                    response,
+                    "temporarily unavailable"
+                    if failure == "connection"
+                    else "scheduled maintenance"
+                    if failure == "maintenance"
+                    else "many requests",
+                )
+                self.assertNotContains(response, VIEW_MARKER)
+                self.assertEqual(VIEW_CALLS, [])
+                self.assertEqual(client.session["user_memberships_fetched_at"], 1.0)
 
     def test_cold_cache_outage_matrix(self) -> None:
         self._assert_outage_matrix("cold")

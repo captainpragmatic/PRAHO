@@ -41,6 +41,20 @@ def _render_role_check_degraded(request: HttpRequest, error: PlatformAPIError) -
             {"error": get_degraded_message(error), "retry_after": retry_after},
             status=status,
         )
+    elif request.headers.get("HX-Request") == "true" and request.method not in ("GET", "HEAD"):
+        # Keep the unsent form in the DOM; base.html always renders this notice container.
+        response = render(
+            request,
+            "components/toast.html",
+            {
+                "message": get_degraded_message(error),
+                "variant": "warning",
+                "dismissible": True,
+                "auto_dismiss": 0,
+            },
+        )
+        response["HX-Retarget"] = "#toast-container"
+        response["HX-Reswap"] = "beforeend"
     elif error.is_rate_limited:
         template = (
             "components/rate_limit_inline_alert.html"

@@ -60,6 +60,14 @@ class ServiceRoleCheckOutageTests(SimpleTestCase):
         self.assertNotIn("Location", response)
         self.assertNotContains(response, "Role not found", status_code=status)
         self.assertNotContains(response, "Private hosting detail", status_code=status)
+        if bound and htmx and failure == "rate_limit":
+            # The decorator throttles before the view runs; an HTMX POST gets a toast retargeted
+            # outside the form so the customer's unsent input stays on the page.
+            self.assertEqual(response["HX-Retarget"], "#toast-container")
+            self.assertEqual(response["HX-Reswap"], "beforeend")
+            self.assertTemplateUsed(response, "components/toast.html")
+            self.assertContains(response, "Please try again in 60 seconds", status_code=status)
+            return
         if failure == "connection":
             heading = "Temporarily unavailable"
             self.assertNotIn("Retry-After", response)

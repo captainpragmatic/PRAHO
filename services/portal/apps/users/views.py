@@ -364,6 +364,10 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
                     # wording may call it planned.
                     logger.warning(f"⚠️ [Portal Auth] Login attempted while the platform was unavailable for {email}")
                     degraded_context = build_maintenance_context(request, e)
+                    # The component bridge reads bound values directly; never echo submitted secrets.
+                    form.data = request.POST.copy()
+                    form.data["password"] = ""
+                    form.data["mfa_token"] = ""
                     # The ALERT explains the platform's state; this form error explains why THIS
                     # submission went nowhere. Master's login-specific wording rather than
                     # `get_degraded_message`, which says "This information is temporarily

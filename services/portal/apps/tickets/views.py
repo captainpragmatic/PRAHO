@@ -8,6 +8,7 @@ import logging
 from django.contrib import messages
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
+from django.urls import reverse
 from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy
 from django.views.decorators.csrf import csrf_protect
@@ -452,7 +453,7 @@ def ticket_reply(request: HttpRequest, ticket_id: int) -> HttpResponse:
             attachments.append(file_data)
 
     try:
-        # Add reply via platform API
+        # Only a failed write may re-offer the submitted reply.
         tickets_api.add_ticket_reply(
             customer_id=customer_id,
             user_id=user_id,
@@ -460,28 +461,6 @@ def ticket_reply(request: HttpRequest, ticket_id: int) -> HttpResponse:
             message=reply_text,
             attachments=attachments if attachments else None,
         )
-
-        logger.info(f"✅ [Tickets View] Added reply to ticket {ticket_id} for customer {customer_id}")
-
-        # Get updated ticket details for HTMX response
-        if request.headers.get("HX-Request"):
-            ticket_response = tickets_api.get_ticket_detail(customer_id, user_id, ticket_id)
-
-            # Extract ticket and replies from the response
-            if ticket_response.get("success") and "data" in ticket_response:
-                ticket = ticket_response["data"].get("ticket", {})
-            else:
-                ticket = ticket_response
-            replies = ticket.get("comments", [])
-
-            context = {"ticket": ticket, "replies": replies}
-            template = "tickets/partials/status_and_comments.html"
-            return _handle_ticket_success_response(
-                request, ticket_id, _("Reply added successfully."), context, template
-            )
-
-        return _handle_ticket_success_response(request, ticket_id, _("Reply added successfully."))
-
     except PlatformAPIError as e:
         if is_rate_limited_error(e):
             raise
@@ -501,6 +480,42 @@ def ticket_reply(request: HttpRequest, ticket_id: int) -> HttpResponse:
                 request, ticket_id, _("Unable to add reply. Please try again later."), status=500
             )
         )
+
+    logger.info(f"✅ [Tickets View] Added reply to ticket {ticket_id} for customer {customer_id}")
+
+    if request.headers.get("HX-Request"):
+        context: dict[str, object]
+        try:
+            ticket_response = tickets_api.get_ticket_detail(customer_id, user_id, ticket_id)
+        except PlatformAPIError as error:
+            logger.warning("⚠️ [Tickets View] Reply saved but ticket %s could not refresh: %s", ticket_id, error)
+            context = {
+                "ticket": {"id": ticket_id},
+                "reply_text": "",
+                "reply_sent": True,
+                "maintenance": True,
+                "maintenance_heading": _("Thread could not refresh"),
+                "maintenance_message": _(
+                    "Your reply was sent, but the thread could not refresh. Refresh the thread to see the latest replies."
+                ),
+                "maintenance_retry_url": reverse("tickets:detail", args=[ticket_id]),
+            }
+        else:
+            if ticket_response.get("success") and "data" in ticket_response:
+                ticket = ticket_response["data"].get("ticket", {})
+            else:
+                ticket = ticket_response
+            context = {"ticket": ticket, "replies": ticket.get("comments", [])}
+
+        return _handle_ticket_success_response(
+            request,
+            ticket_id,
+            _("Reply added successfully."),
+            context,
+            "tickets/partials/status_and_comments.html",
+        )
+
+    return _handle_ticket_success_response(request, ticket_id, _("Reply added successfully."))
 
 
 def ticket_search_api(request: HttpRequest) -> HttpResponse:
