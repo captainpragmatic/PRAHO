@@ -2,9 +2,10 @@
 
 ## Rollout
 
-Apply the additive Platform migrations (`billing.0059`, `promotions.0005` and
-`promotions.0006`) before starting the updated workers. The Portal gains no business
-tables; it continues to call the Platform through the signed, tenant-checked API.
+Apply the Platform migrations before starting the updated workers. The migration history
+was reset to a fresh initial set (ADR-0052), so the promotion tables now come from
+`promotions.0001_initial` and `0002_initial`. The Portal gains no business tables. It
+continues to call the Platform through the signed, tenant-checked API.
 
 `promotions.new_offers_enabled` defaults to false. Enable it only after reviewing
 campaign currencies, budgets, coupon restrictions and rule conditions. Existing
@@ -55,10 +56,9 @@ Historical ledger version 1 discount records remain unchanged. New captures and
 refunds use version 2 tender records and immutable operation identifiers. Issued
 documents are never repriced to adopt a newer promotion.
 
-Customer gift-card purchase and Stripe initiation endpoints are not exposed by this
-change. Customer purchases and the configurable selling-currency policy belong to a
-separate follow-up. The funding service/staff scaffolding here is not a completed
-public purchase flow.
+Customer gift-card purchase has been exposed since #563. The Portal's `/billing/gift-cards/`
+pages call the Platform's signed `/api/billing/gift-cards/…` endpoints for the catalog,
+purchase, funding, reveal and resend.
 
 ## Refunds and recovery
 
@@ -91,7 +91,6 @@ transaction from local document settlement.
 
 ## Verification
 
-Local verification uses isolated SQLite and PostgreSQL databases and separate browser
-servers on ports 18700/18701. It does not verify production firewall rules, SMTP delivery,
-Stripe delivery or accounting-provider delivery. Detailed commands, outcomes and
-browser artifacts are recorded in `logs/staff-promotions/` for this worktree.
+The flows are covered by `services/platform/tests/promotions/`. The PostgreSQL race check
+`PromotionOrderPostgresConcurrencyTests` runs in the nightly suite. None of this verifies
+production firewall rules, SMTP delivery, Stripe delivery or accounting-provider delivery.

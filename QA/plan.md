@@ -43,7 +43,8 @@
 > (`apps/api_client/services.py:511-513`, `apps/common/rate_limit_feedback.py:159-162`). That is
 > product behaviour as well as a test gap, and it is the next thing to close.
 >
-> Cycle evidence: [`cycle-01-v0.21.0/`](cycle-01-v0.21.0/) (v0.21.0, executed) ·
+> Cycle evidence: cycle 1 (v0.21.0, executed and closed) in history at
+> `57e9c124:QA/cycle-01-v0.21.0/` ·
 > [`cycle-02-v0.30.0/findings.md`](cycle-02-v0.30.0/findings.md) (current).
 
 ## Context

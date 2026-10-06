@@ -37,7 +37,6 @@
 
 - [Deployment Guide](deployment/DEPLOYMENT.md) -- Full deployment instructions, Ansible playbooks, rollback procedures
 - [HTTPS Deployment Checklist](deployment/HTTPS_DEPLOYMENT_CHECKLIST.md) -- SSL/TLS setup for PragmaticHost
-- [Production Quality Checklist](deployment/PRODUCTION_QUALITY_CHECKLIST.md) -- Pre-launch quality gates
 - [Virtualmin Production Optimizations](deployment/VIRTUALMIN_PRODUCTION_OPTIMIZATIONS.md) -- Virtualmin tuning for production
 
 ## Security

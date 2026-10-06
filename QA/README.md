@@ -5,12 +5,15 @@
 | [`plan.md`](plan.md) | **Living spec.** The portal checklist, annotated with the automated test that now enforces each phase |
 | [`cycle-02-v0.30.0/findings.md`](cycle-02-v0.30.0/findings.md) | **Current cycle.** Findings, evidence, and what is still open |
 | [`cycle-02-v0.30.0/phase-4-survey.md`](cycle-02-v0.30.0/phase-4-survey.md) | Cycle 2's route, assertion-quality and suppressed-gate survey |
-| [`cycle-01-v0.21.0/`](cycle-01-v0.21.0/) | Cycle 1 evidence, preserved unedited |
+| Cycle 1 (v0.21.0) | Closed; read it from history: `git show 57e9c124:QA/cycle-01-v0.21.0/qa_report.md` (also `action_log.md`, `mobile_pass_plan.md`, `README.md`) |
 
 ## How this is meant to work
 
-A cycle folder is dated evidence and is never edited afterwards — cycle 3 has to be able to compare
-against what cycle 2 actually said. `plan.md` is the opposite: it is carried forward and corrected.
+A cycle folder is dated evidence. While a cycle is open, it is corrected only by dated additions, never
+by rewriting what it said, because cycle 3 has to be able to compare against what cycle 2 actually
+said. Once a cycle closes and every open item has been carried into the next one, the folder leaves
+the tree and is read from git history at a pinned commit. That is where the comparison still works,
+and it keeps the tree to what is current. `plan.md` is the opposite: it is carried forward and corrected.
 
 Every finding belongs in one of four states — PASS, FAIL, BLOCKED, NOT-RUN — and PASS requires
 naming the test that fails if the fix is reverted. "Tests pass" is not evidence of anything except

@@ -33,20 +33,9 @@ A restarted stack keeps its database. This makes a second run useful: baseline c
 
 ## What the audit changed
 
-[e2e-audit.json](e2e-audit.json) accounts for all 317 original collected tests at `b26e427b8b4dafdf51823cce75203f739c1b0e9d`. Each row records original intent/assertions, disposition, replacement nodes and review notes. Audit disposition describes coverage; passing status comes from actual run artifacts.
+The #527 audit gave every one of the 317 browser tests then collected a disposition: 28 retained, 266 strengthened, 13 renamed to the behaviour they actually test, 7 consolidated, 2 moved to a lower test layer, 1 removed. The per-test record is kept in history: `git show 57e9c124:docs/testing/e2e-audit.json`.
 
-| Disposition | Original cases |
-| --- | ---: |
-| Retained meaningful checks | 28 |
-| Strengthened checks/prerequisites | 266 |
-| Renamed to the behavior actually provided | 13 |
-| Consolidated duplicate coverage | 7 |
-| Moved deterministic checks to the appropriate layer | 2 |
-| Removed accidental collection of an imported helper | 1 |
-
-Mutating tests now verify saved outcomes instead of accepting navigation, arbitrary HTTP errors, a missing control, or an early return. Examples include paid invoice conversion and immutable amounts, public/internal ticket visibility, real attachment bytes and authorization, actual search results beyond page one, independent customer isolation, selected order terms/payment method, password changes, and one-use recovery codes.
-
-Production fixes include sample-data integrity and real-model audit fields; eligibility/authorization of manual proforma payments; customer identity/phone and order metadata; full billing synchronization; service search/pagination/date/usage contracts; user-scoped MFA/password/customer-switch endpoints; nullable company identity; HTMX product toggle responses; bounded ticket uploads and signed download proxying; and mobile ticket/service layout. Existing monetary calculation policy is preserved. The D390 export form has a distinct hidden month ID.
+The convention it set still applies to every new browser test. Mutating tests verify saved outcomes. They do not accept navigation, arbitrary HTTP errors, a missing control or an early return as success. Examples include paid invoice conversion and immutable amounts, public/internal ticket visibility, real attachment bytes and authorization, actual search results beyond page one, independent customer isolation, selected order terms/payment method, password changes, and one-use recovery codes.
 
 ## Evidence and acceptance
 

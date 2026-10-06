@@ -14,7 +14,7 @@ function in both services. What follows is what has been established so far, wit
 
 ## Accounting rules for this document
 
-Cycle 1 recorded "11/11 checks PASS" beside a body describing known breakage, because PASS was
+Cycle 1 (closed; read at `57e9c124:QA/cycle-01-v0.21.0/`) recorded "11/11 checks PASS" beside a body describing known breakage, because PASS was
 doing duty for "I looked at it". This cycle uses four verdicts and never averages them:
 
 | Verdict | Means |
@@ -345,6 +345,10 @@ The first two columns are as written on 2026-09-28. The third is the re-verifica
 | Route and button sweep (398 platform + 80 portal named routes) | NOT-RUN | **Partly done.** Measured as 396 / 79 in `phase-4-survey.md` (the figures here were rounded from memory). The status-only ratchet is in `make lint` (#570, 51 baselined); #571/#572 added content-assertion tests for the two dashboard widgets and untested billing/infrastructure routes; the portal ticket-search API still has no test. TMPL blockers 73 (from 91), still behind `\|\| true`, linter still portal-only |
 | Migrating `plan.md`'s 7 phases into `tests/e2e/portal/` | NOT-RUN | **Re-audited instead of migrated.** 21 of 47 checks fully asserted, 24 partly, 2 not at all — the per-check table is in `plan.md`'s header |
 | The nightly browser job (§1) | — | **Was FAIL 7/7 nights, fixed 2026-10-06** — see the correction in §1. First green run pending |
+| Cycle 1 M5 — a service's Domains tab can never render | — | **FAIL, carried from cycle 1.** The portal POSTs `/services/{id}/domains/` (`portal/apps/services/services.py:332`); the platform API has never had that route, and the 404 is logged and flattened to `[]`. The browser test named for it asserts only "no Server Error", which this never produced |
+| Cycle 1 L3 — currency formatting inconsistent | — | **FAIL, partly fixed.** The services list now uses `romanian_currency`; the order confirmation page and the gift-card payment partial still render period decimals, and `test_selling_currency.py` pins `10.00 EUR` on the confirmation page |
+| Cycle 1 L6 — long service names truncated in the detail `<h1>` on mobile | — | **FAIL, cosmetic.** `templates/services/service_detail.html:48` still truncates; the e2e fixture name is too short to show it |
+| Cycle 1 L1 — debug-toolbar console flood on unauthenticated pages | — | **FAIL by reading, dev-only.** `portal/config/settings/dev.py` still enables the toolbar for localhost and `/__debug__/` is not a public path; not re-run in a browser |
 
 ### Carried, deliberately unfixed, with reasons
 
