@@ -12,7 +12,7 @@ the code MUST emit a critical log instead of silently skipping.
 import logging
 from unittest.mock import MagicMock, patch
 
-from django.test import SimpleTestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
 
 from apps.billing.signals import (
     _log_billing_model_event,
@@ -21,7 +21,7 @@ from apps.billing.signals import (
 )
 
 
-class LogBillingModelEventGuardTests(SimpleTestCase):
+class LogBillingModelEventGuardTests(TestCase):
     """H10 — location 1: _log_billing_model_event early-return guard."""
 
     def _make_instance(self) -> MagicMock:
@@ -83,7 +83,7 @@ class LogBillingModelEventGuardTests(SimpleTestCase):
             mock_audit_svc.log_event.assert_called_once()
 
 
-class InvoiceSignalAuditGuardTests(SimpleTestCase):
+class InvoiceSignalAuditGuardTests(TestCase):
     """H10 — location 2: handle_invoice_created_or_updated if-not-flag guard."""
 
     def _make_invoice_instance(self) -> MagicMock:

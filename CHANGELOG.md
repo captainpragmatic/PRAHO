@@ -37,6 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Invoices are no longer silently lost when a database error occurs while handling their
+  creation or updates. Optional failures no longer cancel e-Factura submission or emails.
 - The UI template tags no longer drop arguments they do not recognise. An unknown argument now
   fails while developing and testing, and is logged in production. Templates that passed one
   are fixed:
