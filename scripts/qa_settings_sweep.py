@@ -1,6 +1,8 @@
 """Dev-only QA tool: full settings-catalog sweep against a running dev server.
 
-Usage: .venv-darwin/bin/python scripts/qa_settings_sweep.py  (make dev running)
+Usage: `make qa-settings-sweep`, with `make dev` running. It logs in as the dev admin and completes the
+second factor itself when the admin has 2FA enrolled. It reads the TOTP secret through the ORM, which
+it already uses against the same dev database.
 
 Scope of proof per key: authenticated write through the real save/secret
 endpoints (in the widget wire encoding) -> database persistence -> delivery at
@@ -32,13 +34,16 @@ from pathlib import Path
 import django
 import requests
 
-_PLATFORM = Path(__file__).resolve().parent.parent / "services" / "platform"
+_SCRIPTS = Path(__file__).resolve().parent
+_PLATFORM = _SCRIPTS.parent / "services" / "platform"
 sys.path.insert(0, str(_PLATFORM))
+sys.path.insert(0, str(_SCRIPTS))
 os.chdir(_PLATFORM)
 os.environ["DJANGO_SETTINGS_MODULE"] = "config.settings.dev"
 django.setup()
 
 from django.contrib.contenttypes.models import ContentType
+from qa_sweep_auth import LoginFailedError, login, page_token
 
 from apps.audit.models import AuditEvent
 from apps.billing.efactura.settings import efactura_settings
@@ -46,34 +51,32 @@ from apps.common.encryption import is_encrypted
 from apps.settings.catalog import CATALOG
 from apps.settings.models import SystemSetting
 from apps.settings.services import SettingsService
+from apps.users.models import User
 
 BASE = "http://localhost:8700"
-REASON = "QA sweep 226"
+ADMIN_EMAIL = "admin@pragmatichost.com"
+ADMIN_PASSWORD = "admin123"  # noqa: S105  # the dev fixture's documented admin password
+REASON = "QA settings sweep"
 SETTING_CT = ContentType.objects.get_for_model(SystemSetting)
-
-import re as _re
 
 session = requests.Session()
 
-
-def _page_token(path: str) -> str:
-    html = session.get(f"{BASE}{path}").text
-    match = _re.search(r'csrfmiddlewaretoken" value="([^"]+)"', html)
-    assert match, f"no CSRF token on {path}"
-    return match.group(1)
-
-
-session.post(
-    f"{BASE}/auth/login/",
-    data={
-        "email": "admin@pragmatichost.com",
-        "password": "admin123",
-        "csrfmiddlewaretoken": _page_token("/auth/login/"),
-    },
-    headers={"Referer": f"{BASE}/auth/login/"},
-)
-assert session.get(f"{BASE}/settings/").status_code == 200, "login failed"
-CSRF_TOKEN = session.cookies.get("csrftoken") or _page_token("/settings/billing/")
+_admin = User.objects.filter(email=ADMIN_EMAIL).first()
+if _admin is None:
+    sys.exit(f"🔥 [QA sweep] {ADMIN_EMAIL} does not exist in the dev database. Run `make fixtures` first.")
+try:
+    login(
+        session,
+        BASE,
+        ADMIN_EMAIL,
+        ADMIN_PASSWORD,
+        totp_secret=_admin.two_factor_secret if _admin.two_factor_enabled else None,
+    )
+except LoginFailedError as error:
+    sys.exit(f"🔥 [QA sweep] {error}")
+except requests.ConnectionError:
+    sys.exit(f"🔥 [QA sweep] nothing is listening on {BASE}. Start the platform with `make dev`.")
+CSRF_TOKEN = session.cookies.get("csrftoken") or page_token(session, BASE, "/settings/billing/")
 
 
 def csrf_headers() -> dict:
