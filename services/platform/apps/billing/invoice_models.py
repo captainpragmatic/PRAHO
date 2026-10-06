@@ -459,7 +459,9 @@ class Invoice(models.Model):
                 normalized_update_fields.add(f"{foreign_key}_id")
         if update_fields and not (normalized_update_fields & self._LOCKED_FIELDS):
             self._validate_mutable_update(normalized_update_fields)
-            super().save(*args, **kwargs)
+            # Required post_save work must commit or roll back with the field update.
+            with transaction.atomic():
+                super().save(*args, **kwargs)
             return
 
         with transaction.atomic():

@@ -4,7 +4,7 @@ from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
 from logging import Logger
 
-from django.db import DatabaseError, transaction
+from django.db import DatabaseError, InterfaceError, transaction
 from django.db.transaction import TransactionManagementError
 
 
@@ -13,7 +13,7 @@ def swallow_application_errors(*, logger: Logger, scope: str, message: str, usin
     """Swallow application errors only when the caller's transaction remains usable."""
     try:
         yield
-    except (DatabaseError, TransactionManagementError):
+    except (DatabaseError, InterfaceError, TransactionManagementError):
         raise
     except Exception:
         if transaction.get_connection(using).needs_rollback:
@@ -35,6 +35,8 @@ def best_effort_atomic(*, logger: Logger, scope: str, message: str, using: str |
         stack.enter_context(transaction.atomic(using=using))
         try:
             yield
+        except InterfaceError:
+            raise
         except Exception:
             transaction.set_rollback(True, using=using)
             # Roll back before logging, including when a service marked needs_rollback.

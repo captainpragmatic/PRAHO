@@ -81,6 +81,38 @@ class InvoiceCreationPersistenceTests(TransactionTestCase):
 
 
 @override_settings(DISABLE_AUDIT_SIGNALS=False)
+class InvoiceMutableSavePersistenceTests(TransactionTestCase):
+    def test_paid_at_write_failure_without_caller_atomic_rolls_back_status(self) -> None:
+        _quiet_delivery(self)
+        customer = CustomerFactory()
+        currency = CurrencyFactory()
+        invoice = _draft(customer, currency)
+        invoice.issue()
+        invoice.save()
+        invoice.mark_as_paid()
+        invoice.paid_at = None
+        failed = MagicMock(side_effect=_fail_write)
+
+        def fail_paid_at(
+            execute: Callable[..., object], sql: str, params: object, many: bool, context: dict[str, object]
+        ) -> object:
+            if sql.startswith(f'UPDATE "{Invoice._meta.db_table}"') and '"paid_at"' in sql:
+                failed()
+            return execute(sql, params, many, context)
+
+        self.assertTrue(connection.get_autocommit())
+        self.assertFalse(connection.in_atomic_block)
+        with connection.execute_wrapper(fail_paid_at), self.assertRaises(IntegrityError):
+            invoice.save(update_fields=["status"])
+        failed.assert_called_once()
+        self.assertTrue(connection.get_autocommit())
+        self.assertFalse(connection.needs_rollback)
+        persisted = Invoice.objects.get(pk=invoice.pk)
+        self.assertEqual(persisted.status, "issued")
+        self.assertIsNone(persisted.paid_at)
+
+
+@override_settings(DISABLE_AUDIT_SIGNALS=False)
 class InvoiceSignalIsolationTests(TestCase):
     def setUp(self) -> None:
         self.queued = _quiet_delivery(self)

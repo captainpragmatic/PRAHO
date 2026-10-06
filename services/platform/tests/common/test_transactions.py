@@ -3,7 +3,7 @@
 import logging
 from unittest.mock import patch
 
-from django.db import DatabaseError, IntegrityError, OperationalError, connection, transaction
+from django.db import DatabaseError, IntegrityError, InterfaceError, OperationalError, connection, transaction
 from django.db.transaction import TransactionManagementError
 from django.test import TestCase, TransactionTestCase
 
@@ -15,6 +15,20 @@ logger = logging.getLogger(__name__)
 
 
 class BestEffortAtomicTests(TestCase):
+    def test_interface_error_propagates_unchanged_and_rolls_back_without_logging(self) -> None:
+        failure = InterfaceError("connection is unusable")
+        with (
+            patch.object(logger, "exception") as log,
+            self.assertRaises(InterfaceError) as raised,
+            best_effort_atomic(logger=logger, scope="Test", message="must propagate"),
+        ):
+            Currency.objects.create(code="XIF", symbol="$")
+            raise failure
+        self.assertIs(raised.exception, failure)
+        log.assert_not_called()
+        self.assertFalse(connection.needs_rollback)
+        self.assertFalse(Currency.objects.filter(code="XIF").exists())
+
     def test_body_failure_rolls_back_before_logging_and_outer_transaction_remains_usable(self) -> None:
         Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei"})
 
@@ -81,6 +95,17 @@ class BestEffortAtomicTests(TestCase):
 
 
 class SwallowApplicationErrorsTests(TestCase):
+    def test_interface_error_propagates_unchanged_without_logging(self) -> None:
+        failure = InterfaceError("connection is unusable")
+        with (
+            patch.object(logger, "exception") as log,
+            self.assertRaises(InterfaceError) as raised,
+            swallow_application_errors(logger=logger, scope="Dispatch", message="must propagate"),
+        ):
+            raise failure
+        self.assertIs(raised.exception, failure)
+        log.assert_not_called()
+
     def test_plain_value_error_is_swallowed_and_logged_without_a_savepoint(self) -> None:
         failure = ValueError("dispatch failed")
         with (
