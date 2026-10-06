@@ -166,6 +166,8 @@ services:
       # Space-separated CIDRs, never commas. Applies only to the Platform staff site.
       - PLATFORM_ALLOWED_CIDRS=${PLATFORM_ALLOWED_CIDRS:-127.0.0.1/32 ::1/128}
       - ACME_EMAIL=${ACME_EMAIL:-admin@example.com}
+      # Set but empty would make Caddy send an empty header (HSTS off), so the default is repeated here.
+      - HSTS_POLICY=${HSTS_POLICY:-max-age=31536000; includeSubDomains}
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
