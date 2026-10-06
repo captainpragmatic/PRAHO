@@ -44,6 +44,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lockfile, and the pinned toolchain builds byte-identical CSS on macOS and Linux. The QA record
   that said the suite ran nightly is corrected, and its ledger of open items re-verified against
   the code.
+- Invoices are no longer silently lost when a database error occurs while handling their
+  creation or updates. Optional failures no longer cancel e-Factura submission or emails.
 - The UI template tags no longer drop arguments they do not recognise. An unknown argument now
   fails while developing and testing, and is logged in production. Templates that passed one
   are fixed:
