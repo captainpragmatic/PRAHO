@@ -37,6 +37,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The nightly browser job no longer fails before it starts. The job added on 2026-09-28 failed
+  at its Node setup step on every one of its first seven nights, before a browser was installed,
+  because the `package-lock.json` it installs from was gitignored and existed on no CI runner. The
+  lockfile is tracked, a test keeps every workflow that runs `npm ci` installing from a tracked
+  lockfile, and the pinned toolchain builds byte-identical CSS on macOS and Linux. The QA record
+  that said the suite ran nightly is corrected, and its ledger of open items re-verified against
+  the code.
 - A changed setting takes effect consistently. Code running inside a transaction now reads the
   value it just wrote instead of the old cached one, a value from a transaction that rolls back is
   never cached, and a read that overlaps a save can no longer put the old value back in the cache

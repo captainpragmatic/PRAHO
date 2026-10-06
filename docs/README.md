@@ -12,12 +12,11 @@
 ## UI/UX Design System
 
 - [Design System Specification](architecture/ui-ux/design-system.md) -- Tokens, components, API rules, UX standards, governance
-- [UI/UX Implementation Backlog](architecture/ui-ux/portal-ui-ux-backlog.md) -- Phased roadmap (A-D), task breakdown, success metrics
 - [ADR-0035: Unified Design System](ADRs/ADR-0035-unified-design-system.md) -- Shared component architecture
 
 ## Architecture Decision Records
 
-- [ADR Index](ADRs/README.md) -- 33 decisions (ADR-0001 through ADR-0033, with ADR-0008 superseded)
+- [ADR Index](ADRs/README.md) -- Every decision with its status (active, partially superseded, superseded), and the next free ADR number
 
 ## Development Guides
 
@@ -36,8 +35,7 @@
 ## Deployment and Operations
 
 - [Deployment Guide](deployment/DEPLOYMENT.md) -- Full deployment instructions, Ansible playbooks, rollback procedures
-- [HTTPS Deployment Checklist](deployment/HTTPS_DEPLOYMENT_CHECKLIST.md) -- SSL/TLS setup for PragmaticHost
-- [Production Quality Checklist](deployment/PRODUCTION_QUALITY_CHECKLIST.md) -- Pre-launch quality gates
+- [HTTPS Deployment Checklist](deployment/HTTPS_DEPLOYMENT_CHECKLIST.md) -- Verifying TLS, HSTS, security headers and cookies on both hostnames after a deploy
 - [Virtualmin Production Optimizations](deployment/VIRTUALMIN_PRODUCTION_OPTIMIZATIONS.md) -- Virtualmin tuning for production
 
 ## Security
@@ -53,6 +51,8 @@
 - [RefundService Documentation](domain/REFUND_SERVICE.md) -- Refund workflow and business rules
 - [Signals Architecture](domain/SIGNALS_ARCHITECTURE.md) -- Django signals design and conventions
 
-## Plans
+## Testing and QA
 
-- [Orders System Analysis](plans/orders.md) -- Order system implementation plan (partially complete)
+- [Browser (E2E) Suite](testing/manual-e2e.md) -- Running the Playwright suite against both services, fixtures, evidence, and the nightly job
+- [QA Programme](../QA/README.md) -- The living portal QA plan, the current cycle's findings, and the gates a cycle runs
+- [Load Testing](../tests/load/README.md) -- Locust scenarios and their current state

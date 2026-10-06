@@ -2,8 +2,6 @@
 
 **Services-only draft for accountant review.** Open **Billing → Reports → D390 review** (`/billing/reports/d390/`). The existing billing-role permission applies to preview and both downloads. This ledger belongs to the operating entity configured for invoice issuance; customer companies are counterparties, not separate declarants.
 
-Browser examples with synthetic invoices: [monthly partner preview](images/d390-preview.png) and [blocked XML with reconciliation CSV available](images/d390-exceptions.png).
-
 ## Supported review
 
 This feature covers outgoing intra-Community service/setup supplies with a recorded reverse-charge decision and matching invoice evidence, operation **P**, in a calendar month selected by `Invoice.tax_point_date`, and their storno credit notes as negative lines in the month each reached the customer (see "Credit notes" below). The default is the previous month in Europe/Bucharest. ANAF's instructions describe monthly exigibility-based service reporting grouped by customer. Whether the operator must file, its registration/entitlement and the final filing remain for accountant confirmation. [Official instructions, annex 2](https://static.anaf.ro/static/10/Anaf/legislatie/OPANAF_705_2020.pdf).

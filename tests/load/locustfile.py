@@ -4,14 +4,17 @@
 """
 Load testing using Locust for PRAHO Platform.
 
-Usage:
-    locust -f tests/load/locustfile.py --host=http://localhost:8000
+Usage (Platform on :8700 via `make dev`; see tests/load/README.md):
+    uvx locust -f tests/load/locustfile.py --host=http://localhost:8700
 
     # Run with specific user count and spawn rate
-    locust -f tests/load/locustfile.py --host=http://localhost:8000 --users=100 --spawn-rate=10
+    uvx locust -f tests/load/locustfile.py --host=http://localhost:8700 --users=100 --spawn-rate=10
 
     # Run headless
-    locust -f tests/load/locustfile.py --host=http://localhost:8000 --headless -u 100 -r 10 -t 5m
+    uvx locust -f tests/load/locustfile.py --host=http://localhost:8700 --headless -u 100 -r 10 -t 5m
+
+Known stale: logins post `username` (the form takes `email`) and most `/app/<section>/` routes no
+longer exist. The README's "Current state" section has the details; fix those before trusting a run.
 """
 
 import random

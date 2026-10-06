@@ -54,8 +54,15 @@ Pull Request Checklist
 
 How to build and test
 ---------------------
-- Platform: see `services/platform/README` or repo `README.md` for setup.
-- Portal: see `services/portal/README` or repo `README.md` for setup.
+The root `Makefile` is the interface for both services. Setup and the full list of targets are in
+the repository's `README.md`.
+
+    make install    # dependencies for both services, plus the pre-commit hooks
+    make dev        # Platform on :8700, Portal on :8701
+    make lint       # what every pull request must pass
+    make test       # platform, portal and cross-service suites
+
+The browser suite runs separately; see `docs/testing/manual-e2e.md`.
 
 Security
 --------

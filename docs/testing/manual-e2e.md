@@ -1,6 +1,6 @@
 # Manual E2E workflow and coverage audit
 
-The browser suite runs in CI on a nightly cron and on manual dispatch (`.github/workflows/nightly.yml`, `nightly-e2e` job) — never on a pull request. A scheduled run selects only branches with commits in the last 24 hours (master or staging, with PR activity against master counting); a manual dispatch always runs both. Each selected branch installs Playwright Chromium, runs `make test-e2e-coverage` with server-side coverage, combines that with the portal's unit coverage into the gated union figure, and uploads the browser evidence. It is not a PR gate — the suite takes minutes rather than seconds and browser tests are the flakiest thing in this repo — so it stays a local/manual check for day-to-day development, run the same way described below. Ordinary Django/API/security tests remain the PR-blocking CI. The unused `run_e2e` workflow input was removed because it never enabled a browser job.
+The browser suite runs in CI on a nightly cron and on manual dispatch (`.github/workflows/nightly.yml`, `nightly-e2e` job) — never on a pull request. Because it never runs on a pull request, a broken job is only visible in the Actions tab: the job failed at "Set up Node" on each of its first seven nights (2026-09-29 to 10-05) because `package-lock.json` was gitignored, and nothing flagged it. Before citing a nightly result, check the job, not the run. Run `gh run view <id> --json jobs` and require `nightly-e2e (<branch>)` to conclude `success`. A run whose `check-activity` selected no branch skips both test jobs and still shows green. `services/platform/tests/common/test_ci_node_lockfile.py` keeps the lockfile tracked. A scheduled run selects only branches with commits in the last 24 hours (master or staging, with PR activity against master counting); a manual dispatch always runs both. Each selected branch installs Playwright Chromium, runs `make test-e2e-coverage` with server-side coverage, combines that with the portal's unit coverage into the gated union figure, and uploads the browser evidence. It is not a PR gate — the suite takes minutes rather than seconds and browser tests are the flakiest thing in this repo — so it stays a local/manual check for day-to-day development, run the same way described below. Ordinary Django/API/security tests remain the PR-blocking CI. The unused `run_e2e` workflow input was removed because it never enabled a browser job.
 
 ## Running the complete suite
 
@@ -33,20 +33,9 @@ A restarted stack keeps its database. This makes a second run useful: baseline c
 
 ## What the audit changed
 
-[e2e-audit.json](e2e-audit.json) accounts for all 317 original collected tests at `b26e427b8b4dafdf51823cce75203f739c1b0e9d`. Each row records original intent/assertions, disposition, replacement nodes and review notes. Audit disposition describes coverage; passing status comes from actual run artifacts.
+The #527 audit gave every one of the 317 browser tests then collected a disposition: 28 retained, 266 strengthened, 13 renamed to the behaviour they actually test, 7 consolidated, 2 moved to a lower test layer, 1 removed. The per-test record is kept in history: `git show 57e9c124:docs/testing/e2e-audit.json`.
 
-| Disposition | Original cases |
-| --- | ---: |
-| Retained meaningful checks | 28 |
-| Strengthened checks/prerequisites | 266 |
-| Renamed to the behavior actually provided | 13 |
-| Consolidated duplicate coverage | 7 |
-| Moved deterministic checks to the appropriate layer | 2 |
-| Removed accidental collection of an imported helper | 1 |
-
-Mutating tests now verify saved outcomes instead of accepting navigation, arbitrary HTTP errors, a missing control, or an early return. Examples include paid invoice conversion and immutable amounts, public/internal ticket visibility, real attachment bytes and authorization, actual search results beyond page one, independent customer isolation, selected order terms/payment method, password changes, and one-use recovery codes.
-
-Production fixes include sample-data integrity and real-model audit fields; eligibility/authorization of manual proforma payments; customer identity/phone and order metadata; full billing synchronization; service search/pagination/date/usage contracts; user-scoped MFA/password/customer-switch endpoints; nullable company identity; HTMX product toggle responses; bounded ticket uploads and signed download proxying; and mobile ticket/service layout. Existing monetary calculation policy is preserved. The D390 export form has a distinct hidden month ID.
+The convention it set still applies to every new browser test. Mutating tests verify saved outcomes. They do not accept navigation, arbitrary HTTP errors, a missing control or an early return as success. Examples include paid invoice conversion and immutable amounts, public/internal ticket visibility, real attachment bytes and authorization, actual search results beyond page one, independent customer isolation, selected order terms/payment method, password changes, and one-use recovery codes.
 
 ## Evidence and acceptance
 
@@ -68,8 +57,8 @@ These are explicit follow-ups, not tests silently marked as passing:
 
 | Feature | What is verified now | Work needed / when |
 | --- | --- | --- |
-| Customer password-reset delivery | Accessible request form and uniform response | Implement and test the complete Portal-to-Platform reset/token/email flow before advertising working recovery. The Portal request handler is still a stub. |
-| Service requests and historical usage | Current recorded usage, domain field, action choices/required reason/cancel | Implement authorized request submission/lifecycle and real history endpoints before claiming these actions or charts work. A missing endpoint is not mocked into an E2E success. |
+| Customer password-reset delivery | Done (#549, #562): the Portal handler calls `request_password_reset`, and `tests/e2e/portal/test_password_recovery_workflow.py` drives the email link, the reset, the login, and the rejection of the old password and the reused link; unit coverage in `services/portal/tests/users/test_password_recovery.py` and `test_password_reset_views.py` | Nothing — this row is kept so the table's history reads correctly. |
+| Service requests and historical usage | Request submission for all four actions is done (#562, `tests/e2e/portal/test_service_request_workflow.py`); current recorded usage, domain field, action choices/required reason/cancel | Real history endpoints before claiming charts work ("Usage charts will be available soon" is the honest placeholder). A missing endpoint is not mocked into an E2E success. |
 | Customer order history | Catalog, cart, real checkout/confirmation, isolation | Build an explicit history route/view if required; `/order/` currently serves the catalog. |
 | Registrar, bundle expansion and remote provisioning | Retained input/configuration, real local order FSM and service controls | Provider contract and operator validation belong to their domain work; these local tests do not register a domain, split a bundle, or create a remote server. |
 | GDPR export completion and email | Authenticated private export request and its pending state | Verify worker completion, archive contents and delivery with an owned mail/worker environment before claiming end-to-end delivery. |
