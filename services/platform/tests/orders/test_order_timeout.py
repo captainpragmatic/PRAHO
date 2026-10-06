@@ -26,9 +26,7 @@ class OrderTimeoutTestCase(TestCase):
     """#222: the auto-cancel deadline must depend on payment method, not a flat 24h."""
 
     def setUp(self) -> None:
-        self.currency, _ = Currency.objects.get_or_create(
-            code="RON", defaults={"symbol": "lei", "decimals": 2}
-        )
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
         self.customer = Customer.objects.create(
             name="Timeout Test SRL",
             customer_type="company",
@@ -129,16 +127,22 @@ class OrderTimeoutTestCase(TestCase):
 
         self.assertEqual(self._status(order), "cancelled")
 
-    def test_bank_transfer_missing_proforma_gets_one_and_is_not_cancelled_at_73h(self) -> None:
-        """process_pending_orders self-heals a missing proforma before the timeout check, so an
-        offline order is judged against that fresh (30-day) window — not cancelled at 73h."""
+    def test_bank_transfer_missing_proforma_is_cancelled_at_73h(self) -> None:
+        """A repaired proforma keeps the effective deadline anchored to order creation."""
         order = self._order(payment_method="bank_transfer", hours_old=73)
 
-        self._run()
+        with self.captureOnCommitCallbacks(execute=False) as callbacks:
+            process_pending_orders()
+            order.refresh_from_db()
+            self.assertEqual(order.status, "cancelled")
+            self.assertIsNotNone(order.proforma, "the sweep repairs the missing proforma before timing out")
+            assert order.proforma is not None
+            self.assertEqual(order.proforma.valid_until, order.created_at + timedelta(hours=72))
 
+        for callback in callbacks:
+            callback()
         order.refresh_from_db()
-        self.assertEqual(order.status, "awaiting_payment")
-        self.assertIsNotNone(order.proforma, "a missing proforma should have been created")
+        self.assertIsNone(order.proforma, "cancellation removes the unsent draft")
 
     def test_bank_transfer_fallback_deadline_used_when_no_proforma_can_be_anchored(self) -> None:
         """Helper-level: when an offline order genuinely has no proforma, the deadline is the 72h

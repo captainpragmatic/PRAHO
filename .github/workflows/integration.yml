@@ -180,6 +180,7 @@ jobs:
           tests.billing.test_builtin_storno_concurrency \
           tests.billing.test_invoice_signal_transaction_isolation \
           tests.billing.test_payment_settlement_postgres \
+          tests.orders.test_order_payment_recovery_isolation.OrderAuditPostgresIsolationTests \
           tests.audit.test_membership_signal_postgres_isolation \
           tests.common.test_transactions \
           --settings=config.settings.ci --verbosity=2

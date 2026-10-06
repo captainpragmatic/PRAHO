@@ -3,9 +3,11 @@ Order signals for PRAHO Platform
 Event-driven order lifecycle management with Romanian compliance.
 """
 
+from __future__ import annotations
+
 import contextlib
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from django.core.cache import cache
 from django.core.files.storage import default_storage
@@ -15,9 +17,14 @@ from django.dispatch import receiver
 from django_fsm import ConcurrentTransition, TransitionNotAllowed
 
 from apps.audit.services import AuditContext, AuditEventData, AuditService, BusinessEventData, OrdersAuditService
+from apps.common.transactions import best_effort_atomic
 from apps.common.validators import log_security_event
 
 from .models import Order, OrderItem
+
+if TYPE_CHECKING:
+    from apps.billing.models import Invoice, Payment
+    from apps.billing.proforma_models import ProformaInvoice
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +65,11 @@ def handle_order_created_or_updated(sender: type[Order], instance: Order, create
         if getattr(instance, "_skip_audit_log", False):
             pass
         else:
-            try:
+            with best_effort_atomic(
+                logger=logger,
+                scope="Order Signal",
+                message=f"Audit logging failed for {instance.order_number}",
+            ):
                 event_data = BusinessEventData(
                     event_type=event_type,
                     business_object=instance,
@@ -69,8 +80,6 @@ def handle_order_created_or_updated(sender: type[Order], instance: Order, create
                     description=f"Order {instance.order_number} {'created' if created else 'updated'}",
                 )
                 OrdersAuditService.log_order_event(event_data)
-            except Exception as e:
-                logger.warning("⚠️ [Order Signal] Audit logging failed for %s: %s", instance.order_number, e)
 
         if created:
             # Wrap in on_commit so email is not sent if the enclosing transaction
@@ -766,30 +775,44 @@ def _send_provisioning_failed_email(item: OrderItem) -> None:
 # ===============================================================================
 
 
-def _handle_proforma_payment_received(sender: Any, proforma: Any, invoice: Any, payment: Any, **kwargs: Any) -> None:
+def _handle_proforma_payment_received(
+    sender: object,
+    proforma: ProformaInvoice,
+    invoice: Invoice,
+    payment: Payment | None,
+    **kwargs: object,
+) -> None:
     """Handle proforma_payment_received signal from Billing.
 
     Billing emits this signal after payment is recorded and proforma is converted to invoice.
     Orders listens to confirm the order and start provisioning.
     Dependency direction: Orders → Billing (imports signal). Billing → nothing.
+    Each order gets its own transaction because this receiver runs after commit.
     """
     try:
         from .services import OrderPaymentConfirmationService  # noqa: PLC0415
 
         for order in proforma.orders.filter(status="awaiting_payment"):
-            result = OrderPaymentConfirmationService.confirm_order(order, invoice=invoice)
-            if result.is_ok():
-                logger.info("✅ [Order Signal] Confirmed order %s after proforma payment", order.order_number)
-            else:
-                logger.error(
-                    "🔥 [Order Signal] Failed to confirm order %s: %s",
+            try:
+                with transaction.atomic():
+                    result = OrderPaymentConfirmationService.confirm_order(order, invoice=invoice)
+                    if result.is_ok():
+                        logger.info("✅ [Order Signal] Confirmed order %s after proforma payment", order.order_number)
+                    else:
+                        logger.error(
+                            "🔥 [Order Signal] Failed to confirm order %s: %s",
+                            order.order_number,
+                            result.unwrap_err() if result.is_err() else "unknown",
+                        )
+            except Exception as e:
+                logger.critical(
+                    "🔥 [Order Signal] proforma_payment_received failed for order %s: %s",
                     order.order_number,
-                    result.unwrap_err() if result.is_err() else "unknown",
+                    e,
+                    exc_info=True,
                 )
     except Exception as e:
-        # M10 fix: Use logger.critical for Sentry-level alerting on payment signal failure.
-        # If this handler fails, the customer paid but the order is not confirmed — requires
-        # immediate intervention. The background task provides a safety net but may take 5 min.
+        # A paid order left unconfirmed needs immediate intervention and task recovery.
         logger.critical("🔥 [Order Signal] proforma_payment_received handler failed: %s", e, exc_info=True)
 
 
@@ -931,15 +954,16 @@ def _handle_invoice_refunded(sender: Any, invoice: Any, refund_type: str, **kwar
                         service.save(update_fields=["auto_renew", "updated_at"])
                         if service.status == "active":
                             try:
-                                service.suspend(reason=f"Full refund on invoice {invoice.number}")
-                                service.save(
-                                    update_fields=[
-                                        "status",
-                                        "suspended_at",
-                                        "suspension_reason",
-                                        "updated_at",
-                                    ]
-                                )
+                                with transaction.atomic():
+                                    service.suspend(reason=f"Full refund on invoice {invoice.number}")
+                                    service.save(
+                                        update_fields=[
+                                            "status",
+                                            "suspended_at",
+                                            "suspension_reason",
+                                            "updated_at",
+                                        ]
+                                    )
                                 action_taken = "suspended"
                                 logger.info(
                                     "⚠️ [Refund] Suspended service %s for refunded invoice %s",

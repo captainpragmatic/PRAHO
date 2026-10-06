@@ -203,6 +203,13 @@ class ProformaService:
                 ),
             )
 
+            valid_until = timezone.now() + timedelta(days=_get_proforma_validity_days())
+            if order.payment_method == "bank_transfer":
+                from apps.settings.services import SettingsService  # noqa: PLC0415
+
+                bank_timeout_hours = SettingsService.get_integer_setting("orders.bank_transfer_timeout_hours", 72)
+                valid_until = min(valid_until, order.created_at + timedelta(hours=bank_timeout_hours))
+
             # Create proforma — status stays "draft" (email sending is separate)
             proforma = ProformaModel.objects.create(
                 customer=order.customer,
@@ -212,7 +219,7 @@ class ProformaService:
                 tax_cents=vat_result.vat_cents,
                 vat_evidence=capture_vat_evidence(vat_result),
                 total_cents=vat_result.total_cents,
-                valid_until=timezone.now() + timedelta(days=_get_proforma_validity_days()),
+                valid_until=valid_until,
                 bill_to_name=bill_to_name,
                 bill_to_email=order.customer_email,
                 bill_to_country=bill_to_country,

@@ -3,6 +3,8 @@ Test suite for order models in PRAHO Platform
 Tests Romanian VAT compliance, audit trails, and model relationships.
 """
 
+import contextlib
+import inspect
 import uuid
 from decimal import Decimal
 from unittest.mock import patch
@@ -565,10 +567,18 @@ class OrderSaveTransactionTestCase(TestCase):
         # At this point order._state.adding is False (already persisted)
         force_status(order, "awaiting_payment", save=False)
 
-        with patch("apps.orders.models.transaction.atomic") as mock_atomic:
+        # Signal receivers may open their own savepoints (an isolated audit write, for one);
+        # this test is about Order.save itself, so record which module asked for atomic().
+        callers: list[str] = []
+
+        def record_caller(*args: object, **kwargs: object) -> contextlib.nullcontext[None]:
+            callers.append(inspect.stack()[1].filename)
+            return contextlib.nullcontext()
+
+        with patch("apps.orders.models.transaction.atomic", side_effect=record_caller):
             order.save(update_fields=["status"])
 
-        mock_atomic.assert_not_called()
+        self.assertFalse([c for c in callers if c.endswith("apps/orders/models.py")], callers)
 
     def test_creation_invokes_transaction_atomic(self) -> None:
         """Saving a new order (adding=True) MUST enter transaction.atomic savepoint."""

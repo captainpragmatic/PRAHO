@@ -202,6 +202,12 @@ def process_pending_orders() -> dict[str, Any]:  # noqa: C901, PLR0912  # Comple
                 }
 
                 try:
+                    # Recover settled orders before expiry, including failed confirmation retries.
+                    if order.invoice is not None and order.invoice.status == "paid":
+                        _process_paid_order(order, order.invoice, order_result, results)
+                        results["processed_orders"].append(order_result)
+                        continue
+
                     # B12: Create proforma if missing (edge case — signal failed or race)
                     if order.total_cents > 0 and not order.proforma:
                         try:
@@ -250,9 +256,7 @@ def process_pending_orders() -> dict[str, Any]:  # noqa: C901, PLR0912  # Comple
                     if order.invoice:
                         invoice = order.invoice
 
-                        if invoice.status == "paid":
-                            _process_paid_order(order, invoice, order_result, results)
-                        elif invoice.status == "void":
+                        if invoice.status == "void":
                             _process_cancelled_invoice(order, now, order_result, results)
 
                     # Order without invoice — route through the proforma path
