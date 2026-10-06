@@ -550,28 +550,39 @@ class TestTokenRevocationLogic:
 
 
 # ---------------------------------------------------------------------------
-# 6. CSP has exactly one owner per service — never the nginx proxy
+# 6. CSP has exactly one owner per service — never the edge proxy
 # ---------------------------------------------------------------------------
 
 
 class TestProxyCSPOwnership:
-    """The SSL proxy must not serve its own Content-Security-Policy.
+    """The edge proxy must not serve its own Content-Security-Policy.
 
     Browsers enforce the INTERSECTION of multiple CSP headers, so a proxy-level
-    policy silently overrides the per-service Django middlewares. The nginx
+    policy silently overrides the per-service Django middlewares. The old nginx
     copy demonstrably drifted (stale CDN whitelists, missing 'unsafe-eval' and
     js.stripe.com), breaking Alpine on the platform and Stripe on the portal
     in the documented SSL deployment. CSP is owned by each service's
     middleware; the proxy owns transport-level headers only (#206 / #284).
+    Caddy is the only edge now, so the rule applies to every Caddyfile.
     """
+
+    # A header the Caddyfile sets or adds; `-Content-Security-Policy` (removing it) is allowed.
+    _SETS_CSP = re.compile(r"(?<!-)\bContent-Security-Policy\b", re.IGNORECASE)
 
     @pytest.mark.integration
     @pytest.mark.security
-    def test_nginx_ssl_conf_does_not_set_csp(self):
-        nginx_conf = PROJECT_ROOT / "deploy" / "nginx" / "nginx-ssl.conf"
-        content = nginx_conf.read_text()
-        assert "add_header Content-Security-Policy" not in content, (
-            "nginx-ssl.conf must not add a Content-Security-Policy header: "
-            "browsers enforce the intersection with the Django-served CSP, and "
-            "the proxy copy has repeatedly drifted from the app policies"
+    def test_caddy_does_not_set_csp(self):
+        caddyfiles = sorted(path for path in (PROJECT_ROOT / "deploy").rglob("Caddyfile*") if path.is_file())
+        # A broken glob must fail loudly, not check zero files and pass.
+        assert len(caddyfiles) >= 2, caddyfiles
+        offending = [
+            f"{path.relative_to(PROJECT_ROOT)}:{lineno}"
+            for path in caddyfiles
+            for lineno, line in enumerate(path.read_text().splitlines(), start=1)
+            if not line.lstrip().startswith("#") and self._SETS_CSP.search(line)
+        ]
+        assert offending == [], (
+            "the edge must not set a Content-Security-Policy header: browsers enforce "
+            "the intersection with the Django-served CSP, and a proxy copy drifts "
+            f"from the app policies: {offending}"
         )

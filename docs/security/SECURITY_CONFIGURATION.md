@@ -101,16 +101,10 @@ Beyond the two AES-256-GCM encryption keys, PRAHO derives **domain-specific keys
 | Preferred TLS | TLS 1.3 | Modern security |
 | SSL Redirect | Enabled (default) | Configurable via `DJANGO_SECURE_SSL_REDIRECT`. Set `false` behind TLS proxy. |
 
-### Cipher Suites (TLS 1.2)
+### Cipher Suites
 
-```
-ECDHE-ECDSA-AES128-GCM-SHA256
-ECDHE-RSA-AES128-GCM-SHA256
-ECDHE-ECDSA-AES256-GCM-SHA384
-ECDHE-RSA-AES256-GCM-SHA384
-ECDHE-ECDSA-CHACHA20-POLY1305
-ECDHE-RSA-CHACHA20-POLY1305
-```
+Neither Caddy config sets `protocols` or `ciphers`, so Caddy's defaults apply. Check what a live
+host offers with `nmap --script ssl-enum-ciphers -p 443 <domain>`.
 
 ### HSTS Configuration
 
@@ -127,26 +121,12 @@ Behind Caddy, the edge owns the header: every Caddy config sends `HSTS_POLICY` a
 Django's. Production leaves it unset (the value above); staging sets `max-age=3600`. The Django
 settings apply only where no edge fronts the service. See `docs/deployment/HTTPS_DEPLOYMENT_CHECKLIST.md`.
 
-### Nginx SSL Setup
+### Certificates
 
-```bash
-cp deploy/nginx/nginx-ssl.conf /etc/nginx/nginx.conf
-nginx -t && nginx -s reload
-```
-
-### Certificate Automation (Let's Encrypt)
-
-```bash
-# Initial certificate
-./deploy/ssl/certbot-init.sh $DOMAIN production
-
-# Docker with SSL
-docker-compose -f docker-compose.yml -f deploy/ssl/docker-compose.ssl.yml up -d
-
-# Systemd renewal timer
-sudo cp deploy/ssl/systemd/certbot-renew.* /etc/systemd/system/
-sudo systemctl enable --now certbot-renew.timer
-```
+Caddy obtains and renews the certificates for `PORTAL_DOMAIN` and `PLATFORM_DOMAIN` itself, over
+ACME (Let's Encrypt by default), with `ACME_EMAIL` as the account contact. Both edge configs do
+this: Docker's `deploy/caddy/Caddyfile` and the native role's `Caddyfile.native.j2`. There is no
+certbot step and no renewal timer to install.
 
 > For full TLS rollout procedures, see [HTTPS Deployment Checklist](../deployment/HTTPS_DEPLOYMENT_CHECKLIST.md).
 
@@ -266,14 +246,23 @@ form-action 'self';
 
 **Trade-off**: `'unsafe-inline'` and `'unsafe-eval'` are required for Tailwind CSS CDN and Alpine.js/HTMX inline scripts. Replacing with nonces is tracked as a production hardening gap (see [Security Compliance Assessment](SECURITY_COMPLIANCE_ASSESSMENT.md) gap analysis).
 
-### Nginx-Level Headers
+### Edge Headers (Caddy)
 
-Source: `deploy/nginx/nginx-ssl.conf`
+Source: `deploy/caddy/Caddyfile` (Docker) and
+`deploy/ansible/roles/praho-native/templates/Caddyfile.native.j2` (native). Both sites in both
+configs set the same headers:
 
 | Header | Value |
 |--------|-------|
-| `Permissions-Policy` | `geolocation=(), microphone=(), camera=(), payment=(self)` |
-| `Cross-Origin-Resource-Policy` | `same-origin` |
+| `Strict-Transport-Security` | `HSTS_POLICY` (see [HSTS Configuration](#hsts-configuration)) |
+| `X-Frame-Options` | `DENY` |
+| `X-Content-Type-Options` | `nosniff` |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` |
+| `Permissions-Policy` | `camera=(), microphone=(), geolocation=()` |
+| `Server` | removed |
+
+The edge sets no `Content-Security-Policy`: each service's middleware owns CSP, and
+`tests/integration/test_security_hardening.py::TestProxyCSPOwnership` keeps it that way.
 
 ### Production Cookie Security
 
@@ -512,44 +501,9 @@ python manage.py check --deploy
 
 ---
 
-## 9. SSL Certificate Automation (Let's Encrypt)
+## 9. TLS Certificates
 
-### Initial Certificate Setup
-
-```bash
-# Set your domain
-export DOMAIN="yourdomain.com"
-export CERTBOT_EMAIL="admin@yourdomain.com"
-
-# Obtain initial certificate (use staging for testing)
-./deploy/ssl/certbot-init.sh $DOMAIN staging
-
-# For production certificate
-./deploy/ssl/certbot-init.sh $DOMAIN production
-```
-
-### Docker Deployment with SSL
-
-```bash
-# Start with SSL support
-docker-compose -f docker-compose.yml -f deploy/ssl/docker-compose.ssl.yml up -d
-```
-
-### Automated Renewal
-
-Certificates auto-renew via:
-
-1. **Docker container**: Certbot runs every 12 hours
-2. **Systemd timer** (alternative):
-
-```bash
-# Install systemd timer
-sudo cp deploy/ssl/systemd/certbot-renew.* /etc/systemd/system/
-sudo systemctl enable --now certbot-renew.timer
-
-# Check timer status
-sudo systemctl list-timers certbot-renew.timer
-```
+Caddy issues and renews the certificates automatically; see [Certificates](#certificates).
 
 ### Certificate Verification
 

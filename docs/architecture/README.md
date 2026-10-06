@@ -43,9 +43,9 @@ This directory contains Mermaid diagrams documenting the PRAHO platform architec
 **Purpose**: Docker network topology and container layout.
 
 **Shows**:
-- Docker network segmentation (`platform-network` vs `api-network`)
-- Service exposure (Nginx reverse proxy, SSL termination)
-- Database isolation (PostgreSQL only accessible from platform-network)
+- Docker network segmentation (`internal` vs `web`)
+- Service exposure (Caddy edge: automatic HTTPS, hostname routing)
+- Database isolation (PostgreSQL only on `internal`, which the portal does not join)
 - External API access patterns
 
 **Use case**: Setting up production deployment or understanding security boundaries.

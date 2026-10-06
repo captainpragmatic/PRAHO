@@ -989,7 +989,6 @@ deploy/
 ├── docker-compose.platform-only.yml   # Platform service only
 ├── docker-compose.portal-only.yml     # Portal service only
 ├── docker-compose.dev.yml             # Development environment
-├── docker-compose.services.yml        # Legacy production config
 ├── caddy/
 │   ├── Caddyfile                      # Full stack configuration
 │   ├── Caddyfile.platform             # Platform-only config
