@@ -126,7 +126,7 @@ class CheckActivityDispatchTests(SimpleTestCase):
     before it needs git or the API.
     """
 
-    def _dispatch(self, ref_name: str) -> tuple[int, str]:
+    def _dispatch(self, ref_name: str, ref_type: str = "branch") -> tuple[int, str]:
         steps = _nightly()["jobs"]["check-activity"]["steps"]
         script = next(step["run"] for step in steps if step.get("id") == "check")
         with tempfile.TemporaryDirectory() as directory:
@@ -138,6 +138,7 @@ class CheckActivityDispatchTests(SimpleTestCase):
                     "PATH": os.environ.get("PATH", ""),
                     "EVENT_NAME": "workflow_dispatch",
                     "REF_NAME": ref_name,
+                    "REF_TYPE": ref_type,
                     "GITHUB_OUTPUT": str(output),
                 },
                 capture_output=True,
@@ -161,25 +162,47 @@ class CheckActivityDispatchTests(SimpleTestCase):
                 self.assertNotEqual(code, 0)
                 self.assertNotIn("branches=", output)
 
+    def test_a_dispatched_tag_is_refused_even_with_a_plain_name(self) -> None:
+        code, output = self._dispatch("v1.2.3", ref_type="tag")
+        self.assertNotEqual(code, 0)
+        self.assertNotIn("branches=", output)
+
     def test_the_ref_reaches_the_script_through_env_only(self) -> None:
         step = next(s for s in _nightly()["jobs"]["check-activity"]["steps"] if s.get("id") == "check")
         self.assertEqual(step["env"]["REF_NAME"], "${{ github.ref_name }}")
+        self.assertEqual(step["env"]["REF_TYPE"], "${{ github.ref_type }}")
         self.assertNotIn("${{", step["run"])
 
 
 class NightlyArtifactNamesTests(SimpleTestCase):
     """Artifact names may not contain `/`, so a dispatched `fix/...` branch would fail the upload."""
 
-    def test_uploads_use_a_sanitised_name_and_distinct_prefixes(self) -> None:
-        names = {}
+    def _naming_and_upload(self, job_name: str) -> tuple[dict[str, Any], dict[str, Any]]:
+        steps = _nightly()["jobs"][job_name]["steps"]
+        naming = next(step for step in steps if step.get("id") == "artifact")
+        upload = next(step for step in steps if str(step.get("uses", "")).startswith("actions/upload-artifact"))
+        return naming, upload
+
+    def test_the_naming_step_replaces_slashes(self) -> None:
         for job_name in ("nightly", "nightly-e2e"):
-            for step in _nightly()["jobs"][job_name]["steps"]:
-                if str(step.get("uses", "")).startswith("actions/upload-artifact"):
-                    names[job_name] = step["with"]["name"]
-        self.assertEqual(set(names), {"nightly", "nightly-e2e"})
-        for name in names.values():
-            self.assertNotIn("matrix.branch", name)
-        self.assertNotEqual(names["nightly"], names["nightly-e2e"])
+            naming, _upload = self._naming_and_upload(job_name)
+            self.assertEqual(naming["env"]["BRANCH"], "${{ matrix.branch }}")
+            with tempfile.TemporaryDirectory() as directory, self.subTest(job=job_name):
+                output = Path(directory) / "github_output"
+                output.write_text("")
+                subprocess.run(  # noqa: S603 -- the workflow's own script, run by a fixed bash
+                    ["bash", "-c", naming["run"]],  # noqa: S607 -- bash from PATH, as the runner provides it
+                    env={"PATH": os.environ.get("PATH", ""), "BRANCH": "fix/nightly/x", "GITHUB_OUTPUT": str(output)},
+                    check=True,
+                    timeout=30,
+                )
+                self.assertEqual(output.read_text().strip(), "suffix=fix-nightly-x")
+
+    def test_uploads_are_named_from_that_step_with_distinct_prefixes(self) -> None:
+        expected = {"nightly": "nightly-reports-", "nightly-e2e": "nightly-e2e-"}
+        for job_name, prefix in expected.items():
+            _naming, upload = self._naming_and_upload(job_name)
+            self.assertEqual(upload["with"]["name"], prefix + "${{ steps.artifact.outputs.suffix }}")
 
 
 class ScheduledFailureNotifierTests(SimpleTestCase):

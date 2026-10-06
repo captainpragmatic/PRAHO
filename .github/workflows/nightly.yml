@@ -51,6 +51,7 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
           REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -58,8 +59,8 @@ jobs:
           # caller-chosen value, so it must be a plain branch name before it is used; the
           # character class excludes quotes and backslashes, which keeps the JSON below valid.
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            if [[ ! "$REF_NAME" =~ ^[A-Za-z0-9._/-]+$ ]]; then
-              echo "::error::Refusing to test the dispatched ref: it is not a plain branch name."
+            if [ "$REF_TYPE" != "branch" ] || [[ ! "$REF_NAME" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+              echo "::error::Refusing to test the dispatched ref: it is not a plain branch name (tags are refused)."
               exit 1
             fi
             printf 'branches=["%s"]\n' "$REF_NAME" >> "$GITHUB_OUTPUT"

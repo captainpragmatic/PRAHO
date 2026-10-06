@@ -460,6 +460,7 @@ class _FakeClock:
 
     def __init__(self, state_file: Path, release_after: float | None) -> None:
         self.now = 0.0
+        self.raised = False
         self.state_file = state_file
         self.release_after = release_after
 
@@ -489,7 +490,7 @@ class StopWaitsForCoverageTests(TestCase):
         override.start()
         self.addCleanup(override.stop)
 
-    def _stop(self, *, coverage: bool, release_after: float | None) -> None:
+    def _stop(self, *, coverage: bool, release_after: float | None) -> _FakeClock:
         state = {"pid": 4242, "instance": "owned-nonce", "ready": True, "coverage": coverage}
         self.state.write_text(json.dumps(state))
         clock = _FakeClock(self.state, release_after)
@@ -499,18 +500,28 @@ class StopWaitsForCoverageTests(TestCase):
             patch.object(stack.time, "monotonic", clock.monotonic),
             patch.object(stack.time, "sleep", clock.sleep),
         ):
-            stack.stop()
+            try:
+                stack.stop()
+            except RuntimeError as error:
+                self.assertIn("did not finish stopping", str(error))
+                clock.raised = True
+        return clock
 
     def test_a_coverage_stack_is_given_time_to_finish_reporting(self) -> None:
-        self._stop(coverage=True, release_after=120)
+        clock = self._stop(coverage=True, release_after=120)
+        self.assertFalse(clock.raised)
 
-    def test_a_plain_stack_still_fails_fast(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "did not finish stopping"):
-            self._stop(coverage=False, release_after=120)
+    def test_a_plain_stack_gives_up_at_20_seconds(self) -> None:
+        clock = self._stop(coverage=False, release_after=None)
+        self.assertTrue(clock.raised)
+        self.assertGreaterEqual(clock.now, 20)
+        self.assertLess(clock.now, 20.2)
 
-    def test_a_coverage_stack_that_never_finishes_still_times_out(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "did not finish stopping"):
-            self._stop(coverage=True, release_after=None)
+    def test_a_coverage_stack_gives_up_at_600_seconds(self) -> None:
+        clock = self._stop(coverage=True, release_after=None)
+        self.assertTrue(clock.raised)
+        self.assertGreaterEqual(clock.now, 600)
+        self.assertLess(clock.now, 600.2)
 
 
 class SupervisorOutputIsUnbufferedTests(TestCase):
