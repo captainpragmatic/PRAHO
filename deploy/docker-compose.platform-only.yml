@@ -57,6 +57,7 @@ services:
     build:
       context: ..
       dockerfile: deploy/platform/Dockerfile
+    working_dir: /app/services/platform
     container_name: praho_platform
     ports:
       - "${PLATFORM_PORT:-8700}:8700"
@@ -81,9 +82,9 @@ services:
       - DJANGO_SECURE_SSL_REDIRECT=false
       - SERVICE_NAME=platform
     volumes:
-      - static_files:/app/staticfiles
-      - media_files:/app/media
-      - logs:/app/logs
+      - static_files:/app/services/platform/staticfiles
+      - media_files:/app/services/platform/media
+      - logs:/app/services/platform/logs
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8700/api/users/health/"]

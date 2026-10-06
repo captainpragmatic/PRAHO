@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from typing import TYPE_CHECKING, Any
 
 from django import template
@@ -232,7 +232,7 @@ class DataTableConfig:
     pagination: bool | Any = True  # Can be bool or a Django Paginator object at runtime
     actions: list[dict[str, Any]] | None = None
     css_class: str = ""
-    empty_message: str = "No data available."
+    empty_message: str | _StrPromise = field(default_factory=lambda: _("No data available."))
 
 
 @register.inclusion_tag("components/button.html")

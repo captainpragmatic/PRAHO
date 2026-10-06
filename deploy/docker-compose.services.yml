@@ -41,12 +41,13 @@ services:
     build:
       context: ..
       dockerfile: deploy/platform/Dockerfile
+    working_dir: /app/services/platform
     ports:
       - "8700:8700"
     volumes:
-      - static_volume:/app/staticfiles
-      - media_volume:/app/media
-      - logs_volume:/app/logs
+      - static_volume:/app/services/platform/staticfiles
+      - media_volume:/app/services/platform/media
+      - logs_volume:/app/services/platform/logs
     environment:
       - DEBUG=1
       - DB_HOST=db
@@ -61,7 +62,7 @@ services:
       - PLATFORM_TO_PORTAL_WEBHOOK_SECRET=${PLATFORM_TO_PORTAL_WEBHOOK_SECRET:-test-webhook-secret-do-not-use-in-prod}
       - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY required}
       - DJANGO_SETTINGS_MODULE=config.settings.dev
-      - PYTHONPATH=/app
+      - PYTHONPATH=/app/services/platform
       - SERVICE_NAME=platform
     depends_on:
       db:
@@ -84,11 +85,12 @@ services:
     build:
       context: ..
       dockerfile: deploy/portal/Dockerfile
+    working_dir: /app/services/portal
     ports:
       - "8701:8701"
     volumes:
-      - portal_static_volume:/app/staticfiles
-      - portal_logs_volume:/app/logs
+      - portal_static_volume:/app/services/portal/staticfiles
+      - portal_logs_volume:/app/services/portal/logs
       - portal_sessions_volume:/app/data
     environment:
       - DEBUG=1

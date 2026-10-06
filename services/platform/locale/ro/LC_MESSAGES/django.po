@@ -11145,7 +11145,7 @@ msgstr "Venituri din Facturi"
 #: templates/products/product_list.html:86 templates/tickets/list.html:119
 #: templates/tickets/list.html:129
 msgid "Search"
-msgstr "Caută"
+msgstr "Căutare"
 
 #: templates/billing/billing_list.html:103
 msgid "Customer name, document number..."
@@ -12458,7 +12458,11 @@ msgstr ""
 
 #: templates/components/table_enhanced.html:89
 msgid "No data found"
-msgstr "Nu s-a găsit niciun(o) data"
+msgstr "Nu s-au găsit date"
+
+#: apps/ui/templatetags/ui_components.py
+msgid "No data available."
+msgstr "Nu există date disponibile."
 
 #: templates/components/table_enhanced.html:90
 msgid "No items available."

@@ -2432,7 +2432,7 @@ msgstr "Închide"
 
 #: templates/components/breadcrumb.html:8
 msgid "Breadcrumb"
-msgstr "Traseu de navigare"
+msgstr "Cale de navigare"
 
 #: templates/components/cookie_consent_banner.html:17
 msgid "Cookie consent"
@@ -2654,7 +2654,7 @@ msgstr "Încheie sesiunea"
 
 #: templates/components/modal.html:40 templates/components/toast.html:36
 msgid "Close"
-msgstr "Închide"
+msgstr "Închideți"
 
 #: templates/components/modal.html:91
 msgid "Confirm"
@@ -2668,7 +2668,7 @@ msgid ""
 "          "
 msgstr ""
 "\n"
-"%(start_index)s–%(end_index)s din %(count)s rezultate\n"
+"            %(start_index)s–%(end_index)s din %(count)s rezultate\n"
 "          "
 
 #: templates/components/pagination.html:56
@@ -2677,7 +2677,7 @@ msgstr "Paginare"
 
 #: templates/components/pagination.html:64
 msgid "Go to previous page"
-msgstr "Mergi la pagina anterioară"
+msgstr "Mergeți la pagina anterioară"
 
 #: templates/components/pagination.html:70
 #: templates/components/pagination.html:79
@@ -2695,7 +2695,7 @@ msgstr "Mai multe pagini"
 
 #: templates/components/pagination.html:168
 msgid "Go to next page"
-msgstr "Mergi la pagina următoare"
+msgstr "Mergeți la pagina următoare"
 
 #: templates/components/pagination.html:171
 #: templates/components/pagination.html:180
@@ -2745,6 +2745,10 @@ msgstr "Acțiuni"
 #: templates/components/table_enhanced.html:89
 msgid "No data found"
 msgstr "Nu s-a găsit niciun(o) data"
+
+#: apps/ui/templatetags/ui_components.py
+msgid "No data available."
+msgstr "Nu există date disponibile."
 
 #: templates/components/table_enhanced.html:90
 msgid "No items available."

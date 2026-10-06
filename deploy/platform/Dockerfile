@@ -40,7 +40,7 @@ LABEL description="PRAHO Platform Service - Admin and business logic"
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     DJANGO_SETTINGS_MODULE=config.settings.prod \
-    PYTHONPATH=/app \
+    PYTHONPATH=/app/services/platform \
     SERVICE_NAME=platform
 
 # Runtime-only system packages (no build-essential, no git, no uv)
@@ -54,7 +54,7 @@ RUN apt-get update \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+WORKDIR /app/services/platform
 
 # Copy pre-built venv from builder stage
 COPY --from=builder /build/.venv /app/.venv
@@ -63,15 +63,16 @@ COPY --from=builder /build/.venv /app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 
 # Copy platform service code (includes assets/ and static/)
-COPY services/platform/ ./
+COPY services/platform/ /app/services/platform/
+COPY shared/ /app/shared/
 
 # Copy entrypoint script
-COPY deploy/platform/entrypoint.sh /app/entrypoint.sh
+COPY deploy/platform/entrypoint.sh /app/deploy/platform/entrypoint.sh
 
 # Create required runtime directories
-RUN mkdir -p /app/staticfiles \
-    && mkdir -p /app/media \
-    && mkdir -p /app/logs \
+RUN mkdir -p /app/services/platform/staticfiles \
+    && mkdir -p /app/services/platform/media \
+    && mkdir -p /app/services/platform/logs \
     && mkdir -p /var/log/praho
 
 # Create non-root user
@@ -79,7 +80,7 @@ RUN addgroup --system django \
     && adduser --system --group django
 
 # Set proper permissions
-RUN chmod +x /app/entrypoint.sh \
+RUN chmod +x /app/deploy/platform/entrypoint.sh \
     && chown -R django:django /app \
     && chown -R django:django /var/log/praho
 USER django
@@ -90,4 +91,4 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=60s --retries=3 \
 EXPOSE 8700
 
 # Entrypoint runs migrations, collectstatic, and setup_initial_data before Gunicorn
-ENTRYPOINT ["/app/entrypoint.sh"]
+ENTRYPOINT ["/app/deploy/platform/entrypoint.sh"]

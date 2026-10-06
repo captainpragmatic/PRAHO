@@ -1,0 +1,109 @@
+# Romanian translations for the PRAHO shared UI.
+msgid ""
+msgstr ""
+"Project-Id-Version: PRAHO shared UI\n"
+"PO-Revision-Date: 2026-10-06 00:00+0300\n"
+"Last-Translator: PRAHO contributors\n"
+"Language-Team: Romanian\n"
+"Language: ro\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=3; plural=(n == 1 ? 0 : (n == 0 || (n % 100 > 0 && n % 100 < 20)) ? 1 : 2);\n"
+
+#: templates/components/pagination.html
+#, python-format
+msgid ""
+"\n"
+"            %(start_index)s–%(end_index)s of %(count)s results\n"
+"          "
+msgstr ""
+"\n"
+"            %(start_index)s–%(end_index)s din %(count)s rezultate\n"
+"          "
+
+msgid "(current step)"
+msgstr "(etapa curentă)"
+
+msgid "Actions"
+msgstr "Acțiuni"
+
+msgid "Back"
+msgstr "Înapoi"
+
+msgid "Breadcrumb"
+msgstr "Cale de navigare"
+
+msgid "Cancel"
+msgstr "Anulează"
+
+msgid "Close"
+msgstr "Închideți"
+
+msgid "Close notification"
+msgstr "Închide notificarea"
+
+msgid "Confirm"
+msgstr "Confirmă"
+
+msgid "Filters"
+msgstr "Filtre"
+
+msgid "Go to next page"
+msgstr "Mergeți la pagina următoare"
+
+msgid "Go to previous page"
+msgstr "Mergeți la pagina anterioară"
+
+msgid "Label"
+msgstr "Etichetă"
+
+msgid "More pages"
+msgstr "Mai multe pagini"
+
+msgid "Next"
+msgstr "Următorul"
+
+msgid "Next page (unavailable)"
+msgstr "Pagina următoare (indisponibilă)"
+
+msgid "No data available"
+msgstr "Nu există date disponibile"
+
+msgid "No records have been added yet."
+msgstr "Nu au fost adăugate înregistrări încă."
+
+msgid "Pagination"
+msgstr "Paginare"
+
+msgid "Previous"
+msgstr "Anterior"
+
+msgid "Previous page (unavailable)"
+msgstr "Pagina anterioară (indisponibilă)"
+
+msgid "Progress steps"
+msgstr "Etapele procesului"
+
+msgid "Search"
+msgstr "Căutare"
+
+msgid "Showing"
+msgstr "Se afișează"
+
+msgid "Toggle section"
+msgstr "Comută secțiunea"
+
+msgid "of"
+msgstr "din"
+
+msgid "results"
+msgstr "rezultate"
+
+msgid "to"
+msgstr "Până la"
+
+#: templates/components/form_actions.html
+msgctxt "form action"
+msgid "Save"
+msgstr "Salvează"

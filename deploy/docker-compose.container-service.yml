@@ -19,6 +19,7 @@ services:
     build:
       context: ..
       dockerfile: deploy/platform/Dockerfile
+    working_dir: /app/services/platform
     environment:
       - DEBUG=0
       - DB_HOST=${DB_HOST:?DB_HOST required}
@@ -62,6 +63,7 @@ services:
     build:
       context: ..
       dockerfile: deploy/portal/Dockerfile
+    working_dir: /app/services/portal
     environment:
       - DEBUG=0
       - PLATFORM_API_BASE_URL=${PLATFORM_API_BASE_URL:-http://platform:8700/api}

@@ -1025,12 +1025,14 @@ PYTHON_I18N = uv run python
 
 i18n-extract:
 	@echo "🌍 Extracting translatable strings..."
+	@cd shared/ui && DJANGO_SETTINGS_MODULE=config.settings.dev PYTHONPATH="$(PWD)/services/platform" "$(PWD)/$(VENV_DIR)/bin/django-admin" makemessages -l ro -e html,txt --no-wrap
 	@cd services/platform && PORTAL_IMPORT_ISOLATION_BYPASS=true $(PWD)/$(VENV_DIR)/bin/python manage.py makemessages -l ro --no-wrap --settings=config.settings.dev
 	@cd services/portal && PORTAL_IMPORT_ISOLATION_BYPASS=true $(PWD)/$(VENV_DIR)/bin/python manage.py makemessages -l ro --no-wrap --settings=config.settings.dev
-	@echo "✅ Strings extracted for both services."
+	@echo "✅ Strings extracted for shared UI and both services."
 
 i18n-compile:
 	@echo "🌍 Compiling translation files..."
+	@cd shared/ui && DJANGO_SETTINGS_MODULE=config.settings.dev PYTHONPATH="$(PWD)/services/platform" "$(PWD)/$(VENV_DIR)/bin/django-admin" compilemessages
 	@cd services/platform && $(PWD)/$(VENV_DIR)/bin/python manage.py compilemessages --settings=config.settings.dev
 	@cd services/portal && $(PWD)/$(VENV_DIR)/bin/python manage.py compilemessages --settings=config.settings.dev
 	@echo "✅ Translations compiled."

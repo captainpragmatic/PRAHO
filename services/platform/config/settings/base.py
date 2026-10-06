@@ -198,6 +198,7 @@ LANGUAGES = [
 
 # Romanian locale formatting
 LOCALE_PATHS = [
+    REPO_ROOT / "shared" / "ui" / "locale",
     BASE_DIR / "locale",
 ]
 

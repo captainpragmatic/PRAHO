@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from typing import TYPE_CHECKING, Any
 
 from django import template
@@ -22,6 +22,7 @@ from django.utils.translation import gettext_lazy as _
 
 if TYPE_CHECKING:
     from _typeshed import DataclassInstance
+    from django.utils.functional import _StrPromise
 
 from apps.common.constants import FILE_SIZE_CONVERSION_FACTOR
 from apps.ui.attributes import sanitize_data_attrs, serialize_button_attributes
@@ -221,7 +222,7 @@ class DataTableConfig:
     pagination: bool = True
     actions: list[dict[str, Any]] | None = None
     css_class: str = ""
-    empty_message: str = "Nu există date disponibile."
+    empty_message: str | _StrPromise = field(default_factory=lambda: _("No data available."))
 
 
 @dataclass

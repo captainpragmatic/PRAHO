@@ -31,13 +31,15 @@ services:
     build:
       context: ..
       dockerfile: deploy/platform/Dockerfile
+    working_dir: /app/services/platform
     ports:
       - "8700:8700"
     volumes:
-      # Hot reload - mount source code
-      - ../services/platform:/app:delegated
-      - dev_static_volume:/app/staticfiles
-      - dev_media_volume:/app/media
+      # Hot reload - mount source code without hiding the venv or entrypoint
+      - ../services/platform:/app/services/platform:delegated
+      - ../shared:/app/shared:delegated
+      - dev_static_volume:/app/services/platform/staticfiles
+      - dev_media_volume:/app/services/platform/media
     environment:
       - DEBUG=1
       - DB_HOST=db
@@ -47,7 +49,7 @@ services:
       - DB_PASSWORD=praho123
       - DJANGO_SECRET_KEY=dev-secret-key-for-development-only
       - DJANGO_SETTINGS_MODULE=config.settings.dev
-      - PYTHONPATH=/app
+      - PYTHONPATH=/app/services/platform
       # Debug-toolbar allowlist for non-loopback dev clients (empty = localhost only)
       - DEV_INTERNAL_IPS=${DEV_INTERNAL_IPS:-}
       - SERVICE_NAME=platform
@@ -55,9 +57,7 @@ services:
       db:
         condition: service_healthy
     restart: unless-stopped
-    command: >
-      sh -c "python manage.py migrate --noinput &&
-             python manage.py runserver 0.0.0.0:8700"
+    command: ["python", "/app/services/platform/manage.py", "runserver", "0.0.0.0:8700"]
 
   # ===============================================================================
   # PORTAL SERVICE - DEVELOPMENT HOT RELOAD 🌐
@@ -66,12 +66,14 @@ services:
     build:
       context: ..
       dockerfile: deploy/portal/Dockerfile
+    working_dir: /app/services/portal
     ports:
       - "8701:8701"
     volumes:
-      # Hot reload - mount source code
-      - ../services/portal:/app:delegated
-      - dev_portal_static_volume:/app/staticfiles
+      # Hot reload - mount source code without hiding the venv or entrypoint
+      - ../services/portal:/app/services/portal:delegated
+      - ../shared:/app/shared:delegated
+      - dev_portal_static_volume:/app/services/portal/staticfiles
     environment:
       - DEBUG=1
       - PLATFORM_API_BASE_URL=http://platform:8700/api
@@ -89,8 +91,7 @@ services:
     depends_on:
       - platform
     restart: unless-stopped
-    command: >
-      sh -c "python manage.py runserver 0.0.0.0:8701"
+    command: ["python", "/app/services/portal/manage.py", "runserver", "0.0.0.0:8701"]
 
 # ===============================================================================
 # DEVELOPMENT VOLUMES 💾

@@ -32,7 +32,7 @@ LABEL description="PRAHO Portal Service - Customer-facing API gateway"
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     DJANGO_SETTINGS_MODULE=config.settings.prod \
-    PYTHONPATH=/app \
+    PYTHONPATH=/app/services/portal \
     SERVICE_NAME=portal
 
 # Portal uses config.settings.prod (not config.settings) because portal has a
@@ -47,7 +47,7 @@ RUN apt-get update \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+WORKDIR /app/services/portal
 
 # Copy pre-built venv from builder stage
 COPY --from=builder /build/.venv /app/.venv
@@ -56,14 +56,15 @@ COPY --from=builder /build/.venv /app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 
 # Copy portal service code
-COPY services/portal/ ./
+COPY services/portal/ /app/services/portal/
+COPY shared/ /app/shared/
 
 # Copy entrypoint script
-COPY deploy/portal/entrypoint.sh /app/entrypoint.sh
+COPY deploy/portal/entrypoint.sh /app/deploy/portal/entrypoint.sh
 
 # Create required directories
-RUN mkdir -p /app/staticfiles \
-    && mkdir -p /app/logs \
+RUN mkdir -p /app/services/portal/staticfiles \
+    && mkdir -p /app/services/portal/logs \
     && mkdir -p /app/data \
     && mkdir -p /var/log/praho/portal
 
@@ -72,7 +73,7 @@ RUN addgroup --system django \
     && adduser --system --group django
 
 # Set proper permissions
-RUN chmod +x /app/entrypoint.sh \
+RUN chmod +x /app/deploy/portal/entrypoint.sh \
     && chown -R django:django /app \
     && chown -R django:django /var/log/praho
 USER django
@@ -83,4 +84,4 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=60s --retries=3 \
 EXPOSE 8701
 
 # Entrypoint collects static files, then starts Gunicorn
-ENTRYPOINT ["/app/entrypoint.sh"]
+ENTRYPOINT ["/app/deploy/portal/entrypoint.sh"]

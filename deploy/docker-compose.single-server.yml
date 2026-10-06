@@ -50,6 +50,7 @@ services:
     build:
       context: ..
       dockerfile: deploy/platform/Dockerfile
+    working_dir: /app/services/platform
     container_name: praho_platform
     environment:
       - DEBUG=0
@@ -72,9 +73,9 @@ services:
       - DJANGO_SECURE_SSL_REDIRECT=false
       - SERVICE_NAME=platform
     volumes:
-      - static_files:/app/staticfiles
-      - media_files:/app/media
-      - logs:/app/logs
+      - static_files:/app/services/platform/staticfiles
+      - media_files:/app/services/platform/media
+      - logs:/app/services/platform/logs
     depends_on:
       db:
         condition: service_healthy
@@ -105,6 +106,7 @@ services:
     build:
       context: ..
       dockerfile: deploy/portal/Dockerfile
+    working_dir: /app/services/portal
     container_name: praho_portal
     environment:
       - DEBUG=0
@@ -126,8 +128,8 @@ services:
       - SERVICE_NAME=portal
       - SESSION_DB_PATH=/app/data/portal.sqlite3
     volumes:
-      - portal_static:/app/staticfiles
-      - portal_logs:/app/logs
+      - portal_static:/app/services/portal/staticfiles
+      - portal_logs:/app/services/portal/logs
       - portal_sessions:/app/data
     depends_on:
       platform:
