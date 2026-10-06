@@ -37,6 +37,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A hosting account is turned on or off by one writer, the provisioning reconciler (#566,
+  ADR-0051 accepted). Hosting is on exactly when the service is active and no bound domain
+  is expired, suspended or cancelled. A domain status change now queues a reconcile instead
+  of calling Virtualmin, and the reconciler also suspends an account a domain holds off.
+- Suspending an account from the Virtualmin account page now lasts. The button suspended
+  the panel but left the service active, so the 15-minute sweep switched it back on. Suspend
+  and Activate now act on the service; Activate lifts only a suspension made there, and
+  refuses while the customer is suspended or the subscription is unpaid. A staff suspension
+  now also shows as suspended in the customer's portal. No email is sent and billing is
+  unchanged.
+- The Virtualmin bulk-actions page works for the first time. It had returned an error since
+  it was added, because its template never existed. It now lists accounts by server and
+  status with a "select all", and its Suspend and Activate use the same rules as the account
+  page. The unused `provisioning.bulk_operation_threshold` setting is removed.
+- An API token can check and revoke itself (#569). `GET /api/users/token/me/` and
+  `DELETE /api/users/token/revoke/` answer a bare token; every other API route still needs
+  the Portal's signature. ADR-0031 records what a bare token can reach.
+- Authenticated requests no longer write an audit row each, and load the session user in one
+  query instead of two (#553). The session timeout is audited only when it changes. Existing
+  sessions are signed out once by the new authentication backend.
 - A changed setting takes effect consistently. Code running inside a transaction now reads the
   value it just wrote instead of the old cached one, a value from a transaction that rolls back is
   never cached, and a read that overlaps a save can no longer put the old value back in the cache
