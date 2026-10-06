@@ -85,6 +85,37 @@ def test_portal_health_check(page: Page) -> None:
     expect(page.locator("body")).to_contain_text(re.compile("healthy|operational|running|status|ok", re.I))
 
 
+def test_login_invalid_email_is_blocked_by_browser(page: Page) -> None:
+    ensure_fresh_session(page)
+    page.goto(f"{BASE_URL}/login/")
+    form = page.locator("#login-form")
+    email = form.locator('input[name="email"]')
+    email.fill("notanemail")
+    form.locator('input[name="password"]').fill("short")
+
+    # Observe native validation and submission without preventing either event.
+    email.evaluate(
+        """input => {
+            input.dataset.invalid = "false";
+            input.addEventListener("invalid", () => { input.dataset.invalid = "true"; });
+        }"""
+    )
+    form.evaluate(
+        """form => {
+            form.dataset.submitted = "false";
+            form.addEventListener("submit", () => { form.dataset.submitted = "true"; });
+        }"""
+    )
+    assert email.evaluate("input => input.validity.typeMismatch") is True
+
+    form.locator('button[type="submit"]').click()
+
+    expect(email).to_have_attribute("data-invalid", "true")
+    expect(form).to_have_attribute("data-submitted", "false")
+    expect(email).to_have_value("notanemail")
+    expect(page).to_have_url(f"{BASE_URL}/login/")
+
+
 def test_login_shows_error_on_wrong_credentials(page: Page) -> None:
     ensure_fresh_session(page)
     page.goto(f"{BASE_URL}/login/")
