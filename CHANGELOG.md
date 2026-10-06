@@ -46,6 +46,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Native deployments no longer read a `.env` comment as part of a value. The env examples put comments
+  after values (`DJANGO_SETTINGS_MODULE=config.settings.staging  # note`) on 80 lines. systemd's
+  `EnvironmentFile=` and the native role's own parsing keep that comment in the value. A deploy from a
+  copied example therefore named a settings module that does not exist, and failed at its first
+  migration. Every comment in the examples now sits on its own line, with every value unchanged. The
+  native deploy refuses a `.env` with an inline comment before anything reads it, naming each line
+  and key but never a value. The check follows the shell's comment rule, honouring quotes and
+  escapes, and also catches a comment after a closing quote, which systemd keeps.
 - Docker staging deployments now run the staging Django settings. Every Docker path pinned
   `DJANGO_SETTINGS_MODULE=config.settings.prod`: the standalone Compose files and the Ansible Docker role.
   So staging ran production settings, and every staging-only setting was ignored. Compose now takes the

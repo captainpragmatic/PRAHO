@@ -44,6 +44,13 @@
           Then fill in the [REQUIRED] values and re-run.
       when: not preflight_env_check.stat.exists
 
+    # Before the first read: a comment after a value would become part of it (see the role's
+    # env_preflight.yml).
+    - name: Reject inline comments in the .env file
+      include_role:
+        name: praho-native
+        tasks_from: env_preflight
+
     - name: Read env vars for pre-flight validation
       shell: "grep -E '^[A-Z_]+=' {{ env_file_path }} | grep -v '^#'"
       delegate_to: localhost
