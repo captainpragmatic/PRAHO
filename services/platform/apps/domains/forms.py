@@ -13,10 +13,18 @@ from .models import TLD, Registrar
 class RegistrarForm(forms.ModelForm):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        # Do not prefill sensitive fields
-        for secret_field in ("api_key", "api_secret", "webhook_secret"):
+        # ModelForm validation mutates the instance, so capture ciphertext before _post_clean.
+        self._existing_secrets: dict[str, str] = {
+            "api_key": self.instance.api_key,
+            "api_secret": self.instance.api_secret,
+            "webhook_secret": self.instance.webhook_secret,
+        }
+        # Model-derived form.initial takes precedence over field.initial.
+        for secret_field in self._existing_secrets:
             if secret_field in self.fields:
+                self.initial[secret_field] = ""
                 self.fields[secret_field].initial = ""
+                self.fields[secret_field].help_text = _("Leave blank to keep the existing secret.")
 
     class Meta:
         model = Registrar
@@ -68,13 +76,13 @@ class RegistrarForm(forms.ModelForm):
 
     def save(self, commit: bool = True) -> Registrar:
         instance = super().save(commit=False)
-        # Encrypt all secrets at rest using AES-256-GCM
-        if self.cleaned_data.get("api_key"):
-            instance.api_key = encrypt_value(self.cleaned_data["api_key"]) or ""
-        if self.cleaned_data.get("api_secret"):
-            instance.api_secret = encrypt_value(self.cleaned_data["api_secret"]) or ""
-        if self.cleaned_data.get("webhook_secret"):
-            instance.webhook_secret = encrypt_value(self.cleaned_data["webhook_secret"]) or ""
+        # Encrypt replacements; blank inputs retain the original ciphertext unchanged.
+        for secret_field, existing_secret in self._existing_secrets.items():
+            submitted = cast(str, self.cleaned_data.get(secret_field, ""))
+            if submitted:
+                setattr(instance, secret_field, encrypt_value(submitted) or "")
+            else:
+                setattr(instance, secret_field, existing_secret)
         if commit:
             instance.save()
         return cast(Registrar, instance)

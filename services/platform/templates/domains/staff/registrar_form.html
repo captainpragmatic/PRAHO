@@ -33,8 +33,8 @@
 
       <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
         {% input_field name="api_username" label=_("API username") value=form.api_username.value html_id="id_api_username" error=form.api_username.errors.0 %}
-        {% input_field name="api_key" input_type="password" label=_("API key") html_id="id_api_key" error=form.api_key.errors.0 icon_right="password-toggle" %}
-        {% input_field name="api_secret" input_type="password" label=_("API secret") html_id="id_api_secret" error=form.api_secret.errors.0 icon_right="password-toggle" %}
+        {% input_field name="api_key" input_type="password" label=_("API key") html_id="id_api_key" help_text=form.fields.api_key.help_text error=form.api_key.errors.0 icon_right="password-toggle" %}
+        {% input_field name="api_secret" input_type="password" label=_("API secret") html_id="id_api_secret" help_text=form.fields.api_secret.help_text error=form.api_secret.errors.0 icon_right="password-toggle" %}
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
