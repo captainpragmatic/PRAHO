@@ -18,7 +18,7 @@ from typing import Literal
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import logout
-from django.db import DatabaseError
+from django.db import DatabaseError, InterfaceError
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect
 from django.template.loader import render_to_string
@@ -80,7 +80,7 @@ def end_session_or_unavailable(request: HttpRequest) -> HttpResponse | None:
         # logout() flushes implicitly, so it belongs inside this same guard.
         logout(request)
         request.session.flush()
-    except DatabaseError:
+    except (DatabaseError, InterfaceError):
         logger.exception("🔥 [Session] Session store unavailable while ending authentication")
         # A failed flush may clear the data but retain the old key. Detach both so
         # SessionMiddleware cannot save or reload that key while returning the 503.

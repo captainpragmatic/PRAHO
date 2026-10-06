@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, Required, TypedDict
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db import DatabaseError, transaction
+from django.db import DatabaseError, InterfaceError, transaction
 from django.db.models import Sum
 from django.utils import timezone
 from django.utils.dateparse import parse_date
@@ -320,7 +320,7 @@ def update_draft_invoice(invoice_id: int, data: DraftInvoiceData, user: User) ->
                 return Err(error)
     except Invoice.DoesNotExist:
         return Err(_("Invoice not found."))
-    except DatabaseError:
+    except (DatabaseError, InterfaceError):
         logger.exception("🔥 [Billing] Draft invoice edit failed for %s", invoice_id)
         return Err(_("The invoice could not be saved. Please try again."))
 
