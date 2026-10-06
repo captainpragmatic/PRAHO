@@ -68,7 +68,8 @@ services:
       - DB_USER=${DB_USER:-praho}
       - DB_PASSWORD=${DB_PASSWORD:?DB_PASSWORD required}
       - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY required}
-      - DJANGO_SETTINGS_MODULE=config.settings.prod
+      - DJANGO_SETTINGS_MODULE=${DJANGO_SETTINGS_MODULE:-config.settings.prod}
+      - STATIC_ROOT=/app/staticfiles
       - HMAC_SECRET=${PLATFORM_API_SECRET:?PLATFORM_API_SECRET required}
       # Per-portal HMAC registry (#277). Unset => legacy shared-secret behavior (safe default).
       - PORTAL_HMAC_MODE=${PORTAL_HMAC_MODE:-legacy}

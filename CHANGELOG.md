@@ -46,6 +46,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Docker staging deployments now run the staging Django settings. Every Docker path pinned
+  `DJANGO_SETTINGS_MODULE=config.settings.prod`: the standalone Compose files and the Ansible Docker role.
+  So staging ran production settings, and every staging-only setting was ignored. Compose now takes the
+  module from `.env` (`.env.example.staging` already sets `config.settings.staging`) and defaults to
+  production when it is unset. The Ansible Docker role runs `config.settings.staging` for staging and
+  production settings for every other `praho_env`. The Docker dev inventory stays on production
+  settings, as before: the images lack the dev dependencies that `config.settings.dev` needs. Platform
+  containers also set `STATIC_ROOT=/app/staticfiles`, because the staging default is the native
+  layout's `/opt/praho/static`, which the container's non-root user cannot create.
 - The nightly browser job no longer fails before it starts. The job added on 2026-09-28 failed
   at its Node setup step on every one of its first seven nights, before a browser was installed,
   because the `package-lock.json` it installs from was gitignored and existed on no CI runner. The
