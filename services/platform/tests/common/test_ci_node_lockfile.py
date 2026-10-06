@@ -15,11 +15,13 @@ that wrote the workflow.
 
 from __future__ import annotations
 
+import json
 import posixpath
 import subprocess
+import tempfile
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import yaml
 from django.test import SimpleTestCase
@@ -88,16 +90,34 @@ def _lockfile_needs_in(workflow: dict[str, Any], workflow_name: str) -> dict[str
         for index, step in enumerate(job.get("steps") or []):
             if needed := _lockfiles_a_step_needs(step, job, workflow):
                 label = step.get("name") or step.get("uses") or f"step {index}"
-                found[f"{workflow_name}:{job_name}:{label}"] = needed
+                # Step names need not be unique; a later step must not overwrite an earlier need.
+                found.setdefault(f"{workflow_name}:{job_name}:{label}", []).extend(needed)
     return found
 
 
-def _lockfile_needs() -> dict[str, list[str]]:
-    """Every step in this repository's workflows that needs a Node lockfile."""
+def _lockfile_needs(directory: Path = _WORKFLOWS) -> dict[str, list[str]]:
+    """Every step in a directory of workflows that needs a Node lockfile."""
     found: dict[str, list[str]] = {}
-    for path in sorted(_WORKFLOWS.glob("*.yml")):
+    # GitHub accepts both extensions for a workflow file.
+    for path in sorted([*directory.glob("*.yml"), *directory.glob("*.yaml")]):
         found.update(_lockfile_needs_in(yaml.safe_load(path.read_text(encoding="utf-8")), path.name))
     return found
+
+
+# The sections `npm ci` compares between package.json and the lockfile's root entry before it
+# installs anything. A mismatch fails it outright, which a pull request that edits package.json
+# without reinstalling would otherwise first meet in the nightly.
+_DEPENDENCY_SECTIONS = ("dependencies", "devDependencies", "optionalDependencies", "peerDependencies")
+
+
+def _unsynchronised(package: dict[str, Any], lock: dict[str, Any]) -> dict[str, tuple[Any, Any]]:
+    """Dependency sections that differ between a package.json and its lockfile's root entry."""
+    root = (lock.get("packages") or {}).get("") or {}
+    return {
+        section: (package.get(section) or {}, root.get(section) or {})
+        for section in _DEPENDENCY_SECTIONS
+        if (package.get(section) or {}) != (root.get(section) or {})
+    }
 
 
 def _pull_request_paths(workflow: dict[str, Any]) -> list[str]:
@@ -138,6 +158,26 @@ class WorkflowNodeLockfileTests(SimpleTestCase):
         # Both the cache lookup and the install: fixing only the first leaves the second failing.
         self.assertEqual(len(seen), 2, msg=f"expected the setup-node and `npm ci` steps, saw {sorted(seen)}")
         self.assertTrue(all(needed == [_LOCKFILE] for needed in seen.values()))
+
+    def test_each_lockfile_records_what_its_package_json_declares(self) -> None:
+        checked: list[str] = []
+        offending: dict[str, dict[str, tuple[Any, Any]]] = {}
+        for lockfile in sorted({path for needed in _lockfile_needs().values() for path in needed}):
+            manifest = _REPOSITORY_ROOT / posixpath.dirname(lockfile) / "package.json"
+            if not (manifest.is_file() and (_REPOSITORY_ROOT / lockfile).is_file()):
+                continue  # an absent lockfile is the tracking test's finding, not this one's
+            checked.append(lockfile)
+            package = json.loads(manifest.read_text(encoding="utf-8"))
+            lock = json.loads((_REPOSITORY_ROOT / lockfile).read_text(encoding="utf-8"))
+            if difference := _unsynchronised(package, lock):
+                offending[lockfile] = difference
+
+        self.assertIn(_LOCKFILE, checked, msg="canary: the root lockfile was not compared at all")
+        self.assertEqual(
+            offending,
+            {},
+            msg="package.json changed without the lockfile: run `npm install` and commit both, or `npm ci` fails",
+        )
 
     def test_a_pull_request_that_changes_only_the_guards_inputs_still_runs_it(self) -> None:
         paths = _pull_request_paths(yaml.safe_load(_GUARD_WORKFLOW.read_text(encoding="utf-8")))
@@ -198,6 +238,29 @@ class LockfileNeedResolutionTests(SimpleTestCase):
         explicit = {**step, "with": {"cache": "npm", "cache-dependency-path": "a/package-lock.json\nb/package-lock.json"}}
         self.assertEqual(self._needs(step=explicit), {"w.yml:j:n": ["a/package-lock.json", "b/package-lock.json"]})
 
+    def test_same_named_steps_keep_both_requirements(self) -> None:
+        workflow = {
+            "jobs": {
+                "j": {
+                    "steps": [
+                        {"name": "install", "run": "npm ci", "working-directory": "a"},
+                        {"name": "install", "run": "npm ci", "working-directory": "b"},
+                    ]
+                }
+            }
+        }
+        self.assertEqual(
+            _lockfile_needs_in(workflow, "w.yml"),
+            {"w.yml:j:install": ["a/package-lock.json", "b/package-lock.json"]},
+        )
+
+    def test_yaml_and_yml_workflows_are_both_scanned(self) -> None:
+        step = {"name": "i", "run": "npm ci"}
+        with tempfile.TemporaryDirectory() as directory:
+            for name in ("short.yml", "long.yaml"):
+                (Path(directory) / name).write_text(yaml.safe_dump({"jobs": {"j": {"steps": [step]}}}))
+            self.assertEqual(sorted(_lockfile_needs(Path(directory))), ["long.yaml:j:i", "short.yml:j:i"])
+
     def test_steps_that_install_from_no_lockfile_need_none(self) -> None:
         for step in (
             {"name": "x", "run": "npm install"},
@@ -206,3 +269,28 @@ class LockfileNeedResolutionTests(SimpleTestCase):
         ):
             with self.subTest(step=step):
                 self.assertEqual(self._needs(step=step, job=self._defaults("frontend")), {})
+
+
+class LockfileSynchronisationTests(SimpleTestCase):
+    """The comparison `npm ci` makes first, on manifests built here."""
+
+    _PACKAGE: ClassVar[dict[str, Any]] = {"devDependencies": {"tailwindcss": "^4.1.13"}}
+    _LOCK: ClassVar[dict[str, Any]] = {"packages": {"": {"devDependencies": {"tailwindcss": "^4.1.13"}}}}
+
+    def test_matching_sections_are_synchronised(self) -> None:
+        self.assertEqual(_unsynchronised(self._PACKAGE, self._LOCK), {})
+
+    def test_a_dependency_added_without_reinstalling_is_caught(self) -> None:
+        package = {"devDependencies": {"tailwindcss": "^4.1.13", "postcss": "^8.0.0"}}
+        self.assertEqual(list(_unsynchronised(package, self._LOCK)), ["devDependencies"])
+
+    def test_a_changed_range_is_caught(self) -> None:
+        package = {"devDependencies": {"tailwindcss": "^4.3.3"}}
+        self.assertEqual(list(_unsynchronised(package, self._LOCK)), ["devDependencies"])
+
+    def test_a_section_present_on_one_side_only_is_caught(self) -> None:
+        package = {**self._PACKAGE, "optionalDependencies": {"fsevents": "^2.3.0"}}
+        self.assertEqual(list(_unsynchronised(package, self._LOCK)), ["optionalDependencies"])
+
+    def test_empty_and_absent_sections_are_equivalent(self) -> None:
+        self.assertEqual(_unsynchronised({**self._PACKAGE, "dependencies": {}}, self._LOCK), {})
