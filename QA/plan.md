@@ -1,26 +1,47 @@
 # PRAHO Portal QA Walkthrough Plan
 
-> **Status: living spec, promoted from cycle 1 (2026-09-26).**
+> **Status: living spec, promoted from cycle 1 (2026-09-26); enforcement re-audited check by check
+> on 2026-10-06.**
 >
 > This document is no longer a one-off walkthrough script. It is the checklist each cycle works
 > against, and the table below records which automated test now enforces each phase — because the
 > reason cycle 1 was never re-run is that its walkthrough stayed prose while only its *findings*
-> became tests. A phase with a test beside it does not need a human to re-walk it.
+> became tests. A phase with a test beside it still needs a human for the named gaps: of the 47
+> numbered checks, **21 are fully asserted** by a test, **24 partly** (the page is reached and the
+> main behaviour asserted, but one or two named elements are not), and **2 not at all** — 1.2 root
+> redirect and 1.5 login-form validation. Phase 4 is the only one close to needing no re-walk.
 >
-> | Phase | Enforced by `tests/e2e/portal/` |
-> |---|---|
-> | 1 — Authentication & public pages | `test_cookie_consent.py`, `test_navigation.py`, `test_maintenance_window.py` (the login surface under maintenance) |
-> | 2 — Dashboard | `test_dashboard.py` |
-> | 3 — Profile & account management | `test_customer_company.py`, `test_customer_users.py`, `test_customer_addresses.py` |
-> | 4 — Billing | `test_customer_billing.py`, `test_customer_invoices.py` |
-> | 5 — Orders / product catalog | `test_signup_order_flow.py`, `test_cart_flow_regression.py`, `test_order_flow_bugs.py`, `test_order_flow_compliance.py`, `test_order_flow_ux.py` |
-> | 6 — Hosting services | `test_customer_services.py`, `test_customer_provisioning.py` |
-> | 7 — Support tickets | `test_customer_tickets.py` |
+> | Phase | Enforced by `tests/e2e/portal/` | Asserted / partial / none |
+> |---|---|---|
+> | 1 — Authentication & public pages | `test_cookie_consent.py`, `test_navigation.py`, `test_rate_limit_ux.py` (1.6), `test_password_recovery_workflow.py` (1.8) | 3 / 4 / 2 |
+> | 2 — Dashboard | `test_dashboard.py` | 0 / 2 / 0 |
+> | 3 — Profile & account management | `test_customer_company.py`, `test_customer_users.py`, `../test_localisation.py` (3.1 timezone) | 5 / 6 / 0 |
+> | 4 — Billing | `test_customer_billing.py`, `test_customer_invoices.py` | 6 / 1 / 0 |
+> | 5 — Orders / product catalog | `test_signup_order_flow.py`, `test_cart_flow_regression.py`, `test_order_flow_bugs.py`, `test_order_flow_compliance.py`, `test_order_flow_ux.py` | 2 / 5 / 0 |
+> | 6 — Hosting services | `test_customer_services.py`, `test_customer_provisioning.py`, `test_service_request_workflow.py` (6.5), `test_filter_tabs_portal.py` (6.2) | 1 / 4 / 0 |
+> | 7 — Support tickets | `test_customer_tickets.py`, `test_navigation.py` (7.5, 7.6) | 4 / 2 / 0 |
 >
-> Those 22 files run nightly with server-side coverage as of `1c109951`. What they do **not** yet
-> assert is the check this cycle showed matters most: **no unexpected empty state**. A page that
-> renders "No Support Tickets Yet" when the platform is down passes every one of them. That is the
-> gap to close next, not the walkthrough.
+> `test_maintenance_window.py` and `test_customer_addresses.py` enforce no numbered check — the plan
+> has no maintenance or address check; that is a gap in the plan, not in the tests. The checks whose
+> wording no longer matches the product are corrected inline below (2.1, 3.3, 3.6, 3.9, 5.4, 5.7,
+> 6.4, 7.1).
+>
+> `make test-e2e-coverage` runs the whole `tests/e2e/` tree — portal, platform, ORM and infra — and
+> the 21 `tests/e2e/portal/test_*.py` files plus `tests/e2e/test_localisation.py` are the portal's
+> share of it. The whole tree passed locally at `a4fab59b` on 2026-10-06: 317 tests, 0 skipped,
+> 9m25s. The nightly job meant to run it (#543, `e974d801`) **failed at Node setup on each of its
+> first seven nights** — see [`README.md`](README.md) — so nothing in this file may cite a nightly
+> result until one exists.
+>
+> **No unexpected empty state**, the check cycle 2 showed matters most, is now asserted for one
+> surface: `test_maintenance_window.py` toggles the real `system.maintenance_mode` and checks
+> `/billing/invoices/` keeps its rows and shows the maintenance notice instead of "No documents
+> found". It is still *not* asserted for `/tickets/`, `/services/`, the dashboard, detail pages or
+> the HTMX partials, and no test covers an **undeclared** outage: a refused connection raises a
+> `PlatformAPIError` with no status code, only 502/503/504 count as "unavailable", so `/tickets/`
+> still renders "No Support Tickets Yet" when the platform process is simply down
+> (`apps/api_client/services.py:511-513`, `apps/common/rate_limit_feedback.py:159-162`). That is
+> product behaviour as well as a test gap, and it is the next thing to close.
 >
 > Cycle evidence: [`cycle-01-v0.21.0/`](cycle-01-v0.21.0/) (v0.21.0, executed) ·
 > [`cycle-02-v0.30.0/findings.md`](cycle-02-v0.30.0/findings.md) (current).
@@ -35,29 +56,22 @@ We need a full manual QA walkthrough of the Portal service (localhost:8701) usin
 
 ## Pre-requisites
 
-1. **Start services**: Run `make dev` in background (platform :8700 + portal :8701)
-2. **Load fixtures**: Run `make fixtures` to seed demo data (users, products, invoices, services, tickets)
-3. **Create QA folder structure**:
+1. **Start services**: Run `make dev` in background (platform :8700 + portal :8701). The enforcing
+   tests use a *different* stack, `make dev-e2e` (own SQLite, rate limiting off, no workers), on the
+   same two ports — a human walk and the suite therefore never see the same data, and the e2e stack
+   refuses to start while `make dev` holds the ports.
+2. **Load fixtures**: Run `make fixtures` to seed demo data (users, products, invoices, services, tickets).
+   `make dev` already runs the same command at start-up.
+3. **Create the cycle folder** (`QA/cycle-NN-vX.Y.Z/`; cycle folders are frozen once the cycle closes):
 ```
 QA/
-├── plan.md                     # This plan (copied here)
-├── screenshots/
-│   ├── 01_auth/
-│   ├── 02_dashboard/
-│   ├── 03_profile/
-│   ├── 04_billing/
-│   ├── 05_orders/
-│   ├── 06_services/
-│   └── 07_tickets/
-├── logs/
-│   ├── server_log_checkpoint_A.txt
-│   ├── server_log_checkpoint_B.txt
-│   ├── server_log_checkpoint_C.txt
-│   ├── server_log_checkpoint_D.txt
-│   ├── server_log_final.txt
-│   └── console_errors.log
-├── action_log.md               # Step-by-step log of every action taken
-└── qa_report.md                # Master findings report
+├── plan.md                     # This spec, carried forward and corrected
+├── README.md
+├── cycle-NN-vX.Y.Z/
+│   ├── qa_report.md            # Findings, in the four verdicts
+│   └── action_log.md           # Step-by-step log of every action taken
+├── screenshots/<phase>/        # gitignored — evidence lives on the machine that ran the cycle
+└── logs/                       # gitignored — server-log checkpoints A-D + final, console_errors.log
 ```
 
 ## Test Credentials
@@ -65,7 +79,7 @@ QA/
 | Service | Email | Password |
 |---------|-------|----------|
 | Portal (primary) | `e2e-customer@test.local` | `test123` |
-| Portal (fallback) | `customer@pragmatichost.com` | `testpass123` |
+| Portal (fallback) | `customer@pragmatichost.com` | `testpass123` on `make dev`; `admin123` on the e2e stack (`apps/common/e2e_fixtures.py`) |
 
 ## Team Architecture
 
@@ -161,7 +175,7 @@ QA/
 
 ### 2.1 Main Dashboard
 - **URL**: `/dashboard/`
-- **Check**: Welcome greeting, 4 stat cards (services/tickets/invoices/status), recent invoices section, recent tickets section, quick action buttons, footer version badge
+- **Check**: Welcome greeting, 4 stat cards (Services / Open Tickets / Account Status / Next Billing — there is no invoices card; Next Billing is the literal "End of Month"), recent invoices section, recent tickets section, quick action buttons, footer version badge (hardcoded `Version 0.30.0` in `base.html`; nothing asserts it)
 - **Screenshots**: `02_dashboard_full.png`, `02_dashboard_bottom.png`
 
 ### 2.2 Account Overview
@@ -186,7 +200,7 @@ QA/
 
 ### 3.3 Company Profile Edit
 - **URL**: `/company/edit/`
-- **Check**: Pre-filled fields, country readonly (RO), VAT validation
+- **Check**: Pre-filled fields, save persists. The page no longer carries country or VAT inputs — tax identity lives at `/company/tax/` and addresses at `/company/addresses/`, neither of which this plan walks yet
 - **Screenshots**: `03_company_edit_form.png`
 
 ### 3.4 Create Company (Inspect Only - DO NOT SUBMIT)
@@ -201,7 +215,7 @@ QA/
 
 ### 3.6 MFA Management
 - **URL**: `/mfa/`
-- **Check**: MFA status badge, TOTP setup link, last login date
+- **Check**: MFA status badge, TOTP setup link (the "last login" row was removed, not populated — cycle 1 M2)
 - **Screenshot**: `03_mfa_management.png`
 
 ### 3.7 MFA TOTP Setup (Inspect Only - DO NOT ENABLE)
@@ -216,7 +230,7 @@ QA/
 
 ### 3.9 Privacy Dashboard
 - **URL**: `/privacy/`
-- **Check**: 3 consent toggles, GDPR consent date, data export link
+- **Check**: 2 read-only consent badges, data export link (the consent date renders on `/consent-history/`, not here)
 - **Screenshot**: `03_privacy_dashboard.png`
 
 ### 3.10 Data Export
@@ -272,7 +286,7 @@ QA/
 
 ---
 
-## Phase 5: Orders / Product Catalog (8 checks)
+## Phase 5: Orders / Product Catalog (7 checks)
 
 ### 5.1 Product Catalog
 - **URL**: `/order/`
@@ -291,7 +305,7 @@ QA/
 
 ### 5.4 Cart Review
 - **URL**: `/order/cart/`
-- **Check**: Breadcrumb (step 2), items list, quantity controls (HTMX), totals (subtotal + VAT 21% + total), Proceed to Checkout button
+- **Check**: Breadcrumb (step 2), items list, quantity controls (HTMX), totals (subtotal + VAT 21% + total), "Continue to checkout" button
 - **Screenshots**: `05_cart_review.png`, `05_cart_quantity_updated.png`
 
 ### 5.5 Mini Cart Widget
@@ -307,7 +321,7 @@ QA/
 
 ### 5.7 Service Plans
 - **URL**: `/services/plans/`
-- **Check**: Plans grid, pricing, order CTA buttons
+- **Check**: Plans grid, pricing, order CTA buttons. Known gap: the "Upgrade Plan" button has no href or handler (`templates/services/plans_list.html:159-161`), and the test asserts headings only
 - **Screenshot**: `05_service_plans.png`
 
 ### Log Checkpoint D
@@ -332,7 +346,7 @@ QA/
 - **Screenshots**: `06_service_detail_hero.png`, `06_service_detail_usage.png`
 
 ### 6.4 Service Usage Chart (HTMX)
-- **Check**: `/services/{id}/usage/` loads, bars render
+- **Check**: the inline Usage tab renders current recorded usage ("Usage charts will be available soon" is the honest placeholder for history). The `/services/{id}/usage/` route resolves but no template or script references it; it is covered by unit tests only
 - **Screenshot**: `06_service_usage_chart.png`
 
 ### 6.5 Service Action Request (Inspect Only)
@@ -346,7 +360,7 @@ QA/
 
 ### 7.1 Ticket List
 - **URL**: `/tickets/`
-- **Check**: Header stats, status tabs, search, table, priority badges
+- **Check**: Header stats, status tabs, search, table (columns are Ticket / Subject / Status / Created — no priority column)
 - **Screenshot**: `07_tickets_list.png`
 
 ### 7.2 Ticket Search & Tabs (HTMX)
@@ -386,7 +400,7 @@ QA/
 1. **HTMX skeleton loaders** — `#tickets-skeleton` has custom CSS override; watch for layout shifts
 2. **Romanian currency formatting** — `cents_to_currency` + `romanian_currency` filter chain; raw integers = bug
 3. **SVG icon system** — `{% icon "name" %}` renders blank if icon missing from registry
-4. **Platform availability banner** — Dashboard shows red banner if platform down
+4. **Platform availability banner** — the dashboard's red banner markup is unreachable: `dashboard_view` never sets `platform_available` to false, so a 502/503/504 shows the blue maintenance alert and a refused connection shows nothing (only `/dashboard/account/` can render the red one)
 5. **Cart HMAC price sealing** — `cart_version` hidden field must match on checkout
 6. **GDPR consent date** — Must not display `None` raw
 7. **MFA pages without TOTP** — Backup codes page with MFA disabled must not 500

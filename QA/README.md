@@ -4,6 +4,7 @@
 |---|---|
 | [`plan.md`](plan.md) | **Living spec.** The portal checklist, annotated with the automated test that now enforces each phase |
 | [`cycle-02-v0.30.0/findings.md`](cycle-02-v0.30.0/findings.md) | **Current cycle.** Findings, evidence, and what is still open |
+| [`cycle-02-v0.30.0/phase-4-survey.md`](cycle-02-v0.30.0/phase-4-survey.md) | Cycle 2's route, assertion-quality and suppressed-gate survey |
 | [`cycle-01-v0.21.0/`](cycle-01-v0.21.0/) | Cycle 1 evidence, preserved unedited |
 
 ## How this is meant to work
@@ -18,13 +19,28 @@ the absence of regression.
 The reason cycle 1 went stale for six months is recorded in
 [`cycle-02-v0.30.0/findings.md`](cycle-02-v0.30.0/findings.md#root-cause-of-the-staleness-by-5-whys),
 and it was not laziness: end-to-end QA work moved no number anyone watched. The browser suite ran
-in no CI workflow and reported `--no-cov`. That is fixed, and it is the load-bearing change — the
-documents were the symptom.
+in no CI workflow and reported `--no-cov`. The nightly job that was meant to fix that (#543,
+2026-09-28) is the load-bearing change — and it failed at its "Set up Node" step on each of its
+first seven nights, 2026-09-29 to 10-05, before a browser was ever installed, because the
+`package-lock.json` it installs from was gitignored and existed on no runner. Nobody noticed: a red
+scheduled job notifies no one, so the same root cause recurred one level up. The lockfile is tracked
+since 2026-10-06 and a guard test (`services/platform/tests/common/test_ci_node_lockfile.py`) keeps it that way. The
+job's first green run is the evidence that the suite runs nightly; until then no document here may
+claim it.
 
 ## The gates a cycle runs
 
+Read the nightly's real results first. Every number below is only as good as the job that produces
+it, and this programme has now twice believed a gate that was not running:
+
 ```bash
-make lint                # 8 phases, including the settings guardrail's 6 checks
+gh run list --workflow nightly.yml -L 7   # both jobs green, on the branch you are about to claim
+```
+
+Then:
+
+```bash
+make lint                # 11 phases (0-10), including the settings guardrail's 6 checks
 make test-platform       # Django suite
 make test-portal         # plus the portal DB-isolation guard
 make test-integration    # cross-service HMAC
