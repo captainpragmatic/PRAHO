@@ -116,11 +116,10 @@ DATABASES: dict[str, dict[str, Any]] = {
 # revocation is possible. See ADR-0017 addendum for rationale.
 SESSION_ENGINE = "django.contrib.sessions.backends.db"
 
-# Portal uses LocMemCache (per-process, in-memory).
-# Limitation: rate limit counters are NOT shared across gunicorn workers.
-# In multi-worker deployments, effective rate limits are multiplied by worker count.
-# This is an accepted tradeoff for the portal's stateless architecture (no database).
-# cache.add()/cache.incr() are still atomic within each worker process.
+# Portal uses LocMemCache for disposable cached data and per-worker coordination (ADR-0050).
+# Rate limits and payment/checkout idempotency use apps.common.counters in the shared session database.
+# Clearing LocMemCache does not reset those counters or claims.
+# Protected memberships have a 300 s session TTL and are invalidated when validation changes membership_hash.
 if os.environ.get("DEBUG", "True").lower() == "true":
     CACHES = {
         "default": {

@@ -33,7 +33,6 @@ from typing import Any, cast
 
 import requests
 from django.conf import settings
-from django.core.cache import cache
 from django.core.exceptions import ImproperlyConfigured
 
 from apps.common.outbound_http import OutboundSecurityError, portal_request
@@ -736,13 +735,8 @@ class PlatformAPIClient:
     # CUSTOMER API ENDPOINTS
     # ===============================================================================
 
-    def get_user_customers(self, user_id: int) -> list[dict[str, Any]]:
-        """🔒 Get customers accessible to user - SECURE HMAC BODY"""
-        cache_key = f"user_customers_{user_id}"
-        cached_data = cache.get(cache_key)
-        if cached_data:
-            return cast(list[dict[str, Any]], cached_data)
-
+    def get_user_customers(self, user_id: int) -> list[dict[str, object]]:
+        """🔒 Resolve current customers without a redundant per-worker membership cache."""
         request_data = {
             "action": "get_user_customers",
             "user_id": user_id,
@@ -751,8 +745,8 @@ class PlatformAPIClient:
         # Pass user_id to _make_request so it auto-injects 'user_id' in the signed body (defensive)
         data = self._make_request("POST", "/users/customers/", user_id=user_id, data=request_data, idempotent=True)
         customers = data.get("results", []) if data.get("success") else []
-        cache.set(cache_key, customers, 300)
-        return customers
+        # The middleware saves active_customer_id; protected roles use the session TTL and membership_hash.
+        return cast(list[dict[str, object]], customers)
 
     def get_customer_details(self, customer_id: int, user_id: int) -> dict[str, Any]:
         """Get customer details using secure HMAC authenticated endpoint"""

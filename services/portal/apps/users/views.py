@@ -39,6 +39,7 @@ from apps.common.rate_limit_feedback import (
 )
 from apps.common.rate_limiting import mark_auth_failure, mark_auth_success
 from apps.common.request_ip import get_safe_client_ip
+from apps.common.store_unavailable import end_session_or_unavailable
 from apps.users.constants import PASSWORD_RESET_SESSION_KEY
 from apps.users.forms import (
     ChangePasswordForm,
@@ -421,8 +422,10 @@ def logout_view(request: HttpRequest) -> HttpResponse:
     logger.info(f"✅ [Portal Auth] Customer {customer_id} logged out")
 
     if request.method == "POST":
-        # Flush session (secure - rotates session key)
-        request.session.flush()
+        # End authentication and flush as one guarded operation.
+        unavailable_response = end_session_or_unavailable(request)
+        if unavailable_response is not None:
+            return unavailable_response
         messages.success(request, _("You have been logged out successfully."))
         return redirect("/login/")
 
@@ -747,7 +750,10 @@ def password_reset_confirm_view(
             )
             if not result.get("success"):
                 raise PlatformAPIError("Password reset was not accepted")
-            request.session.flush()
+            unavailable_response = end_session_or_unavailable(request)
+            if unavailable_response is not None:
+                unavailable_response["Referrer-Policy"] = "no-referrer"
+                return unavailable_response
             messages.success(request, _("Password reset successfully. Please sign in with your new password."))
             response = redirect("users:login")
             response["Referrer-Policy"] = "no-referrer"
