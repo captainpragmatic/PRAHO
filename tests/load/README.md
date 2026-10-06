@@ -1,68 +1,73 @@
 # Load Testing for PRAHO Platform
 
-This directory contains load testing scripts using [Locust](https://locust.io/).
+This directory holds a [Locust](https://locust.io/) load-test script for the staff Platform
+(`locustfile.py`).
+
+## Current state: the script needs rework before it measures anything
+
+The scenarios predate the platform's current URLs and login form. Run as it stands, the script only
+measures failures:
+
+- **Login.** It posts a `username` field, but the platform's login form takes `email`, so every login
+  fails.
+- **Routes.** It requests `/app/<section>/` URLs. Only `/app/` survives, as an alias of the dashboard.
+  The sections now live at the top level: `/customers/`, `/orders/`, `/billing/`, `/products/`,
+  `/tickets/`, `/provisioning/`, `/domains/`, `/audit/` and `/settings/`.
+- **API.** `PRAHOAPIUser` sends no credentials, so the platform refuses its `/api/...` requests.
+
+Treat any numbers it produces as meaningless until the script is updated. The rest of this page
+describes how to run it once that is done.
 
 ## Setup
 
-1. Install dependencies:
-```bash
-pip install -r ../../services/platform/requirements/testing.txt
-```
+Locust is not a project dependency, and the script imports nothing from PRAHO. Run it in an isolated
+environment with [`uvx`](https://docs.astral.sh/uv/), so it never touches the project virtualenv.
 
-2. Create test users in the database:
+1. Start the platform with `make dev`. It serves on `http://localhost:8700`.
+2. Create the two test users. The user model is email-based and has no `username` field. Staff
+   accounts without an enrolled second factor log in with the password alone.
+
 ```bash
+VENV=.venv-$(uname -s | tr '[:upper:]' '[:lower:]')
 cd services/platform
-python manage.py shell -c "
+PYTHONPATH=$PWD ../../$VENV/bin/python manage.py shell --settings=config.settings.dev -c "
 from django.contrib.auth import get_user_model
 User = get_user_model()
-
-# Create regular test user
-User.objects.get_or_create(
-    username='loadtest_user',
-    defaults={
-        'email': 'loadtest@test.ro',
-        'is_staff': False,
-    }
-)
-User.objects.filter(username='loadtest_user').first().set_password('LoadTest123!')
-
-# Create staff test user
-User.objects.get_or_create(
-    username='loadtest_staff',
-    defaults={
-        'email': 'loadtest_staff@test.ro',
-        'is_staff': True,
-        'staff_role': 'support',
-    }
-)
-User.objects.filter(username='loadtest_staff').first().set_password('LoadTest123!')
+for email, extra in (
+    ('loadtest@test.ro', {}),
+    ('loadtest_staff@test.ro', {'is_staff': True, 'staff_role': 'support'}),
+):
+    if not User.objects.filter(email=email).exists():
+        User.objects.create_user(email=email, password='LoadTest123!', **extra)
 "
 ```
 
 ## Running Load Tests
 
-### Web UI Mode (Recommended for development)
+### Web UI mode (for development)
 ```bash
-locust -f tests/load/locustfile.py --host=http://localhost:8000
+uvx locust -f tests/load/locustfile.py --host=http://localhost:8700
 ```
 Then open http://localhost:8089 in your browser.
 
-### Headless Mode (For CI/CD)
+### Headless mode
 ```bash
-# 100 users, spawn 10 per second, run for 5 minutes
-locust -f tests/load/locustfile.py --host=http://localhost:8000 --headless -u 100 -r 10 -t 5m
+# 100 users, spawning 10 per second, for 5 minutes
+uvx locust -f tests/load/locustfile.py --host=http://localhost:8700 --headless -u 100 -r 10 -t 5m
 
-# With HTML report
-locust -f tests/load/locustfile.py --host=http://localhost:8000 --headless -u 100 -r 10 -t 5m --html=load_report.html
+# With an HTML report
+uvx locust -f tests/load/locustfile.py --host=http://localhost:8700 --headless -u 100 -r 10 -t 5m --html=load_report.html
 ```
 
-### Specific User Types
+No CI workflow runs these tests.
+
+### Specific user types
 ```bash
-# Only API users
-locust -f tests/load/locustfile.py --host=http://localhost:8000 --class-picker
+# Choose user classes in the web UI
+uvx locust -f tests/load/locustfile.py --host=http://localhost:8700 --class-picker
 
 # Filter by tags
-locust -f tests/load/locustfile.py --host=http://localhost:8000 --tags dashboard customers
+uvx locust -f tests/load/locustfile.py --host=http://localhost:8700 --tags dashboard customers
 ```
 
 ## User Types
@@ -77,26 +82,19 @@ locust -f tests/load/locustfile.py --host=http://localhost:8000 --tags dashboard
 
 ## Test Scenarios
 
-### Smoke Test
 ```bash
-locust -f tests/load/locustfile.py --host=http://localhost:8000 --headless -u 5 -r 1 -t 1m
+# Smoke
+uvx locust -f tests/load/locustfile.py --host=http://localhost:8700 --headless -u 5 -r 1 -t 1m
+# Load
+uvx locust -f tests/load/locustfile.py --host=http://localhost:8700 --headless -u 100 -r 10 -t 10m
+# Stress
+uvx locust -f tests/load/locustfile.py --host=http://localhost:8700 --headless -u 500 -r 50 -t 15m
+# Spike: rapid increase to high load
+uvx locust -f tests/load/locustfile.py --host=http://localhost:8700 --headless -u 200 -r 100 -t 5m
 ```
 
-### Load Test
-```bash
-locust -f tests/load/locustfile.py --host=http://localhost:8000 --headless -u 100 -r 10 -t 10m
-```
-
-### Stress Test
-```bash
-locust -f tests/load/locustfile.py --host=http://localhost:8000 --headless -u 500 -r 50 -t 15m
-```
-
-### Spike Test
-```bash
-# Rapid increase to high load
-locust -f tests/load/locustfile.py --host=http://localhost:8000 --headless -u 200 -r 100 -t 5m
-```
+The development server is single-process and uses SQLite. Its numbers show regressions between two
+runs on the same machine, not production capacity.
 
 ## Performance Targets
 
@@ -110,14 +108,14 @@ locust -f tests/load/locustfile.py --host=http://localhost:8000 --headless -u 20
 
 ## Interpreting Results
 
-- **RPS (Requests per second)**: Higher is better
-- **Response Time**: Lower is better
-- **Failure Rate**: Should be near 0%
+- **RPS (requests per second)**: higher is better
+- **Response time**: lower is better
+- **Failure rate**: should be near 0%. Today it is not; see "Current state" above
 - **Percentiles**: p95 and p99 show worst-case performance
 
 ## Common Issues
 
-1. **High failure rate on login**: Check test user credentials
-2. **CSRF errors**: Ensure CSRF token extraction is working
-3. **Connection refused**: Ensure Django server is running
-4. **Slow response times**: Check database performance, N+1 queries
+1. **Every login fails**: the script posts `username`; see "Current state"
+2. **CSRF errors**: check that the CSRF token is read from the login page before posting
+3. **Connection refused**: the platform is not running on `:8700`; start it with `make dev`
+4. **Slow response times**: check database performance and N+1 queries

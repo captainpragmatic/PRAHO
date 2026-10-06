@@ -1,328 +1,191 @@
-# HTTPS Security Deployment Checklist for PragmaticHost
+# HTTPS Deployment Checklist
 
-## 🔒 **HTTPS Security Implementation Guide**
+Use this for every production or staging deploy that serves PRAHO publicly. Both services run
+behind Caddy, each on its own hostname: `PORTAL_DOMAIN` (customers) and `PLATFORM_DOMAIN` (staff,
+API and webhooks). Most of the HTTPS hardening is fixed in code and config. This checklist is mostly
+about **verifying** it, not rolling it out step by step.
 
-This checklist ensures proper HTTPS security hardening deployment for the PRAHO Platform on PragmaticHost infrastructure.
+Commands below use these shell variables. Set them to your real hostnames first:
 
----
-
-## **Pre-Deployment Preparation**
-
-### ✅ **1. Load Balancer/Proxy Configuration**
-- [ ] **SSL Certificate Installed**: Verify SSL certificate is properly installed on load balancer
-- [ ] **X-Forwarded-Proto Header**: Confirm load balancer sets `X-Forwarded-Proto: https` for HTTPS requests
-- [ ] **Health Check Endpoints**: Ensure health checks work over HTTPS
-- [ ] **HTTP to HTTPS Redirect**: Test that HTTP requests redirect to HTTPS at load balancer level
-
-**Commands to verify:**
 ```bash
-# Test X-Forwarded-Proto header
-curl -H "X-Forwarded-Proto: https" https://app.pragmatichost.com/health/
-
-# Test SSL certificate
-openssl s_client -connect app.pragmatichost.com:443 -servername app.pragmatichost.com
-```
-
-### ✅ **2. DNS Configuration**
-- [ ] **A Record**: `app.pragmatichost.com` points to load balancer IP
-- [ ] **SSL Certificate Validity**: Certificate covers `app.pragmatichost.com`
-- [ ] **Wildcard Support**: If using subdomains, verify wildcard certificate
-
-### ✅ **3. Backup Current Configuration**
-```bash
-# Backup current settings
-cp config/settings/prod.py config/settings/prod.py.backup.$(date +%Y%m%d)
-
-# Backup environment variables
-env | grep -E "(DJANGO|SECRET|DATABASE|REDIS)" > .env.backup.$(date +%Y%m%d)
+PORTAL_HOST=portal.example.com
+PLATFORM_HOST=platform.example.com
 ```
 
 ---
 
-## **Environment-Specific Deployment**
+## How TLS is arranged
 
-### 🚀 **Production Deployment** (app.pragmatichost.com)
+Nothing in this table is an operator decision. It tells you what to expect when you verify.
 
-#### **Phase 1: Initial HTTPS Configuration**
-- [ ] **Deploy HTTPS Settings**: Deploy production settings with HTTPS hardening
-- [ ] **Verify ALLOWED_HOSTS**: Ensure `ALLOWED_HOSTS = ["app.pragmatichost.com"]`
-- [ ] **Set CSRF_TRUSTED_ORIGINS**: `CSRF_TRUSTED_ORIGINS = ["https://app.pragmatichost.com"]`
+| Concern | Where it lives | What ships |
+|---|---|---|
+| TLS termination and certificates | Caddy: `deploy/caddy/Caddyfile` (Docker), `deploy/ansible/roles/praho-native/templates/Caddyfile.native.j2` (native) | Automatic ACME certificates per hostname, contact address `ACME_EMAIL` |
+| HTTP → HTTPS redirect | Caddy | Django's own redirect stays **off**: every shipped compose file and the Ansible env template set `DJANGO_SECURE_SSL_REDIRECT=false`. Set it to `true` only if Django faces the internet directly |
+| Scheme Django sees | `SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")` in both services' `config/settings/prod.py` | Caddy sends `X-Forwarded-Proto` |
+| HSTS | Both services' `prod.py`, and a `Strict-Transport-Security` header in both Caddy configs | One year with `includeSubDomains`. Hardcoded, with no environment variable to lower it |
+| Secure cookies | `SESSION_COOKIE_SECURE` and `CSRF_COOKIE_SECURE` are `True` in both `prod.py` files | Not configurable |
+| Allowed hosts and CSRF origins | `ALLOWED_HOSTS` environment variable (comma-separated) | `CSRF_TRUSTED_ORIGINS` is derived as `https://<host>` for each host. Startup fails if `ALLOWED_HOSTS` is unset or contains `*`. The platform also refuses to start without `PORTAL_DOMAIN` and `PLATFORM_DOMAIN` |
+| Staff UI exposure | Caddy's `@staff` matcher | The platform's staff UI is served only to `PLATFORM_ALLOWED_CIDRS` (native: `platform_allowed_ips`); everyone else gets `403 Access denied`. `/api/*`, the webhook endpoints and unsubscribe links stay public |
+| Content Security Policy | `apps/common/middleware.py` in each service | `default-src 'self'`, with no third-party hosts: every script, style and font is self-hosted. The portal sends `Content-Security-Policy-Report-Only` instead when `CSP_REPORT_ONLY=true`; production should enforce |
 
-#### **Phase 2: SSL Redirect Testing**
-- [ ] **Test Without SSL Redirect**: First deploy with `DJANGO_SECURE_SSL_REDIRECT=false`
-- [ ] **Verify HTTPS Works**: Test all major application flows over HTTPS
-- [ ] **Check Security Headers**: Verify security headers are present
+> **HSTS is permanent for a year.** There is no short-HSTS stage, and no setting that lowers the
+> header once it ships. A browser that has seen it refuses plain HTTP to that host for a year.
+> Confirm HTTPS works on **both** hostnames before the first deploy that serves them publicly.
 
-**Test Commands:**
-```bash
-# Test HTTPS functionality
-curl -I https://app.pragmatichost.com/auth/login/
-
-# Check security headers
-curl -I https://app.pragmatichost.com/ | grep -E "(X-Content-Type|X-Frame|X-XSS|Strict-Transport)"
-
-# Test Django system checks
-python manage.py check --settings=config.settings.prod --deploy
-```
-
-#### **Phase 3: Enable SSL Redirect**
-- [ ] **Enable SSL Redirect**: Set `DJANGO_SECURE_SSL_REDIRECT=true`
-- [ ] **Test HTTP Redirects**: Verify HTTP requests redirect to HTTPS
-- [ ] **Verify No Redirect Loops**: Ensure proper `X-Forwarded-Proto` handling
-
-**Test Commands:**
-```bash
-# Test HTTP to HTTPS redirect
-curl -I http://app.pragmatichost.com/ | grep -i location
-
-# Verify no redirect loops
-curl -L -I http://app.pragmatichost.com/auth/login/
-```
-
-#### **Phase 4: HSTS Rollout**
-- [ ] **Short HSTS First**: Start with `SECURE_HSTS_SECONDS = 300` (5 minutes)
-- [ ] **Monitor for 24 Hours**: Verify no issues with short HSTS
-- [ ] **Increase to Production**: Set `SECURE_HSTS_SECONDS = 31536000` (1 year)
-
-**HSTS Verification:**
-```bash
-# Check HSTS header
-curl -I https://app.pragmatichost.com/ | grep -i strict-transport-security
-
-# Test HSTS policy in browser
-# Visit https://app.pragmatichost.com and check Network tab
-```
-
-### 🧪 **Staging Deployment** (staging.pragmatichost.com)
-
-#### **Staging Configuration Validation**
-- [ ] **Deploy Staging Settings**: Use staging-specific HTTPS configuration
-- [ ] **Shorter HSTS**: `SECURE_HSTS_SECONDS = 3600` (1 hour)
-- [ ] **No Subdomain HSTS**: `SECURE_HSTS_INCLUDE_SUBDOMAINS = False`
-- [ ] **Test SSL Configuration**: Full application testing over HTTPS
-
-### 🔧 **Development Environment**
-
-#### **Local Development Verification**
-- [ ] **HTTP Configuration**: Ensure development uses HTTP properly
-- [ ] **No SSL Redirect**: Verify `DJANGO_SECURE_SSL_REDIRECT=false` (or dev settings default)
-- [ ] **Insecure Cookies**: Confirm `SESSION_COOKIE_SECURE = False`
+> **Known divergence, unresolved.** The two services and Caddy disagree on two HSTS details.
+> - **Preload:** platform `prod.py` has `SECURE_HSTS_PRELOAD = False`, while portal `prod.py` and
+>   both Caddy configs send `preload`.
+> - **Staging:** staging settings use a one-hour HSTS with no `includeSubDomains`, but Caddy sends
+>   the one-year header with `preload` on every host. A staging server behind these Caddy configs
+>   therefore gets the production header, not the staging one.
+>
+> Run the header check below to see which value a browser actually receives. Do this before
+> submitting a domain to the HSTS preload list.
 
 ---
 
-## **Security Validation**
+## Before the first HTTPS deploy
 
-### ✅ **1. Django System Checks**
-```bash
-# Run all security checks
-python manage.py check --settings=config.settings.prod --deploy
-
-# Check specific HTTPS security
-python manage.py check --tag security --settings=config.settings.prod
-```
-
-### ✅ **2. Security Headers Validation**
-```bash
-# Check all security headers
-curl -I https://app.pragmatichost.com/ | grep -E "(Content-Security-Policy|X-Content-Type|X-Frame|X-XSS|Referrer-Policy|Strict-Transport)"
-
-# Verify CSP allows trusted CDNs
-curl -I https://app.pragmatichost.com/ | grep "Content-Security-Policy" | grep -E "(unpkg.com|cdn.tailwindcss.com)"
-```
-
-### ✅ **3. Cookie Security Testing**
-```bash
-# Check session cookie security
-curl -c cookies.txt https://app.pragmatichost.com/auth/login/
-grep -E "(Secure|HttpOnly|SameSite)" cookies.txt
-```
-
-### ✅ **4. Run Test Suite**
-```bash
-# Run HTTPS security tests
-python manage.py test tests.common.test_https_security --settings=config.settings.prod
-
-# Run all security tests
-python manage.py test --pattern="*security*" --settings=config.settings.prod
-```
+- [ ] **DNS.** Both `PORTAL_DOMAIN` and `PLATFORM_DOMAIN` resolve to the server.
+- [ ] **Environment.** `.env` sets `PORTAL_DOMAIN`, `PLATFORM_DOMAIN`, `ACME_EMAIL`, `ALLOWED_HOSTS`
+      and `PLATFORM_ALLOWED_CIDRS`. The comments in `.env.example.prod` explain each.
+- [ ] **Ports.** 80 and 443 are reachable from the internet, so Caddy can complete the ACME
+      challenge. The single-server compose file publishes 80, 443 and 443/udp.
+- [ ] **Redirect setting.** `DJANGO_SECURE_SSL_REDIRECT=false`, as shipped. Caddy owns the redirect.
 
 ---
 
-## **Monitoring & Verification**
+## Verify after every deploy
 
-### ✅ **1. Application Functionality Testing**
-
-#### **Critical User Flows**
-- [ ] **User Login/Logout**: Test authentication flows over HTTPS
-- [ ] **Customer Dashboard**: Verify dashboard loads properly
-- [ ] **Billing Operations**: Test invoice generation and payment flows
-- [ ] **Staff Interface**: Verify staff can access admin functions
-- [ ] **API Endpoints**: Test API functionality with HTTPS
-
-#### **Browser Compatibility**
-- [ ] **Chrome**: Test latest Chrome browser
-- [ ] **Firefox**: Test latest Firefox browser
-- [ ] **Safari**: Test Safari (if supporting macOS users)
-- [ ] **Mobile**: Test mobile browsers
-
-### ✅ **2. Performance Monitoring**
-- [ ] **Response Times**: Monitor for HTTPS performance impact
-- [ ] **SSL Handshake Time**: Verify reasonable SSL negotiation times
-- [ ] **CDN Compatibility**: Ensure CDN works with new security headers
-
-### ✅ **3. Log Monitoring**
-```bash
-# Monitor application logs for HTTPS issues
-tail -f /var/log/pragmatichost/app.log | grep -i -E "(ssl|https|redirect|security)"
-
-# Check for SSL-related errors
-grep -i "ssl" /var/log/pragmatichost/app.log | tail -20
-```
-
----
-
-## **Rollback Plan**
-
-### 🔄 **Emergency Rollback Procedure**
-
-If critical issues are discovered:
-
-#### **1. Immediate Rollback**
-```bash
-# Disable SSL redirect immediately
-export DJANGO_SECURE_SSL_REDIRECT=false
-systemctl restart pragmatichost-app
-
-# Or deploy previous settings file
-cp config/settings/prod.py.backup config/settings/prod.py
-systemctl restart pragmatichost-app
-```
-
-#### **2. HSTS Rollback**
-```bash
-# Reduce HSTS to minimum (if enabled)
-export SECURE_HSTS_SECONDS=0
-systemctl restart pragmatichost-app
-```
-
-**Note**: HSTS cannot be immediately disabled for users who already received the header. Plan HSTS rollout carefully.
-
-#### **3. DNS/Load Balancer Rollback**
-- [ ] Revert load balancer SSL configuration
-- [ ] Temporarily allow HTTP traffic if needed
-- [ ] Coordinate with infrastructure team
-
----
-
-## **Post-Deployment Verification**
-
-### ✅ **24-Hour Monitoring Checklist**
-
-#### **Day 1: Initial Monitoring**
-- [ ] **Error Logs**: No SSL-related errors in application logs
-- [ ] **User Reports**: No user complaints about accessibility
-- [ ] **Performance**: Response times within acceptable range
-- [ ] **Security Scan**: Run security scan to verify headers
-
-#### **Week 1: Stability Monitoring**
-- [ ] **SSL Certificate**: Verify certificate auto-renewal works
-- [ ] **HSTS Policy**: Confirm HSTS working in browsers
-- [ ] **Search Engines**: Monitor for HTTPS indexing by search engines
-- [ ] **CDN Integration**: Verify CDN properly handles security headers
-
-### ✅ **Security Scanning**
-```bash
-# Use external security scanning tools
-# Example: Mozilla Observatory
-curl -X POST https://http-observatory.security.mozilla.org/api/v1/analyze?host=app.pragmatichost.com
-
-# SSL Labs test
-# Visit: https://www.ssllabs.com/ssltest/analyze.html?d=app.pragmatichost.com
-```
-
----
-
-## **Documentation & Communication**
-
-### ✅ **Team Communication**
-- [ ] **Notify Support Team**: Brief support staff on HTTPS changes
-- [ ] **Update Documentation**: Update any HTTP references to HTTPS
-- [ ] **API Documentation**: Update API documentation with HTTPS URLs
-- [ ] **Monitoring Alerts**: Update monitoring to expect HTTPS
-
-### ✅ **Customer Communication** (if needed)
-- [ ] **Service Notice**: If maintenance window required
-- [ ] **URL Updates**: Communicate any bookmark updates needed
-- [ ] **Integration Updates**: Notify customers with API integrations
-
----
-
-## **Long-Term Security Maintenance**
-
-### ✅ **Ongoing Security Tasks**
-
-#### **Monthly**
-- [ ] **SSL Certificate Monitoring**: Verify certificates haven't expired
-- [ ] **Security Headers Review**: Audit security header effectiveness
-- [ ] **HSTS Policy Review**: Confirm HSTS policy appropriate
-
-#### **Quarterly**
-- [ ] **Security Scanning**: Run comprehensive security scans
-- [ ] **Django Security Updates**: Review Django security releases
-- [ ] **TLS Configuration Review**: Update TLS settings as needed
-
-#### **Annually**
-- [ ] **HTTPS Configuration Audit**: Full review of HTTPS implementation
-- [ ] **Certificate Strategy Review**: Evaluate certificate provider/strategy
-- [ ] **Security Policy Updates**: Update security policies as needed
-
----
-
-## **Environment Variables Reference**
-
-### **Env-Configurable HTTPS Settings**
-
-Only these settings are read from environment variables at runtime:
+### 1. Certificates
+Run this for both hosts:
 
 ```bash
-# SSL redirect (env-configurable, default: true)
-export DJANGO_SECURE_SSL_REDIRECT=false   # Set false behind TLS proxy (Caddy/Nginx)
-
-# Domain configuration (env-configurable)
-export ALLOWED_HOSTS="app.pragmatichost.com"
-export CSRF_TRUSTED_ORIGINS="https://app.pragmatichost.com"
+openssl s_client -connect "$PORTAL_HOST:443" -servername "$PORTAL_HOST" </dev/null 2>/dev/null \
+  | openssl x509 -noout -subject -issuer -dates
 ```
 
-All other HTTPS settings (`SECURE_PROXY_SSL_HEADER`, `SESSION_COOKIE_SECURE`, `CSRF_COOKIE_SECURE`, `SECURE_HSTS_SECONDS`, etc.) are hardcoded in the settings files and not read from environment variables.
+- [ ] The subject matches the hostname, the issuer is the ACME CA, and the certificate is in date.
+
+### 2. Health over HTTPS
+
+```bash
+curl -fsS "https://$PORTAL_HOST/status/"            # {"status": "healthy", "service": "portal"}
+curl -fsS "https://$PLATFORM_HOST/api/users/health/"
+```
+
+- [ ] Both return 200. `deploy/scripts/health-check.sh` checks the same endpoints, and is installed at
+      `/opt/praho/scripts/health-check.sh` on native hosts.
+
+### 3. HTTP redirects to HTTPS
+
+```bash
+curl -sI "http://$PORTAL_HOST/"   | grep -i '^location'
+curl -sI "http://$PLATFORM_HOST/" | grep -i '^location'
+```
+
+- [ ] Each one redirects to the `https://` URL of the same host.
+
+### 4. Security headers
+
+```bash
+curl -sI "https://$PORTAL_HOST/login/" | grep -iE \
+  '^(strict-transport-security|content-security-policy|x-frame-options|x-content-type-options|referrer-policy|permissions-policy):'
+```
+
+Repeat with `https://$PLATFORM_HOST/auth/login/` from an address in `PLATFORM_ALLOWED_CIDRS`. From
+anywhere else, that request correctly returns 403.
+
+- [ ] `Strict-Transport-Security` has `max-age=31536000; includeSubDomains`. Note whether `preload`
+      is present, per the known divergence above.
+- [ ] `Content-Security-Policy` starts `default-src 'self'` and names no third-party host. If only
+      `Content-Security-Policy-Report-Only` appears, `CSP_REPORT_ONLY` is on and the policy is not
+      being enforced.
+- [ ] `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff` and a `Referrer-Policy` are all present.
+
+### 5. Cookie flags
+
+```bash
+curl -sI "https://$PORTAL_HOST/login/" | grep -i '^set-cookie'
+```
+
+- [ ] Every `Set-Cookie` carries `Secure`. The session cookie (`portal_session` on the portal), which
+      is set once you log in, also carries `HttpOnly`.
+
+Read the headers directly. `curl -c` writes a cookie-jar file, and that file records neither the
+`SameSite` attribute nor the word `Secure`.
+
+### 6. Django deployment checks
+- **Portal.** It runs `manage.py check --deploy --fail-level ERROR` before every start: the native
+  unit does it as `ExecStartPre`, and the container entrypoint does it too. So a running portal has
+  already passed. Its warnings are in `journalctl -u praho-portal`, or in
+  `docker compose -f deploy/docker-compose.single-server.yml logs portal`.
+- **Platform.** Run the check by hand. Native:
+
+  ```bash
+  cd /opt/praho/src/services/platform
+  sudo -u praho bash -c 'set -a && source /opt/praho/.env && set +a && \
+    PYTHONPATH=$PWD /opt/praho/.venv-linux/bin/python manage.py check --deploy'
+  ```
+
+  Docker:
+
+  ```bash
+  docker compose -f deploy/docker-compose.single-server.yml exec platform python manage.py check --deploy
+  ```
+
+- [ ] No errors are reported, and every warning has been read and understood.
+
+### 7. Tests
+
+The HTTPS settings behaviour is covered in CI by `HTTPSSecurityConfigurationTest` in
+`services/platform/tests/common/test_common_security.py`. To run it locally:
+
+```bash
+make test-file FILE=tests.common.test_common_security
+```
+
+Never run tests with production settings or against the production database.
 
 ---
 
-## **Emergency Contacts**
+## Rollback
 
-- **DevOps Team**: Contact for load balancer/SSL issues
-- **Infrastructure Team**: DNS and certificate issues
-- **Security Team**: Security policy questions
-- **Development Team**: Application-specific HTTPS issues
-
----
-
-## **Success Criteria**
-
-✅ **Deployment is successful when:**
-
-1. **All HTTP traffic redirects to HTTPS** without loops
-2. **All security headers present** and properly configured
-3. **Django system checks pass** without security warnings
-4. **Application functionality intact** over HTTPS
-5. **SSL Labs rating A or A+** (external validation)
-6. **No increase in error rates** after deployment
-7. **HSTS policy active** and working in browsers
-8. **CDN and security headers compatible**
+- **Application.** Run `make rollback VERSION=vX.Y.Z`, which calls `deploy/scripts/rollback.sh`. To
+  restart in place on a native host: `sudo systemctl restart praho-platform praho-portal praho-qcluster`.
+- **HTTPS itself cannot be rolled back.** Browsers that have seen the HSTS header keep refusing HTTP
+  for up to a year, and no setting shortens that. Fix forward.
+- **Certificates.** Caddy renews automatically. If issuance or renewal fails, read Caddy's log:
+  `journalctl -u caddy` on native hosts, `docker compose -f deploy/docker-compose.single-server.yml
+  logs caddy` under Docker.
 
 ---
 
-**📋 Checklist Completed By**: _________________ **Date**: _________________
+## Where the logs are
 
-**🔍 Reviewed By**: _________________ **Date**: _________________
+| | Native | Docker |
+|---|---|---|
+| Service output | `journalctl -u praho-platform`, `-u praho-portal`, `-u praho-qcluster` | `docker compose -f deploy/docker-compose.single-server.yml logs -f platform portal` |
+| Application log files | Platform: `/var/log/praho/app.log`, `security.log`, `error.log`. Portal: `/var/log/praho/portal/app.log`, `error.log` | The same paths, inside each container |
+| Caddy access logs | `/var/log/caddy/portal-access.log`, `/var/log/caddy/platform-access.log` | `/data/portal-access.log`, `/data/platform-access.log` in the Caddy container |
 
-**✅ Approved for Production**: _________________ **Date**: _________________
+---
+
+## External checks
+
+- [ ] **SSL Labs** for both hosts: `https://www.ssllabs.com/ssltest/analyze.html?d=<host>`. Target A or A+.
+- [ ] **Mozilla HTTP Observatory** for both hosts: `https://developer.mozilla.org/en-US/observatory`.
+
+## Ongoing
+
+- Caddy renews certificates on its own. Alert on certificate expiry anyway, because a failed renewal
+  is silent until the certificate lapses.
+- Review the CSP and security headers when the front-end adds an asset source.
+- Track Django security releases.
+
+---
+
+**Checklist completed by**: _________________ **Date**: _________________
+
+**Reviewed by**: _________________ **Date**: _________________

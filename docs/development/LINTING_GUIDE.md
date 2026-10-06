@@ -1,42 +1,56 @@
 # Strategic Linting Framework - Developer Guide
 
-This document provides a quick reference for developers working with PRAHO Platform's strategic linting framework.
+A quick reference for PRAHO's linting setup. The decision record is **ADR-0002**. The rule
+configuration itself is `[tool.ruff]` in `pyproject.toml`, and that file wins wherever this guide
+and it disagree.
 
 ## Quick Reference
 
 ### Essential Commands
 ```bash
-# Daily development linting
-make lint                 # Standard development checks
-make lint-fix            # Apply safe auto-fixes
+make lint                          # Every phase, both services (see below)
+make lint FILE=path/to/file.py     # Ruff on one file - use it on every file you change, tests included
+make lint-fix                      # Apply Ruff's safe auto-fixes
 
-# Focused security checks
-make lint-security        # Security vulnerabilities
-make lint-credentials     # Hardcoded password detection
+make check-types                   # mypy (FILE=path relative to services/platform for one file)
+make check-types-portal            # mypy for the portal
 
-# Performance optimization
-make lint-performance     # O(N²) and efficiency patterns
+make lint-security                 # Security scanners (not part of `make lint`)
+make lint-credentials              # Hardcoded-credential rules only (S105-S108)
 ```
+
+`make lint` runs its phases in order and stops at the first failure. The Makefile's `lint:` target
+is the authoritative list. Today the phases are:
+- the Ruff no-new-debt gate;
+- each service's checks;
+- the test-layout audit;
+- the test-suppression, i18n, code-health, FSM, cross-app-import and error-handling scans;
+- the status-only test assertion ratchet.
+
+The no-new-debt gate compares against your branch's merge base with `origin/master`. It sees only
+committed changes, so lint uncommitted files with `make lint FILE=`.
 
 ## Rule Categories & Priorities
 
-### 🔥 HIGH PRIORITY (Auto-fix enabled)
+### 🔥 HIGH PRIORITY
 - **PERF**: Performance anti-patterns (list comprehensions, O(N²) detection)
-- **S**: Security issues (hardcoded passwords flagged for manual review)
+- **S**: Security issues (hardcoded passwords are flagged for manual review)
 - **DJ**: Django best practices (model optimizations, view patterns)
-- **ANN**: Type annotations (AI/LLM readability improvements)
-- **SIM**: Code simplification (logical simplifications, readability)
+- **ANN**: Type annotations
+- **SIM**: Code simplification
 
-### ✅ MEDIUM PRIORITY (Review recommended)
+### ✅ MEDIUM PRIORITY (review recommended)
 - **B**: Bug-prone patterns
 - **E**: Error patterns
 - **F**: Fatal errors (syntax, imports)
+- **I**: Import order. It is enforced, and `make lint-fix` sorts imports.
 
-### 📝 STRATEGICALLY IGNORED (Cosmetic/Low Impact)
-- **Line length** (E501): Romanian business terms are longer
-- **Quote consistency** (Q000-Q003): Not business critical
-- **Whitespace formatting** (W291-W293): Handled by IDE
-- **Import sorting** (I001-I002): Handled by isort integration
+### 📝 STRATEGICALLY IGNORED (cosmetic or low impact)
+- **Line length** (E501): Romanian business terms are long
+- **Quote style** (Q000): not business critical
+- **Trailing whitespace** (W291, W293): handled by the formatter
+
+The full ignore list, with a reason for each entry, is in `pyproject.toml`.
 
 ## Performance Optimization Patterns
 
@@ -64,57 +78,28 @@ for rel in relationships:
 ## Security Guidelines
 
 ### Hardcoded Credentials (S105, S106)
-- **69 credentials flagged** for manual review across the codebase
-- **Test files**: Allowed (test data)
-- **Production code**: Manual review required
-- **Settings files**: Warnings enabled, not auto-fixed
+- **Production code**: flagged everywhere, with no global ignore. Review every hit.
+- **Test files, management commands and dev settings**: allowed through per-file ignores in `pyproject.toml`.
+- Run `make lint-credentials` for the current list. Don't record a count here, because it goes stale.
 
 ### Security Best Practices
 - Never auto-ignore security warnings
-- Review flagged credentials quarterly
 - Use environment variables for sensitive data
 - Validate all inputs at the edge
 
 ## File-Specific Configurations
 
-### Test Files (`tests/`)
-```python
-# Allowed in tests:
-- Hardcoded test credentials
-- Magic numbers for assertions
-- Import star usage (fixtures)
-```
-
-### Migration Files (`*/migrations/`)
-```python
-# Ignored in migrations:
-- All formatting rules (auto-generated)
-- Performance rules still active
-```
+### Test Files and Migrations
+- `tests` and `migrations` directories are in Ruff's `exclude` list, so a directory-wide run such as
+  `make lint` skips them.
+- A file passed explicitly (`make lint FILE=...`) is linted anyway. That is why every changed test
+  file should get a `make lint FILE=` run.
+- Under that explicit run, tests may use asserts, test credentials and magic numbers, and may omit
+  type hints and docstrings. Migrations may have long lines.
 
 ### Settings Files
-```python
-# Special handling:
-- Credential warnings enabled
-- Manual security review workflow
-- Environment variable validation
-```
-
-## VS Code Integration
-
-### Auto-Approved Commands
-The following commands are auto-approved in terminals:
-- `make lint`, `make lint-security`, `make lint-credentials`, `make lint-performance`, `make lint-fix` - Linting commands
-- `make test`, `make test-fast` - Testing commands
-- `.venv/bin/ruff` - Direct Ruff commands
-- `head`, `tail` - File viewing
-- `cat`, `ls` - Directory listing
-- `grep` - Text searching
-
-### Performance Monitoring
-- Real-time linting in VS Code
-- Auto-fix suggestions
-- Performance issue highlighting
+- Credential warnings stay enabled. Only the development settings may hold a hardcoded `SECRET_KEY`.
+- Long lines are allowed.
 
 ## Common Issues & Solutions
 
@@ -143,56 +128,34 @@ if not API_KEY:
     raise ValueError("API_KEY environment variable required")
 ```
 
-## Metrics & Progress Tracking
-
-### Current Status
-- **Initial Issues**: 848 linting issues identified
-- **Performance Issues**: 10 → 0 (100% resolved)
-- **Auto-fixable Issues**: 68 → 0 (100% resolved)
-- **Security Warnings**: 69 (preserved for manual review)
-
-### Continuous Improvement
-- **Weekly**: Review new performance anti-patterns
-- **Monthly**: Adjust rules based on codebase evolution
-- **Quarterly**: Security audit of flagged credentials
-
-## Related Documentation
-
-- **ADR-0002**: Complete strategic linting framework decision record
-- **CHANGELOG.md**: Performance and security improvements log
-- **pyproject.toml**: Complete rule configuration
-- **Makefile**: Enhanced linting commands
-
 ## Getting Help
 
-### Common Commands
+Ruff lives in the per-OS virtualenv: `.venv-darwin` on macOS, `.venv-linux` on Linux. Call it
+directly, and don't use `uv run`, which re-syncs the environment:
 ```bash
-# Check specific rule category
-.venv/bin/ruff check . --select=PERF --no-fix
+RUFF=.venv-$(uname -s | tr '[:upper:]' '[:lower:]')/bin/ruff
 
-# Get help for specific rule
-.venv/bin/ruff rule PERF401
-
-# Statistics overview
-.venv/bin/ruff check . --statistics
+$RUFF check services/platform/apps --select=PERF --no-fix   # One rule family
+$RUFF rule PERF401                                          # Explain a rule
+$RUFF check services/platform/apps --statistics             # Counts by rule
 ```
 
 ### Performance Issues
-If you encounter performance anti-patterns:
-1. Check for list comprehension opportunities (PERF401)
+If you hit a performance anti-pattern:
+1. Look for list comprehension opportunities (PERF401)
 2. Look for O(N²) nested operations
 3. Consider bulk operations with `list.extend()`
-4. Add performance comments with `# ⚡ PERFORMANCE:`
+4. Add a performance comment with `# ⚡ PERFORMANCE:`
 
 ### Security Issues
 If security warnings appear:
 1. **Never auto-ignore** security rules
 2. Use environment variables for credentials
-3. Add to manual review list for quarterly audit
-4. Document why credentials are needed (test data, etc.)
+3. Document why a credential is needed (test data, etc.)
 
----
+## Related Documentation
 
-**Last Updated**: 2025-08-25
-**Framework Version**: Ruff 0.6.8 + MyPy 1.17.1
-**Documentation**: ADR-0002 Strategic Linting Framework
+- **ADR-0002**: Strategic linting framework decision record
+- **`pyproject.toml`**: Complete rule configuration
+- **`Makefile`**: The lint targets and the phases of `make lint`
+- **`uv.lock`**: The pinned Ruff and mypy versions
