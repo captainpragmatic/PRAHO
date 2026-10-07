@@ -11,7 +11,7 @@ stay UNKNOWN — the fail-closed default the tri-state design mandates.
 from unittest.mock import MagicMock, patch
 
 import requests
-from django.test import SimpleTestCase, TestCase
+from django.test import TestCase
 
 from apps.common.types import Err, Retriability
 from apps.provisioning.virtualmin_gateway import (
@@ -97,7 +97,8 @@ class GatewayTestConnectionRetriabilityTests(TestCase):
         self.assertEqual(result.retriability, Retriability.NOT_RETRIABLE)
 
 
-class ServiceTestServerConnectionRetriabilityTests(SimpleTestCase):
+# Creation now reads provisioning settings, so these tests need the database.
+class ServiceTestServerConnectionRetriabilityTests(TestCase):
     def test_gateway_setup_failure_is_unknown(self) -> None:
         """_get_gateway failures (no server, credential errors) are not transient."""
         service = VirtualminProvisioningService()

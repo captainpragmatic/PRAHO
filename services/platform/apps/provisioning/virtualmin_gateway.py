@@ -14,6 +14,7 @@ import re
 import time
 import uuid
 from collections.abc import Callable
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
@@ -25,6 +26,7 @@ import requests
 from django.conf import settings
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
+from django.db import DatabaseError, InterfaceError, transaction
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
@@ -206,14 +208,40 @@ class VirtualminGlobalConfig(TypedDict):
     pinned_cert_sha256: str
 
 
+def _read_integer_setting(key: str, default: int) -> int:
+    """A failed SQL read must not poison a caller's existing transaction."""
+    context = transaction.atomic() if transaction.get_connection().in_atomic_block else nullcontext()
+    with context:
+        return SettingsService.get_integer_setting(key, default)
+
+
+def _integer_config_or_default(read: Callable[[], int], default: int) -> int:
+    """Operational configuration keeps its constant default when settings are unavailable.
+
+    Callers pass the read itself, with its literal key, so the settings lint can see each reader.
+    """
+    # A failed SQL read must not poison a caller's existing transaction.
+    context = transaction.atomic() if transaction.get_connection().in_atomic_block else nullcontext()
+    try:
+        with context:
+            return read()
+    except (DatabaseError, InterfaceError):
+        logger.warning("⚠️ [Virtualmin] Could not read a setting; using default %s", default, exc_info=True)
+        return default
+
+
 def get_virtualmin_config() -> VirtualminGlobalConfig:
     """Read global operational settings and the environment certificate pin.
 
     Hostname, API port and TLS verification remain authoritative on VirtualminServer.
     """
     return {
-        "timeout": cast(int, SettingsService.get_setting("virtualmin.request_timeout_seconds", 30)),
-        "max_retries": cast(int, SettingsService.get_setting("virtualmin.max_retries", 3)),
+        "timeout": _integer_config_or_default(
+            lambda: SettingsService.get_integer_setting("virtualmin.request_timeout_seconds", 30), 30
+        ),
+        "max_retries": _integer_config_or_default(
+            lambda: SettingsService.get_integer_setting("virtualmin.max_retries", 3), 3
+        ),
         "rate_limit_qps": cast(int, SettingsService.get_setting("virtualmin.rate_limit_qps", 10)),
         "rate_limit_max_calls_per_hour": cast(
             int, SettingsService.get_setting("virtualmin.rate_limit_max_calls_per_hour", 100)
@@ -286,7 +314,9 @@ def get_virtualmin_timeouts() -> dict[str, int]:
     # Runtime settings supply the default; explicit Django/environment overrides retain precedence.
     result = {
         **defaults,
-        "API_REQUEST_TIMEOUT": SettingsService.get_integer_setting("virtualmin.request_timeout_seconds", 30),
+        "API_REQUEST_TIMEOUT": _integer_config_or_default(
+            lambda: SettingsService.get_integer_setting("virtualmin.request_timeout_seconds", 30), 30
+        ),
         **timeout_config,
     }
 
@@ -833,8 +863,8 @@ class VirtualminGateway:
         window = int(time.time() // VIRTUALMIN_RATE_LIMIT_WINDOW)
         scope = hashlib.sha256(f"{self.server.hostname}\0{operation}".encode()).hexdigest()[:24]
         cache_key_prefix = f"virtualmin_rate_limit:{scope}:{window}"
-        hourly_limit = SettingsService.get_integer_setting("virtualmin.rate_limit_max_calls_per_hour", 100)
         try:
+            hourly_limit = _read_integer_setting("virtualmin.rate_limit_max_calls_per_hour", 100)
             for slot in range(hourly_limit):
                 if cache.add(f"{cache_key_prefix}:{slot}", 1, VIRTUALMIN_RATE_LIMIT_WINDOW):
                     return RateLimitOutcome.ALLOWED
@@ -852,10 +882,10 @@ class VirtualminGateway:
 
     def _check_qps_limit(self) -> RateLimitOutcome:
         """Atomically reserve a per-server HTTP dispatch slot for the current second."""
-        limit = SettingsService.get_integer_setting("virtualmin.rate_limit_qps", 10)
         scope = hashlib.sha256(self.server.hostname.encode()).hexdigest()[:24]
         prefix = f"virtualmin_rate_limit_qps:{scope}:{int(time.time())}"
         try:
+            limit = _read_integer_setting("virtualmin.rate_limit_qps", 10)
             for slot in range(limit):
                 if cache.add(f"{prefix}:{slot}", 1, 1):
                     return RateLimitOutcome.ALLOWED
@@ -978,7 +1008,9 @@ class VirtualminGateway:
         # Make API request with retries
         last_error: VirtualminAPIError | None = None
         is_read_only = is_virtualmin_read_only_program(program)
-        max_retries = SettingsService.get_integer_setting("virtualmin.max_retries", 3)
+        max_retries = _integer_config_or_default(
+            lambda: SettingsService.get_integer_setting("virtualmin.max_retries", 3), 3
+        )
         for attempt in range(max_retries):
             try:
                 response = self._make_request(api_params, attempt + 1, auth=call_auth, timeout_seconds=timeout_seconds)

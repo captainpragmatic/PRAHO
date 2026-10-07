@@ -4,8 +4,10 @@ Staff interface for managing Virtualmin servers, accounts, and backups.
 """
 
 import logging
+import math
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, TypedDict, cast
 from uuid import UUID
@@ -67,6 +69,7 @@ _DEFAULT_HEALTH_CHECK_TIMEOUT_SECONDS = 30
 HEALTH_CHECK_TIMEOUT_SECONDS = _DEFAULT_HEALTH_CHECK_TIMEOUT_SECONDS
 _DEFAULT_OVERALL_HEALTH_CHECK_TIMEOUT = 300
 _DEFAULT_MAX_ERROR_DISPLAY = 3
+_HEALTH_CHECK_DEADLINE: ContextVar[float | None] = ContextVar("virtualmin_health_check_deadline", default=None)
 
 
 def get_max_concurrent_health_checks() -> int:
@@ -1504,9 +1507,17 @@ def _perform_gateway_connectivity_test(account: VirtualminAccount) -> tuple[bool
         config = VirtualminConfig(server=account.server)
         gateway = VirtualminGateway(config)
 
-        ping_result = gateway.ping_server()
-        if not ping_result:
-            return False, "Virtualmin server connectivity failed"
+        deadline = _HEALTH_CHECK_DEADLINE.get()
+        if deadline is None:
+            healthy = gateway.ping_server()
+        else:
+            remaining = deadline - time.perf_counter()
+            if remaining <= 0:
+                return False, str(_("Health check timed out"))
+            result = gateway.call("info", timeout_seconds=max(1, math.ceil(remaining)))
+            healthy = result.is_ok() and result.unwrap().success
+        if not healthy:
+            return False, str(_("Virtualmin server connectivity failed"))
         return True, ""
 
     except Exception as gateway_error:
@@ -1539,6 +1550,19 @@ def _perform_single_health_check(account: VirtualminAccount) -> tuple[Virtualmin
 
     except Exception as e:
         return account, False, f"Health check exception: {e!s}"
+
+
+def _health_check_until_deadline(
+    account: VirtualminAccount, deadline: float
+) -> tuple[VirtualminAccount, bool, str | None]:
+    """Propagate the batch deadline without changing the single-check interface."""
+    token = _HEALTH_CHECK_DEADLINE.set(deadline)
+    try:
+        if time.perf_counter() >= deadline:
+            return account, False, str(_("Health check timed out"))
+        return _perform_single_health_check(account)
+    finally:
+        _HEALTH_CHECK_DEADLINE.reset(token)
 
 
 @transaction.atomic
@@ -1591,31 +1615,42 @@ def _execute_bulk_health_check(accounts: list[VirtualminAccount]) -> BulkOperati
         max_workers = min(worker_limit, len(accounts))
         overall_timeout = get_overall_health_check_timeout()
 
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Submit all health check tasks
+        deadline = time.perf_counter() + overall_timeout
+        executor = ThreadPoolExecutor(max_workers=max_workers)
+        future_to_account: dict[Future[tuple[VirtualminAccount, bool, str | None]], VirtualminAccount] = {}
+        collected: set[Future[tuple[VirtualminAccount, bool, str | None]]] = set()
+        try:
             future_to_account = {
-                executor.submit(_perform_single_health_check, account): account for account in accounts
+                executor.submit(_health_check_until_deadline, account, deadline): account for account in accounts
             }
-
-            # Limit result collection; executor shutdown still waits for running checks.
-            for future in as_completed(future_to_account, timeout=overall_timeout):
-                try:
-                    account, success, error_msg = future.result(
-                        timeout=HEALTH_CHECK_TIMEOUT_SECONDS
-                    )  # Per-check timeout
-
-                    if success:
-                        successful_checks.append(account)
-                        logger.debug(f"✅ [Health Check] {account.domain} - OK")
-                    else:
-                        errors.append(f"Health check failed for {account.domain}: {error_msg}")
-                        logger.warning(f"⚠️ [Health Check] {account.domain} - {error_msg}")
-
-                except Exception as e:
+            try:
+                for future in as_completed(future_to_account, timeout=max(0.0, deadline - time.perf_counter())):
+                    collected.add(future)
                     account = future_to_account[future]
-                    error_msg = f"Health check timeout or error for {account.domain}: {e!s}"
-                    errors.append(error_msg)
-                    logger.warning(f"⏰ [Health Check] {error_msg}")
+                    try:
+                        account, success, error_msg = future.result()
+                        if success:
+                            successful_checks.append(account)
+                            logger.debug(f"✅ [Health Check] {account.domain} - OK")
+                        else:
+                            errors.append(
+                                _("Health check failed for %(domain)s: %(error)s")
+                                % {"domain": account.domain, "error": error_msg}
+                            )
+                            logger.warning(f"⚠️ [Health Check] {account.domain} - {error_msg}")
+                    except Exception as error:
+                        errors.append(
+                            _("Health check error for %(domain)s: %(error)s")
+                            % {"domain": account.domain, "error": str(error)}
+                        )
+            except TimeoutError:
+                logger.warning("⚠️ [Health Check] Overall sweep deadline reached")
+        finally:
+            for future, account in future_to_account.items():
+                if future not in collected:
+                    future.cancel()
+                    errors.append(_("Health check timed out for %(domain)s") % {"domain": account.domain})
+            executor.shutdown(wait=False, cancel_futures=True)
 
         processing_time = time.perf_counter() - start_time
         result = BulkOperationResult(

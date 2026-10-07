@@ -210,7 +210,7 @@ class ProvisioningSettingsEffectTests(TestCase):
             result = views._execute_bulk_health_check([account])
         self.assertEqual(result.successful_count, 0)
         self.assertEqual((result.total_processed, result.failed_count), (1, 1))
-        self.assertTrue(any("unfinished" in error for error in result.errors), result.errors)
+        self.assertTrue(any(account.domain in error and "timed out" in error for error in result.errors), result.errors)
         self.assertFalse(result.rollback_performed)
         self.set_setting("provisioning.overall_health_check_timeout", 3)
         with patch.object(views, "_perform_single_health_check", side_effect=slow_check):
