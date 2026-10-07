@@ -280,7 +280,7 @@
                     </div>
                   </div>
                   <div class="space-y-3">
-                    <a href="mailto:support@pragmatichost.com" class="flex items-center justify-between text-slate-300 hover:text-white transition-colors">
+                    <a href="mailto:{{ company.email_support }}" class="flex items-center justify-between text-slate-300 hover:text-white transition-colors">
                       <span>{% trans "Email Support" %}</span>
                       <span class="text-blue-400">→</span>
                     </a>
@@ -761,13 +761,15 @@
                     <span class="text-blue-400">→</span>
                   </a>
 
-                  <a href="mailto:billing@pragmatichost.com" class="flex items-center justify-between p-4 bg-slate-600/30 rounded-lg hover:bg-slate-600/50 transition-colors">
+                  {% if company.email_finance %}
+                  <a href="mailto:{{ company.email_finance }}" class="flex items-center justify-between p-4 bg-slate-600/30 rounded-lg hover:bg-slate-600/50 transition-colors">
                     <div class="flex items-center space-x-3">
                       {% icon "question" size="sm" css_class="text-red-400" %}
                       <span class="text-white">{% trans "Billing Support" %}</span>
                     </div>
                     <span class="text-blue-400">→</span>
                   </a>
+                  {% endif %}
                 </div>
               </div>
 

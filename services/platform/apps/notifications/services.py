@@ -42,7 +42,7 @@ from apps.notifications.models import (
     EmailTemplate,
     validate_template_content,
 )
-from apps.settings.services import SettingsService
+from apps.settings.services import SettingsService, get_default_from_email
 
 if TYPE_CHECKING:
     from apps.billing.models import Invoice
@@ -333,9 +333,9 @@ class EmailService:
     def _send_email(recipient: str, subject: str, body: str, html_body: str | None = None) -> bool:
         """Internal method to send email using Django's email backend."""
         try:
-            from_email = getattr(settings, "DEFAULT_FROM_EMAIL", None) or str(
-                SettingsService.get_setting("company.email_noreply", "noreply@pragmatichost.com")
-            )
+            # Runtime identity takes precedence only when a stored row exists.
+            # Catalog defaults must not shadow the deployment's sender.
+            from_email = get_default_from_email()
 
             email = EmailMultiAlternatives(
                 subject=subject,
@@ -531,7 +531,7 @@ class EmailService:
         track_clicks: bool = True,
     ) -> EmailResult:
         """Send email synchronously."""
-        from_email = from_email or settings.DEFAULT_FROM_EMAIL
+        from_email = get_default_from_email() if from_email is None else from_email
         provider = getattr(settings, "EMAIL_PROVIDER", "smtp")
 
         # Create email log entry
@@ -668,7 +668,7 @@ class EmailService:
         track_clicks: bool = True,
     ) -> EmailResult:
         """Queue email for async sending via Django-Q2."""
-        from_email = from_email or settings.DEFAULT_FROM_EMAIL
+        from_email = get_default_from_email() if from_email is None else from_email
         provider = getattr(settings, "EMAIL_PROVIDER", "smtp")
 
         # Create email log entry with queued status
@@ -768,7 +768,7 @@ class EmailService:
         queued task; the rate-limited path previously degraded the email
         silently (#228 sibling).
         """
-        from_email = from_email or settings.DEFAULT_FROM_EMAIL
+        from_email = get_default_from_email() if from_email is None else from_email
         provider = getattr(settings, "EMAIL_PROVIDER", "smtp")
 
         email_log = cls._create_email_log(

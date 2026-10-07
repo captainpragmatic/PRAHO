@@ -18,6 +18,8 @@ from django.utils import timezone
 from django.utils.translation import gettext as _
 from django.views.decorators.debug import sensitive_variables
 
+from apps.settings.services import get_default_from_email
+
 from .models import GiftCard, GiftCardDelivery, GiftCardPurchase
 
 DELIVERY_LEASE = timedelta(minutes=10)
@@ -128,7 +130,7 @@ def _message(delivery: GiftCardDelivery, purchase: GiftCardPurchase) -> EmailMes
     return EmailMessage(
         subject=str(subject),
         body=body,
-        from_email=settings.DEFAULT_FROM_EMAIL,
+        from_email=get_default_from_email(),
         to=[delivery.target_email],
         headers={"Message-ID": f"<gift-delivery-{delivery.pk}-{delivery.attempt_count}@praho.local>"},
     )

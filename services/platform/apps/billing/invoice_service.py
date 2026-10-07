@@ -594,6 +594,8 @@ def send_invoice_email(invoice: Invoice, recipient_email: str | None = None) -> 
     """
     from django.core.mail import EmailMessage  # noqa: PLC0415  # Deferred: avoids circular import
 
+    from apps.settings.services import get_default_from_email  # noqa: PLC0415
+
     try:
         email = recipient_email or (invoice.customer.primary_email if invoice.customer else None)
 
@@ -625,7 +627,7 @@ Best regards,
         email_message = EmailMessage(
             subject=subject,
             body=body,
-            from_email=getattr(settings, "DEFAULT_FROM_EMAIL", "noreply@praho.io"),
+            from_email=get_default_from_email(),
             to=[email],
         )
 

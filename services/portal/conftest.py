@@ -133,6 +133,13 @@ def mock_middleware_api_calls() -> Generator[None]:
                     "timezone": "Europe/Bucharest",
                     "customer_date_format": "%d.%m.%Y",
                 },
+                "company": {
+                    "legal_name": "PragmaticHost SRL",
+                    "email_support": "support@pragmatichost.com",
+                    "email_privacy": "privacy@pragmatichost.com",
+                    "email_finance": "",
+                    "phone": "",
+                },
             },
         ),
         patch.object(

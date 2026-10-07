@@ -19,7 +19,7 @@ from django.core.mail import EmailMessage, EmailMultiAlternatives
 from django.utils import timezone
 
 from apps.notifications.models import EmailLog
-from apps.settings.services import SettingsService
+from apps.settings.services import SettingsService, get_default_from_email
 
 logger = logging.getLogger(__name__)
 
@@ -68,9 +68,8 @@ def send_email_task(  # notification template parameters  # noqa: PLR0913  # Bus
     Returns:
         Dict with success status and message details
     """
-    from_email = from_email or settings.DEFAULT_FROM_EMAIL
-
     try:
+        # Resolve the default only after loading the log, so retries retain their sender.
         # Get the email log entry
         try:
             email_log = EmailLog.objects.get(id=email_log_id)
@@ -78,9 +77,11 @@ def send_email_task(  # notification template parameters  # noqa: PLR0913  # Bus
             logger.error(f"EmailLog not found: {email_log_id}")
             return {"success": False, "error": "EmailLog not found"}
 
-        # Update status to sending
-        email_log.status = "sending"
-        email_log.save(update_fields=["status"])
+        from_email = from_email if from_email is not None else email_log.from_addr or get_default_from_email()
+
+        # Persist the actual sender for subsequent retries, including legacy blank logs.
+        email_log.from_addr, email_log.status = from_email, "sending"
+        email_log.save(update_fields=["status", "from_addr"])
 
         # Build the email message
         if body_html:

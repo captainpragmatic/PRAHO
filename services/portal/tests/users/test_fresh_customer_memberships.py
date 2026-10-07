@@ -78,6 +78,13 @@ class FreshCustomerMembershipTests(TestCase):
                     "timezone": "Europe/Bucharest",
                     "customer_date_format": "%d.%m.%Y",
                 },
+                "company": {
+                    "legal_name": "PragmaticHost SRL",
+                    "email_support": "support@pragmatichost.com",
+                    "email_privacy": "privacy@pragmatichost.com",
+                    "email_finance": "",
+                    "phone": "",
+                },
             }
         else:
             raise AssertionError(f"Unexpected Platform request: {url}")

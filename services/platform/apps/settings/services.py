@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, ClassVar, Final, cast
 
+from django.conf import settings as django_settings
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
@@ -174,6 +175,15 @@ class SettingsService:
                 cache.delete(cache_key, version=cls.CACHE_VERSION)
         logger.debug("⚡ [Settings] Database hit for key: %s (cache enabled: %s)", key, use_cache)
         return value
+
+    @classmethod
+    def get_stored_setting(cls, key: str) -> SettingValue:
+        """Read only the stored row, without consulting catalog defaults or their cache."""
+        try:
+            setting = SystemSetting.objects.get(key=key)
+        except SystemSetting.DoesNotExist:
+            return None
+        return setting.get_typed_value()
 
     @classmethod
     def _is_sensitive_key(cls, key: str) -> bool:
@@ -876,6 +886,12 @@ class SettingsService:
         except Exception as e:
             logger.error("🔥 [Settings] Error getting settings info: %s", str(e))
             return {}
+
+
+def get_default_from_email() -> str:
+    """Prefer a stored sender; otherwise preserve the deployment's Django default."""
+    stored = SettingsService.get_stored_setting("company.email_noreply")
+    return str(stored) if stored is not None else django_settings.DEFAULT_FROM_EMAIL
 
 
 # ===============================================================================

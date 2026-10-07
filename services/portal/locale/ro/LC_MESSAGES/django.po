@@ -3158,17 +3158,18 @@ msgstr ""
 "          "
 
 #: templates/legal/cookie_policy.html:242
+#, python-format
 msgid ""
 "\n"
 "          For any questions about our use of cookies, please contact our "
 "Data Protection Officer\n"
-"          at privacy@pragmatichost.com.\n"
+"          at %(privacy_email)s.\n"
 "          "
 msgstr ""
 "\n"
 "          Pentru orice întrebări cu privire la utilizarea modulelor cookie, "
 "vă rugăm să contactați Ofițerul nostru pentru protecția datelor la "
-"privacy@pragmatichost.com.\n"
+"%(privacy_email)s.\n"
 "          "
 
 #: templates/orders/cart_review.html:4 templates/orders/cart_review.html:14

@@ -82,6 +82,7 @@ TEMPLATES = [
                 "django.contrib.messages.context_processors.messages",  # Messages in templates
                 "apps.common.context_processors.csp_nonce",
                 "apps.common.context_processors.portal_context",
+                "apps.common.context_processors.company_identity",
             ],
         },
     },
@@ -146,6 +147,15 @@ PLATFORM_API_BASE_URL = os.environ.get("PLATFORM_API_BASE_URL", "http://localhos
 # 🔒 SECURITY: No fallback secrets in base config - must be set in environment
 PLATFORM_API_SECRET = os.environ.get("PLATFORM_API_SECRET")
 PLATFORM_API_TIMEOUT = int(os.environ.get("PLATFORM_API_TIMEOUT", "30"))
+
+# Cold-outage defaults mirror Platform's public company catalog entries.
+COMPANY_IDENTITY_DEFAULTS: dict[str, str] = {
+    "legal_name": "PragmaticHost SRL",
+    "email_support": "support@pragmatichost.com",
+    "email_privacy": "privacy@pragmatichost.com",
+    "email_finance": "",
+    "phone": "",
+}
 
 # Company bank details for bank transfer payment instructions
 COMPANY_BANK_IBAN = os.environ.get("COMPANY_BANK_IBAN", "")

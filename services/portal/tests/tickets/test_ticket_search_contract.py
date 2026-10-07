@@ -142,7 +142,17 @@ class TicketSearchContractTests(SimpleTestCase):
         self.enterContext(
             patch(
                 "apps.common.localisation_services.api_client.get_localisation_defaults",
-                return_value={"success": True, "localisation": LocalisationDefaults().customer_payload()},
+                return_value={
+                    "success": True,
+                    "localisation": LocalisationDefaults().customer_payload(),
+                    "company": {
+                        "legal_name": "PragmaticHost SRL",
+                        "email_support": "support@pragmatichost.com",
+                        "email_privacy": "privacy@pragmatichost.com",
+                        "email_finance": "",
+                        "phone": "",
+                    },
+                },
             )
         )
 

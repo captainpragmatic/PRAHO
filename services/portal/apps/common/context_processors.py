@@ -8,6 +8,7 @@ from django.http import HttpRequest
 from django.utils.translation import gettext as _
 
 from apps.common.account_health import get_account_health
+from apps.common.localisation_services import get_company_identity
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,11 @@ def csp_nonce(request: HttpRequest) -> dict[str, str]:
     Requires CSPNonceMiddleware to be active.
     """
     return {"csp_nonce": getattr(request, "csp_nonce", "")}
+
+
+def company_identity(request: HttpRequest) -> dict[str, object]:
+    """Supply the validated public identity, including during Platform outages."""
+    return {"company": get_company_identity()}
 
 
 def portal_context(request: HttpRequest) -> dict[str, object]:

@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load i18n %}
+{% load i18n ui_components %}
 
 {% block title %}{% trans 'Cookie Policy' %} - PragmaticHost{% endblock %}
 
@@ -220,9 +220,8 @@
         as giving it, as required by GDPR Article 7(3).
         {% endblocktrans %}{% endfilter %}
       </p>
-      <button data-action="cookie-prefs" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md font-medium transition-colors text-sm">
-        {% trans 'Open Cookie Preferences' %}
-      </button>
+      {% trans 'Open Cookie Preferences' as cookie_preferences_label %}
+      {% button cookie_preferences_label data_action="cookie-prefs" variant="primary" %}
     </div>
   </div>
 
@@ -239,9 +238,9 @@
           {% endblocktrans %}{% endfilter %}
         </p>
         <p>
-          {% filter force_escape %}{% blocktrans %}
+          {% filter force_escape %}{% blocktrans with privacy_email=company.email_privacy %}
           For any questions about our use of cookies, please contact our Data Protection Officer
-          at privacy@pragmatichost.com.
+          at {{ privacy_email }}.
           {% endblocktrans %}{% endfilter %}
         </p>
       </div>

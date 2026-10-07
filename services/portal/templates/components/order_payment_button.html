@@ -1,0 +1,11 @@
+{% load i18n ui_components %}
+<button
+  id="submit"
+  class="w-full bg-green-600 hover:bg-green-500 text-white font-medium py-3 px-6 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+  disabled
+>
+  <span id="button-text">
+    {% icon "credit-card" size="sm" css_class="mr-1" %} {% trans "Pay" %} {{ order.total }} {{ order.currency_code }}
+  </span>
+  <div id="spinner" class="hidden inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin ml-2"></div>
+</button>

@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from typing import TypedDict
 
+from django.conf import settings
 from django.core.cache import cache
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 from django.http import HttpRequest
 
 from apps.api_client.services import PlatformAPIError, api_client
@@ -20,32 +24,89 @@ from apps.common.localisation import (
 logger = logging.getLogger(__name__)
 
 
-def get_localisation_defaults() -> LocalisationDefaults:
+class PublicDefaults(TypedDict):
+    success: bool
+    localisation: dict[str, str]
+    company: dict[str, str]
+
+
+_COMPANY_FIELDS = frozenset({"legal_name", "email_support", "email_privacy", "email_finance", "phone"})
+_LOCALISATION_FIELDS = frozenset(LocalisationDefaults().customer_payload())
+
+
+def _string_mapping(value: object, fields: frozenset[str]) -> dict[str, str]:
+    if not isinstance(value, dict) or set(value) != fields:
+        raise ValueError("Invalid public defaults fields")
+    result: dict[str, str] = {}
+    for field in fields:
+        item: object = value[field]
+        if not isinstance(item, str):
+            raise ValueError("Invalid public defaults value type")
+        result[field] = item
+    return result
+
+
+def _validated_payload(response: object) -> PublicDefaults:
+    if not isinstance(response, dict) or response.get("success") is not True:
+        raise ValueError("Invalid public defaults response")
+    localisation = _string_mapping(response.get("localisation"), _LOCALISATION_FIELDS)
+    defaults = LocalisationDefaults.from_mapping(localisation)
+    if localisation != defaults.customer_payload():
+        raise ValueError("Invalid localisation values")
+
+    company = _string_mapping(response.get("company"), _COMPANY_FIELDS)
+    if not company["legal_name"].strip():
+        raise ValueError("Invalid company legal name")
+    for field in ("email_support", "email_privacy", "email_finance"):
+        address = company[field]
+        if address or field != "email_finance":
+            validate_email(address)
+    if any("\r" in value or "\n" in value for value in company.values()):
+        raise ValueError("Invalid company identity control characters")
+    return {"success": True, "localisation": localisation, "company": company}
+
+
+def get_public_defaults() -> PublicDefaults:
+    """Read and cache the entire validated public payload for both consumers."""
     identity = f"{api_client.base_url}|{api_client.portal_id}"
     key = "localisation:" + hashlib.sha256(identity.encode()).hexdigest()[:24]
-    cached = cache.get(key)
-    if isinstance(cached, dict):
-        return LocalisationDefaults.from_mapping(cached)
     try:
-        response = api_client.get_localisation_defaults()
-        if not isinstance(response, dict):
-            raise ValueError("Invalid localisation response")
-        values = response.get("localisation")
-        if response.get("success") is not True or not isinstance(values, dict):
-            raise ValueError("Invalid localisation response")
-        defaults = LocalisationDefaults.from_mapping(values)
-        # Reject incomplete/corrupt payloads so they cannot replace last-known-good data.
-        if any(values.get(name) != value for name, value in defaults.customer_payload().items()):
-            raise ValueError("Invalid localisation values")
-    except (PlatformAPIError, ValueError, TypeError):
-        logger.warning("[Localisation] Platform defaults unavailable; using cached or built-in defaults")
-        values = cache.get(key + ":last_good") or LocalisationDefaults().customer_payload()
-        cache.set(key, values, timeout=30)
-        return LocalisationDefaults.from_mapping(values)
-    values = defaults.customer_payload()
-    cache.set(key + ":last_good", values, timeout=3600)
-    cache.set(key, values, timeout=60)
-    return defaults
+        cached = _validated_payload(cache.get(key))
+    except (ValidationError, ValueError, TypeError):
+        pass
+    else:
+        return cached
+
+    try:
+        payload = _validated_payload(api_client.get_localisation_defaults())
+    except (PlatformAPIError, ValidationError, ValueError, TypeError):
+        logger.warning("⚠️ [Localisation] Platform defaults unavailable; using last-good or catalog defaults")
+        try:
+            payload = _validated_payload(cache.get(key + ":last_good"))
+        except (ValidationError, ValueError, TypeError):
+            payload = _validated_payload(
+                {
+                    "success": True,
+                    "localisation": LocalisationDefaults().customer_payload(),
+                    "company": settings.COMPANY_IDENTITY_DEFAULTS,
+                }
+            )
+        # Outages and rejected responses never extend the last-good lifetime.
+        cache.set(key, payload, timeout=60)
+        return payload
+
+    cache.set(key + ":last_good", payload, timeout=3600)
+    cache.set(key, payload, timeout=60)
+    return payload
+
+
+def get_localisation_defaults() -> LocalisationDefaults:
+    return LocalisationDefaults.from_mapping(get_public_defaults()["localisation"])
+
+
+def get_company_identity() -> dict[str, str]:
+    """Return a copy so a context consumer cannot mutate the cached identity."""
+    return dict(get_public_defaults()["company"])
 
 
 def get_request_localisation(request: HttpRequest | None = None) -> DisplayLocalisation:

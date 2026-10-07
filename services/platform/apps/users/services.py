@@ -51,7 +51,7 @@ from apps.common.validators import (
 from apps.customers.contact_models import CustomerAddress
 from apps.customers.models import Customer
 from apps.customers.profile_models import CustomerBillingProfile, CustomerTaxProfile
-from apps.settings.services import SettingsService
+from apps.settings.services import SettingsService, get_default_from_email
 
 from .models import APIToken, CustomerMembership, UserSession
 
@@ -194,7 +194,7 @@ def _render_and_send_welcome_email(user: User, customer: Customer, request_ip: s
         send_mail(
             subject=subject,
             message=text_message,
-            from_email=settings.DEFAULT_FROM_EMAIL,
+            from_email=get_default_from_email(),
             recipient_list=[user.email],
             html_message=html_message,
             fail_silently=False,
@@ -607,7 +607,7 @@ class SecureUserRegistrationService:
                 send_mail(
                     subject=_("[PRAHO] New Access Request for {company}").format(company=customer.company_name),
                     message=_("A user has requested access to your organization. Please review in your dashboard."),
-                    from_email=settings.DEFAULT_FROM_EMAIL,
+                    from_email=get_default_from_email(),
                     recipient_list=[owner.email],
                     fail_silently=True,  # Don't fail the whole process if email fails
                 )
@@ -1032,7 +1032,7 @@ class SecureCustomerUserService:
                 send_mail(
                     subject=_("[PRAHO] New Access Request for {company}").format(company=customer.company_name),
                     message=_("A user has requested access to your organization. Please review in your dashboard."),
-                    from_email=settings.DEFAULT_FROM_EMAIL,
+                    from_email=get_default_from_email(),
                     recipient_list=[owner.email],
                     fail_silently=True,  # Don't fail the whole process if email fails
                 )
@@ -1072,7 +1072,7 @@ class SecureCustomerUserService:
                 message=_(
                     "You have been invited to join an organization on PRAHO. Please check your dashboard to accept."
                 ),
-                from_email=settings.DEFAULT_FROM_EMAIL,
+                from_email=get_default_from_email(),
                 recipient_list=[user.email],
                 fail_silently=True,
             )

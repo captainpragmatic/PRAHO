@@ -93,9 +93,8 @@
         {% trans 'Manage which cookies you allow on this website. You can change your preferences at any time.' %}
       </p>
       <div class="flex flex-wrap gap-3">
-        <button data-action="cookie-prefs" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors">
-          {% icon "settings" size="sm" css_class="text-white" %} {% trans 'Manage Cookie Preferences' %}
-        </button>
+        {% trans 'Manage Cookie Preferences' as cookie_preferences_label %}
+        {% button cookie_preferences_label data_action="cookie-prefs" icon="settings" variant="primary" %}
         <a href="/cookie-policy/" class="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors inline-block">
           {% icon "document" size="sm" css_class="text-white" %} {% trans 'Cookie Policy' %}
         </a>
@@ -150,7 +149,7 @@
       <div class="bg-slate-700 rounded-lg p-4">
         <p class="text-white mb-2">{% trans 'For any privacy-related questions or to exercise your rights:' %}</p>
         <div class="text-sm text-slate-300 space-y-1">
-          <p><strong>{% trans 'Email:' %}</strong> privacy@pragmatichost.com</p>
+          <p><strong>{% trans 'Email:' %}</strong> {{ company.email_privacy }}</p>
           <p><strong>{% trans 'Subject:' %}</strong> GDPR Request - {{ customer_email }}</p>
           <p class="text-xs text-slate-400 mt-2">
             {% trans 'We will respond to your request within 30 days as required by GDPR Article 12.' %}

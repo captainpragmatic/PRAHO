@@ -18,12 +18,21 @@ behaviour deserves rather than the one that would look tidier - see `NoReplyAddr
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from html import unescape
+from unittest.mock import patch
+
 from django.core import mail
 from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils.html import strip_tags
+from django.utils.translation import override
 
-from apps.notifications.services import NotificationService
+from apps.notifications.models import EmailLog
+from apps.notifications.services import EmailService, NotificationService
+from apps.notifications.tasks import send_email_task
+from apps.settings.models import SystemSetting
 from apps.settings.services import SettingsService
 
 # Every key below is rendered by BOTH legal pages unless noted.
@@ -60,14 +69,7 @@ class CompanyIdentityRenderTests(TestCase):
         self.assertTrue(result.is_ok(), result)
 
     def assert_page_renders_settings(self, url_name: str, values: dict[str, str]) -> None:
-        """Each value must appear on the page, and the catalog default must be gone.
-
-        The second half is what makes the assertion mean anything. A page that renders both the
-        configured value and the default would satisfy `assertContains` while proving nothing
-        about which one won. `company.legal_name` is exempt from it only because the page genuinely
-        still contains the default in hardcoded prose - see
-        `LegalProseHardcodesTheCompanyNameTests`, which pins that defect rather than hiding it.
-        """
+        """The configured identity replaces the catalog defaults throughout the page."""
         defaults = {key: str(SettingsService.DEFAULT_SETTINGS[key]) for key in values}
         for key, value in values.items():
             self.set_value(key, value)
@@ -77,8 +79,6 @@ class CompanyIdentityRenderTests(TestCase):
         for key, value in values.items():
             with self.subTest(key=key):
                 self.assertContains(response, value)
-                if key == "company.legal_name":
-                    continue
                 if defaults[key] and defaults[key] != value:
                     self.assertNotContains(response, defaults[key])
 
@@ -112,84 +112,212 @@ class CompanyIdentityRenderTests(TestCase):
 
 
 @override_settings(CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}})
-class LegalProseHardcodesTheCompanyNameTests(TestCase):
-    """A known defect, pinned so it is visible and so fixing it breaks this test loudly.
+class LegalProseIdentityEffectTests(TestCase):
+    """Every translated prose sentence names the configured legal entity."""
 
-    `company.legal_name` half-works. The identity block of both legal pages renders
-    `{% setting "company.legal_name" %}`; five prose sentences across the same two pages hardcode
-    "PragmaticHost SRL" inside `{% blocktrans %}` blocks. Change the setting and the Terms of
-    Service names the configured company in its identity block and a different company in the
-    sentence that says who the agreement binds you to - a legal document naming two entities.
-
-    Not fixed here on purpose. Interpolating the name means rewriting five translatable msgids,
-    which costs the existing Romanian translations of legal prose, and that is a call for whoever
-    owns the translations rather than a drive-by. Recorded in
-    `QA/cycle-02-v0.30.0/findings.md`.
-
-    When it IS fixed, this test fails. Delete it then - that is the point of it.
-    """
-
-    HARDCODED = "PragmaticHost SRL"
+    LEGAL_NAME = "Renamed Entity SRL"
 
     def setUp(self) -> None:
         cache.clear()
         self.addCleanup(cache.clear)
         with self.captureOnCommitCallbacks(execute=True):
-            SettingsService.update_setting("company.legal_name", "Renamed Entity SRL")
+            result = SettingsService.update_setting("company.legal_name", self.LEGAL_NAME)
+        self.assertTrue(result.is_ok(), result)
 
-    def test_terms_of_service_names_two_different_companies(self) -> None:
-        response = self.client.get(reverse("terms_of_service"))
-        self.assertContains(response, "Renamed Entity SRL")  # the identity block honours the setting
-        self.assertContains(response, self.HARDCODED)  # ...and the prose does not
+    def page_text(self, url_name: str, language: str) -> str:
+        with override(language):
+            response = self.client.get(reverse(url_name), HTTP_ACCEPT_LANGUAGE=language)
+        self.assertEqual(response.status_code, 200)
+        return " ".join(unescape(strip_tags(response.content.decode())).split())
 
-    def test_privacy_policy_names_two_different_companies(self) -> None:
-        response = self.client.get(reverse("privacy_policy"))
-        self.assertContains(response, "Renamed Entity SRL")
-        self.assertContains(response, self.HARDCODED)
+    def test_every_terms_sentence_uses_the_configured_name_in_en_and_ro(self) -> None:
+        sentences = {
+            "en": (
+                f"services provided by {self.LEGAL_NAME}",
+                f"a legally binding agreement between you and {self.LEGAL_NAME}.",
+                f"{self.LEGAL_NAME} provides web hosting and related services",
+                f"{self.LEGAL_NAME} and protected by intellectual property laws.",
+            ),
+            "ro": (
+                f"serviciilor PRAHO Platform furnizate de {self.LEGAL_NAME}",
+                f"un acord legal obligatoriu între dvs. și {self.LEGAL_NAME}.",
+                f"{self.LEGAL_NAME} oferă servicii de găzduire web și servicii conexe",
+                f"{self.LEGAL_NAME} și protejată de legile de proprietate intelectuală.",
+            ),
+        }
+        for language, expected in sentences.items():
+            with self.subTest(language=language):
+                text = self.page_text("terms_of_service", language)
+                for sentence in expected:
+                    with self.subTest(sentence=sentence):
+                        self.assertIn(sentence, text)
+                self.assertNotIn("PragmaticHost SRL", text)
+
+    def test_privacy_sentence_uses_the_configured_name_in_en_and_ro(self) -> None:
+        sentences = {
+            "en": f'{self.LEGAL_NAME} ("we", "us", "our") is committed to protecting your privacy',
+            "ro": f'{self.LEGAL_NAME} ("noi", "ne", "noastre") este angajată să vă protejeze intimitatea',
+        }
+        for language, sentence in sentences.items():
+            with self.subTest(language=language):
+                text = self.page_text("privacy_policy", language)
+                self.assertIn(sentence, text)
+                self.assertNotIn("PragmaticHost SRL", text)
 
 
 @override_settings(
     CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
     EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
     ADMIN_ALERT_EMAILS=["ops@example.test"],
+    DEFAULT_FROM_EMAIL="deployment@example.test",
 )
 class NoReplyAddressPrecedenceTests(TestCase):
-    """`company.email_noreply` and the Django setting that shadows it.
-
-    `EmailService._send_email` resolves its sender as
-    `getattr(settings, "DEFAULT_FROM_EMAIL", None) or SettingsService.get_setting("company.email_noreply", ...)`.
-
-    Every shipped settings module gives `DEFAULT_FROM_EMAIL` a non-empty value - base, dev, staging
-    and prod all do - so the left operand is never falsy and the setting is unreachable in every
-    deployment. That is a third variety of inert setting, and it is invisible to check 6 of
-    `scripts/lint_settings_coverage.py`: the read IS inside a live method, so the getter is called;
-    it is the VALUE that is never used.
-
-    Both branches are asserted rather than only the tidy one. Testing the setting with
-    `DEFAULT_FROM_EMAIL` blanked would show it "working" and hide the fact that no real deployment
-    reaches it. Compare `apps/common/context_processors._maintenance_mode_active`, which gets the
-    same precedence right by testing `is not None` on a setting that may legitimately be unset.
-    """
+    """Stored identity wins over deployment defaults; explicit and logged senders survive."""
 
     NOREPLY_KEY = "company.email_noreply"
+    RUNTIME = "configured-noreply@example.test"
+    DEPLOYMENT = "deployment@example.test"
+    EXPLICIT = "explicit@example.test"
 
     def setUp(self) -> None:
         cache.clear()
         self.addCleanup(cache.clear)
         mail.outbox.clear()
+
+    def configure_sender(self, value: str) -> None:
         with self.captureOnCommitCallbacks(execute=True):
-            result = SettingsService.update_setting(self.NOREPLY_KEY, "configured-noreply@example.test")
+            result = SettingsService.update_setting(self.NOREPLY_KEY, value)
         self.assertTrue(result.is_ok(), result)
 
-    @override_settings(DEFAULT_FROM_EMAIL="deployment-wins@example.test")
-    def test_the_deployment_setting_wins_and_the_runtime_setting_is_ignored(self) -> None:
-        self.assertTrue(NotificationService.send_admin_alert("Subject", "Body"))
-        self.assertEqual(len(mail.outbox), 1)
-        self.assertEqual(mail.outbox[0].from_email, "deployment-wins@example.test")
-        self.assertNotIn("configured-noreply@example.test", mail.outbox[0].from_email)
+    def assert_precedence(self, send: Callable[[str | None], str], *, explicit: bool = True) -> None:
+        self.configure_sender(self.RUNTIME)
+        self.assertEqual(send(None), self.RUNTIME)
 
-    @override_settings(DEFAULT_FROM_EMAIL="")
-    def test_the_runtime_setting_is_used_only_when_the_deployment_setting_is_blank(self) -> None:
+        with self.captureOnCommitCallbacks(execute=True):
+            SystemSetting.objects.filter(key=self.NOREPLY_KEY).delete()
+        # A catalog fallback must not masquerade as a stored row.
+        self.assertEqual(
+            SettingsService.get_setting(self.NOREPLY_KEY),
+            SettingsService.DEFAULT_SETTINGS[self.NOREPLY_KEY],
+        )
+        self.assertEqual(send(None), self.DEPLOYMENT)
+
+        if explicit:
+            self.configure_sender(self.RUNTIME)
+            self.assertEqual(send(self.EXPLICIT), self.EXPLICIT)
+
+    def admin_sender(self, sender: str | None) -> str:
+        self.assertIsNone(sender)
+        mail.outbox.clear()
         self.assertTrue(NotificationService.send_admin_alert("Subject", "Body"))
         self.assertEqual(len(mail.outbox), 1)
-        self.assertEqual(mail.outbox[0].from_email, "configured-noreply@example.test")
+        return mail.outbox[0].from_email
+
+    def synchronous_sender(self, sender: str | None) -> str:
+        mail.outbox.clear()
+        result = EmailService._send_now(
+            to=["recipient@example.test"], subject="Subject", body_text="Body", from_email=sender
+        )
+        self.assertTrue(result.success, result.error)
+        self.assertEqual(len(mail.outbox), 1)
+        log = EmailLog.objects.get(pk=result.email_log_id)
+        self.assertEqual(log.from_addr, mail.outbox[0].from_email)
+        return mail.outbox[0].from_email
+
+    def queued_sender(self, sender: str | None, *, rate_limited: bool = False) -> str:
+        send = EmailService._queue_email_for_retry if rate_limited else EmailService._send_async
+        with patch("django_q.tasks.async_task", return_value="wp5-queued"):
+            result = send(to=["recipient@example.test"], subject="Subject", body_text="Body", from_email=sender)
+        self.assertTrue(result.success, result.error)
+        log = EmailLog.objects.get(pk=result.email_log_id)
+        resolved = log.from_addr
+        self.assertEqual(log.status, "queued")
+
+        # Delivery must retain the queued sender after the live setting changes.
+        self.configure_sender("changed-after-queue@example.test")
+        mail.outbox.clear()
+        delivered = send_email_task(
+            email_log_id=str(log.pk),
+            to=[log.to_addr],
+            subject=log.subject,
+            body_text="Body",
+            from_email=resolved,
+            retry_count=1,
+        )
+        self.assertTrue(delivered["success"], delivered)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].from_email, resolved)
+        log.refresh_from_db()
+        self.assertEqual(log.status, "sent")
+        self.assertEqual(log.from_addr, resolved)
+        return resolved
+
+    def task_sender(self, sender: str | None) -> str:
+        log = EmailLog.objects.create(
+            to_addr="recipient@example.test", from_addr="", subject="Subject", status="queued"
+        )
+        mail.outbox.clear()
+        result = send_email_task(
+            email_log_id=str(log.pk),
+            to=[log.to_addr],
+            subject=log.subject,
+            body_text="Body",
+            from_email=sender,
+        )
+        self.assertTrue(result["success"], result)
+        self.assertEqual(len(mail.outbox), 1)
+        log.refresh_from_db()
+        self.assertEqual(log.from_addr, mail.outbox[0].from_email)
+        return mail.outbox[0].from_email
+
+    def test_admin_sender_uses_stored_row_then_deployment_default(self) -> None:
+        self.assert_precedence(self.admin_sender, explicit=False)
+
+    def test_synchronous_sender_preserves_explicit_override(self) -> None:
+        self.assert_precedence(self.synchronous_sender)
+
+    def test_async_sender_preserves_override_and_queued_sender_on_retry(self) -> None:
+        self.assert_precedence(self.queued_sender)
+
+    def test_rate_limited_sender_preserves_override_and_queued_sender_on_retry(self) -> None:
+        self.assert_precedence(lambda sender: self.queued_sender(sender, rate_limited=True))
+
+    def test_task_sender_uses_row_then_default_and_preserves_override(self) -> None:
+        self.assert_precedence(self.task_sender)
+
+    def test_retry_without_sender_argument_preserves_logged_sender(self) -> None:
+        self.configure_sender(self.RUNTIME)
+        log = EmailLog.objects.create(
+            to_addr="recipient@example.test",
+            from_addr="original-logged@example.test",
+            subject="Retry",
+            status="queued",
+        )
+        result = send_email_task(
+            email_log_id=str(log.pk),
+            to=[log.to_addr],
+            subject=log.subject,
+            body_text="Retry body",
+            retry_count=1,
+        )
+        self.assertTrue(result["success"], result)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].from_email, "original-logged@example.test")
+        log.refresh_from_db()
+        self.assertEqual(log.status, "sent")
+        self.assertEqual(log.from_addr, "original-logged@example.test")
+
+        # A caller-provided sender remains authoritative even with an existing log.
+        mail.outbox.clear()
+        result = send_email_task(
+            email_log_id=str(log.pk),
+            to=[log.to_addr],
+            subject=log.subject,
+            body_text="Explicit retry body",
+            from_email=self.EXPLICIT,
+            retry_count=2,
+        )
+        self.assertTrue(result["success"], result)
+        self.assertEqual(mail.outbox[0].from_email, self.EXPLICIT)
+        log.refresh_from_db()
+        self.assertEqual(log.from_addr, self.EXPLICIT)

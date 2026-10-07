@@ -15226,15 +15226,16 @@ msgid "International Transfers"
 msgstr "Transfer Bancar"
 
 #: templates/legal/privacy_policy.html:44
+#, python-format
 msgid ""
 "\n"
-"                PragmaticHost SRL (\"we\", \"us\", \"our\") is committed to protecting your privacy and personal data.\n"
+"                %(legal_name)s (\"we\", \"us\", \"our\") is committed to protecting your privacy and personal data.\n"
 "                This Privacy Policy explains how we collect, use, store, and protect your personal information\n"
 "                when you use our PRAHO Platform hosting services.\n"
 "                "
 msgstr ""
 "\n"
-"                PragmaticHost SRL (\"noi\", \"ne\", \"noastre\") este angajată să vă protejeze intimitatea și datele personale.\n"
+"                %(legal_name)s (\"noi\", \"ne\", \"noastre\") este angajată să vă protejeze intimitatea și datele personale.\n"
 "                Această Politică de Confidențialitate explică cum colectăm, folosim, stocăm și protejăm informațiile dvs. personale\n"
 "                atunci când utilizați serviciile noastre de găzduire PRAHO Platform.\n"
 "                "
@@ -15935,27 +15936,29 @@ msgid "Contact Information"
 msgstr "Informații Cont"
 
 #: templates/legal/terms_of_service.html:44
+#, python-format
 msgid ""
 "\n"
-"                By accessing or using the PRAHO Platform services provided by PragmaticHost SRL (\"Company\", \"we\", \"us\", \"our\"),\n"
+"                By accessing or using the PRAHO Platform services provided by %(legal_name)s (\"Company\", \"we\", \"us\", \"our\"),\n"
 "                you (\"Customer\", \"you\", \"your\") agree to be bound by these Terms of Service (\"Terms\").\n"
 "                "
 msgstr ""
 "\n"
-"                Prin accesarea sau utilizarea serviciilor PRAHO Platform furnizate de PragmaticHost SRL (\"Companie\", \"noi\", \"ne\", \"noastră\"),\n"
+"                Prin accesarea sau utilizarea serviciilor PRAHO Platform furnizate de %(legal_name)s (\"Companie\", \"noi\", \"ne\", \"noastră\"),\n"
 "                dvs. (\"Client\", \"dvs.\", \"al dvs.\") acceptați să fiți obligat de acești Termeni de Serviciu (\"Termeni\").\n"
 "                "
 
 #: templates/legal/terms_of_service.html:50
+#, python-format
 msgid ""
 "\n"
 "                If you do not agree to these Terms, you may not access or use our services. These Terms constitute\n"
-"                a legally binding agreement between you and PragmaticHost SRL.\n"
+"                a legally binding agreement between you and %(legal_name)s.\n"
 "                "
 msgstr ""
 "\n"
 "                Dacă nu sunteți de acord cu acești Termeni, nu puteți accesa sau utiliza serviciile noastre. Acești Termeni constituie\n"
-"                un acord legal obligatoriu între dvs. și PragmaticHost SRL.\n"
+"                un acord legal obligatoriu între dvs. și %(legal_name)s.\n"
 "                "
 
 #: templates/legal/terms_of_service.html:57
@@ -15971,13 +15974,14 @@ msgstr ""
 "                    "
 
 #: templates/legal/terms_of_service.html:69
+#, python-format
 msgid ""
 "\n"
-"                PragmaticHost SRL provides web hosting and related services through the PRAHO Platform, including but not limited to:\n"
+"                %(legal_name)s provides web hosting and related services through the PRAHO Platform, including but not limited to:\n"
 "                "
 msgstr ""
 "\n"
-"                PragmaticHost SRL oferă servicii de găzduire web și servicii conexe prin PRAHO Platform, inclusiv, dar fără a se limita la:\n"
+"                %(legal_name)s oferă servicii de găzduire web și servicii conexe prin PRAHO Platform, inclusiv, dar fără a se limita la:\n"
 "                "
 
 #: templates/legal/terms_of_service.html:74
@@ -16224,15 +16228,16 @@ msgid "6.1 Our Property"
 msgstr "6.1 Proprietatea noastră"
 
 #: templates/legal/terms_of_service.html:202
+#, python-format
 msgid ""
 "\n"
 "                The PRAHO Platform, including its software, design, logos, and documentation, is owned by\n"
-"                PragmaticHost SRL and protected by intellectual property laws.\n"
+"                %(legal_name)s and protected by intellectual property laws.\n"
 "                "
 msgstr ""
 "\n"
 "                Platforma PRAHO, inclusiv software-ul, designul, logo-urile și documentația acesteia, este deținută de\n"
-"                PragmaticHost SRL și protejată de legile de proprietate intelectuală.\n"
+"                %(legal_name)s și protejată de legile de proprietate intelectuală.\n"
 "                "
 
 #: templates/legal/terms_of_service.html:208

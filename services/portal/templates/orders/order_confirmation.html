@@ -161,16 +161,7 @@
             </div>
 
             <!-- Payment Button -->
-            <button
-              id="submit"
-              class="w-full bg-green-600 hover:bg-green-500 text-white font-medium py-3 px-6 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled
-            >
-              <span id="button-text">
-                {% icon "credit-card" size="sm" css_class="mr-1" %} {% trans "Pay" %} {{ order.total }} {{ order.currency_code }}
-              </span>
-              <div id="spinner" class="hidden inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin ml-2"></div>
-            </button>
+            {% include "components/order_payment_button.html" %}
 
             <!-- Error messages -->
             <div id="payment-errors" class="hidden bg-red-900/50 border border-red-700 rounded-lg p-3">
@@ -251,10 +242,7 @@
             <label class="block text-xs text-amber-300 uppercase tracking-wider mb-1">{% trans "IBAN" %}</label>
             <div x-data="copyToClipboard('{{ bank_details.iban|escapejs }}', '{% trans "Copied!" %}', '{% trans "Copy IBAN to clipboard" %}')" class="flex items-center gap-2">
               <p class="flex-1 text-white font-mono text-sm bg-slate-700/50 px-3 py-2 rounded select-all">{{ bank_details.iban }}</p>
-              <button type="button" @click="copy()" class="flex-shrink-0 px-2 py-2 text-amber-300 hover:text-amber-100 bg-slate-700/50 hover:bg-slate-600/50 rounded transition-colors" :title="title">
-                <span x-show="notCopied">{% icon "clipboard" size="sm" %}</span>
-                <span x-show="copied" class="text-green-400">{% icon "check" size="sm" %}</span>
-              </button>
+              {% include "components/clipboard_button.html" %}
             </div>
           </div>
           {% endif %}
@@ -274,10 +262,7 @@
             <label class="block text-xs text-amber-300 uppercase tracking-wider mb-1">{% trans "Payment Reference" %}</label>
             <div x-data="copyToClipboard('{{ order.order_number|escapejs }}', '{% trans "Copied!" %}', '{% trans "Copy reference to clipboard" %}')" class="flex items-center gap-2">
               <p class="flex-1 text-white font-mono text-sm bg-slate-700/50 px-3 py-2 rounded select-all">{{ order.order_number }}</p>
-              <button type="button" @click="copy()" class="flex-shrink-0 px-2 py-2 text-amber-300 hover:text-amber-100 bg-slate-700/50 hover:bg-slate-600/50 rounded transition-colors" :title="title">
-                <span x-show="notCopied">{% icon "clipboard" size="sm" %}</span>
-                <span x-show="copied" class="text-green-400">{% icon "check" size="sm" %}</span>
-              </button>
+              {% include "components/clipboard_button.html" %}
             </div>
           </div>
           <div>
@@ -350,8 +335,8 @@
         <div class="space-y-2 text-sm">
           <div class="flex items-center text-green-200">
             {% icon "mail" size="sm" css_class="mr-2" %}
-            <a href="mailto:support@pragmatichost.com" class="hover:text-green-100 transition-colors">
-              support@pragmatichost.com
+            <a href="mailto:{{ company.email_support }}" class="hover:text-green-100 transition-colors">
+              {{ company.email_support }}
             </a>
           </div>
           <div class="flex items-center text-green-200">
