@@ -296,9 +296,19 @@
 # 7. Django setup
 # ---------------------------------------------------------------------------
 
+# migrate and collectstatic run with this environment, not the services' EnvironmentFile, and production
+# settings don't load the .env, so pass the keys production refuses to import without. Only those the
+# .env defines are passed, so a staging environment is unchanged.
 - name: Set Django environment variables from .env file
   set_fact:
-    django_env:
+    django_env: "{{ praho_django_env_base | combine(deployed_env | dict2items | selectattr('key', 'in', praho_passthrough) | items2dict) }}"
+  vars:
+    praho_passthrough:
+      - PLATFORM_TO_PORTAL_WEBHOOK_SECRET
+      - DJANGO_ENCRYPTION_KEY
+      - DJANGO_ENCRYPTION_KEY_PREVIOUS
+      - CREDENTIAL_VAULT_MASTER_KEY
+    praho_django_env_base:
       PYTHONPATH: "{{ project_root }}/src/services/platform"
       DJANGO_SETTINGS_MODULE: "{{ django_settings_module }}"
       # Read all vars from the deployed .env file
@@ -345,7 +355,12 @@
 
 - name: Set Portal Django environment
   set_fact:
-    portal_django_env:
+    portal_django_env: "{{ praho_portal_env_base | combine(deployed_env | dict2items | selectattr('key', 'in', praho_passthrough) | items2dict) }}"
+  vars:
+    # Production portal settings refuse to import without it (see the platform task above).
+    praho_passthrough:
+      - PLATFORM_TO_PORTAL_WEBHOOK_SECRET
+    praho_portal_env_base:
       PYTHONPATH: "{{ project_root }}/src/services/portal"
       DJANGO_SETTINGS_MODULE: "{{ django_settings_module }}"
       DJANGO_SECRET_KEY: "{{ deployed_env.DJANGO_SECRET_KEY }}"

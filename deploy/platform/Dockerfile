@@ -25,7 +25,9 @@ WORKDIR /build
 COPY pyproject.toml uv.lock ./
 COPY services/platform/pyproject.toml ./services/platform/pyproject.toml
 
-# Sync platform production dependencies into /build/.venv
+# Build the venv at the path it runs from. Console scripts such as gunicorn carry an absolute
+# shebang to their venv's python, so a venv built elsewhere and copied cannot start them.
+ENV UV_PROJECT_ENVIRONMENT=/app/.venv
 RUN uv sync --group platform --group prod --frozen --no-dev
 
 # ---------------------------------------------------------------------------
@@ -57,13 +59,17 @@ RUN apt-get update \
 WORKDIR /app
 
 # Copy pre-built venv from builder stage
-COPY --from=builder /build/.venv /app/.venv
+COPY --from=builder /app/.venv /app/.venv
 
 # Activate venv — bare `python` resolves to .venv/bin/python
 ENV PATH="/app/.venv/bin:$PATH"
 
 # Copy platform service code (includes assets/ and static/)
 COPY services/platform/ ./
+
+# Shared design-system templates and static files (ADR-0035). Settings load them from
+# REPO_ROOT/shared/ui, and REPO_ROOT is / here (BASE_DIR is /app).
+COPY shared/ui /shared/ui
 
 # Copy entrypoint script
 COPY deploy/platform/entrypoint.sh /app/entrypoint.sh
@@ -84,7 +90,8 @@ RUN chmod +x /app/entrypoint.sh \
     && chown -R django:django /var/log/praho
 USER django
 
-HEALTHCHECK --interval=30s --timeout=30s --start-period=60s --retries=3 \
+# start-period covers a first boot, which runs every migration before Gunicorn listens.
+HEALTHCHECK --interval=30s --timeout=30s --start-period=600s --retries=3 \
     CMD curl -f http://localhost:8700/api/users/health/ || exit 1
 
 EXPOSE 8700
