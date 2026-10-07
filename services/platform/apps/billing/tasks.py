@@ -30,9 +30,7 @@ from apps.common.performance.async_tasks import DistributedLock
 
 logger = logging.getLogger(__name__)
 
-# Task configuration — module-level fallbacks (structural, used for async_task timeout args)
-_DEFAULT_TASK_RETRY_DELAY = 300  # 5 minutes
-_DEFAULT_TASK_MAX_RETRIES = 3
+# Fixed task budgets used for async_task timeout arguments
 TASK_SOFT_TIME_LIMIT = 300  # 5 minutes
 TASK_TIME_LIMIT = 600  # 10 minutes
 PAYMENT_RETRY_LEASE_TIMEOUT = timedelta(seconds=TASK_TIME_LIMIT * 2)
@@ -61,29 +59,6 @@ def _get_refund_reconciliation_limit() -> int:
             ),
         ),
     )
-
-
-def _get_task_retry_delay() -> int:
-    """Get task retry delay seconds from SettingsService."""
-    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
-        SettingsService,  # Deferred: django-q task  # Deferred: avoids circular import
-    )
-
-    return SettingsService.get_integer_setting("billing.task_retry_delay_seconds", _DEFAULT_TASK_RETRY_DELAY)
-
-
-def _get_task_max_retries() -> int:
-    """Get task max retries from SettingsService."""
-    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
-        SettingsService,  # Deferred: django-q task  # Deferred: avoids circular import
-    )
-
-    return SettingsService.get_integer_setting("billing.task_max_retries", _DEFAULT_TASK_MAX_RETRIES)
-
-
-# Backward-compatible module-level aliases (for code that imports them)
-TASK_RETRY_DELAY = _DEFAULT_TASK_RETRY_DELAY
-TASK_MAX_RETRIES = _DEFAULT_TASK_MAX_RETRIES
 
 
 def submit_efactura(invoice_id: str) -> dict[str, Any]:

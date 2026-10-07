@@ -25,7 +25,6 @@ notifications.max_template_size
 orders.max_search_query_length
 products.max_json_content_size
 products.max_price_cents
-provisioning.health_check_timeout_seconds
 provisioning.max_concurrent_health_checks
 provisioning.max_error_display
 provisioning.max_username_uniqueness_attempts

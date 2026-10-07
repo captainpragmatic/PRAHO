@@ -11,7 +11,7 @@ Targets the 158 untested lines (59% → 90%+), covering:
 - SubscriptionChange.proration_amount historical representation
 - PriceGrandfathering properties and expire()
 - SubscriptionItem.effective_price_cents, line_total_cents
-- get_subscription_grace_period_days, get_max_payment_retry_attempts
+- get_subscription_grace_period_days
 """
 
 from __future__ import annotations
@@ -28,13 +28,11 @@ from django.utils import timezone
 from apps.billing.currency_models import Currency
 from apps.billing.subscription_models import (
     _DEFAULT_GRACE_PERIOD_DAYS,
-    _DEFAULT_MAX_PAYMENT_RETRY_ATTEMPTS,
     BILLING_CYCLE_DAYS,
     PriceGrandfathering,
     Subscription,
     SubscriptionChange,
     SubscriptionItem,
-    get_max_payment_retry_attempts,
     get_subscription_grace_period_days,
 )
 from apps.customers.models import Customer
@@ -501,9 +499,7 @@ class SubscriptionStartTrialTestCase(TestCase):
         self.assertGreaterEqual(sub.trial_start, before)
         expected_end = sub.trial_start + timedelta(days=14)
         # Allow small clock skew
-        self.assertAlmostEqual(
-            (sub.trial_end - expected_end).total_seconds(), 0, delta=2
-        )
+        self.assertAlmostEqual((sub.trial_end - expected_end).total_seconds(), 0, delta=2)
         self.assertEqual(sub.current_period_end, sub.trial_end)
         self.assertEqual(sub.next_billing_date, sub.trial_end)
         mock_log.assert_called()
@@ -1139,44 +1135,6 @@ class GetSubscriptionGracePeriodDaysTestCase(TestCase):
     def test_returns_at_least_one(self) -> None:
         """Return value is always >= 1 (enforced by max(1, ...))."""
         result = get_subscription_grace_period_days()
-        self.assertGreaterEqual(result, 1)
-
-
-class GetMaxPaymentRetryAttemptsTestCase(TestCase):
-    """Tests for get_max_payment_retry_attempts()."""
-
-    def test_exception_returns_default(self) -> None:
-        """Returns _DEFAULT_MAX_PAYMENT_RETRY_ATTEMPTS on exception."""
-        with patch(
-            "apps.settings.services.SettingsService.get_integer_setting",
-            side_effect=Exception("Service down"),
-        ):
-            result = get_max_payment_retry_attempts()
-
-        self.assertEqual(result, _DEFAULT_MAX_PAYMENT_RETRY_ATTEMPTS)
-
-    def test_returns_int(self) -> None:
-        """Return value is always an int."""
-        result = get_max_payment_retry_attempts()
-        self.assertIsInstance(result, int)
-
-    def test_returns_at_least_one(self) -> None:
-        """Return value is always >= 1 (enforced by max(1, ...))."""
-        result = get_max_payment_retry_attempts()
-        self.assertGreaterEqual(result, 1)
-
-    def test_success_path_returns_setting_value(self) -> None:
-        """Returns setting value from SettingsService on success."""
-        mock_settings_service = MagicMock()
-        mock_settings_service.get_integer_setting.return_value = 8
-
-        with patch.dict(
-            "sys.modules",
-            {"apps.settings.services": MagicMock(SettingsService=mock_settings_service)},
-        ):
-            result = get_max_payment_retry_attempts()
-
-        self.assertIsInstance(result, int)
         self.assertGreaterEqual(result, 1)
 
 

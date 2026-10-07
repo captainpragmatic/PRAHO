@@ -61,8 +61,6 @@ class OrderProcessingResults(TypedDict):
 # Task configuration
 TASK_RETRY_DELAY = 300  # 5 minutes
 TASK_MAX_RETRIES = 2
-_DEFAULT_TASK_SOFT_TIME_LIMIT = 600  # 10 minutes (catalog default)
-TASK_SOFT_TIME_LIMIT = _DEFAULT_TASK_SOFT_TIME_LIMIT
 _DEFAULT_TASK_TIME_LIMIT = 900  # 15 minutes (catalog default)
 TASK_TIME_LIMIT = _DEFAULT_TASK_TIME_LIMIT
 
@@ -138,15 +136,6 @@ def get_max_paid_order_confirmation_failures() -> int:
             ),
         ),
     )
-
-
-def get_task_soft_time_limit() -> int:
-    """Get task soft time limit from SettingsService (runtime)."""
-    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
-        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
-    )
-
-    return SettingsService.get_integer_setting("orders.task_soft_time_limit", _DEFAULT_TASK_SOFT_TIME_LIMIT)
 
 
 def get_task_time_limit() -> int:

@@ -23,7 +23,24 @@ logger = logging.getLogger(__name__)
 # Later foundation consumers register old catalog default -> previously enforced value here.
 # Equal pairs can register an activation whose catalog default does not change.
 DEFAULT_VALUE_MIGRATIONS: dict[str, tuple[object, object]] = {}
-RETIRED_SETTING_KEYS: frozenset[str] = frozenset()
+RETIRED_SETTING_KEYS: frozenset[str] = frozenset(
+    {
+        "billing.alert_cooldown_hours",
+        "billing.max_payment_retry_attempts",
+        "billing.task_max_retries",
+        "billing.task_retry_delay_seconds",
+        "common.cache_timeout_long",
+        "common.cache_timeout_very_long",
+        "notifications.max_recipients_per_batch",
+        "orders.task_soft_time_limit",
+        "provisioning.health_check_timeout_seconds",
+        "provisioning.long_provisioning_threshold_minutes",
+        "provisioning.resource_usage_alert_threshold",
+        "provisioning.server_overload_threshold",
+        "users.credential_max_age_days",
+        "users.credential_rotation_retry_limit",
+    }
+)
 ACTIVATION_VERSION = "wp18-v1"
 
 _METADATA_FIELDS = ("name", "description", "help_text", "data_type", "is_sensitive", "is_required", "category")

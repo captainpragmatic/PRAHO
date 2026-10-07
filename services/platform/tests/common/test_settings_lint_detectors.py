@@ -212,7 +212,7 @@ class EffectCreditScopeTests(SimpleTestCase):
 class InertSettingDetectionTests(SimpleTestCase):
     """Check 6 must refuse to judge where it cannot see, and must still catch the plain case."""
 
-    KEYS = frozenset({KEY, OTHER, "users.credential_max_age_days", "orders.review_threshold_cents"})
+    KEYS = frozenset({KEY, OTHER, "example.dead_setting", "orders.review_threshold_cents"})
 
     def flagged(self, sources: dict[str, str]) -> set[str]:
         with tempfile.TemporaryDirectory() as tmp:
@@ -225,17 +225,17 @@ class InertSettingDetectionTests(SimpleTestCase):
     def test_a_plainly_uncalled_getter_is_reported(self) -> None:
         source = (
             "from apps.settings.services import SettingsService\n"
-            'def get_dead():\n    return SettingsService.get_integer_setting("users.credential_max_age_days", 1)\n'
+            'def get_dead():\n    return SettingsService.get_integer_setting("example.dead_setting", 1)\n'
         )
-        self.assertIn("users.credential_max_age_days", self.flagged({"dead.py": source}))
+        self.assertIn("example.dead_setting", self.flagged({"dead.py": source}))
 
     def test_a_called_getter_is_not_reported(self) -> None:
         source = (
             "from apps.settings.services import SettingsService\n"
-            'def get_live():\n    return SettingsService.get_integer_setting("users.credential_max_age_days", 1)\n'
+            'def get_live():\n    return SettingsService.get_integer_setting("example.dead_setting", 1)\n'
             "def enforce():\n    return get_live() > 0\n"
         )
-        self.assertNotIn("users.credential_max_age_days", self.flagged({"live.py": source}))
+        self.assertNotIn("example.dead_setting", self.flagged({"live.py": source}))
 
     def test_a_decorated_getter_is_not_reported(self) -> None:
         """A decorator receives the function object, so its name need never appear again."""
@@ -270,7 +270,7 @@ class InertSettingDetectionTests(SimpleTestCase):
         """Three modules define `get_task_time_limit`; a call to one hid the other two."""
         dead = (
             "from apps.settings.services import SettingsService\n"
-            'def get_budget():\n    return SettingsService.get_integer_setting("users.credential_max_age_days", 1)\n'
+            'def get_budget():\n    return SettingsService.get_integer_setting("example.dead_setting", 1)\n'
         )
         unrelated = (
             "from apps.settings.services import SettingsService\n"
@@ -285,7 +285,7 @@ class InertSettingDetectionTests(SimpleTestCase):
             (root / "a" / "mod.py").write_text(dead)
             (root / "b" / "mod.py").write_text(unrelated)
             findings = lint.check_inert_settings(set(self.KEYS), sorted(root.rglob("*.py")), set())
-        self.assertIn("users.credential_max_age_days", {f.name for f in findings if f.severity == "medium"})
+        self.assertIn("example.dead_setting", {f.name for f in findings if f.severity == "medium"})
 
 
 class DriftBaselineTests(SimpleTestCase):

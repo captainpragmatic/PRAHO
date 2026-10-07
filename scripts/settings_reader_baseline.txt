@@ -24,7 +24,6 @@ audit.notify_on_file_integrity_alerts|_create_file_integrity_alert|1
 billing.bank_accounts|bank_transfer_instructions|1
 
 @ services/platform/apps/billing/config.py
-billing.alert_cooldown_hours|get_alert_cooldown_hours|1
 billing.event_grace_period_hours|get_event_grace_period_hours|1
 billing.future_event_drift_minutes|get_future_event_drift_minutes|1
 
@@ -100,7 +99,6 @@ integrations.smartbill_v3_token|_credentials_from_settings|1
 billing.metering_task_timeout|get_task_timeout|1
 
 @ services/platform/apps/billing/subscription_models.py
-billing.max_payment_retry_attempts|get_max_payment_retry_attempts|1
 billing.subscription_grace_period_days|get_subscription_grace_period_days|1
 
 @ services/platform/apps/billing/subscription_service.py
@@ -110,8 +108,6 @@ billing.max_payment_retries|get_max_payment_retries|1
 billing.fx.bnr_fetch_enabled|fetch_bnr_exchange_rates|1
 billing.fx.pairs|_run_bnr_exchange_fetch|1
 billing.refund_reconciliation_limit|_get_refund_reconciliation_limit|1
-billing.task_max_retries|_get_task_max_retries|1
-billing.task_retry_delay_seconds|_get_task_retry_delay|1
 
 @ services/platform/apps/billing/views.py
 billing.proforma_validity_days|_process_valid_until_date|1
@@ -120,8 +116,6 @@ billing.proforma_validity_days|_process_valid_until_date|1
 system.maintenance_mode|_maintenance_mode_active|1
 
 @ services/platform/apps/common/credential_vault.py
-users.credential_max_age_days|get_max_credential_age_days|1
-users.credential_rotation_retry_limit|get_rotation_retry_limit|1
 
 @ services/platform/apps/common/flow_analysis/hybrid_analyzer.py
 common.proximity_line_threshold|get_proximity_line_threshold|1
@@ -135,10 +129,8 @@ common.value_summary_limit|get_value_summary_limit|1
 common.default_orphans|get_orphans|1
 
 @ services/platform/apps/common/performance/cache.py
-common.cache_timeout_long|get_cache_timeout_long|1
 common.cache_timeout_medium|get_cache_timeout_medium|1
 common.cache_timeout_short|get_cache_timeout_short|1
-common.cache_timeout_very_long|get_cache_timeout_very_long|1
 
 @ services/platform/apps/common/performance/query_optimization.py
 common.query_warning_threshold|get_query_warning_threshold|1
@@ -252,7 +244,6 @@ notifications.max_template_size|get_max_template_size|1
 
 @ services/platform/apps/notifications/services.py
 notifications.max_async_attachment_kb|EmailService.send_email|1
-notifications.max_recipients_per_batch|get_max_recipients_per_batch|1
 
 @ services/platform/apps/notifications/tasks.py
 notifications.email_batch_size|process_email_queue|1
@@ -265,7 +256,6 @@ orders.review_thresholds_cents|OrderPaymentConfirmationService._get_review_thres
 
 @ services/platform/apps/orders/tasks.py
 orders.max_payment_failures_before_fail|get_max_payment_failures_before_order_fail|1
-orders.task_soft_time_limit|get_task_soft_time_limit|1
 orders.task_time_limit|get_task_time_limit|1
 
 @ services/platform/apps/orders/views.py
@@ -295,9 +285,6 @@ provisioning.placement_required_tags|order_placement_candidates|1
 @ services/platform/apps/provisioning/signals.py
 provisioning.high_value_plan_threshold_cents|_handle_new_service_creation|1
 provisioning.high_value_plan_threshold_cents|_handle_new_service_plan_creation|1
-provisioning.long_provisioning_threshold_minutes|get_long_provisioning_threshold_minutes|1
-provisioning.resource_usage_alert_threshold|get_resource_usage_alert_threshold|1
-provisioning.server_overload_threshold|get_server_overload_threshold|1
 
 @ services/platform/apps/provisioning/virtualmin_auth_manager.py
 provisioning.cache_timeout|get_cache_timeout|1
@@ -366,7 +353,6 @@ provisioning.task_time_limit|get_task_time_limit|1
 
 @ services/platform/apps/provisioning/virtualmin_views.py
 provisioning.bulk_operation_threshold|get_bulk_operation_threshold|1
-provisioning.health_check_timeout_seconds|get_health_check_timeout_seconds|1
 provisioning.max_concurrent_health_checks|get_max_concurrent_health_checks|1
 provisioning.max_error_display|get_max_error_display|1
 provisioning.overall_health_check_timeout|get_overall_health_check_timeout|1

@@ -54,24 +54,6 @@ def get_cache_timeout_medium() -> int:
     return SettingsService.get_integer_setting("common.cache_timeout_medium", _DEFAULT_CACHE_TIMEOUT_MEDIUM)
 
 
-def get_cache_timeout_long() -> int:
-    """Get cache timeout long from SettingsService (runtime)."""
-    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
-        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
-    )
-
-    return SettingsService.get_integer_setting("common.cache_timeout_long", _DEFAULT_CACHE_TIMEOUT_LONG)
-
-
-def get_cache_timeout_very_long() -> int:
-    """Get cache timeout very long from SettingsService (runtime)."""
-    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
-        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
-    )
-
-    return SettingsService.get_integer_setting("common.cache_timeout_very_long", _DEFAULT_CACHE_TIMEOUT_VERY_LONG)
-
-
 class CacheService:
     """
     Centralized cache service with multi-tier caching support.

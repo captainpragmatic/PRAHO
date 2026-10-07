@@ -168,7 +168,7 @@ The ones that matter most:
 | `orders.max_price_override_multiplier` | Same |
 | `products.max_price_cents` | Product price ceiling |
 | `orders.max_payment_failures_before_fail` | Advertised "fail the order after N payment failures" |
-| `users.credential_max_age_days` | Credential rotation age |
+| `users.credential_max_age_days` | Credential rotation age; retired in WP18 (no enforcement point) |
 | `provisioning.ssh_timeout`, `provisioning.sudo_command_timeout` | Control-panel connection timeouts |
 
 **Fixing one is a behaviour change, not a sweep.** Calling the getter changes what the system

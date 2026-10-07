@@ -96,17 +96,6 @@ def get_max_concurrent_health_checks() -> int:
     )
 
 
-def get_health_check_timeout_seconds() -> int:
-    """Get health check timeout seconds from SettingsService (runtime)."""
-    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
-        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
-    )
-
-    return SettingsService.get_integer_setting(
-        "provisioning.health_check_timeout_seconds", _DEFAULT_HEALTH_CHECK_TIMEOUT_SECONDS
-    )
-
-
 def get_overall_health_check_timeout() -> int:
     """Get overall health check timeout from SettingsService (runtime)."""
     from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
