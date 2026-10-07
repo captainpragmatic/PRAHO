@@ -18,8 +18,8 @@
   <div class="mb-8">
     <div class="bg-gradient-to-r from-slate-800 to-slate-900 rounded-lg p-6 border border-slate-700">
       <div class="flex items-center space-x-4">
-        <div class="w-12 h-12 bg-blue-600/20 rounded-lg flex items-center justify-center">
-          {% icon "swap" size="lg" css_class="text-blue-400" %}
+        <div class="w-12 h-12 bg-blue-600/20 rounded-lg flex items-center justify-center"> {# tmpl-allow TMPL005: needs badge unframed variant #}
+          {% icon "swap" size="lg" css_class="text-blue-400" %} {# tmpl-allow TMPL005: needs badge unframed variant #}
         </div>
         <div>
           <h1 class="text-2xl font-bold text-white">{% trans "Request Service Action" %}</h1>
@@ -42,7 +42,7 @@
           {% if maintenance %}
           {% include "components/maintenance_inline_alert.html" with hide_retry=True %}
           {% elif form_error %}
-          <div role="alert" class="mb-6 rounded-lg border border-yellow-600 bg-yellow-900/20 p-4 text-yellow-200">
+          <div role="alert" class="mb-6 rounded-lg border border-yellow-600 bg-yellow-900/20 p-4 text-yellow-200"> {# tmpl-allow TMPL005: needs alert content_slot #}
             <p>{{ form_error }}</p>
             {% if submission_conflict %}
             <a href="{% url 'tickets:list' %}" class="mt-2 inline-block underline">{% trans "View your tickets" %}</a>
@@ -56,9 +56,9 @@
             <div class="relative">
               {% with rid="action_"|add:action_value cls="sr-only peer" %}
                 {% if action_value == selected_action %}
-                  {% input_field "action" input_type="radio" value=action_value html_id=rid css_class=cls checked=True %}
+                  {% input_field "action" input_type="radio" value=action_value html_id=rid css_class=cls aria_label=action_label checked=True %}
                 {% else %}
-                  {% input_field "action" input_type="radio" value=action_value html_id=rid css_class=cls %}
+                  {% input_field "action" input_type="radio" value=action_value html_id=rid css_class=cls aria_label=action_label %}
                 {% endif %}
               {% endwith %}
 
@@ -105,15 +105,13 @@
                   <!-- Action Requirements -->
                   {% if action_value == 'upgrade_request' %}
                   <div class="mt-3 pl-11">
-                    <div class="text-xs text-green-400 bg-green-400/10 px-2 py-1 rounded-full inline-block">
-                      {% trans "May incur additional charges" %}
-                    </div>
+                    {% trans "May incur additional charges" as requirement_label %}
+                    {% badge requirement_label variant="success" rounded="full" %}
                   </div>
                   {% elif action_value == 'suspend_request' or action_value == 'cancel_request' %}
                   <div class="mt-3 pl-11">
-                    <div class="text-xs text-yellow-400 bg-yellow-400/10 px-2 py-1 rounded-full inline-block">
-                      {% trans "Reason required" %}
-                    </div>
+                    {% trans "Reason required" as requirement_label %}
+                    {% badge requirement_label variant="warning" rounded="full" %}
                   </div>
                   {% endif %}
                 </div>
@@ -136,29 +134,29 @@
               <div class="border border-slate-700 rounded-lg p-4">
                 <div class="flex items-center justify-between mb-2">
                   <h4 class="font-medium text-white">{{ plan.name }}</h4>
-                  <div class="text-sm text-green-400 font-mono">{% with cur=plan.currency_code %}{{ plan.price_monthly|romanian_currency:cur }}{% endwith %}/{% trans "month" %}</div>
+                  <div class="text-sm text-green-400 font-mono">{% with cur=plan.currency_code %}{{ plan.price_monthly|romanian_currency:cur }}{% endwith %}/{% trans "month" %}</div> {# tmpl-allow TMPL005: needs stat_tile value_class #}
                 </div>
                 <p class="text-xs text-slate-400 mb-3">{{ plan.description|truncatewords:15 }}</p>
 
                 <div class="grid grid-cols-2 gap-2 text-xs">
                   {% if plan.disk_space_gb %}
                   <div class="text-slate-400">
-                    <span class="text-blue-400">{{ plan.disk_space_gb }}GB</span> {% trans "Storage" %}
+                    <span class="text-blue-400">{{ plan.disk_space_gb }}GB</span> {% trans "Storage" %} {# tmpl-allow TMPL005: needs stat_tile value_class #}
                   </div>
                   {% endif %}
                   {% if plan.bandwidth_gb %}
                   <div class="text-slate-400">
-                    <span class="text-green-400">{{ plan.bandwidth_gb }}GB</span> {% trans "Bandwidth" %}
+                    <span class="text-green-400">{{ plan.bandwidth_gb }}GB</span> {% trans "Bandwidth" %} {# tmpl-allow TMPL005: needs stat_tile value_class #}
                   </div>
                   {% endif %}
                   {% if plan.email_accounts %}
                   <div class="text-slate-400">
-                    <span class="text-purple-400">{{ plan.email_accounts }}</span> {% trans "Emails" %}
+                    <span class="text-purple-400">{{ plan.email_accounts }}</span> {% trans "Emails" %} {# tmpl-allow TMPL005: needs stat_tile value_class #}
                   </div>
                   {% endif %}
                   {% if plan.databases %}
                   <div class="text-slate-400">
-                    <span class="text-yellow-400">{{ plan.databases }}</span> {% trans "DBs" %}
+                    <span class="text-yellow-400">{{ plan.databases }}</span> {% trans "DBs" %} {# tmpl-allow TMPL005: needs stat_tile value_class #}
                   </div>
                   {% endif %}
                 </div>
@@ -171,11 +169,12 @@
           <div class="mb-8">
             <label for="reason" class="block text-sm font-medium text-slate-300 mb-2">
               {% trans "Reason" %}
-              <span id="reason-required" class="text-red-400 hidden">*</span>
+              <span id="reason-required" class="text-red-400 hidden">*</span> {# tmpl-allow TMPL005: needs input_field required_indicator_id #}
             </label>
+            {% trans "Reason" as reason_label %}
             {% trans 'Please provide a detailed reason for this request...' as reason_placeholder %}
             {% with reason_id="reason" %}
-              {% input_field "reason" input_type="textarea" html_id=reason_id rows=4 maxlength=4000 placeholder=reason_placeholder value=reason %}
+              {% input_field "reason" input_type="textarea" html_id=reason_id aria_label=reason_label rows=4 maxlength=4000 placeholder=reason_placeholder value=reason %}
             {% endwith %}
             <div class="text-xs text-slate-400 mt-1">
               {% trans "This information helps our team process your request faster" %}
@@ -185,7 +184,7 @@
           <!-- Submit Buttons -->
           <div class="flex flex-col sm:flex-row gap-3">
             {% trans "Submit Request" as submit_label %}
-            {% with submit_classes="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-6 rounded-lg transition-colors flex items-center justify-center" %}
+            {% with submit_classes="flex-1 py-3 px-6" %}
               {% button submit_label type="submit" icon="send" css_class=submit_classes %}
             {% endwith %}
 
@@ -228,11 +227,14 @@
             <dt class="text-sm font-medium text-slate-400">{% trans "Status" %}</dt>
             <dd class="text-sm">
               {% if service.status == 'active' %}
-                <span class="text-green-400">{% icon "check" size="sm" css_class="mr-1" %} {% trans "Active" %}</span>
+                {% trans "Active" as status_label %}
+                {% badge status_label variant="success" icon="check" rounded="full" %}
               {% elif service.status == 'suspended' %}
-                <span class="text-red-400">{% icon "ban" size="sm" css_class="mr-1" %} {% trans "Suspended" %}</span>
+                {% trans "Suspended" as status_label %}
+                {% badge status_label variant="danger" icon="ban" rounded="full" %}
               {% elif service.status == 'pending' %}
-                <span class="text-yellow-400">{% icon "clock" size="sm" css_class="mr-1" %} {% trans "Pending" %}</span>
+                {% trans "Pending" as status_label %}
+                {% badge status_label variant="warning" icon="clock" rounded="full" %}
               {% else %}
                 <span class="text-slate-400">{{ service.status_display }}</span>
               {% endif %}
@@ -248,7 +250,7 @@
 
         <div class="space-y-4">
           <div class="flex items-center space-x-3">
-            <div class="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center">
+            <div class="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center"> {# tmpl-allow TMPL005: needs step_progress custom_step_layout #}
               <span class="text-white text-sm font-bold">1</span>
             </div>
             <div>
@@ -335,22 +337,24 @@ document.addEventListener('DOMContentLoaded', function() {
         label.classList.remove('border-slate-700');
         label.classList.add('border-blue-500', 'bg-blue-500/10');
         icon.classList.remove('bg-slate-600');
-        icon.classList.add('bg-blue-600');
+        icon.classList.add('bg-blue-600'); {# tmpl-allow TMPL005: needs input_field state_classes #}
         iconSvg.classList.remove('text-slate-300');
         iconSvg.classList.add('text-white');
         selectionIndicator.classList.remove('border-slate-600', 'bg-transparent');
         selectionIndicator.classList.add('border-blue-500', 'bg-blue-500');
+        {# dm-allow DM001: intentional white selection dot; JS adds and removes the same contrast class #}
         selectionIndicator.querySelector('div').classList.add('bg-white');
       } else {
         // Unselected state
         label.classList.remove('border-blue-500', 'bg-blue-500/10');
         label.classList.add('border-slate-700');
-        icon.classList.remove('bg-blue-600');
+        icon.classList.remove('bg-blue-600'); {# tmpl-allow TMPL005: needs input_field state_classes #}
         icon.classList.add('bg-slate-600');
         iconSvg.classList.remove('text-white');
         iconSvg.classList.add('text-slate-300');
         selectionIndicator.classList.remove('border-blue-500', 'bg-blue-500');
         selectionIndicator.classList.add('border-slate-600', 'bg-transparent');
+        {# dm-allow DM001: intentional white selection dot; JS adds and removes the same contrast class #}
         selectionIndicator.querySelector('div').classList.remove('bg-white');
       }
     });

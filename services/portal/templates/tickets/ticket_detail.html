@@ -7,7 +7,7 @@
 {% block content %}
 <div class="px-4">
     <div class="mb-4">
-        <a href="{% url 'tickets:list' %}" class="inline-block align-baseline font-bold text-sm text-blue-400 hover:text-blue-300">
+        <a href="{% url 'tickets:list' %}" class="inline-block align-baseline font-bold text-sm text-blue-400 hover:text-blue-300"> {# tmpl-allow TMPL005: needs button text variant #}
             ← {% trans 'Back to Tickets' %}
         </a>
     </div>
@@ -23,9 +23,9 @@
 
     {% if ticket.related_service %}
     <div class="flex items-center space-x-2 text-sm mb-6">
-      {% icon "services" size="sm" css_class="text-blue-400" %}
+      {% icon "services" size="sm" css_class="text-blue-400" %} {# tmpl-allow TMPL005: needs badge unframed variant #}
       <span class="text-slate-400">{% trans "Service" %}:</span>
-      <a href="{% url 'services:detail' service_id=ticket.related_service %}" class="text-blue-400 hover:text-blue-300">
+      <a href="{% url 'services:detail' service_id=ticket.related_service %}" class="text-blue-400 hover:text-blue-300"> {# tmpl-allow TMPL005: needs button text variant #}
         {{ ticket.related_service_name|default:ticket.related_service }}
       </a>
     </div>
@@ -56,9 +56,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
             // Visual feedback for long messages
             if (this.value.length > 1000) {
-                charCounter.className = 'text-xs text-yellow-400';
+                charCounter.className = 'text-xs text-yellow-400'; {# tmpl-allow TMPL005: needs input_field state_classes #}
             } else if (this.value.length > 2000) {
-                charCounter.className = 'text-xs text-red-400';
+                charCounter.className = 'text-xs text-red-400'; {# tmpl-allow TMPL005: needs input_field state_classes #}
             } else {
                 charCounter.className = 'text-xs text-slate-400';
             }
@@ -269,9 +269,9 @@ document.addEventListener('htmx:afterRequest', function(e) {
 
                     // Visual feedback for long messages
                     if (this.value.length > 1000) {
-                        newCharCounter.className = 'text-xs text-yellow-400';
+                        newCharCounter.className = 'text-xs text-yellow-400'; {# tmpl-allow TMPL005: needs input_field state_classes #}
                     } else if (this.value.length > 2000) {
-                        newCharCounter.className = 'text-xs text-red-400';
+                        newCharCounter.className = 'text-xs text-red-400'; {# tmpl-allow TMPL005: needs input_field state_classes #}
                     } else {
                         newCharCounter.className = 'text-xs text-slate-400';
                     }

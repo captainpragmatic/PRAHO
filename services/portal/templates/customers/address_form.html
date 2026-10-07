@@ -30,89 +30,52 @@
             <div class="mb-5">
                 <p class="block text-sm font-medium text-slate-300 mb-2">{% trans "Address Role" %}</p>
                 <div class="flex flex-col gap-2">
-                    <label class="inline-flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
-                        <input type="checkbox" name="is_primary" id="is_primary" value="on"
-                               class="h-4 w-4 rounded border-slate-500 text-blue-600 focus:ring-blue-500 bg-slate-700">
-                        {% trans "Primary address" %}
-                    </label>
-                    <label class="inline-flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
-                        <input type="checkbox" name="is_billing" id="is_billing" value="on"
-                               class="h-4 w-4 rounded border-slate-500 text-blue-600 focus:ring-blue-500 bg-slate-700">
-                        {% trans "Billing address" %}
-                    </label>
+                    {% trans "Primary address" as flag_label %}
+                    {% checkbox_field "is_primary" html_id="is_primary" label=flag_label value="on" %}
+                    {% trans "Billing address" as flag_label %}
+                    {% checkbox_field "is_billing" html_id="is_billing" label=flag_label value="on" %}
                 </div>
             </div>
 
             <!-- Optional Label -->
             <div class="mb-5">
-                <label for="label" class="block text-sm font-medium text-slate-300 mb-2">
-                    {% trans "Label (optional)" %}
-                </label>
-                <input type="text" id="label" name="label" value="{{ values.label|default:'' }}" maxlength="50"
-                       class="w-full bg-slate-700 border border-slate-600 text-slate-100 text-sm rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-slate-500"
-                       placeholder="{% trans 'e.g. Home, Office, Warehouse' %}">
+                {% trans "Label (optional)" as field_label %}{% trans "e.g. Home, Office, Warehouse" as field_placeholder %}
+                {% input_field "label" input_type="text" html_id="label" label=field_label value=values.label|default:'' maxlength=50 placeholder=field_placeholder %}
             </div>
 
             <!-- Address Line 1 -->
             <div class="mb-5">
-                <label for="address_line1" class="block text-sm font-medium text-slate-300 mb-2">
-                    {% trans "Street Address" %} <span class="text-red-400">*</span>
-                </label>
-                <input type="text" id="address_line1" name="address_line1" value="{{ values.address_line1|default:'' }}" required
-                       class="w-full bg-slate-700 border border-slate-600 text-slate-100 text-sm rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-slate-500"
-                       placeholder="{% trans 'Str. Exemplu nr. 1' %}">
+                {% trans "Street Address" as field_label %}{% trans "Str. Exemplu nr. 1" as field_placeholder %}
+                {% input_field "address_line1" input_type="text" html_id="address_line1" label=field_label value=values.address_line1|default:'' required=True placeholder=field_placeholder %}
             </div>
 
             <!-- Address Line 2 -->
             <div class="mb-5">
-                <label for="address_line2" class="block text-sm font-medium text-slate-300 mb-2">
-                    {% trans "Address Line 2" %}
-                </label>
-                <input type="text" id="address_line2" name="address_line2" value="{{ values.address_line2|default:'' }}"
-                       class="w-full bg-slate-700 border border-slate-600 text-slate-100 text-sm rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-slate-500"
-                       placeholder="{% trans 'Apartment, suite, floor (optional)' %}">
+                {% trans "Address Line 2" as field_label %}{% trans "Apartment, suite, floor (optional)" as field_placeholder %}
+                {% input_field "address_line2" input_type="text" html_id="address_line2" label=field_label value=values.address_line2|default:'' placeholder=field_placeholder %}
             </div>
 
             <!-- City & County -->
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
                 <div>
-                    <label for="city" class="block text-sm font-medium text-slate-300 mb-2">
-                        {% trans "City" %} <span class="text-red-400">*</span>
-                    </label>
-                    <input type="text" id="city" name="city" value="{{ values.city|default:'' }}" required
-                           class="w-full bg-slate-700 border border-slate-600 text-slate-100 text-sm rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-slate-500"
-                           placeholder="{% trans 'București' %}">
+                    {% trans "City" as field_label %}{% trans "București" as field_placeholder %}
+                    {% input_field "city" input_type="text" html_id="city" label=field_label value=values.city|default:'' required=True placeholder=field_placeholder %}
                 </div>
                 <div>
-                    <label for="county" class="block text-sm font-medium text-slate-300 mb-2">
-                        {% trans "County" %}
-                    </label>
-                    <input type="text" id="county" name="county" value="{{ values.county|default:'' }}"
-                           class="w-full bg-slate-700 border border-slate-600 text-slate-100 text-sm rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-slate-500"
-                           placeholder="{% trans 'București' %}">
+                    {% trans "County" as field_label %}{% trans "București" as field_placeholder %}
+                    {% input_field "county" input_type="text" html_id="county" label=field_label value=values.county|default:'' placeholder=field_placeholder %}
                 </div>
             </div>
 
             <!-- Postal Code & Country -->
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
                 <div>
-                    <label for="postal_code" class="block text-sm font-medium text-slate-300 mb-2">
-                        {% trans "Postal Code" %}
-                    </label>
-                    <input type="text" id="postal_code" name="postal_code" value="{{ values.postal_code|default:'' }}"
-                           class="w-full bg-slate-700 border border-slate-600 text-slate-100 text-sm rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono placeholder-slate-500"
-                           placeholder="010101">
+                    {% trans "Postal Code" as field_label %}
+                    {% input_field "postal_code" input_type="text" html_id="postal_code" label=field_label value=values.postal_code|default:'' placeholder="010101" css_class="font-mono" %}
                 </div>
                 <div>
-                    <label for="country" class="block text-sm font-medium text-slate-300 mb-2">
-                        {% trans "Country" %} <span class="text-red-400">*</span>
-                    </label>
-                    <select id="country" name="country" required
-                            class="w-full bg-slate-700 border border-slate-600 text-slate-100 text-sm rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
-                        {% for code, label in country_choices %}
-                        <option value="{{ code }}" {% if code == selected_country %}selected{% endif %}>{{ label }}</option>
-                        {% endfor %}
-                    </select>
+                    {% trans "Country" as country_label %}
+                    {% input_field "country" input_type="select" html_id="country" label=country_label required=True value=selected_country options=country_choices|as_select_options %}
                 </div>
             </div>
 
@@ -122,11 +85,8 @@
                    class="px-6 py-3 text-sm font-medium text-slate-400 hover:text-white transition-colors">
                     {% trans "Cancel" %}
                 </a>
-                <button type="submit"
-                        class="inline-flex items-center px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-slate-900 transition-colors">
-                    {% icon "save" size="sm" css_class="mr-2" %}
-                    {% trans "Save Address" %}
-                </button>
+                {% trans "Save Address" as submit_label %}
+                {% button submit_label type="submit" variant="primary" icon="save" %}
             </div>
         </form>
         {% end_section_card %}

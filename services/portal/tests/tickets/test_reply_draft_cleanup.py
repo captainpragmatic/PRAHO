@@ -70,7 +70,9 @@ class ReplyDraftCleanupTests(SimpleTestCase):
         node = shutil.which("node")
         if node is None:
             self.fail("Node.js is required to exercise the portal reply listeners.")
-        for name, source in (("registry", registry), ("ticket page", inline.group())):
+        # Django strips {# #} comments when it renders the page, so run what the browser receives.
+        rendered_inline = re.sub(r"\{#.*?#\}", "", inline.group())
+        for name, source in (("registry", registry), ("ticket page", rendered_inline)):
             with self.subTest(listener=name):
                 result = subprocess.run(  # noqa: S603 -- fixed local harness; no shell or remote input
                     [node, "-e", HARNESS],

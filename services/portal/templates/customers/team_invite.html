@@ -28,40 +28,28 @@
 
             <!-- Email -->
             <div class="mb-5">
-                <label for="email" class="block text-sm font-medium text-slate-300 mb-2">
-                    {% trans "Email Address" %} <span class="text-red-400">*</span>
-                </label>
-                <input type="email" id="email" name="email" required
-                       class="w-full bg-slate-700 border border-slate-600 text-slate-100 text-sm rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-slate-500"
-                       placeholder="{% trans 'colleague@company.com' %}">
+                {% trans "Email Address" as field_label %}{% trans "colleague@company.com" as field_placeholder %}
+                {% input_field "email" input_type="email" html_id="email" label=field_label required=True placeholder=field_placeholder %}
             </div>
 
             <!-- First Name -->
             <div class="mb-5">
-                <label for="first_name" class="block text-sm font-medium text-slate-300 mb-2">
-                    {% trans "First Name" %}
-                </label>
-                <input type="text" id="first_name" name="first_name"
-                       class="w-full bg-slate-700 border border-slate-600 text-slate-100 text-sm rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-slate-500"
-                       placeholder="{% trans 'First name' %}">
+                {% trans "First Name" as field_label %}{% trans "First name" as field_placeholder %}
+                {% input_field "first_name" input_type="text" html_id="first_name" label=field_label placeholder=field_placeholder %}
             </div>
 
             <!-- Last Name -->
             <div class="mb-5">
-                <label for="last_name" class="block text-sm font-medium text-slate-300 mb-2">
-                    {% trans "Last Name" %}
-                </label>
-                <input type="text" id="last_name" name="last_name"
-                       class="w-full bg-slate-700 border border-slate-600 text-slate-100 text-sm rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-slate-500"
-                       placeholder="{% trans 'Last name' %}">
+                {% trans "Last Name" as field_label %}{% trans "Last name" as field_placeholder %}
+                {% input_field "last_name" input_type="text" html_id="last_name" label=field_label placeholder=field_placeholder %}
             </div>
 
             <!-- Role -->
             <div class="mb-6">
                 <label for="role" class="block text-sm font-medium text-slate-300 mb-2">
-                    {% trans "Role" %} <span class="text-red-400">*</span>
+                    {% trans "Role" %} <span class="text-red-400">*</span> {# tmpl-allow TMPL005: needs input_field inline_options #}
                 </label>
-                <select id="role" name="role" required
+                <select id="role" name="role" required {# tmpl-allow TMPL003: needs input_field inline_options #}
                         class="w-full bg-slate-700 border border-slate-600 text-slate-100 text-sm rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
                     <option value="viewer">{% trans "Viewer" %} — {% trans "Read-only access" %}</option>
                     <option value="tech">{% trans "Technical" %} — {% trans "Service management" %}</option>
@@ -76,11 +64,8 @@
                    class="px-6 py-3 text-sm font-medium text-slate-400 hover:text-white transition-colors">
                     {% trans "Cancel" %}
                 </a>
-                <button type="submit"
-                        class="inline-flex items-center px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-slate-900 transition-colors">
-                    {% icon "user-plus" size="sm" css_class="mr-2" %}
-                    {% trans "Send Invitation" %}
-                </button>
+                {% trans "Send Invitation" as submit_label %}
+                {% button submit_label type="submit" variant="primary" icon="user-plus" %}
             </div>
         </form>
         {% end_section_card %}
