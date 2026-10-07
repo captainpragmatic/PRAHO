@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 from enum import Enum
 from functools import lru_cache, wraps
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 import requests
 from django.conf import settings
@@ -193,40 +193,36 @@ DOMAIN_USERNAME_INDEX = 1  # Index of username in domain parts
 DOMAIN_DESCRIPTION_INDEX = 2  # Starting index of description in domain parts
 
 
-def get_virtualmin_config() -> dict[str, Any]:
-    """
-    Get Virtualmin configuration from SystemSettings and credential vault.
+class VirtualminGlobalConfig(TypedDict):
+    """Global operational values; connection identity and TLS policy belong to the server."""
 
-    Uses the credential vault for sensitive data (API keys, passwords) and
-    SystemSettings for operational configuration.
+    timeout: int
+    max_retries: int
+    rate_limit_qps: int
+    rate_limit_max_calls_per_hour: int
+    auth_fallback_enabled: bool
+    domain_quota_default_mb: int
+    bandwidth_quota_default_mb: int
+    pinned_cert_sha256: str
 
-    Returns a dict that can be used to create VirtualminConfig with a server.
+
+def get_virtualmin_config() -> VirtualminGlobalConfig:
+    """Read global operational settings and the environment certificate pin.
+
+    Hostname, API port and TLS verification remain authoritative on VirtualminServer.
     """
     return {
-        # Operational settings from database
-        "hostname": SettingsService.get_setting("virtualmin.hostname", "localhost"),
-        "port": SettingsService.get_setting("virtualmin.port", 10000),
-        "ssl_verify": SettingsService.get_setting("virtualmin.ssl_verify", True),
-        "timeout": SettingsService.get_setting("virtualmin.request_timeout_seconds", 30),
-        "max_retries": SettingsService.get_setting("virtualmin.max_retries", 3),
-        "rate_limit_qps": SettingsService.get_setting("virtualmin.rate_limit_qps", 10),
-        "connection_pool_size": SettingsService.get_setting("virtualmin.connection_pool_size", 10),
-        "rate_limit_max_calls_per_hour": SettingsService.get_setting("virtualmin.rate_limit_max_calls_per_hour", 100),
-        "auth_health_check_interval": SettingsService.get_setting(
-            "virtualmin.auth_health_check_interval_seconds", 3600
+        "timeout": cast(int, SettingsService.get_setting("virtualmin.request_timeout_seconds", 30)),
+        "max_retries": cast(int, SettingsService.get_setting("virtualmin.max_retries", 3)),
+        "rate_limit_qps": cast(int, SettingsService.get_setting("virtualmin.rate_limit_qps", 10)),
+        "rate_limit_max_calls_per_hour": cast(
+            int, SettingsService.get_setting("virtualmin.rate_limit_max_calls_per_hour", 100)
         ),
-        "auth_fallback_enabled": SettingsService.get_setting("virtualmin.auth_fallback_enabled", True),
-        "backup_retention_days": SettingsService.get_setting("virtualmin.backup_retention_days", 7),
-        "backup_compression_enabled": SettingsService.get_setting("virtualmin.backup_compression_enabled", True),
-        "domain_quota_default_mb": SettingsService.get_setting("virtualmin.domain_quota_default_mb", 1000),
-        "bandwidth_quota_default_mb": SettingsService.get_setting("virtualmin.bandwidth_quota_default_mb", 10000),
-        "mysql_enabled": SettingsService.get_setting("virtualmin.mysql_enabled", True),
-        "postgresql_enabled": SettingsService.get_setting("virtualmin.postgresql_enabled", False),
-        "php_version_default": SettingsService.get_setting("virtualmin.php_version_default", "8.1"),
-        "ssl_auto_renewal_enabled": SettingsService.get_setting("virtualmin.ssl_auto_renewal_enabled", True),
-        "monitoring_enabled": SettingsService.get_setting("virtualmin.monitoring_enabled", True),
-        "log_retention_days": SettingsService.get_setting("virtualmin.log_retention_days", 30),
-        # Security credentials
+        "auth_fallback_enabled": cast(bool, SettingsService.get_setting("virtualmin.auth_fallback_enabled", True)),
+        "domain_quota_default_mb": cast(int, SettingsService.get_setting("virtualmin.domain_quota_default_mb", 1000)),
+        "bandwidth_quota_default_mb": cast(
+            int, SettingsService.get_setting("virtualmin.bandwidth_quota_default_mb", 10000)
+        ),
         "pinned_cert_sha256": os.environ.get("VIRTUALMIN_PINNED_CERT_SHA256", ""),
     }
 

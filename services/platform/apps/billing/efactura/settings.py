@@ -165,10 +165,6 @@ class EFacturaSettingKeys:
     COMPANY_BANK_NAME = "efactura.company.bank_name"
 
     # VAT rates (Romanian rates as of Aug 2025)
-    VAT_RATE_STANDARD = "efactura.vat.rate_standard"
-    VAT_RATE_REDUCED_1 = "efactura.vat.rate_reduced_1"  # 11% (consolidated)
-    VAT_RATE_REDUCED_2 = "efactura.vat.rate_reduced_2"  # 11% (consolidated)
-    VAT_RATE_ZERO = "efactura.vat.rate_zero"
 
     # Submission settings
     SUBMISSION_DEADLINE_DAYS = "efactura.submission.deadline_days"
@@ -207,7 +203,6 @@ class EFacturaSettingKeys:
 
     # Metrics/observability
     METRICS_ENABLED = "efactura.metrics.enabled"
-    METRICS_PREFIX = "efactura.metrics.prefix"
 
 
 # ===============================================================================
@@ -235,10 +230,6 @@ EFACTURA_DEFAULTS: dict[str, Any] = {
     EFacturaSettingKeys.COMPANY_BANK_ACCOUNT: "",
     EFacturaSettingKeys.COMPANY_BANK_NAME: "",
     # Romanian VAT rates (updated Aug 2025 — Emergency Ordinance 156/2024)
-    EFacturaSettingKeys.VAT_RATE_STANDARD: "21.00",  # Standard rate (was 19%)
-    EFacturaSettingKeys.VAT_RATE_REDUCED_1: "11.00",  # Consolidated reduced rate (was 9%)
-    EFacturaSettingKeys.VAT_RATE_REDUCED_2: "11.00",  # Consolidated reduced rate (was 5%)
-    EFacturaSettingKeys.VAT_RATE_ZERO: "0.00",  # Exports, intra-EU supplies
     # Submission (5 WORKING days per OUG 89/2025; was 5 calendar days pre-2026)
     EFacturaSettingKeys.SUBMISSION_DEADLINE_DAYS: 5,
     EFacturaSettingKeys.DEADLINE_WARNING_HOURS: 24,
@@ -270,7 +261,6 @@ EFACTURA_DEFAULTS: dict[str, Any] = {
     EFacturaSettingKeys.ARCHIVE_RETENTION_YEARS: 10,  # Romanian law requires 10 years
     # Metrics
     EFacturaSettingKeys.METRICS_ENABLED: True,
-    EFacturaSettingKeys.METRICS_PREFIX: "efactura",
 }
 
 
@@ -549,26 +539,9 @@ class EFacturaSettings:
         Returns:
             VATRateConfig with rate and category
         """
-        # Check for custom rates in settings
-        rate_key_map = {
-            "standard": EFacturaSettingKeys.VAT_RATE_STANDARD,
-            "reduced": EFacturaSettingKeys.VAT_RATE_REDUCED_1,
-            "reduced_9": EFacturaSettingKeys.VAT_RATE_REDUCED_1,  # legacy alias
-            "reduced_5": EFacturaSettingKeys.VAT_RATE_REDUCED_2,  # legacy alias
-            "zero": EFacturaSettingKeys.VAT_RATE_ZERO,
-        }
-
-        if rate_type in rate_key_map:
-            custom_rate = self._get_decimal(rate_key_map[rate_type])
-            base_config = ROMANIAN_VAT_RATES.get(rate_type, ROMANIAN_VAT_RATES["standard"])
-            return VATRateConfig(
-                rate=custom_rate,
-                category=base_config.category,
-                name=base_config.name,
-                description=base_config.description,
-                applies_to=base_config.applies_to,
-            )
-
+        # VAT rates come from TaxService and the invoice's stored line rates (ADR-0005, ADR-0015); this table
+        # only describes the categories, so the former efactura.vat.* settings are retired.
+        rate_type = {"reduced_9": "reduced", "reduced_5": "reduced"}.get(rate_type, rate_type)
         return ROMANIAN_VAT_RATES.get(rate_type, ROMANIAN_VAT_RATES["standard"])
 
     def get_vat_rate_for_category(self, category: str) -> VATRateConfig:
@@ -716,11 +689,6 @@ class EFacturaSettings:
     def metrics_enabled(self) -> bool:
         """Check if metrics collection is enabled."""
         return self._get_bool(EFacturaSettingKeys.METRICS_ENABLED, True)
-
-    @property
-    def metrics_prefix(self) -> str:
-        """Get metrics prefix."""
-        return self._get_string(EFacturaSettingKeys.METRICS_PREFIX, "efactura")
 
     # ===== Utility Methods =====
 

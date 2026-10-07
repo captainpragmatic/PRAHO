@@ -98,8 +98,11 @@ class SettingsActivationTests(TestCase):
         self.assertEqual((first.value, second.value), (210, 310))
 
     def test_decimal_conversion_errors_do_not_roll_back_activation(self) -> None:
-        decimal_key = "efactura.vat.rate_reduced_1"
-        definition = CATALOG_BY_KEY[decimal_key]
+        # The catalog no longer has a decimal setting, so this exercises the conversion with a synthetic one.
+        decimal_key = "billing.activation_decimal_probe"
+        definition = SettingDef(
+            key=decimal_key, data_type="decimal", default="11.00", group="billing", section="Probe", label="Probe"
+        )
         first = self.seed(100)
         malformed = SystemSetting.objects.create(
             key=decimal_key, value="not-a-decimal", **sync._row_defaults(definition)
@@ -226,6 +229,48 @@ class SettingsActivationTests(TestCase):
         self.assertFalse(SystemSetting.objects.filter(pk=row.pk).exists())
         self.assertIn(f"Deleted retired setting: {KEY}", output)
         self.assertTrue(SystemSetting.objects.filter(pk=other.pk).exists())
+
+    def test_setup_retires_all_amendment_two_settings(self) -> None:
+        keys = (
+            "efactura.metrics.prefix",
+            "efactura.vat.rate_reduced_1",
+            "efactura.vat.rate_reduced_2",
+            "efactura.vat.rate_standard",
+            "efactura.vat.rate_zero",
+            "virtualmin.auth_health_check_interval_seconds",
+            "virtualmin.backup_compression_enabled",
+            "virtualmin.backup_retention_days",
+            "virtualmin.connection_pool_size",
+            "virtualmin.hostname",
+            "virtualmin.log_retention_days",
+            "virtualmin.monitoring_enabled",
+            "virtualmin.mysql_enabled",
+            "virtualmin.php_version_default",
+            "virtualmin.port",
+            "virtualmin.postgresql_enabled",
+            "virtualmin.ssl_auto_renewal_enabled",
+            "virtualmin.ssl_verify",
+        )
+        for key in keys:
+            SystemSetting.objects.create(
+                key=key,
+                name=key,
+                category=key.split(".", 1)[0],
+                data_type="string",
+                value="stored override",
+                default_value="old default",
+            )
+        output = StringIO()
+        with self.captureOnCommitCallbacks(execute=True):
+            call_command("setup_default_settings", stdout=output)
+
+        self.assertEqual(set(SystemSetting.objects.filter(key__in=keys).values_list("key", flat=True)), set())
+        for key in keys:
+            with self.subTest(key=key):
+                self.assertNotIn(key, CATALOG_BY_KEY)
+                self.assertIn(key, sync.RETIRED_SETTING_KEYS)
+                self.assertNotIn(key, sync.DEFAULT_VALUE_MIGRATIONS)
+                self.assertIn(f"Deleted retired setting: {key}", output.getvalue())
 
     def test_alert_failure_rolls_back_rewrites_receipts_and_retirement(self) -> None:
         first = self.seed(100)

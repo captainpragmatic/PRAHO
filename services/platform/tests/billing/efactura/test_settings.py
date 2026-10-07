@@ -147,7 +147,6 @@ class RomanianVATRatesTestCase(TestCase):
         rate = ROMANIAN_VAT_RATES["reduced"]
         self.assertEqual(rate.rate, Decimal("11.00"))
 
-
     def test_zero_rate(self):
         """Test zero rate for exports."""
         rate = ROMANIAN_VAT_RATES["zero"]
@@ -308,6 +307,11 @@ class EFacturaSettingsTestCase(TestCase):
         """Test metrics are enabled by default."""
         self.assertTrue(self.settings.metrics_enabled)
 
+    def test_metrics_prefix_is_no_longer_a_runtime_setting(self) -> None:
+        self.assertFalse(hasattr(self.settings, "metrics_prefix"))
+        self.assertFalse(hasattr(EFacturaSettingKeys, "METRICS_PREFIX"))
+        self.assertNotIn("efactura.metrics.prefix", EFACTURA_DEFAULTS)
+
 
 class EFacturaSettingsTimezoneTestCase(TestCase):
     """Test timezone-related settings functionality."""
@@ -417,13 +421,11 @@ class EFacturaSettingsFallbackTestCase(TestCase):
         self.assertFalse(settings._get_bool(EFacturaSettingKeys.ENABLED, True))
 
     @override_settings(EFACTURA_VAT_RATE_STANDARD="20.00")
-    def test_django_settings_for_vat_rate(self):
-        """Test Django settings for VAT rate."""
-        settings = EFacturaSettings()
-        # The key mapping should work
-        rate = settings._get_decimal(EFacturaSettingKeys.VAT_RATE_STANDARD, "19.00")
-        # Note: This depends on key mapping working correctly
-        self.assertIsInstance(rate, Decimal)
+    def test_vat_rates_ignore_the_retired_rate_settings(self):
+        """VAT rates come from TaxService and stored invoice lines, never from e-Factura settings."""
+        rate = EFacturaSettings().get_vat_rate("standard")
+        self.assertEqual(rate.rate, ROMANIAN_VAT_RATES["standard"].rate)
+        self.assertEqual(EFacturaSettings().get_vat_rate("reduced_9"), ROMANIAN_VAT_RATES["reduced"])
 
 
 class ConstantsTestCase(TestCase):
@@ -473,9 +475,7 @@ class EFacturaSettingsCatalogTestCase(TestCase):
     def test_catalog_sync_persists_every_runtime_efactura_setting(self) -> None:
         call_command("setup_default_settings", stdout=StringIO())
 
-        persisted_keys = set(
-            SystemSetting.objects.filter(key__startswith="efactura.").values_list("key", flat=True)
-        )
+        persisted_keys = set(SystemSetting.objects.filter(key__startswith="efactura.").values_list("key", flat=True))
         self.assertEqual(persisted_keys, set(EFACTURA_DEFAULTS))
 
     def test_catalog_marks_client_secret_sensitive(self) -> None:
