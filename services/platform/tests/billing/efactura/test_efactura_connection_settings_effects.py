@@ -175,9 +175,15 @@ class EFacturaConnectionSettingEffectTests(TestCase):
             "staff-client:deployment-secret",
         )
         self._write("efactura.oauth.client_id", "")
-        refused = EFacturaClient().upload_invoice(VALID_XML)
-        self.assertFalse(refused.success)
-        self.assertTrue(refused.configuration_error)
+        self.assertEqual(
+            self._basic_credentials(self._exchange("https://explicit.example.test/callback")),
+            "deployment-client:deployment-secret",
+        )
+        response = self._response(b'<header ExecutionStatus="0" index_incarcare="CLEARED-ID"/>')
+        with patch("apps.billing.efactura.client.safe_request", return_value=response):
+            uploaded = EFacturaClient().upload_invoice(VALID_XML)
+        self.assertTrue(uploaded.success, uploaded.message)
+        self.assertEqual(uploaded.upload_index, "CLEARED-ID")
 
     def test_client_secret_reaches_oauth_basic_authentication(self) -> None:
         self._write("efactura.oauth.client_secret", "staff-secret")
@@ -189,9 +195,15 @@ class EFacturaConnectionSettingEffectTests(TestCase):
         self.assertTrue(row.is_sensitive)
         self.assertNotEqual(row.value, "staff-secret")
         self._write("efactura.oauth.client_secret", "")
-        refused = EFacturaClient().upload_invoice(VALID_XML)
-        self.assertFalse(refused.success)
-        self.assertTrue(refused.configuration_error)
+        self.assertEqual(
+            self._basic_credentials(self._exchange("https://explicit.example.test/callback")),
+            "deployment-client:deployment-secret",
+        )
+        response = self._response(b'<header ExecutionStatus="0" index_incarcare="CLEARED-SECRET"/>')
+        with patch("apps.billing.efactura.client.safe_request", return_value=response):
+            uploaded = EFacturaClient().upload_invoice(VALID_XML)
+        self.assertTrue(uploaded.success, uploaded.message)
+        self.assertEqual(uploaded.upload_index, "CLEARED-SECRET")
 
     def test_redirect_uri_reaches_authorization_and_token_exchange(self) -> None:
         self._write("efactura.oauth.redirect_uri", "https://staff.example.test/callback")

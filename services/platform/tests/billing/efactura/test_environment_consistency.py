@@ -243,7 +243,7 @@ class EFacturaEnvironmentConsistencyTests(TestCase):
                     expires_at=timezone.now() + timedelta(hours=1),
                 )
                 client._cache_token(token)
-                cache_key = client.TOKEN_CACHE_KEY.format(env=client.config.environment.value)
+                cache_key = client.token_cache_key
                 cache.delete(cache_key)
                 self.assertIsNone(cache.get(cache_key))
                 self.assertFalse(token.is_expired)

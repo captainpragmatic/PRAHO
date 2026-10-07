@@ -31,6 +31,7 @@ from django.core.files.base import ContentFile
 from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext as _
+from lxml import etree
 
 from apps.billing.fiscal_identity import normalize_country_code
 from apps.billing.issuers.policy import (
@@ -49,7 +50,7 @@ from .client import (
 from .models import EFacturaDocument, EFacturaDocumentType, EFacturaStatus
 from .settings import EFacturaSettings, efactura_environment
 from .validator import CIUSROValidator, ValidationResult
-from .xml_builder import XMLBuilderError, builder_for
+from .xml_builder import NAMESPACES, XMLBuilderError, builder_for
 
 if TYPE_CHECKING:
     from apps.billing.invoice_models import Invoice
@@ -250,16 +251,35 @@ class EFacturaService:
         return self._client
 
     def _client_for_environment(self, environment: str) -> EFacturaClient:
-        """Bind a separate client without carrying another environment's in-memory token."""
+        """Refresh runtime configuration, preserving explicit config and the recorded environment."""
         client = copy(self._client)
         config = EFacturaConfig.from_settings(environment=environment)
         original_config: object = getattr(self._client, "config", None)
-        if isinstance(original_config, EFacturaConfig):
+        if isinstance(original_config, EFacturaConfig) and self._client._config_is_explicit:
             config = replace(original_config, environment=config.environment)
         client.config = config
-        if not isinstance(original_config, EFacturaConfig) or original_config.environment != config.environment:
+        if not isinstance(original_config, EFacturaConfig) or (
+            original_config.environment != config.environment
+            or original_config.client_id != config.client_id
+            or original_config.client_secret != config.client_secret
+        ):
             client._token = None
+            client._token_cache_key = None
         return client
+
+    @staticmethod
+    def _supplier_cif(xml_content: str) -> str:
+        """Read the supplier identifier from the exact bytes claimed for upload."""
+        parser = etree.XMLParser(resolve_entities=False, no_network=True)
+        document = etree.fromstring(xml_content.encode("utf-8"), parser=parser)
+        identifier = document.findtext(
+            "./cac:AccountingSupplierParty/cac:Party/cac:PartyIdentification/cbc:ID", namespaces=NAMESPACES
+        )
+        # Same normalization as CompanyInfo.numeric_tax_id in both UBL builders.
+        cif = (identifier or "").removeprefix("RO").strip()
+        if not cif:
+            raise XMLBuilderError(_("Submitted XML has no supplier CUI"))
+        return cif
 
     def _record_credential_failure(self, document: EFacturaDocument, message: str, operation: str) -> None:
         """Keep ANAF evidence intact while making unavailable credentials visible to staff."""
@@ -356,15 +376,19 @@ class EFacturaService:
         assert_efactura_submission_allowed(invoice)
 
         try:
+            cif = self._supplier_cif(claim.xml_content)
             client = self._client_for_environment(claim.environment)
             if claim.is_b2c and claim.is_credit_note:
-                response = client.upload_b2c(claim.xml_content, standard="CN")
+                response = client.upload_b2c(claim.xml_content, standard="CN", cif=cif)
             elif claim.is_b2c:
-                response = client.upload_b2c(claim.xml_content)
+                response = client.upload_b2c(claim.xml_content, cif=cif)
             elif claim.is_credit_note:
-                response = client.upload_credit_note(claim.xml_content)
+                response = client.upload_credit_note(claim.xml_content, cif=cif)
             else:
-                response = client.upload_invoice(claim.xml_content)
+                response = client.upload_invoice(claim.xml_content, cif=cif)
+        except XMLBuilderError as e:
+            logger.error("🔥 [e-Factura] Supplier identity unavailable for invoice %s: %s", invoice.number, e)
+            return self._finalize_safe_failure(claim, str(e))
         except AuthenticationError as e:
             logger.error(f"🔥 [e-Factura] Authentication failed for invoice {invoice.number}: {e}")
             message = _("Authentication failed: %(error)s") % {"error": e}

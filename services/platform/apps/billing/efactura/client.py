@@ -17,6 +17,7 @@ Reference:
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import logging
 import time
@@ -97,11 +98,13 @@ class EFacturaConfig:
         stored_client_secret = SettingsService.get_stored_setting("efactura.oauth.client_secret")
         return cls(
             client_id=(
-                str(stored_client_id) if stored_client_id is not None else getattr(settings, "EFACTURA_CLIENT_ID", "")
+                str(stored_client_id)
+                if stored_client_id is not None and stored_client_id != ""
+                else getattr(settings, "EFACTURA_CLIENT_ID", "")
             ),
             client_secret=(
                 str(stored_client_secret)
-                if stored_client_secret is not None
+                if stored_client_secret is not None and stored_client_secret != ""
                 else getattr(settings, "EFACTURA_CLIENT_SECRET", "")
             ),
             company_cui=getattr(settings, "EFACTURA_COMPANY_CUI", ""),
@@ -124,9 +127,10 @@ class EFacturaConfig:
     def oauth_token_url(self) -> str:
         return f"{self.environment.oauth_base_url}/token"
 
-    def is_valid(self) -> bool:
-        """Check if configuration has required fields."""
-        return bool(self.client_id and self.client_secret and self.company_cui)
+    def is_valid(self, *, company_cui: str | None = None) -> bool:
+        """Check credentials and the effective supplier CUI for this operation."""
+        effective_cui = self.company_cui if company_cui is None else company_cui
+        return bool(self.client_id and self.client_secret and effective_cui)
 
 
 @dataclass
@@ -477,14 +481,14 @@ class EFacturaClient:
             status = client.get_upload_status(response.upload_index)
     """
 
-    # Token cache key prefix
-    TOKEN_CACHE_KEY: ClassVar[str] = (
-        "efactura_token_{env}"  # Not a real secret: cache key name  # noqa: S105  # Not a real secret: config key name
-    )
+    # Cache namespace contains a digest rather than the OAuth client identifier.
+    TOKEN_CACHE_KEY: ClassVar[str] = "efactura_token_{env}_{client_id_hash}"  # noqa: S105  # Cache key, not a secret.
 
     def __init__(self, config: EFacturaConfig | None = None):
-        self.config = config or EFacturaConfig.from_settings()
+        self._config_is_explicit = config is not None
+        self.config = config if config is not None else EFacturaConfig.from_settings()
         self._token: TokenResponse | None = None
+        self._token_cache_key: str | None = None
         self._default_headers: dict[str, str] = {
             "Accept": "application/json",
             "User-Agent": "PRAHO-EFactura/1.0",
@@ -633,21 +637,31 @@ class EFacturaClient:
             % {"environment": environment}
         )
 
+    @property
+    def token_cache_key(self) -> str:
+        """Scope OAuth credentials to the effective client identity and ANAF environment."""
+        client_id_hash = hashlib.sha256(self.config.client_id.encode("utf-8")).hexdigest()
+        return self.TOKEN_CACHE_KEY.format(env=self.config.environment.value, client_id_hash=client_id_hash)
+
     def _cache_token(self, token: TokenResponse) -> None:
-        """Cache token with expiration."""
-        cache_key = self.TOKEN_CACHE_KEY.format(env=self.config.environment.value)
+        """Cache token with expiration in this client's namespace."""
+        cache_key = self.token_cache_key
         cache.set(cache_key, token.__dict__, timeout=token.expires_in - 60)
         self._token = token
+        self._token_cache_key = cache_key
 
     def _get_cached_token(self) -> TokenResponse | None:
-        """Get token from cache."""
-        if self._token and not self._token.is_expired:
+        """Read only this environment and client's shared or in-memory token."""
+        cache_key = self.token_cache_key
+        if self._token_cache_key == cache_key and self._token and not self._token.is_expired:
             return self._token
 
-        cache_key = self.TOKEN_CACHE_KEY.format(env=self.config.environment.value)
+        self._token = None
+        self._token_cache_key = None
         data = cache.get(cache_key)
         if data:
             self._token = TokenResponse(**data)
+            self._token_cache_key = cache_key
             return self._token
         return None
 
@@ -679,7 +693,7 @@ class EFacturaClient:
             AuthenticationError: If not authenticated
             NetworkError: If network request fails
         """
-        if not self.config.is_valid():
+        if not self.config.is_valid(company_cui=cif):
             return UploadResponse.error(_("Invalid e-Factura configuration"), configuration_error=True)
 
         params: dict[str, str] = {
@@ -706,7 +720,7 @@ class EFacturaClient:
         endpoint differs. From June 2026, a consumer who supplies no fiscal identifier is encoded
         with the statutory 13-zero identifier by the XML builder.
         """
-        if not self.config.is_valid():
+        if not self.config.is_valid(company_cui=cif):
             return UploadResponse.error(_("Invalid e-Factura configuration"), configuration_error=True)
 
         params: dict[str, str] = {

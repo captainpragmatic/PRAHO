@@ -6,7 +6,7 @@ from decimal import Decimal
 from django.test import TestCase, override_settings
 from lxml import etree
 
-from apps.billing.efactura.xml_builder import NAMESPACES, UBLInvoiceBuilder, XMLBuilderError, get_supplier_info
+from apps.billing.efactura.xml_builder import NAMESPACES, UBLInvoiceBuilder, XMLBuilderError
 from apps.billing.invoice_models import Invoice
 from apps.settings.services import SettingsService
 from tests.factories import CurrencyFactory, CustomerFactory, InvoiceFactory, InvoiceLineFactory
@@ -76,7 +76,7 @@ class EFacturaIdentitySettingsEffectsTests(TestCase):
         }
         for key, value in stored.items():
             self._write(f"efactura.company.{key}", value)
-        supplier = get_supplier_info()
+        supplier = UBLInvoiceBuilder(self.invoice)._get_supplier_info()
         self.assertEqual(
             (
                 supplier.name,

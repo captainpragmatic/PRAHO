@@ -26,6 +26,17 @@ from apps.billing.efactura.service import (
 from apps.billing.efactura.validator import ValidationResult
 from apps.billing.invoice_models import ISSUER_BUILTIN, Invoice
 
+LIFECYCLE_INVOICE_XML = (
+    '<Invoice xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2" '
+    'xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">'
+    "<cac:AccountingSupplierParty><cac:Party><cac:PartyIdentification>"
+    "<cbc:ID>12345678</cbc:ID>"
+    "</cac:PartyIdentification></cac:Party></cac:AccountingSupplierParty></Invoice>"
+)
+LIFECYCLE_CREDIT_NOTE_XML = LIFECYCLE_INVOICE_XML.replace("<Invoice ", "<CreditNote ").replace(
+    "</Invoice>", "</CreditNote>"
+)
+
 
 class SubmissionResultTestCase(TestCase):
     """Test SubmissionResult dataclass."""
@@ -152,7 +163,7 @@ class EFacturaServiceTestCase(TestCase):
         return SubmissionClaim(
             document_id=uuid4(),
             token=uuid4(),
-            xml_content="<Invoice/>",
+            xml_content=LIFECYCLE_INVOICE_XML,
             xml_hash="a" * 64,
             is_b2c=False,
             is_credit_note=False,
@@ -176,7 +187,7 @@ class EFacturaServiceTestCase(TestCase):
 
         self.assertTrue(result.success)
         self.assertEqual(result.document, mock_doc)
-        self.mock_client.upload_invoice.assert_called_once_with("<Invoice/>")
+        self.mock_client.upload_invoice.assert_called_once_with(claim.xml_content, cif="12345678")
         finalize.assert_called_once_with(claim, "12345")
 
     def test_submit_validation_failure(self):
@@ -763,7 +774,7 @@ class SubmissionLifecycleTests(TestCase):
         service = self._service(client)
 
         with (
-            patch.object(service, "_generate_xml", return_value="<Invoice/>"),
+            patch.object(service, "_generate_xml", return_value=LIFECYCLE_INVOICE_XML),
             patch.object(service, "_log_audit_event"),
         ):
             result = service.submit_invoice(invoice)
@@ -848,13 +859,13 @@ class SubmissionLifecycleTests(TestCase):
         service = self._service(client)
 
         with (
-            patch.object(service, "_generate_xml", return_value="<Invoice/>"),
+            patch.object(service, "_generate_xml", return_value=LIFECYCLE_INVOICE_XML),
             patch.object(service, "_log_audit_event"),
         ):
             result = service.submit_invoice(invoice)
 
         self.assertTrue(result.success, msg=result.error_message)
-        client.upload_b2c.assert_called_once_with("<Invoice/>")
+        client.upload_b2c.assert_called_once_with(LIFECYCLE_INVOICE_XML, cif="12345678")
         client.upload_invoice.assert_not_called()
         document = EFacturaDocument.objects.get(invoice=invoice)
         self.assertEqual(document.anaf_upload_index, "B2C-1")
@@ -870,13 +881,13 @@ class SubmissionLifecycleTests(TestCase):
         service = self._service(client)
 
         with (
-            patch.object(service, "_generate_xml", return_value="<CreditNote/>"),
+            patch.object(service, "_generate_xml", return_value=LIFECYCLE_CREDIT_NOTE_XML),
             patch.object(service, "_log_audit_event"),
         ):
             result = service.submit_invoice(invoice)
 
         self.assertTrue(result.success, msg=result.error_message)
-        client.upload_credit_note.assert_called_once_with("<CreditNote/>")
+        client.upload_credit_note.assert_called_once_with(LIFECYCLE_CREDIT_NOTE_XML, cif="12345678")
         client.upload_invoice.assert_not_called()
         client.upload_b2c.assert_not_called()
         document.refresh_from_db()
@@ -894,13 +905,13 @@ class SubmissionLifecycleTests(TestCase):
         service = self._service(client)
 
         with (
-            patch.object(service, "_generate_xml", return_value="<CreditNote/>"),
+            patch.object(service, "_generate_xml", return_value=LIFECYCLE_CREDIT_NOTE_XML),
             patch.object(service, "_log_audit_event"),
         ):
             result = service.submit_invoice(invoice)
 
         self.assertTrue(result.success, msg=result.error_message)
-        client.upload_b2c.assert_called_once_with("<CreditNote/>", standard="CN")
+        client.upload_b2c.assert_called_once_with(LIFECYCLE_CREDIT_NOTE_XML, standard="CN", cif="12345678")
         client.upload_invoice.assert_not_called()
         client.upload_credit_note.assert_not_called()
         document.refresh_from_db()
@@ -915,7 +926,7 @@ class SubmissionLifecycleTests(TestCase):
         service = self._service(client)
 
         with (
-            patch.object(service, "_generate_xml", return_value="<Invoice/>"),
+            patch.object(service, "_generate_xml", return_value=LIFECYCLE_INVOICE_XML),
             patch.object(service, "_log_audit_event"),
             patch.object(service, "_is_b2c", return_value=False),
         ):
@@ -955,7 +966,7 @@ class SubmissionLifecycleTests(TestCase):
         service = self._service(client)
 
         with (
-            patch.object(service, "_generate_xml", return_value="<Invoice/>"),
+            patch.object(service, "_generate_xml", return_value=LIFECYCLE_INVOICE_XML),
             patch.object(service, "_log_audit_event"),
             patch.object(service, "_is_b2c", return_value=False),
         ):
