@@ -250,6 +250,8 @@ def _form_label_source(tokens: list[Token]) -> str:
     parts: list[str] = []
     line_no = 1
     for token in tokens:
+        if token.lineno is None:
+            continue
         parts.append("\n" * (token.lineno - line_no))
         if token.token_type == TokenType.TEXT:
             text = token.contents
@@ -334,6 +336,8 @@ def _check_form_labels(content: str, path: Path) -> list[A11yViolation]:
             )
 
     for token, autoescape in _component_fields_with_autoescape(tokens):
+        if token.lineno is None:
+            continue
         bits = token.contents.split(maxsplit=1)
         component = bits[0]
         arguments: dict[str, str] = {}
