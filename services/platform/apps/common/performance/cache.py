@@ -108,8 +108,12 @@ class CacheService:
     ) -> bool:
         """Set a value in cache with automatic key prefixing."""
         full_key = self._make_key(key, version)
-        resolved_timeout = _resolve_timeout(timeout, get_cache_timeout_medium)
         try:
+            try:
+                resolved_timeout = _resolve_timeout(timeout, get_cache_timeout_medium)
+            except Exception:
+                resolved_timeout = _DEFAULT_CACHE_TIMEOUT_MEDIUM
+                logger.warning("⚠️ [Cache] Default timeout lookup failed; using %ss", resolved_timeout)
             self._cache.set(full_key, value, resolved_timeout)
             logger.debug(f"Cache SET: {key} (timeout={resolved_timeout}s)")
             return True

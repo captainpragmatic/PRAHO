@@ -13,7 +13,7 @@ from unittest.mock import patch
 from django.core.cache import cache
 from django.core.management import call_command
 from django.core.paginator import Paginator
-from django.db import connection, models, transaction
+from django.db import OperationalError, connection, models, transaction
 from django.db.models import QuerySet
 from django.http import HttpRequest, HttpResponse
 from django.test import RequestFactory, SimpleTestCase, TestCase, override_settings
@@ -126,6 +126,35 @@ class CommonSettingsEffectTests(TestCase):
         with self.captureOnCommitCallbacks(execute=True):
             result = SettingsService.update_setting(key, value)
         self.assertTrue(result.is_ok(), result)
+
+    def test_set_uses_constant_timeout_when_settings_lookup_fails(self) -> None:
+        now = time.time()
+        with (
+            patch("apps.settings.services.SystemSetting.objects.get", side_effect=OperationalError("settings offline")),
+            patch("django.core.cache.backends.locmem.time.time", return_value=now) as clock,
+        ):
+            try:
+                stored = self.service.set("unavailable-setting", "retained")
+            except OperationalError:
+                self.fail("set must tolerate an unavailable settings table")
+            self.assertTrue(stored)
+            self.assertEqual(self.service.get("unavailable-setting"), "retained")
+            clock.return_value = now + 299
+            self.assertEqual(self.service.get("unavailable-setting"), "retained")
+            clock.return_value = now + 301
+            self.assertIsNone(self.service.get("unavailable-setting"))
+
+    def test_get_or_set_retains_computed_value_when_settings_lookup_fails(self) -> None:
+        value = {"computed": "retained"}
+        with patch(
+            "apps.settings.services.SystemSetting.objects.get", side_effect=OperationalError("settings offline")
+        ):
+            try:
+                result = self.service.get_or_set("computed-without-settings", lambda: value)
+            except OperationalError:
+                self.fail("get_or_set must return the computed value when settings are unavailable")
+            self.assertIs(result, value)
+            self.assertEqual(self.service.get("computed-without-settings"), value)
 
     def test_cache_timeout_medium_expires_every_default_consumer(self) -> None:
         property_reader = cached_model_property(key_suffix="medium-email")(model_email)
@@ -257,6 +286,30 @@ class CommonSettingsEffectTests(TestCase):
             cursor.execute("SELECT 1")
             cursor.execute("SELECT 2")
         self.assertEqual(profiler.query_count, 2)
+
+    @override_settings(DEBUG=True)
+    def test_query_profiler_logs_sql_using_one_display_limit_read_per_loop(self) -> None:
+        for limit in (4, 0):
+            self.set_setting("common.sql_display_limit", limit)
+            with self.subTest(limit=limit):
+                with (
+                    self.assertLogs("apps.common.performance.query_optimization", level="DEBUG") as logs,
+                    QueryProfiler("sql-limit", log_queries=True) as profiler,
+                    connection.cursor() as cursor,
+                ):
+                    cursor.execute("SELECT 12345")
+                    cursor.execute("SELECT 67890")
+                self.assertEqual(profiler.query_count, 2)
+                sql_messages = [record.getMessage() for record in logs.records if record.levelno == logging.DEBUG]
+                self.assertEqual(
+                    sql_messages, [f"  SQL: {'SELECT 12345'[:limit]}...", f"  SQL: {'SELECT 67890'[:limit]}..."]
+                )
+                setting_reads = [
+                    query["sql"]
+                    for query in connection.queries[profiler.query_count :]
+                    if "common.sql_display_limit" in query["sql"]
+                ]
+                self.assertEqual(len(setting_reads), 1)
 
     def test_sql_display_limit_truncates_each_sql_summary(self) -> None:
         self.set_setting("common.sql_display_limit", 4)

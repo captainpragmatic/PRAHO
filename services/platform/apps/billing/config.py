@@ -161,7 +161,7 @@ def get_event_grace_period_hours() -> int:
     """Get grace period for accepting late usage events (hours) from SettingsService."""
     try:
         return max(
-            1,
+            0,
             SettingsService.get_integer_setting("billing.event_grace_period_hours", _DEFAULT_EVENT_GRACE_PERIOD_HOURS),
         )
     except Exception:

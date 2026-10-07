@@ -606,14 +606,14 @@ CATALOG: tuple[SettingDef, ...] = (
     SettingDef(
         key="billing.metering_task_timeout",
         data_type="integer",
-        default=300,
+        default=60,
         group="advanced",
         section=_("Billing"),
         label=_("Metering task timeout"),
         unit="seconds",
         input_kind="number",
         advanced=True,
-        validation={"min": 0},
+        validation={"min": 1},
     ),
     SettingDef(
         key="billing.proforma_validity_days",

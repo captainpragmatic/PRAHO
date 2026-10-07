@@ -57,7 +57,7 @@ def get_subscription_grace_period_days() -> int:
     """Get grace period days from SettingsService (runtime)."""
     try:
         return max(
-            1, SettingsService.get_integer_setting("billing.subscription_grace_period_days", _DEFAULT_GRACE_PERIOD_DAYS)
+            0, SettingsService.get_integer_setting("billing.subscription_grace_period_days", _DEFAULT_GRACE_PERIOD_DAYS)
         )
     except Exception:
         return _DEFAULT_GRACE_PERIOD_DAYS

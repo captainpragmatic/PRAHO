@@ -45,7 +45,7 @@ from typing import Any, ClassVar, TypeVar
 
 from django.conf import settings
 from django.core.cache import cache
-from django.db import connection, reset_queries
+from django.db import DatabaseError, InterfaceError, connection, reset_queries
 from django.utils import timezone as tz
 
 # Thread-local storage for request context
@@ -72,6 +72,9 @@ def _guard_summary_setting(default: int) -> Callable[[Callable[[], int]], Callab
             _request_context.resolving_summary_setting = True
             try:
                 return func()
+            except (DatabaseError, InterfaceError, RuntimeError, AssertionError):
+                # Tracing also runs where a database is unavailable or explicitly forbidden.
+                return default
             finally:
                 _request_context.resolving_summary_setting = False
 

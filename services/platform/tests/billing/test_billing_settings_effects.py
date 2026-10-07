@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from io import StringIO
 from typing import ClassVar, cast
@@ -20,8 +20,8 @@ from django_q.models import OrmQ
 from django_q.signing import SignedPackage
 
 from apps.audit.models import AuditAlert
-from apps.billing.metering_models import UsageEvent, UsageMeter
-from apps.billing.metering_service import MeteringService, UsageEventData
+from apps.billing.metering_models import BillingCycle, UsageAggregation, UsageEvent, UsageMeter, UsageThreshold
+from apps.billing.metering_service import MeteringService, UsageAlertService, UsageEventData
 from apps.billing.metering_tasks import (
     check_usage_thresholds_async,
     send_usage_alert_notification_async,
@@ -29,6 +29,7 @@ from apps.billing.metering_tasks import (
 )
 from apps.billing.models import Currency
 from apps.billing.subscription_models import Subscription
+from apps.billing.subscription_service import SubscriptionLifecycleService
 from apps.customers.models import Customer
 from apps.products.models import Product
 from apps.settings.models import SettingActivation, SystemSetting
@@ -147,6 +148,178 @@ class BillingSettingsEffectTests(TestCase):
         subscription.refresh_from_db()
         self.assertEqual(subscription.grace_period_days, 2)
 
+    def test_zero_meter_grace_rejects_late_events_but_accepts_the_boundary(self) -> None:
+        self.set_value(EVENT_GRACE_KEY, 0)
+        meter = UsageMeter.objects.create(name="zero-grace", display_name="Zero grace")
+        now = timezone.now()
+        broker = ORM(list_key="wp18-zero-grace")
+        with (
+            patch("django.utils.timezone.now", return_value=now),
+            patch("django_q.tasks.get_broker", return_value=broker),
+            patch.object(Conf, "SYNC", False),
+        ):
+            for offset in (-1, 0, 1):
+                with self.subTest(offset=offset):
+                    result = MeteringService().record_event(
+                        UsageEventData(
+                            meter_name=meter.name,
+                            customer_id=str(self.customer.pk),
+                            value=Decimal("1"),
+                            timestamp=now + timedelta(microseconds=offset),
+                            idempotency_key=f"zero-grace-{offset}",
+                        )
+                    )
+                    if offset < 0:
+                        self.assertTrue(result.is_err(), result)
+                        self.assertIn("Event timestamp too old", result.unwrap_err())
+                        self.assertFalse(UsageEvent.objects.filter(idempotency_key=f"zero-grace-{offset}").exists())
+                    else:
+                        self.assertTrue(result.is_ok(), result)
+                        self.assertEqual(result.unwrap().timestamp, now + timedelta(microseconds=offset))
+        meter.refresh_from_db()
+        self.assertEqual(meter.event_grace_period_hours, 0)
+
+    def test_zero_grace_accepts_an_implicit_timestamp_with_an_advancing_clock(self) -> None:
+        meter = UsageMeter.objects.create(
+            name="zero-implicit", display_name="Zero implicit", event_grace_period_hours=0
+        )
+        now = timezone.now()
+        clock_reads = 0
+
+        def advancing_now() -> datetime:
+            nonlocal clock_reads
+            instant = now + timedelta(microseconds=clock_reads)
+            clock_reads += 1
+            return instant
+
+        broker = ORM(list_key="wp18-zero-implicit")
+        with (
+            patch("django.utils.timezone.now", side_effect=advancing_now),
+            patch("django_q.tasks.get_broker", return_value=broker),
+            patch.object(Conf, "SYNC", False),
+        ):
+            result = MeteringService().record_event(
+                UsageEventData(
+                    meter_name=meter.name,
+                    customer_id=str(self.customer.pk),
+                    value=Decimal("1"),
+                    idempotency_key="zero-implicit",
+                )
+            )
+        self.assertTrue(result.is_ok(), result)
+        self.assertEqual(result.unwrap().timestamp, now)
+        self.assertTrue(UsageEvent.objects.filter(pk=result.unwrap().pk, timestamp=now).exists())
+
+    def test_zero_subscription_grace_expires_at_payment_failure(self) -> None:
+        self.set_value(SUBSCRIPTION_GRACE_KEY, 0)
+        subscription = self.subscription()
+        failed_at = subscription.current_period_end + timedelta(seconds=1)
+        with patch("django.utils.timezone.now", return_value=failed_at):
+            subscription.mark_payment_failed()
+        subscription.refresh_from_db()
+        self.assertEqual(subscription.grace_period_ends_at, failed_at)
+        self.assertEqual(subscription.grace_period_days, 0)
+        self.assertEqual(subscription.status, "past_due")
+        self.assertEqual(
+            SubscriptionLifecycleService.handle_grace_period_expirations(as_of=failed_at - timedelta(microseconds=1)),
+            (0, 0),
+        )
+        self.assertEqual(SubscriptionLifecycleService.handle_grace_period_expirations(as_of=failed_at), (1, 0))
+        subscription.refresh_from_db()
+        self.assertEqual(subscription.status, "paused")
+        self.assertEqual(subscription.paused_at, failed_at)
+
+    def test_record_event_queues_the_configured_budget_on_both_paths(self) -> None:
+        meter = UsageMeter.objects.create(name="queued-event", display_name="Queued event")
+        subscription = self.subscription()
+        broker = ORM(list_key="wp18-production-events")
+        with patch("django_q.tasks.get_broker", return_value=broker), patch.object(Conf, "SYNC", False):
+            for configured, budgets in ((17, (17, 17)), (19, (19, 19)), (None, (60, 60)), (300, (300, 300))):
+                if configured is None:
+                    SystemSetting.objects.filter(key=TASK_TIMEOUT_KEY).delete()
+                    cache.clear()
+                else:
+                    self.set_value(TASK_TIMEOUT_KEY, configured)
+                OrmQ.objects.filter(key=broker.list_key).delete()
+                result = MeteringService().record_event(
+                    UsageEventData(
+                        meter_name=meter.name,
+                        customer_id=str(self.customer.pk),
+                        subscription_id=str(subscription.pk),
+                        value=Decimal("1"),
+                        idempotency_key=f"queued-event-{configured}",
+                    )
+                )
+                self.assertTrue(result.is_ok(), result)
+                event = result.unwrap()
+                tasks = {
+                    task["func"]: task
+                    for row in OrmQ.objects.filter(key=broker.list_key)
+                    for task in (cast("dict[str, object]", SignedPackage.loads(row.payload)),)
+                }
+                expected = (
+                    ("apps.billing.metering_tasks.update_aggregation_for_event", (str(event.pk),), budgets[0]),
+                    (
+                        "apps.billing.metering_tasks.check_usage_thresholds",
+                        (str(self.customer.pk), str(meter.pk), str(subscription.pk)),
+                        budgets[1],
+                    ),
+                )
+                self.assertEqual(set(tasks), {function for function, _, _ in expected})
+                for function, arguments, budget in expected:
+                    with self.subTest(configured=configured, function=function):
+                        self.assertEqual(tasks[function]["args"], arguments)
+                        self.assertEqual(tasks[function]["kwargs"], {})
+                        self.assertEqual(tasks[function]["timeout"], budget)
+
+    def test_threshold_processing_queues_the_configured_alert_budget(self) -> None:
+        meter = UsageMeter.objects.create(name="queued-alert", display_name="Queued alert")
+        subscription = self.subscription()
+        cycle = BillingCycle.objects.create(
+            subscription=subscription,
+            period_start=subscription.current_period_start,
+            period_end=subscription.current_period_end,
+        )
+        aggregation = UsageAggregation.objects.create(
+            meter=meter,
+            customer=self.customer,
+            subscription=subscription,
+            billing_cycle=cycle,
+            period_start=cycle.period_start,
+            period_end=cycle.period_end,
+            total_value=Decimal("2"),
+        )
+        UsageThreshold.objects.create(
+            meter=meter,
+            threshold_type="absolute",
+            threshold_value=Decimal("1"),
+            repeat_notification=True,
+        )
+        broker = ORM(list_key="wp18-production-alerts")
+        with patch("django_q.tasks.get_broker", return_value=broker), patch.object(Conf, "SYNC", False):
+            for configured, budget in ((17, 17), (19, 19), (None, 60), (300, 300)):
+                if configured is None:
+                    SystemSetting.objects.filter(key=TASK_TIMEOUT_KEY).delete()
+                    cache.clear()
+                else:
+                    self.set_value(TASK_TIMEOUT_KEY, configured)
+                OrmQ.objects.filter(key=broker.list_key).delete()
+                alerts = UsageAlertService().check_thresholds(
+                    str(self.customer.pk), str(meter.pk), str(subscription.pk)
+                )
+                self.assertEqual(len(alerts), 1)
+                self.assertEqual(alerts[0].aggregation_id, aggregation.pk)
+                row = OrmQ.objects.get(key=broker.list_key)
+                task = cast("dict[str, object]", SignedPackage.loads(row.payload))
+                with self.subTest(configured=configured):
+                    self.assertEqual(task["func"], "apps.billing.metering_tasks.send_usage_alert_notification")
+                    self.assertEqual(task["args"], (str(alerts[0].pk),))
+                    self.assertEqual(task["kwargs"], {})
+                    self.assertEqual(task["timeout"], budget)
+
+    def test_metering_timeout_rejects_zero(self) -> None:
+        self.assertTrue(SettingsService.update_setting(TASK_TIMEOUT_KEY, 0).is_err())
+
     def test_each_metering_helper_persists_the_timeout_resolved_at_enqueue(self) -> None:
         broker = ORM(list_key="wp18-billing")
         with patch("django_q.tasks.get_broker", return_value=broker), patch.object(Conf, "SYNC", False):
@@ -206,7 +379,8 @@ class BillingSettingsEffectTests(TestCase):
         self.assertEqual(hydrated_subscription.grace_period_days, 2)
 
     def test_activation_preserves_defaults_and_reports_retained_values_once(self) -> None:
-        defaults = {EVENT_GRACE_KEY: 24, TASK_TIMEOUT_KEY: 300, SUBSCRIPTION_GRACE_KEY: 7}
+        defaults = {EVENT_GRACE_KEY: 24, TASK_TIMEOUT_KEY: 60, SUBSCRIPTION_GRACE_KEY: 7}
+        old_catalog_defaults = {**defaults, TASK_TIMEOUT_KEY: 300}
         keys = set(defaults)
 
         # Missing rows retain the previously enforced behavior and receive durable receipts.
@@ -222,9 +396,10 @@ class BillingSettingsEffectTests(TestCase):
             keys,
         )
 
-        # Explicit old-default values and metadata-only reconciliation have the same classification.
+        # Explicit old catalog defaults and metadata-only reconciliation have the same classification:
+        # they never took effect, so they become the enforced value.
         SettingActivation.objects.filter(key__in=keys).delete()
-        for key, value in defaults.items():
+        for key, value in old_catalog_defaults.items():
             self.set_value(key, value)
         SystemSetting.objects.filter(key__in=keys).update(name="Stale metadata")
         with self.captureOnCommitCallbacks(execute=True):

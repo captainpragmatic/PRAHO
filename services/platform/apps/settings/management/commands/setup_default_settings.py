@@ -33,7 +33,7 @@ DEFAULT_VALUE_MIGRATIONS: dict[str, tuple[object, object]] = {
     "audit.webhook_max_retry_threshold": (5, 5),
     "audit.webhook_suspicious_retry_threshold": (3, 3),
     "billing.event_grace_period_hours": (24, 24),
-    "billing.metering_task_timeout": (300, 300),
+    "billing.metering_task_timeout": (300, 60),
     "billing.subscription_grace_period_days": (7, 7),
     "common.cache_timeout_medium": (300, 300),
     "common.cache_timeout_short": (60, 60),

@@ -498,16 +498,10 @@ class TestScheduleAggregationUpdate(TestCase):
         self.svc = MeteringService()
 
     @patch("apps.billing.metering_service.MeteringService._update_aggregation_sync")
-    def test_fallback_to_sync_on_import_error(self, mock_sync):
-        """When django_q is unavailable, falls back to sync."""
+    def test_fallback_to_sync_when_scheduling_fails(self, mock_sync):
+        """When the task broker refuses the job, the aggregation is updated synchronously."""
         event = MagicMock(id=uuid.uuid4())
-        with (
-            patch(
-                "apps.billing.metering_service.MeteringService._schedule_aggregation_update",
-                wraps=self.svc._schedule_aggregation_update,
-            ),
-            patch.dict("sys.modules", {"django_q": None, "django_q.tasks": None}),
-        ):
+        with patch("apps.billing.metering_tasks.async_task", side_effect=RuntimeError("broker down")):
             self.svc._schedule_aggregation_update(event)
         mock_sync.assert_called_once_with(event)
 
@@ -683,13 +677,16 @@ class TestApplyEventToAggregation(TestCase):
 
 
 class TestCheckThresholdsAsync(TestCase):
-    def test_handles_django_q_unavailable(self):
+    def test_scheduling_failure_is_logged_not_raised(self):
         svc = MeteringService()
         customer = MagicMock(id=1)
         meter = MagicMock(id=2)
-        # Should not raise
-        with patch.dict("sys.modules", {"django_q": None, "django_q.tasks": None}):
+        with (
+            patch("apps.billing.metering_tasks.async_task", side_effect=RuntimeError("broker down")),
+            self.assertLogs("apps.billing.metering_service", level="WARNING") as logs,
+        ):
             svc._check_thresholds_async(customer, meter, None)
+        self.assertIn("Could not schedule threshold check", logs.output[0])
 
 
 # ============================================================================
@@ -1587,10 +1584,14 @@ class TestUsageAlertServiceNotification(TestCase):
         alert.refresh_from_db()
         assert alert.action_taken == "block_new"
 
-    def test_schedule_alert_notification_django_q_unavailable(self):
+    def test_schedule_alert_notification_failure_is_logged_not_raised(self):
         alert = MagicMock(id=uuid.uuid4())
-        with patch.dict("sys.modules", {"django_q": None, "django_q.tasks": None}):
-            self.svc._schedule_alert_notification(alert)  # should not raise
+        with (
+            patch("apps.billing.metering_tasks.async_task", side_effect=RuntimeError("broker down")),
+            self.assertLogs("apps.billing.metering_service", level="WARNING") as logs,
+        ):
+            self.svc._schedule_alert_notification(alert)
+        self.assertIn("Could not schedule alert notification", logs.output[0])
 
 
 # ============================================================================
@@ -1782,6 +1783,7 @@ class TestStripeGateway(TestCase):
         gw = self._make_gateway(mock_stripe)
         with patch("apps.settings.services.SettingsService.get_setting", side_effect=Exception("db error")):
             assert gw.validate_configuration() is False
+
 
 class TestStripeGatewayInitialization(TestCase):
     """Test _initialize_stripe method."""

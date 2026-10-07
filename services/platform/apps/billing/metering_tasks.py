@@ -25,8 +25,7 @@ from . import config as billing_config
 logger = logging.getLogger(__name__)
 
 # Task configuration
-_DEFAULT_TASK_TIMEOUT = 300  # 5 minutes
-TASK_TIMEOUT = _DEFAULT_TASK_TIMEOUT
+_DEFAULT_TASK_TIMEOUT = 60  # the budget production enqueues enforced before the setting governed them
 
 
 def get_task_timeout() -> int:

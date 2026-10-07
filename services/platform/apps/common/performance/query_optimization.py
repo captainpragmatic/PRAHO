@@ -19,6 +19,8 @@ from django.conf import settings
 from django.db import connection, models, reset_queries
 from django.db.models import Count, Prefetch, QuerySet
 
+from apps.common.logging import get_sql_display_limit
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_QUERY_WARNING_THRESHOLD = 10
@@ -274,8 +276,9 @@ class QueryProfiler:
             if self.log_queries or self.query_count > warning_threshold:
                 logger.warning(f"⚠️ Query profiler [{self.name}]: {self.query_count} queries in {self.total_time:.2f}ms")
                 if self.log_queries:
+                    sql_display_limit = get_sql_display_limit()
                     for query in profiled_queries:
-                        logger.debug(f"  SQL: {query['sql'][:200]}...")
+                        logger.debug(f"  SQL: {query['sql'][:sql_display_limit]}...")
 
 
 def profile_queries(name: str = "", warn_threshold: int = 5) -> Any:
