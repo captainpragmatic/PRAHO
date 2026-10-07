@@ -59,18 +59,20 @@ class TestStandaloneComposeDeliversProductionKeys:
 
     @pytest.mark.integration
     @pytest.mark.parametrize(
-        ("name", "default"),
+        ("name", "sslmode"),
         [
             # The bundled Postgres has no TLS on the internal network; production's own default,
             # sslmode=require (prod.py), refuses it, so the platform could not reach its database.
+            # Fixed, like DB_HOST=db: the env file's value describes a native or external database.
             ("single-server", "disable"),
-            # An external database keeps production's default.
-            ("platform-only", "require"),
-            ("container-service", "require"),
+            # An external database keeps production's default (deploy.sh sets disable for the
+            # platform-only bundled-database profiles).
+            ("platform-only", "${DB_SSLMODE:-require}"),
+            ("container-service", "${DB_SSLMODE:-require}"),
         ],
     )
-    def test_the_platform_gets_an_sslmode_that_fits_its_database(self, name: str, default: str) -> None:
-        assert _environment(_services(name)["platform"]).get("DB_SSLMODE") == f"${{DB_SSLMODE:-{default}}}"
+    def test_the_platform_gets_an_sslmode_that_fits_its_database(self, name: str, sslmode: str) -> None:
+        assert _environment(_services(name)["platform"]).get("DB_SSLMODE") == sslmode
 
     @pytest.mark.integration
     def test_container_service_gives_the_platform_both_domains(self) -> None:
@@ -177,8 +179,9 @@ class TestPortalTrustsItsProxy:
         config = yaml.safe_load((DEPLOY / "docker-compose.single-server.yml").read_text())
         subnet = config["networks"]["web"]["ipam"]["config"][0]["subnet"]
         assert subnet == f"${{PRAHO_WEB_SUBNET:-{self.WEB_SUBNET}}}"
+        # Fixed to the stack's own Caddy network: the env file's value describes a native Caddy.
         portal = _environment(config["services"]["portal"])
-        assert portal["PORTAL_TRUSTED_PROXY_CIDRS"] == f"${{PORTAL_TRUSTED_PROXY_CIDRS:-{subnet}}}"
+        assert portal["PORTAL_TRUSTED_PROXY_CIDRS"] == subnet
 
     @pytest.mark.integration
     @pytest.mark.parametrize("name", ["portal-only", "container-service"])

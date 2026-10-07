@@ -10,10 +10,17 @@
 #   - with-caddy: Platform + Caddy reverse proxy
 #   - full: Platform + PostgreSQL + Caddy
 #
-# Usage:
-#   docker-compose -f docker-compose.platform-only.yml up -d              # Platform only
-#   docker-compose -f docker-compose.platform-only.yml --profile with-db up -d  # With DB
-#   docker-compose -f docker-compose.platform-only.yml --profile full up -d     # Full stack
+# deploy.sh platform-only [--with-db] [--with-caddy] [--full] selects the profiles and, for the
+# bundled database, DB_HOST=db and DB_SSLMODE=disable. Directly, add --profile NAME before `up`
+# (and those two variables for the bundled database):
+#   PRAHO_ENV_FILE=$PWD/.env.prod docker compose --env-file .env.prod -f deploy/docker-compose.platform-only.yml --profile with-db up -d
+#
+# Required (deploy.sh sets PRAHO_ENV_FILE; the rest belong in the env file):
+#   - PRAHO_ENV_FILE: the env file's own path
+#   - DB_PASSWORD, DJANGO_SECRET_KEY
+#   - PLATFORM_API_SECRET (same value as HMAC_SECRET), PLATFORM_TO_PORTAL_WEBHOOK_SECRET
+#   - DJANGO_ENCRYPTION_KEY, CREDENTIAL_VAULT_MASTER_KEY (production settings; deploy.sh checks them)
+#   - DB_HOST without the with-db/full profiles
 
 services:
   # ===========================================================================
@@ -60,6 +67,9 @@ services:
     container_name: praho_platform
     ports:
       - "${PLATFORM_PORT:-8700}:8700"
+    env_file:
+      # The operator's whole env file (deploy.sh exports its path); `environment:` below still wins.
+      - "${PRAHO_ENV_FILE:?run deploy/scripts/deploy.sh, or set PRAHO_ENV_FILE to the file passed with --env-file}"
     environment:
       - DEBUG=0
       - DB_HOST=${DB_HOST:-db}

@@ -2,14 +2,17 @@
 # PRAHO - SINGLE SERVER DEPLOYMENT (All Services)
 # =============================================================================
 # Deploy Platform + Portal + PostgreSQL + Caddy on a single server
-# Usage: docker-compose -f deploy/docker-compose.single-server.yml up -d
+# Run through deploy/scripts/deploy.sh, which passes the env file (.env.prod, or .env.staging with
+# --env staging) to every Compose call. Directly:
+#   PRAHO_ENV_FILE=$PWD/.env.prod docker compose --env-file .env.prod -f deploy/docker-compose.single-server.yml up -d
 #
-# Required environment variables in .env:
-#   - PORTAL_DOMAIN and PLATFORM_DOMAIN (distinct hostnames)
+# Required (deploy.sh sets PRAHO_ENV_FILE; the rest belong in the env file):
+#   - PRAHO_ENV_FILE: the env file's own path
+#   - DB_PASSWORD, DJANGO_SECRET_KEY
+#   - PLATFORM_API_SECRET (same value as HMAC_SECRET), PLATFORM_TO_PORTAL_WEBHOOK_SECRET
+#   - DJANGO_ENCRYPTION_KEY, CREDENTIAL_VAULT_MASTER_KEY (production settings; deploy.sh checks them)
+#   - PORTAL_DOMAIN and PLATFORM_DOMAIN (distinct hostnames), ACME_EMAIL (for Let's Encrypt)
 #   - PLATFORM_ALLOWED_CIDRS (space-separated staff/VPN CIDRs; default: loopback only)
-#   - DB_PASSWORD
-#   - DJANGO_SECRET_KEY
-#   - ACME_EMAIL (for Let's Encrypt)
 
 services:
   # ===========================================================================
@@ -51,6 +54,9 @@ services:
       context: ..
       dockerfile: deploy/platform/Dockerfile
     container_name: praho_platform
+    env_file:
+      # The operator's whole env file (deploy.sh exports its path); `environment:` below still wins.
+      - "${PRAHO_ENV_FILE:?run deploy/scripts/deploy.sh, or set PRAHO_ENV_FILE to the file passed with --env-file}"
     environment:
       - DEBUG=0
       - DB_HOST=db
@@ -58,8 +64,9 @@ services:
       - DB_NAME=praho
       - DB_USER=praho
       - DB_PASSWORD=${DB_PASSWORD:?DB_PASSWORD required}
-      # Production defaults to sslmode=require; the bundled Postgres has no TLS; it is only reachable on the internal network.
-      - DB_SSLMODE=${DB_SSLMODE:-disable}
+      # Fixed, like DB_HOST: this stack's own Postgres has no TLS and is reachable only on `internal`.
+      # The env file's DB_SSLMODE describes a native or external database.
+      - DB_SSLMODE=disable
       - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY required}
       - HMAC_SECRET=${PLATFORM_API_SECRET:?PLATFORM_API_SECRET required}
       # Per-portal HMAC registry (#277). Unset => legacy shared-secret behavior (safe default).
@@ -122,8 +129,9 @@ services:
       - PLATFORM_API_SECRET=${PLATFORM_API_SECRET:?PLATFORM_API_SECRET required}
       # Per-portal signing secret (#277). Unset/empty => sign with PLATFORM_API_SECRET.
       - PORTAL_HMAC_SECRET=${PORTAL_HMAC_SECRET:-}
-      # Production refuses to start without it. Caddy reaches the portal over `web`, so trust that subnet.
-      - PORTAL_TRUSTED_PROXY_CIDRS=${PORTAL_TRUSTED_PROXY_CIDRS:-${PRAHO_WEB_SUBNET:-10.200.250.0/24}}
+      # Production refuses to start without it. This stack's Caddy reaches the portal over `web`, so
+      # trust that subnet; the env file's PORTAL_TRUSTED_PROXY_CIDRS describes a native Caddy.
+      - PORTAL_TRUSTED_PROXY_CIDRS=${PRAHO_WEB_SUBNET:-10.200.250.0/24}
       - PLATFORM_API_ALLOW_INSECURE_HTTP=${PLATFORM_API_ALLOW_INSECURE_HTTP:-true}
       - PLATFORM_TO_PORTAL_WEBHOOK_SECRET=${PLATFORM_TO_PORTAL_WEBHOOK_SECRET:?PLATFORM_TO_PORTAL_WEBHOOK_SECRET required}
       - PLATFORM_DOMAIN=${PLATFORM_DOMAIN:-platform.localhost}

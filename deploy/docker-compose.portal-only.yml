@@ -4,9 +4,15 @@
 # Deploy Portal service separately (connects to remote Platform API)
 # Use when Platform runs on a different server/container
 #
-# Required environment variables:
+# Run through deploy/scripts/deploy.sh, which passes the env file (.env.prod, or .env.staging with
+# --env staging) to every Compose call. Directly:
+#   PRAHO_ENV_FILE=$PWD/.env.prod docker compose --env-file .env.prod -f deploy/docker-compose.portal-only.yml up -d
+#
+# Required (deploy.sh sets PRAHO_ENV_FILE; the rest belong in the env file):
 #   - PLATFORM_API_BASE_URL (e.g., https://platform.example.com/api)
 #   - DJANGO_SECRET_KEY
+#   - PLATFORM_API_SECRET (same value as HMAC_SECRET), PLATFORM_TO_PORTAL_WEBHOOK_SECRET
+#   - PORTAL_TRUSTED_PROXY_CIDRS (the proxy in front of the portal)
 #   - PORTAL_DOMAIN and PLATFORM_DOMAIN (distinct hostnames; DOMAIN is a Portal fallback)
 
 services:
