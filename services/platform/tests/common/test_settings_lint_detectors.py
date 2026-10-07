@@ -642,6 +642,50 @@ class FoundationReaderDetectionTests(SimpleTestCase):
             [("untested-new-reader", "medium", calls[1].line)],
         )
 
+    def test_decorator_factory_credit_reaches_the_closure_it_returns(self) -> None:
+        source = (
+            "from apps.settings.services import SettingsService\n"
+            f'def _checks():\n    return SettingsService.get_boolean_setting("{KEY}", False)\n'
+            "def factory():\n"
+            "    def decorator(func):\n"
+            "        def wrapper(*args, **kwargs):\n"
+            "            _checks()\n"
+            "            return func(*args, **kwargs)\n"
+            "        return wrapper\n"
+            "    return decorator\n"
+            "def registration():\n    return factory()\n"
+            "def defined_only():\n"
+            "    def unused():\n"
+            "        return _checks()\n"
+            "    return 1\n"
+        )
+        calls = self.scan({"apps/probe.py": source})
+        path = lint.PLATFORM_DIR / "apps/probe.py"
+        test_path = lint.PLATFORM_TESTS_DIR / "test_probe.py"
+        original = Path.read_text
+        for entrypoint, expected in (("registration", []), ("defined_only", [calls[0].line])):
+            with self.subTest(entrypoint=entrypoint):
+                fixture = (
+                    f"from apps.probe import {entrypoint}\nclass Effect:\n"
+                    f'    def test_effect(self):\n        SettingsService.update_setting("{KEY}", True)\n'
+                    f"        self.assertTrue({entrypoint}())\n"
+                )
+                texts = {path: source, test_path: fixture}
+
+                def read(
+                    file: Path, encoding: str | None = None, errors: str | None = None, texts: dict[Path, str] = texts
+                ) -> str:
+                    return texts[file] if file in texts else original(file, encoding=encoding, errors=errors)
+
+                with patch.object(Path, "read_text", autospec=True, side_effect=read):
+                    graph = lint.production_import_graph([path])
+                    findings = lint.check_untested_effects(
+                        {KEY}, [test_path], {KEY}, {KEY: {"apps.probe"}}, graph, set(), call_sites=calls
+                    )
+                self.assertEqual(
+                    [finding.line for finding in findings if finding.check == "untested-new-reader"], expected
+                )
+
     def test_new_untested_reader_fails_at_medium(self) -> None:
         calls = self.scan({"apps/probe.py": f'value = SettingsService.get_setting("{OTHER}", "builtin")\n'})
         self.assertEqual(

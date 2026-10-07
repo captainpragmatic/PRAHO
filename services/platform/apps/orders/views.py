@@ -58,7 +58,6 @@ logger = logging.getLogger(__name__)
 
 # Constants for validation and limits
 _DEFAULT_MAX_SEARCH_QUERY_LENGTH = 100
-MAX_SEARCH_QUERY_LENGTH = _DEFAULT_MAX_SEARCH_QUERY_LENGTH
 _DEFAULT_MAX_PRICE_OVERRIDE_CENTS = 50_000_000  # Matches the catalog default (#542)
 _DEFAULT_MAX_PRICE_OVERRIDE_MULTIPLIER = 10
 # H3: Roles that can approve/reject orders under review
@@ -137,12 +136,13 @@ def _sanitize_search_query(query: str) -> str:
     query = re.sub(r"\{\$\w+:", "", query)  # Remove NoSQL injection patterns like {$where:
     query = re.sub(r"[{}$]", "", query)  # Remove MongoDB-style injection chars
 
-    # Limit length
-    if len(query) > MAX_SEARCH_QUERY_LENGTH:
+    # Resolve once after sanitization and reuse the limit for logging and slicing.
+    max_length = get_max_search_query_length()
+    if len(query) > max_length:
         logger.warning(
-            f"⚠️ [Orders] Truncated overly long search query from {original_length} to {MAX_SEARCH_QUERY_LENGTH} characters"
+            "⚠️ [Orders] Truncated overly long search query from %s to %s characters", original_length, max_length
         )
-        query = query[:MAX_SEARCH_QUERY_LENGTH]
+        query = query[:max_length]
 
     return query.strip()
 

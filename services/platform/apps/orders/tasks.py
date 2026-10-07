@@ -8,8 +8,9 @@ payment synchronization, and recurring order management.
 from __future__ import annotations
 
 import logging
+from collections.abc import MutableMapping
 from datetime import datetime, timedelta
-from typing import Any, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 from django.core.cache import cache
 from django.db import transaction
@@ -31,9 +32,11 @@ from apps.orders.services import (
     cancel_orders_for_void_invoice,
 )
 
+if TYPE_CHECKING:
+    from apps.billing.models import Invoice
+
 # Constants
 _DEFAULT_MAX_PAYMENT_FAILURES_BEFORE_ORDER_FAIL = 3
-MAX_PAYMENT_FAILURES_BEFORE_ORDER_FAIL = _DEFAULT_MAX_PAYMENT_FAILURES_BEFORE_ORDER_FAIL
 _DEFAULT_MAX_PAID_ORDER_CONFIRMATION_FAILURES = 3
 _MAX_PAID_ORDER_CONFIRMATION_FAILURES = 10
 _PAID_ORDER_CONFIRMATION_META_KEY = "paid_order_confirmation"
@@ -62,7 +65,6 @@ class OrderProcessingResults(TypedDict):
 TASK_RETRY_DELAY = 300  # 5 minutes
 TASK_MAX_RETRIES = 2
 _DEFAULT_TASK_TIME_LIMIT = 900  # 15 minutes (catalog default)
-TASK_TIME_LIMIT = _DEFAULT_TASK_TIME_LIMIT
 
 # Order auto-cancellation timeouts (#222). Card/immediate methods fail fast, so a tight window is
 # fine. Offline methods settle over 1-3 business days, so they must not be swept at 24h.
@@ -205,9 +207,10 @@ def process_pending_orders() -> dict[str, Any]:  # noqa: C901, PLR0912, PLR0915 
             )
 
             now = timezone.now()
+            task_time_limit = get_task_time_limit()
 
             for order in pending_orders:
-                order_result = {
+                order_result: dict[str, object] = {
                     "order_id": str(order.id),
                     "order_number": order.order_number,
                     "action": None,
@@ -217,7 +220,9 @@ def process_pending_orders() -> dict[str, Any]:  # noqa: C901, PLR0912, PLR0915 
                 try:
                     # Recover settled orders before expiry, including failed confirmation retries.
                     if order.invoice is not None and order.invoice.status == "paid":
-                        _process_paid_order(order, order.invoice, order_result, results)
+                        _process_paid_order(
+                            order, order.invoice, order_result, results, task_time_limit=task_time_limit
+                        )
                         results["processed_orders"].append(order_result)
                         continue
 
@@ -278,7 +283,7 @@ def process_pending_orders() -> dict[str, Any]:  # noqa: C901, PLR0912, PLR0915 
 
                     else:
                         # Free order - move directly to confirmed
-                        _process_free_order(order, order_result, results)
+                        _process_free_order(order, order_result, results, task_time_limit=task_time_limit)
 
                     results["processed_orders"].append(order_result)
 
@@ -326,8 +331,16 @@ def _process_payment_confirmation(order: Order, invoice: Any, total_paid_cents: 
     return False
 
 
-def _process_payment_failures(order: Order, payments: list[Any], results: dict[str, Any]) -> bool:
-    """Process payment failures for an order."""
+def _process_payment_failures(
+    order: Order,
+    payments: list[Payment],
+    results: MutableMapping[str, object],
+    *,
+    max_failures: int | None = None,
+) -> bool:
+    """Process payment failures using the synchronization operation's resolved limit."""
+    if max_failures is None:
+        max_failures = get_max_payment_failures_before_order_fail()
     failed_payments = [p for p in payments if p.status == "failed"]
     if not failed_payments or order.status != "awaiting_payment":
         return False
@@ -335,7 +348,7 @@ def _process_payment_failures(order: Order, payments: list[Any], results: dict[s
     # Check if all payment attempts have failed
     recent_failures = [p for p in failed_payments if p.created_at >= timezone.now() - timedelta(hours=24)]
 
-    if len(recent_failures) >= MAX_PAYMENT_FAILURES_BEFORE_ORDER_FAIL:
+    if len(recent_failures) >= max_failures:
         order.refresh_from_db()
         old_status = order.status
         status_data = StatusChangeData(
@@ -352,7 +365,7 @@ def _process_payment_failures(order: Order, payments: list[Any], results: dict[s
             )
             return False
         order = result.unwrap()
-        results["payment_failures"] += 1
+        results["payment_failures"] = cast("int", results["payment_failures"]) + 1
 
         # Log payment failure with detailed audit context (supplementary to service-layer history)
         AuditService.log_simple_event(
@@ -506,20 +519,31 @@ def _handle_order_timeout(order: Order, now: Any, order_result: dict[str, Any], 
     return True
 
 
-def _trigger_item_provisioning(order: Order, results: dict[str, Any]) -> int:
-    """Trigger provisioning for order items."""
+def _trigger_item_provisioning(
+    order: Order, results: MutableMapping[str, object], *, task_time_limit: int | None = None
+) -> int:
+    """Trigger provisioning with one budget for the item batch."""
+    if task_time_limit is None:
+        task_time_limit = get_task_time_limit()
     provisioned_items = 0
     for item in order.items.filter(provisioning_status="pending"):
         try:
-            async_task("apps.orders.tasks.provision_order_item", item.id, timeout=TASK_TIME_LIMIT)
+            async_task("apps.orders.tasks.provision_order_item", item.id, timeout=task_time_limit)
             provisioned_items += 1
         except Exception as e:
             logger.error(f"🔥 [OrderProcessor] Failed to trigger provisioning for item {item.id}: {e}")
-            results["errors"].append(f"Provisioning trigger failed for item {item.id}: {e}")
+            cast("list[str]", results["errors"]).append(f"Provisioning trigger failed for item {item.id}: {e}")
     return provisioned_items
 
 
-def _process_paid_order(order: Order, invoice: Any, order_result: dict[str, Any], results: dict[str, Any]) -> None:
+def _process_paid_order(
+    order: Order,
+    invoice: Invoice,
+    order_result: MutableMapping[str, object],
+    results: MutableMapping[str, object],
+    *,
+    task_time_limit: int | None = None,
+) -> None:
     """Process orders with paid invoices (fallback task).
 
     Routes through OrderPaymentConfirmationService.confirm_order() to ensure the review
@@ -532,8 +556,8 @@ def _process_paid_order(order: Order, invoice: Any, order_result: dict[str, Any]
         error = result.unwrap_err()
         persisted_error = error[:1_000]
         logger.warning("⚠️ [OrderProcessor] Cannot confirm order %s: %s", order.order_number, error)
-        results["failed_orders"] += 1
-        results["errors"].append(f"Order {order.order_number}: {error}")
+        results["failed_orders"] = cast("int", results["failed_orders"]) + 1
+        cast("list[str]", results["errors"]).append(f"Order {order.order_number}: {error}")
         order_result["action"] = "payment_confirmation_failed"
 
         meta = dict(order.meta or {})
@@ -590,13 +614,13 @@ def _process_paid_order(order: Order, invoice: Any, order_result: dict[str, Any]
         order.save(update_fields=["meta", "updated_at"])
     order_result["action"] = "payment_confirmed"
     order_result["status"] = order.status
-    results["confirmed_orders"] += 1
+    results["confirmed_orders"] = cast("int", results["confirmed_orders"]) + 1
 
     # If order went to provisioning (not in_review), trigger item provisioning
     if order.status == "provisioning":
-        provisioned_items = _trigger_item_provisioning(order, results)
+        provisioned_items = _trigger_item_provisioning(order, results, task_time_limit=task_time_limit)
         if provisioned_items > 0:
-            results["provisioning_triggered"] += provisioned_items
+            results["provisioning_triggered"] = cast("int", results["provisioning_triggered"]) + provisioned_items
 
     # Log order confirmation
     AuditService.log_simple_event(
@@ -726,7 +750,13 @@ def _create_order_invoice(order: Order, order_result: dict[str, Any], results: d
         results["errors"].append(f"Invoice creation error for {order.order_number}: {e}")
 
 
-def _process_free_order(order: Order, order_result: dict[str, Any], results: dict[str, Any]) -> None:
+def _process_free_order(
+    order: Order,
+    order_result: MutableMapping[str, object],
+    results: MutableMapping[str, object],
+    *,
+    task_time_limit: int | None = None,
+) -> None:
     """Process free orders (total=0 → skip proforma, go directly to paid → provisioning).
 
     Routes through OrderPaymentConfirmationService.confirm_order() instead of
@@ -743,17 +773,19 @@ def _process_free_order(order: Order, order_result: dict[str, Any], results: dic
     order.refresh_from_db()
     order_result["action"] = "free_order_confirmed"
     order_result["status"] = order.status
-    results["confirmed_orders"] += 1
+    results["confirmed_orders"] = cast("int", results["confirmed_orders"]) + 1
 
     # If order went to provisioning, trigger item provisioning
     if order.status == "provisioning":
+        if task_time_limit is None:
+            task_time_limit = get_task_time_limit()
         for item in order.items.filter(provisioning_status="pending"):
             try:
-                async_task("apps.orders.tasks.provision_order_item", item.id, timeout=TASK_TIME_LIMIT)
-                results["provisioning_triggered"] += 1
+                async_task("apps.orders.tasks.provision_order_item", item.id, timeout=task_time_limit)
+                results["provisioning_triggered"] = cast("int", results["provisioning_triggered"]) + 1
             except Exception as e:
                 logger.error(f"🔥 [OrderProcessor] Failed to trigger provisioning for free order item {item.id}: {e}")
-                results["errors"].append(f"Free order provisioning trigger failed: {e}")
+                cast("list[str]", results["errors"]).append(f"Free order provisioning trigger failed: {e}")
 
 
 def sync_order_payment_status() -> dict[str, Any]:
@@ -783,6 +815,8 @@ def sync_order_payment_status() -> dict[str, Any]:
     }
 
     try:
+        # Resolve once for the synchronization operation, including inside transactions.
+        max_failures = get_max_payment_failures_before_order_fail()
         # Get orders with pending payments (last 7 days to catch delayed confirmations)
         cutoff_date = timezone.now() - timedelta(days=7)
 
@@ -813,7 +847,7 @@ def sync_order_payment_status() -> dict[str, Any]:
                     payment_updated = True
 
                 # Process payment failures
-                if _process_payment_failures(order, list(payments), results):
+                if _process_payment_failures(order, list(payments), results, max_failures=max_failures):
                     payment_updated = True
 
                 # Process refunds
@@ -853,12 +887,12 @@ def sync_order_payment_status() -> dict[str, Any]:
 
 def process_pending_orders_async() -> str:
     """Queue pending order processing task."""
-    return async_task("apps.orders.tasks.process_pending_orders", timeout=TASK_TIME_LIMIT)
+    return async_task("apps.orders.tasks.process_pending_orders", timeout=get_task_time_limit())
 
 
 def sync_order_payment_status_async() -> str:
     """Queue payment status synchronization task."""
-    return async_task("apps.orders.tasks.sync_order_payment_status", timeout=TASK_TIME_LIMIT)
+    return async_task("apps.orders.tasks.sync_order_payment_status", timeout=get_task_time_limit())
 
 
 # ===============================================================================
@@ -1059,9 +1093,9 @@ def provision_order_item(item_id: str) -> dict[str, Any]:
 
 def generate_invoice_for_order_async(order_id: str) -> str:
     """Queue invoice generation task for order."""
-    return async_task("apps.orders.tasks.generate_invoice_for_order", order_id, timeout=TASK_TIME_LIMIT)
+    return async_task("apps.orders.tasks.generate_invoice_for_order", order_id, timeout=get_task_time_limit())
 
 
 def provision_order_item_async(item_id: str) -> str:
     """Queue order item provisioning task."""
-    return async_task("apps.orders.tasks.provision_order_item", item_id, timeout=TASK_TIME_LIMIT)
+    return async_task("apps.orders.tasks.provision_order_item", item_id, timeout=get_task_time_limit())

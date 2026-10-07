@@ -1141,8 +1141,15 @@ def _exercised_callables(node: ast.AST, bindings: dict[str, str]) -> set[str]:
 
 
 def _callable_edges(tree: ast.Module, module: str) -> dict[str, set[str]]:
-    """Callable edges share the module graph's bounded reachability, without sibling credit."""
+    """Callable edges share the module graph's bounded reachability, without sibling credit.
+
+    A decorator factory is the exception to "defining a nested function does not exercise it": the
+    closure it returns is what its caller ends up running. So a function that returns one of its own
+    nested functions inherits that function's edges, transitively, without spending a hop -
+    `secure_user_registration()` reaches `_execute_security_checks` through `decorator` and `wrapper`.
+    """
     edges: dict[str, set[str]] = {}
+    returned: dict[str, set[str]] = {}
 
     def visit(nodes: list[ast.stmt], scope: str, inherited: dict[str, str]) -> None:
         bindings = dict(inherited)
@@ -1167,11 +1174,27 @@ def _callable_edges(tree: ast.Module, module: str) -> dict[str, set[str]]:
                 )
                 target = f"{scope}.{node.name}"
                 edges[target] = _exercised_callables(body, local)
+                nested = {
+                    child.name for child in node.body if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef)
+                }
+                returned[target] = {
+                    f"{target}.{child.value.id}"
+                    for child in ast.walk(body)
+                    if isinstance(child, ast.Return) and isinstance(child.value, ast.Name) and child.value.id in nested
+                }
                 visit(node.body, target, local)
                 if node.name == "__init__":
                     edges.setdefault(scope, set()).add(target)
 
     visit(tree.body, module, _import_bindings(tree))
+    changed = True
+    while changed:
+        changed = False
+        for target, closures in returned.items():
+            inherited = set().union(*(edges.get(closure, set()) for closure in closures)) - edges[target]
+            if inherited:
+                edges[target] |= inherited
+                changed = True
     return edges
 
 

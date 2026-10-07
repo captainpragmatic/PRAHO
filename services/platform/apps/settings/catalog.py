@@ -2143,7 +2143,7 @@ CATALOG: tuple[SettingDef, ...] = (
     SettingDef(
         key="orders.max_search_query_length",
         data_type="integer",
-        default=200,
+        default=100,
         group="advanced",
         section=_("Orders"),
         label=_("Max search query length"),
