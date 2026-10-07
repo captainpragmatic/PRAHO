@@ -26,6 +26,7 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django_fsm import FSMField, transition
 
+from .config import get_event_grace_period_hours
 from .currency_models import Currency
 
 logger = logging.getLogger(__name__)
@@ -158,7 +159,7 @@ class UsageMeter(models.Model):
 
     # Event processing
     event_grace_period_hours = models.PositiveIntegerField(
-        default=24, help_text=_("Hours in past to accept late events")
+        default=get_event_grace_period_hours, help_text=_("Hours in past to accept late events")
     )
 
     # Metadata

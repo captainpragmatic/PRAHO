@@ -331,7 +331,7 @@ class Subscription(models.Model):
 
     # Grace period and dunning
     grace_period_days = models.PositiveIntegerField(
-        default=DEFAULT_GRACE_PERIOD_DAYS,
+        default=get_subscription_grace_period_days,
         help_text=_("Days of grace after payment failure before suspension"),
     )
     grace_period_ends_at = models.DateTimeField(
