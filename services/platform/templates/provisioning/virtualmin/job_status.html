@@ -92,8 +92,12 @@
                 </div>
             </div>
 
+            {% if job.status != 'failed' and job.status_message %}
+            <p class="text-sm text-slate-300">{{ job.status_message }}</p>
+            {% endif %}
+
             <!-- Error Details (if failed) -->
-            {% if job.status == 'failed' and job.error_message %}
+            {% if job.status == 'failed' and job.status_message %}
             <div class="bg-red-900/20 border border-red-700 rounded-lg p-6">
                 <div class="flex items-start">
                     <div class="flex-shrink-0">
@@ -104,7 +108,7 @@
                             {% trans "Error Details" %}
                         </h3>
                         <div class="mt-2 text-sm text-red-300">
-                            <pre class="whitespace-pre-wrap font-mono text-xs">{{ job.error_message }}</pre>
+                            <pre class="whitespace-pre-wrap font-mono text-xs">{{ job.status_message }}</pre>
                         </div>
                     </div>
                 </div>
@@ -124,13 +128,13 @@
             {% endif %}
 
             <!-- Response Data -->
-            {% if job.response_data %}
+            {% if job.result %}
             <div class="bg-slate-800 rounded-lg border border-slate-700">
                 <div class="px-6 py-4 border-b border-slate-700">
                     <h3 class="text-lg font-medium text-slate-100">{% trans "Response Data" %}</h3>
                 </div>
                 <div class="p-6">
-                    <pre class="text-sm font-mono text-slate-300 bg-slate-900 rounded p-4 overflow-x-auto">{{ job.response_data|pprint }}</pre>
+                    <pre class="text-sm font-mono text-slate-300 bg-slate-900 rounded p-4 overflow-x-auto">{{ job.result|pprint }}</pre>
                 </div>
             </div>
             {% endif %}

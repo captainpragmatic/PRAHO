@@ -20,9 +20,9 @@
       <label for="backup-type" class="text-slate-100">{% trans "Backup type" %}</label>
       <select id="backup-type" name="type" class="bg-slate-900 text-slate-100">
         <option value="">{% trans "All types" %}</option>
-        {% for backup_type in filters.backup_types %}
+        {% for backup_type, backup_label in filters.backup_types %}
           <option value="{{ backup_type }}" {% if backup_type == filters.backup_type_filter %}selected{% endif %}>
-            {{ backup_type }}
+            {{ backup_label }}
           </option>
         {% endfor %}
       </select>
@@ -51,9 +51,9 @@
           <tr>
             <td>{{ backup.backup_id }}</td>
             <td>{{ backup.domain }}</td>
-            <td>{{ backup.backup_type }}</td>
+            <td>{{ backup.type_label }}</td>
             <td>{{ backup.created_at }}</td>
-            <td>{% badge backup.status variant="secondary" %}</td>
+            <td>{% badge backup.status_label variant="secondary" %}</td>
           </tr>
         {% empty %}
           <tr><td colspan="5">{% trans "No backups found." %}</td></tr>

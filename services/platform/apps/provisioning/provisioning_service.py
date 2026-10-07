@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from django.db import transaction
 from django.utils import timezone
+from django.utils.translation import gettext as _
 
 from apps.common.types import Err, Ok, Result
 
@@ -141,7 +142,7 @@ class ProvisioningService:
             return {"success": False, "error": str(e), "services_suspended": 0}
 
     @staticmethod
-    def provision_service(  # noqa: PLR0911, PLR0915  # Complexity: multi-step business logic
+    def provision_service(
         service: Service,
     ) -> dict[str, Any]:  # Complexity: provisioning workflow  # Complexity: multi-step business logic
         """
@@ -178,58 +179,18 @@ class ProvisioningService:
 
                 # Implement actual provisioning based on control panel type
                 if service.server.control_panel == "Virtualmin":
-                    try:
-                        from .virtualmin_gateway import (  # Circular: same-app  # noqa: PLC0415  # Deferred: avoids circular import
-                            VirtualminAuthError,
-                            VirtualminConfig,
-                            VirtualminGateway,
-                            VirtualminQuotaExceededError,
-                            VirtualminTransientError,
-                        )
-
-                        # Create gateway and test connection
-                        config = VirtualminConfig(server=service.server)  # type: ignore[arg-type]
-                        gateway = VirtualminGateway(config)
-
-                        logger.info(f"📡 [Provisioning] Testing connection to {service.server.name}")
-                        health_result = gateway.test_connection()
-
-                        if health_result.is_err():
-                            # REAL INFRASTRUCTURE FAILURE -> FAILED STATUS
-                            error_msg = f"Server unreachable: {health_result.unwrap_err()}"
-                            logger.error(f"❌ [Provisioning] {error_msg}")
-                            service.fail_provisioning()
-                            service.provisioning_errors = error_msg
-                            service.save(update_fields=["status", "provisioning_errors"])
-
-                            return {"status": "failed", "message": error_msg, "server": server_info}
-
-                        # Server is reachable, but domain creation not implemented yet
-                        logger.info(f"📡 [Provisioning] {service.server.name} is healthy - domain creation pending")
-                        service.provisioning_errors = "Server accessible - domain creation API pending implementation"
-                        service.save(update_fields=["provisioning_errors"])
-
-                        return {
-                            "status": "pending_implementation",
-                            "message": "Server healthy - domain creation pending implementation",
-                            "server": server_info,
-                            "gateway_status": "connected",
-                        }
-
-                    except (VirtualminAuthError, VirtualminTransientError, VirtualminQuotaExceededError) as api_error:
-                        # REAL API/INFRASTRUCTURE FAILURES -> FAILED STATUS
-                        error_msg = f"Virtualmin error: {api_error}"
-                        logger.error(f"❌ [Provisioning] {error_msg}")
-                        service.fail_provisioning()
-                        service.provisioning_errors = error_msg
-                        service.save(update_fields=["status", "provisioning_errors"])
-
-                        return {
-                            "status": "failed",
-                            "message": error_msg,
-                            "server": server_info,
-                            "error_type": type(api_error).__name__,
-                        }
+                    # Service.server is a generic Server; automated Virtualmin provisioning
+                    # uses VirtualminServer through VirtualminProvisioningService.
+                    error_msg = _("Manual Virtualmin provisioning required. Configure a VirtualminServer.")
+                    logger.warning("⚠️ [Provisioning] %s", error_msg)
+                    service.provisioning_errors = error_msg
+                    service.save(update_fields=["provisioning_errors"])
+                    return {
+                        "status": "pending_manual",
+                        "message": error_msg,
+                        "server": server_info,
+                        "requires_action": True,
+                    }
 
                 elif service.server.control_panel == "Virtualizor":
                     # VPS provisioning

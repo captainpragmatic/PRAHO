@@ -8,7 +8,7 @@ from io import BytesIO
 from unittest.mock import MagicMock, patch
 
 from django.urls import reverse
-from django.utils import timezone
+from django.utils import timezone, translation
 
 from apps.provisioning.virtualmin_migration_models import VirtualminMigration
 from apps.provisioning.virtualmin_models import VirtualminProvisioningJob, VirtualminServer
@@ -165,6 +165,28 @@ class VirtualminBackupPageCoverageTests(VirtualminViewsFixture):
         self.assertContains(response, "Failed to create restore")
         self.assertIn("active migration or backup/restore", self.messages(response))
         self.assertEqual(list(VirtualminProvisioningJob.objects.values_list("pk", flat=True)), [existing.pk])
+
+    def test_romanian_backup_labels_preserve_filter_values(self) -> None:
+        profile = self.admin.profile
+        profile.preferred_language = "ro"
+        profile.save(update_fields=["preferred_language"])
+        for backup_type in ("full", "incremental", "config_only"):
+            self.add_backup()
+            self.metadata[-1]["backup_type"] = backup_type
+        with translation.override("ro"):
+            response = self.client.get(reverse("provisioning:virtualmin_backups"), HTTP_ACCEPT_LANGUAGE="ro")
+            self.assertContains(response, "Copie de Siguranță Completă")
+            self.assertContains(response, "Copie de Siguranță Incrementală")
+            self.assertContains(response, "Doar Configurare")
+            self.assertContains(response, "Finalizate")
+            for raw in ("full", "incremental", "config_only"):
+                self.assertContains(response, f'value="{raw}"')
+                self.assertNotContains(response, f"<td>{raw}</td>")
+            filtered = self.client.get(
+                reverse("provisioning:virtualmin_backups"), {"type": "config_only"}, HTTP_ACCEPT_LANGUAGE="ro"
+            )
+            self.assertEqual([row["backup_type"] for row in filtered.context["backups"]], ["config_only"])
+            self.assertContains(filtered, 'value="config_only" selected')
 
     def test_backup_list_without_active_server_redirects(self) -> None:
         VirtualminServer.objects.update(status="disabled")

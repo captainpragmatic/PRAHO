@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 _REGISTRATION_RATE_LIMIT_KEY = "security.registration_rate_limit_per_ip"
-_DEFAULT_RATE_LIMIT_REGISTRATION_PER_IP = 5  # per hour
+_REGISTRATION_RATE_LIMIT_DEFAULT = 5  # per hour
 
 
 # ===============================================================================
@@ -169,7 +169,7 @@ def secure_user_registration(
     return secure_service_method(
         validation_type="user_registration",
         rate_limit_key="registration",
-        rate_limit=_DEFAULT_RATE_LIMIT_REGISTRATION_PER_IP if rate_limit is None else rate_limit,
+        rate_limit=_REGISTRATION_RATE_LIMIT_DEFAULT if rate_limit is None else rate_limit,
         rate_limit_setting_key=_REGISTRATION_RATE_LIMIT_KEY if rate_limit is None else None,
         log_attempts=True,
         prevent_timing_attacks=True,
@@ -282,9 +282,7 @@ def _execute_security_checks(
 
             # Same read either way; naming the registration key lets settings lint see this reader.
             if config.rate_limit_setting_key == _REGISTRATION_RATE_LIMIT_KEY:
-                rate_limit = SettingsService.get_integer_setting(
-                    _REGISTRATION_RATE_LIMIT_KEY, _DEFAULT_RATE_LIMIT_REGISTRATION_PER_IP
-                )
+                rate_limit = SettingsService.get_integer_setting(_REGISTRATION_RATE_LIMIT_KEY, rate_limit)
             else:
                 rate_limit = SettingsService.get_integer_setting(config.rate_limit_setting_key, rate_limit)
         rate_limit_user = user

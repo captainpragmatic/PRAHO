@@ -237,9 +237,10 @@ class ProvisioningDeepReviewTests(TestCase):
         self.observe_recovery = True
         with patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=self.http):
             result = VirtualminProvisioningService(self.server).reprovision_virtualmin_account(self.account)
+        # Assert the outcome first: a refused reprovision never reaches create-domain, leaving no budget to observe.
+        self.assertTrue(result.is_ok(), result)
         self.assertEqual(self.observed_budget, 7200)
         self.assertEqual(self.observed_recovery_status, "running")
-        self.assertTrue(result.is_ok(), result)
         self.assertEqual(VirtualminProvisioningJob.objects.get(account=self.account).status, "completed")
 
     @contextmanager

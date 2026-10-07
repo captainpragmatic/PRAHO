@@ -8,6 +8,7 @@ import time
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from contextvars import ContextVar
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any, TypedDict, cast
 from uuid import UUID
 
@@ -1022,6 +1023,21 @@ def virtualmin_backups_list(request: HttpRequest) -> HttpResponse:
     else:
         backups = backups_result.unwrap()
 
+    # Translate display labels; keep stored enum values unchanged for filtering.
+    backup_type_labels = {
+        "full": _("Full Backup"),
+        "incremental": _("Incremental Backup"),
+        "config_only": _("Configuration Only"),
+    }
+    backup_status_labels = {
+        "completed": _("Completed"),
+        "failed": _("Failed"),
+        "in_progress": _("In Progress"),
+    }
+    for backup in backups:
+        backup["type_label"] = backup_type_labels.get(backup["backup_type"], _("Unknown"))
+        backup["status_label"] = backup_status_labels.get(backup["status"], _("Unknown"))
+
     # Prepare table data
     table_data = [
         {
@@ -1058,7 +1074,7 @@ def virtualmin_backups_list(request: HttpRequest) -> HttpResponse:
 
     # Get filter options
     domains = VirtualminAccount.objects.values_list("domain", flat=True).order_by("domain")
-    backup_types = ["full", "incremental", "config_only"]
+    backup_types = list(backup_type_labels.items())
 
     context = {
         "page_title": "Virtualmin Backups",
@@ -1799,20 +1815,34 @@ def virtualmin_accounts_sync(  # noqa: C901, PLR0912, PLR0915  # Complexity: mul
 
                         from apps.billing.currency_policy import get_selling_currency_policy  # noqa: PLC0415
 
-                        # Match the selling currency used by the service creation view.
-                        service, created = Service.objects.get_or_create(
-                            username=username,
-                            defaults={
-                                "currency_id": get_selling_currency_policy().currency_code,
-                                "customer": default_customer,
-                                "service_plan": default_service_plan,
-                                "service_name": f"Virtualmin Account - {username}",
-                                "domain": account_data["primary_domain"],
-                                "status": "active",
-                                "billing_cycle": "monthly",
-                                "price": default_service_plan.price_monthly or 0.00,
-                            },
-                        )
+                        # Existing services retain their stored money; only new imports need a retail price.
+                        service = Service.objects.filter(username=username).first()
+                        if service is None:
+                            currency_code = get_selling_currency_policy().currency_code
+                            retail_price = default_service_plan.get_price_for_currency(currency_code)
+                            if retail_price is None:
+                                error_msg = _("No active monthly price for plan %(plan)s in %(currency)s.") % {
+                                    "plan": default_service_plan.name,
+                                    "currency": currency_code,
+                                }
+                                sync_results["errors"].append(error_msg)
+                                logger.warning("⚠️ [AccountSync] %s", error_msg)
+                                continue
+                            service, created = Service.objects.get_or_create(
+                                username=username,
+                                defaults={
+                                    "currency_id": currency_code,
+                                    "customer": default_customer,
+                                    "service_plan": default_service_plan,
+                                    "service_name": f"Virtualmin Account - {username}",
+                                    "domain": account_data["primary_domain"],
+                                    "status": "active",
+                                    "billing_cycle": "monthly",
+                                    "price": Decimal(retail_price.monthly_price_cents) / 100,
+                                },
+                            )
+                        else:
+                            created = False
 
                         # Update service if it exists
                         if not created:

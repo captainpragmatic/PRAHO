@@ -9,6 +9,7 @@ from django_q.signing import SignedPackage
 
 from apps.audit.models import AuditEvent
 from apps.provisioning.models import ProvisioningTask, Service, ServiceGroup, ServicePlanPrice
+from apps.provisioning.security_utils import SecureTaskParameters
 from apps.provisioning.signals import _trigger_automatic_virtualmin_provisioning
 from apps.provisioning.virtualmin_models import VirtualminAccount
 from apps.provisioning.virtualmin_tasks import reconcile_virtualmin_service_state
@@ -95,6 +96,10 @@ class ProvisioningSupportSignalTests(VirtualminTaskTestBase):
         self.assertEqual(event.old_values["customer_id"], str(self.customer.pk))
 
     def test_existing_account_blocks_a_racing_automatic_creation(self) -> None:
+        Service.objects.filter(pk=self.service.pk).update(domain="tenant.example.com")
+        self.service = Service.objects.get(pk=self.service.pk)
+        self.account.domain = self.service.domain
+        self.account.save(update_fields=["domain"])
         queued_before = OrmQ.objects.count()
         _trigger_automatic_virtualmin_provisioning(self.service)
         self.assertEqual(list(VirtualminAccount.objects.filter(service=self.service)), [self.account])
@@ -102,6 +107,24 @@ class ProvisioningSupportSignalTests(VirtualminTaskTestBase):
         self.assertFalse(
             AuditEvent.objects.filter(
                 action="virtualmin_auto_provisioning_scheduled", object_id=str(self.service.pk)
+            ).exists()
+        )
+        self.account.delete()
+        service = Service.objects.get(pk=self.service.pk)
+        with self.captureOnCommitCallbacks(execute=True):
+            _trigger_automatic_virtualmin_provisioning(service)
+        packages = [cast("dict[str, object]", SignedPackage.loads(row.payload)) for row in OrmQ.objects.all()]
+        provisioning = [
+            package
+            for package in packages
+            if package["func"] == "apps.provisioning.virtualmin_tasks.provision_virtualmin_account"
+        ]
+        self.assertEqual(len(provisioning), 1)
+        secure = cast("tuple[SecureTaskParameters, ...]", provisioning[0]["args"])[0]
+        self.assertEqual(secure.decrypt()["domain"], "tenant.example.com")
+        self.assertTrue(
+            AuditEvent.objects.filter(
+                action="virtualmin_auto_provisioning_scheduled", object_id=str(service.pk)
             ).exists()
         )
 

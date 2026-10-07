@@ -24,6 +24,8 @@ class ProvisioningSupportModelTests(VirtualminViewsFixture):
         self.assertFalse(self.server.is_healthy)
         self.server.last_health_check = None
         self.assertFalse(self.server.is_healthy)
+        self.server.last_health_check = timezone.now()
+        self.assertTrue(self.server.is_healthy)
         self.server.status = "maintenance"
         self.assertFalse(self.server.is_healthy)
 

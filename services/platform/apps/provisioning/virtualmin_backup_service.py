@@ -1060,11 +1060,14 @@ class VirtualminBackupService:
                         expected_features.append(feature)
 
             domain = str(metadata.get("domain", ""))
-            feature_members = {
-                member.name.removeprefix("./").split("/", 1)[0]
-                for member in members
-                if member.isfile() and ".." not in member.name.split("/")
-            }
+            feature_members: set[str] = set()
+            for member in members:
+                if not member.isfile() or ".." in member.name.split("/"):
+                    continue
+                name = member.name.removeprefix("./")
+                # Native newformat members live in .backup/; legacy members are at the root.
+                name = name.removeprefix(".backup/")
+                feature_members.add(name.split("/", 1)[0])
             suffixes = ("", ".tar.gz", ".tar.bz2", ".tar.zst", ".tar", ".gz", ".bz2", ".zst", ".zip")
             missing_features = [
                 feature
