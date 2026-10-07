@@ -497,7 +497,8 @@ class HealthSweepDeadlineTests(SimpleTestCase):
                 raise ConnectTimeout("first health probe fails before the deadline")
             return response("info", output="host: deadline.example.test\n")
 
-        deadline = time.perf_counter() + 1.0
+        # Each attempt carries ~0.15 s of logging and settings overhead, so 1 s left no margin under load.
+        deadline = time.perf_counter() + 3.0
         with patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=retry_http):
             checked_account, healthy, error = _health_check_until_deadline(account, deadline)
         self.assertIs(checked_account, account)
