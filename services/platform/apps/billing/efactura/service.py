@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import posixpath
 import uuid
 from copy import copy
 from dataclasses import dataclass, field, replace
@@ -46,7 +47,7 @@ from .client import (
     validate_response_archive,
 )
 from .models import EFacturaDocument, EFacturaDocumentType, EFacturaStatus
-from .settings import efactura_environment
+from .settings import EFacturaSettings, efactura_environment
 from .validator import CIUSROValidator, ValidationResult
 from .xml_builder import XMLBuilderError, builder_for
 
@@ -684,8 +685,10 @@ class EFacturaService:
         Returns:
             Summary of processed documents
         """
-        pending = EFacturaDocument.get_pending_submissions(limit)
         results = {"submitted": 0, "failed": 0, "skipped": 0}
+        if not EFacturaSettings().auto_submit_enabled:
+            return results
+        pending = EFacturaDocument.get_pending_submissions(limit)
 
         for document in pending:
             result = self.submit_invoice(document.invoice)
@@ -737,8 +740,10 @@ class EFacturaService:
         Returns:
             Summary of retried documents
         """
-        ready = EFacturaDocument.get_ready_for_retry()
         results = {"retried": 0, "failed": 0}
+        if not EFacturaSettings().auto_submit_enabled:
+            return results
+        ready = EFacturaDocument.get_ready_for_retry()
 
         for document in ready:
             result = self.retry_failed_submission(document)
@@ -849,9 +854,15 @@ class EFacturaService:
             document.xml_generated_at = timezone.now()
             document.save(update_fields=["xml_content", "xml_hash", "xml_generated_at", "updated_at"])
 
-            # Save XML file
-            filename = f"{invoice.number}.xml"
-            document.xml_file.save(filename, ContentFile(xml_content.encode("utf-8")), save=True)
+            # Save XML bytes through the real storage backend at the staff-configured path.
+            directory = document.xml_generated_at.strftime(EFacturaSettings().xml_storage_path)
+            filename = posixpath.join(directory, f"{invoice.number}.xml")
+            document.xml_file.name = document.xml_file.storage.save(
+                filename,
+                ContentFile(xml_content.encode("utf-8")),
+                max_length=document.xml_file.field.max_length,
+            )
+            document.save(update_fields=["xml_file", "updated_at"])
 
             return xml_content
 

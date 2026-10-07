@@ -23,6 +23,8 @@ from django.utils.translation import gettext as _
 
 from apps.audit.models import AuditAlert
 
+from .settings import EFacturaSettings
+
 logger = logging.getLogger(__name__)
 
 # Expose imports at module scope for patching in tests
@@ -73,6 +75,10 @@ def submit_efactura_task(invoice_id: str) -> dict[str, Any]:
     Returns:
         Dict with result status and details
     """
+    if not EFacturaSettings().auto_submit_enabled:
+        logger.info("✅ [e-Factura] Automatic submission is disabled for invoice %s", invoice_id)
+        return {"success": False, "error": _("Automatic e-Factura submission is disabled"), "invoice_id": invoice_id}
+
     logger.info(f"[e-Factura Task] Starting submission for invoice {invoice_id}")
 
     try:
@@ -161,11 +167,7 @@ def poll_all_pending_status_task() -> dict[str, Any]:
     """
     logger.info("[e-Factura Task] Polling status for all pending documents")
 
-    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
-        SettingsService,  # Deferred: django-q task  # Deferred: avoids circular import
-    )
-
-    batch_size = SettingsService.get_integer_setting("billing.efactura_batch_size", 100)
+    batch_size = EFacturaSettings().poll_batch_size
 
     if EFacturaService is None:
         raise RuntimeError("EFacturaService unavailable")
@@ -409,6 +411,9 @@ def queue_efactura_submission(invoice_id: str) -> str | None:
     Returns:
         Task ID if queued, None if failed
     """
+    if not EFacturaSettings().auto_submit_enabled:
+        logger.info("✅ [e-Factura] Automatic submission is disabled for invoice %s", invoice_id)
+        return None
     try:
         if async_task is None:
             raise ImportError("Django-Q not installed")
