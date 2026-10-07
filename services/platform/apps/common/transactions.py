@@ -1,5 +1,6 @@
 """Savepoint isolation for optional database effects."""
 
+import logging
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, ContextDecorator, ExitStack, contextmanager
 from logging import Logger
@@ -57,16 +58,22 @@ def _swallow_application_errors(
 
 
 def best_effort_atomic(
-    *, logger: Logger, scope: str, message: str, using: str | None = None
+    *, logger: Logger, scope: str, message: str, using: str | None = None, level: int = logging.ERROR
 ) -> _SuppressingContextDecorator:
-    """Roll back body failures without hiding an unusable transaction or failed entry."""
+    """Roll back body failures without hiding an unusable transaction or failed entry.
+
+    ``level`` sets how the swallowed failure is logged (always with its traceback); use
+    logging.CRITICAL where a failure needs manual review.
+    """
     return _SuppressingContextDecorator(
-        lambda: _best_effort_atomic(logger=logger, scope=scope, message=message, using=using)
+        lambda: _best_effort_atomic(logger=logger, scope=scope, message=message, using=using, level=level)
     )
 
 
 @contextmanager
-def _best_effort_atomic(*, logger: Logger, scope: str, message: str, using: str | None = None) -> Iterator[None]:
+def _best_effort_atomic(
+    *, logger: Logger, scope: str, message: str, using: str | None = None, level: int = logging.ERROR
+) -> Iterator[None]:
     """Roll back body failures without hiding an unusable transaction or failed entry."""
     connection = transaction.get_connection(using)
     if connection.needs_rollback:
@@ -87,7 +94,10 @@ def _best_effort_atomic(*, logger: Logger, scope: str, message: str, using: str 
             stack.close()
             if connection.needs_rollback or connection.closed_in_transaction:
                 raise
-            logger.exception(f"🔥 [{scope}] {message}")
+            if level == logging.ERROR:
+                logger.exception(f"🔥 [{scope}] {message}")
+            else:
+                logger.log(level, f"🔥 [{scope}] {message}", exc_info=True)
 
     if connection.needs_rollback or connection.closed_in_transaction:
         raise TransactionManagementError(

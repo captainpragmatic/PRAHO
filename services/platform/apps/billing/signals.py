@@ -1077,15 +1077,13 @@ def store_original_retry_values(
     sender: type[PaymentRetryAttempt], instance: PaymentRetryAttempt, **kwargs: Any
 ) -> None:
     """Store original retry values for comparison"""
-    try:
+    with best_effort_atomic(logger=logger, scope="Payment Retry Signal", message="Failed to store original values"):
         if instance.pk:
             try:
                 original = PaymentRetryAttempt.objects.get(pk=instance.pk)
                 instance._original_retry_status = original.status
             except PaymentRetryAttempt.DoesNotExist:
                 instance._original_retry_status = ""
-    except Exception as e:
-        logger.exception(f"🔥 [Payment Retry Signal] Failed to store original values: {e}")
 
 
 # ===============================================================================
@@ -2002,16 +2000,13 @@ def _consider_service_suspension(payment: Payment) -> None:
 
 def _cancel_payment_retries(payment: Payment) -> None:
     """Cancel any pending payment retries"""
-    try:
+    with best_effort_atomic(logger=logger, scope="Payment", message="Failed to cancel retries"):
         PaymentRetryAttempt.objects.filter(
             payment=payment,
             status="pending",
         ).update(status="cancelled")  # fsm-bypass: PaymentRetryAttempt is not FSM-protected
 
         logger.info(f"🚫 [Payment] Cancelled pending retries for payment {payment.id}")
-
-    except Exception as e:
-        logger.exception(f"🔥 [Payment] Failed to cancel retries: {e}")
 
 
 def _handle_efactura_refund_reporting(invoice: Invoice) -> None:
@@ -2188,7 +2183,9 @@ def _trigger_virtualmin_provisioning_on_payment(invoice: Invoice) -> None:
 
     Cross-app integration point: billing → provisioning
     """
-    try:
+    with best_effort_atomic(
+        logger=logger, scope="CrossApp", message="Failed to trigger Virtualmin provisioning on payment"
+    ):
         # Import here to avoid circular imports
         from django_q.tasks import async_task
 
@@ -2235,9 +2232,6 @@ def _trigger_virtualmin_provisioning_on_payment(invoice: Invoice) -> None:
             logger.debug(
                 f"📋 [CrossApp] No hosting services found in invoice {invoice.number}, skipping Virtualmin provisioning"
             )
-
-    except Exception as e:
-        logger.error(f"🔥 [CrossApp] Failed to trigger Virtualmin provisioning on payment: {e}")
 
 
 # ===============================================================================
@@ -2305,7 +2299,7 @@ def handle_issuance_audit(
 @receiver(post_delete, sender=ProviderIssuance)
 def handle_issuance_deletion(sender: type[ProviderIssuance], instance: ProviderIssuance, **kwargs: Any) -> None:
     """Deleting the record of a provider call destroys the only evidence it happened."""
-    try:
+    with best_effort_atomic(logger=logger, scope="Issuance Signal", message="Failed to log issuance deletion"):
         log_security_event(
             event_type="provider_issuance_deleted",
             details={
@@ -2315,8 +2309,6 @@ def handle_issuance_deletion(sender: type[ProviderIssuance], instance: ProviderI
                 "provider_number": str(instance.provider_number),
             },
         )
-    except Exception as e:
-        logger.exception(f"🔥 [Issuance Signal] Failed to log issuance deletion: {e}")
 
 
 def _issuance_event_type(state: str) -> str:

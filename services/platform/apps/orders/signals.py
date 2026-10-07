@@ -117,7 +117,7 @@ def store_original_order_values(sender: type[Order], instance: Order, **kwargs: 
 
     The trade-off of occasional audit imprecision is acceptable vs. deadlock risk.
     """
-    try:
+    with best_effort_atomic(logger=logger, scope="Order Signal", message="Failed to store original values"):
         if instance.pk:  # Only for existing orders
             try:
                 # Read current database state for comparison
@@ -130,8 +130,6 @@ def store_original_order_values(sender: type[Order], instance: Order, **kwargs: 
                 }
             except Order.DoesNotExist:
                 instance._original_values = {}
-    except Exception as e:
-        logger.exception(f"🔥 [Order Signal] Failed to store original values: {e}")
 
 
 def _handle_order_status_change(order: Order, old_status: str, new_status: str) -> None:
@@ -140,16 +138,17 @@ def _handle_order_status_change(order: Order, old_status: str, new_status: str) 
         logger.info(f"🔄 [Order] Status change {order.order_number}: {old_status} → {new_status}")
 
         # Security event for important status changes
-        log_security_event(
-            "order_status_changed",
-            {
-                "order_id": str(order.id),
-                "order_number": order.order_number,
-                "customer_id": str(order.customer.id),
-                "old_status": old_status,
-                "new_status": new_status,
-            },
-        )
+        with best_effort_atomic(logger=logger, scope="Order", message="Status change audit failed"):
+            log_security_event(
+                "order_status_changed",
+                {
+                    "order_id": str(order.id),
+                    "order_number": order.order_number,
+                    "customer_id": str(order.customer.id),
+                    "old_status": old_status,
+                    "new_status": new_status,
+                },
+            )
 
         # Trigger different actions based on status transitions
         if new_status == "awaiting_payment" and old_status == "draft":
@@ -226,7 +225,7 @@ def _update_services_to_provisioning(order: Order) -> None:
 
 def _trigger_service_provisioning(order: Order) -> None:
     """Trigger service provisioning for completed orders"""
-    try:
+    with best_effort_atomic(logger=logger, scope="Order Signal", message="Provisioning trigger failed"):
         from apps.provisioning.services import (  # noqa: PLC0415  # Deferred: avoids circular import
             ProvisioningService,  # Circular: cross-app signal  # Deferred: avoids circular import
         )
@@ -248,9 +247,6 @@ def _trigger_service_provisioning(order: Order) -> None:
                         logger.info(f"⚡ [Order] Item {item.id} provisioned successfully")
                     else:
                         logger.error(f"🔥 [Order] Provisioning failed: {result.error}")
-
-    except Exception as e:
-        logger.exception(f"🔥 [Order Signal] Provisioning trigger failed: {e}")
 
 
 def _cancel_linked_subscription_for_order(*, service_id: object, feedback: str) -> None:
@@ -413,21 +409,18 @@ def _handle_order_cancellation(order: Order, old_status: str) -> None:  # noqa: 
                 proforma = order.proforma
                 assert proforma is not None  # narrowing: proforma_id check guarantees non-None
                 if proforma.status == "sent":
-                    try:
+                    with best_effort_atomic(
+                        logger=logger,
+                        scope="Order",
+                        message=f"Could not expire proforma for order {order.order_number} on cancellation; "
+                        "manual review needed",
+                    ):
                         proforma.expire()
                         proforma.save(update_fields=["status"])
                         logger.info(
                             "📋 [Order] Expired proforma %s on cancellation of order %s",
                             proforma.number,
                             order.order_number,
-                        )
-                    except Exception as e:
-                        logger.error(
-                            "🔥 [Order] Could not expire proforma %s for order %s — manual review needed: %s",
-                            proforma.number,
-                            order.order_number,
-                            e,
-                            exc_info=True,
                         )
                 elif proforma.status == "draft":
                     # Draft proformas were never sent to the customer — delete them.
@@ -528,17 +521,18 @@ def handle_order_item_changes(sender: type[OrderItem], instance: OrderItem, crea
             "unit_price_cents": instance.unit_price_cents,
         }
 
-        OrdersAuditService.log_order_item_event(
-            BusinessEventData(
-                event_type=event_type,
-                business_object=instance,
-                user=None,
-                context=AuditContext(actor_type="system"),
-                old_values=old_values,
-                new_values=new_values,
-                description=f"Order item {'added to' if created else 'updated in'} {instance.order.order_number}",
+        with best_effort_atomic(logger=logger, scope="Order Signal", message="Order item audit failed"):
+            OrdersAuditService.log_order_item_event(
+                BusinessEventData(
+                    event_type=event_type,
+                    business_object=instance,
+                    user=None,
+                    context=AuditContext(actor_type="system"),
+                    old_values=old_values,
+                    new_values=new_values,
+                    description=f"Order item {'added to' if created else 'updated in'} {instance.order.order_number}",
+                )
             )
-        )
 
     except Exception as e:
         logger.exception(f"🔥 [Order Signal] Failed to handle order item change: {e}")
@@ -547,7 +541,7 @@ def handle_order_item_changes(sender: type[OrderItem], instance: OrderItem, crea
 @receiver(pre_save, sender=OrderItem)
 def store_original_item_values(sender: type[OrderItem], instance: OrderItem, **kwargs: Any) -> None:
     """Store original order item values for comparison"""
-    try:
+    with best_effort_atomic(logger=logger, scope="Order Signal", message="Failed to store original item values"):
         if instance.pk:
             try:
                 original = OrderItem.objects.get(pk=instance.pk)
@@ -557,8 +551,6 @@ def store_original_item_values(sender: type[OrderItem], instance: OrderItem, **k
                 }
             except OrderItem.DoesNotExist:
                 instance._original_item_values = {}
-    except Exception as e:
-        logger.exception(f"🔥 [Order Signal] Failed to store original item values: {e}")
 
 
 @receiver(post_delete, sender=OrderItem)
@@ -591,7 +583,8 @@ def handle_order_item_deletion(sender: type[OrderItem], instance: OrderItem, **k
             },
             description=f"Order item deleted: {instance.product_name}",
         )
-        AuditService.log_event(event_data)
+        with best_effort_atomic(logger=logger, scope="Order Signal", message="Order item deletion audit failed"):
+            AuditService.log_event(event_data)
 
         logger.info(f"🗑️ [Order] Item deleted from order: {instance.product_name}")
 
@@ -614,14 +607,15 @@ def _handle_item_provisioning_status_change(item: OrderItem, old_status: str | N
         }
 
         if new_status in provisioning_events:
-            OrdersAuditService.log_provisioning_event(
-                BusinessEventData(
-                    event_type=provisioning_events[new_status],
-                    business_object=item,
-                    context=AuditContext(actor_type="system"),
-                    description=f"Order item provisioning {new_status}: {item.product_name}",
+            with best_effort_atomic(logger=logger, scope="Order", message="Provisioning audit failed"):
+                OrdersAuditService.log_provisioning_event(
+                    BusinessEventData(
+                        event_type=provisioning_events[new_status],
+                        business_object=item,
+                        context=AuditContext(actor_type="system"),
+                        description=f"Order item provisioning {new_status}: {item.product_name}",
+                    )
                 )
-            )
 
         if new_status == "completed" and item.service:
             # Item successfully provisioned - send notification
@@ -629,7 +623,12 @@ def _handle_item_provisioning_status_change(item: OrderItem, old_status: str | N
 
             # Check if all items in order are provisioned
             order = item.order
-            all_completed = all(oi.provisioning_status == "completed" for oi in order.items.all())
+            items: list[OrderItem] | None = None
+            with best_effort_atomic(logger=logger, scope="Order", message="Failed to load provisioning items"):
+                items = list(order.items.all())
+            if items is None:
+                return
+            all_completed = all(oi.provisioning_status == "completed" for oi in items)
 
             if all_completed and order.status == "provisioning":
                 # Mark order as completed
@@ -657,7 +656,7 @@ def _handle_item_provisioning_status_change(item: OrderItem, old_status: str | N
 
 def _send_proforma_email_for_order(order: Order) -> None:
     """Send proforma email for bank transfer orders (C1: smart email timing)."""
-    try:
+    with best_effort_atomic(logger=logger, scope="Order", message="Failed to send proforma email"):
         if not order.proforma:
             logger.warning("⚠️ [Order] No proforma to send for order %s", order.order_number)
             return
@@ -678,8 +677,6 @@ def _send_proforma_email_for_order(order: Order) -> None:
                         proforma.status,
                     )
             logger.info("📧 [Order] Sent proforma email for order %s", order.order_number)
-    except Exception as e:
-        logger.exception("🔥 [Order] Failed to send proforma email for %s: %s", order.order_number, e)
 
 
 def _send_order_confirmation_email(order: Order) -> None:
@@ -792,7 +789,14 @@ def _handle_proforma_payment_received(
     try:
         from .services import OrderPaymentConfirmationService  # noqa: PLC0415
 
-        for order in proforma.orders.filter(status="awaiting_payment"):
+        orders: list[Order] | None = None
+        with best_effort_atomic(logger=logger, scope="Order Signal", message="Failed to load paid proforma orders"):
+            orders = list(proforma.orders.filter(status="awaiting_payment"))
+        if orders is None:
+            logger.critical("🔥 [Order Signal] Could not load orders after proforma payment; recovery required")
+            return
+
+        for order in orders:
             try:
                 with transaction.atomic():
                     result = OrderPaymentConfirmationService.confirm_order(order, invoice=invoice)
@@ -860,7 +864,7 @@ def handle_order_cleanup(sender: type[Order], instance: Order, **kwargs: Any) ->
     except Exception as e:
         logger.warning("⚠️ [Order Signal] Webhook cleanup failed for %s: %s", instance.order_number, e)
 
-    try:
+    with best_effort_atomic(logger=logger, scope="Order Signal", message="Audit logging failed for deleted order"):
         log_security_event(
             "order_deleted",
             {
@@ -871,8 +875,6 @@ def handle_order_cleanup(sender: type[Order], instance: Order, **kwargs: Any) ->
                 "status": instance.status,
             },
         )
-    except Exception as e:
-        logger.warning("⚠️ [Order Signal] Audit logging failed for deleted order %s: %s", instance.order_number, e)
 
 
 @receiver(post_delete, sender=OrderItem)
@@ -919,7 +921,16 @@ def _handle_invoice_refunded(sender: Any, invoice: Any, refund_type: str, **kwar
     Partial refund: log for manual review (partial service suspension is business-specific).
     """
     try:
-        orders = Order.objects.filter(invoice=invoice)
+        orders: list[Order] | None = None
+        with best_effort_atomic(
+            logger=logger,
+            scope="Order Signal",
+            message="Could not load orders after invoice refund; manual review required",
+            level=logging.CRITICAL,
+        ):
+            orders = list(Order.objects.filter(invoice=invoice))
+        if orders is None:
+            return
 
         for order in orders:
             # H2 fix: Wrap per-order service suspension in an atomic block with
@@ -1040,7 +1051,7 @@ def _cleanup_order_files(order: Order) -> None:
 
 def _cancel_order_webhooks(order: Order) -> None:
     """Cancel any pending webhook deliveries for the order."""
-    try:
+    with best_effort_atomic(logger=logger, scope="Webhook", message="Webhook cancellation failed"):
         from apps.integrations.models import (  # noqa: PLC0415
             WebhookDelivery,  # Circular: cross-app signal
         )
@@ -1058,6 +1069,3 @@ def _cancel_order_webhooks(order: Order) -> None:
 
         if cancelled_count > 0:
             logger.info(f"🚫 [Webhook] Cancelled {cancelled_count} pending deliveries for order {order.order_number}")
-
-    except Exception as e:
-        logger.exception(f"🔥 [Webhook] Webhook cancellation failed: {e}")

@@ -1,0 +1,2 @@
+# No signal-isolation exceptions remain.
+# Format: services/platform/apps/<app>/signals.py:<except-line> | <reason>
