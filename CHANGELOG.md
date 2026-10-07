@@ -57,6 +57,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Removing a product on the cart review page now updates the Order Summary. The totals kept the
+  removed item's price, so an empty cart still showed a total to pay. Two things stopped the refresh.
+  The Remove button sits inside the list its own response replaces, so by the time htmx reported the
+  request finished, the button was gone and its "cart updated" action was never read; the action is
+  now recorded when the request starts. And the `cartUpdated` event did not bubble, so the page's
+  totals listener never heard it. The mini-cart's Remove button had the same first problem.
 - Native deployments no longer read a `.env` comment as part of a value. The env examples put comments
   after values (`DJANGO_SETTINGS_MODULE=config.settings.staging  # note`) on 80 lines. systemd's
   `EnvironmentFile=` and the native role's own parsing keep that comment in the value. A deploy from a

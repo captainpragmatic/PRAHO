@@ -21,6 +21,7 @@ from tests.e2e.helpers import (
     ensure_fresh_session,
     login_user,
 )
+from tests.e2e.helpers.htmx import wait_for_htmx_settle
 from tests.e2e.helpers.orders import add_product
 
 CATALOG_URL = f"{BASE_URL}/order/"
@@ -77,17 +78,29 @@ def test_remove_item_rerenders_items_section(page: Page) -> None:
     page.wait_for_load_state("networkidle")
 
     expect(page.locator("#cart-items")).to_be_visible()
+    # The Order Summary has loaded the item's total before anything is removed.
+    expect(page.locator("#cart-totals")).to_contain_text("121,00")
 
     # The remove button carries hx-confirm → a native confirm() dialog; accept it.
     page.on("dialog", lambda dialog: dialog.accept())
+    totals_refreshes: list[str] = []
+    page.on("response", lambda r: totals_refreshes.append(r.url) if "/order/cart/calculate/" in r.url else None)
 
     remove_button = page.locator("#cart-items button[aria-label*='Remove']").first
     expect(remove_button).to_be_visible()
     remove_button.click()
-    page.wait_for_load_state("networkidle")
+    wait_for_htmx_settle(page)
 
-    # Items section re-renders: no cart widget, and the empty-cart CTA appears.
-    assert page.locator("#cart-items #cart-widget").count() == 0, (
-        "Removing the item turned the row into a cart widget instead of re-rendering the list."
-    )
+    # Items section re-renders with the empty-cart CTA. Assert that first: it proves the swap
+    # landed, so the widget check below reads the new DOM rather than the row before removal.
     expect(page.locator("#cart-items")).to_contain_text("Your cart is empty")
+    expect(
+        page.locator("#cart-items #cart-widget"),
+        "Removing the item turned the row into a cart widget instead of re-rendering the list.",
+    ).to_have_count(0)
+
+    # The Order Summary follows the cart: it refreshes once to the empty state.
+    expect(page.locator("#cart-totals")).to_contain_text("Add products to your cart to see the order summary.")
+    expect(page.locator("#cart-totals")).not_to_contain_text("121,00")
+    wait_for_htmx_settle(page)
+    assert len(totals_refreshes) == 1, f"expected one totals refresh after the removal, got {totals_refreshes}"
