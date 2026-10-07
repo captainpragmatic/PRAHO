@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any, TypedDict
 from uuid import UUID
 
@@ -1652,10 +1652,10 @@ def retry_virtualmin_job(job_id: str, claim_nonce: str = "") -> dict[str, Any]:
     return {"success": False, "job_id": job_id, "error": str(result.unwrap_err())}
 
 
-def _recover_expired_claims(now: Any) -> int:
-    """Claimed jobs (pending or running) whose lease expired return to the failed pool."""
+def _recover_expired_claims(now: datetime) -> int:
+    """Recover expired dispatch leases and per-job execution deadlines."""
     lease_cutoff = now - timedelta(minutes=_CLAIM_LEASE_MINUTES)
-    return VirtualminProvisioningJob.recover_expired_claims(lease_cutoff, now + timedelta(minutes=5))
+    return VirtualminProvisioningJob.recover_expired_claims(lease_cutoff, now + timedelta(minutes=5), now=now)
 
 
 def process_failed_virtualmin_jobs() -> dict[str, Any]:

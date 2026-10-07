@@ -2190,7 +2190,9 @@ def _trigger_virtualmin_provisioning_on_payment(invoice: Invoice) -> None:
         from django_q.tasks import async_task
 
         from apps.orders.models import OrderItem
+        from apps.provisioning.virtualmin_tasks import get_task_time_limit
 
+        task_budget = get_task_time_limit()
         order_items = OrderItem.objects.filter(order__invoice=invoice).select_related("service")
         hosting_services = [
             item.service for item in order_items if item.service and item.service.requires_hosting_account()
@@ -2221,7 +2223,9 @@ def _trigger_virtualmin_provisioning_on_payment(invoice: Invoice) -> None:
                     "domain": primary_domain,
                     "template": "Default",
                 }
-                async_task("apps.provisioning.virtualmin_tasks.provision_virtualmin_account", params)
+                async_task(
+                    "apps.provisioning.virtualmin_tasks.provision_virtualmin_account", params, timeout=task_budget
+                )
                 logger.info(
                     f"🔄 [CrossApp] Queued Virtualmin provisioning for {primary_domain} (service: {service.id})"
                 )

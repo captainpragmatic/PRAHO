@@ -8,7 +8,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -32,6 +32,7 @@ HEALTH_CHECK_FRESH_SECONDS = 1500  # 25 minutes
 # Consecutive failed checks (~1h at 10-min cadence) before a server is
 # auto-failed; only auto-failed servers are auto-recovered.
 HEALTH_AUTO_FAIL_THRESHOLD = 6
+_EXECUTION_RECOVERY_MARGIN_SECONDS = 60
 
 
 class VirtualminServer(models.Model):
@@ -693,40 +694,41 @@ class VirtualminProvisioningJob(models.Model):
         )
 
     @classmethod
-    def recover_expired_claims(cls, cutoff: Any, retry_at: Any) -> int:
-        """Return orphaned in-flight jobs to the failed pool so the sweep retries them.
+    def recover_expired_claims(cls, cutoff: datetime, retry_at: datetime, *, now: datetime | None = None) -> int:
+        """Recover pending dispatch leases and expired running execution budgets.
 
-        Three orphan classes, all recovered by age:
-        - a leased retry whose claimed_at lease expired; and
-        - an INITIAL execution that died mid-run — mark_started() sets
-          status='running' and started_at but never claims (claimed_at stays
-          NULL), so without the started_at arm a first-execution worker death
-          (SIGKILL/OOM/deploy restart) would strand the job in 'running'
-          forever; and
-        - a legacy pre-lease pending/running row with neither timestamp, aged
-          by updated_at so a freshly-created initial job keeps its full lease.
-
-        started_at/updated_at are only compared for unclaimed rows so a live
-        leased job is never reclaimed on either timestamp alone.
+        Pending jobs and legacy jobs without a persisted budget keep the age-based
+        lease. A budgeted running job gets its full budget from started_at, plus
+        a minute for worker termination. Older rows fall back to claim/update time.
         """
-        return (
-            cls.objects.filter(
-                models.Q(status="pending") | models.Q(status="running"),
-            )
-            # Backup/restore run for hours under their own execution_deadline;
-            # the dedicated janitor sweep owns their recovery (two clocks).
+        recovery_time = timezone.now() if now is None else now
+        jobs = (
+            cls.objects.filter(status__in=("pending", "running"))
+            # Backup/restore have their own execution_deadline and janitor.
             .exclude(operation__in=("backup_domain", "restore_domain"))
-            .filter(
-                models.Q(claimed_at__isnull=False, claimed_at__lt=cutoff)
-                | models.Q(claimed_at__isnull=True, started_at__isnull=False, started_at__lt=cutoff)
-                | models.Q(
-                    claimed_at__isnull=True,
-                    started_at__isnull=True,
-                    updated_at__lt=cutoff,
-                ),
-            )
-            .update(status="failed", next_retry_at=retry_at, claimed_at=None, updated_at=timezone.now())
+            .only("status", "parameters", "claimed_at", "started_at", "updated_at")
         )
+        recovered = 0
+        for job in jobs.iterator():
+            budget: object = job.parameters.get("task_budget_seconds")
+            if job.status == "running" and isinstance(budget, int) and budget > 0:
+                started_at = job.started_at or job.claimed_at or job.updated_at
+                deadline = started_at + timedelta(seconds=budget + _EXECUTION_RECOVERY_MARGIN_SECONDS)
+                expired = deadline < recovery_time
+            else:
+                lease_started_at = job.claimed_at or job.started_at or job.updated_at
+                expired = lease_started_at < cutoff
+            if expired:
+                # Fence against a worker completing, starting or refreshing the row
+                # after this sweep read it.
+                recovered += cls.objects.filter(
+                    pk=job.pk,
+                    status=job.status,
+                    claimed_at=job.claimed_at,
+                    started_at=job.started_at,
+                    updated_at=job.updated_at,
+                ).update(status="failed", next_retry_at=retry_at, claimed_at=None, updated_at=recovery_time)
+        return recovered
 
     @classmethod
     def restore_after_enqueue_failure(cls, job_id: Any, retry_at: Any) -> int:
