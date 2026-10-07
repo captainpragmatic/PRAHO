@@ -1,5 +1,10 @@
 """Retain sibling Virtualmin jobs when one ORM enqueue fails."""
 
+from unittest.mock import patch
+
+from django.db import OperationalError, connection
+from django_q.models import OrmQ
+
 from apps.billing.signals import _trigger_virtualmin_provisioning_on_payment
 from tests.common._provisioning_queue_isolation import ProvisioningQueueIsolationTestCase
 
@@ -14,4 +19,37 @@ class VirtualminQueueIsolationTests(ProvisioningQueueIsolationTestCase):
             lambda: _trigger_virtualmin_provisioning_on_payment(self.invoice),
             function="apps.provisioning.virtualmin_tasks.provision_virtualmin_account",
             expected_args=expected,
+        )
+
+    def test_loading_savepoint_entry_failure_propagates(self) -> None:
+        failure = OperationalError("loading savepoint entry failed")
+        with patch.object(connection, "savepoint", side_effect=failure), self.assertRaises(OperationalError) as raised:
+            _trigger_virtualmin_provisioning_on_payment(self.invoice)
+        self.assertIs(raised.exception, failure)
+        self.assertFalse(OrmQ.objects.exists())
+
+    def test_second_job_savepoint_entry_failure_propagates_and_preserves_first(self) -> None:
+        failure = OperationalError("job savepoint entry failed")
+        savepoint = connection.savepoint
+        entries = 0
+
+        def fail_second_job_entry() -> str | None:
+            nonlocal entries
+            entries += 1
+            if entries == 3:  # Loading, first job, then second job.
+                raise failure
+            return savepoint()
+
+        with (
+            patch("django_q.conf.Conf.SYNC", False),
+            patch.object(connection, "savepoint", side_effect=fail_second_job_entry),
+            self.assertRaises(OperationalError) as raised,
+        ):
+            _trigger_virtualmin_provisioning_on_payment(self.invoice)
+        self.assertIs(raised.exception, failure)
+        jobs = list(OrmQ.objects.order_by("pk"))
+        self.assertEqual(len(jobs), 1, "Keep the first job; failed entry must stop the batch")
+        self.assertEqual(
+            jobs[0].args(),
+            ({"service_id": str(self.services[0].pk), "domain": self.services[0].domain, "template": "Default"},),
         )

@@ -58,6 +58,7 @@ from .models import (
 
 if TYPE_CHECKING:
     from apps.customers.models import Customer
+    from apps.provisioning.models import Service
 
 logger = logging.getLogger(__name__)
 
@@ -2183,19 +2184,18 @@ def _trigger_virtualmin_provisioning_on_payment(invoice: Invoice) -> None:
 
     Cross-app integration point: billing → provisioning
     """
-    try:
-        with transaction.atomic():
-            # Import here to avoid circular imports.
-            from django_q.tasks import async_task
+    hosting_services: list[Service] | None = None
+    with best_effort_atomic(logger=logger, scope="CrossApp", message="Failed to load Virtualmin provisioning services"):
+        # Import here to avoid circular imports.
+        from django_q.tasks import async_task
 
-            from apps.orders.models import OrderItem
+        from apps.orders.models import OrderItem
 
-            order_items = OrderItem.objects.filter(order__invoice=invoice).select_related("service")
-            hosting_services = [
-                item.service for item in order_items if item.service and item.service.requires_hosting_account()
-            ]
-    except Exception as e:
-        logger.exception(f"🔥 [CrossApp] Failed to load Virtualmin provisioning services: {e}")
+        order_items = OrderItem.objects.filter(order__invoice=invoice).select_related("service")
+        hosting_services = [
+            item.service for item in order_items if item.service and item.service.requires_hosting_account()
+        ]
+    if hosting_services is None:
         return
 
     if not hosting_services:
@@ -2209,25 +2209,26 @@ def _trigger_virtualmin_provisioning_on_payment(invoice: Invoice) -> None:
         f"on invoice {invoice.number}"
     )
     for service in hosting_services:
-        try:
-            with transaction.atomic():
-                primary_domain = service.get_primary_domain()
-                if primary_domain:
-                    params = {
-                        "service_id": str(service.id),
-                        "domain": primary_domain,
-                        "template": "Default",
-                    }
-                    async_task("apps.provisioning.virtualmin_tasks.provision_virtualmin_account", params)
-                    logger.info(
-                        f"🔄 [CrossApp] Queued Virtualmin provisioning for {primary_domain} (service: {service.id})"
-                    )
-                else:
-                    logger.warning(
-                        f"⚠️ [CrossApp] No primary domain found for service {service.id}, skipping Virtualmin provisioning"
-                    )
-        except Exception as e:
-            logger.error(f"🔥 [CrossApp] Failed to queue Virtualmin provisioning for service {service.id}: {e}")
+        with best_effort_atomic(
+            logger=logger,
+            scope="CrossApp",
+            message=f"Failed to queue Virtualmin provisioning for service {service.id}",
+        ):
+            primary_domain = service.get_primary_domain()
+            if primary_domain:
+                params = {
+                    "service_id": str(service.id),
+                    "domain": primary_domain,
+                    "template": "Default",
+                }
+                async_task("apps.provisioning.virtualmin_tasks.provision_virtualmin_account", params)
+                logger.info(
+                    f"🔄 [CrossApp] Queued Virtualmin provisioning for {primary_domain} (service: {service.id})"
+                )
+            else:
+                logger.warning(
+                    f"⚠️ [CrossApp] No primary domain found for service {service.id}, skipping Virtualmin provisioning"
+                )
 
 
 # ===============================================================================

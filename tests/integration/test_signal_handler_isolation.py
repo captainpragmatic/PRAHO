@@ -270,13 +270,47 @@ class _DatabaseVisitor(ast.NodeVisitor):
             self.unsafe = True
         if isinstance(node.func, ast.Name) and node.func.id in {"list", "bool", "len"}:
             for arg in node.args:
-                self._evaluate(arg)
+                if node.func.id == "bool":
+                    self._truth_test(arg)
+                else:
+                    self._evaluate(arg)
         self.generic_visit(node)
 
     def _evaluate(self, expr: ast.expr) -> None:
         if not self.protected and self.scope.query(expr):
             self.unsafe = True
         self.visit(expr)
+
+    def _truth_test(self, expr: ast.expr) -> None:
+        """Follow values whose truthiness is consumed, including conditional results."""
+        if isinstance(expr, ast.BoolOp):
+            for value in expr.values:
+                self._truth_test(value)
+        elif isinstance(expr, ast.UnaryOp) and isinstance(expr.op, ast.Not):
+            self._truth_test(expr.operand)
+        elif isinstance(expr, ast.IfExp):
+            self._truth_test(expr.test)
+            self._truth_test(expr.body)
+            self._truth_test(expr.orelse)
+        else:
+            self._evaluate(expr)
+
+    def visit_UnaryOp(self, node: ast.UnaryOp) -> None:
+        if isinstance(node.op, ast.Not):
+            self._truth_test(node.operand)
+        else:
+            self.generic_visit(node)
+
+    def visit_BoolOp(self, node: ast.BoolOp) -> None:
+        # The final operand is returned lazily unless an outer context tests it.
+        for value in node.values[:-1]:
+            self._truth_test(value)
+        self.visit(node.values[-1])
+
+    def visit_IfExp(self, node: ast.IfExp) -> None:
+        self._truth_test(node.test)
+        self.visit(node.body)
+        self.visit(node.orelse)
 
     def visit_Subscript(self, node: ast.Subscript) -> None:
         # A plain slice stays lazy; indexing and slices with a step evaluate.
@@ -288,7 +322,12 @@ class _DatabaseVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_If(self, node: ast.If) -> None:
-        self._evaluate(node.test)
+        self._truth_test(node.test)
+        for stmt in [*node.body, *node.orelse]:
+            self.visit(stmt)
+
+    def visit_While(self, node: ast.While) -> None:
+        self._truth_test(node.test)
         for stmt in [*node.body, *node.orelse]:
             self.visit(stmt)
 
@@ -303,7 +342,7 @@ class _DatabaseVisitor(ast.NodeVisitor):
     def visit_comprehension(self, node: ast.comprehension) -> None:
         self._evaluate(node.iter)
         for condition in node.ifs:
-            self.visit(condition)
+            self._truth_test(condition)
 
 
 def find_unisolated_handlers(source: str, *, include_marked: bool = False) -> list[int]:
@@ -463,6 +502,56 @@ class SignalHandlerIsolationTests(SimpleTestCase):
                 self.assertEqual(find_unisolated_handlers(isolated), [])
         lazy = "rows = Model.objects.filter(active=True)\ntry:\n    limited = rows[:2]\nexcept Exception:\n    pass\n"
         self.assertEqual(find_unisolated_handlers(lazy), [])
+
+    def test_compound_queryset_truthiness_requires_isolation(self) -> None:
+        operations = (
+            "if not rows:\n    consume(rows)",
+            "if ready and rows:\n    consume(rows)",
+            "if ready or rows:\n    consume(rows)",
+            "if not (ready and rows):\n    consume(rows)",
+            "if rows if ready else fallback:\n    consume(rows)",
+            "if fallback if ready else rows:\n    consume(rows)",
+            "chosen = value if rows else fallback",
+            "while rows:\n    break",
+            "while not rows:\n    break",
+            "while ready and rows:\n    break",
+            "chosen = rows or fallback",
+            "chosen = rows and value",
+            "chosen = (rows if ready else fallback) or value",
+            "chosen = not rows",
+            "chosen = bool(rows if ready else fallback)",
+            "chosen = [value for value in values if rows]",
+        )
+        for operation in operations:
+            with self.subTest(operation=operation):
+                source = (
+                    "query = Model.objects.filter(active=True)\n"
+                    "rows = query\n"
+                    "try:\n"
+                    + "\n".join("    " + line for line in operation.splitlines())
+                    + "\nexcept Exception:\n    pass\n"
+                )
+                self.assertEqual(find_unisolated_handlers(source), [4 + len(operation.splitlines())])
+                for boundary in ("transaction.atomic()", "best_effort_atomic(logger=logger)"):
+                    with self.subTest(boundary=boundary):
+                        isolated = source.replace(
+                            "try:\n",
+                            f"try:\n    with {boundary}:\n",
+                        )
+                        lines = isolated.splitlines()
+                        catch = lines.index("except Exception:")
+                        isolated = "\n".join(
+                            line if index < 4 or index >= catch else "    " + line for index, line in enumerate(lines)
+                        )
+                        self.assertEqual(find_unisolated_handlers(isolated), [])
+        for operation in (
+            "chosen = rows if ready else fallback",
+            "chosen = ready and rows",
+            "chosen = ready or rows",
+        ):
+            with self.subTest(lazy=operation):
+                source = f"rows = Model.objects.all()\ntry:\n    {operation}\nexcept Exception:\n    pass\n"
+                self.assertEqual(find_unisolated_handlers(source), [])
 
     def test_database_exception_subclasses_and_aliases_are_flagged(self) -> None:
         exceptions = (
