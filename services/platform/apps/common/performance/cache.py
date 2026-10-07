@@ -20,7 +20,7 @@ from typing import Any, ClassVar, TypeVar, cast
 
 from django.conf import settings
 from django.core.cache import cache, caches
-from django.db import models
+from django.db import DatabaseError, InterfaceError, models
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +31,19 @@ class _CacheTimeout(Enum):
     SETTING = "setting"
 
 
-def _resolve_timeout(timeout: int | None | _CacheTimeout, getter: Callable[[], int]) -> int | None:
-    return getter() if isinstance(timeout, _CacheTimeout) else timeout
+def _resolve_timeout(timeout: int | None | _CacheTimeout, getter: Callable[[], int], fallback: int) -> int | None:
+    """Resolve a default timeout from settings, falling back to the constant when settings are unreachable.
+
+    Every cache consumer resolves through here, so an unavailable settings table never turns a computed
+    value into an error.
+    """
+    if not isinstance(timeout, _CacheTimeout):
+        return timeout
+    try:
+        return getter()
+    except (DatabaseError, InterfaceError):
+        logger.warning("⚠️ [Cache] Default timeout lookup failed; using %ss", fallback)
+        return fallback
 
 
 # Cache timeout constants (seconds)
@@ -109,11 +120,7 @@ class CacheService:
         """Set a value in cache with automatic key prefixing."""
         full_key = self._make_key(key, version)
         try:
-            try:
-                resolved_timeout = _resolve_timeout(timeout, get_cache_timeout_medium)
-            except Exception:
-                resolved_timeout = _DEFAULT_CACHE_TIMEOUT_MEDIUM
-                logger.warning("⚠️ [Cache] Default timeout lookup failed; using %ss", resolved_timeout)
+            resolved_timeout = _resolve_timeout(timeout, get_cache_timeout_medium, _DEFAULT_CACHE_TIMEOUT_MEDIUM)
             self._cache.set(full_key, value, resolved_timeout)
             logger.debug(f"Cache SET: {key} (timeout={resolved_timeout}s)")
             return True
@@ -205,7 +212,7 @@ class CacheService:
         count = self.get(key)
         if count is None:
             count = queryset.count()
-            self.set(key, count, _resolve_timeout(timeout, get_cache_timeout_short))
+            self.set(key, count, _resolve_timeout(timeout, get_cache_timeout_short, _DEFAULT_CACHE_TIMEOUT_SHORT))
 
         return cast(int, count)
 
@@ -270,7 +277,7 @@ def cached_model_property(
                 return cast(T, cached_value)
 
             value = func(self, *args, **kwargs)
-            cache.set(key, value, _resolve_timeout(timeout, get_cache_timeout_medium))
+            cache.set(key, value, _resolve_timeout(timeout, get_cache_timeout_medium, _DEFAULT_CACHE_TIMEOUT_MEDIUM))
             return value
 
         return wrapper
@@ -329,7 +336,9 @@ def cached_queryset[ModelT: models.Model](
             queryset = func(*args, **kwargs)
             result = list(queryset[:max_size])
 
-            cache.set(cache_key, result, _resolve_timeout(timeout, get_cache_timeout_short))
+            cache.set(
+                cache_key, result, _resolve_timeout(timeout, get_cache_timeout_short, _DEFAULT_CACHE_TIMEOUT_SHORT)
+            )
             logger.debug(f"QuerySet cache SET: {func.__name__} ({len(result)} items)")
 
             return result

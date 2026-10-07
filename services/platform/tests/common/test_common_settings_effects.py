@@ -156,6 +156,39 @@ class CommonSettingsEffectTests(TestCase):
             self.assertIs(result, value)
             self.assertEqual(self.service.get("computed-without-settings"), value)
 
+    def test_every_default_timeout_consumer_falls_back_when_settings_lookup_fails(self) -> None:
+        def rows() -> QuerySet[User]:
+            return User.objects.filter(email__startswith="offline-").order_by("email")
+
+        User.objects.create(email="offline-a@example.test")
+        property_reader = cached_model_property(key_suffix="offline-email")(model_email)
+        queryset_reader = cached_queryset(key_prefix="offline-rows")(rows)
+        user = User(pk=456, email="offline@example.test")
+        now = time.time()
+        with (
+            patch("apps.settings.services.SystemSetting.objects.get", side_effect=OperationalError("settings offline")),
+            patch("django.core.cache.backends.locmem.time.time", return_value=now) as clock,
+        ):
+            try:
+                self.assertEqual(property_reader(user), "offline@example.test")
+                self.assertEqual([row.email for row in queryset_reader()], ["offline-a@example.test"])
+                self.assertEqual(self.service.cache_queryset_count(rows()), 1)
+            except OperationalError:
+                self.fail("cache consumers must use the constant timeout when settings are unavailable")
+            user.email = "changed@example.test"
+            User.objects.create(email="offline-b@example.test")
+            # Short consumers keep the 60 s constant, the property keeps the 300 s one.
+            clock.return_value = now + 59
+            self.assertEqual(property_reader(user), "offline@example.test")
+            self.assertEqual(len(queryset_reader()), 1)
+            self.assertEqual(self.service.cache_queryset_count(rows()), 1)
+            clock.return_value = now + 61
+            self.assertEqual(len(queryset_reader()), 2)
+            self.assertEqual(self.service.cache_queryset_count(rows()), 2)
+            self.assertEqual(property_reader(user), "offline@example.test")
+            clock.return_value = now + 301
+            self.assertEqual(property_reader(user), "changed@example.test")
+
     def test_cache_timeout_medium_expires_every_default_consumer(self) -> None:
         property_reader = cached_model_property(key_suffix="medium-email")(model_email)
         user = User(pk=123, email="before@example.test")
