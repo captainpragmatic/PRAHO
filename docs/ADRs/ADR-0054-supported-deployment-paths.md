@@ -11,7 +11,8 @@ PRAHO had three ways to deploy itself:
 
 1. **Native Ansible** (`deploy/ansible/roles/praho-native`, `playbooks/native-single-server.yml`):
    systemd services and a host Caddy on one server. `make deploy-prod`, `make deploy-staging` and
-   `make deploy-dev-native` use it, configured by the operator's `.env.prod` / `.env.staging`.
+   `make deploy-dev-native` use it, configured by the operator's `.env.prod` / `.env.staging` (and
+   `.env.dev` for the remote dev box).
 2. **Docker Compose** (`deploy/docker-compose.*.yml`, `deploy/scripts/deploy.sh`): containers on any
    Docker host, configured by the same files since #627.
 3. **The Ansible Docker role** (`roles/praho`, `playbooks/single-server.yml`, `playbooks/two-servers.yml`):
@@ -45,9 +46,9 @@ native role deploys one. The decision below records how that layout is deployed 
 
 | Path | Where it runs | Entry points | Configuration |
 |------|---------------|--------------|---------------|
-| Native Ansible | Servers: production, staging, a remote dev box | `make deploy-prod`, `make deploy-staging`, `make deploy-dev-native` | `.env.prod` / `.env.staging` (`env_file_path`) |
+| Native Ansible | Servers: production, staging, a remote dev box | `make deploy-prod`, `make deploy-staging`, `make deploy-dev-native` | `.env.prod` / `.env.staging`; `.env.dev` for the remote dev box (`env_file_path` follows `praho_env`) |
 | Docker Compose | Any Docker host; image builds for managed container platforms | `deploy/scripts/deploy.sh <type>`, `make deploy-*` | `.env.prod` / `.env.staging` (`--env`, `--env-file`) |
-| Local development | A developer machine | `make dev`, `make docker-dev` | `.env` (development only; both deploy paths refuse it) |
+| Local development | A developer machine | `make dev`, `make docker-dev` | `make dev`: the repo-root `.env` (development only; `deploy.sh` refuses it). `make docker-dev`: the settings in `deploy/docker-compose.dev.yml` |
 
 The Ansible Docker role, its two playbooks, `playbooks/rollback.yml`, `inventory/two-servers.yml`, the
 Docker variant of `make deploy-dev` and `make ansible-two-servers` are retired.
