@@ -2,16 +2,28 @@
 
 from playwright.sync_api import Page
 
+# True once no element carries htmx's in-flight, swapping or settling class. All three are needed:
+# with a swap delay (`htmx.config.defaultSwapDelay`, set on some pages) htmx drops the request
+# class before the swap lands, and the settling class stays on the target until the settle ends.
+_HTMX_IDLE = """() => {
+    const config = window.htmx && window.htmx.config;
+    if (!config) return true;
+    const phases = [config.requestClass, config.swappingClass, config.settlingClass];
+    return !document.querySelector(phases.map((name) => "." + name).join(","));
+}"""
+
 
 def wait_for_htmx_settle(page: Page, timeout: int = 8000) -> None:
-    """Wait for in-flight HTMX requests to finish and the DOM to settle.
+    """Wait until every HTMX request on the page has finished, swapped and settled.
 
-    networkidle alone is not sufficient right after an interaction that fires
-    a request: the swap happens after the response lands, so a short grace
-    period follows. This also absorbs the ``hx-sync="...:replace"``
-    cancellation storm — rapid interactions (e.g. arrow-key tab navigation)
-    cancel each other's requests, and only the final one settles; callers
-    should interact first, then call this once and assert final state.
+    Call it straight after the interaction that fires the request: a click or a key press on an
+    element with a plain trigger starts the request before Playwright returns. It does not help
+    with a delayed trigger (`delay:`, `changed`, `every`), whose request may not have started yet;
+    after those, assert the swapped content with a retrying `expect`.
+
+    `page.wait_for_load_state("networkidle")` is no substitute: once the page has loaded it returns
+    at once, without waiting for a request the test fired afterwards. This helper used to be that
+    call plus a fixed 300 ms, so on a slow run the test read the page before the swap, and a second
+    interaction cancelled the first request (`hx-sync` replace) instead of following it.
     """
-    page.wait_for_load_state("networkidle", timeout=timeout)
-    page.wait_for_timeout(300)
+    page.wait_for_function(_HTMX_IDLE, timeout=timeout)

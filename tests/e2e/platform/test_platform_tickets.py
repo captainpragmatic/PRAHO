@@ -21,16 +21,11 @@ from tests.e2e.helpers import (
     run_responsive_breakpoints_test,
 )
 from tests.e2e.helpers.filter_tabs import assert_selection_state, visible_tablist
+from tests.e2e.helpers.htmx import wait_for_htmx_settle
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _wait_for_htmx(page: Page, timeout: int = 8000) -> None:
-    """Wait for HTMX swap to complete after a form submission."""
-    page.wait_for_load_state("networkidle", timeout=timeout)
-    page.wait_for_timeout(300)
 
 
 def _get_status_text(page: Page) -> str:
@@ -78,7 +73,8 @@ def _submit_reply(
         page.select_option("select[name='resolution_code']", resolution)
 
     page.locator("#reply-form button[type='submit']").click()
-    _wait_for_htmx(page)
+    # The status and comment checks after a reply read the page once, so the swap must have landed.
+    wait_for_htmx_settle(page)
 
 
 def _create_ticket(page: Page, subject: str, customer_id: int, priority: str = "high") -> str:
