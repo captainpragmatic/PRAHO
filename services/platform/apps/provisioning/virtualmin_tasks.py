@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, TypedDict
+from typing import Any, TypedDict, cast
 from uuid import UUID
 
 from django.conf import settings
@@ -112,7 +112,7 @@ def get_task_time_limit() -> int:
 class VirtualminProvisioningConfig:
     """Configuration for Virtualmin provisioning task."""
 
-    service_id: str
+    service_id: str | int
     domain: str
     username: str | None = None
     password: str | None = None
@@ -150,7 +150,7 @@ class ProvisioningExecutionParams:
 class VirtualminProvisioningParams(TypedDict, total=False):
     """Parameters for Virtualmin account provisioning"""
 
-    service_id: str
+    service_id: str | int
     domain: str
     username: str | None
     password: str | None
@@ -160,7 +160,7 @@ class VirtualminProvisioningParams(TypedDict, total=False):
 
 def _decrypt_and_extract_parameters(
     params: VirtualminProvisioningParams | SecureTaskParameters,
-) -> tuple[dict[str, Any], str, str] | tuple[None, None, None]:
+) -> tuple[VirtualminProvisioningParams, str | int, str] | tuple[None, None, None]:
     """
     Decrypt and extract core parameters from provisioning params.
 
@@ -179,7 +179,7 @@ def _decrypt_and_extract_parameters(
         service_id = decrypted_params["service_id"]
         domain = decrypted_params["domain"]
 
-        return decrypted_params, service_id, domain
+        return cast("VirtualminProvisioningParams", decrypted_params), service_id, domain
 
     except Exception as decrypt_error:
         logger.error(f"🔥 [VirtualminTask] Parameter decryption/extraction failed: {decrypt_error}")
@@ -188,7 +188,7 @@ def _decrypt_and_extract_parameters(
 
 
 def _validate_provisioning_parameters(
-    decrypted_params: dict[str, Any], service_id: str, domain: str
+    decrypted_params: VirtualminProvisioningParams, service_id: str | int, domain: str
 ) -> ProvisioningContext | None:
     """
     Validate provisioning parameters and create context.
@@ -234,8 +234,8 @@ def _validate_provisioning_parameters(
         logger.error(f"❌ [VirtualminTask] Parameter validation failed: {validation_error}")
         log_security_event_safe(
             "virtualmin_task_validation_failed",
-            {"error": str(validation_error), "original_params": sanitize_log_parameters(decrypted_params)},
-            service_id,
+            {"error": str(validation_error), "original_params": sanitize_log_parameters(dict(decrypted_params))},
+            str(service_id),
             domain,
         )
         return None
@@ -383,7 +383,7 @@ def provision_virtualmin_account(
         try:
             validated_domain = context.domain if "context" in locals() and context else (domain or "unknown")
             validated_service_id = (
-                context.service_id if "context" in locals() and context else (service_id or "unknown")
+                context.service_id if "context" in locals() and context else str(service_id or "unknown")
             )
             correlation_id = (
                 context.correlation_id
@@ -470,8 +470,8 @@ def _get_provisioning_server_secure(server_id: str | None) -> VirtualminServer |
         return None
 
     try:
-        # Validate server ID format first
-        validated_server_id = ProvisioningParametersValidator.validate_service_id(server_id)
+        # Validate the UUID primary key independently of integer service IDs.
+        validated_server_id = ProvisioningParametersValidator.validate_server_id(server_id)
 
         server = VirtualminServer.objects.get(id=validated_server_id)
 
@@ -1835,10 +1835,11 @@ def provision_virtualmin_account_async(params: VirtualminProvisioningParams | Se
                 None,
             )
         else:
+            service_ref = params.get("service_id") if isinstance(params, dict) else None
             log_security_event_safe(
                 "virtualmin_task_scheduling_failed",
                 {"error": str(e), "params": sanitize_log_parameters(dict(params))},
-                params.get("service_id") if isinstance(params, dict) else None,
+                None if service_ref is None else str(service_ref),
             )
 
         raise

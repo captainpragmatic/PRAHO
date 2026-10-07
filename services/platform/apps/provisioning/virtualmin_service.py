@@ -215,7 +215,7 @@ class VirtualminProvisioningService:
                     template_name=template,
                     status="provisioning",
                     praho_customer_id=creation_data.service.customer.id,
-                    praho_service_id=creation_data.service.id,
+                    praho_service_id=uuid.UUID(int=creation_data.service.id),
                 )
                 # SECURITY: password is secrets.token_urlsafe(24) — not user input
                 account.set_password(  # nosemgrep: unvalidated-password

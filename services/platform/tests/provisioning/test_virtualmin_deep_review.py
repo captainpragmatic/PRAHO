@@ -36,7 +36,7 @@ from apps.provisioning.virtualmin_gateway import (
     VirtualminResponse,
 )
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
-from apps.provisioning.virtualmin_service import VirtualminAccountCreationData, VirtualminProvisioningService
+from apps.provisioning.virtualmin_service import VirtualminProvisioningService
 from apps.provisioning.virtualmin_tasks import (
     VirtualminProvisioningParams,
     _recover_expired_claims,
@@ -87,7 +87,11 @@ class ProvisioningDeepReviewTests(TestCase):
             status="active",
         )
         self.server = VirtualminServer.objects.create(
-            name="review", hostname="review-node.example.test", api_username="review-api", status="active"
+            name="review",
+            hostname="review-node.example.test",
+            api_username="review-api",
+            status="active",
+            last_health_check=timezone.now(),
         )
         self.server.set_api_password("ReviewServerPassword123!")
         self.server.save()
@@ -173,7 +177,7 @@ class ProvisioningDeepReviewTests(TestCase):
                 self.account.refresh_from_db()
                 self.assertEqual(self.account.status, "active")
 
-    def run_queued(self, enqueue: Callable[[], str], *, provision: bool = False) -> None:
+    def run_queued(self, enqueue: Callable[[], str]) -> None:
         self.set_value("provisioning.task_time_limit", 7200)
         self.set_value("provisioning.task_soft_time_limit", 7200)
         task_id = enqueue()
@@ -185,20 +189,7 @@ class ProvisioningDeepReviewTests(TestCase):
         worker = cast("Callable[..., dict[str, object]]", import_string(str(packet["func"])))
         self.observe_recovery = True
         with patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=self.http):
-            if provision:
-                # The worker's UUID validator currently rejects Service's integer PK.
-                # Exercise the real job producer with the actual queued budget.
-                budget = cast("dict[str, object]", packet["kwargs"]).get("task_budget_seconds")
-                self.assertEqual(budget, 7200)
-                provisioner = VirtualminProvisioningService(self.server, task_budget_seconds=cast("int", budget))
-                result = provisioner.create_virtualmin_account(
-                    VirtualminAccountCreationData(service=self.service, domain=self.service.domain, server=self.server)
-                )
-                outcome: dict[str, object] = {"success": result.is_ok(), "result": str(result)}
-            else:
-                outcome = worker(
-                    *cast("tuple[object, ...]", packet["args"]), **cast("dict[str, object]", packet["kwargs"])
-                )
+            outcome = worker(*cast("tuple[object, ...]", packet["args"]), **cast("dict[str, object]", packet["kwargs"]))
         self.assertEqual(self.observed_budget, 7200, outcome)
         self.assertEqual(self.observed_recovery_status, "running")
         self.assertTrue(outcome["success"], outcome)
@@ -213,14 +204,14 @@ class ProvisioningDeepReviewTests(TestCase):
             "domain": self.service.domain,
             "server_id": str(self.server.pk),
         }
-        self.run_queued(lambda: provision_virtualmin_account_async(params), provision=True)
+        self.run_queued(lambda: provision_virtualmin_account_async(params))
 
     def test_secure_provision_enqueue_budget_reaches_real_producer(self) -> None:
         self.account.delete()
         params = SecureTaskParameters.create(
             {"service_id": str(self.service.pk), "domain": self.service.domain, "server_id": str(self.server.pk)}
         )
-        self.run_queued(lambda: provision_virtualmin_account_async(params), provision=True)
+        self.run_queued(lambda: provision_virtualmin_account_async(params))
 
     def test_queued_suspend_persists_enqueue_budget_before_recovery(self) -> None:
         self.run_queued(lambda: suspend_virtualmin_account_async(str(self.account.pk), "Review"))

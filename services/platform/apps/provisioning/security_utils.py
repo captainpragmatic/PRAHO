@@ -36,6 +36,7 @@ MAX_USERNAME_LENGTH = 32
 MIN_USERNAME_LENGTH = 2
 MAX_TEMPLATE_NAME_LENGTH = 50
 LOG_TRUNCATION_LENGTH = 100
+MAX_SERVICE_ID = 2**63 - 1  # BigAutoField's signed 64-bit primary key range.
 UUID_VERSION_4 = 4
 
 DOMAIN_VALIDATION_PATTERN = re.compile(r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$")
@@ -241,33 +242,39 @@ class ProvisioningParametersValidator:
         return username
 
     @staticmethod
-    def validate_service_id(service_id: str) -> str:
-        """
-        Validate service ID format.
+    def validate_service_id(service_id: str | int) -> str:
+        """Validate a positive BigAutoField primary key and return its canonical decimal string."""
+        if isinstance(service_id, bool) or not isinstance(service_id, (str, int)):
+            raise ValidationError(_("Service ID must be a positive integer"))
 
-        Args:
-            service_id: Service UUID to validate
+        if isinstance(service_id, int):
+            if not 0 < service_id <= MAX_SERVICE_ID:
+                raise ValidationError(_("Service ID must be a positive integer within the primary key range"))
+            return str(service_id)
 
-        Returns:
-            Validated service ID
-
-        Raises:
-            ValidationError: If service ID is invalid
-        """
-        if not service_id:
+        service_id_str = service_id.strip()
+        if not service_id_str:
             raise ValidationError(_("Service ID cannot be empty"))
+        if not re.fullmatch(r"[0-9]+", service_id_str):
+            raise ValidationError(_("Service ID must be a positive integer"))
 
-        service_id = str(service_id).strip()
+        canonical = service_id_str.lstrip("0")
+        if not canonical or len(canonical) > len(str(MAX_SERVICE_ID)) or int(canonical) > MAX_SERVICE_ID:
+            raise ValidationError(_("Service ID must be a positive integer within the primary key range"))
+        return canonical
 
-        # Validate UUID format
+    @staticmethod
+    def validate_server_id(server_id: str) -> str:
+        """Validate a VirtualminServer UUID4 independently of Service primary keys."""
+        if not server_id:
+            raise ValidationError(_("Server ID cannot be empty"))
+
         try:
-            uuid_obj = uuid.UUID(service_id)
-            # Ensure it's a valid UUID4
-            if uuid_obj.version != UUID_VERSION_4:
-                raise ValidationError(_("Service ID must be a valid UUID4"))
+            uuid_obj = uuid.UUID(str(server_id).strip())
         except ValueError as e:
-            raise ValidationError(_("Invalid service ID format: %(error)s") % {"error": e}) from e
-
+            raise ValidationError(_("Invalid server ID format: %(error)s") % {"error": e}) from e
+        if uuid_obj.version != UUID_VERSION_4:
+            raise ValidationError(_("Server ID must be a valid UUID4"))
         return str(uuid_obj)
 
     @staticmethod
@@ -317,7 +324,7 @@ class IdempotencyManager:
         Generate idempotency key for operation.
 
         Args:
-            service_id: Service UUID
+            service_id: Service primary key or account identifier
             operation: Operation type
             parameters: Operation parameters
 
