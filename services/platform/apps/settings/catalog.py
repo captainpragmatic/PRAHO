@@ -63,6 +63,7 @@ class SettingDef:
     critical: bool = False
     requires_restart: bool = False
     advanced: bool = False
+    deployment_fallback: bool = False  # No row preserves deployment configuration; never seed the catalog default.
     validation: dict[str, Any] | None = field(default=None, hash=False)
     choice_labels: dict[str, LazyLabel] = field(default_factory=dict, hash=False)
 
@@ -845,6 +846,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="company.email_noreply",
+        deployment_fallback=True,
         data_type="string",
         default="noreply@pragmatichost.com",
         group="company",
@@ -1134,6 +1136,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.company.bank_account",
+        deployment_fallback=True,
         data_type="string",
         default="",
         group="efactura",
@@ -1142,6 +1145,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.company.bank_name",
+        deployment_fallback=True,
         data_type="string",
         default="",
         group="efactura",
@@ -1150,6 +1154,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.company.city",
+        deployment_fallback=True,
         data_type="string",
         default="",
         group="efactura",
@@ -1158,6 +1163,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.company.country_code",
+        deployment_fallback=True,
         data_type="string",
         default="RO",
         group="efactura",
@@ -1166,6 +1172,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.company.cui",
+        deployment_fallback=True,
         data_type="string",
         default="",
         group="efactura",
@@ -1174,6 +1181,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.company.email",
+        deployment_fallback=True,
         data_type="string",
         default="",
         group="efactura",
@@ -1182,6 +1190,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.company.name",
+        deployment_fallback=True,
         data_type="string",
         default="",
         group="efactura",
@@ -1190,6 +1199,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.company.phone",
+        deployment_fallback=True,
         data_type="string",
         default="",
         group="efactura",
@@ -1198,6 +1208,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.company.postal_code",
+        deployment_fallback=True,
         data_type="string",
         default="",
         group="efactura",
@@ -1206,6 +1217,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.company.registration_number",
+        deployment_fallback=True,
         data_type="string",
         default="",
         group="efactura",
@@ -1214,6 +1226,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.company.street",
+        deployment_fallback=True,
         data_type="string",
         default="",
         group="efactura",
@@ -1222,6 +1235,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.enabled",
+        deployment_fallback=True,
         data_type="boolean",
         default=True,
         group="efactura",
@@ -1231,6 +1245,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.environment",
+        deployment_fallback=True,
         data_type="string",
         default="test",
         group="efactura",
@@ -1241,6 +1256,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.metrics.enabled",
+        deployment_fallback=True,
         data_type="boolean",
         default=True,
         group="efactura",
@@ -1250,6 +1266,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.oauth.client_id",
+        deployment_fallback=True,
         data_type="string",
         default="",
         group="efactura",
@@ -1258,6 +1275,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.oauth.client_secret",
+        deployment_fallback=True,
         data_type="string",
         default="",
         group="efactura",
@@ -1268,6 +1286,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.oauth.redirect_uri",
+        deployment_fallback=True,
         data_type="string",
         default="",
         group="efactura",
@@ -1276,6 +1295,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.polling.batch_size",
+        deployment_fallback=True,
         data_type="integer",
         default=100,
         group="efactura",
@@ -1286,6 +1306,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.rate_limit.download_per_message_day",
+        deployment_fallback=True,
         data_type="integer",
         default=10,
         group="efactura",
@@ -1296,6 +1317,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.rate_limit.global_per_minute",
+        deployment_fallback=True,
         data_type="integer",
         default=1000,
         group="efactura",
@@ -1306,6 +1328,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.rate_limit.list_paginated_per_day",
+        deployment_fallback=True,
         data_type="integer",
         default=100000,
         group="efactura",
@@ -1316,6 +1339,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.rate_limit.list_simple_per_day",
+        deployment_fallback=True,
         data_type="integer",
         default=1500,
         group="efactura",
@@ -1326,6 +1350,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.rate_limit.status_per_message_day",
+        deployment_fallback=True,
         data_type="integer",
         default=100,
         group="efactura",
@@ -1336,6 +1361,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.retry.delay_1_seconds",
+        deployment_fallback=True,
         data_type="integer",
         default=300,
         group="efactura",
@@ -1347,6 +1373,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.retry.delay_2_seconds",
+        deployment_fallback=True,
         data_type="integer",
         default=900,
         group="efactura",
@@ -1358,6 +1385,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.retry.delay_3_seconds",
+        deployment_fallback=True,
         data_type="integer",
         default=3600,
         group="efactura",
@@ -1369,6 +1397,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.retry.delay_4_seconds",
+        deployment_fallback=True,
         data_type="integer",
         default=7200,
         group="efactura",
@@ -1380,6 +1409,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.retry.delay_5_seconds",
+        deployment_fallback=True,
         data_type="integer",
         default=21600,
         group="efactura",
@@ -1391,6 +1421,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.retry.max_retries",
+        deployment_fallback=True,
         data_type="integer",
         default=5,
         group="efactura",
@@ -1401,6 +1432,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.storage.xml_path",
+        deployment_fallback=True,
         data_type="string",
         default="efactura/xml/%Y/%m/",
         group="efactura",
@@ -1409,6 +1441,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.submission.auto_submit_enabled",
+        deployment_fallback=True,
         data_type="boolean",
         default=True,
         group="efactura",
@@ -1418,6 +1451,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.validation.schematron_enabled",
+        deployment_fallback=True,
         data_type="boolean",
         default=True,
         group="efactura",
@@ -1427,6 +1461,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.validation.strict_mode",
+        deployment_fallback=True,
         data_type="boolean",
         default=False,
         group="efactura",
@@ -1436,6 +1471,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.validation.xsd_enabled",
+        deployment_fallback=True,
         data_type="boolean",
         default=True,
         group="efactura",
@@ -2693,6 +2729,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="virtualmin.bandwidth_quota_default_mb",
+        deployment_fallback=True,
         data_type="integer",
         default=10000,
         group="virtualmin",
@@ -2704,6 +2741,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="virtualmin.domain_quota_default_mb",
+        deployment_fallback=True,
         data_type="integer",
         default=1000,
         group="virtualmin",

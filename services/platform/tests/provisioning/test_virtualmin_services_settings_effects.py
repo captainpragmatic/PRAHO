@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 from decimal import Decimal
+from io import StringIO
 from typing import cast
 from unittest.mock import patch
 
 from django.core.cache import cache
+from django.core.management import call_command
 from django.test import TestCase, override_settings
 from requests import Response
 
@@ -101,6 +103,21 @@ class VirtualminServicesSettingsEffectsTests(TestCase):
         self.assertEqual(self.account.status, "active")
         self.assertEqual(job.status, "completed")
         return job
+
+    def test_catalog_sync_keeps_virtualmin_limits_when_quota_defaults_have_no_override(self) -> None:
+        keys = ("virtualmin.domain_quota_default_mb", "virtualmin.bandwidth_quota_default_mb")
+        SystemSetting.objects.filter(key__in=keys).delete()
+        call_command("setup_default_settings", stdout=StringIO())
+        self.create_domain(disk_mb=None, bandwidth_mb=None)
+        params = self.creation_params()
+        for key, parameter, field in (
+            (keys[0], "quota", "disk_quota_mb"),
+            (keys[1], "bandwidth", "bandwidth_quota_mb"),
+        ):
+            with self.subTest(key=key):
+                self.assertNotIn(parameter, params)
+                self.assertIsNone(getattr(self.account, field))
+                self.assertFalse(SystemSetting.objects.filter(key=key).exists())
 
     def creation_params(self) -> dict[str, object]:
         requests = [params for params in self.sent if params["program"] == "create-domain"]

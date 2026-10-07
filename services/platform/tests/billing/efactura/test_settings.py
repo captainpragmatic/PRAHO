@@ -475,11 +475,11 @@ class EFacturaSettingsCatalogTestCase(TestCase):
         }
         self.assertEqual(catalog_efactura, dict(EFACTURA_DEFAULTS))
 
-    def test_catalog_sync_persists_every_runtime_efactura_setting(self) -> None:
+    def test_catalog_sync_preserves_deployment_fallback_for_every_runtime_efactura_setting(self) -> None:
         call_command("setup_default_settings", stdout=StringIO())
 
         persisted_keys = set(SystemSetting.objects.filter(key__startswith="efactura.").values_list("key", flat=True))
-        self.assertEqual(persisted_keys, set(EFACTURA_DEFAULTS))
+        self.assertEqual(persisted_keys, set())
 
     def test_catalog_marks_client_secret_sensitive(self) -> None:
         self.assertTrue(CATALOG_BY_KEY["efactura.oauth.client_secret"].sensitive)

@@ -373,7 +373,8 @@ class EFacturaSettings:
                 from apps.settings.models import SystemSetting  # noqa: PLC0415  # Deferred: avoids circular import
 
                 value = SystemSetting.get_value_by_key(key, None)
-                if value is not None:
+                # Empty strings request the deployment fallback; False and 0 remain explicit overrides.
+                if value is not None and value != "":
                     return value
             except Exception as e:
                 logger.debug(f"Could not get {key} from SettingsService: {e}")

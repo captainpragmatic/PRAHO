@@ -889,9 +889,11 @@ class SettingsService:
 
 
 def get_default_from_email() -> str:
-    """Prefer a stored sender; otherwise preserve the deployment's Django default."""
+    """Prefer a staff override; seeded or empty senders preserve the deployment default."""
     stored = SettingsService.get_stored_setting("company.email_noreply")
-    return str(stored) if stored is not None else django_settings.DEFAULT_FROM_EMAIL
+    if stored in (None, "", CATALOG_BY_KEY["company.email_noreply"].default):
+        return django_settings.DEFAULT_FROM_EMAIL
+    return str(stored)
 
 
 # ===============================================================================

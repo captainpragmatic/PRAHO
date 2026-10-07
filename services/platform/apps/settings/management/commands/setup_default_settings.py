@@ -1,8 +1,8 @@
 """
 Sync catalog metadata and perform explicitly registered, one-time setting activations.
 
-Ordinary sync preserves values except old defaults in the activation manifest.
---force explicitly resets values. Retired rows are deleted within the same transaction.
+Ordinary sync preserves overrides; deployment-fallback defaults and retired rows are removed.
+--force resets only settings without deployment fallbacks. Activations are one-time.
 """
 
 from __future__ import annotations
@@ -227,6 +227,20 @@ def _retire_settings(category_filter: str | None, messages: list[str]) -> None:
         messages.append(_("  🗑️ Deleted retired setting: %(key)s") % {"key": key})
 
 
+def _sync_deployment_fallback(definition: SettingDef, messages: list[str]) -> None:
+    """Remove catalog-default rows; retain and report deliberate deployment overrides."""
+    setting = SystemSetting.objects.select_for_update().filter(key=definition.key).first()
+    if setting is None:
+        return
+    if setting.value == definition.default:
+        setting.delete()
+        messages.append(_("  🗑️ Removed deployment-fallback default: %(key)s") % {"key": definition.key})
+        return
+    # Metadata can be reconciled, but neither --force nor activation may reset this value.
+    _reconcile(setting, definition, force=False, rewrite=False)
+    messages.append(_("  ✅ Retained deployment-fallback override: %(key)s") % {"key": definition.key})
+
+
 class Command(BaseCommand):
     help = _("Create missing settings, reconcile metadata and apply registered one-time activations")
 
@@ -251,6 +265,10 @@ class Command(BaseCommand):
                     continue
                 if definition.key in RETIRED_SETTING_KEYS:
                     raise CommandError(_("Retired setting is still in the catalog: %(key)s") % {"key": definition.key})
+
+                if definition.deployment_fallback:
+                    _sync_deployment_fallback(definition, messages)
+                    continue
 
                 transition = DEFAULT_VALUE_MIGRATIONS.get(definition.key)
                 receipt = _activation_receipt(definition.key) if transition is not None else None
