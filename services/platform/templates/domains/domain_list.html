@@ -81,7 +81,9 @@
 
     <!-- Enhanced Table -->
     {% if domains %}
-        {% table_enhanced table_data.columns table_data.rows page_obj=domains pagination_enabled=True %}
+        {% with columns=table_data.columns rows=table_data.rows %}
+          {% table_enhanced columns rows page_obj=domains pagination_enabled=True extra_params=extra_params %}
+        {% endwith %}
     {% else %}
         <!-- Empty State -->
         <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 text-center py-12">

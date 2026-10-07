@@ -36,3 +36,15 @@ def assert_next_query(case: SimpleTestCase, response: HttpResponse, expected: di
             htmx_parts = urlsplit(link["hx-get"] or "")
             case.assertEqual(htmx_parts.fragment, "")
             case.assertEqual(parse_qs(htmx_parts.query, keep_blank_values=True), {"page": ["2"], **expected})
+
+
+def next_page_url(case: SimpleTestCase, response: HttpResponse) -> str:
+    """Return the actual rendered Next href for a follow-up client request."""
+    case.assertEqual(response.status_code, 200)
+    parser = _PaginationLinks()
+    parser.feed(response.content.decode())
+    case.assertTrue(parser.links, "The response must render a next-page link")
+    href = parser.links[0].get("href")
+    case.assertIsNotNone(href)
+    case.assertTrue(href)
+    return href or ""

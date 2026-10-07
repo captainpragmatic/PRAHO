@@ -276,6 +276,7 @@ def domain_list(request: HttpRequest) -> HttpResponse:
         "status_filter": status_filter,
         "tld_filter": tld_filter,
         "expiry_filter": expiry_filter,
+        "extra_params": pagination_query(request),
         "total_count": total_count,
         "active_count": active_count,
         "expiring_count": expiring_count,
