@@ -20,7 +20,7 @@ from django.utils.module_loading import import_string
 from django_q.models import OrmQ
 from django_q.signing import SignedPackage
 from requests import Response
-from requests.exceptions import ConnectTimeout
+from requests.exceptions import ConnectTimeout, ReadTimeout
 
 from apps.billing.models import Currency
 from apps.common.outbound_http import OutboundPolicy
@@ -50,6 +50,7 @@ from apps.provisioning.virtualmin_views import (
     _execute_bulk_activate,
     _execute_bulk_health_check,
     _execute_bulk_suspend,
+    _health_check_until_deadline,
 )
 from apps.settings.models import SystemSetting
 from apps.settings.services import SettingsService
@@ -354,7 +355,7 @@ class ProvisioningDeepReviewTests(TestCase):
 class HealthSweepDeadlineTests(SimpleTestCase):
     databases: ClassVar[set[str]] = {"default"}
 
-    def test_deadline_bounds_elapsed_time_and_cancels_queued_probes(self) -> None:
+    def health_accounts(self, count: int = 1) -> list[VirtualminAccount]:
         cache.clear()
         self.addCleanup(cache.clear)
         values = {
@@ -378,10 +379,13 @@ class HealthSweepDeadlineTests(SimpleTestCase):
             name="deadline", hostname="deadline.example.test", api_username="deadline", status="active"
         )
         server.set_api_password("DeadlineServerPassword123!")
-        accounts = [
+        return [
             VirtualminAccount(server=server, domain=f"deadline-{index}.example.test", status="active")
-            for index in range(3)
+            for index in range(count)
         ]
+
+    def test_deadline_bounds_elapsed_time_and_cancels_queued_probes(self) -> None:
+        accounts = self.health_accounts(3)
         release = Event()
         finished = Event()
         timeouts: list[float] = []
@@ -412,6 +416,101 @@ class HealthSweepDeadlineTests(SimpleTestCase):
         finally:
             release.set()
             finished.wait(1.0)
+
+    def test_read_timeout_stops_at_absolute_deadline(self) -> None:
+        account = self.health_accounts()[0]
+        dispatches: list[float] = []
+
+        def read_timeout(method: str, url: str, *, policy: OutboundPolicy, **kwargs: object) -> Response:
+            dispatches.append(time.perf_counter())
+            time.sleep(policy.timeout_seconds)
+            raise ReadTimeout("health probe read timeout")
+
+        started = time.perf_counter()
+        deadline = started + 1.0
+        with patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=read_timeout):
+            checked_account, healthy, error = _health_check_until_deadline(account, deadline)
+        elapsed = time.perf_counter() - started
+        self.assertLess(elapsed, 1.4)
+        self.assertIs(checked_account, account)
+        self.assertFalse(healthy)
+        self.assertEqual(error, "Health check timed out")
+        self.assertEqual(len(dispatches), 1)
+        self.assertTrue(all(sent_at < deadline for sent_at in dispatches))
+
+    def test_backoff_stops_at_absolute_deadline(self) -> None:
+        account = self.health_accounts()[0]
+        dispatches: list[float] = []
+
+        def connect_timeout(method: str, url: str, **kwargs: object) -> Response:
+            dispatches.append(time.perf_counter())
+            time.sleep(0.75)
+            raise ConnectTimeout("health probe connection timeout")
+
+        started = time.perf_counter()
+        deadline = started + 1.0
+        with patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=connect_timeout):
+            checked_account, healthy, error = _health_check_until_deadline(account, deadline)
+        elapsed = time.perf_counter() - started
+        self.assertLess(elapsed, 1.4)
+        self.assertIs(checked_account, account)
+        self.assertFalse(healthy)
+        self.assertEqual(error, "Health check timed out")
+        self.assertEqual(len(dispatches), 1)
+        self.assertTrue(all(sent_at < deadline for sent_at in dispatches))
+
+    def test_no_http_dispatch_after_sweep_reports_timeout(self) -> None:
+        accounts = self.health_accounts()
+        dispatches: list[float] = []
+        late_request = Event()
+
+        def slow_timeout(method: str, url: str, *, policy: OutboundPolicy, **kwargs: object) -> Response:
+            dispatches.append(time.perf_counter())
+            if len(dispatches) == 1:
+                time.sleep(policy.timeout_seconds + 0.1)
+                raise ReadTimeout("health probe finishes after the sweep")
+            late_request.set()
+            return response("info", output="host: deadline.example.test\n")
+
+        with patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=slow_timeout):
+            started = time.perf_counter()
+            result = _execute_bulk_health_check(accounts)
+            reported_at = time.perf_counter()
+            late_request.wait(2.0)
+            self.assertEqual([sent_at for sent_at in dispatches if sent_at >= reported_at], [])
+            self.assertLess(reported_at - started, 1.4)
+            self.assertEqual(result.successful_count, 0)
+            self.assertEqual(result.failed_count, 1)
+            self.assertEqual(len(result.errors), 1)
+            self.assertIn(accounts[0].domain, result.errors[0])
+            self.assertIn("timed out", result.errors[0])
+            self.assertEqual(len(dispatches), 1)
+
+    def test_retry_recomputes_read_and_connect_timeouts(self) -> None:
+        account = self.health_accounts()[0]
+        budgets: list[tuple[float, float, float]] = []
+
+        def retry_http(method: str, url: str, *, policy: OutboundPolicy, **kwargs: object) -> Response:
+            budgets.append((time.perf_counter(), policy.timeout_seconds, policy.connect_timeout_seconds))
+            time.sleep(0.1)
+            if len(budgets) == 1:
+                raise ConnectTimeout("first health probe fails before the deadline")
+            return response("info", output="host: deadline.example.test\n")
+
+        deadline = time.perf_counter() + 1.0
+        with patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=retry_http):
+            checked_account, healthy, error = _health_check_until_deadline(account, deadline)
+        self.assertIs(checked_account, account)
+        self.assertTrue(healthy, error)
+        self.assertIsNone(error)
+        self.assertEqual(len(budgets), 2)
+        self.assertLess(budgets[1][1], budgets[0][1] - 0.4)
+        for dispatched_at, read_timeout, connect_timeout in budgets:
+            self.assertLess(dispatched_at, deadline)
+            self.assertGreater(read_timeout, 0.0)
+            self.assertLessEqual(read_timeout, deadline - dispatched_at + 0.01)
+            self.assertGreater(connect_timeout, 0.0)
+            self.assertLessEqual(connect_timeout, read_timeout)
 
 
 @override_settings(CACHES=LOCMEM, VIRTUALMIN_TIMEOUTS={})

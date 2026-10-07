@@ -912,13 +912,15 @@ class VirtualminGateway:
 
         return Ok(True)
 
-    def call(  # noqa: PLR0911, PLR0912, C901  # Explicit per-stage guards + retry loop
+    def call(  # noqa: PLR0911, PLR0912, PLR0913, PLR0915, C901  # Explicit per-stage guards + bounded retry loop
         self,
         program: str,
         params: dict[str, Any] | None = None,
         response_format: str = "json",
         correlation_id: str = "",
         timeout_seconds: int | None = None,
+        *,
+        deadline: float | None = None,
     ) -> Result[VirtualminResponse, VirtualminAPIError]:
         """
         Make authenticated call to Virtualmin API.
@@ -929,11 +931,17 @@ class VirtualminGateway:
             response_format: Response format ('json', 'xml', 'text')
             correlation_id: Correlation ID for request tracking
             timeout_seconds: Per-call read timeout; None retains the current configured timeout
+            deadline: Absolute perf_counter deadline shared by every attempt and backoff
 
         Returns:
             Result containing VirtualminResponse or error
         """
         start_time = time.time()
+        if deadline is not None and time.perf_counter() >= deadline:
+            return Err(
+                VirtualminAPIError(_("Virtualmin call deadline exceeded"), self.server.hostname, program),
+                retriability=Retriability.NOT_RETRIABLE,
+            )
 
         # Input validation
         try:
@@ -1012,8 +1020,17 @@ class VirtualminGateway:
             lambda: SettingsService.get_integer_setting("virtualmin.max_retries", 3), 3
         )
         for attempt in range(max_retries):
+            if deadline is not None and time.perf_counter() >= deadline:
+                break
             try:
-                response = self._make_request(api_params, attempt + 1, auth=call_auth, timeout_seconds=timeout_seconds)
+                if deadline is None:
+                    response = self._make_request(
+                        api_params, attempt + 1, auth=call_auth, timeout_seconds=timeout_seconds
+                    )
+                else:
+                    response = self._make_request(
+                        api_params, attempt + 1, auth=call_auth, timeout_seconds=timeout_seconds, deadline=deadline
+                    )
                 execution_time = time.time() - start_time
 
                 # Parse response
@@ -1053,10 +1070,22 @@ class VirtualminGateway:
                 if not should_retry:
                     return Err(e, retriability=e.retriability)
 
-                # Exponential backoff for retries
+                # Exponential backoff cannot extend the caller's total budget.
                 if attempt < max_retries - 1:
                     backoff_seconds = (2**attempt) * 0.5
+                    if deadline is not None:
+                        remaining = deadline - time.perf_counter()
+                        if remaining <= 0:
+                            break
+                        backoff_seconds = min(backoff_seconds, remaining)
                     time.sleep(backoff_seconds)
+
+        if deadline is not None and time.perf_counter() >= deadline:
+            logger.warning("⚠️ [Virtualmin] %s stopped at the call deadline", program)
+            return Err(
+                VirtualminAPIError(_("Virtualmin call deadline exceeded"), self.server.hostname, program),
+                retriability=Retriability.NOT_RETRIABLE,
+            )
 
         # All retries failed
         execution_time = time.time() - start_time
@@ -1074,6 +1103,7 @@ class VirtualminGateway:
         attempt: int,
         auth: tuple[str, str] | None = None,
         timeout_seconds: int | None = None,
+        deadline: float | None = None,
     ) -> requests.Response:
         """
         Make HTTP request to Virtualmin API.
@@ -1092,7 +1122,12 @@ class VirtualminGateway:
             VirtualminAPIError: On API-specific errors
         """
         try:
-            response = self._execute_http_request(params, auth=auth, timeout_seconds=timeout_seconds)
+            if deadline is None:
+                response = self._execute_http_request(params, auth=auth, timeout_seconds=timeout_seconds)
+            else:
+                response = self._execute_http_request(
+                    params, auth=auth, timeout_seconds=timeout_seconds, deadline=deadline
+                )
             self._validate_response_size(response)
             self._validate_http_status(response)
             return response
@@ -1137,6 +1172,7 @@ class VirtualminGateway:
         params: dict[str, Any],
         auth: tuple[str, str] | None = None,
         timeout_seconds: int | None = None,
+        deadline: float | None = None,
     ) -> requests.Response:
         """Execute HTTPS with DNS pinning and optional handshake-time certificate pinning.
 
@@ -1161,6 +1197,9 @@ class VirtualminGateway:
                 )
             auth = creds.unwrap()
 
+        if deadline is not None and time.perf_counter() >= deadline:
+            raise VirtualminAPIError(_("Virtualmin call deadline exceeded"), self.server.hostname)
+
         qps_outcome = self._check_qps_limit()
         if qps_outcome is RateLimitOutcome.EXHAUSTED:
             raise VirtualminRateLimitedError(_("Virtualmin requests per second limit exceeded"), self.server.hostname)
@@ -1170,11 +1209,16 @@ class VirtualminGateway:
         # Get current timeout configuration (supports hot-reloading).
         # The policy below is constructed per request; shared config is never mutated.
         timeout_config = get_virtualmin_timeouts()
-        request_timeout = (
+        request_timeout = float(
             timeout_seconds
             if timeout_seconds is not None
             else timeout_config.get("API_REQUEST_TIMEOUT", self.config.timeout)
         )
+        if deadline is not None:
+            remaining = deadline - time.perf_counter()
+            if remaining <= 0:
+                raise VirtualminAPIError(_("Virtualmin call deadline exceeded"), self.server.hostname)
+            request_timeout = min(request_timeout, remaining)
 
         # Build per-server policy — Virtualmin uses self-signed certs on some nodes
         virtualmin_policy = OutboundPolicy(
@@ -1183,7 +1227,8 @@ class VirtualminGateway:
             verify_tls=bool(self.config.verify_ssl),
             tls_cert_fingerprint=self.config.cert_fingerprint,
             allowed_schemes=frozenset({"https"}),
-            timeout_seconds=float(request_timeout),
+            timeout_seconds=request_timeout,
+            connect_timeout_seconds=min(10.0, request_timeout) if deadline is not None else 10.0,
             blocked_ports=frozenset(),  # Virtualmin runs on non-standard ports
         )
 

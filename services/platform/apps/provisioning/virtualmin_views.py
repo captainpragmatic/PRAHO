@@ -4,7 +4,6 @@ Staff interface for managing Virtualmin servers, accounts, and backups.
 """
 
 import logging
-import math
 import time
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from contextvars import ContextVar
@@ -1511,10 +1510,11 @@ def _perform_gateway_connectivity_test(account: VirtualminAccount) -> tuple[bool
         if deadline is None:
             healthy = gateway.ping_server()
         else:
-            remaining = deadline - time.perf_counter()
-            if remaining <= 0:
+            if time.perf_counter() >= deadline:
                 return False, str(_("Health check timed out"))
-            result = gateway.call("info", timeout_seconds=max(1, math.ceil(remaining)))
+            result = gateway.call("info", deadline=deadline)
+            if time.perf_counter() >= deadline:
+                return False, str(_("Health check timed out"))
             healthy = result.is_ok() and result.unwrap().success
         if not healthy:
             return False, str(_("Virtualmin server connectivity failed"))
