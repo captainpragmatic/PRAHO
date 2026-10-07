@@ -190,6 +190,16 @@ class TestDeployScript:
         assert result.returncode == 0, result.stderr
 
     @pytest.mark.integration
+    def test_a_production_portal_host_deploys_without_the_platform_keys(self, project: Project) -> None:
+        # A portal-only host must not hold the platform's encryption keys at all.
+        project.write_env(
+            ".env.prod", "DJANGO_SETTINGS_MODULE=config.settings.prod\nPLATFORM_API_BASE_URL=https://p.example.com/api\n"
+        )
+        result = project.run("deploy.sh", "portal-only")
+        assert result.returncode == 0, result.stderr
+        assert any(_subcommand(c)[:1] == ["up"] for c in project.compose_calls())
+
+    @pytest.mark.integration
     def test_staging_deploys_without_the_production_keys(self, project: Project) -> None:
         project.write_env(".env.staging", STAGING_ENV)
         assert project.run("deploy.sh", "single-server", "--env", "staging").returncode == 0

@@ -228,9 +228,11 @@ case "$ACTION" in
         ;;
 esac
 
-if [ "$DEPLOYMENT_TYPE" != container-service ]; then
-    praho_require_production_keys
-fi
+# Only the stacks that run the platform need its keys: a portal-only host must not hold them, and
+# container-service only builds images.
+case "$DEPLOYMENT_TYPE" in
+    single-server | platform-only) praho_require_production_keys ;;
+esac
 
 case "$DEPLOYMENT_TYPE" in
     single-server) deploy_single_server ;;

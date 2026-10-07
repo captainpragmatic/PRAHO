@@ -62,8 +62,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a container started. `deploy.sh`, `rollback.sh`, `restore.sh` and the `make deploy-*`, `rollback`
   and `restore` targets now pass `.env.prod`, or `.env.staging` with `--env staging`
   (`DEPLOY_ENV=staging` for make), to every Compose call, and the platform receives the whole file.
-  They refuse the development `.env`, a settings module the images do not run, and a production file
-  without the encryption keys. A developer's exported `DJANGO_SETTINGS_MODULE` no longer overrides the
+  They refuse the development `.env`, a settings module the images do not run, and a production
+  platform deployment without the encryption keys (a portal-only host never needs them). A developer's exported `DJANGO_SETTINGS_MODULE` no longer overrides the
   file. The single-server stack's own database and proxy settings no longer come from that file,
   which describes a native host, and neither do the platform-only bundled database's. Health is read
   from the containers (`up --wait`), not from host ports the stacks never published. A rollback pins
