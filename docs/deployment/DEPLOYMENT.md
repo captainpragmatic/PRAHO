@@ -620,6 +620,12 @@ Deploy just the Platform service (admin, API, business logic).
 ./deploy/scripts/deploy.sh platform-only --full --build
 ```
 
+The platform-only and portal-only stacks publish the application port (8700, 8701) on `127.0.0.1` only.
+Their Caddy reaches the app over the Docker network, and a proxy on the same host can use the loopback
+port; publishing it wider would bypass Caddy's TLS and, for the platform, the `PLATFORM_ALLOWED_CIDRS`
+allowlist. For an external load balancer, set `PLATFORM_BIND` / `PORTAL_BIND` (e.g. to a private
+interface's address) in the env file.
+
 ---
 
 ### Option 5: Docker Portal Only
@@ -901,7 +907,8 @@ These are set in the `.env` file and used by the Portal service:
 # Using make
 make health-check
 
-# Docker publishes no application ports: read container health, or probe the public routes
+# Docker: single-server publishes only Caddy's 80/443, and the split stacks publish the app on
+# 127.0.0.1 only, so read container health or probe the public routes
 docker inspect --format '{{.State.Health.Status}}' praho_platform praho_portal
 PLATFORM_URL=https://platform.example.com PORTAL_URL=https://portal.example.com ./deploy/scripts/health-check.sh
 

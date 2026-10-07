@@ -65,8 +65,11 @@ services:
       context: ..
       dockerfile: deploy/platform/Dockerfile
     container_name: praho_platform
+    # Loopback only: Caddy (--with-caddy/--full) reaches the platform over the Docker network, and a
+    # proxy on this host can use 127.0.0.1. Publishing it wider would bypass Caddy's TLS and the
+    # PLATFORM_ALLOWED_CIDRS staff allowlist; set PLATFORM_BIND only for an external load balancer.
     ports:
-      - "${PLATFORM_PORT:-8700}:8700"
+      - "${PLATFORM_BIND:-127.0.0.1}:${PLATFORM_PORT:-8700}:8700"
     env_file:
       # The operator's whole env file (deploy.sh exports its path); `environment:` below still wins.
       - "${PRAHO_ENV_FILE:?run deploy/scripts/deploy.sh, or set PRAHO_ENV_FILE to the file passed with --env-file}"
