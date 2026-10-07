@@ -58,6 +58,10 @@ rollback_version() {
         log_error "Invalid version format: ${VERSION} (expected vX.Y.Z or X.Y.Z)"
         exit 1
     fi
+    # Before the prompt, the backup and any pull: an incomplete production file would only
+    # replace the running version with one that cannot start.
+    praho_load_env
+    praho_require_production_keys
 
     log_info "Rolling back to version: ${VERSION}"
 
@@ -73,7 +77,6 @@ rollback_version() {
     log_info "Creating pre-rollback backup..."
     "${SCRIPT_DIR}/backup.sh" || log_warn "Backup failed"
 
-    praho_load_env
     # A shell variable beats the env file in Compose interpolation, so VERSION picks the image tag
     # for these calls only. Pull first so the images are local before anything is replaced; a tag
     # built on this host (no registry) is used as is, and a tag found nowhere fails `up`. Only the

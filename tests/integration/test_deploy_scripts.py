@@ -35,7 +35,7 @@ with open(os.environ["DOCKER_LOG"], "a") as log:
 if argv[:1] == ["ps"]:
     print("praho_db\\npraho_platform\\npraho_portal\\npraho_caddy")
 elif argv[:1] == ["inspect"]:
-    print(os.environ.get("DOCKER_HEALTH", "healthy"))
+    print(os.environ.get("DOCKER_HEALTH_" + argv[-1], os.environ.get("DOCKER_HEALTH", "healthy")))
 elif argv[:1] == ["start"] and os.environ.get("DOCKER_START_FAILS"):
     sys.exit(1)
 """
@@ -294,6 +294,27 @@ class TestRollbackAndRestore:
         result = project.run("restore.sh", str(backup), stdin="yes\n", DOCKER_HEALTH="unhealthy")
         assert "Starting services" in result.stdout, result.stdout + result.stderr
         assert result.returncode != 0, result.stdout
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize(("script", "args"), [("rollback.sh", ("version", "v1.2.3")), ("restore.sh", ("--latest",))])
+    def test_recovery_refuses_a_production_file_without_its_keys_before_touching_anything(
+        self, project: Project, script: str, args: tuple[str, ...]
+    ) -> None:
+        project.write_env(".env.prod", "DJANGO_SETTINGS_MODULE=config.settings.prod\n")
+        backups = project.root / "backups"
+        backups.mkdir()
+        (backups / "praho_backup_20261007_000000.sql.gz").write_bytes(b"")
+        result = project.run(script, *args, stdin="yes\n")
+        assert result.returncode != 0
+        assert "DJANGO_ENCRYPTION_KEY" in result.stderr
+        # Nothing stopped, dropped, pulled or replaced.
+        assert [c["argv"][0] for c in project.calls() if c["argv"][0] in ("compose", "exec", "stop")] == []
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize(("container", "expected_rc"), [("praho_caddy", 0), ("praho_platform", 1)])
+    def test_only_caddy_may_lack_a_healthcheck(self, project: Project, container: str, expected_rc: int) -> None:
+        result = project.run("health-check.sh", **{f"DOCKER_HEALTH_{container}": "no-healthcheck"})
+        assert result.returncode == expected_rc, result.stdout
 
     @pytest.mark.integration
     def test_health_check_reads_container_health_not_host_ports(self, project: Project) -> None:

@@ -44,8 +44,13 @@ check_container() {
                 return 0
                 ;;
             no-healthcheck)
-                echo -e "${GREEN}[OK]${NC} Container ${NAME}: running (no healthcheck)"
-                return 0
+                # Only Caddy ships without one; any other PRAHO container without it is misconfigured.
+                if [ "$NAME" = praho_caddy ]; then
+                    echo -e "${GREEN}[OK]${NC} Container ${NAME}: running (no healthcheck)"
+                    return 0
+                fi
+                echo -e "${RED}[FAIL]${NC} Container ${NAME}: running without its healthcheck"
+                return 1
                 ;;
             unhealthy)
                 echo -e "${RED}[FAIL]${NC} Container ${NAME}: unhealthy"

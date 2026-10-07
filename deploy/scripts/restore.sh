@@ -136,8 +136,10 @@ restore_backup() {
 
 praho_parse_env_args "$@"
 set -- ${PRAHO_ARGS[@]+"${PRAHO_ARGS[@]}"}
-# Resolve the env file before anything is dropped: the restart may need it.
+# Resolve and check the env file before anything is dropped: the restart may need it, and a
+# production file without its keys could not start the platform again.
 praho_load_env
+praho_require_production_keys
 
 case "${1:-}" in
     --latest)
