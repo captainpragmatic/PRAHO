@@ -2,6 +2,23 @@
 # PRAHO - Application Deployment Role
 # =============================================================================
 
+# The templates need operator-supplied secrets and domains that nothing in the repo defines
+# (praho_required_inputs in defaults/main.yml, by topology). Stop before rendering anything if one is
+# missing, and name only the variables: their values are secrets.
+- name: Find required role variables that are not set
+  set_fact:
+    praho_missing_inputs: "{{ (praho_missing_inputs | default([])) + [item] }}"
+  loop: "{{ praho_required_inputs }}"
+  when: (lookup('vars', item, default='') | string | trim | length) == 0
+  no_log: true
+
+- name: Stop if a required role variable is missing
+  fail:
+    msg: >-
+      Set these role variables (inventory group_vars or -e @vars.yml, vault the secrets):
+      {{ praho_missing_inputs | join(', ') }}
+  when: praho_missing_inputs | default([]) | length > 0
+
 - name: Copy environment file
   template:
     src: env.j2
@@ -71,16 +88,29 @@
     build: always
   register: compose_result
 
-- name: Wait for services to be healthy
-  uri:
-    url: "http://localhost:{{ platform_port }}/api/users/health/"
-    status_code: 200
-    follow_redirects: none
-  register: health_check
-  until: health_check.status == 200
-  retries: 30
+# The services publish no host ports (only Caddy does), so read each container's own healthcheck.
+# 150 x 5s outlasts the platform's 600s start period plus three failed 30s checks: a first boot that
+# migrates a fresh database is still `starting`, not failed. The inspection result holds Config.Env
+# (the database password and keys), so it is never logged; the next task names what failed.
+- name: Wait for the application containers to report healthy
+  community.docker.docker_container_info:
+    name: "{{ item }}"
+  register: praho_container
+  until: praho_container.exists and (praho_container.container.State.Health.Status | default('')) == 'healthy'
+  retries: 150
   delay: 5
-  when: deploy_platform
+  loop: "{{ (['praho_platform'] if deploy_platform else []) + (['praho_portal'] if deploy_portal else []) }}"
+  no_log: true
+  ignore_errors: true
+
+- name: Stop if an application container did not report healthy
+  fail:
+    msg: >-
+      Not healthy after the wait:
+      {% for r in praho_container.results if r.failed | default(false) %}{{ r.item }}
+      ({{ r.container.State.Health.Status | default('missing') if r.exists | default(false) else 'missing' }}){{ ', ' if not loop.last }}{% endfor %}.
+      Inspect with: docker logs <name>
+  when: praho_container.results | selectattr('failed', 'defined') | selectattr('failed') | list | length > 0
 
 - name: Setup backup cron job
   cron:
