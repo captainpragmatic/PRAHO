@@ -9,7 +9,9 @@ from apps.settings.services import SettingsService
 from .currency_service import normalize_currency_code
 
 
-def bank_transfer_instructions(currency_code: str) -> dict[str, str] | None:
+def bank_transfer_instructions(
+    currency_code: str, *, ron_fallback: dict[str, str] | None = None
+) -> dict[str, str] | None:
     try:
         code = normalize_currency_code(currency_code)
     except ValueError:
@@ -19,11 +21,15 @@ def bank_transfer_instructions(currency_code: str) -> dict[str, str] | None:
         return None
     account = accounts.get(code)
     if code == "RON" and code not in accounts:
-        account = {
-            "iban": getattr(settings, "COMPANY_BANK_ACCOUNT", ""),
-            "bank_name": getattr(settings, "COMPANY_BANK_NAME", ""),
-            "beneficiary": getattr(settings, "COMPANY_NAME", ""),
-        }
+        account = (
+            ron_fallback
+            if ron_fallback is not None
+            else {
+                "iban": getattr(settings, "COMPANY_BANK_ACCOUNT", ""),
+                "bank_name": getattr(settings, "COMPANY_BANK_NAME", ""),
+                "beneficiary": getattr(settings, "COMPANY_NAME", ""),
+            }
+        )
     if not isinstance(account, dict):
         return None
     required = ("iban", "bank_name", "beneficiary")

@@ -790,3 +790,11 @@ def efactura_enabled() -> bool:
 def efactura_environment() -> EFacturaEnvironment:
     """Stored efactura.environment first, then Django EFACTURA_ENVIRONMENT; read on every use."""
     return efactura_settings.environment
+
+
+def company_identity_setting(key: str, legacy_value: str) -> str:
+    """Resolve stored identity, then namespaced Django configuration, then legacy identity."""
+    value = SettingsService.get_stored_setting(key)
+    if value is None:
+        value = getattr(django_settings, key.replace(".", "_").upper(), None)
+    return legacy_value if value is None else str(value)

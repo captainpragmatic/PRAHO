@@ -101,3 +101,16 @@ portal.public_base_url
 promotions.gift_card_denominations
 promotions.gift_card_sales_enabled
 promotions.new_offers_enabled
+
+# WP18 C16: e-Factura supplier identity effects.
+efactura.company.bank_account
+efactura.company.bank_name
+efactura.company.city
+efactura.company.country_code
+efactura.company.cui
+efactura.company.email
+efactura.company.name
+efactura.company.phone
+efactura.company.postal_code
+efactura.company.registration_number
+efactura.company.street
