@@ -145,23 +145,6 @@ class ServicePlan(models.Model):
     def get_price_for_currency(self, currency_code: str) -> ServicePlanPrice | None:
         return self.currency_prices.filter(currency_id=currency_code, is_active=True).first()
 
-    def get_effective_price(self, billing_cycle: str = "monthly") -> Decimal:
-        """Get price for specific billing cycle"""
-        if billing_cycle == "quarterly" and self.price_quarterly:
-            return self.price_quarterly
-        elif billing_cycle == "annual" and self.price_annual:
-            return self.price_annual
-        return self.price_monthly
-
-    def get_monthly_equivalent_price(self, billing_cycle: str = "monthly") -> Decimal:
-        """Get monthly equivalent price for comparison"""
-        price = self.get_effective_price(billing_cycle)
-        if billing_cycle == "quarterly":
-            return price / 3
-        elif billing_cycle == "annual":
-            return price / 12
-        return price
-
 
 class ServicePlanPrice(models.Model):
     """Explicit retail prices; no conversion from another currency or billing period."""
@@ -317,28 +300,6 @@ class Server(models.Model):
     def __str__(self) -> str:
         return f"{self.name} ({self.hostname})"
 
-    def get_management_api_credentials(self) -> tuple[str, str]:
-        """Return decrypted API credentials (AES-256-GCM encrypted at rest)."""
-        return (
-            decrypt_value(self.management_api_key) if self.management_api_key else "",
-            decrypt_value(self.management_api_secret) if self.management_api_secret else "",
-        )
-
-    def get_decrypted_webhook_secret(self) -> str:
-        """Get decrypted webhook secret for signature verification."""
-        return decrypt_value(self.management_webhook_secret) if self.management_webhook_secret else ""
-
-    def set_encrypted_management_credentials(
-        self, *, api_key: str = "", api_secret: str = "", webhook_secret: str = ""
-    ) -> None:
-        """Encrypt and store management API credentials."""
-        if api_key:
-            self.management_api_key = encrypt_sensitive_data(api_key)
-        if api_secret:
-            self.management_api_secret = encrypt_sensitive_data(api_secret)
-        if webhook_secret:
-            self.management_webhook_secret = encrypt_sensitive_data(webhook_secret)
-
     def get_api_password(self) -> str:
         """Return decrypted Virtualmin API password."""
         return decrypt_value(self._api_password_encrypted) if self._api_password_encrypted else ""
@@ -357,20 +318,6 @@ class Server(models.Model):
         """Average resource usage across CPU, RAM, disk"""
         usage_values = [self.cpu_usage_percent or 0, self.ram_usage_percent or 0, self.disk_usage_percent or 0]
         return sum(float(v) for v in usage_values) / len(usage_values)
-
-    def can_host_service(self, service_plan: ServicePlan) -> bool:
-        """Check if server can host a new service"""
-        if not self.is_active or self.status != "active":
-            return False
-
-        if self.max_services and self.active_services_count >= self.max_services:
-            return False
-
-        # Check resource requirements
-        if service_plan.ram_gb and self.ram_gb < service_plan.ram_gb:
-            return False
-
-        return not (service_plan.cpu_cores and self.cpu_cores < service_plan.cpu_cores)
 
 
 class Service(ConcurrentTransitionMixin, models.Model):
@@ -622,21 +569,6 @@ class Service(ConcurrentTransitionMixin, models.Model):
             pass
 
         return None
-
-    def get_customer_membership(self) -> Any | None:
-        """
-        Get the CustomerMembership for this service's customer.
-
-        Cross-app integration helper for linking services to customer access control.
-        """
-        try:
-            from apps.users.models import (  # noqa: PLC0415  # Deferred: avoids circular import
-                CustomerMembership,  # Circular: cross-app  # Deferred: avoids circular import
-            )
-
-            return CustomerMembership.objects.filter(customer=self.customer, is_primary=True).first()
-        except ImportError:
-            return None
 
 
 class ProvisioningTask(models.Model):

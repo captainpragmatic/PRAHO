@@ -49,7 +49,7 @@ class VirtualminAccountCoverageTests(VirtualminViewsFixture):
         url = reverse("provisioning:virtualmin_account_new")
         self.assertContains(self.client.get(url), 'name="domain"')
         response = self.client.post(url, {"domain": "invalid-domain"})
-        self.assertContains(response, "Invalid domain format")
+        self.assertContains(response, "Enter a valid domain name.")
         self.assertIn("domain", response.context["form"].errors)
         self.assertEqual(VirtualminAccount.objects.count(), 1)
 

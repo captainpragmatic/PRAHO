@@ -164,7 +164,7 @@ class VirtualminModelFormTests(VirtualminViewsFixture):
         self.account.save(update_fields=["domain"])
         for domain, error in (
             (" DUPLICATE.EXAMPLE ", "An account with this domain already exists"),
-            ("bad/domain", "Invalid domain format"),
+            ("bad/domain", "Invalid domain name format"),
         ):
             form = VirtualminAccountForm(
                 {

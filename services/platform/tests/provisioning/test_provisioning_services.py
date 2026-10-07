@@ -10,13 +10,14 @@ Tests for Provisioning Services focusing on business logic and service operation
 """
 
 from decimal import Decimal
-from unittest.mock import Mock, patch
+from unittest.mock import patch
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.utils import timezone
 
-from apps.billing.models import Currency, Invoice
-from apps.customers.models import Customer, CustomerTaxProfile, CustomerBillingProfile, CustomerAddress
+from apps.billing.models import Currency
+from apps.customers.models import Customer, CustomerAddress, CustomerBillingProfile, CustomerTaxProfile
 from apps.provisioning.models import Service, ServicePlan
 from apps.provisioning.services import ServiceActivationService
 from tests.helpers.fsm_helpers import force_status
@@ -28,13 +29,10 @@ User = get_user_model()
 # HELPER FUNCTIONS
 # ===============================================================================
 
+
 def create_test_user(email: str, **kwargs) -> User:
     """Helper to create test users"""
-    defaults = {
-        'first_name': 'Test',
-        'last_name': 'User',
-        'password': 'testpass123'
-    }
+    defaults = {"first_name": "Test", "last_name": "User", "password": "testpass123"}
     defaults.update(kwargs)
     return User.objects.create_user(email=email, **defaults)
 
@@ -42,12 +40,12 @@ def create_test_user(email: str, **kwargs) -> User:
 def create_test_customer(name: str, admin_user: User, **kwargs) -> Customer:
     """Helper to create test customers with all required profiles"""
     defaults = {
-        'customer_type': 'company',
-        'company_name': name,
-        'primary_email': f'contact@{name.lower().replace(" ", "")}.ro',
-        'primary_phone': '+40721123456',
-        'data_processing_consent': True,
-        'created_by': admin_user
+        "customer_type": "company",
+        "company_name": name,
+        "primary_email": f"contact@{name.lower().replace(' ', '')}.ro",
+        "primary_phone": "+40721123456",
+        "data_processing_consent": True,
+        "created_by": admin_user,
     }
     defaults.update(kwargs)
     customer = Customer.objects.create(**defaults)
@@ -55,30 +53,27 @@ def create_test_customer(name: str, admin_user: User, **kwargs) -> Customer:
     # Create required profiles
     CustomerTaxProfile.objects.create(
         customer=customer,
-        cui='RO12345678',
-        vat_number='RO12345678',
-        registration_number='J40/1234/2023',
+        cui="RO12345678",
+        vat_number="RO12345678",
+        registration_number="J40/1234/2023",
         is_vat_payer=True,
-        vat_rate=Decimal('19.00')
+        vat_rate=Decimal("19.00"),
     )
 
     CustomerBillingProfile.objects.create(
-        customer=customer,
-        payment_terms=30,
-        credit_limit=Decimal('5000.00'),
-        preferred_currency='RON'
+        customer=customer, payment_terms=30, credit_limit=Decimal("5000.00"), preferred_currency="RON"
     )
 
     CustomerAddress.objects.create(
         customer=customer,
         is_primary=True,
         is_billing=True,
-        address_line1='Str. Test Nr. 1',
-        city='București',
-        county='Sector 1',
-        postal_code='010101',
-        country='România',
-        is_current=True
+        address_line1="Str. Test Nr. 1",
+        city="București",
+        county="Sector 1",
+        postal_code="010101",
+        country="România",
+        is_current=True,
     )
 
     return customer
@@ -87,15 +82,15 @@ def create_test_customer(name: str, admin_user: User, **kwargs) -> Customer:
 def create_test_service_plan(**kwargs) -> ServicePlan:
     """Helper to create test service plans"""
     defaults = {
-        'name': 'Test Hosting Plan',
-        'plan_type': 'shared_hosting',
-        'description': 'Test hosting plan for unit tests',
-        'price_monthly': Decimal('50.00'),
-        'setup_fee': Decimal('0.00'),
-        'is_active': True,
-        'is_public': True,
-        'sort_order': 1,
-        'auto_provision': True,
+        "name": "Test Hosting Plan",
+        "plan_type": "shared_hosting",
+        "description": "Test hosting plan for unit tests",
+        "price_monthly": Decimal("50.00"),
+        "setup_fee": Decimal("0.00"),
+        "is_active": True,
+        "is_public": True,
+        "sort_order": 1,
+        "auto_provision": True,
     }
     defaults.update(kwargs)
     return ServicePlan.objects.create(**defaults)
@@ -104,6 +99,7 @@ def create_test_service_plan(**kwargs) -> ServicePlan:
 # ===============================================================================
 # SERVICE ACTIVATION SERVICE TESTS
 # ===============================================================================
+
 
 class ServiceActivationServiceTestCase(TestCase):
     """Test ServiceActivationService methods and business logic
@@ -115,45 +111,26 @@ class ServiceActivationServiceTestCase(TestCase):
 
     def setUp(self):
         """Set up test data"""
-        self.admin_user = create_test_user('admin@test.ro', staff_role='admin')
-        self.customer = create_test_customer('Test Customer', self.admin_user)
+        self.admin_user = create_test_user("admin@test.ro", staff_role="admin")
+        self.customer = create_test_customer("Test Customer", self.admin_user)
         self.plan = create_test_service_plan()
 
-        # Create a mock invoice for testing
-        self.mock_invoice = Mock(spec=Invoice)
-        self.mock_invoice.number = 'INV-2025-001'
-        self.mock_invoice.customer = self.customer
-        self.mock_invoice.total_amount = Decimal('59.50')  # 50.00 + 19% VAT
-        self.mock_invoice.is_paid = True
-
-    @patch('apps.audit.services.AuditService.log_simple_event')
-    @patch('apps.provisioning.provisioning_service.logger')
-    def test_activate_services_for_invoice_logs_message(self, mock_logger, mock_audit):
-        """Test that activate_services_for_invoice logs appropriate message"""
-        ServiceActivationService.activate_services_for_invoice(self.mock_invoice)
-
-        # Verify the log message was called with actual implementation format
-        mock_logger.info.assert_called_once()
-        call_args = mock_logger.info.call_args[0][0]
-        self.assertIn('[Provisioning]', call_args)
-        self.assertIn(self.mock_invoice.number, call_args)
-
-    @patch('apps.provisioning.provisioning_service.logger')
+    @patch("apps.provisioning.provisioning_service.logger")
     def test_suspend_services_for_customer_logs_message(self, mock_logger):
         """Test that suspend_services_for_customer logs appropriate message"""
         customer_id = self.customer.id
-        reason = 'payment_overdue'
+        reason = "payment_overdue"
 
         ServiceActivationService.suspend_services_for_customer(customer_id, reason)
 
         # Verify the log message was called with actual implementation format
         mock_logger.info.assert_called_once()
         call_args = mock_logger.info.call_args[0][0]
-        self.assertIn('[Provisioning]', call_args)
+        self.assertIn("[Provisioning]", call_args)
         self.assertIn(str(customer_id), call_args)
         self.assertIn(reason, call_args)
 
-    @patch('apps.provisioning.provisioning_service.logger')
+    @patch("apps.provisioning.provisioning_service.logger")
     def test_suspend_services_for_customer_default_reason(self, mock_logger):
         """Test that suspend_services_for_customer uses default reason"""
         customer_id = self.customer.id
@@ -163,46 +140,9 @@ class ServiceActivationServiceTestCase(TestCase):
         # Verify the log message was called with default reason
         mock_logger.info.assert_called_once()
         call_args = mock_logger.info.call_args[0][0]
-        self.assertIn('[Provisioning]', call_args)
+        self.assertIn("[Provisioning]", call_args)
         self.assertIn(str(customer_id), call_args)
-        self.assertIn('payment_overdue', call_args)
-
-    @patch('apps.provisioning.provisioning_service.logger')
-    def test_reactivate_services_for_customer_logs_message(self, mock_logger):
-        """Test that reactivate_services_for_customer logs appropriate message"""
-        customer_id = self.customer.id
-        reason = 'payment_received'
-
-        ServiceActivationService.reactivate_services_for_customer(customer_id, reason)
-
-        # Verify the log message was called with actual implementation format
-        mock_logger.info.assert_called_once()
-        call_args = mock_logger.info.call_args[0][0]
-        self.assertIn('[Provisioning]', call_args)
-        self.assertIn(str(customer_id), call_args)
-        self.assertIn(reason, call_args)
-
-    @patch('apps.provisioning.provisioning_service.logger')
-    def test_reactivate_services_for_customer_default_reason(self, mock_logger):
-        """Test that reactivate_services_for_customer uses default reason"""
-        customer_id = self.customer.id
-
-        ServiceActivationService.reactivate_services_for_customer(customer_id)
-
-        # Verify the log message was called with default reason
-        mock_logger.info.assert_called_once()
-        call_args = mock_logger.info.call_args[0][0]
-        self.assertIn('[Provisioning]', call_args)
-        self.assertIn(str(customer_id), call_args)
-        self.assertIn('payment_received', call_args)
-
-    def test_activate_services_for_invoice_handles_none_invoice(self):
-        """Test that activate_services_for_invoice handles None invoice gracefully"""
-        # This should not raise an exception
-        try:
-            ServiceActivationService.activate_services_for_invoice(None)
-        except Exception as e:
-            self.fail(f"activate_services_for_invoice raised an exception with None: {e}")
+        self.assertIn("payment_overdue", call_args)
 
     def test_suspend_services_for_customer_handles_invalid_customer_id(self):
         """Test that suspend_services_for_customer handles invalid customer ID"""
@@ -214,25 +154,14 @@ class ServiceActivationServiceTestCase(TestCase):
         except Exception as e:
             self.fail(f"suspend_services_for_customer raised an exception with invalid ID: {e}")
 
-    def test_reactivate_services_for_customer_handles_invalid_customer_id(self):
-        """Test that reactivate_services_for_customer handles invalid customer ID"""
-        invalid_customer_id = 999999
-
-        # This should not raise an exception
-        try:
-            ServiceActivationService.reactivate_services_for_customer(invalid_customer_id)
-        except Exception as e:
-            self.fail(f"reactivate_services_for_customer raised an exception with invalid ID: {e}")
-
     def test_service_activation_service_static_methods(self):
         """Test that all methods are static and can be called without instance"""
         # Test that we can call methods without creating an instance
         customer_id = self.customer.id
 
-        # These should all work without creating a ServiceActivationService instance
-        ServiceActivationService.activate_services_for_invoice(self.mock_invoice)
-        ServiceActivationService.suspend_services_for_customer(customer_id)
-        ServiceActivationService.reactivate_services_for_customer(customer_id)
+        # The live method remains callable without an instance.
+        result = ServiceActivationService.suspend_services_for_customer(customer_id)
+        self.assertTrue(result["success"])
 
         # If we get here without exceptions, the static methods work correctly
 
@@ -243,52 +172,49 @@ class ServiceActivationServiceTestCase(TestCase):
 
         # Should handle Romanian characters and special symbols
         try:
-            ServiceActivationService.suspend_services_for_customer(customer_id, special_reason)
-            ServiceActivationService.reactivate_services_for_customer(customer_id, special_reason)
+            result = ServiceActivationService.suspend_services_for_customer(customer_id, special_reason)
+            self.assertTrue(result["success"])
         except Exception as e:
             self.fail(f"Service methods failed with special characters: {e}")
 
-    @patch('apps.provisioning.provisioning_service.logger')
+    @patch("apps.provisioning.provisioning_service.logger")
     def test_service_activation_service_logging_format(self, mock_logger):
         """Test that logging follows PRAHO Platform format standards"""
         customer_id = self.customer.id
 
-        ServiceActivationService.suspend_services_for_customer(customer_id, 'test_reason')
+        ServiceActivationService.suspend_services_for_customer(customer_id, "test_reason")
 
         # Get the actual log call
         call_args = mock_logger.info.call_args[0][0]
 
         # Verify log format includes emoji and [Provisioning] scope
-        self.assertIn('[Provisioning]', call_args)
+        self.assertIn("[Provisioning]", call_args)
         self.assertIn(str(customer_id), call_args)
-        self.assertIn('test_reason', call_args)
+        self.assertIn("test_reason", call_args)
 
     def test_service_activation_service_type_hints(self):
         """Test that service methods work with proper type hints"""
         # Test with correct types
         customer_id: int = self.customer.id
-        reason: str = 'payment_overdue'
+        reason: str = "payment_overdue"
 
-        # These should work with type checkers
-        ServiceActivationService.suspend_services_for_customer(customer_id, reason)
-        ServiceActivationService.reactivate_services_for_customer(customer_id, reason)
-
-        # Test with None invoice (type hint allows this)
-        invoice = None
-        ServiceActivationService.activate_services_for_invoice(invoice)
+        result = ServiceActivationService.suspend_services_for_customer(customer_id, reason)
+        self.assertTrue(result["success"])
+        self.assertEqual(result["services_suspended"], 0)
 
 
 # ===============================================================================
 # SERVICE ACTIVATION INTEGRATION TESTS
 # ===============================================================================
 
+
 class ServiceActivationIntegrationTestCase(TestCase):
     """Integration tests for service activation with real models"""
 
     def setUp(self):
         """Set up test data with real models"""
-        self.admin_user = create_test_user('admin@test.ro', staff_role='admin')
-        self.customer = create_test_customer('Integration Test Customer', self.admin_user)
+        self.admin_user = create_test_user("admin@test.ro", staff_role="admin")
+        self.customer = create_test_customer("Integration Test Customer", self.admin_user)
         self.plan = create_test_service_plan()
         Currency.objects.get_or_create(code="RON", defaults={"name": "Romanian Leu", "symbol": "lei", "decimals": 2})
 
@@ -297,24 +223,24 @@ class ServiceActivationIntegrationTestCase(TestCase):
             customer=self.customer,
             service_plan=self.plan,
             currency_id="RON",
-            service_name='Test Service 1',
-            domain='test1.example.com',
-            username='test1_user',
-            billing_cycle='monthly',
-            price=Decimal('50.00'),
-            status='pending'
+            service_name="Test Service 1",
+            domain="test1.example.com",
+            username="test1_user",
+            billing_cycle="monthly",
+            price=Decimal("50.00"),
+            status="pending",
         )
 
         self.service2 = Service.objects.create(
             customer=self.customer,
             service_plan=self.plan,
             currency_id="RON",
-            service_name='Test Service 2',
-            domain='test2.example.com',
-            username='test2_user',
-            billing_cycle='monthly',
-            price=Decimal('30.00'),
-            status='active'
+            service_name="Test Service 2",
+            domain="test2.example.com",
+            username="test2_user",
+            billing_cycle="monthly",
+            price=Decimal("30.00"),
+            status="active",
         )
 
     def test_service_activation_with_real_customer_data(self):
@@ -326,12 +252,14 @@ class ServiceActivationIntegrationTestCase(TestCase):
         self.assertEqual(services_count, 2)
 
         # Test suspend operation with real customer ID
-        ServiceActivationService.suspend_services_for_customer(customer_id, 'payment_test')
+        ServiceActivationService.suspend_services_for_customer(customer_id, "payment_test")
 
-        # Test reactivate operation
-        ServiceActivationService.reactivate_services_for_customer(customer_id, 'payment_received')
+        self.service1.refresh_from_db()
+        self.service2.refresh_from_db()
+        self.assertEqual(self.service1.status, "pending")
+        self.assertEqual(self.service2.status, "suspended")
 
-        # Services should still exist (placeholder implementation doesn't modify)
+        # Suspension preserves the service rows.
         services_after = Service.objects.filter(customer=self.customer).count()
         self.assertEqual(services_after, 2)
 
@@ -357,24 +285,24 @@ class ServiceActivationIntegrationTestCase(TestCase):
             customer=self.customer,
             service_plan=self.plan,
             currency_id="RON",
-            service_name='Suspended Service',
-            domain='suspended.example.com',
-            username='suspended_user',
-            billing_cycle='monthly',
-            price=Decimal('25.00'),
-            status='suspended'
+            service_name="Suspended Service",
+            domain="suspended.example.com",
+            username="suspended_user",
+            billing_cycle="monthly",
+            price=Decimal("25.00"),
+            status="suspended",
         )
 
         expired_service = Service.objects.create(
             customer=self.customer,
             service_plan=self.plan,
             currency_id="RON",
-            service_name='Expired Service',
-            domain='expired.example.com',
-            username='expired_user',
-            billing_cycle='monthly',
-            price=Decimal('15.00'),
-            status='expired'
+            service_name="Expired Service",
+            domain="expired.example.com",
+            username="expired_user",
+            billing_cycle="monthly",
+            price=Decimal("15.00"),
+            status="expired",
         )
 
         customer_id = self.customer.id
@@ -382,13 +310,16 @@ class ServiceActivationIntegrationTestCase(TestCase):
         # Should handle customer with services in various statuses
         try:
             ServiceActivationService.suspend_services_for_customer(customer_id)
-            ServiceActivationService.reactivate_services_for_customer(customer_id)
+            suspended_service.refresh_from_db()
+            expired_service.refresh_from_db()
+            self.assertEqual(suspended_service.status, "suspended")
+            self.assertEqual(expired_service.status, "expired")
         except Exception as e:
             self.fail(f"Service activation failed with mixed service statuses: {e}")
 
     def test_service_activation_with_empty_customer(self):
         """Test service activation with customer that has no services"""
-        empty_customer = create_test_customer('Empty Customer', self.admin_user)
+        empty_customer = create_test_customer("Empty Customer", self.admin_user)
 
         # Verify customer has no services
         services_count = Service.objects.filter(customer=empty_customer).count()
@@ -396,18 +327,18 @@ class ServiceActivationIntegrationTestCase(TestCase):
 
         # Should handle customer with no services gracefully
         try:
-            ServiceActivationService.suspend_services_for_customer(empty_customer.id)
-            ServiceActivationService.reactivate_services_for_customer(empty_customer.id)
+            result = ServiceActivationService.suspend_services_for_customer(empty_customer.id)
+            self.assertTrue(result["success"])
+            self.assertEqual(result["services_suspended"], 0)
         except Exception as e:
             self.fail(f"Service activation failed with empty customer: {e}")
 
-    @patch('apps.provisioning.provisioning_service.logger')
+    @patch("apps.provisioning.provisioning_service.logger")
     def test_service_activation_logging_with_real_data(self, mock_logger):
         """Test logging works correctly with real customer data"""
         customer_id = self.customer.id
-        customer_name = self.customer.get_display_name()
 
-        ServiceActivationService.suspend_services_for_customer(customer_id, 'integration_test')
+        ServiceActivationService.suspend_services_for_customer(customer_id, "integration_test")
 
         # Verify log was called
         self.assertTrue(mock_logger.info.called)
@@ -417,4 +348,4 @@ class ServiceActivationIntegrationTestCase(TestCase):
 
         # Should contain customer ID
         self.assertIn(str(customer_id), log_message)
-        self.assertIn('integration_test', log_message)
+        self.assertIn("integration_test", log_message)

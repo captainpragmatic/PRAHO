@@ -151,13 +151,6 @@ class BillingProvisioningIntegrationTest(TestCase):
         self.service.save()
         self.assertIsNone(self.service.get_primary_domain())
 
-    def test_service_get_customer_membership(self):
-        """Test Service.get_customer_membership() method"""
-        # Test getting primary membership
-        membership = self.service.get_customer_membership()
-        self.assertEqual(membership, self.membership)
-        self.assertTrue(membership.is_primary)
-
 
 class DomainsProvisioningIntegrationTest(TestCase):
     """Test domains → provisioning integration (domain sync)"""

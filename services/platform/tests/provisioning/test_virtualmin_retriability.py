@@ -109,18 +109,6 @@ class ServiceTestServerConnectionRetriabilityTests(TestCase):
         assert isinstance(result, Err)
         self.assertEqual(result.retriability, Retriability.UNKNOWN)
 
-    def test_sync_account_preserves_gateway_retriability(self) -> None:
-        service = VirtualminProvisioningService()
-        account = MagicMock()
-        gateway = MagicMock()
-        gateway.get_domain_state.return_value = Err("bad credentials", retriability=Retriability.NOT_RETRIABLE)
-
-        with patch.object(service, "_get_gateway", return_value=gateway):
-            result = service.sync_account_from_virtualmin(account)
-
-        assert isinstance(result, Err)
-        self.assertEqual(result.retriability, Retriability.NOT_RETRIABLE)
-
     def test_failed_creation_preserves_inner_retriability(self) -> None:
         service = VirtualminProvisioningService()
         customer = MagicMock(id=42)

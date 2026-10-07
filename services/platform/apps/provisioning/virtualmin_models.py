@@ -10,7 +10,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import Any, ClassVar
 
 from django.core.validators import MinValueValidator
 from django.db import models
@@ -20,9 +20,6 @@ from django.utils.translation import gettext_lazy as _
 
 from apps.common.encryption import decrypt_sensitive_data, encrypt_sensitive_data
 from apps.common.types import Retriability
-
-if TYPE_CHECKING:
-    from apps.customers.models import Customer
 
 logger = logging.getLogger(__name__)
 
@@ -210,15 +207,6 @@ class VirtualminServer(models.Model):
             and self.current_domains + VirtualminMigration.active_reservations(self) < self.max_domains
         )
 
-    def update_stats(self, domains: int, disk_gb: float, bandwidth_gb: float) -> None:
-        """Update server statistics"""
-        self.current_domains = domains
-        self.current_disk_usage_gb = Decimal(str(disk_gb))
-        self.current_bandwidth_usage_gb = Decimal(str(bandwidth_gb))
-        self.save(
-            update_fields=["current_domains", "current_disk_usage_gb", "current_bandwidth_usage_gb", "updated_at"]
-        )
-
 
 class VirtualminAccount(models.Model):
     """
@@ -369,11 +357,6 @@ class VirtualminAccount(models.Model):
         """Check if account is active"""
         return self.status == "active"
 
-    @property
-    def customer(self) -> Customer:
-        """Get customer associated with this account"""
-        return self.service.customer
-
     def get_password(self) -> str:
         """Decrypt and return account password"""
         try:
@@ -446,65 +429,6 @@ class VirtualminAccount(models.Model):
 
         return data
 
-    def update_usage_stats(self, disk_mb: int, bandwidth_mb: int) -> None:
-        """Update current usage statistics"""
-        self.current_disk_usage_mb = disk_mb
-        self.current_bandwidth_usage_mb = bandwidth_mb
-        self.last_sync_at = timezone.now()
-        self.save(update_fields=["current_disk_usage_mb", "current_bandwidth_usage_mb", "last_sync_at", "updated_at"])
-
-    def is_over_quota(self) -> dict[str, bool]:
-        """Check if account is over quota limits"""
-        result = {"disk": False, "bandwidth": False}
-
-        if self.disk_quota_mb and self.current_disk_usage_mb > self.disk_quota_mb:
-            result["disk"] = True
-
-        if self.bandwidth_quota_mb and self.current_bandwidth_usage_mb > self.bandwidth_quota_mb:
-            result["bandwidth"] = True
-
-        return result
-
-    @property
-    def backup_url(self) -> str:
-        """Get URL for account backup"""
-        return reverse("provisioning:virtualmin_account_backup", kwargs={"account_id": self.id})
-
-    @property
-    def edit_url(self) -> str:
-        """Get URL for editing account"""
-        # For now, return the detail URL since we don't have an edit view yet
-        return self.get_absolute_url()
-
-    @property
-    def reset_password_url(self) -> str:
-        """Get URL for resetting account password"""
-        # Placeholder - would need to implement password reset functionality
-        return self.get_absolute_url()
-
-    @property
-    def suspend_url(self) -> str:
-        """Get URL for suspending account"""
-        return reverse("provisioning:virtualmin_account_suspend", kwargs={"account_id": self.id})
-
-    @property
-    def activate_url(self) -> str:
-        """Get URL for activating account"""
-        return reverse("provisioning:virtualmin_account_activate", kwargs={"account_id": self.id})
-
-    @property
-    def delete_url(self) -> str:
-        """Get URL for deleting account"""
-        # Return delete URL if account can be deleted, empty string otherwise
-        if self.can_be_deleted:
-            return reverse("provisioning:virtualmin_account_delete", kwargs={"account_id": self.id})
-        return ""
-
-    @property
-    def toggle_protection_url(self) -> str:
-        """Get URL for toggling deletion protection"""
-        return reverse("provisioning:virtualmin_account_toggle_protection", kwargs={"account_id": self.id})
-
     @property
     def can_be_deleted(self) -> bool:
         """Check if account can be deleted"""
@@ -536,12 +460,6 @@ class VirtualminAccount(models.Model):
         if self.bandwidth_quota_mb == -1:
             return -1  # Unlimited bandwidth
         return self.bandwidth_quota_mb * 1024 * 1024 if self.bandwidth_quota_mb else None
-
-    @property
-    def last_backup(self) -> None:
-        """Get last backup date - placeholder for future implementation"""
-        # This would need to be implemented by checking backup records
-        return None
 
     @property
     def plan(self) -> str:
@@ -949,11 +867,3 @@ class VirtualminDriftRecord(models.Model):
 
     def __str__(self) -> str:
         return f"{self.domain}: {self.get_drift_type_display()}"
-
-    def mark_resolved(self, resolution: str, notes: str = "", resolved_by: str = "") -> None:
-        """Mark drift as resolved"""
-        self.resolution_status = resolution
-        self.resolution_notes = notes
-        self.resolved_by = resolved_by
-        self.resolved_at = timezone.now()
-        self.save(update_fields=["resolution_status", "resolution_notes", "resolved_by", "resolved_at"])

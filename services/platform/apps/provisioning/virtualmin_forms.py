@@ -3,11 +3,11 @@ Virtualmin Management Forms - PRAHO Platform
 Django forms for Virtualmin server and account management with Romanian compliance.
 """
 
-import re
 from typing import Any, ClassVar, cast
 
 from django import forms
 from django.core.exceptions import ValidationError
+from django.core.validators import validate_domain_name
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
@@ -96,8 +96,8 @@ class VirtualminServerForm(forms.ModelForm):  # type: ignore[type-arg]
         """Validate API password strength."""
         password = cast(str, self.cleaned_data.get("api_password", ""))
 
-        if not password and not self.instance.pk:
-            # New server requires password
+        if not password and self.instance._state.adding:
+            # UUID primary keys are assigned before the first save.
             raise ValidationError(_("API password is required for new servers"))
 
         if password:
@@ -465,9 +465,9 @@ class VirtualminAccountForm(forms.ModelForm):  # type: ignore[type-arg]
         if not domain:
             raise ValidationError(_("Domain is required"))
 
-        # Basic domain validation
-        if not re.match(r"^[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]*\.[a-zA-Z]{2,}$", domain):
-            raise ValidationError(_("Invalid domain format"))
+        # Reuse Virtualmin validation, retaining the form's public-domain/TLD requirement.
+        domain = VirtualminValidator.validate_domain_name(domain)
+        validate_domain_name(domain)
 
         # Check uniqueness
         if VirtualminAccount.objects.filter(domain=domain).exists():

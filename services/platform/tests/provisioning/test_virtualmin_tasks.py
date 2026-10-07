@@ -28,7 +28,6 @@ from apps.provisioning.tasks import queue_service_provisioning
 from apps.provisioning.virtualmin_gateway import VirtualminConfig, VirtualminGateway, VirtualminResponse
 from apps.provisioning.virtualmin_models import (
     VirtualminAccount,
-    VirtualminDriftRecord,
     VirtualminProvisioningJob,
     VirtualminServer,
 )
@@ -268,9 +267,7 @@ class TestRetryJobExecution(VirtualminTaskTestBase):
         force_status(self.service, "suspended")  # the suspend intent is still current
         mock_gateway = MockVirtualminGateway()
         mock_gateway.seed_domain(self.account.domain, username=self.account.virtualmin_username)
-        job = self._failed_job(
-            operation="suspend_domain", status="pending", retry_count=1, claimed_at=timezone.now()
-        )
+        job = self._failed_job(operation="suspend_domain", status="pending", retry_count=1, claimed_at=timezone.now())
 
         with patch(
             "apps.provisioning.virtualmin_service.VirtualminGateway",
@@ -306,9 +303,7 @@ class TestCreateAccountPreflight(VirtualminTaskTestBase):
             price=Decimal("10.00"),
             status="active",
         )
-        return VirtualminAccountCreationData(
-            service=service2, domain=domain, template=template, server=self.server
-        )
+        return VirtualminAccountCreationData(service=service2, domain=domain, template=template, server=self.server)
 
     def _create(self, mock_gateway, **kwargs):
         with patch(
@@ -361,61 +356,6 @@ class TestCreateAccountPreflight(VirtualminTaskTestBase):
         self.assertEqual(len(mock_gateway.get_calls("create-domain")), 0)
 
 
-class TestDriftRecords(VirtualminTaskTestBase):
-    """#325 defect 5: drift writes used nonexistent model fields and crashed
-    with TypeError exactly when drift existed."""
-
-    def setUp(self) -> None:
-        super().setUp()
-        self.account.status = "suspended"  # PRAHO says suspended...
-        self.account.save(update_fields=["status"])
-
-    def _sync(self, mock_gateway):
-        with patch(
-            "apps.provisioning.virtualmin_service.VirtualminGateway",
-            return_value=mock_gateway,
-        ):
-            service = VirtualminProvisioningService(self.server)
-            return service.sync_account_from_virtualmin(self.account)
-
-    def test_status_mismatch_persists_valid_drift_record(self):
-        mock_gateway = MockVirtualminGateway()
-        mock_gateway.seed_domain(self.account.domain, enabled=True)  # ...Virtualmin says active
-
-        result = self._sync(mock_gateway)
-
-        self.assertTrue(result.is_ok(), result)
-        record = VirtualminDriftRecord.objects.get(domain=self.account.domain)
-        self.assertEqual(record.server, self.server)
-        self.assertIn(
-            record.drift_type,
-            [choice[0] for choice in VirtualminDriftRecord.DRIFT_TYPE_CHOICES],
-        )
-        self.assertEqual(record.resolution_status, "pending")
-        self.assertTrue(record.description)
-
-    def test_enforce_praho_state_persists_valid_drift_record(self):
-        mock_gateway = MockVirtualminGateway()
-        mock_gateway.seed_domain(self.account.domain, enabled=True)
-
-        with patch(
-            "apps.provisioning.virtualmin_service.VirtualminGateway",
-            return_value=mock_gateway,
-        ):
-            service = VirtualminProvisioningService(self.server)
-            result = service.enforce_praho_state(self.account, force=True)
-
-        self.assertTrue(result.is_ok(), result)
-        record = VirtualminDriftRecord.objects.filter(domain=self.account.domain).latest("detected_at")
-        self.assertIn(
-            record.drift_type,
-            [choice[0] for choice in VirtualminDriftRecord.DRIFT_TYPE_CHOICES],
-        )
-        # PRAHO won: Virtualmin was forced to match, drift auto-fixed
-        self.assertEqual(record.resolution_status, "auto_fixed")
-        self.assertFalse(mock_gateway.domain_state_of(self.account.domain).enabled)
-
-
 class TestServerHealthModel(VirtualminTaskTestBase):
     """#325 defect 6: hourly checks vs 600s freshness starved placement
     ~50 min/hour, and a single failed check permanently evicted a server."""
@@ -456,9 +396,7 @@ class TestServerHealthModel(VirtualminTaskTestBase):
         self.assertEqual(self.server.consecutive_health_failures, 1)
         self.assertFalse(self.server.is_healthy)  # but not placeable
         # last_health_check means "last VERIFIED" — failure must not stamp it
-        self.assertLess(
-            self.server.last_health_check, timezone.now() - timedelta(seconds=0)
-        )
+        self.assertLess(self.server.last_health_check, timezone.now() - timedelta(seconds=0))
 
     def test_sustained_failures_auto_fail_at_threshold(self):
         failing = MockVirtualminGateway(fail_operations={"info": "Connection refused"})
@@ -786,9 +724,7 @@ class TestReviewHardening325(VirtualminTaskTestBase):
         self.account.status = "active"
         self.account.save(update_fields=["status"])
         force_status(self.service, "suspended")  # suspend is still the desired state
-        job = self._failed_job(
-            operation="suspend_domain", status="pending", retry_count=1, claimed_at=timezone.now()
-        )
+        job = self._failed_job(operation="suspend_domain", status="pending", retry_count=1, claimed_at=timezone.now())
         gateway = MagicMock()
         gateway.call.return_value = Err("gateway temporarily unavailable", retriability=Retriability.RETRIABLE)
 
@@ -838,9 +774,7 @@ class TestReviewHardening325(VirtualminTaskTestBase):
         self.account.status = "suspended"
         self.account.save(update_fields=["status"])
         force_status(self.service, "suspended")  # current desired state: suspended
-        job = self._failed_job(
-            operation="unsuspend_domain", status="pending", retry_count=1, claimed_at=timezone.now()
-        )
+        job = self._failed_job(operation="unsuspend_domain", status="pending", retry_count=1, claimed_at=timezone.now())
 
         with (
             patch("apps.provisioning.virtualmin_service.VirtualminGateway", return_value=MockVirtualminGateway()),
@@ -948,9 +882,7 @@ class TestPrReviewFixes331(VirtualminTaskTestBase):
             price=Decimal("10.00"),
             status="active",
         )
-        creation = VirtualminAccountCreationData(
-            service=service2, domain="unhealthy.example.com", server=self.server
-        )
+        creation = VirtualminAccountCreationData(service=service2, domain="unhealthy.example.com", server=self.server)
 
         with (
             patch("apps.provisioning.virtualmin_service.VirtualminGateway", return_value=mock_gateway),
@@ -1004,9 +936,7 @@ class TestAtoZReviewFixes(VirtualminTaskTestBase):
         force_status(self.service, "suspended")
         mock_gateway = MockVirtualminGateway()
         mock_gateway.seed_domain(self.account.domain, username=self.account.virtualmin_username)
-        job = self._failed_job(
-            operation="suspend_domain", status="pending", retry_count=1, claimed_at=timezone.now()
-        )
+        job = self._failed_job(operation="suspend_domain", status="pending", retry_count=1, claimed_at=timezone.now())
         nonce = job.claimed_at.isoformat()
 
         original_call = mock_gateway.call

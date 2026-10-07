@@ -174,86 +174,10 @@ class ServiceManagementService:
             return Err(f"Failed to mark service for review: {e}")
 
 
-class ServiceGroupService:
-    """Service group management for batch operations on related services."""
-
-    VALID_GROUP_ACTIONS = ("suspend_all", "resume_all", "check_all", "sync_status")
-
-    @staticmethod
-    def manage_group(group_id: str, action: str) -> Result[dict[str, Any], str]:
-        """
-        Manage a group of services with the specified action.
-
-        Args:
-            group_id: Customer ID or service group identifier
-            action: One of 'suspend_all', 'resume_all', 'check_all', 'sync_status'
-
-        Returns:
-            Result with batch operation results or error message
-        """
-        from apps.provisioning.models import (  # noqa: PLC0415  # Deferred: avoids circular import
-            Service,  # Circular: same-app  # Deferred: avoids circular import
-        )
-
-        if action not in ServiceGroupService.VALID_GROUP_ACTIONS:
-            return Err(f"Invalid group action '{action}'. Valid: {ServiceGroupService.VALID_GROUP_ACTIONS}")
-
-        try:
-            services = Service.objects.filter(customer_id=group_id)
-            if not services.exists():
-                return Err(f"No services found for group {group_id}")
-
-            results: dict[str, Any] = {"total": services.count(), "processed": 0, "errors": []}
-
-            for service in services:
-                try:
-                    if action == "suspend_all":
-                        service.suspend()
-                        service.save(update_fields=["status", "suspended_at", "suspension_reason", "updated_at"])
-                    elif action == "resume_all":
-                        if service.status == "suspended":
-                            service.activate()
-                            service.save(
-                                update_fields=[
-                                    "status",
-                                    "activated_at",
-                                    "suspended_at",
-                                    "suspension_reason",
-                                    "updated_at",
-                                ]
-                            )
-                    elif action in ("check_all", "sync_status"):
-                        pass  # Just checking status
-
-                    results["processed"] += 1
-
-                except Exception as e:
-                    results["errors"].append({"service_id": str(service.id), "error": str(e)})
-
-            logger.info(
-                f"⚙️ [ServiceGroup] {action} completed for group {group_id}: "
-                f"{results['processed']}/{results['total']} services"
-            )
-
-            return Ok(
-                {
-                    "group_id": group_id,
-                    "action": action,
-                    "results": results,
-                    "success": len(results["errors"]) == 0,
-                }
-            )
-
-        except Exception as e:
-            logger.error(f"🔥 [ServiceGroup] Failed to {action} group {group_id}: {e}")
-            return Err(f"Failed to {action} group: {e}")
-
-
 # Re-export for backward compatibility
 __all__ = [
     "ProvisioningService",
     "ServiceActivationService",  # Legacy name
-    "ServiceGroupService",
     "ServiceManagementService",
     "logger",  # For test mocking compatibility
 ]
