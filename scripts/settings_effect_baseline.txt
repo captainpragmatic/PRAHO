@@ -101,6 +101,11 @@ portal.public_base_url
 promotions.gift_card_denominations
 promotions.gift_card_sales_enabled
 promotions.new_offers_enabled
+virtualmin.auth_fallback_enabled
+virtualmin.max_retries
+virtualmin.rate_limit_max_calls_per_hour
+virtualmin.rate_limit_qps
+virtualmin.request_timeout_seconds
 
 # WP18 C16: e-Factura supplier identity effects.
 efactura.company.bank_account

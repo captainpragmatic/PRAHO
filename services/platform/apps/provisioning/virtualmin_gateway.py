@@ -26,6 +26,7 @@ from django.conf import settings
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.utils import timezone
+from django.utils.translation import gettext as _
 
 from apps.common.encryption import DecryptionError
 from apps.common.outbound_http import OutboundPolicy, OutboundSecurityError, safe_request
@@ -286,8 +287,12 @@ def get_virtualmin_timeouts() -> dict[str, int]:
     # Try to get configuration from Django settings
     timeout_config = getattr(settings, "VIRTUALMIN_TIMEOUTS", {})
 
-    # Merge with defaults
-    result = {**defaults, **timeout_config}
+    # Runtime settings supply the default; explicit Django/environment overrides retain precedence.
+    result = {
+        **defaults,
+        "API_REQUEST_TIMEOUT": SettingsService.get_integer_setting("virtualmin.request_timeout_seconds", 30),
+        **timeout_config,
+    }
 
     # Override with environment variables if present
     for key in result:
@@ -832,20 +837,35 @@ class VirtualminGateway:
         window = int(time.time() // VIRTUALMIN_RATE_LIMIT_WINDOW)
         scope = hashlib.sha256(f"{self.server.hostname}\0{operation}".encode()).hexdigest()[:24]
         cache_key_prefix = f"virtualmin_rate_limit:{scope}:{window}"
+        hourly_limit = SettingsService.get_integer_setting("virtualmin.rate_limit_max_calls_per_hour", 100)
         try:
-            for slot in range(VIRTUALMIN_RATE_LIMIT_MAX_CALLS):
+            for slot in range(hourly_limit):
                 if cache.add(f"{cache_key_prefix}:{slot}", 1, VIRTUALMIN_RATE_LIMIT_WINDOW):
                     return RateLimitOutcome.ALLOWED
         except Exception:
-            logger.exception("Virtualmin rate-limit counter failed for %s", self.server.hostname)
+            logger.exception("🔥 [Virtualmin] Rate-limit counter failed for %s", self.server.hostname)
             return RateLimitOutcome.BACKEND_ERROR
 
         logger.warning(
-            "Rate limit exceeded for %s operation %s: %s slots claimed",
+            "⚠️ [Virtualmin] Rate limit exceeded for %s operation %s: %s slots claimed",
             self.server.hostname,
             operation,
-            VIRTUALMIN_RATE_LIMIT_MAX_CALLS,
+            hourly_limit,
         )
+        return RateLimitOutcome.EXHAUSTED
+
+    def _check_qps_limit(self) -> RateLimitOutcome:
+        """Atomically reserve a per-server HTTP dispatch slot for the current second."""
+        limit = SettingsService.get_integer_setting("virtualmin.rate_limit_qps", 10)
+        scope = hashlib.sha256(self.server.hostname.encode()).hexdigest()[:24]
+        prefix = f"virtualmin_rate_limit_qps:{scope}:{int(time.time())}"
+        try:
+            for slot in range(limit):
+                if cache.add(f"{prefix}:{slot}", 1, 1):
+                    return RateLimitOutcome.ALLOWED
+        except Exception:
+            logger.exception("🔥 [Virtualmin] QPS counter failed for %s", self.server.hostname)
+            return RateLimitOutcome.BACKEND_ERROR
         return RateLimitOutcome.EXHAUSTED
 
     # Programs an auto-failed server may still receive: the health probe only.
@@ -962,7 +982,8 @@ class VirtualminGateway:
         # Make API request with retries
         last_error: VirtualminAPIError | None = None
         is_read_only = is_virtualmin_read_only_program(program)
-        for attempt in range(VIRTUALMIN_MAX_RETRIES):
+        max_retries = SettingsService.get_integer_setting("virtualmin.max_retries", 3)
+        for attempt in range(max_retries):
             try:
                 response = self._make_request(api_params, attempt + 1, auth=call_auth, timeout_seconds=timeout_seconds)
                 execution_time = time.time() - start_time
@@ -996,7 +1017,7 @@ class VirtualminGateway:
                 return Ok(virtualmin_response)
             except VirtualminAPIError as e:
                 last_error = e
-                logger.warning(f"⚠️ [Virtualmin] Attempt {attempt + 1}/{VIRTUALMIN_MAX_RETRIES} failed: {e}")
+                logger.warning(f"⚠️ [Virtualmin] Attempt {attempt + 1}/{max_retries} failed: {e}")
 
                 should_retry = e.retriability is Retriability.RETRIABLE or (
                     e.retriability is Retriability.UNKNOWN and is_read_only
@@ -1005,13 +1026,13 @@ class VirtualminGateway:
                     return Err(e, retriability=e.retriability)
 
                 # Exponential backoff for retries
-                if attempt < VIRTUALMIN_MAX_RETRIES - 1:
+                if attempt < max_retries - 1:
                     backoff_seconds = (2**attempt) * 0.5
                     time.sleep(backoff_seconds)
 
         # All retries failed
         execution_time = time.time() - start_time
-        error_msg = f"All {VIRTUALMIN_MAX_RETRIES} attempts failed. Last error: {last_error}"
+        error_msg = f"All {max_retries} attempts failed. Last error: {last_error}"
 
         logger.error(f"❌ [Virtualmin] {program} failed after {execution_time:.2f}s: {error_msg}")
 
@@ -1111,6 +1132,12 @@ class VirtualminGateway:
                     self.server.hostname,
                 )
             auth = creds.unwrap()
+
+        qps_outcome = self._check_qps_limit()
+        if qps_outcome is RateLimitOutcome.EXHAUSTED:
+            raise VirtualminRateLimitedError(_("Virtualmin requests per second limit exceeded"), self.server.hostname)
+        if qps_outcome is RateLimitOutcome.BACKEND_ERROR:
+            raise VirtualminAPIError(_("Virtualmin rate-limit backend unavailable"), self.server.hostname)
 
         # Get current timeout configuration (supports hot-reloading).
         # The policy below is constructed per request; shared config is never mutated.

@@ -478,7 +478,12 @@ class VirtualminAuthenticationManager:
             self._ssh_client = None
 
     def _get_auth_method_priority(self) -> list[AuthMethod]:
-        """Get authentication methods in priority order"""
+        """Get authentication methods in priority order."""
+        from apps.settings.services import SettingsService  # noqa: PLC0415  # Circular: cross-app
+
+        if not SettingsService.get_boolean_setting("virtualmin.auth_fallback_enabled", True):
+            return [AuthMethod.ACL]
+
         cache_key = f"{CACHE_AUTH_METHOD_PREFIX}{self.server.id}"
         cached_method = cache.get(cache_key)
 
