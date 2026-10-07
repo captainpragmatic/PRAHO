@@ -14,7 +14,7 @@ from botocore.stub import Stubber
 from django.urls import reverse
 from django.utils import timezone
 
-from tests.provisioning.test_virtualmin_qa_closeout import VirtualminQATestBase
+from tests.provisioning.test_virtualmin_staff_pages import VirtualminQATestBase
 
 
 class VirtualminQAS3ViewsTests(VirtualminQATestBase):
