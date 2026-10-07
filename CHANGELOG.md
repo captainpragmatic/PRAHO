@@ -19,8 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   single-server and container-service use it when set.
   **Upgrading a Compose portal-only host:** add `PORTAL_DJANGO_SECRET_KEY` to the full file, run
   `portal-env.sh`, replace the portal host's env file with the output, then redeploy (`--stop` and
-  `--logs` need the new key too). A new portal key signs customers out and invalidates in-flight cart
-  price seals.
+  `--logs` keep working before that). A new portal key signs customers out and invalidates in-flight
+  cart price seals.
+- The platform-only and portal-only Docker stacks publish the application port on `127.0.0.1` only.
+  They published 8700 and 8701 on every interface, so anyone who could reach the host bypassed Caddy:
+  its TLS and HSTS and, for the platform, the `PLATFORM_ALLOWED_CIDRS` staff allowlist. Their Caddy
+  uses the Docker network, and a proxy on the same host uses the loopback port; set `PLATFORM_BIND` /
+  `PORTAL_BIND` only for an external load balancer.
 - HSTS now follows the environment. Every Caddy configuration hardcoded a one-year header with
   `preload` and replaced whatever Django sent, so staging's one-hour policy never reached a
   browser, and `preload` went out for a domain never submitted to the preload list. The edge now
