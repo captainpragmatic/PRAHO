@@ -3,11 +3,15 @@
 # =============================================================================
 # Deploys all services (Platform + Portal + DB + Caddy) on one server
 #
-# Usage:
-#   ansible-playbook -i inventory/single-server.yml playbooks/single-server.yml
+# Usage (make deploy-dev):
+#   ansible-playbook -i inventory/dev.yml playbooks/single-server.yml -e @$HOME/praho-vars.yml --ask-vault-pass
 #
-# Required environment variables:
-#   PRAHO_SERVER_IP, PRAHO_PORTAL_DOMAIN, PRAHO_PLATFORM_DOMAIN, PRAHO_DB_PASSWORD, PRAHO_SECRET_KEY
+# The inventory reads the host from the environment: PRAHO_DEV_IP, and optionally PRAHO_SSH_USER and
+# PRAHO_SSH_KEY.
+# The role's inputs (domains, secrets) are Ansible variables, not environment variables: pass them
+# with -e @<file>, kept in Ansible Vault outside the repository. The role stops first and names any that are missing; the
+# list per host is praho_required_inputs in roles/praho/defaults/main.yml, and docs/deployment/DEPLOYMENT.md
+# ("Docker Deployment (Ansible role)") describes each.
 
 ---
 - name: Deploy PRAHO - Single Server

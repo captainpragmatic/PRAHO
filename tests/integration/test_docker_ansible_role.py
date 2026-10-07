@@ -257,3 +257,23 @@ class TestAnsibleDockerRole:
         )
         assert "Starting version v1.2.3" in result.stdout, result.stdout + result.stderr
         assert result.returncode != 0, result.stdout
+
+
+class TestDockerRoleDocs:
+    """The Docker role's playbook headers and the two-server guide told operators to export the domains,
+    the database password and the secret key as environment variables, which nothing reads: the role
+    takes them as Ansible variables. Only the inventories' host addresses come from the environment."""
+
+    @pytest.mark.integration
+    def test_every_documented_environment_variable_is_read(self) -> None:
+        ansible = DEPLOY / "ansible"
+        read = set(re.findall(r"lookup\('env', '([A-Z_]+)'\)", "".join(p.read_text() for p in ansible.rglob("*.yml"))))
+        documented: set[str] = set()
+        for playbook in ("single-server.yml", "two-servers.yml"):
+            header = (ansible / "playbooks" / playbook).read_text().split("\n---", 1)[0]
+            documented |= set(re.findall(r"\bPRAHO_[A-Z_]+\b", header))
+        guide = (PROJECT_ROOT / "docs/deployment/DEPLOYMENT.md").read_text()
+        two_servers = guide[guide.index("### Option 6") :].split("\n---\n", 1)[0]
+        documented |= set(re.findall(r"^export (PRAHO_[A-Z_]+)=", two_servers, re.MULTILINE))
+        assert documented
+        assert sorted(documented - read) == []

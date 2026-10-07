@@ -4,10 +4,14 @@
 # Deploys Platform + DB on primary server, Portal on secondary server
 #
 # Usage:
-#   ansible-playbook -i inventory/two-servers.yml playbooks/two-servers.yml
+#   ansible-playbook -i inventory/two-servers.yml playbooks/two-servers.yml -e @$HOME/praho-vars.yml --ask-vault-pass
 #
-# Required environment variables:
-#   PRAHO_PLATFORM_IP, PRAHO_PORTAL_IP, PRAHO_PORTAL_DOMAIN, PRAHO_PLATFORM_DOMAIN, PRAHO_DB_PASSWORD, PRAHO_SECRET_KEY
+# The inventory reads the hosts from the environment: PRAHO_PLATFORM_IP and PRAHO_PORTAL_IP, and
+# optionally PRAHO_SSH_USER and PRAHO_SSH_KEY.
+# The role's inputs (domains, secrets) are Ansible variables, not environment variables: pass them
+# with -e @<file>, kept in Ansible Vault outside the repository. The role stops first and names any that are missing; the
+# list per host is praho_required_inputs in roles/praho/defaults/main.yml, and docs/deployment/DEPLOYMENT.md
+# ("Docker Deployment (Ansible role)") describes each.
 
 ---
 - name: Deploy PRAHO - Primary Server (Platform + DB)

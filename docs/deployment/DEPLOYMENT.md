@@ -667,19 +667,31 @@ Platform + DB on primary server, Portal on secondary server.
 └─────────────────────────┘     └─────────────────────────┘
 ```
 
-**Using Ansible:**
+**Using Ansible:** this runs the Docker role on both hosts. Only the host addresses come from the
+environment; the domains and secrets are Ansible variables, listed per host in
+[Docker Deployment (Ansible role)](#docker-deployment-ansible-role). The role stops first and names any
+that are missing, and never writes the database password or the encryption keys on the portal host.
+
 ```bash
-# Set environment variables
+# The hosts (the inventory reads these; PRAHO_SSH_USER and PRAHO_SSH_KEY are optional)
 export PRAHO_PLATFORM_IP=10.0.0.1
 export PRAHO_PORTAL_IP=10.0.0.2
-export PRAHO_PORTAL_DOMAIN=portal.pragmatichost.com
-export PRAHO_PLATFORM_DOMAIN=platform.pragmatichost.com
-export PRAHO_DB_PASSWORD=secure-password
-export PRAHO_SECRET_KEY=django-secret-key
+
+# The role's inputs, encrypted and outside the repository
+ansible-vault create ~/praho-two-servers.yml
+#   portal_domain: portal.pragmatichost.com
+#   platform_domain: platform.pragmatichost.com
+#   acme_email: admin@pragmatichost.com
+#   secret_key: ...
+#   hmac_secret: ...
+#   platform_to_portal_webhook_secret: ...
+#   db_password: ...
+#   django_encryption_key: ...
+#   credential_vault_master_key: ...
 
 # Deploy
 cd deploy/ansible
-ansible-playbook -i inventory/two-servers.yml playbooks/two-servers.yml
+ansible-playbook -i inventory/two-servers.yml playbooks/two-servers.yml -e @$HOME/praho-two-servers.yml --ask-vault-pass
 ```
 
 ---
