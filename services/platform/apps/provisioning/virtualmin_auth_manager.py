@@ -410,7 +410,7 @@ class VirtualminAuthenticationManager:
             if not self._ssh_client:
                 return Err("Failed to establish SSH connection")
 
-            _stdin, stdout, stderr = self._ssh_client.exec_command(command, timeout=SUDO_COMMAND_TIMEOUT)
+            _stdin, stdout, stderr = self._ssh_client.exec_command(command, timeout=get_sudo_command_timeout())
 
             # Read output
             output = stdout.read().decode("utf-8")
@@ -438,6 +438,7 @@ class VirtualminAuthenticationManager:
             ssh_username = getattr(settings, "VIRTUALMIN_SSH_USERNAME", "virtualmin-praho")
             ssh_private_key = getattr(settings, "VIRTUALMIN_SSH_PRIVATE_KEY_PATH", None)
             ssh_password = getattr(settings, "VIRTUALMIN_SSH_PASSWORD", None)
+            ssh_timeout = get_ssh_timeout()
 
             if ssh_private_key:
                 # Use private key authentication
@@ -446,7 +447,7 @@ class VirtualminAuthenticationManager:
                     port=22,
                     username=ssh_username,
                     key_filename=ssh_private_key,
-                    timeout=SSH_TIMEOUT,
+                    timeout=ssh_timeout,
                 )
             elif ssh_password:
                 # Use password authentication
@@ -455,7 +456,7 @@ class VirtualminAuthenticationManager:
                     port=22,
                     username=ssh_username,
                     password=ssh_password,
-                    timeout=SSH_TIMEOUT,
+                    timeout=ssh_timeout,
                 )
             else:
                 raise Exception("No SSH credentials configured")
@@ -499,7 +500,7 @@ class VirtualminAuthenticationManager:
     def _cache_working_auth_method(self, method: AuthMethod) -> None:
         """Cache authentication method that worked"""
         cache_key = f"{CACHE_AUTH_METHOD_PREFIX}{self.server.id}"
-        cache.set(cache_key, method.value, CACHE_TIMEOUT)
+        cache.set(cache_key, method.value, get_cache_timeout())
 
         # Clear any failure cache
         fail_cache_key = f"{CACHE_AUTH_HEALTH_PREFIX}{self.server.id}_{method.value}"

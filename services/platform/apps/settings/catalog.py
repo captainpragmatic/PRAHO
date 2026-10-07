@@ -2580,7 +2580,7 @@ CATALOG: tuple[SettingDef, ...] = (
     SettingDef(
         key="provisioning.task_time_limit",
         data_type="integer",
-        default=1200,
+        default=900,
         group="advanced",
         section=_("Provisioning"),
         label=_("Task time limit"),

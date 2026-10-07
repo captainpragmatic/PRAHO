@@ -922,7 +922,9 @@ def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:  # n
         return {"status": "failed", "job_id": job_id, "error": "no account"}
 
     token = uuid4()
-    budget = int(job.parameters.get("task_budget_seconds", TASK_TIME_LIMIT))
+    budget = (
+        int(job.parameters["task_budget_seconds"]) if "task_budget_seconds" in job.parameters else get_task_time_limit()
+    )
     deadline = timezone.now() + timedelta(seconds=budget)
     if not VirtualminProvisioningJob.claim_execution(job.pk, token, deadline):
         return {"status": "stale", "job_id": job_id}
@@ -1308,7 +1310,7 @@ def reconcile_virtualmin_service_state_async(service_id: str) -> str:
     return async_task(
         "apps.provisioning.virtualmin_tasks.reconcile_virtualmin_service_state",
         service_id,
-        timeout=TASK_SOFT_TIME_LIMIT,
+        timeout=get_task_soft_time_limit(),
     )
 
 
@@ -1692,6 +1694,7 @@ def process_failed_virtualmin_jobs() -> dict[str, Any]:
             "jobs": [],
         }
 
+        default_task_budget: int | None = None
         for job in retryable_jobs[:50]:  # Limit to 50 jobs per run
             try:
                 # Validate BEFORE claiming: unsupported/orphaned jobs are
@@ -1708,11 +1711,22 @@ def process_failed_virtualmin_jobs() -> dict[str, Any]:
                     continue
 
                 try:
-                    dispatch_timeout = TASK_TIME_LIMIT
                     if job.operation == "migrate_domain":
                         from .virtualmin_migration_service import migration_task_timeout  # noqa: PLC0415
 
                         dispatch_timeout = migration_task_timeout()
+                    elif "task_budget_seconds" in job.parameters:
+                        dispatch_timeout = int(job.parameters["task_budget_seconds"])
+                    else:
+                        # Resolve once per sweep and persist before a worker can receive the task.
+                        if default_task_budget is None:
+                            default_task_budget = get_task_time_limit()
+                        dispatch_timeout = default_task_budget
+                        job.parameters = {**job.parameters, "task_budget_seconds": dispatch_timeout}
+                        if not VirtualminProvisioningJob.objects.filter(
+                            pk=job.pk, status="pending", claimed_at=now
+                        ).update(parameters=job.parameters):
+                            continue
                     task_id = async_task(
                         "apps.provisioning.virtualmin_tasks.retry_virtualmin_job",
                         str(job.id),
@@ -1785,7 +1799,7 @@ def provision_virtualmin_account_async(params: VirtualminProvisioningParams | Se
         return async_task(
             "apps.provisioning.virtualmin_tasks.provision_virtualmin_account",
             params,
-            timeout=TASK_TIME_LIMIT,
+            timeout=get_task_time_limit(),
         )
 
     except Exception as e:
@@ -1814,21 +1828,23 @@ def suspend_virtualmin_account_async(account_id: str, reason: str = "") -> str:
         "apps.provisioning.virtualmin_tasks.suspend_virtualmin_account",
         account_id,
         reason,
-        timeout=TASK_SOFT_TIME_LIMIT,
+        timeout=get_task_soft_time_limit(),
     )
 
 
 def unsuspend_virtualmin_account_async(account_id: str) -> str:
     """Queue Virtualmin account unsuspension task."""
     return async_task(
-        "apps.provisioning.virtualmin_tasks.unsuspend_virtualmin_account", account_id, timeout=TASK_SOFT_TIME_LIMIT
+        "apps.provisioning.virtualmin_tasks.unsuspend_virtualmin_account",
+        account_id,
+        timeout=get_task_soft_time_limit(),
     )
 
 
 def delete_virtualmin_account_async(account_id: str) -> str:
     """Queue Virtualmin account deletion task."""
     return async_task(
-        "apps.provisioning.virtualmin_tasks.delete_virtualmin_account", account_id, timeout=TASK_TIME_LIMIT
+        "apps.provisioning.virtualmin_tasks.delete_virtualmin_account", account_id, timeout=get_task_time_limit()
     )
 
 

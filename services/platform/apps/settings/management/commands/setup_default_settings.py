@@ -54,10 +54,15 @@ DEFAULT_VALUE_MIGRATIONS: dict[str, tuple[object, object]] = {
     "products.max_price_cents": (10000000000, 100000000),
     "promotions.max_code_generation_attempts": (100, 100),
     "provisioning.bulk_operation_threshold": (10, 10),
+    "provisioning.cache_timeout": (3600, 3600),
     "provisioning.max_concurrent_health_checks": (5, 10),
     "provisioning.max_error_display": (10, 3),
     "provisioning.max_username_uniqueness_attempts": (10, 1000),
     "provisioning.overall_health_check_timeout": (30, 300),
+    "provisioning.ssh_timeout": (30, 30),
+    "provisioning.sudo_command_timeout": (60, 60),
+    "provisioning.task_soft_time_limit": (600, 600),
+    "provisioning.task_time_limit": (1200, 900),
     "security.registration_rate_limit_per_ip": (5, 5),
 }
 RETIRED_SETTING_KEYS: frozenset[str] = frozenset(
