@@ -767,6 +767,20 @@ def save_change_set(request: HttpRequest) -> JsonResponse:
     )
 
 
+def _credential_state(definition: SettingDef, *, configured: bool, inherited: bool = False) -> dict[str, object]:
+    """Return credential presence and translated inheritance text without exposing its value."""
+    inheritance_text = ""
+    if definition.deployment_fallback:
+        label = _("Inherited from deployment") if inherited else _("Explicit override")
+        inheritance_text = f"{label} · {definition.deployment_source}"
+    return {
+        "success": True,
+        "configured": configured,
+        "inherited": inherited,
+        "inheritance_text": inheritance_text,
+    }
+
+
 @admin_required
 @require_http_methods(["POST"])
 def secret_set(request: HttpRequest, key: str) -> JsonResponse:
@@ -786,7 +800,7 @@ def secret_set(request: HttpRequest, key: str) -> JsonResponse:
 
     result = SettingsService.update_setting(key, value, user_id=request.user.id, reason=reason)
     if isinstance(result, Ok):
-        return JsonResponse({"success": True, "configured": True})
+        return JsonResponse(_credential_state(definition, configured=True))
     return JsonResponse({"success": False, "error": result.error.message}, status=400)
 
 
@@ -817,9 +831,7 @@ def secret_clear(request: HttpRequest, key: str) -> JsonResponse:
         if isinstance(cleared, Ok):
             return JsonResponse(
                 {
-                    "success": True,
-                    "configured": bool(definition.deployment_default()),
-                    "inherited": True,
+                    **_credential_state(definition, configured=bool(definition.deployment_default()), inherited=True),
                     "change_set_id": cleared.value.change_set_id,
                 }
             )
@@ -827,7 +839,7 @@ def secret_clear(request: HttpRequest, key: str) -> JsonResponse:
 
     result = SettingsService.update_setting(key, "", user_id=request.user.id, reason=reason)
     if isinstance(result, Ok):
-        return JsonResponse({"success": True, "configured": False})
+        return JsonResponse(_credential_state(definition, configured=False))
     return JsonResponse({"success": False, "error": result.error.message}, status=400)
 
 

@@ -112,6 +112,7 @@ _XCLOAK_ONLY_RE = re.compile(r"<style[^>]*>\s*\[x-cloak\][^<]{0,60}</style>", re
 # TMPL007: inline executable scripts and HTML event handlers in components.
 # External scripts and non-executable JSON data are allowed; Alpine directives remain allowed.
 _DJANGO_COMMENT_RE = re.compile(r"\{#.*?#\}", re.DOTALL)
+_DJANGO_CONTROL_FLOW_RE = re.compile(r"\{%\s*(?:if|elif|else|endif|for|empty|endfor)\b.*?%\}", re.DOTALL)
 
 # TMPL008: Unicode emoji characters (ranges cover most common emoji blocks)
 # Dingbats block (U+2700-U+27BF) is intentionally excluded because it contains
@@ -312,7 +313,11 @@ def scan_file(path: Path) -> list[Violation]:
     component_script_lines: set[int] = set()
     if is_component:
         script_parser = _ComponentScriptParser()
-        script_parser.feed(_DJANGO_COMMENT_RE.sub(lambda match: "\n" * match.group().count("\n"), "\n".join(lines)))
+        markup = _DJANGO_COMMENT_RE.sub(lambda match: "\n" * match.group().count("\n"), "\n".join(lines))
+        # Control-flow tags may touch an attribute name; separate them before HTML parsing.
+        # Keep every newline so findings still refer to the original template.
+        markup = _DJANGO_CONTROL_FLOW_RE.sub(lambda match: re.sub(r"[^\n]", " ", match.group()), markup)
+        script_parser.feed(markup)
         script_parser.close()
         component_script_lines = script_parser.lines
 
@@ -323,17 +328,11 @@ def scan_file(path: Path) -> list[Violation]:
 
         # ── Feature template checks (TMPL001-005, TMPL008) ─────────────────────
         if is_feature and line:
-            # Bot review: one marker exempts at most the FIRST matching element on the line below
-            # it - two raw <button>s sharing a line used to collapse into a single Violation
-            # (search() only ever fires once per line regardless of match count), so exempting
-            # that one record silently approved both. Enumerating every match keeps a second,
-            # un-exempted element on the same line reported as a real, separate blocker.
-            for index, _match in enumerate(_RAW_INPUT_RE.finditer(raw_line)):
-                exempted, reason = (
-                    _exemption_for(tmpl_allow_markers, consumed_marker_lines, line_no, "TMPL001")
-                    if index == 0
-                    else (False, "")
-                )
+            # Enumerate every element and consume at most one marker per finding.
+            # Both marker placements may target this line, but neither marker can be reused.
+            # Additional elements remain separate, un-exempted findings.
+            for _match in _RAW_INPUT_RE.finditer(raw_line):
+                exempted, reason = _exemption_for(tmpl_allow_markers, consumed_marker_lines, line_no, "TMPL001")
                 violations.append(
                     Violation(
                         "TMPL001",
@@ -347,12 +346,8 @@ def scan_file(path: Path) -> list[Violation]:
                     )
                 )
 
-            for index, _match in enumerate(_RAW_BUTTON_RE.finditer(raw_line)):
-                exempted, reason = (
-                    _exemption_for(tmpl_allow_markers, consumed_marker_lines, line_no, "TMPL002")
-                    if index == 0
-                    else (False, "")
-                )
+            for _match in _RAW_BUTTON_RE.finditer(raw_line):
+                exempted, reason = _exemption_for(tmpl_allow_markers, consumed_marker_lines, line_no, "TMPL002")
                 violations.append(
                     Violation(
                         "TMPL002",
@@ -366,12 +361,8 @@ def scan_file(path: Path) -> list[Violation]:
                     )
                 )
 
-            for index, _match in enumerate(_RAW_SELECT_RE.finditer(raw_line)):
-                exempted, reason = (
-                    _exemption_for(tmpl_allow_markers, consumed_marker_lines, line_no, "TMPL003")
-                    if index == 0
-                    else (False, "")
-                )
+            for _match in _RAW_SELECT_RE.finditer(raw_line):
+                exempted, reason = _exemption_for(tmpl_allow_markers, consumed_marker_lines, line_no, "TMPL003")
                 violations.append(
                     Violation(
                         "TMPL003",
@@ -385,12 +376,8 @@ def scan_file(path: Path) -> list[Violation]:
                     )
                 )
 
-            for index, _match in enumerate(_RAW_TEXTAREA_RE.finditer(raw_line)):
-                exempted, reason = (
-                    _exemption_for(tmpl_allow_markers, consumed_marker_lines, line_no, "TMPL004")
-                    if index == 0
-                    else (False, "")
-                )
+            for _match in _RAW_TEXTAREA_RE.finditer(raw_line):
+                exempted, reason = _exemption_for(tmpl_allow_markers, consumed_marker_lines, line_no, "TMPL004")
                 violations.append(
                     Violation(
                         "TMPL004",

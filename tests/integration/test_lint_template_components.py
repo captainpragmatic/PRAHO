@@ -3,8 +3,12 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from typing import Protocol, cast
+from unittest.mock import patch
 
 import pytest
+from django.test import SimpleTestCase
 
 
 def _load_lint_module():
@@ -389,3 +393,83 @@ def test_second_matching_element_on_an_exempted_line_is_not_also_exempted(tmp_pa
     assert len(tmpl002) == 2, f"both buttons must be reported as separate records, got: {violations}"
     assert tmpl002[0].exempted is True
     assert tmpl002[1].exempted is False, "only the first matching element on the line may be exempted"
+
+
+class _ReviewViolation(Protocol):
+    code: str
+    line: int
+    exempted: bool
+    reason: str
+
+
+class _ReviewLint(Protocol):
+    def scan_file(self, path: Path) -> list[_ReviewViolation]: ...
+
+
+class TemplateReviewRegressionTests(SimpleTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        # resolve(): on macOS /tmp is a symlink, and scan_file compares resolved paths against REPO_ROOT.
+        self.root = Path(self.enterContext(TemporaryDirectory())).resolve()
+        self.lint = cast("_ReviewLint", _load_lint_module())
+        templates = self.root / "services/portal/templates"
+        self.enterContext(
+            patch.multiple(
+                self.lint,
+                REPO_ROOT=self.root,
+                PORTAL_TEMPLATES=templates,
+                COMPONENT_DIR=templates / "components",
+                COMPONENT_SVG_ALLOWLIST_FILE=self.root / ".component-svg-allowlist",
+            )
+        )
+        self.templates = templates
+
+    def seed(self, relative: str, content: str) -> Path:
+        path = self.templates / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        return path
+
+    def test_conditional_event_handlers_are_detected_at_the_original_line(self) -> None:
+        cases = (
+            ('<button {% if enabled %}onclick="run()"{% endif %}>Run</button>', 2),
+            ('<button {% if enabled %}onclick="run()"{% else %}onfocus="focus()"{% endif %}>Run</button>', 2),
+            ('<button\n{% if enabled %}onclick="run()"{% endif %}>Run</button>', 2),
+            ('<button {% if\n enabled %}onclick="run()"{% endif %}>Run</button>', 2),
+        )
+        for markup, expected_line in cases:
+            with self.subTest(markup=markup):
+                path = self.seed(
+                    "components/conditional.html",
+                    "\n"
+                    + markup
+                    + '\n<div onkeydown="next()"></div>\n'
+                    + """<script src="{% static 'component.js' %}"></script>\n""",
+                )
+                handlers = [finding for finding in self.lint.scan_file(path) if finding.code == "TMPL007"]
+                self.assertEqual([finding.line for finding in handlers], [expected_line, 3 + markup.count("\n")])
+
+    def test_two_marker_placements_exempt_two_elements_without_reuse(self) -> None:
+        cases = (
+            ("TMPL001", '<input name="a"><input name="b">', '<input name="c">'),
+            ("TMPL002", "<button>A</button><button>B</button>", "<button>C</button>"),
+            ("TMPL003", "<select></select><select></select>", "<select></select>"),
+            ("TMPL004", "<textarea></textarea><textarea></textarea>", "<textarea></textarea>"),
+        )
+        for code, pair, third in cases:
+            for extra in ("", third):
+                with self.subTest(code=code, extra=extra):
+                    path = self.seed(
+                        "billing/allowances.html",
+                        f"{{# tmpl-allow {code}: standalone allowance #}}\n"
+                        f"{pair}{extra} {{# tmpl-allow {code}: inline allowance #}}\n",
+                    )
+                    findings = self.lint.scan_file(path)
+                    matches = [finding for finding in findings if finding.code == code]
+                    expected = [True, True] + ([False] if extra else [])
+                    self.assertEqual([finding.exempted for finding in matches], expected)
+                    self.assertEqual(
+                        [finding.reason for finding in matches[:2]], ["inline allowance", "standalone allowance"]
+                    )
+                    self.assertEqual([finding.line for finding in matches], [2] * len(expected))
+                    self.assertEqual([finding for finding in findings if finding.code == "TMPL_ALLOW_STALE"], [])

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 import subprocess
 from pathlib import Path
 from typing import cast
@@ -179,44 +178,111 @@ class SettingsReviewFollowupTests(TestCase):
         self.assertNotIn("stored-secret", json.dumps(event.old_values))
         self.assertNotIn("deployment-secret", json.dumps(event.new_values))
 
-    @override_settings(EFACTURA_CLIENT_SECRET="deployment-secret")
-    def test_replacing_an_inherited_credential_refreshes_its_rendered_state(self) -> None:
-        response = self.page()
-        root = re.search(r'id="setting-efactura\.oauth\.client_secret"[^>]*', response.content.decode())
-        self.assertIsNotNone(root)
-        assert root is not None
-        marker = re.search(r'data-deployment-fallback="([01])"', root.group())
-        fallback_flag = marker.group(1) if marker is not None else "0"
-        payload = self.post(
-            reverse("settings:secret_set", args=["efactura.oauth.client_secret"]),
-            {"value": "replacement-secret"},
-        )
+    def credential_ui_state(self, payload: dict[str, object], action: str = "save") -> dict[str, object]:
         source = Path(__file__).resolve().parents[2] / "static/js/alpine-components.js"
         script = """
 const fs = require("fs");
-let reloads = 0;
-global.window = {addEventListener: () => {}, location: {reload: () => { reloads++; }}};
-global.document = {addEventListener: (_, callback) => callback(), querySelector: () => ({value: "csrf"})};
 const registry = {};
+let reloads = 0;
+let form;
+const environment = {value: "test", dataset: {key: "efactura.environment", kind: "select"}};
+const company = {value: "ANAF supplier", dataset: {key: "efactura.company.name", kind: "text"}};
+global.window = {
+  addEventListener: () => {},
+  location: {reload: () => {
+    reloads++;
+    environment.value = "test";
+    company.value = "ANAF supplier";
+    form.dirty = {};
+  }},
+};
+global.document = {addEventListener: (_, callback) => callback(), querySelector: () => ({value: "csrf"})};
 global.Alpine = {data: (name, factory) => { registry[name] = factory; }};
 eval(fs.readFileSync(process.argv[1], "utf8"));
+form = registry.settingsForm("/settings/save/");
+for (const field of [environment, company]) {
+  field.closest = () => ({dataset: {deploymentFallback: "1", inherited: "1", fallback: "null"}});
+  form.initField(field);
+}
+environment.value = "prod";
+company.value = "Pending supplier";
+form.syncField(environment);
+form.syncField(company);
+form.reason = "Pending settings edits";
+const clearing = process.argv[3] === "clear";
+const stateLabel = {textContent: clearing
+  ? "Explicit override · EFACTURA_CLIENT_SECRET" : "Inherited from deployment · EFACTURA_CLIENT_SECRET"};
 const row = registry.settingsSecretRow(true);
-row.$root = {dataset: {setUrl: "/secret/", deploymentFallback: process.argv[2]}};
+row.$root = {
+  dataset: {
+    setUrl: "/secret/set/", clearUrl: "/secret/clear/",
+    deploymentFallback: "1", inherited: clearing ? "0" : "1",
+  },
+  querySelector: (selector) => selector === "code + p" ? stateLabel : null,
+};
 row.secret = "replacement-secret";
-global.fetch = async () => ({json: async () => JSON.parse(process.argv[3])});
+row.replacing = true;
+let confirm;
+row.$dispatch = (_, detail) => { confirm = detail.action; };
+global.fetch = async () => ({json: async () => JSON.parse(process.argv[2])});
 (async () => {
-  await row.saveSecret();
-  process.stdout.write(JSON.stringify({reloads, configured: row.configured, secret: row.secret}));
-})();
+  if (process.argv[3] === "clear") {
+    row.clearCredential();
+    await confirm();
+  } else {
+    await row.saveSecret();
+  }
+  process.stdout.write(JSON.stringify({
+    reloads, configured: row.configured, secret: row.secret, replacing: row.replacing,
+    inherited: row.$root.dataset.inherited, label: stateLabel.textContent,
+    environment: environment.value, company: company.value, dirty: form.dirty, reason: form.reason,
+  }));
+})().catch((error) => { console.error(error); process.exitCode = 1; });
 """
         result = subprocess.run(  # noqa: S603  # Fixed Node executable; local source and JSON, no shell.
-            ["node", "-e", script, str(source), fallback_flag, json.dumps(payload)],  # noqa: S607
+            ["node", "-e", script, str(source), json.dumps(payload), action],  # noqa: S607
             check=True,
             capture_output=True,
             text=True,
         )
-        self.assertEqual(json.loads(result.stdout), {"reloads": 1, "configured": True, "secret": ""})
+        return cast("dict[str, object]", json.loads(result.stdout))
+
+    @override_settings(EFACTURA_CLIENT_SECRET="deployment-secret")
+    def test_replacing_an_inherited_credential_refreshes_its_rendered_state(self) -> None:
+        self.assertContains(self.page(), "Inherited from deployment")
+        payload = self.post(
+            reverse("settings:secret_set", args=["efactura.oauth.client_secret"]),
+            {"value": "replacement-secret"},
+        )
+        state = self.credential_ui_state(payload)
+        self.assertEqual(state["reloads"], 0, "Saving a credential must preserve pending settings edits")
+        self.assertEqual(state["environment"], "prod")
+        self.assertEqual(state["company"], "Pending supplier")
+        self.assertEqual(state["dirty"], {"efactura.environment": True, "efactura.company.name": True})
+        self.assertEqual(state["reason"], "Pending settings edits")
+        self.assertIs(state["configured"], True)
+        self.assertIs(state["replacing"], False)
+        self.assertEqual(state["secret"], "")
+        self.assertEqual(state["inherited"], "0")
+        self.assertEqual(state["label"], "Explicit override · EFACTURA_CLIENT_SECRET")
         refreshed = self.page()
         self.assertContains(refreshed, "Explicit override")
         self.assertNotContains(refreshed, "replacement-secret")
         self.assertNotContains(refreshed, "deployment-secret")
+
+    @override_settings(EFACTURA_CLIENT_SECRET="deployment-secret")
+    def test_clearing_a_credential_preserves_dirty_fields_and_updates_inheritance(self) -> None:
+        self.write("efactura.oauth.client_secret", "stored-secret")
+        payload = self.post(
+            reverse("settings:secret_clear", args=["efactura.oauth.client_secret"]),
+            {"reason": "Return to deployment credential"},
+        )
+        state = self.credential_ui_state(payload, action="clear")
+        self.assertEqual(state["reloads"], 0, "Clearing a credential must preserve pending settings edits")
+        self.assertEqual(state["environment"], "prod")
+        self.assertEqual(state["company"], "Pending supplier")
+        self.assertEqual(state["dirty"], {"efactura.environment": True, "efactura.company.name": True})
+        self.assertEqual(state["reason"], "Pending settings edits")
+        self.assertIs(state["configured"], True)
+        self.assertEqual(state["inherited"], "1")
+        self.assertEqual(state["label"], "Inherited from deployment · EFACTURA_CLIENT_SECRET")

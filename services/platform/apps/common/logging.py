@@ -39,13 +39,14 @@ import time
 import traceback
 from collections import defaultdict
 from collections.abc import Callable, Generator
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, ClassVar, TypeVar
 
 from django.conf import settings
 from django.core.cache import cache
-from django.db import DatabaseError, InterfaceError, connection, reset_queries
+from django.db import DatabaseError, InterfaceError, connection, reset_queries, transaction
 from django.utils import timezone as tz
 
 # Thread-local storage for request context
@@ -71,7 +72,8 @@ def _guard_summary_setting(default: int) -> Callable[[Callable[[], int]], Callab
                 return default
             _request_context.resolving_summary_setting = True
             try:
-                return func()
+                with transaction.atomic() if transaction.get_connection().in_atomic_block else nullcontext():
+                    return func()
             except (DatabaseError, InterfaceError, RuntimeError, AssertionError):
                 # Tracing also runs where a database is unavailable or explicitly forbidden.
                 return default

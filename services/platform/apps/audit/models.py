@@ -167,7 +167,7 @@ class AuditEvent(models.Model):
         ("critical", "Critical"),
     )
 
-    ACTION_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+    ACTION_CHOICES: ClassVar[tuple[tuple[str, str | _StrPromise], ...]] = (
         # ======================================================================
         # GENERIC CRUD OPERATIONS
         # ======================================================================
@@ -449,6 +449,7 @@ class AuditEvent(models.Model):
         ("backup_created", "Backup Created"),
         ("backup_restored", "Backup Restored"),
         ("configuration_changed", "Configuration Changed"),
+        ("setting_override_cleared", _("Setting override cleared")),
         ("user_impersonation_started", "User Impersonation Started"),
         ("user_impersonation_ended", "User Impersonation Ended"),
         ("bulk_operation_started", "Bulk Operation Started"),

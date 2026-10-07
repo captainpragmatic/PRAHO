@@ -180,6 +180,14 @@ document.addEventListener("alpine:init", function () {
       busy: false,
       message: "",
       configured: configured,
+      applyCredentialState(data) {
+        this.configured = data.configured;
+        if (this.$root.dataset.deploymentFallback === "1") {
+          this.$root.dataset.inherited = data.inherited ? "1" : "0";
+          const label = this.$root.querySelector("code + p");
+          if (label) label.textContent = data.inheritance_text;
+        }
+      },
       clearCredential() {
         this.$dispatch("confirm-dangerous-action", {
           title: this.$root.dataset.clearTitle,
@@ -196,8 +204,7 @@ document.addEventListener("alpine:init", function () {
             });
             const data = await response.json();
             if (data.success) {
-              this.configured = data.configured;
-              if (data.inherited) window.location.reload();
+              this.applyCredentialState(data);
             }
           },
         });
@@ -214,11 +221,10 @@ document.addEventListener("alpine:init", function () {
         }).then((r) => r.json()).then((data) => {
           this.busy = false;
           if (data.success) {
-            this.configured = true;
+            this.applyCredentialState(data);
             this.replacing = false;
             this.secret = "";
             this.message = "";
-            if (this.$root.dataset.deploymentFallback === "1") window.location.reload();
           } else {
             this.message = data.error;
           }
