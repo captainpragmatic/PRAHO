@@ -642,7 +642,9 @@ Deploy just the Portal service (customer-facing).
 # On the machine that holds the full .env.prod: set the portal's own key and its public settings
 #   PORTAL_DJANGO_SECRET_KEY=...   (openssl rand -base64 50; must differ from DJANGO_SECRET_KEY)
 #   PLATFORM_API_BASE_URL=https://platform.praho.example.com/api
-#   PORTAL_DOMAIN, PLATFORM_DOMAIN, PORTAL_TRUSTED_PROXY_CIDRS (the proxy in front of the portal)
+#   PORTAL_DOMAIN, PLATFORM_DOMAIN
+#   PORTAL_TRUSTED_PROXY_CIDRS=10.200.250.0/24 (the stack's own network, where its Caddy or a proxy on
+#   the host reaches the portal; PRAHO_WEB_SUBNET changes it, an external load balancer adds its range)
 # then write the portal's file (mode 600; only the variables the portal stack uses)
 ./deploy/scripts/portal-env.sh --env prod          # writes .env.prod.portal
 scp -p .env.prod.portal portal-host:/opt/praho/.env.prod
@@ -683,8 +685,9 @@ stacks of Options 4 and 5 (ADR-0054).
 
 **Deploying it:**
 ```bash
-# Where the full .env.prod lives, with PORTAL_DJANGO_SECRET_KEY, PORTAL_DOMAIN, PLATFORM_DOMAIN and
-# PLATFORM_API_BASE_URL=https://<platform domain>/api set:
+# Where the full .env.prod lives, with PORTAL_DJANGO_SECRET_KEY, PORTAL_DOMAIN, PLATFORM_DOMAIN,
+# PLATFORM_API_BASE_URL=https://<platform domain>/api and PORTAL_TRUSTED_PROXY_CIDRS=10.200.250.0/24
+# (the portal stack's own network, where its Caddy runs; PRAHO_WEB_SUBNET changes it) set:
 ./deploy/scripts/portal-env.sh --env prod        # writes .env.prod.portal: only what the portal uses
 
 # Platform server: the full file (its checkout's .env.prod), then

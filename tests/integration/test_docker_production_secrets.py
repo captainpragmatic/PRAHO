@@ -189,6 +189,15 @@ class TestPortalTrustsItsProxy:
         assert portal["PORTAL_TRUSTED_PROXY_CIDRS"] == subnet
 
     @pytest.mark.integration
+    def test_portal_only_pins_its_network_so_the_proxy_range_is_known(self) -> None:
+        # Its Caddy, or a proxy on the host through the loopback port, reaches the portal over this
+        # network. A pinned subnet gives PORTAL_TRUSTED_PROXY_CIDRS a value the operator can write down
+        # before the first start; Docker's own pick is only known afterwards.
+        config = yaml.safe_load((DEPLOY / "docker-compose.portal-only.yml").read_text())
+        subnet = config["networks"]["default"]["ipam"]["config"][0]["subnet"]
+        assert subnet == f"${{PRAHO_WEB_SUBNET:-{self.WEB_SUBNET}}}"
+
+    @pytest.mark.integration
     @pytest.mark.parametrize("name", ["portal-only", "container-service"])
     def test_an_external_proxy_must_be_named(self, name: str) -> None:
         portal = _environment(_services(name)["portal"])

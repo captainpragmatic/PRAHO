@@ -96,6 +96,15 @@ services:
     profiles:
       - with-caddy
 
+networks:
+  default:
+    # A known subnet, so PORTAL_TRUSTED_PROXY_CIDRS can name the proxy before the first start: this
+    # stack's Caddy, or a proxy on the host through the loopback port, reaches the portal from inside it.
+    # Override PRAHO_WEB_SUBNET if it collides with a network on the host.
+    ipam:
+      config:
+        - subnet: ${PRAHO_WEB_SUBNET:-10.200.250.0/24}
+
 volumes:
   portal_static:
   portal_logs:
