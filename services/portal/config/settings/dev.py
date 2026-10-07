@@ -9,6 +9,8 @@ from pathlib import Path
 
 from dotenv import dotenv_values, load_dotenv
 
+from config.dotenv_path import repo_dotenv_path
+
 
 def _strip_comment_polluted_env(env_path: Path) -> list[str]:
     """Unset any dotenv-loaded var whose value is actually a leaked inline comment (#364).
@@ -36,8 +38,9 @@ def _strip_comment_polluted_env(env_path: Path) -> list[str]:
 
 # Dev-only: load project-root .env. Prod/staging must set env vars
 # via deployment platform (Docker, systemd, secrets manager).
-_env_path = Path(__file__).resolve().parents[4] / ".env"
-if _env_path.exists() and not os.environ.get("PRAHO_SKIP_DOTENV"):
+# Checked first, and only a real path is loaded: load_dotenv(None) would go looking for a file itself.
+_env_path = None if os.environ.get("PRAHO_SKIP_DOTENV") else repo_dotenv_path(Path(__file__))
+if _env_path is not None:
     load_dotenv(_env_path)
     _polluted = _strip_comment_polluted_env(_env_path)
     if _polluted:
@@ -148,7 +151,8 @@ else:
     RATE_LIMITING_ENABLED = os.environ.get("RATE_LIMITING_ENABLED", "true").lower() in ("1", "true", "yes")
 
 # Development platform API URL
-PLATFORM_API_BASE_URL = "http://localhost:8700/api"
+# The Docker dev stack reaches the platform by service name, so the environment wins.
+PLATFORM_API_BASE_URL = os.environ.get("PLATFORM_API_BASE_URL", "http://localhost:8700/api")
 PLATFORM_API_SECRET = "dev-shared-secret-change-in-production"
 PLATFORM_API_TIMEOUT = 10  # seconds
 PLATFORM_TO_PORTAL_WEBHOOK_SECRET = "test-webhook-secret-do-not-use-in-prod"
