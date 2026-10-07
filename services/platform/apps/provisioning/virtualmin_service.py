@@ -326,6 +326,7 @@ class VirtualminProvisioningService:
 
             # Mark job as started
             job.mark_started()
+            self._apply_default_quotas(account)
 
             # ===============================================================================
             # PHASE 1: PRE-FLIGHT VALIDATION 🚀 (Quick Win)
@@ -355,12 +356,13 @@ class VirtualminProvisioningService:
                 "comment": account.get_recovery_seed(),  # Store recovery seed
             }
 
-            # Add quota limits if specified
-            if account.disk_quota_mb:
-                params["quota"] = str(account.disk_quota_mb)
+            # Virtualmin expects disk quotas in KiB and bandwidth in bytes.
+            # Zero and the account's -1 bandwidth sentinel mean unlimited.
+            if account.disk_quota_mb is not None:
+                params["quota"] = str(account.disk_quota_mb * 1024)
 
-            if account.bandwidth_quota_mb:
-                params["bw-limit"] = str(account.bandwidth_quota_mb)
+            if account.bandwidth_quota_mb is not None:
+                params["bandwidth"] = str(max(0, account.bandwidth_quota_mb) * 1024 * 1024)
 
             # Make API call
             result = gateway.call("create-domain", params, correlation_id=job.correlation_id)
@@ -439,6 +441,24 @@ class VirtualminProvisioningService:
             job.mark_failed(str(e))
             return Err(str(e))
 
+    def _apply_default_quotas(self, account: VirtualminAccount) -> None:
+        """Pin stored defaults; absent rows preserve Virtualmin's existing limits."""
+        from apps.settings.services import SettingsService  # noqa: PLC0415  # Cross-app: avoids circular imports
+
+        fields: list[str] = []
+        if account.disk_quota_mb is None:
+            disk_default = SettingsService.get_stored_setting("virtualmin.domain_quota_default_mb")
+            if isinstance(disk_default, int) and not isinstance(disk_default, bool):
+                account.disk_quota_mb = disk_default
+                fields.append("disk_quota_mb")
+        if account.bandwidth_quota_mb is None:
+            bandwidth_default = SettingsService.get_stored_setting("virtualmin.bandwidth_quota_default_mb")
+            if isinstance(bandwidth_default, int) and not isinstance(bandwidth_default, bool):
+                account.bandwidth_quota_mb = bandwidth_default
+                fields.append("bandwidth_quota_mb")
+        if fields:
+            account.save(update_fields=[*fields, "updated_at"])
+
     def _check_server_capacity(self, account: VirtualminAccount, health_result: Result[Any, str]) -> Result[None, str]:
         """Check server capacity and disk space"""
         # Check server capacity
@@ -450,7 +470,9 @@ class VirtualminProvisioningService:
         # Check disk space if quota specified
         if account.disk_quota_mb and health_result.is_ok():
             server_info = health_result.unwrap()
-            available_mb = server_info.get("available_disk_mb", 0)
+            # test_connection() wraps the info response under "data".
+            server_data = server_info.get("data", server_info)
+            available_mb = server_data.get("available_disk_mb", 0)
             if available_mb < account.disk_quota_mb:
                 return Err(f"Insufficient disk space: {available_mb}MB available, {account.disk_quota_mb}MB requested")
 
