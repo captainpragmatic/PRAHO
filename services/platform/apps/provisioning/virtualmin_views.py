@@ -59,19 +59,15 @@ def _get_user_email(user: User | AnonymousUser) -> str:
     return user.email
 
 
-# Health check constants
+# Health check defaults
 HEALTH_CHECK_STALE_SECONDS = 3600  # 1 hour in seconds
 _DEFAULT_BULK_OPERATION_THRESHOLD = 10
-BULK_OPERATION_THRESHOLD = _DEFAULT_BULK_OPERATION_THRESHOLD
 MIN_DOMAIN_LENGTH = 3
 _DEFAULT_MAX_CONCURRENT_HEALTH_CHECKS = 10
-MAX_CONCURRENT_HEALTH_CHECKS = _DEFAULT_MAX_CONCURRENT_HEALTH_CHECKS
 _DEFAULT_HEALTH_CHECK_TIMEOUT_SECONDS = 30
 HEALTH_CHECK_TIMEOUT_SECONDS = _DEFAULT_HEALTH_CHECK_TIMEOUT_SECONDS
 _DEFAULT_OVERALL_HEALTH_CHECK_TIMEOUT = 300
-OVERALL_HEALTH_CHECK_TIMEOUT = _DEFAULT_OVERALL_HEALTH_CHECK_TIMEOUT
 _DEFAULT_MAX_ERROR_DISPLAY = 3
-MAX_ERROR_DISPLAY = _DEFAULT_MAX_ERROR_DISPLAY
 
 
 def get_bulk_operation_threshold() -> int:
@@ -1211,10 +1207,14 @@ class BulkOperationResult:
 def _handle_backup_action_result(request: HttpRequest, result: BulkOperationResult) -> None:
     """Handle backup action result and add appropriate messages."""
     if result.rollback_performed:
+        max_error_display = get_max_error_display()
         messages.error(
             request,
-            f"Backup operation failed and was rolled back. "
-            f"Errors: {'; '.join(result.errors[:MAX_ERROR_DISPLAY])}{'...' if len(result.errors) > MAX_ERROR_DISPLAY else ''}",
+            _("Backup operation failed and was rolled back. Errors: %(errors)s%(omission)s")
+            % {
+                "errors": "; ".join(result.errors[:max_error_display]),
+                "omission": "..." if len(result.errors) > max_error_display else "",
+            },
         )
     else:
         messages.success(
@@ -1442,6 +1442,7 @@ def _execute_bulk_suspend(accounts: list[VirtualminAccount]) -> BulkOperationRes
     start_time = time.perf_counter()
     errors = []
     eligible_accounts = []
+    bulk_operation_threshold = get_bulk_operation_threshold()
 
     # Pre-filter eligible accounts for suspension
     for account in accounts:
@@ -1459,12 +1460,12 @@ def _execute_bulk_suspend(accounts: list[VirtualminAccount]) -> BulkOperationRes
         successful_accounts = []
 
         # Use bulk update for better performance when possible
-        if len(eligible_accounts) > BULK_OPERATION_THRESHOLD:  # Use bulk operations for larger datasets
+        if len(eligible_accounts) > bulk_operation_threshold:
             try:
                 # Bulk update status
                 account_ids = [acc.id for acc in eligible_accounts]
                 updated_count = VirtualminAccount.objects.filter(id__in=account_ids, status="active").update(
-                    status="suspended", last_modified=timezone.now()
+                    status="suspended", updated_at=timezone.now()
                 )
 
                 successful_accounts = eligible_accounts[:updated_count]
@@ -1479,7 +1480,7 @@ def _execute_bulk_suspend(accounts: list[VirtualminAccount]) -> BulkOperationRes
                 for account in eligible_accounts:
                     try:
                         account.status = "suspended"
-                        account.save(update_fields=["status", "last_modified"])
+                        account.save(update_fields=["status", "updated_at"])
                         successful_accounts.append(account)
 
                     except Exception as individual_error:
@@ -1491,7 +1492,7 @@ def _execute_bulk_suspend(accounts: list[VirtualminAccount]) -> BulkOperationRes
             for account in eligible_accounts:
                 try:
                     account.status = "suspended"
-                    account.save(update_fields=["status", "last_modified"])
+                    account.save(update_fields=["status", "updated_at"])
                     successful_accounts.append(account)
 
                 except Exception as e:
@@ -1563,6 +1564,7 @@ def _execute_bulk_activate(accounts: list[VirtualminAccount]) -> BulkOperationRe
     start_time = time.perf_counter()
     errors = []
     eligible_accounts = []
+    bulk_operation_threshold = get_bulk_operation_threshold()
 
     # Pre-filter eligible accounts for activation
     for account in accounts:
@@ -1577,11 +1579,11 @@ def _execute_bulk_activate(accounts: list[VirtualminAccount]) -> BulkOperationRe
         successful_accounts = []
 
         # Use bulk update for better performance
-        if len(eligible_accounts) > BULK_OPERATION_THRESHOLD:
+        if len(eligible_accounts) > bulk_operation_threshold:
             try:
                 account_ids = [acc.id for acc in eligible_accounts]
                 updated_count = VirtualminAccount.objects.filter(id__in=account_ids, status="suspended").update(
-                    status="active", last_modified=timezone.now()
+                    status="active", updated_at=timezone.now()
                 )
 
                 successful_accounts = eligible_accounts[:updated_count]
@@ -1593,7 +1595,7 @@ def _execute_bulk_activate(accounts: list[VirtualminAccount]) -> BulkOperationRe
                 for account in eligible_accounts:
                     try:
                         account.status = "active"
-                        account.save(update_fields=["status", "last_modified"])
+                        account.save(update_fields=["status", "updated_at"])
                         successful_accounts.append(account)
 
                     except Exception as individual_error:
@@ -1605,7 +1607,7 @@ def _execute_bulk_activate(accounts: list[VirtualminAccount]) -> BulkOperationRe
             for account in eligible_accounts:
                 try:
                     account.status = "active"
-                    account.save(update_fields=["status", "last_modified"])
+                    account.save(update_fields=["status", "updated_at"])
                     successful_accounts.append(account)
 
                 except Exception as e:
@@ -1751,8 +1753,21 @@ def _execute_bulk_health_check(accounts: list[VirtualminAccount]) -> BulkOperati
     logger.info(f"🏥 [Bulk Health Check] Starting health checks for {len(accounts)} accounts")
 
     try:
-        # Use thread pool for parallel health checks (with reasonable concurrency limit)
-        max_workers = min(MAX_CONCURRENT_HEALTH_CHECKS, len(accounts))  # Limit concurrent checks to prevent overload
+        if not accounts:
+            return BulkOperationResult(
+                total_processed=0,
+                successful_count=0,
+                failed_count=0,
+                errors=[],
+                processing_time_seconds=time.perf_counter() - start_time,
+            )
+
+        # Snapshot the batch limits before dispatch; invalid legacy worker rows use the enforced default.
+        worker_limit = get_max_concurrent_health_checks()
+        if worker_limit < 1:
+            worker_limit = _DEFAULT_MAX_CONCURRENT_HEALTH_CHECKS
+        max_workers = min(worker_limit, len(accounts))
+        overall_timeout = get_overall_health_check_timeout()
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             # Submit all health check tasks
@@ -1760,8 +1775,8 @@ def _execute_bulk_health_check(accounts: list[VirtualminAccount]) -> BulkOperati
                 executor.submit(_perform_single_health_check, account): account for account in accounts
             }
 
-            # Process completed checks
-            for future in as_completed(future_to_account, timeout=OVERALL_HEALTH_CHECK_TIMEOUT):  # Overall timeout
+            # Limit result collection; executor shutdown still waits for running checks.
+            for future in as_completed(future_to_account, timeout=overall_timeout):
                 try:
                     account, success, error_msg = future.result(
                         timeout=HEALTH_CHECK_TIMEOUT_SECONDS

@@ -53,10 +53,9 @@ from .virtualmin_migration_models import account_has_active_migration
 
 logger = logging.getLogger(__name__)
 
-# Username generation constants
+# Username generation defaults
 MIN_USERNAME_LENGTH = 3
 _DEFAULT_MAX_USERNAME_UNIQUENESS_ATTEMPTS = 1000
-MAX_USERNAME_UNIQUENESS_ATTEMPTS = _DEFAULT_MAX_USERNAME_UNIQUENESS_ATTEMPTS
 
 
 def _clear_idempotency_key(idempotency_key: str | None, *, operation: str, domain: str) -> None:
@@ -1315,7 +1314,8 @@ class VirtualminProvisioningService:
         # Truncate to maximum length
         username = username[:32]
 
-        # Ensure uniqueness by checking existing accounts
+        # Resolve once for the collision loop, preserving the counter and UUID fallback boundary.
+        max_attempts = get_max_username_uniqueness_attempts()
         original_username = username
         counter = 1
 
@@ -1324,7 +1324,7 @@ class VirtualminProvisioningService:
             counter += 1
 
             # Prevent infinite loop
-            if counter > MAX_USERNAME_UNIQUENESS_ATTEMPTS:
+            if counter > max_attempts:
                 username = f"user_{uuid.uuid4().hex[:8]}"
                 break
 
