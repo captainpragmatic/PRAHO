@@ -41,7 +41,7 @@ python manage.py test tests.users.test_2fa_models tests.users.test_2fa_services
 
 2. **Create .env File**
    ```bash
-   cp .env.example .env
+   cp .env.example.dev .env
    ```
 
 3. **Generate and Set Encryption Key**

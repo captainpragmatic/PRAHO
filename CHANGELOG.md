@@ -16,8 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `max-age=3600` on staging, which the Docker Ansible role derives from `praho_env`. Caddy's own
   502s now carry it too. Where no edge fronts the portal, its `SECURE_HSTS_*` settings now take
   effect; a hardcoded header in its middleware had blocked them. Nothing preloads by default.
-  **Upgrading a Docker Compose staging deployment:** add `HSTS_POLICY=max-age=3600` to its `.env`, or
-  it keeps the one-year production default. Native staging deploys fall back to one hour on their own.
+  **Upgrading a Docker Compose staging deployment:** add `HSTS_POLICY=max-age=3600` to its
+  `.env.staging`, or it keeps the one-year production default. Native staging deploys fall back to one hour on their own.
 - Staff with two-factor authentication enrolled are now asked for their code at the web
   login. The password alone used to sign them in, because the step that hands a login over
   to the code page was never wired (#590). The code page now uses the same check as the API
@@ -57,6 +57,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Docker deploy scripts now use the operator's env file. The Compose files live in `deploy/`, so
+  Compose looked for `deploy/.env`, which no step creates, and every required variable failed before
+  a container started. `deploy.sh`, `rollback.sh`, `restore.sh` and the `make deploy-*`, `rollback`
+  and `restore` targets now pass `.env.prod`, or `.env.staging` with `--env staging`
+  (`DEPLOY_ENV=staging` for make), to every Compose call, and the platform receives the whole file.
+  They refuse the development `.env`, a settings module the images do not run, and a production
+  platform deployment without the encryption keys (a portal-only host never needs them). A developer's exported `DJANGO_SETTINGS_MODULE` no longer overrides the
+  file. The single-server stack's own database and proxy settings no longer come from that file,
+  which describes a native host, and neither do the platform-only bundled database's. Health is read
+  from the containers (`up --wait`), not from host ports the stacks never published. A rollback pins
+  its tag for that run, pulls only the application images, and no longer edits a file Compose never
+  read. `make deploy-stop` and `make deploy-logs` act on one deployment, `DEPLOY_TYPE=single-server`
+  by default.
 - The Ansible Docker role (`make deploy-dev`, `playbooks/two-servers.yml`) can deploy. Its templates
   needed variables nothing defined, so it could not even render. It now declares the secrets and
   domains operators must supply per topology (`praho_required_inputs`) and stops first, naming any that
@@ -72,12 +85,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     so its scripts pointed at an interpreter that wasn't there. It is now built where it runs.
   - Pages using shared components failed: `shared/ui` was not in the images. It is now copied in.
   - The platform received neither `DJANGO_ENCRYPTION_KEY` nor `CREDENTIAL_VAULT_MASTER_KEY`, which
-    production requires; the Compose files now require both (and `container-service` the two domains).
+    production requires; the Compose files now pass both, and the deploy script refuses a production
+    env file without them (`container-service` also requires the two domains).
   - It could not reach the bundled database: production defaults to `sslmode=require`, which that
     Postgres doesn't offer. `DB_SSLMODE` is now passed, `disable` for the bundled database and
     `require` for an external one.
   - The portal refused to start without trusted proxy CIDRs. Single-server pins the `web` network's
-    subnet and trusts it by default; portal-only and container-service require the value.
+    subnet and trusts it; portal-only and container-service require the value.
   A first boot also outlasted the platform healthcheck, so the portal never started; the start period
   now covers it. The native path gets the keys too: `.env.example.prod` lists them, and the production
   preflight requires them.

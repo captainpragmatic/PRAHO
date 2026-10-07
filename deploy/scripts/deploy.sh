@@ -9,12 +9,21 @@
 #   ./deploy.sh platform-only          # Deploy platform only
 #   ./deploy.sh portal-only            # Deploy portal only
 #   ./deploy.sh container-service      # Deploy for managed container platforms
+#
+# Every Compose call reads the operator's env file: .env.prod by default, .env.staging with
+# --env staging, or any path with --env-file (see lib/compose.sh).
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_DIR="$(dirname "$SCRIPT_DIR")"
 PROJECT_ROOT="$(dirname "$DEPLOY_DIR")"
+# shellcheck source=SCRIPTDIR/lib/compose.sh
+source "${SCRIPT_DIR}/lib/compose.sh"
+
+# Outlasts the platform healthcheck's 600s start period (a first boot migrates a fresh database)
+# plus its failed-check retries.
+WAIT_TIMEOUT=900
 
 # Colors
 RED='\033[0;31m'
@@ -31,7 +40,7 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 usage() {
     echo "PRAHO Deployment Script"
     echo ""
-    echo "Usage: $0 <deployment-type> [options]"
+    echo "Usage: $0 <deployment-type> [--env prod|staging | --env-file PATH] [options]"
     echo ""
     echo "Deployment Types:"
     echo "  single-server      Deploy all services (Platform + Portal + DB + Caddy)"
@@ -39,17 +48,29 @@ usage() {
     echo "  portal-only        Deploy Portal service only"
     echo "  container-service  Deploy for DigitalOcean/AWS container services"
     echo ""
+    echo "Env file (never the repo-root .env, which is the development file):"
+    echo "  --env prod         Read .env.prod (the default)"
+    echo "  --env staging      Read .env.staging"
+    echo "  --env-file PATH    Read PATH"
+    echo ""
     echo "Options:"
     echo "  --build            Force rebuild images"
-    echo "  --no-cache         Build without Docker cache"
+    echo "  --no-cache         Rebuild images without Docker cache"
     echo "  --migrate          Run database migrations"
+    echo "  --with-db          platform-only: also run the bundled PostgreSQL"
+    echo "  --with-caddy       platform-only, portal-only: also run Caddy"
+    echo "  --full             platform-only: --with-db and --with-caddy"
+    echo "  --stop             Stop this deployment's services"
+    echo "  --logs             Follow this deployment's logs"
     echo "  --help             Show this help"
     echo ""
     echo "Examples:"
+    echo "  cp .env.example.prod .env.prod   # then fill it in"
     echo "  $0 single-server --build --migrate"
-    echo "  $0 platform-only --build"
-    echo "  $0 portal-only"
-    exit 1
+    echo "  $0 single-server --env staging --build"
+    echo "  $0 platform-only --with-db --build"
+    echo "  $0 single-server --stop"
+    exit "${1:-1}"
 }
 
 check_requirements() {
@@ -60,46 +81,36 @@ check_requirements() {
         exit 1
     fi
 
+    # `up --wait` needs Compose v2.
     if ! docker compose version &> /dev/null; then
-        log_error "Docker Compose is not available"
+        log_error "Docker Compose v2 is not available"
         exit 1
     fi
+}
 
-    if [ ! -f "${PROJECT_ROOT}/.env" ]; then
-        log_warn ".env file not found. Creating from .env.example..."
-        if [ -f "${PROJECT_ROOT}/.env.example" ]; then
-            cp "${PROJECT_ROOT}/.env.example" "${PROJECT_ROOT}/.env"
-            log_warn "Please edit .env with your configuration"
-        else
-            log_error ".env.example not found"
-            exit 1
-        fi
+# compose_up TYPE [--profile NAME ...]: start TYPE and wait until every service with a healthcheck
+# reports healthy and the rest (Caddy) are running.
+compose_up() {
+    local type="$1"
+    shift
+    local up=(up -d --wait --wait-timeout "$WAIT_TIMEOUT")
+    if [ "$NO_CACHE" = true ]; then
+        praho_compose "$type" "$@" build --no-cache
+    elif [ "$BUILD" = true ]; then
+        up+=(--build)
+    fi
+
+    log_info "Starting services and waiting for them to be healthy..."
+    if ! praho_compose "$type" "$@" "${up[@]}"; then
+        log_error "Services did not become healthy. Inspect: $0 $type --logs (or docker logs <container>)"
+        praho_compose "$type" "$@" ps || true
+        exit 1
     fi
 }
 
 deploy_single_server() {
-    local BUILD_FLAG=""
-    local CACHE_FLAG=""
-    local MIGRATE=false
-
-    while [[ $# -gt 0 ]]; do
-        case $1 in
-            --build) BUILD_FLAG="--build"; shift ;;
-            --no-cache) CACHE_FLAG="--no-cache"; shift ;;
-            --migrate) MIGRATE=true; shift ;;
-            *) shift ;;
-        esac
-    done
-
     log_info "Deploying PRAHO - Single Server (all services)"
-
-    cd "$PROJECT_ROOT"
-
-    log_info "Starting services..."
-    docker compose -f deploy/docker-compose.single-server.yml up -d $BUILD_FLAG $CACHE_FLAG
-
-    log_info "Waiting for services to be healthy..."
-    sleep 30
+    compose_up single-server
 
     if [ "$MIGRATE" = true ]; then
         log_info "Running database migrations..."
@@ -112,150 +123,120 @@ deploy_single_server() {
     log_info "Running initial data setup..."
     docker exec praho_platform python manage.py setup_initial_data || log_warn "setup_initial_data failed"
 
-    verify_deployment "single-server"
+    verify_deployment single-server
 }
 
 deploy_platform_only() {
-    local BUILD_FLAG=""
-    local PROFILE=""
-
-    while [[ $# -gt 0 ]]; do
-        case $1 in
-            --build) BUILD_FLAG="--build"; shift ;;
-            --with-db) PROFILE="--profile with-db"; shift ;;
-            --with-caddy) PROFILE="--profile with-caddy"; shift ;;
-            --full) PROFILE="--profile full"; shift ;;
-            *) shift ;;
-        esac
-    done
-
     log_info "Deploying PRAHO - Platform Only"
-
-    cd "$PROJECT_ROOT"
-    docker compose -f deploy/docker-compose.platform-only.yml $PROFILE up -d $BUILD_FLAG
-
-    log_info "Waiting for platform..."
-    sleep 20
-
-    verify_deployment "platform-only"
+    # The bundled PostgreSQL is `db` and speaks no TLS. The env file is shared with native deploys
+    # (DB_HOST=localhost, DB_SSLMODE=require), and a shell variable beats it in Compose's
+    # substitution. An external database keeps the file's settings.
+    if [ "$BUNDLED_DB" = true ]; then
+        log_info "Bundled database: DB_HOST=db, DB_SSLMODE=disable"
+        export DB_HOST=db DB_SSLMODE=disable
+    fi
+    compose_up platform-only ${PROFILES[@]+"${PROFILES[@]}"}
+    verify_deployment platform-only ${PROFILES[@]+"${PROFILES[@]}"}
 }
 
 deploy_portal_only() {
-    local BUILD_FLAG=""
-
-    while [[ $# -gt 0 ]]; do
-        case $1 in
-            --build) BUILD_FLAG="--build"; shift ;;
-            --with-caddy) PROFILE="--profile with-caddy"; shift ;;
-            *) shift ;;
-        esac
-    done
-
     log_info "Deploying PRAHO - Portal Only"
-
-    if [ -z "${PLATFORM_API_BASE_URL:-}" ]; then
-        log_error "PLATFORM_API_BASE_URL must be set for portal-only deployment"
-        exit 1
-    fi
-
-    cd "$PROJECT_ROOT"
-    docker compose -f deploy/docker-compose.portal-only.yml up -d $BUILD_FLAG
-
-    log_info "Waiting for portal..."
-    sleep 15
-
-    verify_deployment "portal-only"
+    # PLATFORM_API_BASE_URL comes from the env file; Compose refuses to start without it.
+    compose_up portal-only ${PROFILES[@]+"${PROFILES[@]}"}
+    verify_deployment portal-only ${PROFILES[@]+"${PROFILES[@]}"}
 }
 
 deploy_container_service() {
-    local BUILD_FLAG=""
-
-    while [[ $# -gt 0 ]]; do
-        case $1 in
-            --build) BUILD_FLAG="--build"; shift ;;
-            *) shift ;;
-        esac
-    done
-
     log_info "Building images for container service deployment..."
-
-    cd "$PROJECT_ROOT"
-
-    # Build images
-    docker compose -f deploy/docker-compose.container-service.yml build
+    if [ "$NO_CACHE" = true ]; then
+        praho_compose container-service build --no-cache
+    else
+        praho_compose container-service build
+    fi
 
     log_success "Images built. Push to registry with:"
     echo "  docker push \${REGISTRY}praho-platform:\${VERSION}"
     echo "  docker push \${REGISTRY}praho-portal:\${VERSION}"
 }
 
+# Health was already proven by `up --wait`; show what is running.
 verify_deployment() {
-    local TYPE=$1
-    log_info "Verifying deployment..."
-
-    case $TYPE in
-        single-server)
-            if curl -sf http://localhost:8700/api/users/health/ > /dev/null; then
-                log_success "Platform is healthy"
-            else
-                log_warn "Platform health check failed"
-            fi
-            if curl -sf http://localhost:8701/status/ > /dev/null; then
-                log_success "Portal is healthy"
-            else
-                log_warn "Portal health check failed"
-            fi
-            ;;
-        platform-only)
-            if curl -sf http://localhost:8700/api/users/health/ > /dev/null; then
-                log_success "Platform is healthy"
-            else
-                log_warn "Platform health check failed"
-            fi
-            ;;
-        portal-only)
-            if curl -sf http://localhost:8701/status/ > /dev/null; then
-                log_success "Portal is healthy"
-            else
-                log_warn "Portal health check failed"
-            fi
-            ;;
-    esac
-
-    log_success "Deployment complete!"
+    local type="$1"
+    shift
+    log_success "Deployment complete! Every service is running, and those with a healthcheck report healthy."
     echo ""
     echo "Services:"
-    docker compose -f deploy/docker-compose.${TYPE}.yml ps 2>/dev/null || docker ps --filter "name=praho"
+    praho_compose "$type" "$@" ps
 }
 
 # Main
 if [ $# -eq 0 ]; then
     usage
 fi
+for arg in "$@"; do
+    case "$arg" in
+        --help | -h) usage 0 ;;
+    esac
+done
 
 DEPLOYMENT_TYPE="$1"
 shift
-
-check_requirements
-
-case $DEPLOYMENT_TYPE in
-    single-server)
-        deploy_single_server "$@"
-        ;;
-    platform-only)
-        deploy_platform_only "$@"
-        ;;
-    portal-only)
-        deploy_portal_only "$@"
-        ;;
-    container-service)
-        deploy_container_service "$@"
-        ;;
-    --help|-h)
-        usage
-        ;;
+case "$DEPLOYMENT_TYPE" in
+    single-server | platform-only | portal-only | container-service) ;;
     *)
         log_error "Unknown deployment type: $DEPLOYMENT_TYPE"
         usage
         ;;
+esac
+
+praho_parse_env_args "$@"
+BUILD=false
+NO_CACHE=false
+MIGRATE=false
+BUNDLED_DB=false
+ACTION=deploy
+PROFILES=()
+for arg in ${PRAHO_ARGS[@]+"${PRAHO_ARGS[@]}"}; do
+    case "$arg" in
+        --build) BUILD=true ;;
+        --no-cache) NO_CACHE=true ;;
+        --migrate) MIGRATE=true ;;
+        --with-db) PROFILES+=(--profile with-db); BUNDLED_DB=true ;;
+        --with-caddy) PROFILES+=(--profile with-caddy) ;;
+        --full) PROFILES+=(--profile full); BUNDLED_DB=true ;;
+        --stop) ACTION=stop ;;
+        --logs) ACTION=logs ;;
+        *)
+            log_error "Unknown option: $arg"
+            usage
+            ;;
+    esac
+done
+
+check_requirements
+praho_load_env
+log_info "Env file: ${PRAHO_ENV_FILE} (${PRAHO_SETTINGS_MODULE})"
+
+case "$ACTION" in
+    stop)
+        praho_compose "$DEPLOYMENT_TYPE" ${PROFILES[@]+"${PROFILES[@]}"} down
+        exit 0
+        ;;
+    logs)
+        praho_compose "$DEPLOYMENT_TYPE" ${PROFILES[@]+"${PROFILES[@]}"} logs -f
+        exit 0
+        ;;
+esac
+
+# Only the stacks that run the platform need its keys: a portal-only host must not hold them, and
+# container-service only builds images.
+case "$DEPLOYMENT_TYPE" in
+    single-server | platform-only) praho_require_production_keys ;;
+esac
+
+case "$DEPLOYMENT_TYPE" in
+    single-server) deploy_single_server ;;
+    platform-only) deploy_platform_only ;;
+    portal-only) deploy_portal_only ;;
+    container-service) deploy_container_service ;;
 esac

@@ -8,6 +8,8 @@
 #   ./restore.sh                           # Interactive - choose from list
 #   ./restore.sh <backup_file>             # Restore specific file
 #   ./restore.sh --latest                  # Restore latest backup
+#
+# Add --env staging or --env-file PATH to use an env file other than .env.prod (see lib/compose.sh).
 
 set -euo pipefail
 
@@ -15,6 +17,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_DIR="$(dirname "$SCRIPT_DIR")"
 PROJECT_ROOT="$(dirname "$DEPLOY_DIR")"
 BACKUP_DIR="${BACKUP_DIR:-${PROJECT_ROOT}/backups}"
+# shellcheck source=SCRIPTDIR/lib/compose.sh
+source "${SCRIPT_DIR}/lib/compose.sh"
+# Outlasts the platform healthcheck's 600s start period plus its failed-check retries.
+WAIT_TIMEOUT=900
 
 # Colors
 GREEN='\033[0;32m'
@@ -26,6 +32,22 @@ log_info() { echo -e "[INFO] $1"; }
 log_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+
+# The stacks publish no application ports, so health comes from each container's healthcheck.
+wait_healthy() {
+    local name status deadline=$((SECONDS + WAIT_TIMEOUT))
+    for name in "$@"; do
+        while true; do
+            status="$(docker inspect --format '{{.State.Health.Status}}' "$name" 2>/dev/null || echo missing)"
+            [ "$status" = healthy ] && break
+            if [ "$status" = unhealthy ] || [ "$SECONDS" -ge "$deadline" ]; then
+                log_warn "${name} is ${status}. Inspect: docker logs ${name}"
+                return 1
+            fi
+            sleep 5
+        done
+    done
+}
 
 get_latest_backup() {
     ls -t "${BACKUP_DIR}"/praho_backup_*.sql.gz 2>/dev/null | head -n1
@@ -99,20 +121,25 @@ restore_backup() {
     gunzip -c "${BACKUP_FILE}" | docker exec -i praho_db psql -U praho praho
 
     # Restart services
-    log_info "Starting services..."
+    log_info "Starting services and waiting for health..."
     docker start praho_platform praho_portal 2>/dev/null || \
-        docker compose -f deploy/docker-compose.single-server.yml up -d
+        praho_compose single-server up -d --wait --wait-timeout "$WAIT_TIMEOUT" || true
 
-    log_info "Waiting for services..."
-    sleep 15
-
-    # Verify
-    if curl -sf http://localhost:8700/api/users/health/ > /dev/null; then
+    if wait_healthy praho_platform praho_portal; then
         log_success "Restore completed successfully!"
     else
-        log_warn "Services may not be fully healthy. Check with: docker compose logs"
+        # The data is restored, but the services did not come back; callers (rollback.sh) must know.
+        log_error "The database was restored, but the services did not become healthy."
+        exit 1
     fi
 }
+
+praho_parse_env_args "$@"
+set -- ${PRAHO_ARGS[@]+"${PRAHO_ARGS[@]}"}
+# Resolve and check the env file before anything is dropped: the restart may need it, and a
+# production file without its keys could not start the platform again.
+praho_load_env
+praho_require_production_keys
 
 case "${1:-}" in
     --latest)
