@@ -17,6 +17,7 @@ from typing import Any
 
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
+from django.utils.translation import gettext as _
 
 from apps.audit.compliance import (
     ComplianceFramework,
@@ -221,14 +222,25 @@ class Command(BaseCommand):
         self.stdout.write(f"Report exported to: {filepath}")
 
         if report.violations:
+            max_violations_displayed = get_max_violations_displayed()
             self.stdout.write("")
-            self.stdout.write(self.style.WARNING("VIOLATIONS:"))
-            for v in report.violations[:MAX_VIOLATIONS_DISPLAYED]:  # Show first 10
+            self.stdout.write(self.style.WARNING(_("VIOLATIONS:")))
+            for v in report.violations[:max_violations_displayed]:
                 severity_style = self._get_severity_style(v.severity)
-                self.stdout.write(f"  [{severity_style}] {v.framework} {v.control_id}: {v.description}")
+                self.stdout.write(
+                    _("  [%(severity)s] %(framework)s %(control)s: %(description)s")
+                    % {
+                        "severity": severity_style,
+                        "framework": v.framework,
+                        "control": v.control_id,
+                        "description": v.description,
+                    }
+                )
 
-            if len(report.violations) > MAX_VIOLATIONS_DISPLAYED:
-                self.stdout.write(f"  ... and {len(report.violations) - MAX_VIOLATIONS_DISPLAYED} more")
+            if len(report.violations) > max_violations_displayed:
+                self.stdout.write(
+                    _("  ... and %(count)s more") % {"count": len(report.violations) - max_violations_displayed}
+                )
 
     def handle_verify_integrity(self, options: dict[str, Any]) -> None:
         """Verify audit event integrity via the real verifier; non-zero exit on failure."""

@@ -31,11 +31,10 @@ class IntegrityAlertNotificationTests(TestCase):
 
     @patch("apps.notifications.services.NotificationService")
     @patch("apps.settings.services.SettingsService")
-    def test_integrity_alert_sends_notification(
-        self, mock_settings_cls: MagicMock, mock_notif_cls: MagicMock
-    ) -> None:
+    def test_integrity_alert_sends_notification(self, mock_settings_cls: MagicMock, mock_notif_cls: MagicMock) -> None:
         """Critical integrity alert should send email notification to admins."""
         mock_settings_cls.get_boolean_setting.return_value = True
+        mock_settings_cls.get_integer_setting.return_value = 5  # audit.max_files_displayed
 
         results = self._make_compromised_results()
         _send_integrity_escalation_alert(results)
@@ -55,6 +54,7 @@ class IntegrityAlertNotificationTests(TestCase):
     ) -> None:
         """When setting is disabled, notification should not be sent."""
         mock_settings_cls.get_boolean_setting.return_value = False
+        mock_settings_cls.get_integer_setting.return_value = 5  # audit.max_files_displayed
 
         results = self._make_compromised_results()
         _send_integrity_escalation_alert(results)
@@ -70,6 +70,7 @@ class IntegrityAlertNotificationTests(TestCase):
     ) -> None:
         """If notification sending fails, the AuditAlert should still exist."""
         mock_settings_cls.get_boolean_setting.return_value = True
+        mock_settings_cls.get_integer_setting.return_value = 5  # audit.max_files_displayed
         mock_notif_cls.send_admin_alert.side_effect = Exception("SMTP connection failed")
 
         results = self._make_compromised_results()
@@ -107,6 +108,7 @@ class FileIntegrityAlertNotificationTests(TestCase):
     ) -> None:
         """File integrity changes should trigger a warning notification."""
         mock_settings_cls.get_boolean_setting.return_value = True
+        mock_settings_cls.get_integer_setting.return_value = 5  # audit.max_files_displayed
 
         results = self._make_file_change_results()
         _create_file_integrity_alert(results)
@@ -124,6 +126,7 @@ class FileIntegrityAlertNotificationTests(TestCase):
     ) -> None:
         """When file integrity notifications are disabled, no email should be sent."""
         mock_settings_cls.get_boolean_setting.return_value = False
+        mock_settings_cls.get_integer_setting.return_value = 5  # audit.max_files_displayed
 
         results = self._make_file_change_results()
         _create_file_integrity_alert(results)

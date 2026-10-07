@@ -22,7 +22,16 @@ logger = logging.getLogger(__name__)
 
 # Later foundation consumers register old catalog default -> previously enforced value here.
 # Equal pairs can register an activation whose catalog default does not change.
-DEFAULT_VALUE_MIGRATIONS: dict[str, tuple[object, object]] = {}
+DEFAULT_VALUE_MIGRATIONS: dict[str, tuple[object, object]] = {
+    "audit.compliant_score_threshold": (90, 90),
+    "audit.high_complexity_filter_threshold": (5, 5),
+    "audit.max_files_displayed": (5, 5),
+    "audit.max_violations_displayed": (10, 10),
+    "audit.partial_score_threshold": (70, 70),
+    "audit.webhook_healthy_response_threshold": (300, 300),
+    "audit.webhook_max_retry_threshold": (5, 5),
+    "audit.webhook_suspicious_retry_threshold": (3, 3),
+}
 RETIRED_SETTING_KEYS: frozenset[str] = frozenset(
     {
         "billing.alert_cooldown_hours",
