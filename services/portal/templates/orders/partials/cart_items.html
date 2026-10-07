@@ -40,7 +40,7 @@
           <!-- Configuration Details -->
           {% if item.config %}
           <details class="mb-4">
-            <summary class="text-sm text-blue-400 cursor-pointer hover:text-blue-300">
+            <summary class="text-sm text-blue-400 cursor-pointer hover:text-blue-300"> {# tmpl-allow TMPL005: needs button disclosure_trigger #}
               {% trans "View configuration" %}
             </summary>
             <div class="mt-2 pl-4 border-l-2 border-slate-600">
@@ -65,14 +65,8 @@
             <label for="qty-{{ forloop.counter0 }}" class="text-sm text-slate-400">
               {% trans "Quantity:" %}
             </label>
-            <select id="qty-{{ forloop.counter0 }}"
-                    name="quantity"
-                    hx-post="{% url 'orders:update_cart_item' %}"
-                    hx-vals='{"product_slug": "{{ item.product_slug|escapejs }}", "billing_period": "{{ item.billing_period|escapejs }}"}'
-                    hx-target="#cart-totals"
-                    hx-swap="outerHTML"
-                    hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
-                    class="bg-slate-700 text-white rounded px-2 py-1 text-sm border border-slate-600 focus:border-blue-500 focus:outline-none">
+            {# tmpl-allow TMPL003: needs input_field generated_quantity_options #}
+            <select id="qty-{{ forloop.counter0 }}" name="quantity" hx-post="{% url 'orders:update_cart_item' %}" hx-vals='{"product_slug": "{{ item.product_slug|escapejs }}", "billing_period": "{{ item.billing_period|escapejs }}"}' hx-target="#cart-totals" hx-swap="outerHTML" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' class="bg-slate-700 text-white rounded px-2 py-1 text-sm border border-slate-600 focus:border-blue-500 focus:outline-none">
               {% for i in "xxxxxxxxxx"|make_list %}
               <option value="{{ forloop.counter }}" {% if item.quantity == forloop.counter %}selected{% endif %}>
                 {{ forloop.counter }}
@@ -82,6 +76,7 @@
           </div>
 
           <!-- Remove Button -->
+          {# tmpl-allow TMPL002: needs button responsive_label #}
           <button hx-post="{% url 'orders:remove_from_cart' %}" hx-vals='{"product_slug": "{{ item.product_slug|escapejs }}", "billing_period": "{{ item.billing_period|escapejs }}"}' hx-target="#cart-items" hx-swap="outerHTML" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' data-htmx-after="cart-updated" hx-confirm="{% trans 'Are you sure you want to remove this product from cart?' %}" class="text-slate-400 hover:text-red-400 transition-colors p-2 rounded hover:bg-slate-700" aria-label="{% trans 'Remove from cart' %}">
             <span>{% icon "x" size="sm" css_class="text-slate-400" %}</span>
             <span class="ml-1 text-sm hidden sm:inline">{% trans "Remove" %}</span>
@@ -99,9 +94,8 @@
       <p class="text-slate-400 mb-4">
         {% trans "Add products to continue" %}
       </p>
-      <a href="{% url 'orders:catalog' %}" class="ui-btn inline-flex items-center justify-center font-medium rounded-lg transition-all duration-200 focus:outline-none focus:ring-4 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-300">
-        {% icon "orders" size="sm" css_class="text-white" %} {% trans "Explore Products" %}
-      </a>
+      {% url 'orders:catalog' as wp16_url %}
+      {% button _("Explore Products") href=wp16_url variant="primary" icon="orders" %}
     </div>
     {% endfor %}
   </div>

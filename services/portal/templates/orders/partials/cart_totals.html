@@ -35,7 +35,7 @@
       <!-- Total -->
       <div class="flex justify-between items-center">
         <span class="text-lg font-medium text-white">{% trans "Total" %}</span>
-        <span class="text-lg font-bold text-green-400 font-mono">
+        <span class="text-lg font-bold text-green-400 font-mono"> {# tmpl-allow TMPL005: needs badge unboxed_value #}
           {{ calculation.total_cents|cents_to_currency|romanian_currency:calculation.currency }}
         </span>
       </div>
@@ -53,30 +53,25 @@
 
   <!-- Proceed to Checkout Button -->
   {% if calculation.total_cents > 0 %}
-  <a href="{% url 'orders:checkout' %}" class="w-full inline-flex items-center justify-center px-6 py-3 text-base font-medium text-white bg-green-600 border border-green-600 rounded-lg hover:bg-green-700 focus:ring-4 focus:ring-green-300 transition-all duration-200" data-cart-version="{{ cart.get_cart_version }}">
-    {% icon "credit-card" size="sm" css_class="mr-1" %} {% trans "Continue to checkout" %}
-  </a>
+  {% with version_attrs='data-cart-version="'|add:cart.get_cart_version|add:'"' %}
+  {% url 'orders:checkout' as wp16_url %}
+  {% button _("Continue to checkout") href=wp16_url variant="success" icon="credit-card" class_="w-full" attrs=version_attrs %}
+  {% endwith %}
   {% else %}
-  <button disabled class="w-full inline-flex items-center justify-center px-6 py-3 text-base font-medium text-slate-300 bg-slate-700 border border-slate-600 rounded-lg cursor-not-allowed opacity-50">
-    {% icon "credit-card" size="sm" css_class="mr-1" %} {% trans "Continue to checkout" %}
-  </button>
+  {% button _("Continue to checkout") disabled=True variant="secondary" size="lg" icon="credit-card" class_="w-full" %}
   {% endif %}
 
   {% else %}
   <!-- Calculation Error State -->
   <div class="text-center py-6">
-    <div class="text-red-400 mb-3">
-      {% icon "warning" size="2xl" css_class="text-red-400" %}
+    <div class="text-red-400 mb-3"> {# tmpl-allow TMPL005: needs alert nested_content #}
+      {% icon "warning" size="2xl" css_class="text-red-400" %} {# tmpl-allow TMPL005: needs badge unboxed_icon #}
     </div>
-    <p class="text-sm text-red-400 mb-4">
+    <p class="text-sm text-red-400 mb-4"> {# tmpl-allow TMPL005: needs alert nested_content #}
       {% trans "Error calculating totals" %}
     </p>
-    <button hx-post="{% url 'orders:calculate_totals' %}"
-            hx-target="#cart-totals"
-            hx-swap="outerHTML"
-            class="text-blue-400 hover:text-blue-300 text-sm transition-colors">
-      {% trans "Try again" %}
-    </button>
+    {% url "orders:calculate_totals" as calculate_url %}
+    {% button _("Try again") hx_post=calculate_url hx_target="#cart-totals" hx_swap="outerHTML" variant="secondary" size="sm" %}
   </div>
   {% endif %}
 

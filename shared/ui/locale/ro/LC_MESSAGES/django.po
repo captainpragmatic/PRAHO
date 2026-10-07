@@ -55,9 +55,6 @@ msgstr "Mergeți la pagina următoare"
 msgid "Go to previous page"
 msgstr "Mergeți la pagina anterioară"
 
-msgid "Label"
-msgstr "Etichetă"
-
 msgid "More pages"
 msgstr "Mai multe pagini"
 
@@ -107,3 +104,30 @@ msgstr "Până la"
 msgctxt "form action"
 msgid "Save"
 msgstr "Salvează"
+
+#: templates/components/dangerous_action_modal.html
+msgid "Close dialog"
+msgstr "Închideți fereastra"
+
+#: templates/components/dangerous_action_modal.html
+msgid "Dangerous Action"
+msgstr "Acțiune periculoasă"
+
+#: templates/components/dangerous_action_modal.html
+msgid "I really am sure I want to do this!"
+msgstr "Sunt sigur că vreau să fac acest lucru!"
+
+#: templates/components/dangerous_action_modal.html
+msgid "This action cannot be undone."
+msgstr "Această acțiune nu poate fi anulată."
+
+#: templates/components/dangerous_action_modal.html
+msgid "Type confirmation text here..."
+msgstr "Introduceți aici textul de confirmare..."
+
+#: templates/components/dangerous_action_modal.html
+msgid "Type the following to confirm:"
+msgstr "Introduceți textul următor pentru a confirma:"
+
+#~ msgid "Label"
+#~ msgstr "Etichetă"

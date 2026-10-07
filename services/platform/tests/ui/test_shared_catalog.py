@@ -44,7 +44,7 @@ class SharedCatalogTests(SimpleTestCase):
     def test_catalog_covers_every_shared_template_msgid(self) -> None:
         messages = _shared_msgids()
         self.assertEqual(len(list((ROOT / "shared/ui/templates").rglob("*.html"))), 25)
-        self.assertEqual(len(messages), 28)  # badge "Close" shares the modal msgid
+        self.assertEqual(len(messages), 34)  # badge "Close" shares the modal msgid
         self.assertTrue(SHARED_PO.is_file(), "Shared Romanian catalog is missing")
         self.assertIn((None, _BLOCK_MESSAGE), messages)
         self.assertIn(("form action", "Save"), messages)

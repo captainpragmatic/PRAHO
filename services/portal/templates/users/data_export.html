@@ -15,7 +15,7 @@
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div class="space-y-3">
           <div class="flex items-start">
-            <span class="text-green-400 mr-2 mt-1">{% icon "check" size="sm" %}</span>
+            <span class="text-green-400 mr-2 mt-1">{% icon "check" size="sm" %}</span> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
             <div>
               <div class="text-sm font-medium text-white">{% trans 'Account Information' %}</div>
               <div class="text-xs text-slate-400">{% trans 'Name, email, phone number, account settings' %}</div>
@@ -23,7 +23,7 @@
           </div>
 
           <div class="flex items-start">
-            <span class="text-green-400 mr-2 mt-1">{% icon "check" size="sm" %}</span>
+            <span class="text-green-400 mr-2 mt-1">{% icon "check" size="sm" %}</span> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
             <div>
               <div class="text-sm font-medium text-white">{% trans 'Service History' %}</div>
               <div class="text-xs text-slate-400">{% trans 'Hosting services, domains, configuration data' %}</div>
@@ -31,7 +31,7 @@
           </div>
 
           <div class="flex items-start">
-            <span class="text-green-400 mr-2 mt-1">{% icon "check" size="sm" %}</span>
+            <span class="text-green-400 mr-2 mt-1">{% icon "check" size="sm" %}</span> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
             <div>
               <div class="text-sm font-medium text-white">{% trans 'Billing Records' %}</div>
               <div class="text-xs text-slate-400">{% trans 'Invoices, payments, billing preferences' %}</div>
@@ -41,7 +41,7 @@
 
         <div class="space-y-3">
           <div class="flex items-start">
-            <span class="text-green-400 mr-2 mt-1">{% icon "check" size="sm" %}</span>
+            <span class="text-green-400 mr-2 mt-1">{% icon "check" size="sm" %}</span> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
             <div>
               <div class="text-sm font-medium text-white">{% trans 'Support Tickets' %}</div>
               <div class="text-xs text-slate-400">{% trans 'Support requests and communications' %}</div>
@@ -49,7 +49,7 @@
           </div>
 
           <div class="flex items-start">
-            <span class="text-green-400 mr-2 mt-1">{% icon "check" size="sm" %}</span>
+            <span class="text-green-400 mr-2 mt-1">{% icon "check" size="sm" %}</span> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
             <div>
               <div class="text-sm font-medium text-white">{% trans 'Privacy Consents' %}</div>
               <div class="text-xs text-slate-400">{% trans 'GDPR consents and marketing preferences' %}</div>
@@ -57,7 +57,7 @@
           </div>
 
           <div class="flex items-start">
-            <span class="text-yellow-400 mr-2 mt-1">{% icon "warning" size="sm" %}</span>
+            <span class="text-yellow-400 mr-2 mt-1">{% icon "warning" size="sm" %}</span> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
             <div>
               <div class="text-sm font-medium text-white">{% trans 'Server Data' %}</div>
               <div class="text-xs text-slate-400">{% trans 'Website files not included - contact support if needed' %}</div>
@@ -73,12 +73,12 @@
       <form method="post" class="space-y-4">
         {% csrf_token %}
 
-        <div class="bg-blue-900/50 border border-blue-700 rounded-lg p-4">
+        <div class="bg-blue-900/50 border border-blue-700 rounded-lg p-4"> {# tmpl-allow TMPL005: needs alert nested_content #}
           <div class="flex items-start">
-            <span class="text-blue-400 mr-3 mt-1">{% icon "info" size="md" %}</span>
-            <div class="text-sm text-blue-200">
+            <span class="text-blue-400 mr-3 mt-1">{% icon "info" size="md" %}</span> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
+            <div class="text-sm text-blue-200"> {# tmpl-allow TMPL005: needs alert nested_content #}
               <p class="font-medium mb-1">{% trans 'Export Process' %}</p>
-              <ul class="text-xs space-y-1 text-blue-300">
+              <ul class="text-xs space-y-1 text-blue-300"> {# tmpl-allow TMPL005: needs alert nested_content #}
                 <li>• {% trans 'Your request will be processed within 48 hours' %}</li>
                 <li>• {% trans 'You will receive an email with a secure download link' %}</li>
                 <li>• {% trans 'The download link expires after 7 days for security' %}</li>
@@ -102,10 +102,7 @@
             ← {% trans 'Back to Privacy Dashboard' %}
           </a>
 
-          <button type="submit"
-                  class="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-md font-medium transition-colors">
-            {% icon "download" size="sm" css_class="text-white" %} {% trans 'Request Data Export' %}
-          </button>
+          {% button _("Request Data Export") type="submit" variant="success" icon="download" %}
         </div>
       </form>
   {% end_section_card %}
@@ -120,13 +117,13 @@
         <div class="flex items-center justify-between p-3 bg-slate-700 rounded-lg">
           <div class="flex items-center">
             {% if export.status == 'completed' %}
-              <span class="text-green-400 mr-3">{% icon "check" size="md" %}</span>
+              <span class="text-green-400 mr-3">{% icon "check" size="md" %}</span> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
             {% elif export.status == 'processing' %}
-              <span class="text-yellow-400 mr-3 animate-pulse">{% icon "clock" size="md" %}</span>
+              <span class="text-yellow-400 mr-3 animate-pulse">{% icon "clock" size="md" %}</span> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
             {% elif export.status == 'pending' %}
-              <span class="text-blue-400 mr-3">{% icon "clock" size="md" %}</span>
+              <span class="text-blue-400 mr-3">{% icon "clock" size="md" %}</span> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
             {% else %}
-              <span class="text-red-400 mr-3">{% icon "x" size="md" %}</span>
+              <span class="text-red-400 mr-3">{% icon "x" size="md" %}</span> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
             {% endif %}
             <div>
               <div class="text-sm text-white">
@@ -163,7 +160,7 @@
           {% trans 'The export includes personal data you provided and data generated through your use of our services.' %}
         </p>
         <p class="text-xs text-slate-400">
-          {% icon "flag" size="sm" css_class="inline text-blue-400" %} {% trans 'In compliance with Romanian Law 190/2018 and EU Regulation 2016/679' %}
+          {% icon "flag" size="sm" css_class="inline text-blue-400" %} {% trans 'In compliance with Romanian Law 190/2018 and EU Regulation 2016/679' %} {# tmpl-allow TMPL005: needs badge unboxed_icon #}
         </p>
       </div>
   {% end_section_card %}

@@ -21,7 +21,7 @@
             <!-- Data Processing Consent -->
             <div class="flex items-center justify-between p-3 bg-slate-700 rounded-lg">
               <div class="flex items-center">
-                <span class="text-green-400 mr-2">{% icon "lock" size="sm" %}</span>
+                <span class="text-green-400 mr-2">{% icon "lock" size="sm" %}</span> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
                 <div>
                   <div class="text-sm font-medium text-white">{% trans 'Data Processing' %}</div>
                   <div class="text-xs text-slate-400">{% trans 'Required for service operation' %}</div>
@@ -37,7 +37,7 @@
             <!-- Marketing Consent -->
             <div class="flex items-center justify-between p-3 bg-slate-700 rounded-lg">
               <div class="flex items-center">
-                <span class="text-blue-400 mr-2">{% icon "mail" size="sm" %}</span>
+                <span class="text-blue-400 mr-2">{% icon "mail" size="sm" %}</span> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
                 <div>
                   <div class="text-sm font-medium text-white">{% trans 'Marketing Communications' %}</div>
                   <div class="text-xs text-slate-400">{% trans 'Newsletters and promotional content' %}</div>
@@ -57,21 +57,21 @@
           <h4 class="text-sm font-semibold text-slate-300">{% trans 'Quick Actions' %}</h4>
 
           <div class="space-y-3">
-            <a href="{% url 'users:data_export' %}" class="flex items-center p-3 bg-blue-900/50 hover:bg-blue-800/60 rounded-lg transition-colors group">
-              <span class="text-blue-400 mr-3">{% icon "document" size="md" %}</span>
+            <a href="{% url 'users:data_export' %}" class="flex items-center p-3 bg-blue-900/50 hover:bg-blue-800/60 rounded-lg transition-colors group"> {# tmpl-allow TMPL005: needs button inline_link #}
+              <span class="text-blue-400 mr-3">{% icon "document" size="md" %}</span> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
               <div class="flex-1">
                 <div class="text-sm font-medium text-white group-hover:text-blue-200">
                   {% trans 'Export My Data' %}
                 </div>
-                <div class="text-xs text-blue-300">
+                <div class="text-xs text-blue-300"> {# tmpl-allow TMPL005: needs alert nested_content #}
                   {% trans 'Download your data' %}
                 </div>
               </div>
-              <span class="text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity">→</span>
+              <span class="text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity">→</span> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
             </a>
 
             <a href="{% url 'users:consent_history' %}" class="flex items-center p-3 bg-slate-700/50 hover:bg-slate-600/60 rounded-lg transition-colors group">
-              <span class="text-yellow-400 mr-3">{% icon "document" size="md" %}</span>
+              <span class="text-yellow-400 mr-3">{% icon "document" size="md" %}</span> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
               <div class="flex-1">
                 <div class="text-sm font-medium text-white group-hover:text-yellow-200">
                   {% trans 'Consent History' %}
@@ -80,7 +80,7 @@
                   {% trans 'View consent changes' %}
                 </div>
               </div>
-              <span class="text-yellow-400 opacity-0 group-hover:opacity-100 transition-opacity">→</span>
+              <span class="text-yellow-400 opacity-0 group-hover:opacity-100 transition-opacity">→</span> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
             </a>
           </div>
         </div>
@@ -106,37 +106,37 @@
 
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         <div class="p-4 bg-slate-700 rounded-lg">
-          <div class="text-green-400 mb-2">{% icon "search" size="xl" %}</div>
+          <div class="text-green-400 mb-2">{% icon "search" size="xl" %}</div> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
           <h4 class="text-white font-medium mb-1">{% trans 'Right to Access' %}</h4>
           <p class="text-xs text-slate-400">{% trans 'View what personal data we hold about you' %}</p>
         </div>
 
         <div class="p-4 bg-slate-700 rounded-lg">
-          <div class="text-blue-400 mb-2">{% icon "document" size="xl" %}</div>
+          <div class="text-blue-400 mb-2">{% icon "document" size="xl" %}</div> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
           <h4 class="text-white font-medium mb-1">{% trans 'Right to Rectification' %}</h4>
           <p class="text-xs text-slate-400">{% trans 'Correct any inaccurate personal data' %}</p>
         </div>
 
         <div class="p-4 bg-slate-700 rounded-lg">
-          <div class="text-red-400 mb-2">{% icon "x" size="xl" %}</div>
+          <div class="text-red-400 mb-2">{% icon "x" size="xl" %}</div> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
           <h4 class="text-white font-medium mb-1">{% trans 'Right to Erasure' %}</h4>
           <p class="text-xs text-slate-400">{% trans 'Request deletion of your data ("Right to be forgotten")' %}</p>
         </div>
 
         <div class="p-4 bg-slate-700 rounded-lg">
-          <div class="text-yellow-400 mb-2">{% icon "download" size="xl" %}</div>
+          <div class="text-yellow-400 mb-2">{% icon "download" size="xl" %}</div> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
           <h4 class="text-white font-medium mb-1">{% trans 'Right to Portability' %}</h4>
           <p class="text-xs text-slate-400">{% trans 'Export your data in machine-readable format' %}</p>
         </div>
 
         <div class="p-4 bg-slate-700 rounded-lg">
-          <div class="text-purple-400 mb-2">{% icon "ban" size="xl" %}</div>
+          <div class="text-purple-400 mb-2">{% icon "ban" size="xl" %}</div> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
           <h4 class="text-white font-medium mb-1">{% trans 'Right to Object' %}</h4>
           <p class="text-xs text-slate-400">{% trans 'Object to processing for direct marketing' %}</p>
         </div>
 
         <div class="p-4 bg-slate-700 rounded-lg">
-          <div class="text-orange-400 mb-2">{% icon "clock" size="xl" %}</div>
+          <div class="text-orange-400 mb-2">{% icon "clock" size="xl" %}</div> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
           <h4 class="text-white font-medium mb-1">{% trans 'Right to Restrict' %}</h4>
           <p class="text-xs text-slate-400">{% trans 'Limit how we process your data' %}</p>
         </div>

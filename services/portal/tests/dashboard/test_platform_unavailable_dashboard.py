@@ -55,10 +55,11 @@ class DashboardPlatformUnavailableTests(SimpleTestCase):
 
     def _assert_red_banner(self, response: HttpResponseBase) -> None:
         self.assertContains(response, PLATFORM_DOWN_MESSAGE)
-        self.assertContains(response, "mb-6 bg-red-900 border border-red-700 rounded-lg p-4")
+        self.assertContains(response, 'role="alert"')
+        self.assertContains(response, "Platform service temporarily unavailable.")
         self.assertContains(
             response,
-            f'<span class="text-red-100 text-sm sm:text-base">{PLATFORM_DOWN_MESSAGE}</span>',
+            PLATFORM_DOWN_MESSAGE,
         )
         context: Context | ContextList | None = getattr(response, "context", None)
         assert context is not None

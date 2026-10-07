@@ -26,7 +26,7 @@
         <div class="mb-8 bg-slate-800 rounded-lg p-4">
             <div class="flex items-center space-x-4">
                 <div class="flex items-center">
-                    <div class="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white text-sm font-medium">1</div>
+                    {% badge "1" variant="primary" rounded="full" css_class="w-8 h-8 justify-center text-sm" %}
                     <span class="ml-2 text-sm text-white">{% trans "Company Details" %}</span>
                 </div>
                 <div class="flex-1 h-1 bg-slate-700"></div>
@@ -45,7 +45,7 @@
             <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-xl overflow-hidden">
                 <div class="px-6 py-4 border-b border-slate-700">
                     <h2 class="text-xl font-semibold text-white flex items-center">
-                        {% icon "building" size="md" css_class="mr-2 text-blue-500" %}
+                        {% icon "building" size="md" css_class="mr-2 text-blue-500" %} {# tmpl-allow TMPL005: needs badge unboxed_icon #}
                         {% trans "Company Information" %}
                     </h2>
                 </div>
@@ -56,15 +56,13 @@
                         <div class="md:col-span-2">
                             <label class="block text-sm font-medium text-slate-300 mb-2">
                                 {{ form.company_name.label_tag }}
-                                <span class="text-red-400">*</span>
+                                <span class="text-red-400">*</span> {# tmpl-allow TMPL005: needs input_field standalone_required_indicator #}
                             </label>
                             {{ form.company_name }}
                             {% if form.company_name.errors %}
-                                <div class="mt-2 text-sm text-red-400">
-                                    {% for error in form.company_name.errors %}
-                                        <p>{{ error }}</p>
-                                    {% endfor %}
-                                </div>
+                              {% for error in form.company_name.errors %}
+                                {% alert error variant="danger" %}
+                              {% endfor %}
                             {% endif %}
                             <p class="mt-1 text-xs text-slate-500">{{ form.company_name.help_text }}</p>
                         </div>
@@ -74,11 +72,9 @@
                             <label class="block text-sm font-medium text-slate-300 mb-2">{{ form.vat_number.label_tag }}</label>
                             {{ form.vat_number }}
                             {% if form.vat_number.errors %}
-                                <div class="mt-2 text-sm text-red-400">
-                                    {% for error in form.vat_number.errors %}
-                                        <p>{{ error }}</p>
-                                    {% endfor %}
-                                </div>
+                              {% for error in form.vat_number.errors %}
+                                {% alert error variant="danger" %}
+                              {% endfor %}
                             {% endif %}
                             <p class="mt-1 text-xs text-slate-500">{{ form.vat_number.help_text }}</p>
                         </div>
@@ -88,11 +84,9 @@
                             <label class="block text-sm font-medium text-slate-300 mb-2">{{ form.trade_registry_number.label_tag }}</label>
                             {{ form.trade_registry_number }}
                             {% if form.trade_registry_number.errors %}
-                                <div class="mt-2 text-sm text-red-400">
-                                    {% for error in form.trade_registry_number.errors %}
-                                        <p>{{ error }}</p>
-                                    {% endfor %}
-                                </div>
+                              {% for error in form.trade_registry_number.errors %}
+                                {% alert error variant="danger" %}
+                              {% endfor %}
                             {% endif %}
                             <p class="mt-1 text-xs text-slate-500">{{ form.trade_registry_number.help_text }}</p>
                         </div>
@@ -102,11 +96,9 @@
                             <label class="block text-sm font-medium text-slate-300 mb-2">{{ form.industry.label_tag }}</label>
                             {{ form.industry }}
                             {% if form.industry.errors %}
-                                <div class="mt-2 text-sm text-red-400">
-                                    {% for error in form.industry.errors %}
-                                        <p>{{ error }}</p>
-                                    {% endfor %}
-                                </div>
+                              {% for error in form.industry.errors %}
+                                {% alert error variant="danger" %}
+                              {% endfor %}
                             {% endif %}
                             <p class="mt-1 text-xs text-slate-500">{{ form.industry.help_text }}</p>
                         </div>
@@ -119,7 +111,7 @@
             <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-xl overflow-hidden">
                 <div class="px-6 py-4 border-b border-slate-700">
                     <h2 class="text-xl font-semibold text-white flex items-center">
-                        {% icon "map-pin" size="md" css_class="mr-2 text-green-500" %}
+                        {% icon "map-pin" size="md" css_class="mr-2 text-green-500" %} {# tmpl-allow TMPL005: needs badge unboxed_icon #}
                         {% trans "Billing Address" %}
                     </h2>
                 </div>
@@ -130,15 +122,13 @@
                         <div class="md:col-span-2">
                             <label class="block text-sm font-medium text-slate-300 mb-2">
                                 {{ form.street_address.label_tag }}
-                                <span class="text-red-400">*</span>
+                                <span class="text-red-400">*</span> {# tmpl-allow TMPL005: needs input_field standalone_required_indicator #}
                             </label>
                             {{ form.street_address }}
                             {% if form.street_address.errors %}
-                                <div class="mt-2 text-sm text-red-400">
-                                    {% for error in form.street_address.errors %}
-                                        <p>{{ error }}</p>
-                                    {% endfor %}
-                                </div>
+                              {% for error in form.street_address.errors %}
+                                {% alert error variant="danger" %}
+                              {% endfor %}
                             {% endif %}
                             <p class="mt-1 text-xs text-slate-500">{{ form.street_address.help_text }}</p>
                         </div>
@@ -147,15 +137,13 @@
                         <div>
                             <label class="block text-sm font-medium text-slate-300 mb-2">
                                 {{ form.city.label_tag }}
-                                <span class="text-red-400">*</span>
+                                <span class="text-red-400">*</span> {# tmpl-allow TMPL005: needs input_field standalone_required_indicator #}
                             </label>
                             {{ form.city }}
                             {% if form.city.errors %}
-                                <div class="mt-2 text-sm text-red-400">
-                                    {% for error in form.city.errors %}
-                                        <p>{{ error }}</p>
-                                    {% endfor %}
-                                </div>
+                              {% for error in form.city.errors %}
+                                {% alert error variant="danger" %}
+                              {% endfor %}
                             {% endif %}
                             <p class="mt-1 text-xs text-slate-500">{{ form.city.help_text }}</p>
                         </div>
@@ -165,11 +153,9 @@
                             <label class="block text-sm font-medium text-slate-300 mb-2">{{ form.state.label_tag }}</label>
                             {{ form.state }}
                             {% if form.state.errors %}
-                                <div class="mt-2 text-sm text-red-400">
-                                    {% for error in form.state.errors %}
-                                        <p>{{ error }}</p>
-                                    {% endfor %}
-                                </div>
+                              {% for error in form.state.errors %}
+                                {% alert error variant="danger" %}
+                              {% endfor %}
                             {% endif %}
                             <p class="mt-1 text-xs text-slate-500">{{ form.state.help_text }}</p>
                         </div>
@@ -179,11 +165,9 @@
                             <label class="block text-sm font-medium text-slate-300 mb-2">{{ form.postal_code.label_tag }}</label>
                             {{ form.postal_code }}
                             {% if form.postal_code.errors %}
-                                <div class="mt-2 text-sm text-red-400">
-                                    {% for error in form.postal_code.errors %}
-                                        <p>{{ error }}</p>
-                                    {% endfor %}
-                                </div>
+                              {% for error in form.postal_code.errors %}
+                                {% alert error variant="danger" %}
+                              {% endfor %}
                             {% endif %}
                             <p class="mt-1 text-xs text-slate-500">{{ form.postal_code.help_text }}</p>
                         </div>
@@ -193,11 +177,9 @@
                             <label class="block text-sm font-medium text-slate-300 mb-2">{{ form.country.label_tag }}</label>
                             {{ form.country }}
                             {% if form.country.errors %}
-                                <div class="mt-2 text-sm text-red-400">
-                                    {% for error in form.country.errors %}
-                                        <p>{{ error }}</p>
-                                    {% endfor %}
-                                </div>
+                              {% for error in form.country.errors %}
+                                {% alert error variant="danger" %}
+                              {% endfor %}
                             {% endif %}
                             <p class="mt-1 text-xs text-slate-500">{{ form.country.help_text }}</p>
                         </div>
@@ -210,7 +192,7 @@
             <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-xl overflow-hidden">
                 <div class="px-6 py-4 border-b border-slate-700">
                     <h2 class="text-xl font-semibold text-white flex items-center">
-                        {% icon "mail" size="md" css_class="mr-2 text-purple-500" %}
+                        {% icon "mail" size="md" css_class="mr-2 text-purple-500" %} {# tmpl-allow TMPL005: needs badge unboxed_icon #}
                         {% trans "Business Contact" %}
                     </h2>
                 </div>
@@ -221,15 +203,13 @@
                         <div>
                             <label class="block text-sm font-medium text-slate-300 mb-2">
                                 {{ form.primary_email.label_tag }}
-                                <span class="text-red-400">*</span>
+                                <span class="text-red-400">*</span> {# tmpl-allow TMPL005: needs input_field standalone_required_indicator #}
                             </label>
                             {{ form.primary_email }}
                             {% if form.primary_email.errors %}
-                                <div class="mt-2 text-sm text-red-400">
-                                    {% for error in form.primary_email.errors %}
-                                        <p>{{ error }}</p>
-                                    {% endfor %}
-                                </div>
+                              {% for error in form.primary_email.errors %}
+                                {% alert error variant="danger" %}
+                              {% endfor %}
                             {% endif %}
                             <p class="mt-1 text-xs text-slate-500">{{ form.primary_email.help_text }}</p>
                         </div>
@@ -239,11 +219,9 @@
                             <label class="block text-sm font-medium text-slate-300 mb-2">{{ form.primary_phone.label_tag }}</label>
                             {{ form.primary_phone }}
                             {% if form.primary_phone.errors %}
-                                <div class="mt-2 text-sm text-red-400">
-                                    {% for error in form.primary_phone.errors %}
-                                        <p>{{ error }}</p>
-                                    {% endfor %}
-                                </div>
+                              {% for error in form.primary_phone.errors %}
+                                {% alert error variant="danger" %}
+                              {% endfor %}
                             {% endif %}
                             <p class="mt-1 text-xs text-slate-500">{{ form.primary_phone.help_text }}</p>
                         </div>
@@ -253,11 +231,9 @@
                             <label class="block text-sm font-medium text-slate-300 mb-2">{{ form.website.label_tag }}</label>
                             {{ form.website }}
                             {% if form.website.errors %}
-                                <div class="mt-2 text-sm text-red-400">
-                                    {% for error in form.website.errors %}
-                                        <p>{{ error }}</p>
-                                    {% endfor %}
-                                </div>
+                              {% for error in form.website.errors %}
+                                {% alert error variant="danger" %}
+                              {% endfor %}
                             {% endif %}
                             <p class="mt-1 text-xs text-slate-500">{{ form.website.help_text }}</p>
                         </div>
@@ -274,14 +250,12 @@
                         <div class="flex-1">
                             <label for="{{ form.agree_terms.id_for_label }}" class="text-sm text-slate-300 cursor-pointer">
                                 {{ form.agree_terms.label }}
-                                <span class="text-red-400">*</span>
+                                <span class="text-red-400">*</span> {# tmpl-allow TMPL005: needs input_field standalone_required_indicator #}
                             </label>
                             {% if form.agree_terms.errors %}
-                                <div class="mt-2 text-sm text-red-400">
-                                    {% for error in form.agree_terms.errors %}
-                                        <p>{{ error }}</p>
-                                    {% endfor %}
-                                </div>
+                              {% for error in form.agree_terms.errors %}
+                                {% alert error variant="danger" %}
+                              {% endfor %}
                             {% endif %}
                             <p class="mt-1 text-xs text-slate-500">{{ form.agree_terms.help_text }}</p>
                         </div>
@@ -296,11 +270,7 @@
                     {% trans "Cancel" %}
                 </a>
 
-                <button type="submit"
-                        class="inline-flex items-center justify-center px-8 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-slate-900 transition-colors">
-                    {% icon "plus" size="md" css_class="mr-2" %}
-                    {% trans "Create Company" %}
-                </button>
+                {% button _("Create Company") type="submit" variant="primary" size="lg" icon="plus" %}
             </div>
 
         </form>
@@ -308,7 +278,7 @@
         <!-- Romanian Compliance Notice -->
         <div class="mt-8 p-4 bg-slate-800/50 rounded-lg border border-slate-700">
             <div class="flex items-start space-x-3">
-                <span class="text-blue-400 mt-0.5 flex-shrink-0">{% icon "flag" size="sm" css_class="text-blue-400" %}</span>
+                <span class="text-blue-400 mt-0.5 flex-shrink-0">{% icon "flag" size="sm" css_class="" %}</span> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
                 <div class="text-xs sm:text-sm text-slate-400 min-w-0">
                     <p class="font-medium text-slate-300 mb-2">{% trans "Romanian Business Compliance" %}</p>
                     <p class="leading-relaxed">{% trans "As the company owner, you'll be able to manage all business settings, invite team members with different access levels, and handle invoicing. VAT number (CUI) and complete address information are required for proper tax compliance and invoicing." %}</p>

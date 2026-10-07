@@ -21,7 +21,7 @@
   <!-- Cart Items Preview -->
   <div class="px-4 py-3 space-y-3 max-h-64 overflow-y-auto">
     {% for item in cart_items %}
-    <div class="flex items-center justify-between rounded-lg transition-colors duration-200{% if just_added_slug and item.product_slug == just_added_slug %} bg-green-900/30{% endif %}"
+    <div class="flex items-center justify-between rounded-lg transition-colors duration-200{% if just_added_slug and item.product_slug == just_added_slug %} bg-green-900/30{% endif %}" {# tmpl-allow TMPL005: needs alert alpine_highlight #}
          {% if just_added_slug and item.product_slug == just_added_slug %}data-just-added="true" x-data="justAddedHighlight"{% endif %}>
       <div class="flex-1 min-w-0">
         <p class="text-sm font-medium text-white truncate">
@@ -37,7 +37,8 @@
       </div>
 
       <!-- Remove Item Button -->
-      <button hx-post="{% url 'orders:remove_from_cart' %}" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' hx-vals='{"product_slug": "{{ item.product_slug }}", "billing_period": "{{ item.billing_period }}"}' hx-target="#cart-widget" hx-swap="outerHTML" data-htmx-after="cart-updated" hx-confirm="{% trans 'Are you sure you want to remove this product from cart?' %}" class="ml-2 text-slate-400 hover:text-red-400 transition-colors p-1" aria-label="{% trans 'Remove from cart' %}">
+      {# tmpl-allow TMPL002: icon-only remove button with HTMX payload, CSRF header and translated aria-label #}
+      <button hx-post="{% url 'orders:remove_from_cart' %}" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' hx-vals='{"product_slug": "{{ item.product_slug|escapejs }}", "billing_period": "{{ item.billing_period|escapejs }}"}' hx-target="#cart-widget" hx-swap="outerHTML" data-htmx-after="cart-updated" hx-confirm="{% trans 'Are you sure you want to remove this product from cart?' %}" class="ml-2 text-slate-400 hover:text-red-400 transition-colors p-1" aria-label="{% trans 'Remove from cart' %}">
         {% icon "x" size="sm" %}
       </button>
     </div>
@@ -57,9 +58,8 @@
     <a href="{% url 'orders:cart_review' %}" class="w-full text-center inline-flex items-center justify-center px-3 py-2 text-sm font-medium text-slate-300 bg-slate-700 border border-slate-600 rounded-lg hover:bg-slate-600 transition-colors">
       {% icon "search" size="sm" css_class="mr-1" %} {% trans "View full cart" %}
     </a>
-    <a href="{% url 'orders:checkout' %}" class="w-full text-center inline-flex items-center justify-center px-3 py-2 text-sm font-medium text-white bg-blue-600 border border-blue-600 rounded-lg hover:bg-blue-700 transition-colors">
-      {% icon "credit-card" size="sm" css_class="mr-1" %} {% trans "Checkout now" %}
-    </a>
+    {% url 'orders:checkout' as wp16_url %}
+    {% button _("Checkout now") href=wp16_url variant="primary" icon="credit-card" class_="w-full text-center" %}
   </div>
 
   {% else %}
@@ -71,9 +71,8 @@
     <p class="text-sm text-slate-400 mb-3">
       {% trans "Your cart is empty" %}
     </p>
-    <a href="{% url 'orders:catalog' %}" class="w-full text-center inline-flex items-center justify-center px-3 py-2 text-sm font-medium text-white bg-blue-600 border border-blue-600 rounded-lg hover:bg-blue-700 transition-colors">
-      {% icon "orders" size="sm" css_class="mr-1" %} {% trans "Explore products" %}
-    </a>
+    {% url 'orders:catalog' as wp16_url %}
+    {% button _("Explore products") href=wp16_url variant="primary" icon="orders" class_="w-full text-center" %}
   </div>
   {% endif %}
 

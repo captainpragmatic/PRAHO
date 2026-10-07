@@ -9,12 +9,8 @@
 <div class="space-y-6">
   <!-- Platform Connection Status -->
   {% if not platform_available %}
-  <div class="mb-6 bg-red-900 border border-red-700 rounded-lg p-4">
-    <div class="flex items-center">
-      {% icon "warning" size="sm" css_class="text-red-400 mr-2" %}
-      <span class="text-red-100 text-sm sm:text-base">{% trans 'Platform service temporarily unavailable. Some features may be limited.' %}</span>
-    </div>
-  </div>
+  {% trans "Platform service temporarily unavailable. Some features may be limited." as outage_message %}
+  {% alert outage_message variant="danger" css_class="mb-6" %}
   {% endif %}
 
   {% if rate_limited %}
@@ -123,7 +119,7 @@
         </div>
 
         <div class="mt-4 text-center">
-          <a href="{% url 'billing:invoices_list' %}" class="inline-flex items-center text-blue-400 hover:text-blue-300">
+          <a href="{% url 'billing:invoices_list' %}" class="inline-flex items-center text-blue-400 hover:text-blue-300"> {# tmpl-allow TMPL005: needs button inline_link #}
             {% trans 'View all' %} →
           </a>
         </div>
@@ -180,7 +176,7 @@
         </div>
 
         <div class="mt-4 text-center">
-          <a href="{% url 'tickets:list' %}" class="inline-flex items-center text-blue-400 hover:text-blue-300">
+          <a href="{% url 'tickets:list' %}" class="inline-flex items-center text-blue-400 hover:text-blue-300"> {# tmpl-allow TMPL005: needs button inline_link #}
             {% trans 'View all' %} →
           </a>
         </div>
@@ -191,18 +187,15 @@
     {% section_card title=actions_title icon="lightning" %}
 
         <div class="grid grid-cols-2 gap-3">
-          <a href="{% url 'tickets:create' %}" class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-red-600 border border-red-600 rounded-lg hover:bg-red-700 focus:ring-4 focus:ring-red-300 transition-all duration-200">
-            {% icon "tickets" size="sm" css_class="mr-1" %} {% trans 'New Ticket' %}
-          </a>
-          <a href="{% url 'billing:invoices_list' %}" class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-green-600 border border-green-600 rounded-lg hover:bg-green-700 focus:ring-4 focus:ring-green-300 transition-all duration-200">
-            {% icon "invoices" size="sm" css_class="mr-1" %} {% trans 'View Invoices' %}
-          </a>
+          {% url 'tickets:create' as wp16_url %}
+          {% button _("New Ticket") href=wp16_url variant="danger" icon="tickets" %}
+          {% url 'billing:invoices_list' as wp16_url %}
+          {% button _("View Invoices") href=wp16_url variant="success" icon="invoices" %}
           <a href="{% url 'services:list' %}" class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-slate-600 border border-slate-600 rounded-lg hover:bg-slate-700 focus:ring-4 focus:ring-slate-300 transition-all duration-200">
             {% icon "services" size="sm" css_class="mr-1" %} {% trans 'My Services' %}
           </a>
-          <a href="{% url 'users:profile' %}" class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-yellow-500 border border-yellow-500 rounded-lg hover:bg-yellow-600 focus:ring-4 focus:ring-yellow-300 transition-all duration-200">
-            {% icon "user" size="sm" css_class="mr-1" %} {% trans 'My Profile' %}
-          </a>
+          {% url 'users:profile' as wp16_url %}
+          {% button _("My Profile") href=wp16_url variant="warning" icon="user" %}
         </div>
     {% end_section_card %}
 

@@ -36,11 +36,9 @@
             {% endif %}
 
             {% if form.non_field_errors %}
-            <div class="bg-red-900 border border-red-700 rounded-md p-3 mb-4">
-              {% for error in form.non_field_errors %}
-              <p class="text-red-100 text-sm">{{ error }}</p>
-              {% endfor %}
-            </div>
+            {% for error in form.non_field_errors %}
+              {% alert error variant="danger" %}
+            {% endfor %}
             {% endif %}
 
             <!-- Company Information Section -->
@@ -53,7 +51,7 @@
                             <label for="{{ form.company_name.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
                                 {{ form.company_name.label }}
                                 {% if form.company_name.field.required %}
-                                    <span class="text-red-400">*</span>
+                                    <span class="text-red-400">*</span> {# tmpl-allow TMPL005: needs input_field standalone_required_indicator #}
                                 {% endif %}
                             </label>
                             {{ form.company_name }}
@@ -62,7 +60,7 @@
                             {% endif %}
                             {% if form.company_name.errors %}
                                 {% for error in form.company_name.errors %}
-                                    <p class="mt-1 text-sm text-red-400">{{ error }}</p>
+                                  {% alert error variant="danger" %}
                                 {% endfor %}
                             {% endif %}
                         </div>
@@ -72,7 +70,7 @@
                             <label for="{{ form.industry.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
                                 {{ form.industry.label }}
                                 {% if form.industry.field.required %}
-                                    <span class="text-red-400">*</span>
+                                    <span class="text-red-400">*</span> {# tmpl-allow TMPL005: needs input_field standalone_required_indicator #}
                                 {% endif %}
                             </label>
                             {{ form.industry }}
@@ -81,7 +79,7 @@
                             {% endif %}
                             {% if form.industry.errors %}
                                 {% for error in form.industry.errors %}
-                                    <p class="mt-1 text-sm text-red-400">{{ error }}</p>
+                                  {% alert error variant="danger" %}
                                 {% endfor %}
                             {% endif %}
                         </div>
@@ -123,7 +121,7 @@
                             <label for="{{ form.primary_email.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
                                 {{ form.primary_email.label }}
                                 {% if form.primary_email.field.required %}
-                                    <span class="text-red-400">*</span>
+                                    <span class="text-red-400">*</span> {# tmpl-allow TMPL005: needs input_field standalone_required_indicator #}
                                 {% endif %}
                             </label>
                             {{ form.primary_email }}
@@ -132,7 +130,7 @@
                             {% endif %}
                             {% if form.primary_email.errors %}
                                 {% for error in form.primary_email.errors %}
-                                    <p class="mt-1 text-sm text-red-400">{{ error }}</p>
+                                  {% alert error variant="danger" %}
                                 {% endfor %}
                             {% endif %}
                         </div>
@@ -142,7 +140,7 @@
                             <label for="{{ form.primary_phone.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
                                 {{ form.primary_phone.label }}
                                 {% if form.primary_phone.field.required %}
-                                    <span class="text-red-400">*</span>
+                                    <span class="text-red-400">*</span> {# tmpl-allow TMPL005: needs input_field standalone_required_indicator #}
                                 {% endif %}
                             </label>
                             {{ form.primary_phone }}
@@ -151,7 +149,7 @@
                             {% endif %}
                             {% if form.primary_phone.errors %}
                                 {% for error in form.primary_phone.errors %}
-                                    <p class="mt-1 text-sm text-red-400">{{ error }}</p>
+                                  {% alert error variant="danger" %}
                                 {% endfor %}
                             {% endif %}
                         </div>
@@ -161,7 +159,7 @@
                             <label for="{{ form.website.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
                                 {{ form.website.label }}
                                 {% if form.website.field.required %}
-                                    <span class="text-red-400">*</span>
+                                    <span class="text-red-400">*</span> {# tmpl-allow TMPL005: needs input_field standalone_required_indicator #}
                                 {% endif %}
                             </label>
                             {{ form.website }}
@@ -170,7 +168,7 @@
                             {% endif %}
                             {% if form.website.errors %}
                                 {% for error in form.website.errors %}
-                                    <p class="mt-1 text-sm text-red-400">{{ error }}</p>
+                                  {% alert error variant="danger" %}
                                 {% endfor %}
                             {% endif %}
                         </div>
@@ -181,7 +179,7 @@
             <!-- Form Actions -->
             <div class="flex items-center justify-between space-x-4">
                 <div class="text-sm text-slate-400">
-                    <span class="text-red-400">*</span> {% trans "Required fields" %}
+                    <span class="text-red-400">*</span> {% trans "Required fields" %} {# tmpl-allow TMPL005: needs input_field standalone_required_indicator #}
                 </div>
 
                 <div class="flex items-center space-x-4">
@@ -199,7 +197,7 @@
         <!-- Help Text -->
         <div class="mt-8 p-4 bg-slate-800/50 rounded-lg border border-slate-700">
             <div class="flex items-start">
-                {% icon "info" size="md" css_class="text-blue-400 mr-3 mt-0.5 flex-shrink-0" %}
+                {% icon "info" size="md" css_class="text-blue-400 mr-3 mt-0.5 flex-shrink-0" %} {# tmpl-allow TMPL005: needs badge unboxed_icon #}
                 <div class="text-sm text-slate-400">
                     <p class="font-medium text-slate-300 mb-2">{% trans "Important Notes:" %}</p>
                     <ul class="list-disc list-inside space-y-1 ml-4">
