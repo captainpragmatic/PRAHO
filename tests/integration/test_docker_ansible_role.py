@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import ast
 import re
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -231,3 +232,28 @@ class TestAnsibleDockerRole:
         assert secret not in message
         healthy = {"praho_container": {"results": [result("praho_platform", "healthy"), result("praho_portal", "healthy")]}}
         assert env.compile_expression(stop["when"])(**healthy) is False
+
+    @pytest.mark.integration
+    def test_a_failed_rollback_start_exits_nonzero(self, tmp_path: Path) -> None:
+        # The old version is already down by then; a caller (or an operator's `&&`) must see the failure.
+        root = tmp_path.resolve()
+        inputs = {**_dummy_inputs("combined"), "project_root": str(root), "backup_directory": str(root / "backups")}
+        script = root / "rollback.sh"
+        script.write_text(_render_role("combined", inputs)["rollback.sh.j2"])
+        bin_dir = root / "bin"
+        bin_dir.mkdir()
+        docker = bin_dir / "docker"
+        docker.write_text('#!/bin/sh\n[ "$1 $2" = "compose up" ] && exit 1\nexit 0\n')
+        docker.chmod(0o755)
+        result = subprocess.run(  # noqa: S603  # The rendered template, run against a stub docker.
+            ["/bin/bash", str(script), "v1.2.3"],
+            cwd=root,
+            env={"PATH": f"{bin_dir}:/usr/bin:/bin", "HOME": str(root)},
+            input="yes\n",
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        assert "Starting version v1.2.3" in result.stdout, result.stdout + result.stderr
+        assert result.returncode != 0, result.stdout
