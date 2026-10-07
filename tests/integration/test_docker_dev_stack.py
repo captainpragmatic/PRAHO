@@ -61,3 +61,12 @@ class TestDevStack:
         )
         assert len(recipes) == 3
         assert [r for r in recipes if "docker-compose " in r] == []
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("name", ["platform", "portal"])
+    def test_debug_is_spelled_the_way_the_settings_parse_it(self, name: str) -> None:
+        # The portal's base.py reads DEBUG as `.lower() == "true"`; "1" made it derive production values
+        # (secure-only session cookies, an https redirect, the production cache) before dev.py ran.
+        settings = (PROJECT_ROOT / "services/portal/config/settings/base.py").read_text()
+        assert 'DEBUG = os.environ.get("DEBUG", "True").lower() == "true"' in settings
+        assert _environment(name)["DEBUG"].lower() == "true"
