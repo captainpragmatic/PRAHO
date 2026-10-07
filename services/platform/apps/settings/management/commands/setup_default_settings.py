@@ -44,6 +44,12 @@ DEFAULT_VALUE_MIGRATIONS: dict[str, tuple[object, object]] = {
     "common.query_warning_threshold": (10, 10),
     "common.sql_display_limit": (200, 200),
     "common.value_summary_limit": (50, 50),
+    "notifications.max_name_length": (100, 200),
+    "notifications.max_subject_length": (200, 200),
+    "notifications.max_template_size": (102400, 100000),
+    "products.max_json_content_size": (102400, 10000),
+    "products.max_price_cents": (10000000000, 100000000),
+    "promotions.max_code_generation_attempts": (100, 100),
 }
 RETIRED_SETTING_KEYS: frozenset[str] = frozenset(
     {

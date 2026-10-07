@@ -2046,7 +2046,7 @@ CATALOG: tuple[SettingDef, ...] = (
     SettingDef(
         key="notifications.max_name_length",
         data_type="integer",
-        default=100,
+        default=200,
         group="advanced",
         section=_("Notifications"),
         label=_("Max name length"),
@@ -2068,7 +2068,7 @@ CATALOG: tuple[SettingDef, ...] = (
     SettingDef(
         key="notifications.max_template_size",
         data_type="integer",
-        default=102400,
+        default=100000,
         group="advanced",
         section=_("Notifications"),
         label=_("Max template size"),
@@ -2190,7 +2190,7 @@ CATALOG: tuple[SettingDef, ...] = (
     SettingDef(
         key="products.max_json_content_size",
         data_type="integer",
-        default=102400,
+        default=10000,
         group="advanced",
         section=_("Products"),
         label=_("Max json content size"),
@@ -2201,7 +2201,7 @@ CATALOG: tuple[SettingDef, ...] = (
     SettingDef(
         key="products.max_price_cents",
         data_type="integer",
-        default=10000000000,
+        default=100000000,
         group="advanced",
         section=_("Products"),
         label=_("Max price"),

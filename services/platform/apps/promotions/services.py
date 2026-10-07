@@ -150,21 +150,6 @@ def release_promotions_for_order(order: Order, *, trigger: str) -> None:  # noqa
 # Constants
 # ===============================================================================
 
-_DEFAULT_MAX_CODE_GENERATION_ATTEMPTS = 100  # Prevent infinite loops in code generation (structural safety limit)
-MAX_CODE_GENERATION_ATTEMPTS = _DEFAULT_MAX_CODE_GENERATION_ATTEMPTS
-
-
-def get_max_code_generation_attempts() -> int:
-    """Get max code generation attempts from SettingsService (runtime)."""
-    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
-        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
-    )
-
-    return SettingsService.get_integer_setting(
-        "promotions.max_code_generation_attempts", _DEFAULT_MAX_CODE_GENERATION_ATTEMPTS
-    )
-
-
 COUPON_EXPIRY_WARNING_DAYS = 3
 
 

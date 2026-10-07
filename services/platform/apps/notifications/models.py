@@ -80,8 +80,8 @@ def validate_template_content(content: str) -> None:
     if not content:
         return
 
-    # Size limit check - templates over 100KB are rejected
-    if len(content) > MAX_TEMPLATE_SIZE:
+    # The configured size limit counts characters, as before.
+    if len(content) > get_max_template_size():
         raise ValidationError(_("Template content too large"))
 
     # Disallowed tags that should be explicitly blocked
@@ -136,7 +136,7 @@ def validate_email_subject(subject: str) -> None:
     if not subject:
         return
 
-    if len(subject) > MAX_SUBJECT_LENGTH:
+    if len(subject) > get_max_subject_length():
         raise ValidationError(_("Subject too long"))
 
     # Check for email header injection attempts (newlines, carriage returns, null bytes)
@@ -626,8 +626,8 @@ class EmailCampaign(models.Model):
         if self.audience_filter and len(str(self.audience_filter)) > MAX_JSON_SIZE:
             raise ValidationError(_("Audience filter JSON too large"))
 
-        # Name length constraint
-        if self.name and len(self.name) > MAX_NAME_LENGTH:
+        # The runtime constraint remains independent of the field's schema limit.
+        if self.name and len(self.name) > get_max_name_length():
             raise ValidationError(_("Campaign name too long"))
 
         # GDPR compliance warning for marketing without consent

@@ -32,6 +32,7 @@ def validate_custom_period_prices(value: Any) -> None:
     """Custom terms have explicit integer cents for a canonical number of days."""
     if not isinstance(value, dict):
         raise ValidationError(_("Custom period prices must map day counts to amounts in cents."))
+    max_price_cents = get_max_price_cents()
     for days, amount in value.items():
         if (
             not isinstance(days, str)
@@ -39,7 +40,7 @@ def validate_custom_period_prices(value: Any) -> None:
             or str(int(days)) != days
             or not 1 <= int(days) <= 730  # noqa: PLR2004  # Matches Subscription.custom_cycle_days
             or type(amount) is not int
-            or not 0 <= amount <= MAX_PRICE_CENTS
+            or not 0 <= amount <= max_price_cents
         ):
             raise ValidationError(_("Custom prices require 1 to 730 days and a non-negative integer amount in cents."))
 
@@ -72,17 +73,18 @@ def validate_json_field(data: Any, field_name: str = "JSON field") -> None:
     if data is None:
         return
 
-    # Size limit check - stricter for model fields, relaxed for general validation
+    # Snapshot once for both guards; preserve the relaxed general-validation scope.
+    max_json_content_size = get_max_json_content_size()
     data_str = str(data)
     # General size guard to prevent DoS via oversized JSON blobs
     # Apply only to simple "single large value" payloads to allow legitimate nested structures
     if isinstance(data, dict) and len(data) == 1:
         only_value = next(iter(data.values()))
-        if isinstance(only_value, str) and len(only_value) > MAX_JSON_CONTENT_SIZE:
+        if isinstance(only_value, str) and len(only_value) > max_json_content_size:
             raise ValidationError(_("JSON content too large"))
     # Apply tighter limit for known model-bound fields to prevent bloat
     model_bound_fields = {"tags", "meta", "module_config"}
-    if field_name in model_bound_fields and len(data_str) > MAX_JSON_CONTENT_SIZE:
+    if field_name in model_bound_fields and len(data_str) > max_json_content_size:
         raise ValidationError(_("%(field_name)s too large") % {"field_name": field_name})
 
     # Depth check
@@ -567,8 +569,8 @@ class ProductPrice(models.Model):
         if self.monthly_price_cents is None or int(self.monthly_price_cents) < 0:
             raise ValidationError(_("Monthly price cannot be negative"))
 
-        # Reject unrealistic prices (> 1,000,000.00 in major units)
-        if int(self.monthly_price_cents) > MAX_PRICE_CENTS:
+        # Resolve the current price ceiling once for this validation.
+        if int(self.monthly_price_cents) > get_max_price_cents():
             raise ValidationError(_("Monthly price too large"))
 
         # Discount range validation
