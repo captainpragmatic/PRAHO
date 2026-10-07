@@ -10070,6 +10070,18 @@ msgstr "Prioritate medie"
 msgid "Low Priority"
 msgstr "Prioritate scăzută"
 
+#: apps/audit/models.py
+msgid "Informational"
+msgstr "Informativ"
+
+#: apps/audit/models.py
+msgid "Under Investigation"
+msgstr "În curs de investigare"
+
+#: apps/audit/models.py
+msgid "False Positive"
+msgstr "Fals pozitiv"
+
 #: templates/audit/alerts_dashboard.html:58
 msgid "Recent Alerts"
 msgstr "Alerte recente"

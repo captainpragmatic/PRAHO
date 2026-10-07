@@ -9,7 +9,7 @@ import threading
 import uuid
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
-from typing import Any, ClassVar, TypedDict
+from typing import TYPE_CHECKING, Any, ClassVar, TypedDict
 
 from django.contrib.auth import get_user_model
 from django.contrib.contenttypes.fields import GenericForeignKey
@@ -17,6 +17,9 @@ from django.contrib.contenttypes.models import ContentType
 from django.db import models
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+
+if TYPE_CHECKING:
+    from django.utils.functional import _StrPromise
 
 User = get_user_model()
 
@@ -1035,19 +1038,19 @@ class AuditAlert(models.Model):
         ("retention_violation", "Retention Policy Violation"),
     )
 
-    SEVERITY_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
-        ("info", "Informational"),
-        ("warning", "Warning"),
-        ("high", "High Priority"),
-        ("critical", "Critical"),
+    SEVERITY_CHOICES: ClassVar[tuple[tuple[str, str | _StrPromise], ...]] = (
+        ("info", _("Informational")),
+        ("warning", _("Warning")),
+        ("high", _("High Priority")),
+        ("critical", _("Critical")),
     )
 
-    STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
-        ("active", "Active"),
-        ("acknowledged", "Acknowledged"),
-        ("investigating", "Under Investigation"),
-        ("resolved", "Resolved"),
-        ("false_positive", "False Positive"),
+    STATUS_CHOICES: ClassVar[tuple[tuple[str, str | _StrPromise], ...]] = (
+        ("active", _("Active")),
+        ("acknowledged", _("Acknowledged")),
+        ("investigating", _("Under Investigation")),
+        ("resolved", _("Resolved")),
+        ("false_positive", _("False Positive")),
     )
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

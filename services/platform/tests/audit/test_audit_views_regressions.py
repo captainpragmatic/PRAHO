@@ -785,19 +785,37 @@ class LogsListTests(AuditViewsBaseTestCase):
         self.assertEqual(resp.status_code, 200)
 
     def test_with_filters(self) -> None:
-        event = self._create_audit_event(
-            category="authentication",
-            severity="high",
-            timestamp=timezone.make_aware(datetime(2024, 6, 1)),
-            ip_address="127.0.0.1",
-            request_id="abc123",
-            session_key="sess123",
-            description="WP19 test matching event",
-            is_sensitive=True,
-            requires_review=True,
-            old_values={"value": "old"},
-            new_values={"value": "new"},
+        matching_values: dict[str, object] = {
+            "category": "authentication",
+            "severity": "high",
+            "timestamp": timezone.make_aware(datetime(2024, 6, 1)),
+            "ip_address": "127.0.0.1",
+            "request_id": "abc123",
+            "session_key": "sess123",
+            "content_type": self.ct,
+            "description": "WP19 test matching event",
+            "is_sensitive": True,
+            "requires_review": True,
+            "old_values": {"value": "old"},
+            "new_values": {"value": "new"},
+        }
+        event = self._create_audit_event(**matching_values)
+        mismatches: tuple[tuple[str, str | ContentType], ...] = (
+            ("ip_address", "127.0.0.2"),
+            ("request_id", "other-request"),
+            ("session_key", "other-session"),
+            ("content_type", ContentType.objects.get_for_model(AuditAlert)),
         )
+        excluded_events = [
+            self._create_audit_event(
+                **{
+                    **matching_values,
+                    field: value,
+                    "description": f"WP19 test excluded by {field}",
+                }
+            )
+            for field, value in mismatches
+        ]
         self._create_audit_event(description="WP19 test excluded event")
         self.client.login(email="staff@example.com", password="testpass123")
         resp = self.client.get(
@@ -826,6 +844,8 @@ class LogsListTests(AuditViewsBaseTestCase):
         self.assertEqual(resp.context["total_results"], 1)
         self.assertEqual(resp.context["page_size"], 25)
         self.assertContains(resp, event.description)
+        for excluded_event in excluded_events:
+            self.assertNotContains(resp, excluded_event.description)
         self.assertNotContains(resp, "WP19 test excluded event")
 
     @patch("apps.audit.views.audit_search_service")
@@ -1960,6 +1980,29 @@ class EventDetailTests(AuditViewsBaseTestCase):
         self.assertEqual([row.pk for row in resp.context["related_alerts"]], [alert.pk])
         self.assertContains(resp, alert.title)
         self.assertNotContains(resp, unrelated_alert.title)
+
+    def test_related_alert_labels_render_in_romanian(self) -> None:
+        self.staff_user.profile.preferred_language = "ro"
+        self.staff_user.profile.save(update_fields=["preferred_language"])
+        self.client.force_login(self.staff_user)
+        cases = (
+            ("critical", "active", "Critic", "Activ"),
+            ("high", "acknowledged", "Prioritate ridicată", "Confirmat"),
+            ("warning", "investigating", "Avertisment", "În curs de investigare"),
+            ("info", "resolved", "Informativ", "Rezolvat"),
+            ("critical", "false_positive", "Critic", "Fals pozitiv"),
+        )
+        for severity, status, severity_label, status_label in cases:
+            with self.subTest(severity=severity, status=status):
+                event = self._create_audit_event()
+                alert = self._create_alert(severity=severity, status=status)
+                alert.related_events.add(event)
+
+                resp = self.client.get(reverse("audit:event_detail", args=[event.id]))
+
+                self.assertEqual(resp["Content-Language"], "ro")
+                self.assertEqual([row.pk for row in resp.context["related_alerts"]], [alert.pk])
+                self.assertContains(resp, f"{severity_label} · {status_label}")
 
     def test_nonexistent_event(self):
         self.client.login(email="staff@example.com", password="testpass123")
