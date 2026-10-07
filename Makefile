@@ -3,7 +3,7 @@
 # ===============================================================================
 # Enhanced for Platform/Portal separation with scoped PYTHONPATH security
 
-.PHONY: help install lock-upgrade check-env check-venv-platform dev dev-e2e dev-e2e-bg dev-e2e-csp dev-platform dev-portal dev-all test test-fast test-file test-platform test-platform-fast test-ci test-ci-focused test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-file test-e2e-csp test-e2e-orm test-security test-cache show-test-deps install-frontend build-css watch-css check-css-tooling migrate check-migrations fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-imports lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict lint-error-handling lint-assertion-quality
+.PHONY: help install lock-upgrade check-env check-venv-platform dev dev-e2e dev-e2e-bg dev-e2e-csp dev-platform dev-portal dev-all test test-fast test-file test-platform test-platform-fast test-ci test-ci-focused test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-file test-e2e-csp test-e2e-orm test-security test-cache show-test-deps install-frontend build-css watch-css check-css-tooling migrate check-migrations fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-imports lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict lint-error-handling lint-assertion-quality
 
 # ===============================================================================
 # SCOPED PYTHON ENVIRONMENTS 🔒
@@ -125,7 +125,6 @@ help:
 	@echo "  make infra-destroy-dev     - Destroy dev server"
 	@echo ""
 	@echo "🚀 ENVIRONMENT DEPLOYMENT (Ansible):"
-	@echo "  make deploy-dev            - Deploy PRAHO to dev (Docker)"
 	@echo "  make deploy-dev-native     - Deploy PRAHO to dev (native, no Docker)"
 	@echo "  make deploy-staging                - Deploy to staging (git HEAD of DEPLOY_BRANCH, or rsync)"
 	@echo "  make deploy-prod                   - Deploy to production (git tag from PRAHO_VERSION)"
@@ -133,7 +132,6 @@ help:
 	@echo ""
 	@echo "📜 ANSIBLE (generic):"
 	@echo "  make ansible-single-server - Deploy via Ansible (single server)"
-	@echo "  make ansible-two-servers   - Deploy via Ansible (distributed)"
 	@echo "  make ansible-backup        - Remote backup via Ansible"
 	@echo ""
 	@echo "⚙️  SETUP & MAINTENANCE:"
@@ -1359,12 +1357,7 @@ infra-destroy-dev:
 # ENVIRONMENT DEPLOYMENT (Ansible) 🚀
 # ===============================================================================
 
-.PHONY: deploy-dev deploy-dev-native deploy-staging deploy-prod
-
-deploy-dev:
-	@echo "🚀 [Deploy] Deploying PRAHO to dev (Docker)..."
-	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@cd deploy/ansible && ansible-playbook -i inventory/dev.yml playbooks/single-server.yml
+.PHONY: deploy-dev-native deploy-staging deploy-prod
 
 deploy-dev-native:
 	@echo "🚀 [Deploy] Deploying PRAHO to dev (native)..."
@@ -1399,11 +1392,6 @@ ansible-single-server:
 	@echo "📜 [Ansible] Native single server deployment..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@cd deploy/ansible && ansible-playbook -i inventory/native-single-server.yml playbooks/native-single-server.yml -e praho_env=$(ENV)
-
-ansible-two-servers:
-	@echo "📜 [Ansible] Two server deployment..."
-	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@cd deploy/ansible && ansible-playbook -i inventory/two-servers.yml playbooks/two-servers.yml
 
 ansible-backup:
 	@echo "📜 [Ansible] Remote backup..."

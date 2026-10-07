@@ -424,24 +424,22 @@ Code exists (`apps/audit/siem.py` + `apps/audit/siem.py (format renderers + on-d
 
 | Tool | Status | Location |
 |------|--------|----------|
-| **Ansible** | Implemented | `deploy/ansible/` — 5 playbooks, 4 roles |
+| **Ansible** | Implemented | `deploy/ansible/` — 2 playbooks, 2 roles (native deployment; [ADR-0054](../ADRs/ADR-0054-supported-deployment-paths.md)) |
 | **Docker** | Implemented | `deploy/platform/Dockerfile`, `deploy/portal/Dockerfile` |
 | **Docker Compose** | Implemented | 7 compose configs (dev, prod, single-server, split, SSL) |
 | **hcloud Python SDK** | Implemented | `apps/infrastructure/hcloud_service.py` — replaced Terraform ([ADR-0027](../ADRs/ADR-0027-hcloud-sdk-infrastructure-provisioning.md)) |
 | Terraform | Exists (legacy) | `services/platform/infrastructure/terraform/` — superseded by hcloud SDK |
 
 **Ansible playbooks** (`deploy/ansible/playbooks/`):
-- `single-server.yml` — single machine Docker deployment
-- `two-servers.yml` — platform + portal split deployment
 - `native-single-server.yml` — systemd-based deployment (no Docker)
 - `backup.yml` — database backup
-- `rollback.yml` — deployment rollback
 
 **Ansible roles:**
 - `common` — security hardening (Fail2Ban jail config)
-- `docker` — Docker installation and daemon config
-- `praho` — Docker-based service deployment
 - `praho-native` — systemd-based service deployment
+
+Docker deployments use Docker Compose through `deploy/scripts/deploy.sh`; the Ansible Docker role was
+retired (ADR-0054).
 
 **Docker security:**
 - Non-root user (`django:django`) in both Dockerfiles

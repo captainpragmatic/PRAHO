@@ -21,9 +21,9 @@ Nothing in this table is an operator decision. It tells you what to expect when 
 | Concern | Where it lives | What ships |
 |---|---|---|
 | TLS termination and certificates | Caddy: `deploy/caddy/Caddyfile` (Docker), `deploy/ansible/roles/praho-native/templates/Caddyfile.native.j2` (native) | Automatic ACME certificates per hostname, contact address `ACME_EMAIL` |
-| HTTP → HTTPS redirect | Caddy | Django's own redirect stays **off**: every shipped compose file and the Ansible env template set `DJANGO_SECURE_SSL_REDIRECT=false`. Set it to `true` only if Django faces the internet directly |
+| HTTP → HTTPS redirect | Caddy | Django's own redirect stays **off**: every shipped compose file and both env examples set `DJANGO_SECURE_SSL_REDIRECT=false`, and the native role defaults it to `false`. Set it to `true` only if Django faces the internet directly |
 | Scheme Django sees | `SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")` in both services' `config/settings/prod.py` | Caddy sends `X-Forwarded-Proto` |
-| HSTS | **Behind Caddy, the edge owns it**: every Caddy config sends `HSTS_POLICY`, and replaces the header Django sends. Without an edge, Django's `SECURE_HSTS_*` settings apply | Production: unset, so `max-age=31536000; includeSubDomains`. Staging: `HSTS_POLICY=max-age=3600` (`.env.example.staging`; the Docker Ansible role derives it from `praho_env`). Nothing preloads |
+| HSTS | **Behind Caddy, the edge owns it**: every Caddy config sends `HSTS_POLICY`, and replaces the header Django sends. Without an edge, Django's `SECURE_HSTS_*` settings apply | Production: unset, so `max-age=31536000; includeSubDomains`. Staging: `HSTS_POLICY=max-age=3600` (`.env.example.staging`; the native role falls back to it on staging). Nothing preloads |
 | Secure cookies | `SESSION_COOKIE_SECURE` and `CSRF_COOKIE_SECURE` are `True` in both `prod.py` files | Not configurable |
 | Allowed hosts and CSRF origins | `ALLOWED_HOSTS` environment variable (comma-separated) | `CSRF_TRUSTED_ORIGINS` is derived as `https://<host>` for each host. Startup fails if `ALLOWED_HOSTS` is unset or contains `*`. The platform also refuses to start without `PORTAL_DOMAIN` and `PLATFORM_DOMAIN` |
 | Staff UI exposure | Caddy's `@staff` matcher | The platform's staff UI is served only to `PLATFORM_ALLOWED_CIDRS` (native: `platform_allowed_ips`); everyone else gets `403 Access denied`. `/api/*`, the webhook endpoints and unsubscribe links stay public |
@@ -39,7 +39,7 @@ Nothing in this table is an operator decision. It tells you what to expect when 
 >   on an immediate `header` line, which covers responses Caddy generates itself (a 502 with the
 >   upstream down).
 > - **Set but empty would send an empty header, which turns HSTS off.** So every compose file and
->   both Ansible roles repeat the non-empty default.
+>   the native role repeat the non-empty default.
 > - **Quote a value that contains `;`** (for example, adding `; preload`). `source .env`, Docker
 >   Compose and the native template all strip the double quotes.
 > - **Upgrading an existing staging deployment:** Compose falls back to the one-year default when

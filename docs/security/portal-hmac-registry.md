@@ -24,9 +24,9 @@ at 3). Malformed JSON / shape fails startup — it never silently degrades to an
 
 ### Where these are set
 
-The supported Docker Compose files and the Ansible role forward `PORTAL_HMAC_MODE` /
-`PORTAL_HMAC_CREDENTIALS` (platform) and `PORTAL_HMAC_SECRET` (portal) from the host `.env`
-into the containers. Under compose `${VAR:-}` interpolation an **unset** variable reaches the
+The supported Docker Compose files forward `PORTAL_HMAC_MODE` /
+`PORTAL_HMAC_CREDENTIALS` (platform) and `PORTAL_HMAC_SECRET` (portal) from the operator's env file
+into the containers; native deployments read the whole file. Under compose `${VAR:-}` interpolation an **unset** variable reaches the
 container as the **empty string** — the two are indistinguishable — so on both services empty
 means "not set": the platform treats an empty registry as unset (legacy/audit unaffected;
 `enforce` still requires a non-empty registry), and the portal falls back to

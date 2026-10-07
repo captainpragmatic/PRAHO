@@ -34,10 +34,6 @@ DENIED_TO_PORTAL = (
     "DATABASE_URL",
 )
 
-# (deploy_platform, deploy_portal, deploy_database, deploy_caddy): the inventories' topologies.
-# Values the repo itself provides (group_vars/all.yml) and facts Ansible gathers. A template that
-# starts using another repo-defined variable fails the render until it is added here.
-
 
 def _environment(service: dict[str, Any]) -> dict[str, str]:
     return dict(str(entry).split("=", 1) for entry in service.get("environment", []))

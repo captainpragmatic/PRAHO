@@ -12,7 +12,7 @@ This guide covers all deployment scenarios for PRAHO, from native single-server 
   - [Option 3: Container Service](#option-3-container-service)
   - [Option 4: Docker Platform Only](#option-4-docker-platform-only)
   - [Option 5: Docker Portal Only](#option-5-docker-portal-only)
-  - [Option 6: Two Servers (Distributed)](#option-6-two-servers-distributed)
+  - [Option 6: Two Servers (Docker Compose split)](#option-6-two-servers-docker-compose-split)
 - [Database Operations](#database-operations)
 - [Rollback Procedures](#rollback-procedures)
 - [Makefile Commands](#makefile-commands)
@@ -642,9 +642,11 @@ Deploy just the Portal service (customer-facing).
 
 ---
 
-### Option 6: Two Servers (Distributed)
+### Option 6: Two Servers (Docker Compose split)
 
-Platform + DB on primary server, Portal on secondary server.
+Platform + DB on primary server, Portal on secondary server. This is the layout Terraform provisions for
+staging and production. Until the native role deploys two hosts, it is deployed by hand with the Compose
+stacks of Options 4 and 5 (ADR-0054).
 
 **Architecture:**
 ```
@@ -667,20 +669,22 @@ Platform + DB on primary server, Portal on secondary server.
 └─────────────────────────┘     └─────────────────────────┘
 ```
 
-**Using Ansible:**
+**Deploying it:**
 ```bash
-# Set environment variables
-export PRAHO_PLATFORM_IP=10.0.0.1
-export PRAHO_PORTAL_IP=10.0.0.2
-export PRAHO_PORTAL_DOMAIN=portal.pragmatichost.com
-export PRAHO_PLATFORM_DOMAIN=platform.pragmatichost.com
-export PRAHO_DB_PASSWORD=secure-password
-export PRAHO_SECRET_KEY=django-secret-key
+# Where the full .env.prod lives, with PORTAL_DJANGO_SECRET_KEY, PORTAL_DOMAIN, PLATFORM_DOMAIN and
+# PLATFORM_API_BASE_URL=https://<platform domain>/api set:
+./deploy/scripts/portal-env.sh --env prod        # writes .env.prod.portal: only what the portal uses
 
-# Deploy
-cd deploy/ansible
-ansible-playbook -i inventory/two-servers.yml playbooks/two-servers.yml
+# Platform server: the full file (its checkout's .env.prod), then
+./deploy/scripts/deploy.sh platform-only --full --build
+
+# Portal server: only .env.prod.portal, copied as its checkout's .env.prod, then
+./deploy/scripts/deploy.sh portal-only --with-caddy --build
 ```
+
+The portal reaches the platform at `https://<platform domain>/api` through the platform server's Caddy,
+where `/api/*` is public and Django's HMAC check guards it. `rollback.sh` and `restore.sh` assume the
+single-server stack: on a split deployment, roll back by redeploying an earlier `VERSION` on each server.
 
 ---
 
@@ -780,14 +784,14 @@ Roll back both version and database:
 ./deploy/scripts/rollback.sh full v1.2.3
 ```
 
-### Rollback via Ansible
+### Rollback on a native server
 
 ```bash
-# Rollback to version
-ansible-playbook -i inventory/native-single-server.yml playbooks/rollback.yml -e version=v1.2.3
+# Redeploy an earlier tag
+make deploy-prod VERSION=v1.2.3
 
-# Restore database
-ansible-playbook -i inventory/native-single-server.yml playbooks/rollback.yml -e restore_backup=true
+# Restore the latest database backup (on the server)
+/opt/praho/scripts/restore.sh --latest
 ```
 
 ---
@@ -829,30 +833,6 @@ All variables live in your `.env.{env}` file. See `.env.example.prod` for the fu
 | `HMAC_SECRET` | Portal ↔ Platform HMAC auth | `openssl rand -base64 32` |
 | `PLATFORM_TO_PORTAL_WEBHOOK_SECRET` | Platform→Portal webhook HMAC | `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
 | `ACME_EMAIL` | Let's Encrypt email | `admin@pragmatichost.com` |
-
-### Docker Deployment (Ansible role)
-
-`make deploy-dev` and `playbooks/two-servers.yml` use the `praho` role, which renders its own `.env` from
-Ansible variables. Pass them in inventory `group_vars` or with `-e @vars.yml`, and keep the secrets in
-Ansible Vault. The role's first task stops and names any that are missing; the list per topology is
-`praho_required_inputs` in `roles/praho/defaults/main.yml`.
-
-| Variable | Needed on | Notes |
-|----------|-----------|-------|
-| `portal_domain`, `platform_domain` | every host | The two hostnames |
-| `acme_email` | every host | Let's Encrypt contact |
-| `secret_key` | every host | Rendered as `DJANGO_SECRET_KEY` |
-| `hmac_secret` | every host | Portal → Platform request signing (`HMAC_SECRET` / `PLATFORM_API_SECRET`) |
-| `platform_to_portal_webhook_secret` | every host | Platform → Portal webhook signing |
-| `db_password` | platform or database host | Not written on a portal-only host |
-| `db_host` | platform host with an external database | |
-| `django_encryption_key`, `credential_vault_master_key` | platform host | Production refuses to start without them; never written on a portal-only host |
-
-Optional: `django_encryption_key_previous` (key rotation), `portal_hmac_secret`, `superuser_email` /
-`superuser_password`, `sentry_dsn`, `db_sslmode` (default `disable` with the bundled database,
-`require` with an external one), and `portal_trusted_proxy_cidrs` (default: `praho_web_subnet`,
-the `web` network Caddy shares with the portal, `10.200.250.0/24`). Role defaults: `db_name` and
-`db_user` (`praho`), `db_port` (`5432`), `debug` (`false`).
 
 ### Docker Deployment (Compose)
 
@@ -1051,20 +1031,14 @@ deploy/
 └── ansible/
     ├── inventory/
     │   ├── native-single-server.yml   # Unified native inventory (staging + prod)
-    │   ├── dev.yml                    # Dev environment inventory
-    │   └── two-servers.yml            # Multi-server hosts (Docker)
+    │   └── dev.yml                    # Remote dev box (make deploy-dev-native)
     ├── group_vars/
     │   └── all.yml                    # Ansible-only vars (ports, paths, tuning)
     ├── playbooks/
     │   ├── native-single-server.yml   # Native deploy (no Docker) — the main playbook
-    │   ├── single-server.yml          # Docker single server deploy
-    │   ├── two-servers.yml            # Multi-server deploy (Docker)
-    │   ├── backup.yml                 # Backup playbook
-    │   └── rollback.yml               # Rollback playbook
+    │   └── backup.yml                 # Backup playbook
     └── roles/
         ├── common/                    # Base server setup (UFW, swap, users)
-        ├── docker/                    # Docker installation
-        ├── praho/                     # Docker-based deployment
         └── praho-native/              # Native deployment (systemd + Gunicorn)
             ├── defaults/main.yml      # Tunable variables
             ├── handlers/main.yml      # Service restart handlers
