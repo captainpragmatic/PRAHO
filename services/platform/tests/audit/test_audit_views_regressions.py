@@ -2,9 +2,11 @@
 Comprehensive tests for apps/audit/views.py to maximize coverage.
 """
 
+import csv
+import io
 import json
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
@@ -68,6 +70,23 @@ class AuditViewsBaseTestCase(TestCase):
         defaults.update(kwargs)
         return DataExport.objects.create(**defaults)
 
+    def _create_alert(
+        self,
+        *,
+        status: str = "active",
+        severity: str = "critical",
+        alert_type: str = "security_incident",
+        assigned_to_id: int | None = None,
+    ) -> AuditAlert:
+        return AuditAlert.objects.create(
+            alert_type=alert_type,
+            severity=severity,
+            title=f"{status} {severity} {alert_type}",
+            description="WP19 alert fixture",
+            status=status,
+            assigned_to_id=assigned_to_id,
+        )
+
 
 # =============================================================================
 # GDPR Dashboard
@@ -95,6 +114,14 @@ class GDPRDashboardTests(AuditViewsBaseTestCase):
         self.client.login(email="user@example.com", password="testpass123")
         resp = self.client.get(reverse("audit:gdpr_dashboard"))
         self.assertEqual(resp.status_code, 200)
+        self.assertEqual(
+            resp.context["consent_status"],
+            {
+                "data_processing": True,
+                "marketing": False,
+                "last_updated": self.regular_user.gdpr_consent_date.isoformat(),
+            },
+        )
 
 
 # =============================================================================
@@ -604,6 +631,10 @@ class UpdateConsentTests(AuditViewsBaseTestCase):
             HTTP_HX_REQUEST="true",
         )
         self.assertEqual(resp.status_code, 200)
+        self.regular_user.refresh_from_db()
+        self.assertTrue(self.regular_user.accepts_marketing)
+        self.assertTrue(resp.context["consent_status"]["marketing"])
+        self.assertTemplateUsed(resp, "audit/gdpr_dashboard.html")
 
     def test_update_consent_exception(self):
         self.client.login(email="user@example.com", password="testpass123")
@@ -665,11 +696,20 @@ class AuditManagementDashboardTests(AuditViewsBaseTestCase):
         resp = self.client.get(reverse("audit:management_dashboard"))
         self.assertEqual(resp.status_code, 302)
 
-    def test_staff_can_access(self):
+    def test_staff_can_access(self) -> None:
+        self.client.login(email="staff@example.com", password="testpass123")
+        # Profile and login signals create sensitive events before the dashboard fixtures.
+        baseline_sensitive = AuditEvent.objects.filter(is_sensitive=True).count()
         self._create_audit_event()
         self._create_audit_event(severity="critical")
         self._create_audit_event(is_sensitive=True)
         self._create_audit_event(requires_review=True)
+        self._create_audit_event(
+            severity="critical",
+            is_sensitive=True,
+            requires_review=True,
+            timestamp=timezone.now() - timedelta(days=8),
+        )
         AuditAlert.objects.create(
             alert_type="security_incident",
             severity="critical",
@@ -696,9 +736,19 @@ class AuditManagementDashboardTests(AuditViewsBaseTestCase):
             is_shared=True,
         )
 
-        self.client.login(email="staff@example.com", password="testpass123")
+        expected_total = AuditEvent.objects.count()
         resp = self.client.get(reverse("audit:management_dashboard"))
         self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["audit_stats"]["total_events"], expected_total)
+        self.assertEqual(resp.context["audit_stats"]["today_events"], expected_total - 1)
+        self.assertEqual(resp.context["audit_stats"]["week_events"], expected_total - 1)
+        self.assertEqual(resp.context["audit_stats"]["critical_events"], 1)
+        self.assertEqual(resp.context["audit_stats"]["sensitive_events"], baseline_sensitive + 1)
+        self.assertEqual(resp.context["audit_stats"]["review_required"], 1)
+        self.assertEqual([alert.title for alert in resp.context["active_alerts"]], ["Test"])
+        self.assertEqual([check.status for check in resp.context["recent_integrity_checks"]], ["healthy"])
+        self.assertEqual(resp.context["retention_policies_count"], 1)
+        self.assertEqual([query.name for query in resp.context["popular_searches"]], ["Test Search"])
 
 
 # =============================================================================
@@ -734,12 +784,21 @@ class LogsListTests(AuditViewsBaseTestCase):
         resp = self.client.get(reverse("audit:logs_list"))
         self.assertEqual(resp.status_code, 200)
 
-    @patch("apps.audit.views.audit_search_service")
-    def test_with_filters(self, mock_search):
-        mock_search.build_advanced_query.return_value = (
-            AuditEvent.objects.none(),
-            {"query_description": "Filtered"},
+    def test_with_filters(self) -> None:
+        event = self._create_audit_event(
+            category="authentication",
+            severity="high",
+            timestamp=timezone.make_aware(datetime(2024, 6, 1)),
+            ip_address="127.0.0.1",
+            request_id="abc123",
+            session_key="sess123",
+            description="WP19 test matching event",
+            is_sensitive=True,
+            requires_review=True,
+            old_values={"value": "old"},
+            new_values={"value": "new"},
         )
+        self._create_audit_event(description="WP19 test excluded event")
         self.client.login(email="staff@example.com", password="testpass123")
         resp = self.client.get(
             reverse("audit:logs_list"),
@@ -748,7 +807,7 @@ class LogsListTests(AuditViewsBaseTestCase):
                 "action": ["create"],
                 "category": ["authentication"],
                 "severity": ["high"],
-                "content_type": ["1"],
+                "content_type": [str(self.ct.pk)],
                 "start_date": "2024-01-01",
                 "end_date": "2024-12-31",
                 "ip_address": "127.0.0.1",
@@ -763,6 +822,11 @@ class LogsListTests(AuditViewsBaseTestCase):
             },
         )
         self.assertEqual(resp.status_code, 200)
+        self.assertEqual([row.pk for row in resp.context["audit_events"]], [event.pk])
+        self.assertEqual(resp.context["total_results"], 1)
+        self.assertEqual(resp.context["page_size"], 25)
+        self.assertContains(resp, event.description)
+        self.assertNotContains(resp, "WP19 test excluded event")
 
     @patch("apps.audit.views.audit_search_service")
     def test_htmx_request(self, mock_search):
@@ -778,23 +842,29 @@ class LogsListTests(AuditViewsBaseTestCase):
         self.assertEqual(resp.status_code, 200)
 
     @patch("apps.audit.views.audit_search_service")
-    def test_page_size_capped(self, mock_search):
+    def test_page_size_capped(self, mock_search: MagicMock) -> None:
+        events = [self._create_audit_event(description=f"Capped event {index}") for index in range(201)]
+        expected_ids = sorted(event.pk for event in events)
         mock_search.build_advanced_query.return_value = (
-            AuditEvent.objects.none(),
+            AuditEvent.objects.filter(pk__in=expected_ids).order_by("pk"),
             {},
         )
         self.client.login(email="staff@example.com", password="testpass123")
-        resp = self.client.get(
-            reverse("audit:logs_list"),
-            {"page_size": "999"},
-        )
+        resp = self.client.get(reverse("audit:logs_list"), {"page_size": "999"})
         self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["page_size"], 200)
+        self.assertEqual(resp.context["audit_events"].paginator.count, 201)
+        self.assertEqual([event.pk for event in resp.context["audit_events"]], expected_ids[:200])
+
+        second = self.client.get(reverse("audit:logs_list"), {"page_size": "999", "page": "2"})
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual([event.pk for event in second.context["audit_events"]], expected_ids[200:])
 
     @patch("apps.audit.views.audit_search_service")
-    def test_empty_filter_values_stripped(self, mock_search):
-        """Empty filter values should be removed."""
+    def test_empty_filter_values_stripped(self, mock_search: MagicMock) -> None:
+        event = self._create_audit_event(description="Unfiltered audit event")
         mock_search.build_advanced_query.return_value = (
-            AuditEvent.objects.none(),
+            AuditEvent.objects.filter(pk=event.pk),
             {},
         )
         self.client.login(email="staff@example.com", password="testpass123")
@@ -803,6 +873,9 @@ class LogsListTests(AuditViewsBaseTestCase):
             {"user": [""], "action": [""], "severity": [""]},
         )
         self.assertEqual(resp.status_code, 200)
+        self.assertEqual(mock_search.build_advanced_query.call_args.args[0], {})
+        self.assertEqual([row.pk for row in resp.context["audit_events"]], [event.pk])
+        self.assertContains(resp, event.description)
 
 
 # =============================================================================
@@ -859,11 +932,31 @@ class ExportLogsTests(AuditViewsBaseTestCase):
         self.assertEqual(resp["Content-Type"], "text/csv")
 
     @patch("apps.audit.views.AuditService")
-    @patch("apps.audit.views.audit_search_service")
-    def test_export_with_filters(self, mock_search, mock_audit):
-        mock_search.build_advanced_query.return_value = (
-            AuditEvent.objects.none(),
-            {},
+    def test_export_with_filters(self, mock_audit: MagicMock) -> None:
+        timestamp = timezone.make_aware(datetime(2024, 6, 1))
+        event = self._create_audit_event(
+            timestamp=timestamp,
+            is_sensitive=True,
+            requires_review=True,
+            description="Included filtered CSV event",
+        )
+        self._create_audit_event(
+            timestamp=timestamp,
+            is_sensitive=False,
+            requires_review=True,
+            description="Not sensitive",
+        )
+        self._create_audit_event(
+            timestamp=timestamp,
+            is_sensitive=True,
+            requires_review=False,
+            description="No review required",
+        )
+        self._create_audit_event(
+            timestamp=timezone.make_aware(datetime(2025, 6, 1)),
+            is_sensitive=True,
+            requires_review=True,
+            description="Outside the requested dates",
         )
         self.client.login(email="staff@example.com", password="testpass123")
         resp = self.client.get(
@@ -877,19 +970,30 @@ class ExportLogsTests(AuditViewsBaseTestCase):
             },
         )
         self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp["Content-Type"], "text/csv")
+        rows = list(csv.DictReader(io.StringIO(resp.content.decode())))
+        self.assertEqual([row["Description"] for row in rows], [event.description])
+        self.assertEqual(rows[0]["User"], self.staff_user.email)
+        self.assertEqual(rows[0]["Is Sensitive"], "True")
+        self.assertEqual(rows[0]["Requires Review"], "True")
 
     @patch("apps.audit.views.AuditService")
     @patch("apps.audit.views.audit_search_service")
-    def test_csv_export_with_null_user(self, mock_search, mock_audit):
-        """Export event with no user (system event)."""
-        self._create_audit_event(user=None)
+    def test_csv_export_with_null_user(self, mock_search: MagicMock, mock_audit: MagicMock) -> None:
+        event = self._create_audit_event(user=None, description="System event, with a comma")
         mock_search.build_advanced_query.return_value = (
-            AuditEvent.objects.all(),
+            AuditEvent.objects.filter(pk=event.pk),
             {},
         )
         self.client.login(email="staff@example.com", password="testpass123")
         resp = self.client.get(reverse("audit:export_logs"), {"format": "csv"})
         self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp["Content-Type"], "text/csv")
+        rows = list(csv.DictReader(io.StringIO(resp.content.decode())))
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["User"], "System")
+        self.assertEqual(rows[0]["Description"], event.description)
+        self.assertEqual(rows[0]["Object ID"], event.object_id)
 
     @patch("apps.audit.views.AuditService")
     @patch("apps.audit.views.audit_search_service")
@@ -958,13 +1062,23 @@ class GDPRExportRequestsListTests(AuditViewsBaseTestCase):
             with self.subTest(label=label):
                 self.assertRegex(resp.content.decode(), rf"<(button|a)[^>]*class=\"ui-btn[^>]*>\s*(<[^>]+>\s*)*{label}")
 
-    def test_with_filters(self):
-        self._create_data_export()
+    def test_with_filters(self) -> None:
+        expired_at = timezone.now() - timedelta(days=1)
+        requested_at = timezone.make_aware(datetime(2024, 6, 1))
+        included = self._create_data_export(status="completed", expires_at=expired_at)
+        pending = self._create_data_export(status="pending", expires_at=expired_at)
+        active = self._create_data_export(status="completed")
+        other_user = self._create_data_export(user=self.staff_user, status="completed", expires_at=expired_at)
+        other_date = self._create_data_export(status="completed", expires_at=expired_at)
+        DataExport.objects.filter(pk__in=[included.pk, pending.pk, active.pk, other_user.pk]).update(
+            requested_at=requested_at
+        )
+        DataExport.objects.filter(pk=other_date.pk).update(requested_at=timezone.make_aware(datetime(2023, 6, 1)))
         self.client.login(email="staff@example.com", password="testpass123")
         resp = self.client.get(
             reverse("audit:gdpr_export_requests_list"),
             {
-                "status": "pending",
+                "status": "completed",
                 "user_email": "user@",
                 "export_type": "gdpr",
                 "start_date": "2024-01-01",
@@ -973,22 +1087,40 @@ class GDPRExportRequestsListTests(AuditViewsBaseTestCase):
             },
         )
         self.assertEqual(resp.status_code, 200)
+        self.assertEqual([export.pk for export in resp.context["export_requests"]], [included.pk])
 
-    def test_active_filter(self):
+    def test_active_filter(self) -> None:
+        pending = self._create_data_export(
+            status="pending",
+            expires_at=timezone.now() - timedelta(days=1),
+        )
+        active = self._create_data_export(status="completed")
+        self._create_data_export(status="completed", expires_at=timezone.now() - timedelta(days=1))
         self.client.login(email="staff@example.com", password="testpass123")
         resp = self.client.get(
             reverse("audit:gdpr_export_requests_list"),
             {"expired": "active"},
         )
         self.assertEqual(resp.status_code, 200)
+        self.assertCountEqual(
+            [export.pk for export in resp.context["export_requests"]],
+            [pending.pk, active.pk],
+        )
 
-    def test_all_status_filter(self):
+    def test_all_status_filter(self) -> None:
+        pending = self._create_data_export(status="pending")
+        completed = self._create_data_export(status="completed")
+        failed = self._create_data_export(status="failed")
         self.client.login(email="staff@example.com", password="testpass123")
         resp = self.client.get(
             reverse("audit:gdpr_export_requests_list"),
             {"status": "all"},
         )
         self.assertEqual(resp.status_code, 200)
+        self.assertCountEqual(
+            [export.pk for export in resp.context["export_requests"]],
+            [pending.pk, completed.pk, failed.pk],
+        )
 
     def test_htmx_request(self):
         self.client.login(email="staff@example.com", password="testpass123")
@@ -1215,14 +1347,19 @@ class DownloadUserExportTests(AuditViewsBaseTestCase):
 
 class SearchSuggestionsTests(AuditViewsBaseTestCase):
     @patch("apps.audit.views.audit_search_service")
-    def test_renders(self, mock_search):
-        mock_search.get_search_suggestions.return_value = {"users": [], "actions": []}
+    def test_renders(self, mock_search: MagicMock) -> None:
+        suggestions = {"users": ["test@example.com"], "actions": ["login_success"]}
+        mock_search.get_search_suggestions.return_value = suggestions
         self.client.login(email="staff@example.com", password="testpass123")
         resp = self.client.get(
             reverse("audit:search_suggestions"),
             {"q": "test"},
         )
         self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["query"], "test")
+        self.assertEqual(resp.context["suggestions"], suggestions)
+        self.assertContains(resp, 'data-value="test@example.com"')
+        self.assertContains(resp, 'data-value="login_success"')
 
     @patch("apps.audit.views.audit_search_service")
     def test_empty_query(self, mock_search):
@@ -1362,7 +1499,7 @@ class IntegrityDashboardTests(AuditViewsBaseTestCase):
         resp = self.client.get(reverse("audit:integrity_dashboard"))
         self.assertEqual(resp.status_code, 200)
 
-    def test_renders_with_data(self):
+    def test_renders_with_data(self) -> None:
         for status in ("healthy", "warning", "compromised"):
             AuditIntegrityCheck.objects.create(
                 check_type="hash_verification",
@@ -1373,6 +1510,21 @@ class IntegrityDashboardTests(AuditViewsBaseTestCase):
         self.client.login(email="staff@example.com", password="testpass123")
         resp = self.client.get(reverse("audit:integrity_dashboard"))
         self.assertEqual(resp.status_code, 200)
+        self.assertCountEqual(
+            [check.status for check in resp.context["recent_checks"]],
+            ["healthy", "warning", "compromised"],
+        )
+        self.assertCountEqual(
+            [check.status for check in resp.context["recent_issues"]],
+            ["warning", "compromised"],
+        )
+        stats = resp.context["stats"]
+        self.assertEqual(stats["total_checks"], 3)
+        self.assertEqual(stats["healthy_checks"], 1)
+        self.assertEqual(stats["warning_checks"], 1)
+        self.assertEqual(stats["compromised_checks"], 1)
+        self.assertEqual(stats["error_checks"], 0)
+        self.assertAlmostEqual(stats["health_percentage"], 100 / 3)
 
 
 # =============================================================================
@@ -1466,11 +1618,29 @@ class RetentionDashboardTests(AuditViewsBaseTestCase):
             retention_days=365,
             is_active=True,
         )
-        self._create_audit_event(category="authentication")
+        self._create_audit_event(
+            category="authentication",
+            timestamp=timezone.now() - timedelta(days=100),
+        )
+        self._create_audit_event(
+            category="security_event",
+            severity="low",
+            timestamp=timezone.now() - timedelta(days=400),
+        )
 
         self.client.login(email="staff@example.com", password="testpass123")
         resp = self.client.get(reverse("audit:retention_dashboard"))
         self.assertEqual(resp.status_code, 200)
+        self.assertCountEqual(
+            [policy.name for policy in resp.context["policies"]],
+            ["Auth Policy", "Security Policy"],
+        )
+        self.assertEqual(
+            {stats["policy_name"]: stats["eligible_events"] for stats in resp.context["retention_stats"].values()},
+            {"Auth Policy": 1, "Security Policy": 0},
+        )
+        self.assertContains(resp, "Auth Policy")
+        self.assertContains(resp, "Security Policy")
 
 
 # =============================================================================
@@ -1549,35 +1719,53 @@ class AlertsDashboardTests(AuditViewsBaseTestCase):
         resp = self.client.get(reverse("audit:alerts_dashboard"))
         self.assertEqual(resp.status_code, 403)
 
-    def test_renders_default_filter(self):
-        AuditAlert.objects.create(
-            alert_type="security_incident",
-            severity="critical",
-            title="Test Alert",
-            description="Test",
-            status="active",
-        )
+    def test_renders_default_filter(self) -> None:
+        alert = self._create_alert()
+        self._create_alert(status="acknowledged")
+        self._create_alert(status="resolved")
         self.client.login(email="staff@example.com", password="testpass123")
         resp = self.client.get(reverse("audit:alerts_dashboard"))
         self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["status_filter"], "active")
+        self.assertEqual([row.pk for row in resp.context["alerts"]], [alert.pk])
+        self.assertContains(resp, alert.title)
+        self.assertNotContains(resp, "resolved critical security_incident")
 
-    def test_all_status_filter(self):
+    def test_all_status_filter(self) -> None:
+        active = self._create_alert()
+        resolved = self._create_alert(status="resolved")
+        false_positive = self._create_alert(status="false_positive")
         self.client.login(email="staff@example.com", password="testpass123")
         resp = self.client.get(
             reverse("audit:alerts_dashboard"),
             {"status": "all"},
         )
         self.assertEqual(resp.status_code, 200)
+        self.assertCountEqual(
+            [alert.pk for alert in resp.context["alerts"]],
+            [active.pk, resolved.pk, false_positive.pk],
+        )
 
-    def test_open_status_filter(self):
+    def test_open_status_filter(self) -> None:
+        open_alerts = [self._create_alert(status=status) for status in ("active", "acknowledged", "investigating")]
+        self._create_alert(status="resolved")
+        self._create_alert(status="false_positive")
         self.client.login(email="staff@example.com", password="testpass123")
         resp = self.client.get(
             reverse("audit:alerts_dashboard"),
             {"status": "open"},
         )
         self.assertEqual(resp.status_code, 200)
+        self.assertCountEqual(
+            [alert.pk for alert in resp.context["alerts"]],
+            [alert.pk for alert in open_alerts],
+        )
 
-    def test_with_type_and_severity_filters(self):
+    def test_with_type_and_severity_filters(self) -> None:
+        included = self._create_alert(status="resolved")
+        self._create_alert(status="active")
+        self._create_alert(status="resolved", severity="warning")
+        self._create_alert(status="resolved", alert_type="performance_anomaly")
         self.client.login(email="staff@example.com", password="testpass123")
         resp = self.client.get(
             reverse("audit:alerts_dashboard"),
@@ -1588,19 +1776,21 @@ class AlertsDashboardTests(AuditViewsBaseTestCase):
             },
         )
         self.assertEqual(resp.status_code, 200)
+        self.assertEqual([alert.pk for alert in resp.context["alerts"]], [included.pk])
 
-    def test_assigned_alerts_count(self):
-        AuditAlert.objects.create(
-            alert_type="security_incident",
-            severity="critical",
-            title="Assigned",
-            description="Test",
-            status="active",
-            assigned_to=self.staff_user,
-        )
+    def test_assigned_alerts_count(self) -> None:
+        assigned = self._create_alert(assigned_to_id=self.staff_user.pk)
+        self._create_alert(status="resolved", assigned_to_id=self.staff_user.pk)
+        other_user = self._create_alert(assigned_to_id=self.regular_user.pk)
+        unassigned = self._create_alert()
         self.client.login(email="staff@example.com", password="testpass123")
         resp = self.client.get(reverse("audit:alerts_dashboard"))
         self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["alert_stats"]["my_assigned"], 1)
+        self.assertCountEqual(
+            [alert.pk for alert in resp.context["alerts"]],
+            [assigned.pk, other_user.pk, unassigned.pk],
+        )
 
 
 # =============================================================================
@@ -1752,7 +1942,7 @@ class EventDetailTests(AuditViewsBaseTestCase):
         resp = self.client.get(reverse("audit:event_detail", args=[event.id]))
         self.assertEqual(resp.status_code, 200)
 
-    def test_with_related_alerts(self):
+    def test_with_related_alerts(self) -> None:
         event = self._create_audit_event()
         alert = AuditAlert.objects.create(
             alert_type="security_incident",
@@ -1761,10 +1951,15 @@ class EventDetailTests(AuditViewsBaseTestCase):
             description="Test",
         )
         alert.related_events.add(event)
+        unrelated_alert = self._create_alert()
 
         self.client.login(email="staff@example.com", password="testpass123")
         resp = self.client.get(reverse("audit:event_detail", args=[event.id]))
         self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["event"].pk, event.pk)
+        self.assertEqual([row.pk for row in resp.context["related_alerts"]], [alert.pk])
+        self.assertContains(resp, alert.title)
+        self.assertNotContains(resp, unrelated_alert.title)
 
     def test_nonexistent_event(self):
         self.client.login(email="staff@example.com", password="testpass123")

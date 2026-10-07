@@ -4,21 +4,19 @@ Tests all security enhancements implemented for the integrations system.
 """
 
 import hashlib
-import json
 import uuid
-from unittest.mock import patch, Mock, MagicMock
-from django.test import TestCase, Client, RequestFactory
+from datetime import timedelta
+from unittest.mock import patch
+
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.test import Client, RequestFactory, TestCase
 from django.urls import reverse
 from django.utils import timezone
-from datetime import timedelta
-from django.utils.html import escape
 
-from apps.integrations.models import WebhookEvent, WebhookDelivery
-from apps.integrations.webhooks.base import BaseWebhookProcessor, SecurityError
-from apps.integrations.views import webhook_status, retry_webhook
 from apps.billing.models import Currency
+from apps.integrations.models import WebhookDelivery, WebhookEvent
+from apps.integrations.webhooks.base import BaseWebhookProcessor, SecurityError
 
 User = get_user_model()
 
@@ -27,24 +25,21 @@ class WebhookSignatureSecurityTests(TestCase):
     """🔒 Tests for webhook signature hashing security fixes"""
 
     def setUp(self):
-        self.currency, _ = Currency.objects.get_or_create(
-            code='USD',
-            defaults={'name': 'US Dollar', 'symbol': '$'}
-        )
+        self.currency, _ = Currency.objects.get_or_create(code="USD", defaults={"name": "US Dollar", "symbol": "$"})
 
     def test_webhook_signature_hashing(self):
         """Test that webhook signatures are properly hashed instead of stored raw"""
         webhook_event = WebhookEvent.objects.create(
-            source='stripe',
-            event_id='evt_test123',
-            event_type='invoice.payment_succeeded',
-            payload={'test': 'data'},
-            ip_address='192.168.1.1',
-            user_agent='Stripe-Webhook/1.0'
+            source="stripe",
+            event_id="evt_test123",
+            event_type="invoice.payment_succeeded",
+            payload={"test": "data"},
+            ip_address="192.168.1.1",
+            user_agent="Stripe-Webhook/1.0",
         )
 
         # Test setting signature
-        test_signature = 'whsec_test_signature_12345'
+        test_signature = "whsec_test_signature_12345"
         webhook_event.set_signature(test_signature)
         webhook_event.save()
 
@@ -59,13 +54,10 @@ class WebhookSignatureSecurityTests(TestCase):
     def test_signature_verification(self):
         """Test signature verification against stored hash"""
         webhook_event = WebhookEvent.objects.create(
-            source='stripe',
-            event_id='evt_test124',
-            event_type='invoice.created',
-            payload={'test': 'data'}
+            source="stripe", event_id="evt_test124", event_type="invoice.created", payload={"test": "data"}
         )
 
-        original_signature = 'whsec_original_signature_12345'
+        original_signature = "whsec_original_signature_12345"
         webhook_event.set_signature(original_signature)
         webhook_event.save()
 
@@ -73,45 +65,32 @@ class WebhookSignatureSecurityTests(TestCase):
         self.assertTrue(webhook_event.verify_signature_hash(original_signature))
 
         # Test incorrect signature
-        self.assertFalse(webhook_event.verify_signature_hash('wrong_signature'))
+        self.assertFalse(webhook_event.verify_signature_hash("wrong_signature"))
 
         # Test empty signature
-        self.assertFalse(webhook_event.verify_signature_hash(''))
+        self.assertFalse(webhook_event.verify_signature_hash(""))
         self.assertFalse(webhook_event.verify_signature_hash(None))
 
     def test_empty_signature_handling(self):
         """Test handling of empty signatures"""
         webhook_event = WebhookEvent.objects.create(
-            source='test',
-            event_id='evt_empty',
-            event_type='test.event',
-            payload={}
+            source="test", event_id="evt_empty", event_type="test.event", payload={}
         )
 
         # Test setting empty signature
-        webhook_event.set_signature('')
-        self.assertEqual(webhook_event.signature_hash, '')
+        webhook_event.set_signature("")
+        self.assertEqual(webhook_event.signature_hash, "")
 
         webhook_event.set_signature(None)
-        self.assertEqual(webhook_event.signature_hash, '')
+        self.assertEqual(webhook_event.signature_hash, "")
 
     def test_signature_hash_consistency(self):
         """Test that same signature always produces same hash"""
-        signature = 'test_signature_consistency'
+        signature = "test_signature_consistency"
 
-        webhook1 = WebhookEvent.objects.create(
-            source='test1',
-            event_id='evt_1',
-            event_type='test',
-            payload={}
-        )
+        webhook1 = WebhookEvent.objects.create(source="test1", event_id="evt_1", event_type="test", payload={})
 
-        webhook2 = WebhookEvent.objects.create(
-            source='test2',
-            event_id='evt_2',
-            event_type='test',
-            payload={}
-        )
+        webhook2 = WebhookEvent.objects.create(source="test2", event_id="evt_2", event_type="test", payload={})
 
         webhook1.set_signature(signature)
         webhook2.set_signature(signature)
@@ -123,10 +102,10 @@ class WebhookSignatureSecurityTests(TestCase):
         webhook_event = WebhookEvent()
 
         # Verify the field exists
-        self.assertTrue(hasattr(webhook_event, 'signature_hash'))
+        self.assertTrue(hasattr(webhook_event, "signature_hash"))
 
         # Verify field properties
-        field = WebhookEvent._meta.get_field('signature_hash')
+        field = WebhookEvent._meta.get_field("signature_hash")
         self.assertEqual(field.max_length, 64)
         self.assertTrue(field.blank)
 
@@ -135,26 +114,23 @@ class RetryTimingSecurityTests(TestCase):
     """🔒 Tests for retry timing jitter security fixes"""
 
     def setUp(self):
-        self.currency, _ = Currency.objects.get_or_create(
-            code='USD',
-            defaults={'name': 'US Dollar', 'symbol': '$'}
-        )
+        self.currency, _ = Currency.objects.get_or_create(code="USD", defaults={"name": "US Dollar", "symbol": "$"})
 
-    @patch('secrets.SystemRandom.uniform')
+    @patch("secrets.SystemRandom.uniform")
     def test_retry_timing_uses_jitter(self, mock_uniform):
         """Test that retry timing uses jitter to prevent timing attacks"""
         mock_uniform.return_value = 0.9  # 90% of base delay
 
         webhook_event = WebhookEvent.objects.create(
-            source='stripe',
-            event_id='evt_retry_test',
-            event_type='test.event',
-            payload={'test': 'data'},
-            status='pending'
+            source="stripe",
+            event_id="evt_retry_test",
+            event_type="test.event",
+            payload={"test": "data"},
+            status="pending",
         )
 
         # Mark as failed to trigger retry calculation
-        webhook_event.mark_failed('Test error')
+        webhook_event.mark_failed("Test error")
 
         # Verify jitter was applied
         mock_uniform.assert_called_with(0.8, 1.2)
@@ -175,11 +151,7 @@ class RetryTimingSecurityTests(TestCase):
     def test_retry_timing_randomization_range(self):
         """Test that retry timing randomization is within expected range"""
         webhook_event = WebhookEvent.objects.create(
-            source='test',
-            event_id='evt_random_test',
-            event_type='test.event',
-            payload={},
-            status='pending'
+            source="test", event_id="evt_random_test", event_type="test.event", payload={}, status="pending"
         )
 
         # Test multiple failures to check jitter range
@@ -189,7 +161,7 @@ class RetryTimingSecurityTests(TestCase):
         for i in range(5):
             webhook_event.retry_count = i
             original_time = timezone.now()
-            webhook_event.mark_failed(f'Test error {i+1}', save=False)
+            webhook_event.mark_failed(f"Test error {i + 1}", save=False)
 
             if webhook_event.next_retry_at:
                 actual_delay = (webhook_event.next_retry_at - original_time).total_seconds()
@@ -206,17 +178,14 @@ class RetryTimingSecurityTests(TestCase):
     def test_retry_count_progression(self):
         """Test that retry count progresses correctly with timing"""
         webhook_event = WebhookEvent.objects.create(
-            source='test',
-            event_id='evt_progression',
-            event_type='test.event',
-            payload={}
+            source="test", event_id="evt_progression", event_type="test.event", payload={}
         )
 
         # Test progression through retry attempts
         expected_counts = [1, 2, 3, 4, 5]
 
         for expected_count in expected_counts:
-            webhook_event.mark_failed(f'Error attempt {expected_count}')
+            webhook_event.mark_failed(f"Error attempt {expected_count}")
 
             self.assertEqual(webhook_event.retry_count, expected_count)
 
@@ -231,11 +200,7 @@ class InputSanitizationSecurityTests(TestCase):
     """🔒 Tests for input sanitization security fixes"""
 
     def setUp(self):
-        self.user = User.objects.create_user(
-            email='staff@example.com',
-            password='testpass123',
-            is_staff=True
-        )
+        self.user = User.objects.create_user(email="staff@example.com", password="testpass123", is_staff=True)
         self.client = Client()
         self.client.force_login(self.user)
 
@@ -243,81 +208,79 @@ class InputSanitizationSecurityTests(TestCase):
         """Test that webhook status API sanitizes external webhook data"""
         # Create webhook with potentially malicious data
         malicious_data = {
-            'source': 'stripe<script>alert("XSS")</script>',
-            'event_type': 'invoice.created"><img src=x onerror=alert(1)>',
-            'status': 'processed</div><script>steal_data()</script>'
+            "source": 'stripe<script>alert("XSS")</script>',
+            "event_type": 'invoice.created"><img src=x onerror=alert(1)>',
+            "status": "processed</div><script>steal_data()</script>",
         }
 
         WebhookEvent.objects.create(
-            source=malicious_data['source'],
-            event_id='evt_malicious',
-            event_type=malicious_data['event_type'],
-            status='processed',  # Use valid status for the model
-            payload={'test': 'data'}
+            source=malicious_data["source"],
+            event_id="evt_malicious",
+            event_type=malicious_data["event_type"],
+            status="processed",  # Use valid status for the model
+            payload={"test": "data"},
         )
 
         # Grant the required permission to test the data sanitization
-        from django.contrib.contenttypes.models import ContentType
         from django.contrib.auth.models import Permission
+        from django.contrib.contenttypes.models import ContentType
+
         content_type = ContentType.objects.get_for_model(WebhookEvent)
         permission, _ = Permission.objects.get_or_create(
-            content_type=content_type,
-            codename="view_webhook_stats",
-            defaults={"name": "Can view webhook statistics"}
+            content_type=content_type, codename="view_webhook_stats", defaults={"name": "Can view webhook statistics"}
         )
         self.user.user_permissions.add(permission)
 
-        response = self.client.get(reverse('integrations:webhook_status'))
+        response = self.client.get(reverse("integrations:webhook_status"))
 
         self.assertEqual(response.status_code, 200)
 
         response_data = response.json()
-        recent_webhooks = response_data.get('recent_webhooks', [])
+        recent_webhooks = response_data.get("recent_webhooks", [])
 
         if recent_webhooks:
             webhook_data = recent_webhooks[0]
 
             # Verify malicious content is escaped
-            self.assertNotIn('<script>', webhook_data['source'])
-            self.assertNotIn('<img src=', webhook_data['event_type'])
-            self.assertNotIn('</div>', webhook_data['status'])
+            self.assertNotIn("<script>", webhook_data["source"])
+            self.assertNotIn("<img src=", webhook_data["event_type"])
+            self.assertNotIn("</div>", webhook_data["status"])
 
             # Verify escaped content is present
-            self.assertIn('&lt;script&gt;', webhook_data['source'])
-            self.assertIn('&lt;img', webhook_data['event_type'])
+            self.assertIn("&lt;script&gt;", webhook_data["source"])
+            self.assertIn("&lt;img", webhook_data["event_type"])
 
     def test_webhook_data_escape_comprehensive(self):
         """Test comprehensive escaping of webhook data"""
         xss_payloads = [
             '"><script>alert(1)</script>',
             "'; DROP TABLE webhooks; --",
-            '<img src=x onerror=alert(document.cookie)>',
-            'javascript:alert(1)',
-            '&lt;already&gt;escaped&lt;/already&gt;',
-            '\"><iframe src=javascript:alert(1)></iframe>',
+            "<img src=x onerror=alert(document.cookie)>",
+            "javascript:alert(1)",
+            "&lt;already&gt;escaped&lt;/already&gt;",
+            '"><iframe src=javascript:alert(1)></iframe>',
         ]
 
         for i, payload in enumerate(xss_payloads):
             WebhookEvent.objects.create(
-                source=f'test_source_{i}',
-                event_id=f'evt_xss_{i}',
+                source=f"test_source_{i}",
+                event_id=f"evt_xss_{i}",
                 event_type=payload,
-                payload={'test': f'payload_{i}'},
-                status='processed'
+                payload={"test": f"payload_{i}"},
+                status="processed",
             )
 
         # Grant the required permission to test the data escaping
-        from django.contrib.contenttypes.models import ContentType
         from django.contrib.auth.models import Permission
+        from django.contrib.contenttypes.models import ContentType
+
         content_type = ContentType.objects.get_for_model(WebhookEvent)
         permission, _ = Permission.objects.get_or_create(
-            content_type=content_type,
-            codename="view_webhook_stats",
-            defaults={"name": "Can view webhook statistics"}
+            content_type=content_type, codename="view_webhook_stats", defaults={"name": "Can view webhook statistics"}
         )
         self.user.user_permissions.add(permission)
 
-        response = self.client.get(reverse('integrations:webhook_status'))
+        response = self.client.get(reverse("integrations:webhook_status"))
 
         self.assertEqual(response.status_code, 200)
 
@@ -325,23 +288,22 @@ class InputSanitizationSecurityTests(TestCase):
 
         # Verify no unescaped malicious content
         dangerous_patterns = [
-            '<script>alert',
-            'javascript:alert',
-            '<img src=x',
-            '<iframe src=',
-            'DROP TABLE',
+            "<script>alert",
+            "javascript:alert",
+            "<img src=x",
+            "<iframe src=",
+            "DROP TABLE",
         ]
 
         for pattern in dangerous_patterns:
-            self.assertNotIn(pattern, response_content,
-                           f"Dangerous pattern '{pattern}' found unescaped in response")
+            self.assertNotIn(pattern, response_content, f"Dangerous pattern '{pattern}' found unescaped in response")
 
     def test_json_response_content_type_safety(self):
         """Test that JSON responses have proper content-type to prevent MIME sniffing"""
-        with patch.object(self.user, 'has_perm', return_value=True):
-            response = self.client.get(reverse('integrations:webhook_status'))
+        with patch.object(self.user, "has_perm", return_value=True):
+            response = self.client.get(reverse("integrations:webhook_status"))
 
-        self.assertEqual(response['Content-Type'], 'application/json')
+        self.assertEqual(response["Content-Type"], "application/json")
 
         # Verify response is valid JSON
         response_data = response.json()
@@ -360,6 +322,7 @@ class AbstractWebhookProcessorSecurityTests(TestCase):
         """Test that subclasses must implement verify_signature method"""
         # This should fail to instantiate without implementing abstract method
         with self.assertRaises(TypeError):
+
             class IncompleteProcessor(BaseWebhookProcessor):
                 pass
 
@@ -367,6 +330,7 @@ class AbstractWebhookProcessorSecurityTests(TestCase):
 
     def test_proper_subclass_can_be_instantiated(self):
         """Test that properly implemented subclass can be instantiated"""
+
         class ProperProcessor(BaseWebhookProcessor):
             def verify_signature(self, payload, signature, headers):
                 return False  # Always reject for security
@@ -377,23 +341,25 @@ class AbstractWebhookProcessorSecurityTests(TestCase):
 
     def test_signature_verification_enforcement(self):
         """Test that signature verification is properly enforced"""
+
         class TestProcessor(BaseWebhookProcessor):
             def verify_signature(self, payload, signature, headers):
                 # Simulate proper verification logic
-                if signature == 'obviously_invalid_signature_12345':
+                if signature == "obviously_invalid_signature_12345":
                     return False
                 return len(signature) > 10  # Simple test logic
 
         processor = TestProcessor()
 
         # Test validation method exists
-        self.assertTrue(hasattr(processor, '_validate_signature_implementation'))
+        self.assertTrue(hasattr(processor, "_validate_signature_implementation"))
 
         # Test validation logic
         processor._validate_signature_implementation()  # Should not raise
 
     def test_overly_permissive_signature_verification_detection(self):
         """Test detection of overly permissive signature verification"""
+
         class PermissiveProcessor(BaseWebhookProcessor):
             def verify_signature(self, payload, signature, headers):
                 return True  # Always accept - DANGEROUS!
@@ -418,17 +384,9 @@ class AccessControlSecurityTests(TestCase):
     """🔒 Tests for access control security improvements"""
 
     def setUp(self):
-        self.staff_user = User.objects.create_user(
-            email='staff@example.com',
-            password='testpass123',
-            is_staff=True
-        )
+        self.staff_user = User.objects.create_user(email="staff@example.com", password="testpass123", is_staff=True)
 
-        self.regular_user = User.objects.create_user(
-            email='user@example.com',
-            password='testpass123',
-            is_staff=False
-        )
+        self.regular_user = User.objects.create_user(email="user@example.com", password="testpass123", is_staff=False)
 
         self.client = Client()
         self.factory = RequestFactory()
@@ -437,31 +395,44 @@ class AccessControlSecurityTests(TestCase):
         """Test webhook status requires both staff status and specific permissions"""
         from django.contrib.auth.models import Permission
         from django.contrib.contenttypes.models import ContentType
+
         from apps.integrations.models import WebhookEvent
 
         # Test with non-staff user — StaffOnlyPlatformMiddleware redirects (302) to login
         self.client.force_login(self.regular_user)
-        response = self.client.get(reverse('integrations:webhook_status'))
+        response = self.client.get(reverse("integrations:webhook_status"))
         self.assertIn(response.status_code, (302, 403))
 
         # Test with staff user but no permissions
         self.client.force_login(self.staff_user)
-        response = self.client.get(reverse('integrations:webhook_status'))
+        response = self.client.get(reverse("integrations:webhook_status"))
         # Should fail without the specific permission
         self.assertIn(response.status_code, (403, 302))
 
         # Add webhook stats permission to staff user
         content_type = ContentType.objects.get_for_model(WebhookEvent)
         permission, _ = Permission.objects.get_or_create(
-            content_type=content_type,
-            codename="view_webhook_stats",
-            defaults={"name": "Can view webhook statistics"}
+            content_type=content_type, codename="view_webhook_stats", defaults={"name": "Can view webhook statistics"}
         )
         self.staff_user.user_permissions.add(permission)
 
         # Test with staff user and proper permissions
-        response = self.client.get(reverse('integrations:webhook_status'))
+        event = WebhookEvent.objects.create(
+            source="stripe",
+            event_id="wp19-permitted-webhook",
+            event_type="invoice.payment_failed",
+            payload={},
+            status="failed",
+        )
+        response = self.client.get(reverse("integrations:webhook_status"))
         self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(
+            data["stats"],
+            {"total_webhooks": 1, "pending": 0, "processed": 0, "failed": 1, "skipped": 0},
+        )
+        self.assertEqual(data["by_source"]["stripe"]["failed"], 1)
+        self.assertEqual([row["id"] for row in data["recent_webhooks"]], [str(event.pk)])
 
     def test_retry_webhook_permission_checks(self):
         """Test retry webhook has proper permission checks"""
@@ -469,79 +440,65 @@ class AccessControlSecurityTests(TestCase):
         from django.contrib.contenttypes.models import ContentType
 
         webhook_event = WebhookEvent.objects.create(
-            source='test',
-            event_id='evt_retry',
-            event_type='test.event',
-            payload={},
-            status='failed'
+            source="test", event_id="evt_retry", event_type="test.event", payload={}, status="failed"
         )
 
         # Test with non-staff user — StaffOnlyPlatformMiddleware redirects (302) to login
         self.client.force_login(self.regular_user)
-        response = self.client.post(
-            reverse('integrations:retry_webhook', kwargs={'webhook_id': webhook_event.id})
-        )
+        response = self.client.post(reverse("integrations:retry_webhook", kwargs={"webhook_id": webhook_event.id}))
         self.assertIn(response.status_code, (302, 403))
 
         # Test with staff user but no retry permission
         self.client.force_login(self.staff_user)
-        response = self.client.post(
-            reverse('integrations:retry_webhook', kwargs={'webhook_id': webhook_event.id})
-        )
+        response = self.client.post(reverse("integrations:retry_webhook", kwargs={"webhook_id": webhook_event.id}))
         self.assertIn(response.status_code, (403, 302))  # Should fail without permission
 
         # Add retry webhook permission to staff user
         content_type = ContentType.objects.get_for_model(WebhookEvent)
         permission, _ = Permission.objects.get_or_create(
-            content_type=content_type,
-            codename="retry_webhook",
-            defaults={"name": "Can retry failed webhooks"}
+            content_type=content_type, codename="retry_webhook", defaults={"name": "Can retry failed webhooks"}
         )
         self.staff_user.user_permissions.add(permission)
 
         # Test with staff user and proper permissions - should succeed (404 due to mock)
-        response = self.client.post(
-            reverse('integrations:retry_webhook', kwargs={'webhook_id': webhook_event.id})
-        )
+        response = self.client.post(reverse("integrations:retry_webhook", kwargs={"webhook_id": webhook_event.id}))
         # Since we don't have a processor registered for 'test' source, expect error
         self.assertEqual(response.status_code, 400)
 
     def test_webhook_not_found_handling(self):
         """Test proper handling of non-existent webhooks"""
         # Grant the required permission to test the not-found handling
-        from django.contrib.contenttypes.models import ContentType
         from django.contrib.auth.models import Permission
+        from django.contrib.contenttypes.models import ContentType
+
         content_type = ContentType.objects.get_for_model(WebhookEvent)
         permission, _ = Permission.objects.get_or_create(
-            content_type=content_type,
-            codename="retry_webhook",
-            defaults={"name": "Can retry failed webhooks"}
+            content_type=content_type, codename="retry_webhook", defaults={"name": "Can retry failed webhooks"}
         )
         self.staff_user.user_permissions.add(permission)
 
         self.client.force_login(self.staff_user)
 
         non_existent_id = uuid.uuid4()
-        response = self.client.post(
-            reverse('integrations:retry_webhook', kwargs={'webhook_id': non_existent_id})
-        )
+        response = self.client.post(reverse("integrations:retry_webhook", kwargs={"webhook_id": non_existent_id}))
 
         self.assertEqual(response.status_code, 404)
         response_data = response.json()
-        self.assertEqual(response_data['error'], 'Webhook not found')
+        self.assertEqual(response_data["error"], "Webhook not found")
 
     def test_permission_logging_for_security_monitoring(self):
         """Test that permission failures are logged for security monitoring"""
-        with patch('apps.integrations.views.logger') as mock_logger:
+        with patch("apps.integrations.views.logger") as mock_logger:
             self.client.force_login(self.staff_user)
 
             # Trigger permission failure
-            response = self.client.get(reverse('integrations:webhook_status'))
+            response = self.client.get(reverse("integrations:webhook_status"))
+            self.assertIn(response.status_code, (302, 403))
 
             # Should log the security event
             mock_logger.warning.assert_called_once()
             log_call = mock_logger.warning.call_args[0][0]
-            self.assertIn('Webhook stats access denied', log_call)
+            self.assertIn("Webhook stats access denied", log_call)
             self.assertIn(self.staff_user.email, log_call)
 
 
@@ -550,11 +507,12 @@ class SSRFProtectionSecurityTests(TestCase):
 
     def setUp(self):
         from apps.customers.models import Customer
+
         self.customer = Customer.objects.create(
-            name='Test Customer',
-            company_name='Test Company',
-            primary_email='test@example.com',
-            customer_type='business'
+            name="Test Customer",
+            company_name="Test Company",
+            primary_email="test@example.com",
+            customer_type="business",
         )
 
     def test_webhook_delivery_blocks_localhost_urls(self):
@@ -562,17 +520,14 @@ class SSRFProtectionSecurityTests(TestCase):
         # https://127.0.0.1 triggers IP-range blocking; http:// variants trigger scheme check.
         # Either way a ValidationError must be raised.
         localhost_urls = [
-            'http://localhost:8700/webhook',
-            'https://127.0.0.1/webhook',
-            'https://[::1]/webhook',
+            "http://localhost:8700/webhook",
+            "https://127.0.0.1/webhook",
+            "https://[::1]/webhook",
         ]
 
         for url in localhost_urls:
             webhook_delivery = WebhookDelivery(
-                customer=self.customer,
-                endpoint_url=url,
-                event_type='test.event',
-                payload={'test': 'data'}
+                customer=self.customer, endpoint_url=url, event_type="test.event", payload={"test": "data"}
             )
 
             with self.assertRaises(ValidationError, msg=f"URL should be blocked: {url}"):
@@ -582,16 +537,13 @@ class SSRFProtectionSecurityTests(TestCase):
         """Test that webhook delivery blocks private network IP addresses"""
         # STRICT_EXTERNAL requires HTTPS; even if scheme passes, private IPs are blocked.
         private_ips = [
-            'https://10.0.0.1/webhook',
-            'https://169.254.1.1/webhook',  # Link-local
+            "https://10.0.0.1/webhook",
+            "https://169.254.1.1/webhook",  # Link-local
         ]
 
         for url in private_ips:
             webhook_delivery = WebhookDelivery(
-                customer=self.customer,
-                endpoint_url=url,
-                event_type='test.event',
-                payload={}
+                customer=self.customer, endpoint_url=url, event_type="test.event", payload={}
             )
 
             with self.assertRaises(ValidationError, msg=f"Private IP should be blocked: {url}"):
@@ -603,12 +555,9 @@ class SSRFProtectionSecurityTests(TestCase):
         dangerous_ports = [22, 25, 445, 3306, 5432]
 
         for port in dangerous_ports:
-            url = f'https://example.com:{port}/webhook'
+            url = f"https://example.com:{port}/webhook"
             webhook_delivery = WebhookDelivery(
-                customer=self.customer,
-                endpoint_url=url,
-                event_type='test.event',
-                payload={}
+                customer=self.customer, endpoint_url=url, event_type="test.event", payload={}
             )
 
             with self.assertRaises(ValidationError, msg=f"Port {port} should be blocked"):
@@ -617,33 +566,27 @@ class SSRFProtectionSecurityTests(TestCase):
     def test_webhook_delivery_allows_safe_urls(self):
         """Test that webhook delivery allows safe URLs"""
         safe_urls = [
-            'https://api.example.com/webhooks',
-            'https://external-service.com:443/webhook',
-            'https://secure-endpoint.org:8443/api/webhook',
+            "https://api.example.com/webhooks",
+            "https://external-service.com:443/webhook",
+            "https://secure-endpoint.org:8443/api/webhook",
         ]
 
         for url in safe_urls:
             webhook_delivery = WebhookDelivery(
-                customer=self.customer,
-                endpoint_url=url,
-                event_type='test.event',
-                payload={}
+                customer=self.customer, endpoint_url=url, event_type="test.event", payload={}
             )
 
             # Patch DNS resolution so example.com resolves to a public IP in tests
-            with patch('apps.common.outbound_http._resolve_dns', return_value=['1.2.3.4']):
+            with patch("apps.common.outbound_http._resolve_dns", return_value=["1.2.3.4"]):
                 try:
                     webhook_delivery.clean()
                 except ValidationError as exc:
-                    self.fail(f'Safe URL {url} was incorrectly blocked: {exc}')
+                    self.fail(f"Safe URL {url} was incorrectly blocked: {exc}")
 
     def test_webhook_delivery_save_calls_clean(self):
         """Test that save() automatically calls clean() for validation"""
         malicious_webhook = WebhookDelivery(
-            customer=self.customer,
-            endpoint_url='http://localhost/webhook',
-            event_type='test.event',
-            payload={}
+            customer=self.customer, endpoint_url="http://localhost/webhook", event_type="test.event", payload={}
         )
 
         # save() should call clean() and raise ValidationError
@@ -655,9 +598,9 @@ class SSRFProtectionSecurityTests(TestCase):
         # Mock domain that resolves to private IP
         webhook_delivery = WebhookDelivery(
             customer=self.customer,
-            endpoint_url='http://internal.company.com/webhook',
-            event_type='test.event',
-            payload={}
+            endpoint_url="http://internal.company.com/webhook",
+            event_type="test.event",
+            payload={},
         )
 
         # This test verifies the validation structure exists
@@ -674,27 +617,21 @@ class ComprehensiveSecurityTests(TestCase):
     """🔒 Comprehensive security tests covering edge cases"""
 
     def setUp(self):
-        self.currency, _ = Currency.objects.get_or_create(
-            code='USD',
-            defaults={'name': 'US Dollar', 'symbol': '$'}
-        )
+        self.currency, _ = Currency.objects.get_or_create(code="USD", defaults={"name": "US Dollar", "symbol": "$"})
 
     def test_webhook_event_model_security_comprehensive(self):
         """Test comprehensive security of WebhookEvent model"""
         # Test with various malicious payloads
         malicious_payloads = [
-            {'sql_injection': "'; DROP TABLE webhooks; --"},
-            {'xss': '<script>alert("XSS")</script>'},
-            {'large_payload': 'x' * 10000},  # Test size limits
-            {'nested': {'level1': {'level2': {'level3': 'deep_nesting'}}}},
+            {"sql_injection": "'; DROP TABLE webhooks; --"},
+            {"xss": '<script>alert("XSS")</script>'},
+            {"large_payload": "x" * 10000},  # Test size limits
+            {"nested": {"level1": {"level2": {"level3": "deep_nesting"}}}},
         ]
 
         for i, payload in enumerate(malicious_payloads):
             webhook_event = WebhookEvent.objects.create(
-                source='security_test',
-                event_id=f'evt_security_{i}',
-                event_type='security.test',
-                payload=payload
+                source="security_test", event_id=f"evt_security_{i}", event_type="security.test", payload=payload
             )
 
             # Should be able to create and retrieve safely
@@ -708,14 +645,11 @@ class ComprehensiveSecurityTests(TestCase):
         """Test security at boundary conditions"""
         # Test empty and None values
         webhook_event = WebhookEvent.objects.create(
-            source='boundary_test',
-            event_id='evt_boundary',
-            event_type='test.boundary',
-            payload={}
+            source="boundary_test", event_id="evt_boundary", event_type="test.boundary", payload={}
         )
 
         # Test signature operations with edge cases
-        edge_cases = ['', None, 'a', 'x' * 1000]
+        edge_cases = ["", None, "a", "x" * 1000]
 
         for case in edge_cases:
             if case is not None:
@@ -724,25 +658,25 @@ class ComprehensiveSecurityTests(TestCase):
                     self.assertEqual(len(webhook_event.signature_hash), 64)
                     self.assertTrue(webhook_event.verify_signature_hash(case))
                 else:
-                    self.assertEqual(webhook_event.signature_hash, '')
+                    self.assertEqual(webhook_event.signature_hash, "")
                     self.assertFalse(webhook_event.verify_signature_hash(case))
 
     def test_unicode_and_encoding_security(self):
         """Test security with Unicode and various encodings"""
         unicode_test_data = [
-            'Test with émojis 🔒🔐',
-            'Romanian diacritics: ăâîșț ĂÂÎȘȚ',
-            'Mixed: Test-テスト-тест-测试',
-            '\x01\x02\x03',  # Control characters (excluding NUL: PostgreSQL TEXT/VARCHAR rejects \x00)
-            '\\u0041\\u0042',  # Escaped Unicode
+            "Test with émojis 🔒🔐",
+            "Romanian diacritics: ăâîșț ĂÂÎȘȚ",
+            "Mixed: Test-テスト-тест-测试",
+            "\x01\x02\x03",  # Control characters (excluding NUL: PostgreSQL TEXT/VARCHAR rejects \x00)
+            "\\u0041\\u0042",  # Escaped Unicode
         ]
 
         for i, test_data in enumerate(unicode_test_data):
             webhook_event = WebhookEvent.objects.create(
-                source='unicode_test',
-                event_id=f'evt_unicode_{i}',
+                source="unicode_test",
+                event_id=f"evt_unicode_{i}",
                 event_type=test_data,
-                payload={'unicode_test': test_data}
+                payload={"unicode_test": test_data},
             )
 
             # Should handle Unicode safely

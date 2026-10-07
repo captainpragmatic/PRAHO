@@ -4898,6 +4898,8 @@ class AuditSearchService:
                     AuditEvent.objects.filter(
                         ip_address__icontains=query, timestamp__gte=timezone.now() - timedelta(days=30)
                     )
+                    # Order by the projected field so DISTINCT deduplicates before the limit.
+                    .order_by("ip_address")
                     .values_list("ip_address", flat=True)
                     .distinct()[:limit]
                 )

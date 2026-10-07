@@ -9,7 +9,7 @@ edge cases, and API endpoints.
 from __future__ import annotations
 
 import uuid
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
@@ -23,8 +23,10 @@ from django.utils import timezone
 from apps.billing.currency_policy import get_selling_currency_policy
 from apps.billing.models import (
     Currency,
+    EFacturaDocument,
     Invoice,
     InvoiceSequence,
+    Payment,
     ProformaInvoice,
     ProformaLine,
     ProformaSequence,
@@ -128,6 +130,29 @@ class BillingViewsTestBase(TestCase):
         defaults.update(kwargs)
         return ProformaInvoice.objects.create(**defaults)
 
+    def _create_payment(self, invoice: Invoice, *, status: str = "pending", amount_cents: int = 1000) -> Payment:
+        return Payment.objects.create(
+            customer=invoice.customer,
+            invoice=invoice,
+            currency=invoice.currency,
+            amount_cents=amount_cents,
+            payment_method="bank",
+            status=status,
+        )
+
+    def _create_efactura_document(
+        self,
+        *,
+        number: str,
+        status: str = "draft",
+        upload_index: str = "",
+    ) -> EFacturaDocument:
+        return EFacturaDocument.objects.create(
+            invoice=self._create_invoice(number=number),
+            status=status,
+            anaf_upload_index=upload_index,
+        )
+
 
 # ===============================================================================
 # BILLING LIST VIEWS
@@ -151,28 +176,81 @@ class BillingListViewTest(BillingViewsTestBase):
         response = self.client.get("/billing/invoices/")
         self.assertEqual(response.status_code, 302)
 
-    def test_billing_list_filter_by_type_proforma(self):
-        self._create_proforma()
+    def test_billing_list_filter_by_type_proforma(self) -> None:
+        proforma = self._create_proforma()
+        invoice = self._create_invoice()
         self.client.force_login(self.staff_user)
         response = self.client.get("/billing/invoices/?type=proforma")
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [(document["type"], document["id"]) for document in response.context["documents"]],
+            [("proforma", proforma.pk)],
+        )
+        rows = self.client.get("/billing/invoices/list/?type=proforma")
+        self.assertEqual(rows.status_code, 200)
+        self.assertEqual(
+            [(document["type"], document["id"]) for document in rows.context["documents"]],
+            [("proforma", proforma.pk)],
+        )
+        self.assertContains(rows, proforma.number)
+        self.assertNotContains(rows, invoice.display_number)
 
-    def test_billing_list_filter_by_type_invoice(self):
-        self._create_invoice()
+    def test_billing_list_filter_by_type_invoice(self) -> None:
+        invoice = self._create_invoice()
+        proforma = self._create_proforma()
         self.client.force_login(self.staff_user)
         response = self.client.get("/billing/invoices/?type=invoice")
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [(document["type"], document["id"]) for document in response.context["documents"]],
+            [("invoice", invoice.pk)],
+        )
+        rows = self.client.get("/billing/invoices/list/?type=invoice")
+        self.assertEqual(rows.status_code, 200)
+        self.assertEqual(
+            [(document["type"], document["id"]) for document in rows.context["documents"]],
+            [("invoice", invoice.pk)],
+        )
+        self.assertContains(rows, invoice.display_number)
+        self.assertNotContains(rows, proforma.number)
 
-    def test_billing_list_with_search(self):
-        self._create_invoice(number="INV-SEARCH-001")
+    def test_billing_list_with_search(self) -> None:
+        invoice = self._create_invoice(number="INV-SEARCH-001")
+        excluded = self._create_invoice(number="INV-UNRELATED-001")
         self.client.force_login(self.staff_user)
         response = self.client.get("/billing/invoices/?search=SEARCH")
         self.assertEqual(response.status_code, 200)
+        self.assertEqual([document["id"] for document in response.context["documents"]], [invoice.pk])
+        rows = self.client.get("/billing/invoices/list/?search=SEARCH")
+        self.assertEqual(rows.status_code, 200)
+        self.assertEqual([document["id"] for document in rows.context["documents"]], [invoice.pk])
+        self.assertContains(rows, invoice.display_number)
+        self.assertNotContains(rows, excluded.display_number)
 
-    def test_billing_list_pagination(self):
+    def test_billing_list_pagination(self) -> None:
+        invoices = [self._create_invoice(number=f"INV-PAGE-{index:03d}") for index in range(21)]
+        expected_ids = [invoice.pk for invoice in reversed(invoices)]
         self.client.force_login(self.staff_user)
         response = self.client.get("/billing/invoices/?page=1")
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["documents"].paginator.count, 21)
+        self.assertEqual([document["id"] for document in response.context["documents"]], expected_ids[:20])
+
+        second = self.client.get("/billing/invoices/?page=2")
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(second.context["documents"].number, 2)
+        self.assertEqual([document["id"] for document in second.context["documents"]], expected_ids[20:])
+        first_rows = self.client.get("/billing/invoices/list/?page=1")
+        self.assertEqual(first_rows.status_code, 200)
+        self.assertEqual([document["id"] for document in first_rows.context["documents"]], expected_ids[:20])
+        self.assertContains(first_rows, invoices[-1].display_number)
+        self.assertNotContains(first_rows, invoices[0].display_number)
+
+        second_rows = self.client.get("/billing/invoices/list/?page=2")
+        self.assertEqual(second_rows.status_code, 200)
+        self.assertEqual([document["id"] for document in second_rows.context["documents"]], expected_ids[20:])
+        self.assertContains(second_rows, invoices[0].display_number)
+        self.assertNotContains(second_rows, invoices[-1].display_number)
 
     def test_billing_list_with_documents(self):
         self._create_invoice()
@@ -198,11 +276,24 @@ class ProformaListViewTest(BillingViewsTestBase):
         response = self.client.get("/billing/proformas/")
         self.assertEqual(response.status_code, 200)
 
-    def test_proforma_list_with_search(self):
-        self._create_proforma(number="PRO-SEARCH-001")
+    def test_proforma_list_with_search(self) -> None:
+        proforma = self._create_proforma(number="PRO-SEARCH-001")
+        excluded = self._create_proforma(number="PRO-UNRELATED-001")
+        invoice = self._create_invoice(number="INV-SEARCH-001")
         self.client.force_login(self.staff_user)
         response = self.client.get("/billing/proformas/?search=SEARCH")
         self.assertEqual(response.status_code, 200)
+        self.assertEqual([document["id"] for document in response.context["documents"]], [proforma.pk])
+        self.assertEqual(response.context["doc_type"], "proforma")
+        rows = self.client.get("/billing/invoices/list/", {"search": "SEARCH", "type": response.context["doc_type"]})
+        self.assertEqual(rows.status_code, 200)
+        self.assertEqual(
+            [(document["type"], document["id"]) for document in rows.context["documents"]],
+            [("proforma", proforma.pk)],
+        )
+        self.assertContains(rows, proforma.number)
+        self.assertNotContains(rows, excluded.number)
+        self.assertNotContains(rows, invoice.display_number)
 
     def test_proforma_list_anonymous_redirect(self):
         response = self.client.get("/billing/proformas/")
@@ -224,22 +315,44 @@ class BillingListHtmxViewTest(BillingViewsTestBase):
         response = self.client.get("/billing/invoices/list/")
         self.assertEqual(response.status_code, 200)
 
-    def test_htmx_list_filter_by_type(self):
-        self._create_proforma()
-        self._create_invoice()
+    def test_htmx_list_filter_by_type(self) -> None:
+        proforma = self._create_proforma()
+        invoice = self._create_invoice()
         self.client.force_login(self.staff_user)
         response = self.client.get("/billing/invoices/list/?type=proforma")
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [(document["type"], document["id"]) for document in response.context["documents"]],
+            [("proforma", proforma.pk)],
+        )
+        self.assertContains(response, proforma.number)
+        self.assertNotContains(response, invoice.display_number)
 
-    def test_htmx_list_with_search(self):
+    def test_htmx_list_with_search(self) -> None:
+        invoice = self._create_invoice(number="INV-SEARCH-001")
+        excluded = self._create_invoice(number="INV-UNRELATED-001")
         self.client.force_login(self.staff_user)
-        response = self.client.get("/billing/invoices/list/?search=test")
+        response = self.client.get("/billing/invoices/list/?search=SEARCH")
         self.assertEqual(response.status_code, 200)
+        self.assertEqual([document["id"] for document in response.context["documents"]], [invoice.pk])
+        self.assertContains(response, invoice.display_number)
+        self.assertNotContains(response, excluded.display_number)
 
-    def test_htmx_list_pagination(self):
+    def test_htmx_list_pagination(self) -> None:
+        invoices = [self._create_invoice(number=f"INV-PAGE-{index:03d}") for index in range(21)]
+        expected_ids = [invoice.pk for invoice in reversed(invoices)]
         self.client.force_login(self.staff_user)
         response = self.client.get("/billing/invoices/list/?page=1&type=all")
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["documents"].paginator.count, 21)
+        self.assertEqual([document["id"] for document in response.context["documents"]], expected_ids[:20])
+
+        second = self.client.get("/billing/invoices/list/?page=2&type=all")
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(second.context["documents"].number, 2)
+        self.assertEqual([document["id"] for document in second.context["documents"]], expected_ids[20:])
+        self.assertContains(second, invoices[0].display_number)
+        self.assertNotContains(second, invoices[-1].display_number)
 
     def test_htmx_list_database_error(self):
         self.client.force_login(self.staff_user)
@@ -267,6 +380,9 @@ class InvoiceDetailViewTest(BillingViewsTestBase):
         self.client.force_login(self.staff_user)
         response = self.client.get(f"/billing/invoices/{invoice.pk}/")
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["invoice"].pk, invoice.pk)
+        self.assertContains(response, invoice.display_number)
+        self.assertContains(response, self.customer.name)
 
     def test_invoice_detail_not_found(self):
         self.client.force_login(self.staff_user)
@@ -576,6 +692,9 @@ class ProformaDetailViewTest(BillingViewsTestBase):
         self.client.force_login(self.staff_user)
         response = self.client.get(f"/billing/proformas/{proforma.pk}/")
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["proforma"].pk, proforma.pk)
+        self.assertContains(response, proforma.number)
+        self.assertContains(response, proforma.bill_to_name)
 
     def test_proforma_detail_not_found(self):
         self.client.force_login(self.staff_user)
@@ -586,11 +705,23 @@ class ProformaDetailViewTest(BillingViewsTestBase):
 class ProformaEditViewTest(BillingViewsTestBase):
     """Tests for proforma_edit view."""
 
-    def test_proforma_edit_get(self):
+    def test_proforma_edit_get(self) -> None:
         proforma = self._create_proforma()
+        line = ProformaLine.objects.create(
+            proforma=proforma,
+            description="Existing proforma hosting",
+            quantity=Decimal("2.500"),
+            unit_price_cents=125,
+            tax_rate=Decimal("0.2100"),
+        )
         self.client.force_login(self.staff_user)
         response = self.client.get(f"/billing/proformas/{proforma.pk}/edit/")
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["proforma"].pk, proforma.pk)
+        self.assertEqual([row.pk for row in response.context["lines"]], [line.pk])
+        self.assertContains(response, "Existing proforma hosting")
+        self.assertContains(response, proforma.bill_to_name)
+        self.assertContains(response, proforma.bill_to_email)
 
     def test_proforma_line_edit_resets_document_discount(self):
         """#188: manually editing proforma lines sets explicit prices, so the stored
@@ -650,14 +781,19 @@ class ProformaPdfViewTest(BillingViewsTestBase):
     """Tests for proforma_pdf view."""
 
     @patch("apps.billing.views.RomanianProformaPDFGenerator")
-    def test_proforma_pdf_success(self, mock_gen_cls):
+    def test_proforma_pdf_success(self, mock_gen_cls: MagicMock) -> None:
         mock_gen = MagicMock()
-        mock_gen.generate_response.return_value = HttpResponse(b"%PDF", content_type="application/pdf")
+        pdf_bytes = b"%PDF-1.4\nWP19 proforma document\n%%EOF"
+        mock_gen.generate_response.return_value = HttpResponse(pdf_bytes, content_type="application/pdf")
         mock_gen_cls.return_value = mock_gen
         proforma = self._create_proforma()
         self.client.force_login(self.staff_user)
         response = self.client.get(f"/billing/proformas/{proforma.pk}/pdf/")
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertEqual(response.content, pdf_bytes)
+        mock_gen_cls.assert_called_once_with(proforma)
+        mock_gen.generate_response.assert_called_once_with()
 
 
 class ProformaSendViewTest(BillingViewsTestBase):
@@ -760,16 +896,27 @@ class PaymentListViewTest(BillingViewsTestBase):
         response = self.client.get("/billing/payments/")
         self.assertEqual(response.status_code, 200)
 
-    def test_payment_list_with_status_filter(self):
+    def test_payment_list_with_status_filter(self) -> None:
+        invoice = self._create_invoice()
+        succeeded = self._create_payment(invoice, status="succeeded")
+        self._create_payment(invoice, status="pending")
+        self._create_payment(invoice, status="failed")
         self.client.force_login(self.staff_user)
         response = self.client.get("/billing/payments/?status=succeeded")
         self.assertEqual(response.status_code, 200)
+        self.assertEqual([payment.pk for payment in response.context["payments"]], [succeeded.pk])
 
-    def test_payment_list_with_invoice_filter(self):
+    def test_payment_list_with_invoice_filter(self) -> None:
         invoice = self._create_invoice()
+        payment = self._create_payment(invoice)
+        other_invoice = self._create_invoice()
+        self._create_payment(other_invoice, amount_cents=2000)
         self.client.force_login(self.staff_user)
         response = self.client.get(f"/billing/payments/?invoice={invoice.pk}")
         self.assertEqual(response.status_code, 200)
+        self.assertEqual([row.pk for row in response.context["payments"]], [payment.pk])
+        self.assertContains(response, "10,00 RON", count=2)
+        self.assertNotContains(response, "20,00 RON")
 
     def test_payment_list_anonymous_redirect(self):
         response = self.client.get("/billing/payments/")
@@ -994,10 +1141,16 @@ class EFacturaDashboardViewTest(BillingViewsTestBase):
         response = self.client.get("/billing/e-factura/")
         self.assertEqual(response.status_code, 302)
 
-    def test_dashboard_with_status_filter(self):
+    def test_dashboard_with_status_filter(self) -> None:
+        draft = self._create_efactura_document(number="INV-DRAFT")
+        accepted = self._create_efactura_document(number="INV-ACCEPTED", status="accepted")
         self.client.force_login(self.staff_user)
         response = self.client.get("/billing/e-factura/?status=draft")
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["status_filter"], "draft")
+        self.assertEqual([document.pk for document in response.context["documents_page"]], [draft.pk])
+        self.assertContains(response, draft.invoice.number)
+        self.assertNotContains(response, accepted.invoice.number)
 
 
 class EFacturaDocumentDetailViewTest(BillingViewsTestBase):
@@ -1021,6 +1174,9 @@ class EFacturaDocumentDetailViewTest(BillingViewsTestBase):
         self.client.force_login(self.staff_user)
         response = self.client.get(f"/billing/e-factura/{doc.pk}/")
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["document"].pk, doc.pk)
+        self.assertEqual(response.context["invoice"].pk, invoice.pk)
+        self.assertContains(response, invoice.number)
 
 
 class EFacturaSubmitViewTest(BillingViewsTestBase):
@@ -1131,15 +1287,30 @@ class EFacturaDocumentsHtmxViewTest(BillingViewsTestBase):
         response = self.client.get("/billing/e-factura/documents/")
         self.assertEqual(response.status_code, 200)
 
-    def test_htmx_documents_with_status_filter(self):
+    def test_htmx_documents_with_status_filter(self) -> None:
+        draft = self._create_efactura_document(number="INV-DRAFT")
+        accepted = self._create_efactura_document(number="INV-ACCEPTED", status="accepted")
         self.client.force_login(self.staff_user)
         response = self.client.get("/billing/e-factura/documents/?status=draft")
         self.assertEqual(response.status_code, 200)
+        self.assertEqual([document.pk for document in response.context["documents_page"]], [draft.pk])
+        self.assertContains(response, draft.invoice.number)
+        self.assertNotContains(response, accepted.invoice.number)
 
-    def test_htmx_documents_with_search(self):
+    def test_htmx_documents_with_search(self) -> None:
+        invoice_match = self._create_efactura_document(number="INV-SEARCH-001")
+        upload_match = self._create_efactura_document(number="OTHER-UPLOAD", upload_index="SEARCH-UPLOAD")
+        excluded = self._create_efactura_document(number="OTHER-EXCLUDED", upload_index="UNRELATED")
         self.client.force_login(self.staff_user)
-        response = self.client.get("/billing/e-factura/documents/?q=INV")
+        response = self.client.get("/billing/e-factura/documents/?q=SEARCH")
         self.assertEqual(response.status_code, 200)
+        self.assertCountEqual(
+            [document.pk for document in response.context["documents_page"]],
+            [invoice_match.pk, upload_match.pk],
+        )
+        self.assertContains(response, invoice_match.invoice.number)
+        self.assertContains(response, upload_match.invoice.number)
+        self.assertNotContains(response, excluded.invoice.number)
 
 
 # ===============================================================================
@@ -1175,10 +1346,36 @@ class VatReportViewTest(BillingViewsTestBase):
         response = self.client.get("/billing/reports/vat/")
         self.assertEqual(response.status_code, 200)
 
-    def test_vat_report_with_dates(self):
+    def test_vat_report_with_dates(self) -> None:
+        invoice = self._create_invoice(
+            number="INV-VAT-INCLUDED",
+            tax_point_date=date(2025, 6, 1),
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
+        )
+        self._create_invoice(
+            number="INV-VAT-EXCLUDED",
+            tax_point_date=date(2024, 12, 31),
+            subtotal_cents=50000,
+            tax_cents=10500,
+            total_cents=60500,
+        )
         self.client.force_login(self.staff_user)
         response = self.client.get("/billing/reports/vat/?start_date=2025-01-01&end_date=2025-12-31")
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["start_date"], date(2025, 1, 1))
+        self.assertEqual(response.context["end_date"], date(2025, 12, 31))
+        self.assertEqual([document.pk for document in response.context["documents"]], [invoice.pk])
+        self.assertEqual(response.context["total_net"], 10000)
+        self.assertEqual(response.context["total_vat"], 2100)
+        self.assertEqual(response.context["total_gross"], 12100)
+        self.assertEqual(
+            response.context["vat_summary_by_currency"],
+            [{"currency": "RON", "net": 10000, "vat": 2100, "gross": 12100}],
+        )
+        self.assertContains(response, invoice.display_number)
+        self.assertNotContains(response, "INV-VAT-EXCLUDED")
 
     def test_vat_report_non_staff_redirect(self):
         self.client.force_login(self.regular_user)
@@ -1420,20 +1617,46 @@ class InvoiceRefundRequestViewTest(BillingViewsTestBase):
         response = self.client.get(f"/billing/invoices/{invoice.id}/refund-request/")
         self.assertEqual(response.status_code, 405)
 
-    def test_refund_request_various_reasons(self):
-        """Test different refund reason types."""
-        from apps.tickets.models import SupportCategory  # noqa: PLC0415
+    def test_refund_request_various_reasons(self) -> None:
+        from apps.tickets.models import SupportCategory, Ticket  # noqa: PLC0415
 
-        SupportCategory.objects.get_or_create(name="Billing")
-
+        category, _ = SupportCategory.objects.get_or_create(name="Billing")
         invoice = self._create_invoice(status="paid")
         self.client.force_login(self.staff_user)
-        for reason in ["service_failure", "quality_issue", "duplicate_invoice", "other"]:
-            response = self.client.post(
-                f"/billing/invoices/{invoice.id}/refund-request/",
-                {"refund_reason": reason, "refund_notes": f"Reason: {reason}"},
-            )
-            self.assertEqual(response.status_code, 200)
+        reason_titles = {
+            "service_failure": "Service Not Working",
+            "quality_issue": "Quality Not As Expected",
+            "duplicate_invoice": "Duplicate Invoice",
+            "other": "Other Reason",
+        }
+        ticket_numbers: set[str] = set()
+        for reason, title in reason_titles.items():
+            with self.subTest(reason=reason):
+                notes = f"Reason: {reason}"
+                before = Ticket.objects.filter(customer=self.customer, object_id=str(invoice.pk)).count()
+                response = self.client.post(
+                    f"/billing/invoices/{invoice.id}/refund-request/",
+                    {"refund_reason": reason, "refund_notes": notes},
+                )
+                self.assertEqual(response.status_code, 200)
+                data = response.json()
+                self.assertTrue(data["success"])
+                self.assertEqual(data["data"]["invoice_number"], invoice.number)
+                ticket = Ticket.objects.get(ticket_number=data["data"]["ticket_number"])
+                self.assertEqual(ticket.customer_id, self.customer.pk)
+                self.assertEqual(ticket.created_by_id, self.staff_user.pk)
+                self.assertEqual(ticket.category_id, category.pk)
+                self.assertEqual(str(ticket.object_id), str(invoice.pk))
+                self.assertEqual(ticket.title, f"Refund Request for Invoice {invoice.number}")
+                self.assertIn(f"Refund Reason: {title}", ticket.description)
+                self.assertIn(notes, ticket.description)
+                self.assertEqual(
+                    Ticket.objects.filter(customer=self.customer, object_id=str(invoice.pk)).count(),
+                    before + 1,
+                )
+                self.assertNotIn(ticket.ticket_number, ticket_numbers)
+                ticket_numbers.add(ticket.ticket_number)
+        self.assertEqual(len(ticket_numbers), 4)
 
 
 # ===============================================================================

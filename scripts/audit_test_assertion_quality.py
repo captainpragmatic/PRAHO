@@ -278,12 +278,31 @@ def _user_creation_is_all_identity(fn: ast.FunctionDef) -> bool:
     return all(id(call) in consumed for call in creations)
 
 
+def _credential_only_post(call: ast.Call) -> bool:
+    """Recognise literal credential payloads without exempting domain or token-option payloads."""
+    if not isinstance(call.func, ast.Attribute) or call.func.attr != "post":
+        return False
+    payload = (
+        call.args[1]
+        if len(call.args) > 1
+        else next(
+            (keyword.value for keyword in call.keywords if keyword.arg == "data"),
+            None,
+        )
+    )
+    if not isinstance(payload, ast.Dict):
+        return False
+    if not all(isinstance(key, ast.Constant) and isinstance(key.value, str) for key in payload.keys):
+        return False
+    keys = {key.value for key in payload.keys if isinstance(key, ast.Constant)}
+    return keys in ({"email", "password"}, {"username", "password"})
+
+
 def _varies_only_identity(source_lines: list[str], fn: ast.FunctionDef) -> bool:
     """True when the test's only distinguishing act is authenticating.
 
-    Such a test's 200 is the authorisation result, not a placeholder for a missing assertion. A test
-    that seeds domain state, or sends a payload or query string, has set up something the response is
-    supposed to show - and asserting only the status leaves that unchecked.
+    A credential-only POST is identity setup only when the test also checks output beyond status.
+    Domain state, query parameters and additional payload fields still require effect assertions.
     """
     body = "\n".join(source_lines[fn.lineno - 1 : (fn.end_lineno or fn.lineno)])
     if _DOMAIN_STATE.search(body):
@@ -296,7 +315,8 @@ def _varies_only_identity(source_lines: list[str], fn: ast.FunctionDef) -> bool:
         if call.func.attr not in REQUEST_METHODS:
             continue
         if len(call.args) > 1 or any(kw.arg == "data" for kw in call.keywords):
-            return False
+            if not _credential_only_post(call) or not _reads_beyond_status(fn):
+                return False
         first = call.args[0] if call.args else None
         if isinstance(first, ast.Constant) and isinstance(first.value, str) and "?" in first.value:
             return False
@@ -343,6 +363,23 @@ def _asserted_status_codes(source_lines: list[str], fn: ast.FunctionDef) -> set[
     body = "\n".join(source_lines[fn.lineno - 1 : (fn.end_lineno or fn.lineno)])
     codes = set(re.findall(r"status_code,?\s*(?:==\s*)?(\d{3})", body))
     codes |= set(re.findall(r"status_code\s*,\s*(\d{3})", body))
+    for call in ast.walk(fn):
+        if not (
+            isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Attribute)
+            and call.func.attr == "assertIn"
+            and len(call.args) >= 2
+        ):
+            continue
+        status, accepted = call.args[:2]
+        if not isinstance(status, ast.Attribute) or status.attr != "status_code":
+            continue
+        if isinstance(accepted, ast.Tuple | ast.List | ast.Set):
+            codes.update(
+                str(item.value)
+                for item in accepted.elts
+                if isinstance(item, ast.Constant) and isinstance(item.value, int) and 100 <= item.value <= 599
+            )
     return codes
 
 

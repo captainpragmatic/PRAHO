@@ -5,8 +5,11 @@ This module tests advanced audit search, data integrity monitoring, retention ma
 and security features for the PRAHO audit system.
 """
 
+import csv
+import io
 import json
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.contenttypes.models import ContentType
@@ -152,31 +155,50 @@ class AuditManagementDashboardTests(EnterpriseAuditManagementTestCase):
 class AdvancedAuditSearchTests(EnterpriseAuditManagementTestCase):
     """Test advanced audit search and filtering functionality."""
 
-    def test_advanced_search_filters(self):
-        """Test advanced search with multiple filter combinations."""
-        # Test category filter
-        response = self.client.get(reverse("audit:logs_list"), {"category": ["authentication", "security_event"]})
+    def test_advanced_search_filters(self) -> None:
+        response = self.client.get(
+            reverse("audit:logs_list"),
+            {"category": ["authentication", "security_event"], "user": [str(self.regular_user.pk)]},
+        )
         self.assertEqual(response.status_code, 200)
+        self.assertCountEqual(
+            [event.pk for event in response.context["audit_events"]],
+            [event.pk for event in self.events[:8]],
+        )
 
-        # Test severity filter
         response = self.client.get(reverse("audit:logs_list"), {"severity": ["critical"]})
         self.assertEqual(response.status_code, 200)
+        self.assertCountEqual(
+            [event.pk for event in response.context["audit_events"]],
+            [event.pk for event in self.events[5:8]],
+        )
 
-        # Test combined filters
         response = self.client.get(
             reverse("audit:logs_list"),
             {"category": ["security_event"], "severity": ["critical"], "is_sensitive": "true"},
         )
         self.assertEqual(response.status_code, 200)
+        self.assertCountEqual(
+            [event.pk for event in response.context["audit_events"]],
+            [event.pk for event in self.events[5:8]],
+        )
+        self.assertNotContains(response, "Invoice INV-1 created")
 
-    def test_search_suggestions_endpoint(self):
-        """Test search suggestions API endpoint."""
+    def test_search_suggestions_endpoint(self) -> None:
         response = self.client.get(reverse("audit:search_suggestions"), {"q": "login"})
         self.assertEqual(response.status_code, 200)
+        self.assertIn("login_success", response.context["suggestions"]["actions"])
+        self.assertContains(response, 'data-value="login_success"')
 
-        # Test suggestions for IP addresses
         response = self.client.get(reverse("audit:search_suggestions"), {"q": "192.168"})
         self.assertEqual(response.status_code, 200)
+        self.assertCountEqual(
+            response.context["suggestions"]["ip_addresses"],
+            ["192.168.1.1", "192.168.1.100"],
+        )
+        self.assertContains(response, 'data-value="192.168.1.1"', count=1)
+        self.assertContains(response, 'data-value="192.168.1.100"', count=1)
+        self.assertNotContains(response, 'data-value="10.0.0.1"')
 
     def test_save_search_query(self):
         """Test saving search queries for reuse."""
@@ -456,19 +478,38 @@ class AuditAlertsManagementTests(EnterpriseAuditManagementTestCase):
         self.assertIn("alerts", context)
         self.assertIn("alert_stats", context)
 
-    def test_alerts_filtering(self):
-        """Test alert filtering functionality."""
-        # Filter by status
+    def test_alerts_filtering(self) -> None:
+        other_active = AuditAlert.objects.create(
+            alert_type="performance_anomaly",
+            severity="warning",
+            title="Performance warning",
+            description="Excluded by severity and type",
+            status="active",
+        )
+        resolved = AuditAlert.objects.create(
+            alert_type="security_incident",
+            severity="critical",
+            title="Resolved incident",
+            description="Excluded by the default active filter",
+            status="resolved",
+        )
+
         response = self.client.get(reverse("audit:alerts_dashboard"), {"status": "active"})
         self.assertEqual(response.status_code, 200)
+        self.assertCountEqual(
+            [alert.pk for alert in response.context["alerts"]],
+            [self.alert.pk, other_active.pk],
+        )
 
-        # Filter by severity
         response = self.client.get(reverse("audit:alerts_dashboard"), {"severity": "critical"})
         self.assertEqual(response.status_code, 200)
+        self.assertEqual([alert.pk for alert in response.context["alerts"]], [self.alert.pk])
 
-        # Filter by alert type
         response = self.client.get(reverse("audit:alerts_dashboard"), {"alert_type": "security_incident"})
         self.assertEqual(response.status_code, 200)
+        self.assertEqual([alert.pk for alert in response.context["alerts"]], [self.alert.pk])
+        self.assertNotContains(response, resolved.title)
+        self.assertNotContains(response, other_active.title)
 
     def test_alert_status_updates(self):
         """Test updating alert status and assignment."""
@@ -554,13 +595,36 @@ class AuditExportEnhancementsTests(EnterpriseAuditManagementTestCase):
         self.assertIn("audit_events", data)
         self.assertGreater(data["export_metadata"]["record_count"], 0)
 
-    def test_export_size_limits(self):
-        """Test that exports are limited for performance."""
-        # This would test the 10,000 record limit in production
-        export_params = {"format": "csv"}
+    def test_export_size_limits(self) -> None:
+        AuditEvent.objects.bulk_create(
+            [
+                AuditEvent(
+                    user=self.regular_user,
+                    action="create",
+                    category="business_operation",
+                    severity="low",
+                    content_type=self.events[0].content_type,
+                    object_id=str(self.regular_user.pk),
+                    description=f"Limit row {index:05d}",
+                )
+                for index in range(10001)
+            ],
+            batch_size=500,
+        )
+        queryset = AuditEvent.objects.filter(description__startswith="Limit row ").order_by("description")
+        with (
+            patch("apps.audit.views.audit_search_service.build_advanced_query", return_value=(queryset, {})),
+            patch("apps.audit.views.AuditService.log_simple_event"),
+        ):
+            response = self.client.get(reverse("audit:export_logs"), {"format": "csv"})
 
-        response = self.client.get(reverse("audit:export_logs"), export_params)
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/csv")
+        rows = list(csv.DictReader(io.StringIO(response.content.decode())))
+        self.assertEqual(len(rows), 10000)
+        self.assertEqual(rows[0]["Description"], "Limit row 00000")
+        self.assertEqual(rows[-1]["Description"], "Limit row 09999")
+        self.assertNotIn("Limit row 10000", {row["Description"] for row in rows})
 
 
 class EventDetailEnhancementsTests(EnterpriseAuditManagementTestCase):

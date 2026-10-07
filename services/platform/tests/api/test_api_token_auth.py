@@ -19,7 +19,6 @@ from django.utils import timezone
 from django_q.models import Schedule
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.test import APIClient, APIRequestFactory
-from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
 
 from apps.api.users.authentication import HashedTokenAuthentication
 from apps.audit.models import AuditEvent
@@ -27,6 +26,7 @@ from apps.audit.services import AuditService
 from apps.customers.models import Customer
 from apps.users.models import APIToken, CustomerMembership
 from apps.users.tasks import purge_expired_api_tokens, setup_user_security_scheduled_tasks
+from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
 
 User = get_user_model()
 
@@ -310,6 +310,9 @@ class ObtainTokenTests(TestCase):
         self.client.credentials(HTTP_AUTHORIZATION=f"Token {raw_key}")
         info_response = self.client.get("/api/users/token/me/")
         self.assertEqual(info_response.status_code, 200)
+        self.assertEqual(info_response.json()["user_id"], self.user.pk)
+        self.assertEqual(info_response.json()["key_prefix"], raw_key[:8])
+        self.assertEqual(info_response.json()["token_name"], response.json()["name"])
 
     @override_settings(API_TOKEN_MAX_ACTIVE_PER_USER=2)
     def test_obtain_rejects_when_at_configured_token_limit(self) -> None:
@@ -499,6 +502,18 @@ class ObtainTokenLimitExpiredTests(TestCase):
 
         # Live count is 0, so issuance must succeed rather than report "Maximum".
         self.assertEqual(response.status_code, 200)
+        raw_key = response.json()["token"]
+        issued = APIToken.objects.get(key_hash=APIToken.hash_key(raw_key))
+        self.assertEqual(issued.user_id, self.user.pk)
+        self.assertFalse(issued.is_expired)
+        self.assertEqual(APIToken.objects.filter(user=self.user).count(), 3)
+        self.assertEqual(APIToken.objects.filter(user=self.user, expires_at__gt=timezone.now()).count(), 1)
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {raw_key}")
+        info_response = self.client.get("/api/users/token/me/")
+        self.assertEqual(info_response.status_code, 200)
+        self.assertEqual(info_response.json()["user_id"], self.user.pk)
+        self.assertEqual(info_response.json()["key_prefix"], raw_key[:8])
 
     @override_settings(API_TOKEN_MAX_ACTIVE_PER_USER=2)
     def test_live_tokens_still_enforce_configured_limit(self) -> None:
@@ -748,7 +763,7 @@ class StrayAuthorizationHeaderTests(TestCase):
         self.assertEqual(response.status_code, 200)
 
     def test_obtain_token_ignores_stray_bearer_header(self) -> None:
-        """Credential auth must win — a leftover header from a shared HTTP client is not our business."""
+        """Credential authentication produces a usable token despite an unrelated header."""
         response = self.client.post(
             "/api/users/token/",
             {"email": self.user.email, "password": self.password},
@@ -756,6 +771,12 @@ class StrayAuthorizationHeaderTests(TestCase):
             HTTP_AUTHORIZATION="Bearer stray-garbage",
         )
         self.assertEqual(response.status_code, 200)
+        raw_key = response.json()["token"]
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {raw_key}")
+        info_response = self.client.get("/api/users/token/me/")
+        self.assertEqual(info_response.status_code, 200)
+        self.assertEqual(info_response.json()["user_id"], self.user.pk)
+        self.assertEqual(info_response.json()["key_prefix"], raw_key[:8])
 
 
 @override_settings(PLATFORM_API_SECRET=HMAC_TEST_SECRET, MIDDLEWARE=HMAC_TEST_MIDDLEWARE)
