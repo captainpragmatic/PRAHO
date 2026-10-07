@@ -52,9 +52,10 @@ from .base import *  # noqa: E402, F403
 
 # Debug mode
 DEBUG = True
-# base.py derives this from DEBUG before the line above runs; development serves plain HTTP
+# base.py derives these from DEBUG before the line above runs; development serves plain HTTP
 # whatever DEBUG was spelled as (the platform's dev settings say the same).
 SECURE_SSL_REDIRECT = False
+SESSION_COOKIE_SECURE = False
 
 # 🔒 SECURITY: Development-safe secret fallback
 if not SECRET_KEY:
