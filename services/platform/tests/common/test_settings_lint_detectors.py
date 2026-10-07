@@ -642,7 +642,7 @@ class FoundationReaderDetectionTests(SimpleTestCase):
             [("untested-new-reader", "medium", calls[1].line)],
         )
 
-    def test_decorator_factory_credit_reaches_the_closure_it_returns(self) -> None:
+    def test_decorator_factory_credit_requires_applying_what_it_returns(self) -> None:
         source = (
             "from apps.settings.services import SettingsService\n"
             f'def _checks():\n    return SettingsService.get_boolean_setting("{KEY}", False)\n'
@@ -659,18 +659,31 @@ class FoundationReaderDetectionTests(SimpleTestCase):
             "        return _checks()\n"
             "    return 1\n"
         )
+        # A decorated consumer in another module, the shape of SecureUserRegistrationService.
+        service = "from apps.probe import registration\n@registration()\ndef service():\n    return True\n"
         calls = self.scan({"apps/probe.py": source})
         path = lint.PLATFORM_DIR / "apps/probe.py"
+        service_path = lint.PLATFORM_DIR / "apps/service.py"
         test_path = lint.PLATFORM_TESTS_DIR / "test_probe.py"
         original = Path.read_text
-        for entrypoint, expected in (("registration", []), ("defined_only", [calls[0].line])):
-            with self.subTest(entrypoint=entrypoint):
+        untested = [calls[0].line]
+        scenarios = (
+            ("factory called, result never applied", "apps.probe", "registration", "registration()", untested),
+            ("result applied", "apps.probe", "registration", "registration()(lambda: True)()", []),
+            ("decorated in the test", "apps.probe", "registration", "registration()(lambda: True)", []),
+            ("decorated consumer", "apps.service", "service", "service()", []),
+            ("nested def never returned", "apps.probe", "defined_only", "defined_only()", untested),
+        )
+        for label, module, name, expression, expected in scenarios:
+            with self.subTest(label):
+                body = f"        self.assertTrue({expression})\n"
+                if label == "decorated in the test":
+                    body = "        @registration()\n        def local():\n            return True\n        local()\n"
                 fixture = (
-                    f"from apps.probe import {entrypoint}\nclass Effect:\n"
-                    f'    def test_effect(self):\n        SettingsService.update_setting("{KEY}", True)\n'
-                    f"        self.assertTrue({entrypoint}())\n"
+                    f"from {module} import {name}\nclass Effect:\n"
+                    f'    def test_effect(self):\n        SettingsService.update_setting("{KEY}", True)\n' + body
                 )
-                texts = {path: source, test_path: fixture}
+                texts = {path: source, service_path: service, test_path: fixture}
 
                 def read(
                     file: Path, encoding: str | None = None, errors: str | None = None, texts: dict[Path, str] = texts
@@ -678,13 +691,222 @@ class FoundationReaderDetectionTests(SimpleTestCase):
                     return texts[file] if file in texts else original(file, encoding=encoding, errors=errors)
 
                 with patch.object(Path, "read_text", autospec=True, side_effect=read):
-                    graph = lint.production_import_graph([path])
+                    graph = lint.production_import_graph([path, service_path])
                     findings = lint.check_untested_effects(
                         {KEY}, [test_path], {KEY}, {KEY: {"apps.probe"}}, graph, set(), call_sites=calls
                     )
                 self.assertEqual(
                     [finding.line for finding in findings if finding.check == "untested-new-reader"], expected
                 )
+
+    def consumer_findings(
+        self, sources: dict[str, str], fixture: str
+    ) -> tuple[list[lint.SettingsCallSite], list[lint.Finding]]:
+        calls = self.scan(sources)
+        texts = {lint.PLATFORM_DIR / name: source for name, source in sources.items()}
+        test_path = lint.PLATFORM_TESTS_DIR / "common" / "test_probe.py"
+        texts[test_path] = fixture
+        original = Path.read_text
+
+        def read(path: Path, encoding: str | None = None, errors: str | None = None) -> str:
+            return texts[path] if path in texts else original(path, encoding=encoding, errors=errors)
+
+        with patch.object(Path, "read_text", autospec=True, side_effect=read):
+            graph = lint.production_import_graph([lint.PLATFORM_DIR / name for name in sources])
+            findings = lint.check_untested_effects(
+                {KEY}, [test_path], {KEY}, {KEY: {"apps.probe", "apps.other"}}, graph, set(), call_sites=calls
+            )
+        return calls, findings
+
+    def test_method_imports_do_not_resolve_calls_in_sibling_scopes(self) -> None:
+        source = (
+            "class Consumer:\n"
+            f'    def read(self):\n        return SettingsService.get_boolean_setting("{KEY}", False)\n'
+        )
+        for shadow_scope in ("method", "class", "closure"):
+            with self.subTest(shadow_scope=shadow_scope):
+                shadow = {
+                    "method": (
+                        "    def test_name(self):\n"
+                        "        from apps.probe import Consumer\n"
+                        "        self.assertEqual(Consumer.__name__, 'Consumer')\n"
+                    ),
+                    "class": (
+                        "class NamesOnly:\n"
+                        "    from apps.probe import Consumer\n"
+                        "    def test_name(self):\n"
+                        "        self.assertEqual(self.Consumer.__name__, 'Consumer')\n"
+                    ),
+                    "closure": (
+                        "    def test_name(self):\n"
+                        "        def unused():\n"
+                        "            from apps.probe import Consumer\n"
+                        "            return Consumer.__name__\n"
+                        "        self.assertTrue(callable(unused))\n"
+                    ),
+                }[shadow_scope]
+                module_import = "" if shadow_scope == "method" else "from apps.other import Consumer\n"
+                method_import = "        from apps.other import Consumer\n" if shadow_scope == "method" else ""
+                fixture = (
+                    f"{module_import}class Effect:\n"
+                    "    def test_effect(self):\n"
+                    f'        SettingsService.update_setting("{KEY}", True)\n'
+                    f"{method_import}        self.assertTrue(Consumer().read())\n"
+                    f"{shadow}"
+                )
+                calls, findings = self.consumer_findings({"apps/probe.py": source, "apps/other.py": source}, fixture)
+                self.assertEqual([call.scope for call in calls], ["Consumer.read", "Consumer.read"])
+                self.assertEqual(
+                    [(f.file, f.check, f.severity, f.line) for f in findings if f.severity == "medium"],
+                    [(calls[0].file, "untested-new-reader", "medium", calls[0].line)],
+                )
+
+    def test_production_wrapper_imports_do_not_leak_from_sibling_functions(self) -> None:
+        source = (
+            "class Consumer:\n"
+            f'    def read(self):\n        return SettingsService.get_boolean_setting("{KEY}", False)\n'
+        )
+        wrapper = (
+            "from apps.other import Consumer\n"
+            "def entrypoint():\n    return Consumer().read()\n"
+            "def names_only():\n"
+            "    from apps.probe import Consumer\n"
+            "    return Consumer.__name__\n"
+        )
+        fixture = (
+            "from apps.entry import entrypoint\n"
+            "class Effect:\n"
+            "    def test_effect(self):\n"
+            f'        SettingsService.update_setting("{KEY}", True)\n'
+            "        self.assertTrue(entrypoint())\n"
+        )
+        calls, findings = self.consumer_findings(
+            {"apps/probe.py": source, "apps/other.py": source, "apps/entry.py": wrapper}, fixture
+        )
+        self.assertEqual(
+            [(f.file, f.check, f.severity, f.line) for f in findings if f.severity == "medium"],
+            [(calls[0].file, "untested-new-reader", "medium", calls[0].line)],
+        )
+
+    def test_local_instance_assignments_do_not_leak_between_methods(self) -> None:
+        source = (
+            "class Consumer:\n"
+            f'    def read(self):\n        return SettingsService.get_boolean_setting("{KEY}", False)\n'
+        )
+        fixture = (
+            "from apps.other import Consumer as OtherConsumer\n"
+            "from apps.probe import Consumer\n"
+            "class Effect:\n"
+            "    def test_effect(self):\n"
+            f'        SettingsService.update_setting("{KEY}", True)\n'
+            "        consumer = OtherConsumer()\n"
+            "        self.assertTrue(consumer.read())\n"
+            "    def test_name(self):\n"
+            "        consumer = Consumer()\n"
+            "        self.assertEqual(consumer.__class__.__name__, 'Consumer')\n"
+        )
+        calls, findings = self.consumer_findings({"apps/probe.py": source, "apps/other.py": source}, fixture)
+        self.assertEqual(
+            [(f.file, f.check, f.severity, f.line) for f in findings if f.severity == "medium"],
+            [(calls[0].file, "untested-new-reader", "medium", calls[0].line)],
+        )
+
+    def test_setup_instances_credit_only_methods_exercised_in_the_same_class(self) -> None:
+        source = (
+            "class Consumer:\n"
+            f'    def read(self):\n        return SettingsService.get_boolean_setting("{KEY}", False)\n'
+            f'    def sibling(self):\n        return SettingsService.get_boolean_setting("{KEY}", False)\n'
+        )
+        for method, receiver in (("setUp", "self"), ("setUpTestData", "cls"), ("prepare", "self")):
+            with self.subTest(method=method):
+                decorator = "    @classmethod\n" if receiver == "cls" else ""
+                prepare = "        self.prepare()\n" if method == "prepare" else ""
+                fixture = (
+                    "class Effect:\n"
+                    f"{decorator}"
+                    f"    def {method}({receiver}):\n"
+                    "        from apps.probe import Consumer\n"
+                    f"        {receiver}.consumer = Consumer()\n"
+                    "    def test_effect(self):\n"
+                    f'        SettingsService.update_setting("{KEY}", True)\n'
+                    f"{prepare}        self.assertTrue(self.consumer.read())\n"
+                )
+                calls, findings = self.consumer_findings({"apps/probe.py": source}, fixture)
+                self.assertEqual([call.scope for call in calls], ["Consumer.read", "Consumer.sibling"])
+                self.assertEqual(
+                    [(f.check, f.severity, f.line) for f in findings if f.severity == "medium"],
+                    [("untested-new-reader", "medium", calls[1].line)],
+                )
+                separate_class = fixture.replace(
+                    "    def test_effect(self):", "class Uninitialised:\n    def test_effect(self):"
+                )
+                _, findings = self.consumer_findings({"apps/probe.py": source}, separate_class)
+                self.assertEqual(
+                    [f.line for f in findings if f.check == "untested-new-reader"],
+                    [call.line for call in calls],
+                )
+
+    def test_property_access_credits_only_resolved_property_getters(self) -> None:
+        for import_line, decorator in (
+            ("", "property"),
+            ("from functools import cached_property\n", "cached_property"),
+            ("from django.utils.functional import cached_property as memoized\n", "memoized"),
+        ):
+            with self.subTest(decorator=decorator):
+                source = (
+                    f"{import_line}class Consumer:\n"
+                    f"    @{decorator}\n"
+                    f'    def read(self):\n        return SettingsService.get_boolean_setting("{KEY}", False)\n'
+                    f"    @{decorator}\n"
+                    f'    def sibling(self):\n        return SettingsService.get_boolean_setting("{KEY}", False)\n'
+                    f'    def plain(self):\n        return SettingsService.get_boolean_setting("{KEY}", False)\n'
+                )
+                fixture = (
+                    "from apps.probe import Consumer\n"
+                    "class Effect:\n"
+                    "    def test_effect(self):\n"
+                    f'        SettingsService.update_setting("{KEY}", True)\n'
+                    "        consumer = Consumer()\n"
+                    "        self.assertTrue(consumer.read)\n"
+                    "        self.assertTrue(callable(consumer.plain))\n"
+                    "        self.assertTrue(hasattr(Consumer.sibling, '__get__'))\n"
+                )
+                calls, findings = self.consumer_findings({"apps/probe.py": source}, fixture)
+                self.assertEqual([c.scope for c in calls], ["Consumer.read", "Consumer.sibling", "Consumer.plain"])
+                self.assertEqual(
+                    [(f.check, f.severity, f.line) for f in findings if f.severity == "medium"],
+                    [("untested-new-reader", "medium", call.line) for call in calls[1:]],
+                )
+                _, findings = self.consumer_findings(
+                    {"apps/probe.py": source}, fixture.replace("consumer.read)", "consumer.sibling)")
+                )
+                self.assertEqual(
+                    [f.line for f in findings if f.check == "untested-new-reader"],
+                    [calls[0].line, calls[2].line],
+                )
+
+    def test_property_credit_follows_getter_edges(self) -> None:
+        source = (
+            "class Consumer:\n"
+            f'    def _read(self):\n        return SettingsService.get_boolean_setting("{KEY}", False)\n'
+            f'    def sibling(self):\n        return SettingsService.get_boolean_setting("{KEY}", False)\n'
+            "    @property\n"
+            "    def read(self):\n        return self._read()\n"
+        )
+        fixture = (
+            "from apps.probe import Consumer\n"
+            "class Effect:\n"
+            "    def setUp(self):\n        self.consumer = Consumer()\n"
+            "    def test_effect(self):\n"
+            f'        SettingsService.update_setting("{KEY}", True)\n'
+            "        self.assertTrue(self.consumer.read)\n"
+        )
+        calls, findings = self.consumer_findings({"apps/probe.py": source}, fixture)
+        self.assertEqual([call.scope for call in calls], ["Consumer._read", "Consumer.sibling"])
+        self.assertEqual(
+            [(f.check, f.severity, f.line) for f in findings if f.severity == "medium"],
+            [("untested-new-reader", "medium", calls[1].line)],
+        )
 
     def test_new_untested_reader_fails_at_medium(self) -> None:
         calls = self.scan({"apps/probe.py": f'value = SettingsService.get_setting("{OTHER}", "builtin")\n'})

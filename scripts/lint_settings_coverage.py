@@ -1096,10 +1096,21 @@ def _module_name(relative_path: str) -> str:
     return relative_path.replace("services/platform/", "").removesuffix(".py").replace("/", ".")
 
 
+def _scope_nodes(node: ast.AST) -> list[ast.AST]:
+    """Walk one lexical scope, leaving nested declarations for separate resolution."""
+    nodes = [node]
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Lambda):
+            nodes.append(child)
+        else:
+            nodes.extend(_scope_nodes(child))
+    return nodes
+
+
 def _import_bindings(node: ast.AST) -> dict[str, str]:
-    """Resolve import aliases to their fully qualified symbols."""
+    """Resolve imports in this lexical scope only."""
     bindings: dict[str, str] = {}
-    for child in ast.walk(node):
+    for child in _scope_nodes(node):
         if isinstance(child, ast.ImportFrom) and child.module and not child.level:
             for alias in child.names:
                 if alias.name != "*":
@@ -1115,47 +1126,122 @@ def _import_bindings(node: ast.AST) -> dict[str, str]:
 def _bound_callable(node: ast.expr, bindings: dict[str, str]) -> str:
     if isinstance(node, ast.Call):
         return _bound_callable(node.func, bindings)
+    if target := bindings.get(_expression_name(node)):
+        return target
     if isinstance(node, ast.Attribute):
         parent = _bound_callable(node.value, bindings)
         return f"{parent}.{node.attr}" if parent else ""
-    if isinstance(node, ast.Name):
-        return bindings.get(node.id, "")
     return ""
 
 
-def _exercised_callables(node: ast.AST, bindings: dict[str, str]) -> set[str]:
-    """Calls, including imported aliases and methods on locally constructed instances."""
-    local = dict(bindings)
-    for child in ast.walk(node):
-        if isinstance(child, ast.Assign) and isinstance(child.value, ast.Call):
+def _local_callable_bindings(
+    node: ast.AST, inherited: dict[str, str], instances: set[str] | None = None
+) -> dict[str, str]:
+    """Resolve constructed instances without merging sibling methods' local variables."""
+    local = {**inherited, **_import_bindings(node)}
+    for child in _scope_nodes(node):
+        if isinstance(child, ast.Assign | ast.AnnAssign) and isinstance(child.value, ast.Call):
             target = _bound_callable(child.value.func, local)
             if target:
-                for name in child.targets:
-                    if isinstance(name, ast.Name):
-                        local[name.id] = target
-    return {
-        target
-        for child in ast.walk(node)
-        if isinstance(child, ast.Call) and (target := _bound_callable(child.func, local))
-    }
+                names = child.targets if isinstance(child, ast.Assign) else [child.target]
+                for name in names:
+                    if isinstance(name, ast.Name) or (
+                        isinstance(name, ast.Attribute) and _expression_name(name.value) in ("self", "cls")
+                    ):
+                        symbol = _expression_name(name)
+                        local[symbol] = target
+                        if instances is not None:
+                            instances.add(symbol)
+    return local
+
+
+def _exercised_callables(
+    node: ast.AST,
+    bindings: dict[str, str],
+    graph: dict[str, set[str]] | None = None,
+    instance_names: set[str] | None = None,
+) -> set[str]:
+    """Combine scope-local calls and resolved descriptor accesses, sharing only class instances."""
+    constructed = set(instance_names or ())
+    local = _local_callable_bindings(node, bindings, constructed)
+    if isinstance(node, ast.ClassDef):
+        # setUp, setUpTestData and helpers can initialise an instance used by another method.
+        instances: dict[str, str] = {}
+        for method in node.body:
+            if isinstance(method, ast.FunctionDef | ast.AsyncFunctionDef):
+                for name, target in _local_callable_bindings(method, local).items():
+                    if name.startswith(("self.", "cls.")):
+                        attribute = name.split(".", 1)[1]
+                        instances[f"self.{attribute}"] = target
+                        instances[f"cls.{attribute}"] = target
+        local.update(instances)
+        constructed.update(instances)
+    exercised: set[str] = set()
+    for child in _scope_nodes(node):
+        if child is not node and isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            inherited = local
+            if isinstance(child, ast.ClassDef):
+                inherited = {name: target for name, target in local.items() if not name.startswith(("self.", "cls."))}
+            inherited_instances = constructed
+            if isinstance(child, ast.ClassDef):
+                inherited_instances = {name for name in constructed if not name.startswith(("self.", "cls."))}
+            exercised |= _exercised_callables(child, inherited, graph, inherited_instances)
+            if not isinstance(child, ast.ClassDef):
+                # `@factory()` applies the factory's result to the decorated function.
+                exercised |= {
+                    f"{target}()"
+                    for decorator in child.decorator_list
+                    if isinstance(decorator, ast.Call) and (target := _bound_callable(decorator.func, local))
+                }
+        elif isinstance(child, ast.Call) and (target := _bound_callable(child.func, local)):
+            exercised.add(target)
+            if isinstance(child.func, ast.Call):
+                # `factory()(func)` runs what the factory returned, not only the factory.
+                exercised.add(f"{target}()")
+        elif isinstance(child, ast.Attribute) and isinstance(child.ctx, ast.Load) and graph is not None:
+            # Only marked descriptors execute a getter; ordinary attribute reads earn no credit.
+            receiver = _expression_name(child.value)
+            if receiver in constructed or isinstance(child.value, ast.Call) or receiver == "self":
+                target = _bound_callable(child, local)
+                exercised.update(graph.get(f"@property:{target}", set()))
+    return exercised
 
 
 def _callable_edges(tree: ast.Module, module: str) -> dict[str, set[str]]:
     """Callable edges share the module graph's bounded reachability, without sibling credit.
 
-    A decorator factory is the exception to "defining a nested function does not exercise it": the
-    closure it returns is what its caller ends up running. So a function that returns one of its own
-    nested functions inherits that function's edges, transitively, without spending a hop -
-    `secure_user_registration()` reaches `_execute_security_checks` through `decorator` and `wrapper`.
+    Decorator factories need one more node. Calling `factory()` runs only the factory's own body; the
+    closure it returns runs when that result is applied. So the closure's edges - transitively through
+    returned nested functions and returned factory calls - hang off a separate `factory()` node, which
+    is reached only by application: a production function decorated with `@factory()` gets an edge to
+    it, and a test earns it through `@factory()` or `factory()(func)`. That is how
+    `SecureUserRegistrationService.register_new_customer_owner` reaches `_execute_security_checks`
+    through `secure_user_registration()`, `secure_service_method()`, `decorator` and `wrapper`.
     """
     edges: dict[str, set[str]] = {}
     returned: dict[str, set[str]] = {}
+    returned_calls: dict[str, set[str]] = {}
+    decorated: dict[str, set[str]] = {}
 
     def visit(nodes: list[ast.stmt], scope: str, inherited: dict[str, str]) -> None:
-        bindings = dict(inherited)
+        bindings = {**inherited, **_import_bindings(ast.Module(body=nodes, type_ignores=[]))}
         for node in nodes:
             if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
                 bindings[node.name] = f"{scope}.{node.name}"
+        # Descriptor markers point to getter callables, whose own edges remain independent.
+        for node in nodes:
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and any(
+                (_bound_callable(decorator, bindings) or _expression_name(decorator))
+                in {
+                    "property",
+                    "builtins.property",
+                    "functools.cached_property",
+                    "django.utils.functional.cached_property",
+                }
+                for decorator in node.decorator_list
+            ):
+                getter = f"{scope}.{node.name}"
+                edges[f"@property:{getter}"] = {getter}
         for node in nodes:
             if isinstance(node, ast.ClassDef):
                 visit(node.body, f"{scope}.{node.name}", bindings)
@@ -1173,28 +1259,48 @@ def _callable_edges(tree: ast.Module, module: str) -> dict[str, set[str]]:
                     type_ignores=[],
                 )
                 target = f"{scope}.{node.name}"
-                edges[target] = _exercised_callables(body, local)
+                edges[target] = _exercised_callables(body, local, edges)
                 nested = {
                     child.name for child in node.body if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef)
                 }
+                returns = [child.value for child in ast.walk(body) if isinstance(child, ast.Return) and child.value]
                 returned[target] = {
-                    f"{target}.{child.value.id}"
-                    for child in ast.walk(body)
-                    if isinstance(child, ast.Return) and isinstance(child.value, ast.Name) and child.value.id in nested
+                    f"{target}.{value.id}" for value in returns if isinstance(value, ast.Name) and value.id in nested
+                }
+                returned_calls[target] = {
+                    factory
+                    for value in returns
+                    if isinstance(value, ast.Call) and (factory := _bound_callable(value.func, local))
+                }
+                decorated[target] = {
+                    factory
+                    for decorator in node.decorator_list
+                    if isinstance(decorator, ast.Call) and (factory := _bound_callable(decorator.func, bindings))
                 }
                 visit(node.body, target, local)
                 if node.name == "__init__":
                     edges.setdefault(scope, set()).add(target)
 
     visit(tree.body, module, _import_bindings(tree))
+    applied: dict[str, set[str]] = {target: set() for target in returned}
     changed = True
     while changed:
         changed = False
-        for target, closures in returned.items():
-            inherited = set().union(*(edges.get(closure, set()) for closure in closures)) - edges[target]
-            if inherited:
-                edges[target] |= inherited
+        for target, current in applied.items():
+            closure = set().union(
+                *(edges.get(nested, set()) | applied.get(nested, set()) for nested in returned[target]),
+                *(applied.get(factory, set()) for factory in returned_calls[target]),
+            )
+            if closure - current:
+                current |= closure
                 changed = True
+    for target, closure in applied.items():
+        # A factory returned from another module is resolved through its own `()` node.
+        foreign = {f"{factory}()" for factory in returned_calls[target] if factory not in applied}
+        if closure | foreign:
+            edges[f"{target}()"] = closure | foreign
+    for target, factories in decorated.items():
+        edges[target] |= {f"{factory}()" for factory in factories}
     return edges
 
 
@@ -1403,7 +1509,7 @@ def effect_tested_keys(  # noqa: PLR0913  # Criterion inputs and optional per-co
                 }
                 observed_through_reader = bool(observed_readers)
                 if reader_credits is not None:
-                    reader_credits.setdefault(key, set()).update(_exercised_callables(cls, bindings))
+                    reader_credits.setdefault(key, set()).update(_exercised_callables(cls, bindings, graph))
                 # A key with no Python reader at all - the `company.*` identity values - can only be
                 # observed on a rendered page.
                 rendered_on_a_page = key in template_keys and makes_request
