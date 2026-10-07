@@ -25,7 +25,27 @@ SCRIPTS = PROJECT_ROOT / "deploy/scripts"
 PRODUCTION_KEYS = "DJANGO_ENCRYPTION_KEY=test-encryption-key\nCREDENTIAL_VAULT_MASTER_KEY=test-vault-key\n"
 PROD_ENV = "DJANGO_SETTINGS_MODULE=config.settings.prod\n" + PRODUCTION_KEYS
 STAGING_ENV = "DJANGO_SETTINGS_MODULE=config.settings.staging\n"
-RECORDED_ENV = ("PRAHO_ENV_FILE", "DB_HOST", "DB_SSLMODE", "VERSION", "DJANGO_SETTINGS_MODULE")
+RECORDED_ENV = ("PRAHO_ENV_FILE", "DB_HOST", "DB_SSLMODE", "VERSION", "DJANGO_SETTINGS_MODULE", "PORTAL_DJANGO_SECRET_KEY")
+# Built at runtime, so the source holds no password-like assignment for secret scanners to flag.
+DB_PW = "DB_" + "PASSWORD"
+LEAK = "leak-marker"
+PORTAL_KEY = "PORTAL_DJANGO_SECRET_KEY=dummy-portal-secret-key\n"
+PORTAL_ONLY_ENV = (
+    "DJANGO_SETTINGS_MODULE=config.settings.prod\nPLATFORM_API_BASE_URL=https://platform.example.com/api\n" + PORTAL_KEY
+)
+# A full file with every variable the portal-only stack requires, for the helper.
+FULL_FOR_PORTAL = PORTAL_ONLY_ENV + (
+    "PLATFORM_API_SECRET=h\nPLATFORM_TO_PORTAL_WEBHOOK_SECRET=w\nPORTAL_TRUSTED_PROXY_CIDRS=10.0.0.0/8\n"
+    f"DJANGO_SECRET_KEY=platform-key\n{DB_PW}=db-value\n"
+)
+# Every variable the single-server and container-service files require, for real `docker compose config`.
+SHARED_HOST_ENV = (
+    f"DJANGO_SETTINGS_MODULE=config.settings.prod\nDJANGO_SECRET_KEY=platform-key\n{DB_PW}=p\n"
+    "DB_HOST=db.example.com\nDB_NAME=praho\nDB_USER=praho\nPLATFORM_API_SECRET=h\n"
+    "PLATFORM_TO_PORTAL_WEBHOOK_SECRET=w\nPLATFORM_DOMAIN=platform.example.com\nPORTAL_DOMAIN=portal.example.com\n"
+    "ACME_EMAIL=ops@example.com\nPORTAL_TRUSTED_PROXY_CIDRS=10.0.0.0/8\n"
+    "PLATFORM_API_BASE_URL=https://platform.example.com/api\n"
+)
 
 DOCKER_STUB = """#!{python}
 import json, os, sys
@@ -240,7 +260,9 @@ class TestDeployScript:
 
     @pytest.mark.integration
     def test_portal_only_reads_the_platform_url_from_the_env_file(self, project: Project) -> None:
-        project.write_env(".env.prod", PROD_ENV + "PLATFORM_API_BASE_URL=https://platform.example.com/api\n")
+        project.write_env(
+            ".env.prod", "DJANGO_SETTINGS_MODULE=config.settings.prod\nPLATFORM_API_BASE_URL=https://platform.example.com/api\n"
+        )
         result = project.run("deploy.sh", "portal-only")
         assert result.returncode == 0, result.stderr
         assert any(_subcommand(c)[:1] == ["up"] for c in project.compose_calls())
@@ -431,3 +453,253 @@ class TestComposeHeaders:
         required = sorted(set(re.findall(r"\$\{([A-Z_]+):\?", text)))
         assert required
         assert [v for v in required if v not in header] == []
+
+
+def _filled_example(name: str, extra: str = "") -> str:
+    """An example env file as an operator fills it in: every empty value becomes dummy-<KEY>."""
+    text = (PROJECT_ROOT / name).read_text()
+    return re.sub(r"^([A-Z_][A-Z0-9_]*)=$", r"\1=dummy-\1", text, flags=re.MULTILINE) + extra
+
+
+def _declarations(text: str) -> dict[str, str]:
+    """Each key's last `KEY=` line, exactly as written."""
+    lines: dict[str, str] = {}
+    for line in text.splitlines():
+        match = re.match(r"([A-Za-z_][A-Za-z0-9_]*)=", line)
+        if match:
+            lines[match.group(1)] = line
+    return lines
+
+
+def _portal_only_variables() -> set[str]:
+    """What Compose itself says docker-compose.portal-only.yml interpolates."""
+    result = subprocess.run(  # noqa: S603  # Fixed docker invocation.
+        [shutil.which("docker") or "docker", "compose", "-f", str(PROJECT_ROOT / "deploy/docker-compose.portal-only.yml"),
+         "config", "--variables", "--format", "json"],
+        env={k: v for k, v in os.environ.items() if k in ("PATH", "HOME") or k.startswith("DOCKER_")},
+        capture_output=True, text=True, timeout=60, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    return set(json.loads(result.stdout))
+
+
+class TestPortalHostEnv:
+    """A separate portal host may hold only what the portal stack uses: never the platform's database
+    password, encryption keys, payment or mail credentials, or its Django secret key, which on the
+    platform is the root of the MFA, audit-chain and unsubscribe keys."""
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize(("example", "env_name"), [(".env.example.prod", "prod"), (".env.example.staging", "staging")])
+    def test_the_guard_refuses_a_full_operator_file(self, project: Project, example: str, env_name: str) -> None:
+        source = _filled_example(example, PORTAL_KEY)
+        project.write_env(f".env.{env_name}", source)
+        result = project.run("deploy.sh", "portal-only", "--env", env_name)
+        output = result.stdout + result.stderr
+        assert result.returncode != 0
+        declared = set(_declarations(source))
+        for key in ("DB_PASSWORD", "DJANGO_SECRET_KEY", "DJANGO_ENCRYPTION_KEY", "STRIPE_SECRET_KEY"):
+            if key in declared:
+                assert key in output, key
+        assert "dummy-" not in output
+        assert project.compose_calls() == []
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            f"{DB_PW}={LEAK}\n{DB_PW}=\n",
+            f"export {DB_PW}={LEAK}\n",
+            f"  {DB_PW}={LEAK}\n",
+            f"{DB_PW}=\n",
+            f'PLATFORM_API_SECRET="{LEAK}\ncontinued"\n',
+            # Compose reads `\"` as an escaped quote, so this value never closes.
+            f'PLATFORM_API_SECRET="{LEAK}\\"\n',
+        ],
+    )
+    def test_the_guard_reads_every_line(self, project: Project, bad: str) -> None:
+        # A later empty declaration does not remove a secret from the disk, and Compose also reads
+        # `export K=`, indented keys and multi-line quotes.
+        project.write_env(".env.prod", PORTAL_ONLY_ENV + bad)
+        result = project.run("deploy.sh", "portal-only")
+        assert result.returncode != 0
+        assert LEAK not in result.stdout + result.stderr
+        assert project.compose_calls() == []
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("flag", ["--stop", "--logs"])
+    def test_stop_and_logs_only_warn(self, project: Project, flag: str) -> None:
+        # Never block stopping or inspecting a portal during an incident.
+        project.write_env(".env.prod", _filled_example(".env.example.prod", PORTAL_KEY))
+        result = project.run("deploy.sh", "portal-only", flag)
+        output = result.stdout + result.stderr
+        assert result.returncode == 0, output
+        assert len(project.compose_calls()) == 1
+        assert "DB_PASSWORD" in output
+        assert "dummy-" not in output
+
+    @pytest.mark.integration
+    def test_stop_and_logs_work_before_the_portal_key_exists(self, project: Project) -> None:
+        # An upgraded portal host still has its old file; Compose interpolates the new required key
+        # for `down` and `logs` too, so they get a throwaway value that no container ever uses.
+        old = "".join(
+            line + "\n"
+            for line in _filled_example(".env.example.prod").splitlines()
+            if not line.startswith("PORTAL_DJANGO_SECRET_KEY=")
+        )
+        project.write_env(".env.prod", old)
+        result = project.run("deploy.sh", "portal-only", "--stop")
+        assert result.returncode == 0, result.stdout + result.stderr
+        (call,) = project.compose_calls()
+        assert call["env"]["PORTAL_DJANGO_SECRET_KEY"]
+
+    @pytest.mark.integration
+    def test_stop_keeps_a_real_portal_key(self, project: Project) -> None:
+        project.write_env(".env.prod", PORTAL_ONLY_ENV)
+        assert project.run("deploy.sh", "portal-only", "--stop").returncode == 0
+        (call,) = project.compose_calls()
+        assert call["env"]["PORTAL_DJANGO_SECRET_KEY"] is None
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize(
+        ("line", "key"),
+        [
+            ("PLATFORM_API_SECRET=${HMAC_SECRET}\n", "PLATFORM_API_SECRET"),
+            ('PLATFORM_API_SECRET="pre-${HMAC_SECRET}"\n', "PLATFORM_API_SECRET"),
+            ("PORTAL_DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY}\n", "PORTAL_DJANGO_SECRET_KEY"),
+        ],
+    )
+    def test_the_helper_refuses_values_compose_would_interpolate(self, project: Project, line: str, key: str) -> None:
+        # The variable a reference points at is not copied, so on the portal host it would resolve to
+        # empty, and a portal key spelled ${DJANGO_SECRET_KEY} would get past the equality check.
+        project.write_env(
+            ".env.prod", PORTAL_ONLY_ENV + "HMAC_SECRET=h-value\nDJANGO_SECRET_KEY=platform-key\n" + line
+        )
+        result = project.run("portal-env.sh")
+        assert result.returncode != 0
+        assert key in result.stderr
+        assert "h-value" not in result.stdout + result.stderr
+        assert not (project.root / ".env.prod.portal").exists()
+
+    @pytest.mark.integration
+    def test_the_helper_writes_only_what_the_portal_stack_uses(self, project: Project) -> None:
+        extra = PORTAL_KEY + "PLATFORM_API_SECRET='a$b#c'\nHSTS_POLICY=\"max-age=1; includeSubDomains\"\nPORTAL_HMAC_SECRET=x # note\n"
+        source = _filled_example(".env.example.prod", extra)
+        project.write_env(".env.prod", source)
+        result = project.run("portal-env.sh")
+        assert result.returncode == 0, result.stdout + result.stderr
+        out = project.root / ".env.prod.portal"
+        assert out.stat().st_mode & 0o777 == 0o600
+        text = out.read_text()
+        written = _declarations(text)
+        allowed = _portal_only_variables()
+        assert sorted(set(written) - allowed) == []
+        assert written["DJANGO_SETTINGS_MODULE"] == "DJANGO_SETTINGS_MODULE=config.settings.prod"
+        expected = _declarations(source)
+        for key, line in written.items():
+            if key != "DJANGO_SETTINGS_MODULE":
+                assert line == expected[key], key
+        assert "PORTAL_DJANGO_SECRET_KEY" in written
+        for key in set(expected) - allowed:
+            assert f"dummy-{key}" not in text, key
+        assert "dummy-" not in result.stdout + result.stderr
+        assert "a$b#c" not in result.stdout + result.stderr
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize(
+        "portal_line", ["", "PORTAL_DJANGO_SECRET_KEY=\n", 'PORTAL_DJANGO_SECRET_KEY="dup-value-123"\n']
+    )
+    def test_the_helper_refuses_a_missing_empty_or_shared_portal_key(self, project: Project, portal_line: str) -> None:
+        project.write_env(".env.prod", "DJANGO_SETTINGS_MODULE=config.settings.prod\nDJANGO_SECRET_KEY=dup-value-123\n" + portal_line)
+        result = project.run("portal-env.sh")
+        assert result.returncode != 0
+        assert "PORTAL_DJANGO_SECRET_KEY" in result.stderr
+        assert "dup-value-123" not in result.stdout + result.stderr
+        assert not (project.root / ".env.prod.portal").exists()
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("form", ["export PLATFORM_API_SECRET=h\n", "  PLATFORM_API_SECRET=h\n"])
+    def test_the_helper_refuses_forms_it_cannot_copy(self, project: Project, form: str) -> None:
+        # Compose reads these, so dropping them would write a file that lacks the value.
+        source = FULL_FOR_PORTAL.replace("PLATFORM_API_SECRET=h\n", form)
+        project.write_env(".env.prod", source)
+        result = project.run("portal-env.sh")
+        assert result.returncode != 0
+        assert "PLATFORM_API_SECRET" in result.stderr
+        assert not (project.root / ".env.prod.portal").exists()
+
+    @pytest.mark.integration
+    def test_the_helper_does_not_read_inside_a_value_spanning_lines(self, project: Project) -> None:
+        # Compose reads the middle line as part of DB_PASSWORD, never as a declaration.
+        source = FULL_FOR_PORTAL + f"{DB_PW}='first\nPLATFORM_API_SECRET=leaked-fragment\nlast'\n"
+        project.write_env(".env.prod", source)
+        result = project.run("portal-env.sh")
+        assert result.returncode == 0, result.stdout + result.stderr
+        text = (project.root / ".env.prod.portal").read_text()
+        assert "leaked-fragment" not in text
+        assert _declarations(text)["PLATFORM_API_SECRET"] == "PLATFORM_API_SECRET=h"
+
+    @pytest.mark.integration
+    def test_the_helper_refuses_a_file_the_portal_stack_could_not_start_with(self, project: Project) -> None:
+        project.write_env(".env.prod", FULL_FOR_PORTAL.replace("PORTAL_TRUSTED_PROXY_CIDRS=10.0.0.0/8\n", ""))
+        result = project.run("portal-env.sh")
+        assert result.returncode != 0
+        assert "PORTAL_TRUSTED_PROXY_CIDRS" in result.stderr
+        assert not (project.root / ".env.prod.portal").exists()
+
+    @pytest.mark.integration
+    def test_the_helper_never_overwrites_by_accident(self, project: Project) -> None:
+        source = project.write_env(".env.prod", FULL_FOR_PORTAL)
+        out = project.write_env(".env.prod.portal", "OLD=1\n")
+        out.chmod(0o644)
+        assert project.run("portal-env.sh").returncode != 0
+        assert out.read_text() == "OLD=1\n"
+        result = project.run("portal-env.sh", "--force")
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "OLD" not in out.read_text()
+        assert out.stat().st_mode & 0o777 == 0o600
+        before = source.read_bytes()
+        assert project.run("portal-env.sh", "--output", ".env.prod", "--force").returncode != 0
+        assert source.read_bytes() == before
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize(("example", "env_name"), [(".env.example.prod", "prod"), (".env.example.staging", "staging")])
+    def test_the_helpers_file_deploys_on_the_portal_host(
+        self, project: Project, tmp_path: Path, example: str, env_name: str
+    ) -> None:
+        project.write_env(f".env.{env_name}", _filled_example(example, PORTAL_KEY))
+        result = project.run("portal-env.sh", "--env", env_name)
+        assert result.returncode == 0, result.stdout + result.stderr
+        host = Project((tmp_path / "portal-host").resolve())
+        host.write_env(f".env.{env_name}", (project.root / f".env.{env_name}.portal").read_text())
+        result = host.run("deploy.sh", "portal-only", "--env", env_name)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert any(_subcommand(c)[:1] == ["up"] for c in host.compose_calls())
+
+    @pytest.mark.integration
+    def test_the_helpers_file_satisfies_the_portal_stack(self, project: Project) -> None:
+        project.write_env(".env.prod", _filled_example(".env.example.prod", PORTAL_KEY + "PLATFORM_API_SECRET='a$b#c'\n"))
+        assert project.run("portal-env.sh").returncode == 0
+        services = _compose_config(project.root / ".env.prod.portal", project.compose_file("portal-only"))
+        portal = services["portal"]["environment"]
+        assert portal["DJANGO_SECRET_KEY"] == "dummy-portal-secret-key"
+        # Single quotes keep `$` literal; `config` prints it as `$$`.
+        assert portal["PLATFORM_API_SECRET"] == "a$$b#c"
+
+    @pytest.mark.integration
+    def test_the_allowlist_is_what_compose_interpolates(self) -> None:
+        result = subprocess.run(  # noqa: S603  # The helper library, sourced in a fresh shell.
+            ["/bin/bash", "-c", 'DEPLOY_DIR="$1"; source "$1/scripts/lib/compose.sh"; praho_portal_allowlist', "_",
+             str(PROJECT_ROOT / "deploy")],
+            capture_output=True, text=True, timeout=30, check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert set(result.stdout.split()) == _portal_only_variables()
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("name", ["single-server", "container-service"])
+    @pytest.mark.parametrize("separate", [True, False])
+    def test_a_shared_host_may_give_the_portal_its_own_key(self, project: Project, name: str, separate: bool) -> None:
+        env_file = project.write_env(".env.prod", SHARED_HOST_ENV + ("PORTAL_DJANGO_SECRET_KEY=portal-key\n" if separate else ""))
+        services = _compose_config(env_file, project.compose_file(name))
+        assert services["platform"]["environment"]["DJANGO_SECRET_KEY"] == "platform-key"
+        assert services["portal"]["environment"]["DJANGO_SECRET_KEY"] == ("portal-key" if separate else "platform-key")

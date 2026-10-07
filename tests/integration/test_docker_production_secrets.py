@@ -285,3 +285,24 @@ class TestNativeMigrateEnvironment:
         operator_env = {k: v for k, v in self._operator_env().items() if k not in PRODUCTION_KEY_VALUES}
         environment = self._environment_for("Set Django environment variables from .env file", operator_env, "staging")
         assert not set(environment) & set(PRODUCTION_KEY_VALUES)
+
+
+class TestPortalHostHoldsNoPlatformKey:
+    """The portal-only stack never names the platform's Django secret key, and the variables it
+    interpolates (the portal host's allowlist) include no platform secret."""
+
+    @pytest.mark.integration
+    def test_each_portal_gets_its_own_key_where_it_can(self) -> None:
+        assert "${DJANGO_SECRET_KEY" not in (DEPLOY / "docker-compose.portal-only.yml").read_text()
+        portal_only = _environment(_services("portal-only")["portal"])["DJANGO_SECRET_KEY"]
+        assert portal_only.startswith("${PORTAL_DJANGO_SECRET_KEY:?"), portal_only
+        for name in ("single-server", "container-service"):
+            shared = _environment(_services(name)["portal"])["DJANGO_SECRET_KEY"]
+            assert shared.startswith("${PORTAL_DJANGO_SECRET_KEY:-${DJANGO_SECRET_KEY:?"), (name, shared)
+
+    @pytest.mark.integration
+    def test_the_portal_allowlist_holds_no_platform_secret(self) -> None:
+        lines = (DEPLOY / "docker-compose.portal-only.yml").read_text().splitlines()
+        variables = set(re.findall(r"\$\{([A-Za-z_][A-Za-z0-9_]*)", "\n".join(line for line in lines if not line.lstrip().startswith("#"))))
+        denied = set(DENIED_TO_PORTAL) | {"DJANGO_SECRET_KEY", "HMAC_SECRET", "PORTAL_HMAC_CREDENTIALS"}
+        assert sorted(variables & denied) == []

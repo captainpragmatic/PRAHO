@@ -141,7 +141,8 @@ deploy_platform_only() {
 
 deploy_portal_only() {
     log_info "Deploying PRAHO - Portal Only"
-    # PLATFORM_API_BASE_URL comes from the env file; Compose refuses to start without it.
+    # The env file is the portal's own (deploy/scripts/portal-env.sh writes it), checked above: it
+    # holds PLATFORM_API_BASE_URL and the portal's own Django key, and nothing of the platform's.
     compose_up portal-only ${PROFILES[@]+"${PROFILES[@]}"}
     verify_deployment portal-only ${PROFILES[@]+"${PROFILES[@]}"}
 }
@@ -217,6 +218,19 @@ check_requirements
 praho_load_env
 log_info "Env file: ${PRAHO_ENV_FILE} (${PRAHO_SETTINGS_MODULE})"
 
+# Stopping or reading logs is never blocked, even on a portal host that holds too much.
+if [ "$DEPLOYMENT_TYPE" = portal-only ] && [ "$ACTION" != deploy ]; then
+    PORTAL_OFFENDERS="$(praho_portal_env_offenders "$PRAHO_ENV_FILE")"
+    if [ -n "$PORTAL_OFFENDERS" ]; then
+        log_warn "This portal host's env file holds more than the portal stack uses: ${PORTAL_OFFENDERS}. Regenerate it with deploy/scripts/portal-env.sh."
+    fi
+    # Compose interpolates the required portal key for `down` and `logs` too. A host still on its old
+    # file lacks it, so these two get a throwaway value; neither creates a container that would use it.
+    if [ -z "${PORTAL_DJANGO_SECRET_KEY:-}" ] && [ -z "$(praho_env_value PORTAL_DJANGO_SECRET_KEY)" ]; then
+        export PORTAL_DJANGO_SECRET_KEY="unused-by-${ACTION}"
+    fi
+fi
+
 case "$ACTION" in
     stop)
         praho_compose "$DEPLOYMENT_TYPE" ${PROFILES[@]+"${PROFILES[@]}"} down
@@ -228,10 +242,11 @@ case "$ACTION" in
         ;;
 esac
 
-# Only the stacks that run the platform need its keys: a portal-only host must not hold them, and
-# container-service only builds images.
+# Only the stacks that run the platform need its keys. A portal-only host must not hold them, or any
+# other platform secret, and container-service only builds images.
 case "$DEPLOYMENT_TYPE" in
     single-server | platform-only) praho_require_production_keys ;;
+    portal-only) praho_require_portal_env ;;
 esac
 
 case "$DEPLOYMENT_TYPE" in
