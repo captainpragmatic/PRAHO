@@ -85,6 +85,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `PORTAL_TRUSTED_PROXY_CIDRS` has a known value before the first start. Docker used to choose the
   subnet, and unless the operator found and set it, the portal attributed every request to its own
   Caddy, which merged all customers into one rate-limit bucket and one audit address.
+  **Upgrading a host that already ran it:** run `deploy.sh portal-only --stop` once before deploying;
+  Compose keeps an existing network's old subnet on `up`.
 - `make docker-dev` starts again. Since March it built the production images and mounted the source
   over `/app`, hiding their venv and entrypoint, and the production venv lacks the debug toolbar and
   colorlog that the dev settings import. The Dockerfiles now have `dev` targets that install the dev

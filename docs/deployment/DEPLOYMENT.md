@@ -649,7 +649,8 @@ Deploy just the Portal service (customer-facing).
 ./deploy/scripts/portal-env.sh --env prod          # writes .env.prod.portal
 scp -p .env.prod.portal portal-host:/opt/praho/.env.prod
 
-# On the portal host
+# On the portal host (one that already ran the portal stack: run --stop once first, so Compose
+# recreates its network with the pinned subnet)
 ./deploy/scripts/deploy.sh portal-only --build
 ./deploy/scripts/deploy.sh portal-only --with-caddy --build   # with Caddy
 ```
