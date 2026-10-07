@@ -15,7 +15,19 @@ from pathlib import Path
 import pytest
 
 E2E = Path(__file__).resolve().parents[1] / "e2e"
+# `\s*` also spans newlines, so a call split across lines is caught when whole files are scanned.
 _TIMED_IS_VISIBLE = re.compile(r"\.is_visible\(\s*timeout\s*=")
+
+
+def _timed_is_visible_calls(paths: list[Path], root: Path) -> list[str]:
+    """`path:line` of every `is_visible(timeout=…)` call, scanning each file whole."""
+    found = []
+    for path in paths:
+        source = path.read_text()
+        for match in _TIMED_IS_VISIBLE.finditer(source):
+            line = source.count("\n", 0, match.start()) + 1
+            found.append(f"{path.relative_to(root)}:{line}")
+    return found
 
 
 class TestE2EVisibilityChecks:
@@ -24,12 +36,7 @@ class TestE2EVisibilityChecks:
         files = sorted(E2E.rglob("*.py"))
         # A broken glob must fail loudly, not check zero files and pass.
         assert len(files) > 20, files
-        offenders = [
-            f"{path.relative_to(E2E.parent.parent)}:{number}"
-            for path in files
-            for number, line in enumerate(path.read_text().splitlines(), start=1)
-            if _TIMED_IS_VISIBLE.search(line)
-        ]
+        offenders = _timed_is_visible_calls(files, E2E.parent.parent)
         assert offenders == [], (
             "is_visible() ignores its timeout; use expect(...).to_be_visible() to wait, "
             f"or is_visible() with no timeout to branch: {offenders}"
@@ -37,13 +44,16 @@ class TestE2EVisibilityChecks:
 
     @pytest.mark.integration
     @pytest.mark.parametrize(
-        ("line", "flagged"),
+        ("source", "expected"),
         [
-            ("assert badge.is_visible(timeout=5000)", True),
-            ("if row.is_visible( timeout = 2000 ):", True),
-            ("if row.is_visible():", False),
-            ("expect(badge).to_be_visible(timeout=5000)", False),
+            ("assert badge.is_visible(timeout=5000)\n", ["case.py:1"]),
+            ("if row.is_visible( timeout = 2000 ):\n", ["case.py:1"]),
+            ("x = 1\nassert badge.is_visible(\n    timeout=5000\n)\n", ["case.py:2"]),
+            ("if row.is_visible():\n", []),
+            ("expect(badge).to_be_visible(timeout=5000)\n", []),
         ],
     )
-    def test_the_pattern_flags_only_a_timeout_on_is_visible(self, line: str, flagged: bool) -> None:
-        assert bool(_TIMED_IS_VISIBLE.search(line)) is flagged
+    def test_the_scan_flags_only_a_timeout_on_is_visible(self, tmp_path: Path, source: str, expected: list[str]) -> None:
+        case = tmp_path / "case.py"
+        case.write_text(source)
+        assert _timed_is_visible_calls([case], tmp_path) == expected
