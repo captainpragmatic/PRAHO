@@ -35,7 +35,7 @@ with open(os.environ["DOCKER_LOG"], "a") as log:
 if argv[:1] == ["ps"]:
     print("praho_db\\npraho_platform\\npraho_portal\\npraho_caddy")
 elif argv[:1] == ["inspect"]:
-    print("healthy")
+    print(os.environ.get("DOCKER_HEALTH", "healthy"))
 elif argv[:1] == ["start"] and os.environ.get("DOCKER_START_FAILS"):
     sys.exit(1)
 """
@@ -283,6 +283,17 @@ class TestRollbackAndRestore:
         assert call["argv"][2] == str(env_file)
         assert "--wait" in _subcommand(call)
         assert "curl" not in project.log.read_text()
+
+    @pytest.mark.integration
+    def test_a_restore_whose_services_stay_unhealthy_exits_nonzero(self, project: Project) -> None:
+        project.write_env(".env.prod", PROD_ENV)
+        backups = project.root / "backups"
+        backups.mkdir()
+        backup = backups / "praho_backup_20261007_000000.sql.gz"
+        backup.write_bytes(b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03\x03\x00\x00\x00\x00\x00\x00\x00\x00\x00")
+        result = project.run("restore.sh", str(backup), stdin="yes\n", DOCKER_HEALTH="unhealthy")
+        assert "Starting services" in result.stdout, result.stdout + result.stderr
+        assert result.returncode != 0, result.stdout
 
     @pytest.mark.integration
     def test_health_check_reads_container_health_not_host_ports(self, project: Project) -> None:

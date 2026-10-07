@@ -128,7 +128,9 @@ restore_backup() {
     if wait_healthy praho_platform praho_portal; then
         log_success "Restore completed successfully!"
     else
-        log_warn "Services may not be fully healthy."
+        # The data is restored, but the services did not come back; callers (rollback.sh) must know.
+        log_error "The database was restored, but the services did not become healthy."
+        exit 1
     fi
 }
 
