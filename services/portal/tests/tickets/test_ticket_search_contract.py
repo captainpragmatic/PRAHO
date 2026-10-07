@@ -106,10 +106,13 @@ class _TicketHTML(HTMLParser):
         self.ticket_ids: list[int] = []
         self.links: list[dict[str, str]] = []
         self.search: dict[str, str] = {}
+        self.full_page = False
         self.feed(content.decode())
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attributes = {key: value for key, value in attrs if value is not None}
+        if tag == "html":
+            self.full_page = True
         # Only desktop rows: the same ticket is also rendered as a mobile card.
         if tag == "tr" and "data-href" in attributes:
             self.ticket_ids.append(int(urlsplit(attributes["data-href"]).path.rstrip("/").rsplit("/", 1)[1]))
@@ -223,6 +226,29 @@ class TicketSearchContractTests(SimpleTestCase):
         self.assertEqual(urlsplit(htmx_url).path, reverse("tickets:search_api"))
         self.assertEqual(parse_qs(urlsplit(htmx_url).query), parse_qs(urlsplit(link["href"]).query))
         self.assertEqual(self._render(htmx_url, htmx=True).ticket_ids, list(range(21, 41)))
+
+    def test_pagination_pushes_a_full_list_url_that_survives_refresh(self) -> None:
+        query = "hosting & mail+é"
+        for route, htmx in (("tickets:list", False), ("tickets:search_api", True)):
+            with self.subTest(route=route):
+                page = self._render(self._url(route, query=query), htmx=htmx)
+                next_links = [link for link in page.links if link.get("aria-label") == "Go to next page"]
+                self.assertEqual(len(next_links), 1)
+                link = next_links[0]
+                push_url = link.get("hx-push-url", "")
+                self.assertEqual(push_url, reverse("tickets:list") + "?" + urlsplit(link["hx-get"]).query)
+                self.assertEqual(
+                    parse_qs(urlsplit(push_url).query),
+                    {"page": ["2"], "q": [query], "status": ["open"], "priority": ["high"]},
+                )
+                refreshed = self._render(push_url)
+                self.assertTrue(refreshed.full_page)
+                self.assertEqual(refreshed.ticket_ids, list(range(21, 41)))
+                self.assertEqual(refreshed.search["value"], query)
+                self.assertEqual(self.platform.requests[-1]["page"], 2)
+                self.assertEqual(self.platform.requests[-1]["search"], query)
+                self.assertEqual(self.platform.requests[-1]["status"], "open")
+                self.assertEqual(self.platform.requests[-1]["priority"], "high")
 
     def test_search_placeholder_names_only_supported_fields(self) -> None:
         page = self._render(self._url("tickets:list"))

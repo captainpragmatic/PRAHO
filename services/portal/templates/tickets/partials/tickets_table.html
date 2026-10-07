@@ -103,7 +103,10 @@
 
 <!-- Use Platform Pagination Component -->
 {% url 'tickets:search_api' as tickets_search_url %}
-{% include 'components/pagination.html' with page_obj=paginator_data extra_params=pagination_params htmx_target="#tickets-content" htmx_url=tickets_search_url %}
+{% url 'tickets:list' as tickets_list_url %}
+{% with page_obj=paginator_data extra_params=pagination_params htmx_target="#tickets-content" %}
+{% include 'components/pagination.html' with htmx_url=tickets_search_url push_url=tickets_list_url %}
+{% endwith %}
 
 {% else %}
 <!-- Enhanced Empty State -->
