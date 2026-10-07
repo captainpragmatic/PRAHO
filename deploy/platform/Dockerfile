@@ -31,6 +31,43 @@ ENV UV_PROJECT_ENVIRONMENT=/app/.venv
 RUN uv sync --group platform --group prod --frozen --no-dev
 
 # ---------------------------------------------------------------------------
+# Development target for `make docker-dev` (--target dev). A build without a target ends at the
+# runtime stage below, so production images contain none of this.
+# ---------------------------------------------------------------------------
+FROM builder AS dev-builder
+
+# Outside /app: the dev stack mounts the source over /app, which would hide a venv there. The dev
+# group adds the debug toolbar and colorlog that config.settings.dev imports; the service code
+# comes from that mount, so the workspace package itself is not installed.
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv
+RUN uv sync --group platform --group prod --frozen --no-install-workspace
+
+FROM python:3.13-slim AS dev
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app \
+    PATH="/opt/venv/bin:$PATH" \
+    DJANGO_SETTINGS_MODULE=config.settings.dev \
+    SERVICE_NAME=platform \
+    PRAHO_SKIP_DOTENV=1
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        postgresql-client \
+        libpq5 \
+        curl \
+        gettext \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=dev-builder /opt/venv /opt/venv
+WORKDIR /app
+EXPOSE 8700
+# No entrypoint: the dev stack runs migrations, then the autoreloading development server.
+CMD ["python", "manage.py", "runserver", "0.0.0.0:8700"]
+
+# ---------------------------------------------------------------------------
 # Stage 2: Runtime — minimal image with only runtime dependencies
 # ---------------------------------------------------------------------------
 FROM python:3.13-slim

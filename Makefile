@@ -1158,15 +1158,15 @@ docker-build:
 docker-dev:
 	@echo "🚀 [Docker] Starting development services (no Redis)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@docker-compose -f deploy/docker-compose.dev.yml up --build
+	@docker compose -f deploy/docker-compose.dev.yml up --build
 
 docker-stop:
 	@echo "🛑 [Docker] Stopping all services..."
-	@docker-compose -f deploy/docker-compose.dev.yml down || true
+	@docker compose -f deploy/docker-compose.dev.yml down || true
 
 docker-clean:
 	@echo "🧹 [Docker] Cleaning up containers and images..."
-	@docker-compose -f deploy/docker-compose.dev.yml down --volumes --rmi all || true
+	@docker compose -f deploy/docker-compose.dev.yml down --volumes --rmi all || true
 	@docker system prune -f
 
 clean-cache:

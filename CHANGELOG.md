@@ -57,6 +57,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `make docker-dev` starts again. Since March it built the production images and mounted the source
+  over `/app`, hiding their venv and entrypoint, and the production venv lacks the debug toolbar and
+  colorlog that the dev settings import. The Dockerfiles now have `dev` targets that install the dev
+  dependencies outside the mount, and the dev stack uses them. The platform now uses the stack's
+  PostgreSQL, the portal reaches the platform by its container name and keeps its session database out
+  of the checkout, and the dev settings no longer look for a `.env` four directories up inside the
+  container. The portal's dev settings no longer redirect to HTTPS when `DEBUG` is spelled `1`. Images
+  built without a target are unchanged.
 - The Docker production images and the standalone Compose files can start a working deployment.
   Booting them showed five failures in a row:
   - Gunicorn could not start (exit 127): the venv was built at `/build/.venv` and copied to `/app/.venv`,

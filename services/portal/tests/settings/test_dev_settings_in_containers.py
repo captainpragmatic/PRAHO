@@ -56,3 +56,10 @@ class TestPlatformApiBaseUrl(SimpleTestCase):
 
     def test_localhost_stays_the_default(self) -> None:
         self.assertEqual(self._dev_setting("PLATFORM_API_BASE_URL", {}), "http://localhost:8700/api")
+
+    def test_development_never_redirects_to_https(self) -> None:
+        # base.py derives SECURE_SSL_REDIRECT from DEBUG before dev.py turns DEBUG on, so a DEBUG
+        # spelled "1" (as the dev stack set it) left every portal page redirecting to https.
+        for debug in ("1", "true", "0"):
+            with self.subTest(DEBUG=debug):
+                self.assertEqual(self._dev_setting("SECURE_SSL_REDIRECT", {"DEBUG": debug}), "False")

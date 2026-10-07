@@ -1,7 +1,8 @@
 # ===============================================================================
 # PRAHO SERVICES - DEVELOPMENT DOCKER COMPOSE 🛠️
 # ===============================================================================
-# Development environment with hot reload and debug settings (no Redis)
+# Development environment with hot reload and debug settings (no Redis). `make docker-dev` runs it.
+# The images are the Dockerfiles' `dev` targets: dependencies only, with the source mounted over /app.
 
 services:
   # ===============================================================================
@@ -19,7 +20,8 @@ services:
       - postgres_dev_data:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U praho"]
+      # -d: without it pg_isready probes a database named after the user, which does not exist here
+      test: ["CMD-SHELL", "pg_isready -U praho -d praho_dev"]
       interval: 15s
       timeout: 3s
       retries: 3
@@ -31,15 +33,20 @@ services:
     build:
       context: ..
       dockerfile: deploy/platform/Dockerfile
+      target: dev
     ports:
       - "8700:8700"
     volumes:
       # Hot reload - mount source code
       - ../services/platform:/app:delegated
+      # Shared design-system templates and static files, where the settings look for them (ADR-0035)
+      - ../shared/ui:/shared/ui:ro
       - dev_static_volume:/app/staticfiles
       - dev_media_volume:/app/media
     environment:
       - DEBUG=1
+      # config.settings.dev uses SQLite unless told otherwise
+      - USE_POSTGRES=true
       - DB_HOST=db
       - DB_PORT=5432
       - DB_NAME=praho_dev
@@ -57,6 +64,7 @@ services:
     restart: unless-stopped
     command: >
       sh -c "python manage.py migrate --noinput &&
+             python manage.py setup_initial_data &&
              python manage.py runserver 0.0.0.0:8700"
 
   # ===============================================================================
@@ -66,14 +74,19 @@ services:
     build:
       context: ..
       dockerfile: deploy/portal/Dockerfile
+      target: dev
     ports:
       - "8701:8701"
     volumes:
       # Hot reload - mount source code
       - ../services/portal:/app:delegated
+      - ../shared/ui:/shared/ui:ro
       - dev_portal_static_volume:/app/staticfiles
+      # Session store, kept out of the mounted checkout
+      - dev_portal_data:/data
     environment:
       - DEBUG=1
+      - SESSION_DB_PATH=/data/portal.sqlite3
       - PLATFORM_API_BASE_URL=http://platform:8700/api
       - PLATFORM_API_SECRET=dev-shared-secret-change-in-production
       # Debug-toolbar allowlist for non-loopback dev clients (empty = localhost only)
@@ -90,7 +103,8 @@ services:
       - platform
     restart: unless-stopped
     command: >
-      sh -c "python manage.py runserver 0.0.0.0:8701"
+      sh -c "python manage.py migrate --noinput &&
+             python manage.py runserver 0.0.0.0:8701"
 
 # ===============================================================================
 # DEVELOPMENT VOLUMES 💾
@@ -104,3 +118,5 @@ volumes:
     name: praho_dev_media_volume
   dev_portal_static_volume:
     name: praho_dev_portal_static_volume
+  dev_portal_data:
+    name: praho_dev_portal_data
