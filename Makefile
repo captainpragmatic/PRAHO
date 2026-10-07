@@ -96,14 +96,14 @@ help:
 	@echo "  make docker-stop     - Stop all Docker services"
 	@echo "  make docker-clean    - Clean up Docker containers and images"
 	@echo ""
-	@echo "🚀 PRODUCTION DEPLOYMENT:"
+	@echo "🚀 PRODUCTION DEPLOYMENT (reads .env.prod; DEPLOY_ENV=staging reads .env.staging):"
 	@echo "  make deploy-single-server  - Deploy all services on single server"
 	@echo "  make deploy-platform       - Deploy platform service only"
 	@echo "  make deploy-portal         - Deploy portal service only"
 	@echo "  make deploy-container-service - Build for DigitalOcean/AWS"
-	@echo "  make deploy-stop           - Stop all deployment services"
+	@echo "  make deploy-stop           - Stop a deployment (DEPLOY_TYPE=single-server by default)"
 	@echo "  make deploy-status         - Show deployment status"
-	@echo "  make deploy-logs           - Show service logs"
+	@echo "  make deploy-logs           - Follow a deployment's logs (DEPLOY_TYPE as above)"
 	@echo ""
 	@echo "💾 BACKUP & RESTORE:"
 	@echo "  make backup          - Create database backup"
@@ -1223,31 +1223,33 @@ clean-nuke:
 
 .PHONY: deploy-single-server deploy-platform deploy-portal deploy-stop deploy-status deploy-logs backup restore rollback rollback-db health-check
 
+# The standalone Compose deployments read .env.prod or .env.staging (never the development .env).
+DEPLOY_ENV ?= prod
+DEPLOY_TYPE ?= single-server
+
 deploy-single-server:
 	@echo "🚀 [Deploy] Single server deployment (all services)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@./deploy/scripts/deploy.sh single-server --build --migrate
+	@./deploy/scripts/deploy.sh single-server --env $(DEPLOY_ENV) --build --migrate
 
 deploy-platform:
 	@echo "🚀 [Deploy] Platform service only..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@./deploy/scripts/deploy.sh platform-only --build
+	@./deploy/scripts/deploy.sh platform-only --env $(DEPLOY_ENV) --build
 
 deploy-portal:
 	@echo "🚀 [Deploy] Portal service only..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@./deploy/scripts/deploy.sh portal-only --build
+	@./deploy/scripts/deploy.sh portal-only --env $(DEPLOY_ENV) --build
 
 deploy-container-service:
 	@echo "🚀 [Deploy] Building for container service..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@./deploy/scripts/deploy.sh container-service --build
+	@./deploy/scripts/deploy.sh container-service --env $(DEPLOY_ENV) --build
 
 deploy-stop:
-	@echo "🛑 [Deploy] Stopping deployment services..."
-	@docker compose -f deploy/docker-compose.single-server.yml down 2>/dev/null || true
-	@docker compose -f deploy/docker-compose.platform-only.yml down 2>/dev/null || true
-	@docker compose -f deploy/docker-compose.portal-only.yml down 2>/dev/null || true
+	@echo "🛑 [Deploy] Stopping the $(DEPLOY_TYPE) deployment ($(DEPLOY_ENV))..."
+	@./deploy/scripts/deploy.sh $(DEPLOY_TYPE) --env $(DEPLOY_ENV) --stop
 
 deploy-status:
 	@echo "📊 [Deploy] Service status..."
@@ -1255,8 +1257,8 @@ deploy-status:
 	@docker ps --filter "name=praho" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 
 deploy-logs:
-	@echo "📋 [Deploy] Service logs..."
-	@docker compose -f deploy/docker-compose.single-server.yml logs -f
+	@echo "📋 [Deploy] Service logs ($(DEPLOY_TYPE), $(DEPLOY_ENV))..."
+	@./deploy/scripts/deploy.sh $(DEPLOY_TYPE) --env $(DEPLOY_ENV) --logs
 
 # ===============================================================================
 # DATABASE BACKUP & RESTORE 💾
@@ -1274,12 +1276,12 @@ backup-list:
 restore:
 	@echo "🔄 [Restore] Interactive database restore..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@./deploy/scripts/restore.sh
+	@./deploy/scripts/restore.sh --env $(DEPLOY_ENV)
 
 restore-latest:
 	@echo "🔄 [Restore] Restoring latest backup..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@./deploy/scripts/restore.sh --latest
+	@./deploy/scripts/restore.sh --latest --env $(DEPLOY_ENV)
 
 # ===============================================================================
 # ROLLBACK PROCEDURES ⏪
@@ -1292,12 +1294,12 @@ ifndef VERSION
 endif
 	@echo "⏪ [Rollback] Rolling back to version $(VERSION)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@./deploy/scripts/rollback.sh version $(VERSION)
+	@./deploy/scripts/rollback.sh version $(VERSION) --env $(DEPLOY_ENV)
 
 rollback-db:
 	@echo "⏪ [Rollback] Restoring database from latest backup..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@./deploy/scripts/rollback.sh database
+	@./deploy/scripts/rollback.sh database --env $(DEPLOY_ENV)
 
 # ===============================================================================
 # HEALTH & MONITORING 🏥

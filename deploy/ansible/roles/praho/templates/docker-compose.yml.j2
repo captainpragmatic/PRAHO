@@ -39,6 +39,7 @@ services:
       - DB_NAME=${DB_NAME}
       - DB_USER=${DB_USER}
       - DB_PASSWORD=${DB_PASSWORD}
+      - DB_SSLMODE=${DB_SSLMODE}
       - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY}
       - DJANGO_SETTINGS_MODULE={{ docker_django_settings_module }}
       - STATIC_ROOT=/app/staticfiles
@@ -48,6 +49,10 @@ services:
       - CSRF_TRUSTED_ORIGINS=https://{{ platform_domain }},https://{{ portal_domain }}
       - SERVICE_NAME=platform
       - HMAC_SECRET=${HMAC_SECRET}
+      - PLATFORM_TO_PORTAL_WEBHOOK_SECRET=${PLATFORM_TO_PORTAL_WEBHOOK_SECRET}
+      - DJANGO_ENCRYPTION_KEY=${DJANGO_ENCRYPTION_KEY}
+      - DJANGO_ENCRYPTION_KEY_PREVIOUS=${DJANGO_ENCRYPTION_KEY_PREVIOUS:-}
+      - CREDENTIAL_VAULT_MASTER_KEY=${CREDENTIAL_VAULT_MASTER_KEY}
       # Per-portal HMAC registry (#277). Unset => legacy shared-secret behavior (safe default).
       - PORTAL_HMAC_MODE=${PORTAL_HMAC_MODE:-legacy}
       - PORTAL_HMAC_CREDENTIALS=${PORTAL_HMAC_CREDENTIALS:-}
@@ -68,7 +73,9 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      # A first boot runs every migration before Gunicorn listens (124 s measured on a fast machine);
+      # failures during the start period don't count, and a passing check ends it early.
+      start_period: 600s
     networks:
       - internal
       - web
@@ -87,9 +94,10 @@ services:
       - DEBUG=0
       - PLATFORM_API_BASE_URL=${PLATFORM_API_BASE_URL}
       - PLATFORM_API_SECRET=${PLATFORM_API_SECRET}
+      - PLATFORM_TO_PORTAL_WEBHOOK_SECRET=${PLATFORM_TO_PORTAL_WEBHOOK_SECRET}
       # Per-portal signing secret (#277). Unset/empty => sign with PLATFORM_API_SECRET.
       - PORTAL_HMAC_SECRET=${PORTAL_HMAC_SECRET:-}
-      # Set to this project's proxy network subnet, e.g. 172.16.0.0/12; narrow to the actual subnet.
+      # Defaults to praho_web_subnet, Caddy's network; set portal_trusted_proxy_cidrs if the proxy is elsewhere.
       - PORTAL_TRUSTED_PROXY_CIDRS=${PORTAL_TRUSTED_PROXY_CIDRS:-}
       - PLATFORM_API_ALLOW_INSECURE_HTTP=true
       - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY}
@@ -154,6 +162,10 @@ networks:
     driver: bridge
   web:
     driver: bridge
+    # A known subnet, so the portal trusts its proxy (Caddy) by default (praho_web_subnet).
+    ipam:
+      config:
+        - subnet: {{ praho_web_subnet }}
 
 volumes:
 {% if deploy_database %}

@@ -11,3 +11,24 @@ hsts_policy: "{{ 'max-age=3600' if (praho_env | default('prod')) == 'staging' el
 # config.settings.dev adds debug_toolbar, so a dev container would fail at startup. That is why this is
 # not the group vars' django_settings_module, which follows praho_env for the native role.
 docker_django_settings_module: "config.settings.{{ 'staging' if (praho_env | default('prod')) == 'staging' else 'prod' }}"
+
+# The `web` network's subnet. The portal trusts it as its proxy network by default (Caddy shares it);
+# set portal_trusted_proxy_cidrs when the proxy is elsewhere. Change it if it collides on the host.
+praho_web_subnet: 10.200.250.0/24
+
+# Database settings the templates need. Override per inventory if the database differs.
+db_name: praho
+db_user: praho
+db_port: 5432
+debug: false
+
+# Operator-supplied variables the templates need, by topology: secrets and domains that nothing in
+# the repo defines. Pass them in inventory group_vars or `-e @vars.yml` (vault the secrets). The
+# role's first tasks stop, naming any that are missing, and
+# tests/integration/test_docker_production_secrets.py checks this list matches the templates.
+praho_required_inputs: >-
+  {{ ['portal_domain', 'platform_domain', 'acme_email', 'secret_key', 'hmac_secret',
+      'platform_to_portal_webhook_secret']
+     + (['db_password'] if (deploy_platform or deploy_database) else [])
+     + (['db_host'] if (deploy_platform and not deploy_database) else [])
+     + (['django_encryption_key', 'credential_vault_master_key'] if deploy_platform else []) }}

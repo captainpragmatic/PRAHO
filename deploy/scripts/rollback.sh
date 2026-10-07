@@ -8,12 +8,19 @@
 #   ./rollback.sh version <tag>    # Roll back to specific version
 #   ./rollback.sh database         # Restore latest database backup
 #   ./rollback.sh full <tag>       # Version rollback + database restore
+#
+# Add --env staging or --env-file PATH to use an env file other than .env.prod (see lib/compose.sh).
+# The tag applies to this run only; the env file is never edited.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_DIR="$(dirname "$SCRIPT_DIR")"
 PROJECT_ROOT="$(dirname "$DEPLOY_DIR")"
+# shellcheck source=SCRIPTDIR/lib/compose.sh
+source "${SCRIPT_DIR}/lib/compose.sh"
+# Outlasts the platform healthcheck's 600s start period plus its failed-check retries.
+WAIT_TIMEOUT=900
 
 # Colors
 GREEN='\033[0;32m'
@@ -29,7 +36,7 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 usage() {
     echo "PRAHO Rollback Script"
     echo ""
-    echo "Usage: $0 <type> [options]"
+    echo "Usage: $0 <type> [--env prod|staging | --env-file PATH]"
     echo ""
     echo "Types:"
     echo "  version <tag>    Roll back to specific image version"
@@ -51,6 +58,10 @@ rollback_version() {
         log_error "Invalid version format: ${VERSION} (expected vX.Y.Z or X.Y.Z)"
         exit 1
     fi
+    # Before the prompt, the backup and any pull: an incomplete production file would only
+    # replace the running version with one that cannot start.
+    praho_load_env
+    praho_require_production_keys
 
     log_info "Rolling back to version: ${VERSION}"
 
@@ -66,38 +77,25 @@ rollback_version() {
     log_info "Creating pre-rollback backup..."
     "${SCRIPT_DIR}/backup.sh" || log_warn "Backup failed"
 
-    cd "$PROJECT_ROOT"
+    # A shell variable beats the env file in Compose interpolation, so VERSION picks the image tag
+    # for these calls only. Pull first so the images are local before anything is replaced; a tag
+    # built on this host (no registry) is used as is, and a tag found nowhere fails `up`. Only the
+    # application images: a newer postgres or caddy image would recreate those containers too.
+    log_info "Pulling version ${VERSION}..."
+    VERSION="$VERSION" praho_compose single-server pull --ignore-pull-failures platform portal
 
-    # Update .env with new version
-    if grep -q "^VERSION=" .env 2>/dev/null; then
-        sed -i.bak "s/^VERSION=.*/VERSION=${VERSION}/" .env && rm -f .env.bak
-    else
-        echo "VERSION=${VERSION}" >> .env
-    fi
-
-    # Pull and restart
-    log_info "Stopping services..."
-    docker compose -f deploy/docker-compose.single-server.yml down
-
-    log_info "Starting services with version ${VERSION}..."
-    export VERSION="${VERSION}"
-    docker compose -f deploy/docker-compose.single-server.yml up -d
-
-    log_info "Waiting for services..."
-    sleep 30
-
-    # Verify
-    if curl -sf http://localhost:8700/api/users/health/ > /dev/null; then
+    log_info "Starting version ${VERSION} and waiting for health..."
+    if VERSION="$VERSION" praho_compose single-server up -d --no-build --wait --wait-timeout "$WAIT_TIMEOUT"; then
         log_success "Rollback to ${VERSION} completed successfully!"
     else
-        log_error "Services are not healthy. Check logs: docker compose logs"
+        log_error "Services are not healthy. Inspect: ${SCRIPT_DIR}/deploy.sh single-server --logs"
         exit 1
     fi
 }
 
 rollback_database() {
     log_info "Rolling back database to latest backup..."
-    "${SCRIPT_DIR}/restore.sh" --latest
+    "${SCRIPT_DIR}/restore.sh" --latest "${ENV_ARGS[@]}"
 }
 
 rollback_full() {
@@ -115,6 +113,14 @@ rollback_full() {
     rollback_database
     rollback_version "$VERSION"
 }
+
+praho_parse_env_args "$@"
+set -- ${PRAHO_ARGS[@]+"${PRAHO_ARGS[@]}"}
+if [ -n "$PRAHO_ENV_PATH" ]; then
+    ENV_ARGS=(--env-file "$PRAHO_ENV_PATH")
+else
+    ENV_ARGS=(--env "$PRAHO_ENV_NAME")
+fi
 
 if [ $# -eq 0 ]; then
     usage
