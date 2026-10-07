@@ -28,7 +28,6 @@ from apps.common.constants import (
 from apps.common.types import Err, Ok, Result
 
 from .validators import (
-    _DEFAULT_RATE_LIMIT_REGISTRATION_PER_IP,
     BusinessLogicValidator,
     SecureErrorHandler,
     SecureInputValidator,
@@ -40,6 +39,7 @@ logger = logging.getLogger(__name__)
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 _REGISTRATION_RATE_LIMIT_KEY = "security.registration_rate_limit_per_ip"
+_DEFAULT_RATE_LIMIT_REGISTRATION_PER_IP = 5  # per hour
 
 
 # ===============================================================================
@@ -282,7 +282,9 @@ def _execute_security_checks(
 
             # Same read either way; naming the registration key lets settings lint see this reader.
             if config.rate_limit_setting_key == _REGISTRATION_RATE_LIMIT_KEY:
-                rate_limit = SettingsService.get_integer_setting(_REGISTRATION_RATE_LIMIT_KEY, rate_limit)
+                rate_limit = SettingsService.get_integer_setting(
+                    _REGISTRATION_RATE_LIMIT_KEY, _DEFAULT_RATE_LIMIT_REGISTRATION_PER_IP
+                )
             else:
                 rate_limit = SettingsService.get_integer_setting(config.rate_limit_setting_key, rate_limit)
         rate_limit_user = user

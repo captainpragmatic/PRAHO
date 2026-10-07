@@ -1,5 +1,5 @@
-# WP18 foundation: grandfathered untested readers present before the new-reader ratchet.
-# Consumer effect coverage is deferred to later packages; no existing debt is hidden by key alone.
+# Grandfathered untested settings readers.
+# Regenerate intentionally with lint_settings_coverage.py --write-reader-baseline.
 # @ headers name consumer files. Entries are key|qualified callable|ordinal; line shifts are harmless.
 
 @ services/platform/apps/api/billing/views.py
@@ -8,26 +8,9 @@ integrations.stripe_publishable_key|begin_recurring_authorization_api|1
 @ services/platform/apps/api/users/serializers.py
 portal.public_base_url|PasswordResetRequestSerializer.create|1
 
-@ services/platform/apps/audit/compliance.py
-audit.compliant_score_threshold|get_compliant_score_threshold|1
-audit.partial_score_threshold|get_partial_score_threshold|1
-
-@ services/platform/apps/audit/management/commands/audit_compliance.py
-audit.max_violations_displayed|get_max_violations_displayed|1
-
-@ services/platform/apps/audit/services.py
-audit.high_complexity_filter_threshold|get_high_complexity_filter_threshold|1
-audit.webhook_healthy_response_threshold|get_webhook_healthy_response_threshold|1
-audit.webhook_max_retry_threshold|get_webhook_max_retry_threshold|1
-audit.webhook_suspicious_retry_threshold|get_webhook_suspicious_retry_threshold|1
-
 @ services/platform/apps/audit/tasks.py
-audit.max_files_displayed|get_max_files_displayed|1
 audit.notify_on_critical_alerts|_send_integrity_escalation_alert|1
 audit.notify_on_file_integrity_alerts|_create_file_integrity_alert|1
-
-@ services/platform/apps/billing/bank_transfer.py
-billing.bank_accounts|bank_transfer_instructions|1
 
 @ services/platform/apps/billing/config.py
 billing.event_grace_period_hours|get_event_grace_period_hours|1
@@ -65,13 +48,10 @@ efactura.company.street|EFacturaSettings.company_address|1
 efactura.enabled|EFacturaSettings.enabled|1
 efactura.environment|EFacturaSettings.environment|1
 efactura.metrics.enabled|EFacturaSettings.metrics_enabled|1
-efactura.metrics.prefix|EFacturaSettings.metrics_prefix|1
 efactura.oauth.client_id|EFacturaSettings.client_id|1
 efactura.oauth.client_secret|EFacturaSettings.client_secret|1
 efactura.oauth.redirect_uri|EFacturaSettings.redirect_uri|1
 efactura.polling.batch_size|EFacturaSettings.poll_batch_size|1
-efactura.polling.interval_seconds|EFacturaSettings.poll_interval_seconds|1
-efactura.polling.stale_submission_hours|EFacturaSettings.stale_submission_hours|1
 efactura.rate_limit.download_per_message_day|EFacturaSettings.rate_limit_download_per_message_day|1
 efactura.rate_limit.global_per_minute|EFacturaSettings.rate_limit_global_per_minute|1
 efactura.rate_limit.list_paginated_per_day|EFacturaSettings.rate_limit_list_paginated_per_day|1
@@ -83,22 +63,13 @@ efactura.retry.delay_3_seconds|EFacturaSettings.retry_delays|1
 efactura.retry.delay_4_seconds|EFacturaSettings.retry_delays|1
 efactura.retry.delay_5_seconds|EFacturaSettings.retry_delays|1
 efactura.retry.max_retries|EFacturaSettings.max_retries|1
-efactura.storage.archive_retention_years|EFacturaSettings.archive_retention_years|1
-efactura.storage.pdf_path|EFacturaSettings.pdf_storage_path|1
 efactura.storage.xml_path|EFacturaSettings.xml_storage_path|1
 efactura.submission.auto_submit_enabled|EFacturaSettings.auto_submit_enabled|1
-efactura.submission.deadline_days|EFacturaSettings.submission_deadline_days|1
-efactura.submission.deadline_warning_hours|EFacturaSettings.deadline_warning_hours|1
 efactura.validation.schematron_enabled|EFacturaSettings.schematron_validation_enabled|1
 efactura.validation.strict_mode|EFacturaSettings.strict_mode|1
 efactura.validation.xsd_enabled|EFacturaSettings.xsd_validation_enabled|1
-efactura.vat.rate_reduced_1|EFacturaSettings.get_vat_rate|1
-efactura.vat.rate_reduced_2|EFacturaSettings.get_vat_rate|1
-efactura.vat.rate_standard|EFacturaSettings.get_vat_rate|1
-efactura.vat.rate_zero|EFacturaSettings.get_vat_rate|1
 
 @ services/platform/apps/billing/efactura/tasks.py
-billing.efactura_batch_size|poll_all_pending_status_task|1
 billing.efactura_batch_size|process_pending_submissions_task|1
 billing.efactura_deadline_warning_hours|check_efactura_deadlines_task|1
 
@@ -117,9 +88,6 @@ integrations.smartbill_language|_config_from_settings|1
 integrations.smartbill_token|_credentials_from_settings|1
 integrations.smartbill_v3_token|_credentials_from_settings|1
 
-@ services/platform/apps/billing/metering_tasks.py
-billing.metering_task_timeout|get_task_timeout|1
-
 @ services/platform/apps/billing/subscription_models.py
 billing.subscription_grace_period_days|get_subscription_grace_period_days|1
 
@@ -137,21 +105,8 @@ billing.proforma_validity_days|_process_valid_until_date|1
 @ services/platform/apps/common/context_processors.py
 system.maintenance_mode|_maintenance_mode_active|1
 
-@ services/platform/apps/common/credential_vault.py
-
-@ services/platform/apps/common/flow_analysis/hybrid_analyzer.py
-common.proximity_line_threshold|get_proximity_line_threshold|1
-
-@ services/platform/apps/common/logging.py
-common.max_summarized_args|get_max_summarized_args|1
-common.sql_display_limit|get_sql_display_limit|1
-common.value_summary_limit|get_value_summary_limit|1
-
 @ services/platform/apps/common/middleware.py
 system.maintenance_mode|MaintenanceModeMiddleware._maintenance_active|1
-
-@ services/platform/apps/common/mixins.py
-common.default_orphans|get_orphans|1
 
 @ services/platform/apps/common/performance/cache.py
 common.cache_timeout_medium|get_cache_timeout_medium|1
@@ -164,12 +119,8 @@ common.query_warning_threshold|get_query_warning_threshold|1
 billing.fx.pairs|_compute_fx_freshness|1
 billing.fx.stale_after_days|_compute_fx_freshness|1
 
-@ services/platform/apps/common/trace_middleware.py
-common.max_header_json_length|get_max_header_json_length|1
-
 @ services/platform/apps/common/validators.py
 security.company_check_rate_limit_per_ip|BusinessLogicValidator.check_company_uniqueness|1
-security.registration_rate_limit_per_ip|get_registration_rate_limit|1
 
 @ services/platform/apps/customers/credit_service.py
 billing.credit_consecutive_bonus_12|CustomerCreditService.update_credit_score|1
@@ -265,33 +216,16 @@ infrastructure.vultr_poll_timeout_seconds|_get_vultr_poll_timeout|1
 @ services/platform/apps/integrations/webhooks/stripe.py
 integrations.stripe_webhook_secret|StripeWebhookProcessor.verify_signature|1
 
-@ services/platform/apps/notifications/models.py
-notifications.max_name_length|get_max_name_length|1
-notifications.max_subject_length|get_max_subject_length|1
-notifications.max_template_size|get_max_template_size|1
-
 @ services/platform/apps/notifications/services.py
 notifications.max_async_attachment_kb|EmailService.send_email|1
 
 @ services/platform/apps/notifications/tasks.py
 notifications.email_batch_size|process_email_queue|1
-notifications.email_batch_size|retry_failed_emails|1
 notifications.email_max_retries|retry_failed_emails|1
 notifications.email_max_retries|send_email_task|1
 
 @ services/platform/apps/orders/services.py
 orders.review_thresholds_cents|OrderPaymentConfirmationService._get_review_threshold|1
-
-@ services/platform/apps/orders/tasks.py
-orders.max_payment_failures_before_fail|get_max_payment_failures_before_order_fail|1
-orders.task_time_limit|get_task_time_limit|1
-
-@ services/platform/apps/orders/views.py
-orders.max_search_query_length|get_max_search_query_length|1
-
-@ services/platform/apps/products/models.py
-products.max_json_content_size|get_max_json_content_size|1
-products.max_price_cents|get_max_price_cents|1
 
 @ services/platform/apps/promotions/forms.py
 promotions.max_coupon_batch_size|CouponBatchForm.clean_count|1
@@ -308,9 +242,6 @@ promotions.gift_card_sales_enabled|gift_purchase_options|1
 @ services/platform/apps/promotions/models.py
 promotions.max_discount_amount_cents|get_max_discount_amount_cents|1
 
-@ services/platform/apps/promotions/services.py
-promotions.max_code_generation_attempts|get_max_code_generation_attempts|1
-
 @ services/platform/apps/provisioning/placement.py
 provisioning.placement_excluded_tags|order_placement_candidates|1
 provisioning.placement_required_tags|order_placement_candidates|1
@@ -319,11 +250,6 @@ provisioning.placement_required_tags|order_placement_candidates|1
 provisioning.high_value_plan_threshold_cents|_handle_new_service_creation|1
 provisioning.high_value_plan_threshold_cents|_handle_new_service_plan_creation|1
 
-@ services/platform/apps/provisioning/virtualmin_auth_manager.py
-provisioning.cache_timeout|get_cache_timeout|1
-provisioning.ssh_timeout|get_ssh_timeout|1
-provisioning.sudo_command_timeout|get_sudo_command_timeout|1
-
 @ services/platform/apps/provisioning/virtualmin_backup_service.py
 backup.aws_access_key_id|VirtualminBackupService._get_s3_client|1
 backup.aws_region|VirtualminBackupService._get_s3_client|1
@@ -331,8 +257,6 @@ backup.aws_secret_access_key|VirtualminBackupService._get_s3_client|1
 backup.s3_bucket_name|VirtualminBackupService._get_backup_bucket|1
 provisioning.backup_min_transfer_mib_s|backup_task_timeout|1
 provisioning.backup_retention_days|VirtualminBackupService.list_backups|1
-provisioning.max_backup_size_gb|VirtualminBackupService._validate_backup_preconditions|1
-provisioning.max_backup_size_gb|VirtualminBackupService._verify_backup_integrity|1
 provisioning.migration_backup_timeout_seconds|VirtualminBackupService._backup_command_timeout|1
 provisioning.migration_backup_timeout_seconds|backup_task_timeout|1
 provisioning.migration_spool_dir|VirtualminBackupService._spool_dir|1
@@ -354,25 +278,12 @@ provisioning.migration_enabled|NodeDrainService.start_drain|1
 
 @ services/platform/apps/provisioning/virtualmin_gateway.py
 virtualmin.auth_fallback_enabled|get_virtualmin_config|1
-virtualmin.auth_health_check_interval_seconds|get_virtualmin_config|1
-virtualmin.backup_compression_enabled|get_virtualmin_config|1
-virtualmin.backup_retention_days|get_virtualmin_config|1
 virtualmin.bandwidth_quota_default_mb|get_virtualmin_config|1
-virtualmin.connection_pool_size|get_virtualmin_config|1
 virtualmin.domain_quota_default_mb|get_virtualmin_config|1
-virtualmin.hostname|get_virtualmin_config|1
-virtualmin.log_retention_days|get_virtualmin_config|1
 virtualmin.max_retries|get_virtualmin_config|1
-virtualmin.monitoring_enabled|get_virtualmin_config|1
-virtualmin.mysql_enabled|get_virtualmin_config|1
-virtualmin.php_version_default|get_virtualmin_config|1
-virtualmin.port|get_virtualmin_config|1
-virtualmin.postgresql_enabled|get_virtualmin_config|1
 virtualmin.rate_limit_max_calls_per_hour|get_virtualmin_config|1
 virtualmin.rate_limit_qps|get_virtualmin_config|1
 virtualmin.request_timeout_seconds|get_virtualmin_config|1
-virtualmin.ssl_auto_renewal_enabled|get_virtualmin_config|1
-virtualmin.ssl_verify|get_virtualmin_config|1
 
 @ services/platform/apps/provisioning/virtualmin_migration_service.py
 provisioning.migration_backup_timeout_seconds|VirtualminMigrationService.__init__|1
@@ -380,25 +291,11 @@ provisioning.migration_backup_timeout_seconds|migration_task_timeout|1
 provisioning.migration_transfer_timeout_seconds|VirtualminMigrationService.__init__|1
 provisioning.migration_transfer_timeout_seconds|migration_task_timeout|1
 
-@ services/platform/apps/provisioning/virtualmin_service.py
-provisioning.max_username_uniqueness_attempts|get_max_username_uniqueness_attempts|1
-
-@ services/platform/apps/provisioning/virtualmin_tasks.py
-provisioning.migration_spool_dir|_sweep_spool_orphans|1
-provisioning.task_soft_time_limit|get_task_soft_time_limit|1
-provisioning.task_time_limit|get_task_time_limit|1
-
 @ services/platform/apps/provisioning/virtualmin_views.py
-provisioning.bulk_operation_threshold|get_bulk_operation_threshold|1
-provisioning.max_concurrent_health_checks|get_max_concurrent_health_checks|1
 provisioning.max_error_display|get_max_error_display|1
-provisioning.overall_health_check_timeout|get_overall_health_check_timeout|1
 
 @ services/platform/apps/settings/views.py
 system.maintenance_mode|settings_home|1
-
-@ services/platform/apps/tickets/monitoring.py
-tickets.security_alert_threshold|SecurityEventTracker.alert_threshold|1
 
 @ services/platform/apps/tickets/security.py
 tickets.allowed_file_extensions|generate_secure_filename|1

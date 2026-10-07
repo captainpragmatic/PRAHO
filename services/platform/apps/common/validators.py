@@ -38,7 +38,6 @@ logger = logging.getLogger(__name__)
 # ===============================================================================
 
 # Rate limiting thresholds — defaults; authoritative source is SettingsService
-_DEFAULT_RATE_LIMIT_REGISTRATION_PER_IP = 5  # per hour
 _DEFAULT_RATE_LIMIT_COMPANY_CHECK_PER_IP = 30  # per hour
 
 
