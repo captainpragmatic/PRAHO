@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- The platform-only and portal-only Docker stacks publish the application port on `127.0.0.1` only.
+  They published 8700 and 8701 on every interface, so anyone who could reach the host bypassed Caddy:
+  its TLS and HSTS and, for the platform, the `PLATFORM_ALLOWED_CIDRS` staff allowlist. Their Caddy
+  uses the Docker network and a proxy on the same host the loopback port; set `PLATFORM_BIND` /
+  `PORTAL_BIND` only for an external load balancer.
 - HSTS now follows the environment. Every Caddy configuration hardcoded a one-year header with
   `preload` and replaced whatever Django sent, so staging's one-hour policy never reached a
   browser, and `preload` went out for a domain never submitted to the preload list. The edge now

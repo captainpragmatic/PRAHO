@@ -22,8 +22,10 @@ services:
       context: ..
       dockerfile: deploy/portal/Dockerfile
     container_name: praho_portal
+    # Loopback only: Caddy (--with-caddy) reaches the portal over the Docker network, and a proxy on
+    # this host can use 127.0.0.1. Set PORTAL_BIND only for an external load balancer.
     ports:
-      - "${PORTAL_PORT:-8701}:8701"
+      - "${PORTAL_BIND:-127.0.0.1}:${PORTAL_PORT:-8701}:8701"
     environment:
       - DEBUG=0
       - PLATFORM_API_BASE_URL=${PLATFORM_API_BASE_URL:?PLATFORM_API_BASE_URL required}
