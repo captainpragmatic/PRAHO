@@ -367,13 +367,15 @@ def _check_form_labels(content: str, path: Path) -> list[A11yViolation]:
 
 
 def _apply_a11y_allow(lines: list[str], path: Path, violations: list[A11yViolation]) -> list[A11yViolation]:
-    """One standalone marker exempts the first matching finding on the next line."""
-    markers: dict[int, str] = {}
+    """Each marker exempts one matching finding on its own or the immediately following line."""
+    markers: dict[int, list[str]] = {}
     warnings: list[A11yViolation] = []
     for line_no, raw_line in enumerate(lines, 1):
-        if not re.search(r"\{#\s*a11y-allow\b", raw_line):
+        starts = list(re.finditer(r"\{#\s*a11y-allow\b", raw_line))
+        if not starts:
             continue
-        match = A11Y_ALLOW.fullmatch(raw_line.strip())
+        matches = list(A11Y_ALLOW.finditer(raw_line))
+        match = matches[0] if len(starts) == len(matches) == 1 else None
         if match is None or not match.group(2).strip():
             warnings.append(
                 A11yViolation(
@@ -381,16 +383,21 @@ def _apply_a11y_allow(lines: list[str], path: Path, violations: list[A11yViolati
                     SEVERITY_WARNING,
                     path,
                     line_no,
-                    gettext("Malformed a11y-allow marker — use {# a11y-allow CODE: reason #} on its own line"),
+                    gettext(
+                        "Malformed a11y-allow marker — use one {# a11y-allow CODE: reason #} "
+                        "above or on the same line as the element"
+                    ),
                 )
             )
         else:
-            markers[line_no + 1] = match.group(1)
+            target_line = line_no + int(raw_line.strip() == match.group())
+            markers.setdefault(target_line, []).append(match.group(1))
 
     findings: list[A11yViolation] = []
     for violation in violations:
-        if markers.get(violation.line) == violation.code:
-            del markers[violation.line]
+        allowances = markers.get(violation.line, [])
+        if violation.code in allowances:
+            allowances.remove(violation.code)
         else:
             findings.append(violation)
     return findings + warnings

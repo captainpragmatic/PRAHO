@@ -148,9 +148,7 @@ def test_fail_on_excluding_every_present_code_exits_0_without_claiming_warnings_
     """A selective --fail-on that matches nothing still exits 0, but real blockers exist that this
     run was simply never asked to fail on - the old "Warnings only" message was wrong here."""
     feature_file = _feature_file_with_one_blocker_and_one_warning(tmp_path, lint, monkeypatch)
-    monkeypatch.setattr(
-        sys, "argv", ["lint_template_components.py", str(feature_file), "--fail-on", "TMPL009"]
-    )
+    monkeypatch.setattr(sys, "argv", ["lint_template_components.py", str(feature_file), "--fail-on", "TMPL009"])
 
     exit_code = lint.main()
 
@@ -190,7 +188,7 @@ def test_marked_line_is_exempt_not_a_blocker(tmp_path, lint, monkeypatch):
         tmp_path,
         lint,
         monkeypatch,
-        '{# tmpl-allow TMPL002: Alpine @click rejected by the button attrs allowlist #}\n'
+        "{# tmpl-allow TMPL002: Alpine @click rejected by the button attrs allowlist #}\n"
         '<button @click="open = true">Open</button>\n',
     )
 
@@ -215,8 +213,7 @@ def test_marker_for_a_different_code_does_not_exempt(tmp_path, lint, monkeypatch
         tmp_path,
         lint,
         monkeypatch,
-        "{# tmpl-allow TMPL001: unrelated reason #}\n"
-        '<button type="submit">Pay</button>\n',
+        '{# tmpl-allow TMPL001: unrelated reason #}\n<button type="submit">Pay</button>\n',
     )
 
     violations = lint.scan_file(feature_file)
@@ -233,9 +230,7 @@ def test_marker_two_lines_up_does_not_apply(tmp_path, lint, monkeypatch):
         tmp_path,
         lint,
         monkeypatch,
-        "{# tmpl-allow TMPL002: reason #}\n"
-        "\n"
-        '<button type="submit">Pay</button>\n',
+        '{# tmpl-allow TMPL002: reason #}\n\n<button type="submit">Pay</button>\n',
     )
 
     violations = lint.scan_file(feature_file)
@@ -252,8 +247,7 @@ def test_stale_marker_with_no_matching_violation_is_an_error(tmp_path, lint, mon
         tmp_path,
         lint,
         monkeypatch,
-        "{# tmpl-allow TMPL002: reason #}\n"
-        '{% button "Pay" %}\n',
+        '{# tmpl-allow TMPL002: reason #}\n{% button "Pay" %}\n',
     )
 
     violations = lint.scan_file(feature_file)
@@ -267,8 +261,7 @@ def test_marker_with_no_reason_is_an_error(tmp_path, lint, monkeypatch):
         tmp_path,
         lint,
         monkeypatch,
-        "{# tmpl-allow TMPL002: #}\n"
-        '<button type="submit">Pay</button>\n',
+        '{# tmpl-allow TMPL002: #}\n<button type="submit">Pay</button>\n',
     )
 
     violations = lint.scan_file(feature_file)
@@ -286,7 +279,7 @@ def test_exempted_violations_are_reported_but_not_counted_as_blockers(tmp_path, 
         tmp_path,
         lint,
         monkeypatch,
-        '{# tmpl-allow TMPL002: Alpine @click rejected by the button attrs allowlist #}\n'
+        "{# tmpl-allow TMPL002: Alpine @click rejected by the button attrs allowlist #}\n"
         '<button @click="open = true">Open</button>\n',
     )
     monkeypatch.setattr(sys, "argv", ["lint_template_components.py", str(feature_file)])
@@ -326,8 +319,7 @@ def test_two_markers_on_one_line_is_an_error_not_a_silent_first_match(tmp_path, 
         tmp_path,
         lint,
         monkeypatch,
-        '{# tmpl-allow TMPL002: Alpine #} {# tmpl-allow TMPL001: #}\n'
-        '<button type="submit">Pay</button>\n',
+        '{# tmpl-allow TMPL002: Alpine #} {# tmpl-allow TMPL001: #}\n<button type="submit">Pay</button>\n',
     )
 
     violations = lint.scan_file(feature_file)
@@ -360,9 +352,10 @@ def test_real_element_sharing_a_line_with_a_marker_is_still_reported(tmp_path, l
 def test_real_element_on_the_same_line_as_a_marker_meant_for_the_next_line_is_still_reported(
     tmp_path, lint, monkeypatch
 ):
-    """codex finding: `<button>x</button> {# tmpl-allow TMPL002: for the next one #}` - the
-    marker is meant to exempt a DIFFERENT button on the line below, but sharing its line with a
-    real button silently hid that real button entirely."""
+    """A same-line marker exempts its own button, which remains explicitly reported.
+
+    Its reason cannot redirect the exemption onto the following line.
+    """
     feature_file = _write_feature_file(
         tmp_path,
         lint,
@@ -374,9 +367,9 @@ def test_real_element_on_the_same_line_as_a_marker_meant_for_the_next_line_is_st
     violations = lint.scan_file(feature_file)
     tmpl002_by_line = {v.line: v for v in violations if v.code == "TMPL002"}
     assert 1 in tmpl002_by_line, f"the button sharing the marker's own line must still be reported, got: {violations}"
-    assert tmpl002_by_line[1].exempted is False
+    assert tmpl002_by_line[1].exempted is True
     assert 2 in tmpl002_by_line
-    assert tmpl002_by_line[2].exempted is False, "the marker was never clean, so nothing below it is exempted either"
+    assert tmpl002_by_line[2].exempted is False, "a same-line marker must not exempt the following line"
 
 
 def test_second_matching_element_on_an_exempted_line_is_not_also_exempted(tmp_path, lint, monkeypatch):

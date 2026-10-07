@@ -135,13 +135,15 @@ def _has_dark_variant_nearby(lines: list[str], line_idx: int, cls: str) -> bool:
 
 
 def _apply_dm_allow(lines: list[str], path: Path, violations: list[DarkModeViolation]) -> list[DarkModeViolation]:
-    """One standalone marker exempts the first matching finding on the next line."""
-    markers: dict[int, str] = {}
+    """Each marker exempts one matching finding on its own or the immediately following line."""
+    markers: dict[int, list[str]] = {}
     warnings: list[DarkModeViolation] = []
     for line_no, raw_line in enumerate(lines, 1):
-        if not re.search(r"\{#\s*dm-allow\b", raw_line):
+        starts = list(re.finditer(r"\{#\s*dm-allow\b", raw_line))
+        if not starts:
             continue
-        match = DM_ALLOW.fullmatch(raw_line.strip())
+        matches = list(DM_ALLOW.finditer(raw_line))
+        match = matches[0] if len(starts) == len(matches) == 1 else None
         if match is None or not match.group(2).strip():
             warnings.append(
                 DarkModeViolation(
@@ -149,17 +151,22 @@ def _apply_dm_allow(lines: list[str], path: Path, violations: list[DarkModeViola
                     SEVERITY_WARNING,
                     path,
                     line_no,
-                    gettext("Malformed dm-allow marker — use {# dm-allow CODE: reason #} on its own line"),
+                    gettext(
+                        "Malformed dm-allow marker — use one {# dm-allow CODE: reason #} "
+                        "above or on the same line as the element"
+                    ),
                     raw_line.strip()[:60],
                 )
             )
         else:
-            markers[line_no + 1] = match.group(1)
+            target_line = line_no + int(raw_line.strip() == match.group())
+            markers.setdefault(target_line, []).append(match.group(1))
 
     findings: list[DarkModeViolation] = []
     for violation in violations:
-        if markers.get(violation.line) == violation.code:
-            del markers[violation.line]
+        allowances = markers.get(violation.line, [])
+        if violation.code in allowances:
+            allowances.remove(violation.code)
         else:
             findings.append(violation)
     return findings + warnings

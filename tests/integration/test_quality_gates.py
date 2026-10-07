@@ -472,6 +472,152 @@ class TestQualityGates(SimpleTestCase):
         )
         self.assertEqual(self._lines(findings, "DM004"), [2, 4, 6, 8, 10])
 
+    def test_tmpl005_allow_is_scoped_and_checked(self) -> None:
+        path = self._seed(
+            "{# tmpl-allow TMPL005: Issue #605 keeps this status colour #}\n"
+            '<span class="bg-green-100">Paid</span>\n'
+            '<span class="bg-red-100">Unpaid</span>\n'
+            "{# tmpl-allow TMPL005: obsolete status colour #}\n"
+            '{% badge "Paid" variant="success" %}\n'
+            "{# tmpl-allow TMPL005: #}\n"
+            '<span class="bg-yellow-100">Pending</span>\n'
+        )
+        findings = self._scan(path)
+        colours = [v for v in findings if v.code == "TMPL005"]
+        self.assertEqual([(v.line, v.exempted) for v in colours], [(2, True), (3, False), (7, False)])
+        self.assertEqual(colours[0].reason, "Issue #605 keeps this status colour")
+        self.assertEqual(self._lines(findings, "TMPL_ALLOW_STALE"), [4])
+        self.assertEqual(self._lines(findings, "TMPL_ALLOW_NO_REASON"), [6])
+        self.assertEqual(self._lines(findings, "TMPL010"), [6])
+
+    def test_tmpl005_allow_controls_the_requested_exit_code(self) -> None:
+        marked = self._seed(
+            '{# tmpl-allow TMPL005: intentional status colour #}\n<span class="bg-green-100">Paid</span>\n',
+            name="marked.html",
+        )
+        unmarked = self._seed('<span class="bg-green-100">Paid</span>\n', name="unmarked.html")
+        stale = self._seed(
+            "{# tmpl-allow TMPL005: obsolete status colour #}\n<p>Paid</p>\n",
+            name="stale.html",
+        )
+        main = cast(Callable[[], int], self.tmpl.main)
+        for path, expected in ((marked, 0), (unmarked, 1), (stale, 1)):
+            with (
+                self.subTest(path=path.name),
+                patch.object(
+                    sys,
+                    "argv",
+                    [
+                        "lint_template_components.py",
+                        str(path),
+                        "--fail-on",
+                        "TMPL005,TMPL_ALLOW_STALE,TMPL_ALLOW_NO_REASON",
+                    ],
+                ),
+            ):
+                self.assertEqual(main(), expected)
+
+    def test_tmpl_markers_support_both_placements_without_leaking(self) -> None:
+        elements = {
+            "TMPL001": '<input name="name">',
+            "TMPL002": "<button>Open</button>",
+            "TMPL003": "<select></select>",
+            "TMPL004": "<textarea></textarea>",
+            "TMPL005": '<span class="bg-green-100">Paid</span>',
+        }
+        for code, element in elements.items():
+            marker = "{# tmpl-allow " + code + ": Issue #605 mentions <input> and bg-red-100 #}"
+            for placement in ("above", "before", "after"):
+                if placement == "above":
+                    content = marker + "\n" + element * 2 + "\n" + element + "\n"
+                    element_line = 2
+                else:
+                    marked = marker + element * 2 if placement == "before" else element * 2 + marker
+                    content = marked + "\n" + element + "\n"
+                    element_line = 1
+                with self.subTest(code=code, placement=placement):
+                    findings = self._scan(self._seed(content))
+                    matching = [v for v in findings if v.code == code]
+                    self.assertEqual(
+                        [(v.line, v.exempted) for v in matching],
+                        [(element_line, True), (element_line, False), (element_line + 1, False)],
+                    )
+                    self.assertEqual(
+                        [v.code for v in findings if v.code in {"TMPL010", "TMPL_ALLOW_STALE", "TMPL_ALLOW_NO_REASON"}],
+                        [],
+                    )
+
+    def test_audit_markers_support_both_placements_without_leaking(self) -> None:
+        cases = (
+            (self.a11y, "a11y-allow", "A11Y003", '<input name="name">'),
+            (self.dm, "dm-allow", "DM004", '<p style="color: black"></p>'),
+        )
+        for module, prefix, code, element in cases:
+            marker = "{# " + prefix + " " + code + ": Issue #605 mentions <input> and dark:bg-black #}"
+            for placement in ("above", "before", "after"):
+                if placement == "above":
+                    content = marker + "\n" + element * 2 + "\n" + element + "\n"
+                    element_line = 2
+                else:
+                    marked = marker + element * 2 if placement == "before" else element * 2 + marker
+                    content = marked + "\n" + element + "\n"
+                    element_line = 1
+                with self.subTest(prefix=prefix, placement=placement):
+                    findings = self._check(module, self._seed(content))
+                    self.assertEqual(
+                        [(v.code, v.line) for v in findings],
+                        [(code, element_line), (code, element_line + 1)],
+                    )
+
+    def test_same_line_malformed_markers_warn_without_exempting(self) -> None:
+        cases = (
+            (self.tmpl, "tmpl-allow", "TMPL002", "TMPL010", "<button>Open</button>"),
+            (self.a11y, "a11y-allow", "A11Y003", "A11Y011", '<input name="name">'),
+            (self.dm, "dm-allow", "DM004", "DM006", '<p style="color: black"></p>'),
+        )
+        for module, prefix, code, warning, element in cases:
+            markers = (
+                "{# " + prefix + " " + code + ": intentional #}",
+                "{# " + prefix + " " + code + ": #}",
+                "{# " + prefix + " " + code + ": first #} {# " + prefix + " " + code + ": second #}",
+                "{# " + prefix + " " + code + " missing colon #}",
+            )
+            content = "".join(element + marker + "\n" for marker in markers) + element + "\n"
+            with self.subTest(prefix=prefix):
+                path = self._seed(content)
+                if module is self.tmpl:
+                    template_findings = self._scan(path)
+                    self.assertEqual(
+                        [v.exempted for v in template_findings if v.code == code],
+                        [True, False, False, False, False],
+                    )
+                    self.assertEqual(self._lines(template_findings, "TMPL_ALLOW_NO_REASON"), [2, 3])
+                    self.assertEqual(self._lines(template_findings, "TMPL_ALLOW_STALE"), [])
+                    findings: list[_Finding] = list(template_findings)
+                else:
+                    findings = self._check(module, path)
+                    self.assertEqual(self._lines(findings, code), [2, 3, 4, 5])
+                self.assertEqual(
+                    [(v.line, v.severity) for v in findings if v.code == warning],
+                    [(2, "warning"), (3, "warning"), (4, "warning")],
+                )
+
+    def test_tmpl007_distinguishes_external_scripts_from_inline_execution(self) -> None:
+        path = self._seed(
+            """<script src="{% static 'js/component.js' %}"></script>\n"""
+            "<script\n"
+            '  src="/static/js/component.js"></script>\n'
+            "<script src=/static/js/component.js></script>\n"
+            '<script type="application/json">{"enabled": true}</script>\n'
+            "<script>window.inline = true;</script>\n"
+            '<script src="/static/js/component.js"></script><script>window.other = true;</script>\n'
+            '<script data-src="/static/js/component.js">window.stillInline = true;</script>\n'
+            '<script src="/static/js/component.js">window.body = true;</script>\n'
+            '<button onclick="window.inline = true;">Run</button>\n',
+            name="components/scripts.html",
+        )
+        self.assertEqual(self._lines(self._scan(path), "TMPL007"), [6, 7, 8, 9, 10])
+
     def test_default_fail_sets_do_not_include_marker_warnings_or_minor_tables(self) -> None:
         a11y = self._seed("{# a11y-allow BAD: reason #}\n<table></table>\n", name="a11y.html")
         dm = self._seed("{# dm-allow BAD: reason #}\n<p>Plain</p>\n", name="dm.html")

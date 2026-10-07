@@ -31,6 +31,7 @@ import sys
 from dataclasses import dataclass
 from functools import lru_cache
 from gettext import gettext
+from html.parser import HTMLParser
 from pathlib import Path
 
 # ===============================================================================
@@ -88,10 +89,9 @@ _RAW_BUTTON_RE = re.compile(r"<button\b", re.IGNORECASE)
 _RAW_SELECT_RE = re.compile(r"<select\b", re.IGNORECASE)
 _RAW_TEXTAREA_RE = re.compile(r"<textarea\b", re.IGNORECASE)
 
-# TMPL001-004 exemption marker: a single-line {# tmpl-allow CODE: reason #} directly above the
-# violating element. Per-line (not file-level like TMPL009's allowlist) because a single file can
-# have both legitimate blockers to fix and legitimate exceptions on different lines - a file-level
-# allowlist would exempt every future raw element in the file, not just the one it was written for.
+# TMPL001-005: one {# tmpl-allow CODE: reason #} marker may exempt one matching finding.
+# A standalone marker targets the immediately following line; an inline marker targets its own.
+# Exemptions remain local and explicit, and unused markers are reported as stale.
 #
 # Reasons may contain punctuation, including "#", but never the Django comment terminator.
 # A tempered match stops at the first "#}", so two markers cannot merge into one reason.
@@ -109,8 +109,9 @@ _COLOR_CONTEXT_EXCLUDE = re.compile(
 _STYLE_BLOCK_RE = re.compile(r"<style\b", re.IGNORECASE)
 _XCLOAK_ONLY_RE = re.compile(r"<style[^>]*>\s*\[x-cloak\][^<]{0,60}</style>", re.IGNORECASE | re.DOTALL)
 
-# TMPL007: Inline <script> block in component — Alpine x-data is allowed (on-element only)
-_SCRIPT_BLOCK_RE = re.compile(r"<script\b", re.IGNORECASE)
+# TMPL007: inline executable scripts and HTML event handlers in components.
+# External scripts and non-executable JSON data are allowed; Alpine directives remain allowed.
+_DJANGO_COMMENT_RE = re.compile(r"\{#.*?#\}", re.DOTALL)
 
 # TMPL008: Unicode emoji characters (ranges cover most common emoji blocks)
 # Dingbats block (U+2700-U+27BF) is intentionally excluded because it contains
@@ -182,60 +183,82 @@ def load_component_svg_allowlist() -> set[str]:
 # ===============================================================================
 
 
-def _find_tmpl_allow_markers(lines: list[str], path: Path) -> tuple[dict[int, tuple[str, str]], list[Violation]]:
-    """Scan every line for a `{# tmpl-allow CODE: reason #}` marker.
+class _ComponentScriptParser(HTMLParser):
+    """Locate inline execution without treating external script imports as inline code."""
 
-    Returns (markers, meta_violations). `markers` maps a CLEAN marker line's 1-indexed number to
-    (code, reason), for lookup by the line directly below it. A line counts as a clean marker
-    only if the marker is its entire stripped content - bot review on the first version of this
-    mechanism found that `.search()` treated any line CONTAINING a marker as marker-only, so
-    `<input> {# tmpl-allow TMPL002: reason #}` silently skipped scanning its own `<input>`, and
-    `<button>x</button> {# tmpl-allow TMPL002: for the next one #}` silently skipped its own real
-    `<button>` too. `scan_file` only skips feature-element scanning on a line present in
-    `markers` (i.e. a clean one) - a merely marker-ish line (marker text sharing the line with
-    anything else) is still scanned normally, so real content sharing that line is still reported.
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=False)
+        self.lines: set[int] = set()
+        self.script_line: int | None = None
 
-    A marker with an empty reason, or marker-shaped text sharing a line with anything else
-    (including a second marker), is never added to `markers` - it exempts nothing - and instead
-    produces a TMPL_ALLOW_NO_REASON blocker in `meta_violations`.
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        line_no = self.getpos()[0]
+        if any(value is not None and re.fullmatch(r"on[a-z]+", name) for name, value in attrs):
+            self.lines.add(line_no)
+        if tag != "script":
+            return
+        attributes = {name: value or "" for name, value in attrs}
+        script_type = attributes.get("type", "").strip().lower()
+        if script_type in {"application/json", "application/ld+json"}:
+            self.script_line = None
+            return
+        self.script_line = line_no
+        if not attributes.get("src", "").strip():
+            self.lines.add(line_no)
+
+    def handle_data(self, data: str) -> None:
+        if self.script_line is not None and data.strip():
+            self.lines.add(self.script_line)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "script":
+            self.script_line = None
+
+
+def _find_tmpl_allow_markers(lines: list[str], path: Path) -> tuple[dict[int, tuple[str, str, int]], list[Violation]]:
+    """Map each marker line to its code, reason and target line.
+
+    Exactly one complete marker with a non-empty reason is allowed per line.
+    Standalone markers target the next line; inline markers target their own line.
     """
-    markers: dict[int, tuple[str, str]] = {}
+    markers: dict[int, tuple[str, str, int]] = {}
     meta_violations: list[Violation] = []
     for line_no, raw_line in enumerate(lines, start=1):
-        if not re.search(r"\{#\s*tmpl-allow\b", raw_line):
+        starts = list(re.finditer(r"\{#\s*tmpl-allow\b", raw_line))
+        if not starts:
             continue
-
-        clean_match = _TMPL_ALLOW_RE.fullmatch(raw_line.strip())
-        if clean_match is None or not clean_match.group(2).strip():
+        matches = list(_TMPL_ALLOW_RE.finditer(raw_line))
+        match = matches[0] if len(starts) == len(matches) == 1 else None
+        if match is None or not match.group(2).strip():
             meta_violations.append(
                 Violation(
                     "TMPL010",
                     SEVERITY_WARNING,
                     path,
                     line_no,
-                    gettext("Malformed tmpl-allow marker — use {# tmpl-allow CODE: reason #} on its own line"),
+                    gettext(
+                        "Malformed tmpl-allow marker — use one {# tmpl-allow CODE: reason #} "
+                        "above or on the same line as the element"
+                    ),
                     snippet=raw_line.strip()[:120],
                 )
             )
-        # Retain the existing blocker diagnostics for previously recognised malformed markers.
-        if not _TMPL_ALLOW_RE.search(raw_line):
+        # Retain blocker diagnostics for recognised markers with missing reasons or duplicates.
+        if not matches:
             continue
-
-        if clean_match is None:
+        if match is None:
             meta_violations.append(
                 Violation(
                     "TMPL_ALLOW_NO_REASON",
                     SEVERITY_BLOCKER,
                     path,
                     line_no,
-                    "tmpl-allow marker must be the only content on its line (found other text, "
-                    "or more than one marker, sharing the line) - split them across separate lines",
+                    gettext("Use only one tmpl-allow marker per line — split markers across separate lines"),
                     snippet=raw_line.strip()[:120],
                 )
             )
             continue
-
-        code, reason = clean_match.group(1), clean_match.group(2).strip()
+        code, reason = match.group(1), match.group(2).strip()
         if not reason:
             meta_violations.append(
                 Violation(
@@ -243,23 +266,26 @@ def _find_tmpl_allow_markers(lines: list[str], path: Path) -> tuple[dict[int, tu
                     SEVERITY_BLOCKER,
                     path,
                     line_no,
-                    f"tmpl-allow marker for {code} has no reason — every exemption must say why",
+                    gettext("tmpl-allow marker for %(code)s has no reason — every exemption must say why")
+                    % {"code": code},
                     snippet=raw_line.strip()[:120],
                 )
             )
             continue
-        markers[line_no] = (code, reason)
+        target_line = line_no + int(raw_line.strip() == match.group())
+        markers[line_no] = (code, reason, target_line)
     return markers, meta_violations
 
 
 def _exemption_for(
-    markers: dict[int, tuple[str, str]], consumed: set[int], line_no: int, code: str
+    markers: dict[int, tuple[str, str, int]], consumed: set[int], line_no: int, code: str
 ) -> tuple[bool, str]:
-    """Check whether the line directly above `line_no` carries a marker for `code`."""
-    marker = markers.get(line_no - 1)
-    if marker is not None and marker[0] == code:
-        consumed.add(line_no - 1)
-        return True, marker[1]
+    """Consume at most one matching allowance targeting this line."""
+    for marker_line in (line_no, line_no - 1):
+        marker = markers.get(marker_line)
+        if marker is not None and marker_line not in consumed and marker[0] == code and marker[2] == line_no:
+            consumed.add(marker_line)
+            return True, marker[1]
     return False, ""
 
 
@@ -283,19 +309,20 @@ def scan_file(path: Path) -> list[Violation]:
         tmpl_allow_markers = {}
         tmpl_allow_meta_violations = [v for v in tmpl_allow_meta_violations if v.code == "TMPL010"]
     consumed_marker_lines: set[int] = set()
+    component_script_lines: set[int] = set()
+    if is_component:
+        script_parser = _ComponentScriptParser()
+        script_parser.feed(_DJANGO_COMMENT_RE.sub(lambda match: "\n" * match.group().count("\n"), "\n".join(lines)))
+        script_parser.close()
+        component_script_lines = script_parser.lines
 
     for line_no, raw_line in enumerate(lines, start=1):
+        # Marker reasons are prose; retain real elements sharing their line.
+        raw_line = _DJANGO_COMMENT_RE.sub("", raw_line)
         line = raw_line.strip()
-        # Skip feature-element scanning ONLY on a CLEAN marker line (the marker is its entire
-        # content) - a marker's own reason text is free-form prose, not template code, and could
-        # otherwise self-match ("needed for <button>" was one review finding). A merely
-        # marker-ish line - marker text sharing the line with something else - must still be
-        # scanned normally, or the real content sharing that line goes unreported (the other
-        # review finding: `<input> {# tmpl-allow TMPL002: reason #}` silently hid its own <input>).
-        is_clean_tmpl_allow_marker_line = line_no in tmpl_allow_markers
 
         # ── Feature template checks (TMPL001-005, TMPL008) ─────────────────────
-        if is_feature and not is_clean_tmpl_allow_marker_line:
+        if is_feature and line:
             # Bot review: one marker exempts at most the FIRST matching element on the line below
             # it - two raw <button>s sharing a line used to collapse into a single Violation
             # (search() only ever fires once per line regardless of match count), so exempting
@@ -384,6 +411,7 @@ def scan_file(path: Path) -> list[Violation]:
                 match_start = color_match.start()
                 pre_context = raw_line[max(0, match_start - 30) : match_start]
                 if not _COLOR_CONTEXT_EXCLUDE.search(pre_context):
+                    exempted, reason = _exemption_for(tmpl_allow_markers, consumed_marker_lines, line_no, "TMPL005")
                     violations.append(
                         Violation(
                             "TMPL005",
@@ -393,6 +421,8 @@ def scan_file(path: Path) -> list[Violation]:
                             f"Raw semantic color class '{color_match.group()}' — use "
                             "{% badge variant=... %} or {% alert variant=... %} instead",
                             snippet=line[:120],
+                            exempted=exempted,
+                            reason=reason,
                         )
                     )
 
@@ -429,25 +459,20 @@ def scan_file(path: Path) -> list[Violation]:
                         )
                     )
 
-            if _SCRIPT_BLOCK_RE.search(raw_line):
-                # Exception: <script type="application/json"> is non-executable data,
-                # used for JSON-LD, HTMX config, etc. — safe inside components.
-                if not re.search(
-                    r'<script\b[^>]*type=["\']application/(?:json|ld\+json)["\']',
-                    raw_line,
-                    re.IGNORECASE,
-                ):
-                    violations.append(
-                        Violation(
-                            "TMPL007",
-                            SEVERITY_WARNING,
-                            path,
-                            line_no,
-                            "Inline <script> block in component — move to services/portal/static/js/ "
-                            "(Alpine x-data on-element is allowed)",
-                            snippet=line[:120],
-                        )
+            if line_no in component_script_lines:
+                violations.append(
+                    Violation(
+                        "TMPL007",
+                        SEVERITY_WARNING,
+                        path,
+                        line_no,
+                        gettext(
+                            "Inline script or event handler in component — move JavaScript to static/ "
+                            "(Alpine x-data on-element is allowed)"
+                        ),
+                        snippet=line[:120],
                     )
+                )
 
             if _RAW_SVG_RE.search(raw_line) and not svg_allowed_in_component:
                 violations.append(
@@ -462,7 +487,7 @@ def scan_file(path: Path) -> list[Violation]:
                     )
                 )
 
-    for marker_line_no, (code, _reason) in tmpl_allow_markers.items():
+    for marker_line_no, (code, _reason, _target_line) in tmpl_allow_markers.items():
         if marker_line_no not in consumed_marker_lines:
             violations.append(
                 Violation(
@@ -470,8 +495,11 @@ def scan_file(path: Path) -> list[Violation]:
                     SEVERITY_BLOCKER,
                     path,
                     marker_line_no,
-                    f"tmpl-allow marker for {code} has no matching violation on the next line — "
-                    "remove the marker or restore the element it was written for",
+                    gettext(
+                        "tmpl-allow marker for %(code)s has no matching violation on its target line — "
+                        "remove the marker or restore the element it was written for"
+                    )
+                    % {"code": code},
                     snippet=lines[marker_line_no - 1].strip()[:120],
                 )
             )

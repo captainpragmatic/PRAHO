@@ -97,6 +97,8 @@ class HTMXAttributes:
     hx_include: str | None = None
     hx_sync: str | None = None
     hx_boost: bool = False
+    hx_vals: str | None = None
+    hx_headers: str | None = None
 
 
 @dataclass
@@ -291,6 +293,8 @@ def button(
         "hx_select": htmx.hx_select,
         "hx_include": htmx.hx_include,
         "hx_boost": htmx.hx_boost,
+        "hx_vals": htmx.hx_vals,
+        "hx_headers": htmx.hx_headers,
         "icon": config.icon,
         "icon_right": config.icon_right,
         "disabled": config.disabled,
@@ -352,6 +356,8 @@ def input_field(
         "hx_include": htmx.hx_include,
         "hx_sync": htmx.hx_sync,
         "hx_indicator": htmx.hx_indicator,
+        "hx_vals": htmx.hx_vals,
+        "hx_headers": htmx.hx_headers,
         "options": config.options,
         "romanian_validation": config.romanian_validation,
         "has_error": bool(config.error),
@@ -1726,9 +1732,22 @@ _TAG_ARGUMENTS: dict[str, frozenset[str]] = {
         "hx_select",
         "hx_include",
         "hx_boost",
+        "hx_vals",
+        "hx_headers",
     ),
     "input_field": _fields(InputConfig)
-    | _htmx("hx_get", "hx_post", "hx_trigger", "hx_target", "hx_swap", "hx_include", "hx_sync", "hx_indicator"),
+    | _htmx(
+        "hx_get",
+        "hx_post",
+        "hx_trigger",
+        "hx_target",
+        "hx_swap",
+        "hx_include",
+        "hx_sync",
+        "hx_indicator",
+        "hx_vals",
+        "hx_headers",
+    ),
     "checkbox_field": _fields(CheckboxConfig) | _htmx("hx_get", "hx_post", "hx_trigger", "hx_target", "hx_swap"),
     "alert": _fields(AlertConfig),
     "modal": _fields(ModalConfig),
