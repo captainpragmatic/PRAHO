@@ -67,6 +67,8 @@ services:
       - DB_NAME=${DB_NAME:-praho}
       - DB_USER=${DB_USER:-praho}
       - DB_PASSWORD=${DB_PASSWORD:?DB_PASSWORD required}
+      # Production defaults to sslmode=require; set DB_SSLMODE=disable with the bundled database (with-db/full profiles).
+      - DB_SSLMODE=${DB_SSLMODE:-require}
       - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY required}
       - DJANGO_SETTINGS_MODULE=${DJANGO_SETTINGS_MODULE:-config.settings.prod}
       - STATIC_ROOT=/app/staticfiles
@@ -75,6 +77,10 @@ services:
       - PORTAL_HMAC_MODE=${PORTAL_HMAC_MODE:-legacy}
       - PORTAL_HMAC_CREDENTIALS=${PORTAL_HMAC_CREDENTIALS:-}
       - PLATFORM_TO_PORTAL_WEBHOOK_SECRET=${PLATFORM_TO_PORTAL_WEBHOOK_SECRET:?PLATFORM_TO_PORTAL_WEBHOOK_SECRET required}
+      # Production refuses to start without these two (config/settings/prod.py); the portal never gets them.
+      - DJANGO_ENCRYPTION_KEY=${DJANGO_ENCRYPTION_KEY:?DJANGO_ENCRYPTION_KEY required}
+      - DJANGO_ENCRYPTION_KEY_PREVIOUS=${DJANGO_ENCRYPTION_KEY_PREVIOUS:-}
+      - CREDENTIAL_VAULT_MASTER_KEY=${CREDENTIAL_VAULT_MASTER_KEY:?CREDENTIAL_VAULT_MASTER_KEY required}
       - PLATFORM_DOMAIN=${PLATFORM_DOMAIN:-${DOMAIN:-platform.localhost}}
       - PORTAL_DOMAIN=${PORTAL_DOMAIN:-${DOMAIN:-localhost}}
       - ALLOWED_HOSTS=${PLATFORM_DOMAIN:-${DOMAIN:-platform.localhost}},localhost,platform
@@ -91,7 +97,9 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      # A first boot runs every migration before Gunicorn listens (124 s measured on a fast machine);
+      # failures during the start period don't count, and a passing check ends it early.
+      start_period: 600s
     deploy:
       resources:
         limits:
