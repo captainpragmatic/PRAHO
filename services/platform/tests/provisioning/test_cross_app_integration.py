@@ -15,30 +15,23 @@ Tests the integration between:
 🔒 Security: Tests audit logging and GDPR compliance
 """
 
-import unittest
 from decimal import Decimal
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-from django.conf import settings
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
-from apps.customers.models import Customer
-from apps.billing.models import Invoice, Payment, Currency
+from apps.billing.models import Currency, Invoice
 from apps.common.types import Ok
-from apps.domains.models import Domain, TLD, Registrar
+from apps.customers.models import Customer
+from apps.domains.models import TLD, Domain, Registrar
 from apps.domains.signals import sync_domain_to_virtualmin
 from apps.orders.models import Order, OrderItem
+from apps.products.models import Product
 from apps.provisioning.models import Service, ServicePlan
-from apps.provisioning.virtualmin_signals import (
-    audit_virtualmin_account_changes,
-    audit_virtualmin_account_deletion,
-    audit_virtualmin_provisioning_jobs,
-    log_virtualmin_security_event,
-    notify_provisioning_completion,
-)
-from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminServer, VirtualminProvisioningJob
-from apps.users.models import User, CustomerMembership
+from apps.provisioning.relationship_models import ServiceDomain
+from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
+from apps.users.models import CustomerMembership, User
 from tests.helpers.fsm_helpers import force_status
 
 
@@ -67,8 +60,6 @@ class BillingProvisioningIntegrationTest(TestCase):
         )
 
         # Create product
-        from apps.products.models import Product
-
         self.product = Product.objects.create(
             slug="shared-hosting", name="Shared Hosting", product_type="shared_hosting"
         )
@@ -238,8 +229,6 @@ class DomainsProvisioningIntegrationTest(TestCase):
         )
 
         # Create ServiceDomain relationship so domain sync can find the service
-        from apps.provisioning.relationship_models import ServiceDomain
-
         ServiceDomain.objects.create(service=self.service, domain=self.domain, domain_type="primary")
 
     @patch("apps.provisioning.virtualmin_service.VirtualminProvisioningService.suspend_account")
@@ -333,7 +322,7 @@ class ProvisioningAuditIntegrationTest(TestCase):
     def test_virtualmin_account_creation_audit(self, mock_audit):
         """Test that Virtualmin account creation is audited"""
         # Create Virtualmin account
-        account = VirtualminAccount.objects.create(
+        VirtualminAccount.objects.create(
             domain="example.com",
             service=self.service,
             server=self.server,
@@ -439,7 +428,7 @@ class ProvisioningAuditIntegrationTest(TestCase):
         mock_audit.reset_mock()
 
         # Create provisioning job
-        job = VirtualminProvisioningJob.objects.create(
+        VirtualminProvisioningJob.objects.create(
             operation="create_domain", server=self.server, account=account, correlation_id="test-123", status="pending"
         )
 
@@ -450,32 +439,6 @@ class ProvisioningAuditIntegrationTest(TestCase):
         self.assertEqual(call_args.event_type, "virtualmin_provisioning_job_created")
         self.assertEqual(call_args.new_values["operation"], "create_domain")
         self.assertTrue(context_args.metadata["provisioning_job"])
-
-    @patch("apps.audit.services.AuditService.log_event")
-    def test_provisioning_completion_notification(self, mock_audit):
-        """Test provisioning completion notification helper"""
-        # Create account
-        account = VirtualminAccount.objects.create(
-            domain="example.com",
-            service=self.service,
-            server=self.server,
-            virtualmin_username="testuser",
-            status="active",
-        )
-
-        # Clear mock calls from creation
-        mock_audit.reset_mock()
-
-        # Notify completion
-        notify_provisioning_completion(account, success=True, details={"server": "vm1.example.com"})
-
-        # Verify audit logging was called
-        mock_audit.assert_called_once()
-        call_args = mock_audit.call_args[0][0]  # Get AuditEventData
-        context_args = mock_audit.call_args[1]["context"]  # Get AuditContext
-        self.assertEqual(call_args.event_type, "virtualmin_provisioning_completed")
-        self.assertTrue(call_args.new_values["success"])
-        self.assertTrue(context_args.metadata["provisioning_completion"])
 
 
 class CustomerProvisioningIntegrationTest(TestCase):
@@ -611,9 +574,6 @@ class CrossAppIntegrationPerformanceTest(TestCase):
         )
 
         # Create hosting service and service plan for the domain
-        from apps.provisioning.models import ServicePlan, Service
-        from apps.provisioning.relationship_models import ServiceDomain
-
         service_plan = ServicePlan.objects.create(
             name="Test Hosting Plan", plan_type="shared_hosting", price_monthly=Decimal("29.99")
         )

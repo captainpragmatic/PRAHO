@@ -9,15 +9,18 @@ Tests for Provisioning Signals focusing on signal handlers and audit logging.
 🔒 Security: Tests signal-triggered security events and compliance
 """
 
-import unittest
+import time
 from decimal import Decimal
-from unittest.mock import Mock, patch
+from unittest.mock import patch
+
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 
 from apps.billing.models import Currency
-from apps.customers.models import Customer, CustomerTaxProfile, CustomerBillingProfile, CustomerAddress
-from apps.provisioning.models import ServicePlan, Server, Service
+from apps.customers.models import Customer, CustomerAddress, CustomerBillingProfile, CustomerTaxProfile
+from apps.provisioning.models import Server, Service, ServicePlan
+from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
 
 # Handle missing ProvisioningTask
 try:
@@ -28,11 +31,11 @@ except ImportError:
 # Handle missing signals - they may not be implemented yet
 try:
     from apps.provisioning.signals import (
-        handle_service_plan_created_or_updated,
-        store_original_service_plan_values,
         handle_server_created_or_updated,
-        store_original_server_values,
         handle_service_created_or_updated,
+        handle_service_plan_created_or_updated,
+        store_original_server_values,
+        store_original_service_plan_values,
         store_original_service_values,
     )
 except ImportError:
@@ -126,7 +129,7 @@ class ServicePlanSignalTestCase(TestCase):
             "is_public": True,
         }
 
-        plan = ServicePlan.objects.create(**plan_data)
+        ServicePlan.objects.create(**plan_data)
 
         # Verify logging was called
         mock_logger.info.assert_called()
@@ -141,7 +144,7 @@ class ServicePlanSignalTestCase(TestCase):
     def test_high_value_plan_security_trigger(self, mock_logger):
         """Test high-value plan security logging trigger"""
         # Create high-value plan (≥500 RON)
-        high_value_plan = ServicePlan.objects.create(
+        ServicePlan.objects.create(
             name="Enterprise Plan", plan_type="dedicated", price_monthly=Decimal("600.00"), is_active=True
         )
 
@@ -155,7 +158,7 @@ class ServicePlanSignalTestCase(TestCase):
             patch("apps.provisioning.signals.logger") as mock_logger,
         ):
             # Should not raise exception even if handler fails
-            plan = ServicePlan.objects.create(
+            ServicePlan.objects.create(
                 name="Exception Test Plan",
                 plan_type="shared_hosting",
                 price_monthly=Decimal("25.00"),
@@ -195,7 +198,7 @@ class ServerSignalTestCase(TestCase):
             "is_active": True,
         }
 
-        server = Server.objects.create(**server_data)
+        Server.objects.create(**server_data)
 
         # Verify logging was called
         mock_logger.info.assert_called()
@@ -243,7 +246,7 @@ class ServerSignalTestCase(TestCase):
     def test_server_overload_alert_trigger(self, mock_logger):
         """Test server overload alert trigger"""
         # Create server with high resource usage
-        server = Server.objects.create(
+        Server.objects.create(
             name="Overload Test Server",
             hostname="overload.example.com",
             server_type="shared",
@@ -273,7 +276,7 @@ class ServerSignalTestCase(TestCase):
             patch("apps.provisioning.signals.logger") as mock_logger,
         ):
             # Should not raise exception even if handler fails
-            server = Server.objects.create(
+            Server.objects.create(
                 name="Exception Test Server",
                 hostname="exception.example.com",
                 server_type="shared",
@@ -332,8 +335,6 @@ class ServiceSignalTestCase(TestCase):
     @patch("apps.provisioning.signals.logger")
     def test_service_creation_signal(self, mock_logger):
         """Test service creation triggers signal"""
-        from django.conf import settings
-
         service_data = {
             "customer": self.customer,
             "service_plan": self.plan,
@@ -347,7 +348,7 @@ class ServiceSignalTestCase(TestCase):
             "status": "pending",
         }
 
-        service = Service.objects.create(**service_data)
+        Service.objects.create(**service_data)
 
         # Debug: Check if signals are disabled
         signals_disabled = getattr(settings, "DISABLE_AUDIT_SIGNALS", False)
@@ -369,7 +370,7 @@ class ServiceSignalTestCase(TestCase):
             is_active=True,
         )
 
-        service = Service.objects.create(
+        Service.objects.create(
             customer=self.customer,
             service_plan=auto_plan,
             currency=self.currency,
@@ -392,7 +393,7 @@ class ServiceSignalTestCase(TestCase):
             patch("apps.provisioning.signals.logger") as mock_logger,
         ):
             # Should not raise exception even if handler fails
-            service = Service.objects.create(
+            Service.objects.create(
                 customer=self.customer,
                 service_plan=self.plan,
                 currency=self.currency,
@@ -455,7 +456,7 @@ class SignalIntegrationTestCase(TestCase):
 
         # Create service (should trigger multiple signals)
         with patch("apps.provisioning.signals.logger") as mock_logger:
-            service = Service.objects.create(
+            Service.objects.create(
                 customer=self.customer,
                 service_plan=plan,
                 currency=self.currency,
@@ -475,7 +476,7 @@ class SignalIntegrationTestCase(TestCase):
     @patch("apps.provisioning.signals.logger")
     def test_signal_audit_integration(self, mock_logger):
         """Test signal integration with audit system"""
-        plan = ServicePlan.objects.create(
+        ServicePlan.objects.create(
             name="Audit Test Plan", plan_type="vps", price_monthly=Decimal("80.00"), is_active=True
         )
 
@@ -484,8 +485,6 @@ class SignalIntegrationTestCase(TestCase):
 
     def test_signal_performance_with_multiple_objects(self):
         """Test signal performance with multiple object creation"""
-        import time
-
         start_time = time.time()
 
         # Create multiple plans to test signal performance
@@ -590,18 +589,14 @@ class VirtualminAccountSignalsTest(TestCase):
         )
 
         # Create Virtualmin server
-        from apps.provisioning.virtualmin_models import VirtualminServer
-
         self.server = VirtualminServer.objects.create(hostname="vm1.example.com", capacity=1000, status="healthy")
 
     @override_settings(DISABLE_AUDIT_SIGNALS=False)
     @patch("apps.provisioning.signals.AuditService.log_event")
     def test_virtualmin_account_creation_signal(self, mock_audit):
         """Test that Virtualmin account creation triggers audit signal"""
-        from apps.provisioning.virtualmin_models import VirtualminAccount
-
         # Create Virtualmin account
-        account = VirtualminAccount.objects.create(
+        VirtualminAccount.objects.create(
             domain="example.com",
             service=self.service,
             server=self.server,
@@ -638,8 +633,6 @@ class VirtualminAccountSignalsTest(TestCase):
     @patch("apps.provisioning.signals.AuditService.log_event")
     def test_virtualmin_account_status_change_signal(self, mock_audit):
         """Test that account status changes trigger audit signals"""
-        from apps.provisioning.virtualmin_models import VirtualminAccount
-
         # Create account
         account = VirtualminAccount.objects.create(
             domain="example.com",
@@ -673,8 +666,6 @@ class VirtualminAccountSignalsTest(TestCase):
     @patch("apps.provisioning.signals.AuditService.log_event")
     def test_virtualmin_account_deletion_signal(self, mock_audit):
         """Test that account deletion triggers audit signals"""
-        from apps.provisioning.virtualmin_models import VirtualminAccount
-
         # Create account
         account = VirtualminAccount.objects.create(
             domain="example.com",
@@ -710,8 +701,6 @@ class VirtualminAccountSignalsTest(TestCase):
     @patch("apps.provisioning.signals.AuditService.log_event")
     def test_virtualmin_signals_can_be_disabled(self, mock_audit):
         """Test that Virtualmin signals can be disabled for testing"""
-        from apps.provisioning.virtualmin_models import VirtualminAccount
-
         # Create account with signals disabled
         VirtualminAccount.objects.create(
             domain="example.com",
@@ -754,8 +743,6 @@ class VirtualminProvisioningJobSignalsTest(TestCase):
         )
 
         # Create Virtualmin server and account
-        from apps.provisioning.virtualmin_models import VirtualminServer, VirtualminAccount
-
         self.server = VirtualminServer.objects.create(hostname="vm1.example.com", capacity=1000, status="healthy")
 
         self.account = VirtualminAccount.objects.create(
@@ -770,10 +757,8 @@ class VirtualminProvisioningJobSignalsTest(TestCase):
     @patch("apps.provisioning.signals.AuditService.log_event")
     def test_provisioning_job_creation_signal(self, mock_audit):
         """Test that provisioning job creation triggers audit signals"""
-        from apps.provisioning.virtualmin_models import VirtualminProvisioningJob
-
         # Create provisioning job
-        job = VirtualminProvisioningJob.objects.create(
+        VirtualminProvisioningJob.objects.create(
             operation="create_domain",
             server=self.server,
             account=self.account,
@@ -803,8 +788,6 @@ class VirtualminProvisioningJobSignalsTest(TestCase):
     @patch("apps.provisioning.signals.AuditService.log_event")
     def test_provisioning_job_failure_monitoring_alert(self, mock_audit):
         """Test that job failures trigger monitoring alerts"""
-        from apps.provisioning.virtualmin_models import VirtualminProvisioningJob
-
         # Create job
         job = VirtualminProvisioningJob.objects.create(
             operation="create_domain",
@@ -830,135 +813,3 @@ class VirtualminProvisioningJobSignalsTest(TestCase):
         context_args = mock_audit.call_args[1]["context"]  # AuditContext
         self.assertEqual(call_args.event_type, "virtualmin_provisioning_job_failed")
         self.assertTrue(context_args.metadata["requires_monitoring_alert"])
-
-
-class SecurityEventSignalsTest(TestCase):
-    """Test security event logging signals"""
-
-    @patch("apps.provisioning.signals.log_security_event")
-    def test_virtualmin_security_event_logging(self, mock_log_security):
-        """Test security event logging helper function"""
-        from apps.provisioning.signals import log_virtualmin_security_event
-
-        # Log a security event
-        log_virtualmin_security_event(
-            "virtualmin_auth_failure",
-            {"server": "vm1.example.com", "username": "testuser", "attempt_count": 3},
-            "192.168.1.100",
-        )
-
-        # Verify security logging was called
-        mock_log_security.assert_called_once()
-
-        # Verify call arguments
-        call_args = mock_log_security.call_args[0]
-        self.assertEqual(call_args[0], "virtualmin_auth_failure")
-
-        details = call_args[1]
-        self.assertEqual(details["server"], "vm1.example.com")
-        self.assertEqual(details["source_app"], "provisioning")
-        self.assertTrue(details["virtualmin_integration"])
-
-        self.assertEqual(call_args[2], "192.168.1.100")  # IP address
-
-    @patch("apps.provisioning.signals.log_security_event")
-    @patch("apps.provisioning.signals.logger")
-    def test_security_event_error_handling(self, mock_logger, mock_log_security):
-        """Test that security event logging errors are handled gracefully"""
-        from apps.provisioning.signals import log_virtualmin_security_event
-
-        # Make security logging raise an exception
-        mock_log_security.side_effect = Exception("Security logging failed")
-
-        # Should not raise exception
-        log_virtualmin_security_event("virtualmin_auth_failure", {"server": "vm1.example.com"}, "192.168.1.100")
-
-        # Verify error was logged (the isolation boundary logs the failure with its traceback)
-        mock_logger.exception.assert_called_once()
-
-
-class ProvisioningCompletionSignalsTest(TestCase):
-    """Test provisioning completion notification signals"""
-
-    def setUp(self):
-        """Set up test data"""
-        # Create customer and service
-        self.customer = Customer.objects.create(
-            name="Test Customer Ltd",
-            company_name="Test Customer Ltd",
-            customer_type="company",
-        )
-
-        self.service_plan = ServicePlan.objects.create(
-            name="Test Plan", plan_type="shared_hosting", price_monthly=Decimal("29.99")
-        )
-
-        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
-
-        self.service = Service.objects.create(
-            customer=self.customer,
-            service_plan=self.service_plan,
-            currency=self.currency,
-            service_name="Test Hosting",
-            domain="example.com",
-            username="testuser",
-            price=Decimal("29.99"),
-        )
-
-        # Create Virtualmin server and account
-        from apps.provisioning.virtualmin_models import VirtualminServer, VirtualminAccount
-
-        self.server = VirtualminServer.objects.create(hostname="vm1.example.com", capacity=1000, status="healthy")
-
-        self.account = VirtualminAccount.objects.create(
-            domain="example.com",
-            service=self.service,
-            server=self.server,
-            virtualmin_username="testuser",
-            status="active",
-        )
-
-    @patch("apps.provisioning.signals.AuditService.log_event")
-    def test_provisioning_completion_notification(self, mock_audit):
-        """Test provisioning completion notification helper"""
-        from apps.provisioning.signals import notify_provisioning_completion
-
-        # Clear account creation signals
-        mock_audit.reset_mock()
-
-        # Notify successful completion
-        notify_provisioning_completion(
-            self.account,
-            success=True,
-            details={"server": "vm1.example.com", "duration_seconds": 45, "features_enabled": ["web", "dns", "mail"]},
-        )
-
-        # Verify audit logging was called
-        mock_audit.assert_called_once()
-
-        # Verify audit data
-        call_args = mock_audit.call_args[0][0]  # AuditEventData
-        context_args = mock_audit.call_args[1]["context"]  # AuditContext
-        self.assertEqual(call_args.event_type, "virtualmin_provisioning_completed")
-        self.assertTrue(call_args.new_values["success"])
-        self.assertEqual(call_args.new_values["domain"], "example.com")
-
-        # Verify metadata (in context)
-        metadata = context_args.metadata
-        self.assertTrue(metadata["provisioning_completion"])
-        self.assertTrue(metadata["cross_app_notification"])
-
-    @patch("apps.provisioning.signals.AuditService.log_event")
-    @patch("apps.provisioning.signals.logger")
-    def test_provisioning_completion_error_handling(self, mock_logger, mock_audit):
-        """Test that provisioning completion notification errors are handled"""
-        from apps.provisioning.signals import notify_provisioning_completion
-
-        # Make audit service raise an exception
-        mock_audit.side_effect = Exception("Audit service error")
-
-        # Should not raise exception
-        notify_provisioning_completion(self.account, success=True, details={"server": "vm1.example.com"})
-
-        # Verify error was logged
-        mock_logger.error.assert_called_once()

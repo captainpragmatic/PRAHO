@@ -583,7 +583,7 @@ def virtualmin_account_backup(request: HttpRequest, account_id: str) -> HttpResp
             if backup_result.is_ok():
                 job = backup_result.unwrap()
                 messages.success(request, f"Backup job created successfully! Job ID: {job.id}")
-                return redirect("provisioning:virtualmin_backup_status", job_id=job.id)
+                return redirect("provisioning:virtualmin_job_status", job_id=job.id)
             else:
                 messages.error(request, f"Failed to create backup: {backup_result.unwrap_err()}")
     else:
@@ -650,7 +650,7 @@ def virtualmin_account_restore(request: HttpRequest, account_id: str) -> HttpRes
             if restore_result.is_ok():
                 job = restore_result.unwrap()
                 messages.success(request, f"Restore job created successfully! Job ID: {job.id}")
-                return redirect("provisioning:virtualmin_backup_status", job_id=job.id)
+                return redirect("provisioning:virtualmin_job_status", job_id=job.id)
             else:
                 messages.error(request, f"Failed to create restore: {restore_result.unwrap_err()}")
     else:
@@ -676,49 +676,6 @@ def virtualmin_account_restore(request: HttpRequest, account_id: str) -> HttpRes
     }
 
     return render(request, "provisioning/virtualmin/restore_form.html", context)
-
-
-@login_required
-@user_passes_test(is_staff_or_superuser)
-@monitor_performance(max_duration_seconds=3.0, alert_threshold=1.0)
-def virtualmin_backup_status(request: HttpRequest, job_id: str) -> HttpResponse:
-    """📊 Monitor backup/restore job status."""
-
-    job = get_object_or_404(VirtualminProvisioningJob, id=job_id)
-
-    # Get real-time status from backup service
-    backup_service = VirtualminBackupService(job.server)
-
-    if job.operation == "backup_domain":
-        live_status = backup_service.get_backup_status(str(job.id))
-    elif job.operation == "restore_domain":
-        live_status = backup_service.get_restore_status(str(job.id))
-    else:
-        live_status = {"status": "unknown", "progress": 0}
-
-    # If it's an HTMX request, return partial template
-    if request.headers.get("HX-Request"):
-        return render(
-            request,
-            "provisioning/virtualmin/partials/job_status.html",
-            {
-                "job": job,
-                "live_status": live_status,
-                "is_complete": job.status in ["completed", "failed", "attention"],
-                "refresh_url": reverse("provisioning:virtualmin_backup_status", args=[job.id]),
-            },
-        )
-
-    context = {
-        "page_title": f"Job Status: {job.operation}",
-        "job": job,
-        "live_status": live_status,
-        "refresh_url": reverse("provisioning:virtualmin_backup_status", args=[job.id]),
-        "account_url": reverse("provisioning:virtualmin_account_detail", args=[job.account.id]) if job.account else "",
-        "is_complete": job.status in ["completed", "failed", "attention"],
-    }
-
-    return render(request, "provisioning/virtualmin/backup_status.html", context)
 
 
 # ===============================================================================
@@ -968,9 +925,12 @@ def virtualmin_server_test_connection(request: HttpRequest) -> HttpResponse:
             '<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" /></svg>'
             "</div>"
             '<div class="ml-3">'
-            '<h3 class="text-sm font-medium text-red-400">Test Failed</h3>'
-            f'<p class="text-sm text-red-300 mt-1">An error occurred during connection test: {e!s}</p>'
-            "</div>"
+            + format_html('<h3 class="text-sm font-medium text-red-400">{}</h3>', _("Test Failed"))
+            + format_html(
+                '<p class="text-sm text-red-300 mt-1">{}</p>',
+                _("An error occurred during connection test: %(error)s") % {"error": str(e)},
+            )
+            + "</div>"
             "</div>"
             "</div>",
             content_type="text/html",
@@ -1035,7 +995,15 @@ def virtualmin_backups_list(request: HttpRequest) -> HttpResponse:
     # Apply filters
     domain_filter = request.GET.get("domain")
     backup_type_filter = request.GET.get("type")
-    max_age_days = int(request.GET.get("max_age", 30))
+    try:
+        max_age_days = int(request.GET.get("max_age", "30"))
+        if max_age_days <= 0:
+            raise ValueError("Nonpositive backup age")
+    except ValueError:
+        return HttpResponse(
+            format_html("<p>{}</p>", _("Maximum backup age must be a positive integer.")),
+            status=400,
+        )
 
     # Get account if domain filter specified
     account = None
@@ -1495,8 +1463,8 @@ def _validate_domain_configuration(account: VirtualminAccount) -> tuple[bool, st
 
 def _validate_disk_usage_data(account: VirtualminAccount) -> tuple[bool, str]:
     """Validate disk usage data for health check."""
-    if hasattr(account, "disk_usage_mb") and account.disk_usage_mb < 0:
-        return False, "Invalid disk usage data"
+    if account.current_disk_usage_mb < 0:
+        return False, str(_("Invalid disk usage data"))
     return True, ""
 
 
@@ -1831,10 +1799,13 @@ def virtualmin_accounts_sync(  # noqa: C901, PLR0912, PLR0915  # Complexity: mul
                             sync_results["errors"].append(error_msg)
                             continue
 
-                        # Get or create Service record
+                        from apps.billing.currency_policy import get_selling_currency_policy  # noqa: PLC0415
+
+                        # Match the selling currency used by the service creation view.
                         service, created = Service.objects.get_or_create(
                             username=username,
                             defaults={
+                                "currency_id": get_selling_currency_policy().currency_code,
                                 "customer": default_customer,
                                 "service_plan": default_service_plan,
                                 "service_name": f"Virtualmin Account - {username}",
@@ -2162,12 +2133,11 @@ def virtualmin_job_status(request: HttpRequest, job_id: str) -> HttpResponse:
         {"text": f"Job {job.correlation_id[:8]}", "url": ""},
     ]
 
-    max_retry_count = 3  # Maximum number of retry attempts allowed
     context = {
         "job": job,
         "page_title": f"Job Status - {job.operation}",
         "breadcrumb_items": breadcrumb_items,
-        "can_retry": job.status == "failed" and job.retry_count < max_retry_count,
+        "can_retry": job.status == "failed" and job.retry_count < job.max_retries,
     }
 
     return render(request, "provisioning/virtualmin/job_status.html", context)

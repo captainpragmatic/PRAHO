@@ -29,8 +29,7 @@ from apps.audit.services import (
     AuditEventData,
     AuditService,
 )
-from apps.common.transactions import best_effort_atomic, swallow_application_errors
-from apps.common.validators import log_security_event
+from apps.common.transactions import best_effort_atomic
 from apps.settings.services import SettingsService
 
 from .models import (
@@ -643,90 +642,6 @@ def _handle_new_service_creation(instance: Service) -> None:
         )
 
     logger.info(f"✅ [Service] Created: {instance.service_name} for {instance.customer.company_name}")
-
-
-def log_virtualmin_security_event(event_type: str, details: dict[str, Any], ip_address: str) -> None:
-    """
-    Log security events related to Virtualmin operations.
-
-    Args:
-        event_type: Type of security event (e.g., 'virtualmin_auth_failure', 'access_violation')
-        details: Dictionary containing event details
-        ip_address: IP address of the source of the event
-    """
-    with swallow_application_errors(
-        logger=logger, scope="provisioning", message="log_virtualmin_security_event failed"
-    ):
-        # Enhance details with Virtualmin-specific metadata
-        enhanced_details = details.copy()
-        enhanced_details.update(
-            {
-                "source_app": "provisioning",
-                "virtualmin_integration": True,
-            }
-        )
-
-        # Call the log_security_event function with expected parameters
-        log_security_event(event_type, enhanced_details, ip_address)
-
-        logger.info(f"🔒 [Security] Virtualmin {event_type}: {details}")
-
-
-def notify_provisioning_completion(account: Any, success: bool = True, details: dict[str, Any] | None = None) -> None:
-    """
-    Send provisioning completion notifications.
-
-    Args:
-        account: VirtualminAccount object that was provisioned
-        success: Whether the provisioning was successful
-        details: Optional details about the provisioning process
-    """
-    try:
-        details = details or {}
-        status = "success" if success else "failed"
-
-        # Log provisioning completion
-        # Savepoint: a failed audit INSERT must not poison the caller's transaction.
-        with transaction.atomic():
-            AuditService.log_event(
-                AuditEventData(
-                    event_type="virtualmin_provisioning_completed",
-                    content_object=account,
-                    new_values={
-                        "success": success,
-                        "status": status,
-                        "domain": account.domain,
-                        "server_hostname": account.server.hostname if account.server else None,
-                        "details": details,
-                    },
-                    description=f"Virtualmin provisioning {'completed' if success else 'failed'} for domain '{account.domain}'",
-                ),
-                context=AuditContext(
-                    actor_type="system",
-                    metadata={
-                        "source_app": "provisioning",
-                        "provisioning_event": True,
-                        "provisioning_completion": True,
-                        "cross_app_notification": True,
-                        "virtualmin_provisioning": True,
-                        "completion_status": status,
-                        "domain": account.domain,
-                        "server_hostname": account.server.hostname if account.server else None,
-                    },
-                ),
-            )
-
-        logger.info(
-            f"📋 [Provisioning] Virtualmin {'completed' if success else 'failed'} for domain {account.domain}: {details}"
-        )
-
-        # Here you could add email notifications, webhook calls, etc.
-        # For now, we just log the completion
-
-    except Exception as e:
-        logger.error(
-            f"🔥 [Provisioning] Failed to notify completion for domain {getattr(account, 'domain', 'unknown')}: {e}"
-        )
 
 
 def _validate_service_for_provisioning(service: Service) -> bool:

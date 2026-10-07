@@ -110,7 +110,7 @@ class NodeDrainService:
         logger.info("✅ [NodeDrain] drain=%s status=%s", drain.pk, status)
 
     @classmethod
-    def _enqueue(cls, drain_id: UUID, token: UUID) -> None:
+    def _enqueue(cls, drain_id: UUID, token: UUID) -> bool:
         try:
             async_task(
                 "apps.provisioning.virtualmin_tasks.run_node_drain",
@@ -118,12 +118,14 @@ class NodeDrainService:
                 str(token),
                 timeout=cls._timeout(),
             )
+            return True
         except Exception as error:
             logger.exception("🔥 [NodeDrain] Enqueue failed: %s", drain_id)
             with transaction.atomic():
                 drain = NodeDrain.objects.select_for_update().get(pk=drain_id)
                 if drain.status == "pending" and drain.task_token == token:
                     cls._close(drain, "paused_needs_review", f"Enqueue failed: {error}")
+            return False
 
     @classmethod
     def close_interrupted(cls, drain_id: UUID) -> bool:

@@ -16,7 +16,6 @@ import uuid
 from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from enum import Enum
 from functools import lru_cache, wraps
 from types import SimpleNamespace
@@ -40,8 +39,6 @@ from .virtualmin_validators import VirtualminValidator, is_virtualmin_read_only_
 
 if TYPE_CHECKING:
     from apps.common.credential_vault import CredentialVault
-
-    from .virtualmin_auth_manager import VirtualminAuthenticationManager
 
 logger = logging.getLogger(__name__)
 
@@ -104,56 +101,6 @@ def performance_monitor(operation_name: str) -> Callable[[Callable[..., Any]], C
         return wrapper
 
     return decorator
-
-
-def create_error_context(
-    operation: str, params: dict[str, Any], server: VirtualminServer, correlation_id: str | None = None
-) -> dict[str, Any]:
-    """
-    Create enhanced error context for debugging and operational monitoring.
-
-    Provides structured error information without exposing sensitive data.
-    Includes correlation IDs for distributed tracing and debugging.
-
-    Args:
-        operation: The operation being performed
-        params: Operation parameters (will be sanitized)
-        server: VirtualminServer instance
-        correlation_id: Optional correlation ID for request tracking
-
-    Returns:
-        Dictionary containing sanitized error context for logging and debugging.
-
-    Security:
-        - Automatically sanitizes sensitive parameters
-        - Never includes passwords, keys, or credentials
-        - Suitable for production logging and monitoring
-    """
-    if correlation_id is None:
-        correlation_id = str(uuid.uuid4())[:8]
-
-    # Sanitize parameters to remove sensitive data
-    sanitized_params = {}
-    sensitive_keys = {"password", "passwd", "key", "token", "secret", "credential"}
-
-    for key, value in params.items():
-        key_lower = key.lower()
-        if any(sensitive_key in key_lower for sensitive_key in sensitive_keys):
-            sanitized_params[key] = "[REDACTED]"
-        elif isinstance(value, str | int | float | bool):
-            sanitized_params[key] = str(value)
-        else:
-            sanitized_params[key] = str(type(value).__name__)
-
-    return {
-        "operation": operation,
-        "server_id": str(server.id),
-        "server_hostname": server.hostname,
-        "timestamp": datetime.now(UTC).isoformat(),
-        "correlation_id": correlation_id,
-        "sanitized_params": sanitized_params,
-        "version": "v2.0",  # For tracking error context format evolution
-    }
 
 
 # ===============================================================================
@@ -789,19 +736,7 @@ class VirtualminGateway:
     def __init__(self, config: VirtualminConfig):
         self.config = config
         self.server = config.server
-        self._auth_manager: VirtualminAuthenticationManager | None = None
         self._credential_vault: CredentialVault | None = None
-
-    def _get_auth_manager(self) -> VirtualminAuthenticationManager:
-        """Lazy load authentication manager"""
-        if not self._auth_manager:
-            # Import here to avoid circular imports
-            from .virtualmin_auth_manager import (  # noqa: PLC0415  # Deferred: avoids circular import
-                VirtualminAuthenticationManager,  # Circular: same-app  # Deferred: avoids circular import
-            )
-
-            self._auth_manager = VirtualminAuthenticationManager(self.server)
-        return self._auth_manager
 
     def _get_credential_vault(self) -> CredentialVault:
         """Lazy load credential vault"""
@@ -824,31 +759,6 @@ class VirtualminGateway:
         """
         vault = self._get_credential_vault() if self.config.use_credential_vault else None
         return resolve_server_credentials(self.server, vault=vault, reason=reason)
-
-    def call_with_auth_fallback(
-        self, program: str, parameters: dict[str, Any] | None = None, use_fallback_auth: bool = True
-    ) -> Result[dict[str, Any], str]:
-        """
-        Call Virtualmin API with credential vault integration and multi-path authentication.
-
-        Args:
-            program: Virtualmin program to execute
-            parameters: Command parameters
-            use_fallback_auth: Whether to use authentication fallback
-
-        Returns:
-            Result with API response or error
-        """
-        if use_fallback_auth:
-            # Use multi-path authentication manager
-            return self._get_auth_manager().execute_virtualmin_command(program, parameters or {})
-        else:
-            # Use direct API call (legacy path)
-            return self._call_direct_api(program, parameters or {})
-
-    def _call_direct_api(self, program: str, parameters: dict[str, Any]) -> Result[dict[str, Any], str]:
-        """Direct API call without authentication fallback (legacy method)"""
-        raise NotImplementedError("Direct API call not implemented")
 
     # _create_session removed — safe_request() handles sessions with DNS-pinned adapters
 
@@ -1441,19 +1351,6 @@ class VirtualminGateway:
         result = self.test_connection()
         return result.is_ok()
 
-    def call_api(self, command: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        """
-        Generic API call method that delegates to the core call() method.
-
-        Returns raw response data as a dict, or raises RuntimeError on failure.
-        """
-        result = self.call(command, params or {})
-        if result.is_err():
-            error = result.unwrap_err()
-            raise RuntimeError(f"Virtualmin API call '{command}' failed: {error}")
-        response = result.unwrap()
-        return {"status": "ok", "command": command, "data": response.data}
-
     def list_domains_with_owners(self) -> Result[list[dict[str, str]], str]:
         """Full multiline listing normalized to [{'domain', 'username'}] rows."""
         result = self.call("list-domains", {"multiline": ""})
@@ -1711,41 +1608,6 @@ class VirtualminGateway:
 
         return quota_mb
 
-    def _extract_usage_from_domain_data(self, domain_data: dict[str, Any]) -> dict[str, Any]:
-        """Extract usage information from domain data returned by list-domains."""
-        domain_info = {
-            "disk_usage_mb": 0,
-            "bandwidth_usage_mb": 0,
-            "disk_quota_mb": None,
-            "bandwidth_quota_mb": None,
-        }
-
-        # Extract disk usage if available
-        if "disk_usage" in domain_data:
-            domain_info["disk_usage_mb"] = self._parse_size_to_mb(domain_data["disk_usage"])
-        elif "used" in domain_data:
-            domain_info["disk_usage_mb"] = self._parse_size_to_mb(domain_data["used"])
-
-        # Extract disk quota if available
-        if "disk_quota" in domain_data:
-            domain_info["disk_quota_mb"] = self._parse_size_to_mb(domain_data["disk_quota"])
-        elif "quota" in domain_data:
-            domain_info["disk_quota_mb"] = self._parse_size_to_mb(domain_data["quota"])
-
-        # Extract bandwidth usage if available
-        if "bandwidth_usage" in domain_data:
-            domain_info["bandwidth_usage_mb"] = self._parse_size_to_mb(domain_data["bandwidth_usage"])
-        elif "bw_used" in domain_data:
-            domain_info["bandwidth_usage_mb"] = self._parse_size_to_mb(domain_data["bw_used"])
-
-        # Extract bandwidth quota if available
-        if "bandwidth_quota" in domain_data:
-            domain_info["bandwidth_quota_mb"] = self._parse_size_to_mb(domain_data["bandwidth_quota"])
-        elif "bw_limit" in domain_data:
-            domain_info["bandwidth_quota_mb"] = self._parse_size_to_mb(domain_data["bw_limit"])
-
-        return domain_info
-
     @performance_monitor("Multiline Domain Response Parsing")
     def _parse_multiline_domain_response(self, data: dict[str, Any]) -> dict[str, Any]:
         """
@@ -1913,7 +1775,14 @@ class VirtualminGateway:
         patterns = get_compiled_patterns()
 
         # Priority fields for quota detection
-        quota_priority_fields = ["disk_quota", "quota_limit", "size_limit", "disk_limit"]
+        quota_priority_fields = [
+            "disk_quota",
+            "quota_limit",
+            "size_limit",
+            "disk_limit",
+            "Server byte quota",
+            "server byte quota",
+        ]
 
         # Check priority fields first
         for field in quota_priority_fields:
@@ -1970,6 +1839,40 @@ class VirtualminGateway:
         except (ValueError, IndexError, TypeError, AttributeError) as e:
             logger.debug(f"🐛 [Parsing] Failed to parse value size '{value}': {e}")
             return 0
+
+    @staticmethod
+    def _parse_bandwidth_rows(rows: list[object]) -> int:
+        """Sum Virtualmin byte counters, preferring totals over their components."""
+        total_bytes = 0
+        for row in rows:
+            if not isinstance(row, dict) or not isinstance(row.get("values"), dict):
+                continue
+            raw_values = cast("dict[str, object]", row["values"])
+            values = {key.casefold(): value for key, value in raw_values.items()}
+            fields = ("total bytes",) if "total bytes" in values else ("bytes in", "bytes out")
+            for field in fields:
+                value = values.get(field, 0)
+                if isinstance(value, list):
+                    value = value[0] if value else 0
+                try:
+                    total_bytes += max(0, int(str(value)))
+                except (TypeError, ValueError):
+                    continue
+        return total_bytes // (1024 * 1024)
+
+    def _parse_bandwidth_dict(self, data: dict[str, object]) -> int:
+        """Handle nested byte counters and legacy top-level bandwidth fields."""
+        rows = data.get("data")
+        if isinstance(rows, list):
+            return self._parse_bandwidth_rows(cast("list[object]", rows))
+        total_mb = 0
+        for key, value in data.items():
+            if "bandwidth" in key.lower() or "bytes" in key.lower():
+                try:
+                    total_mb += self._parse_size_to_mb_cached(str(value))
+                except (ValueError, TypeError):
+                    continue
+        return total_mb
 
     @performance_monitor("Bandwidth Response Parsing")
     def _parse_bandwidth_response(self, data: dict[str, Any] | str) -> int:
@@ -2028,140 +1931,9 @@ class VirtualminGateway:
                         continue
 
         elif isinstance(data, dict):
-            # Optimized structured data parsing
-            bandwidth_keys = [key for key in data if "bandwidth" in key.lower() or "bytes" in key.lower()]
-
-            for key in bandwidth_keys:
-                value = data[key]
-                try:
-                    total_mb += self._parse_size_to_mb_cached(str(value))
-                except (ValueError, TypeError):
-                    continue
+            return self._parse_bandwidth_dict(data)
 
         return total_mb
-
-    def _process_domain_info_item(self, item: dict[str, Any], domain_info: dict[str, Any], domain: str) -> None:
-        """Process a single domain info item and update domain_info dictionary."""
-        name = item.get("name", "").lower()
-        value = item.get("value", "")
-
-        if not name:  # Skip items without names
-            return
-
-        # Disk-related fields
-        if "disk" in name:
-            self._process_disk_field(name, value, domain_info, domain)
-        # Bandwidth-related fields
-        elif "bandwidth" in name or "bw" in name:
-            self._process_bandwidth_field(name, value, domain_info, domain)
-        # Status fields
-        elif ("status" in name or "state" in name) and isinstance(value, str) and value.strip():
-            domain_info["status"] = value.strip().lower()
-            logger.debug(f"📊 [Parsing] Status: {domain_info['status']} for {domain}")
-
-    def _process_disk_field(self, name: str, value: Any, domain_info: dict[str, Any], domain: str) -> None:
-        """Process disk-related field."""
-        if "used" in name or "usage" in name:
-            parsed_value = self._parse_size_to_mb_cached(str(value))
-            if parsed_value > 0:  # Only update if we got a valid value
-                domain_info["disk_usage_mb"] = parsed_value
-                logger.debug(f"📊 [Parsing] Disk usage: {parsed_value}MB for {domain}")
-        elif "quota" in name or "limit" in name:
-            parsed_value = self._parse_size_to_mb_cached(str(value))
-            if parsed_value > 0:  # 0 typically means unlimited
-                domain_info["disk_quota_mb"] = parsed_value
-                logger.debug(f"📊 [Parsing] Disk quota: {parsed_value}MB for {domain}")
-
-    def _process_bandwidth_field(self, name: str, value: Any, domain_info: dict[str, Any], domain: str) -> None:
-        """Process bandwidth-related field."""
-        if "used" in name or "usage" in name:
-            parsed_value = self._parse_size_to_mb_cached(str(value))
-            if parsed_value > 0:
-                domain_info["bandwidth_usage_mb"] = parsed_value
-                logger.debug(f"📊 [Parsing] Bandwidth usage: {parsed_value}MB for {domain}")
-        elif "quota" in name or "limit" in name:
-            parsed_value = self._parse_size_to_mb_cached(str(value))
-            if parsed_value > 0:
-                domain_info["bandwidth_quota_mb"] = parsed_value
-                logger.debug(f"📊 [Parsing] Bandwidth quota: {parsed_value}MB for {domain}")
-
-    @performance_monitor("Domain Info Response Parsing")
-    def _parse_domain_info_response(self, data: dict[str, Any], domain: str) -> dict[str, Any]:
-        """
-        Parse domain info response to extract comprehensive usage data.
-
-        Algorithm Complexity: O(n) where n is the number of response items
-
-        Performance Optimizations:
-        - Pre-compiled regex patterns for field name matching
-        - Optimized string comparison using lowercase conversion
-        - Early exit for malformed responses
-        - Cached size parsing for repeated values
-
-        Response Format Handling:
-        - Handles Virtualmin's structured response format
-        - Processes nested data items with name/value pairs
-        - Extracts disk usage, quotas, bandwidth, and status information
-        - Graceful degradation for missing or malformed data
-
-        Args:
-            data: Raw response data from Virtualmin API
-            domain: Domain name for context and validation
-
-        Returns:
-            Dictionary containing parsed domain information:
-            {
-                'domain': str,              # Domain name
-                'disk_usage_mb': int,       # Current disk usage in MB
-                'bandwidth_usage_mb': int,  # Current bandwidth usage in MB
-                'disk_quota_mb': int|None,  # Disk quota in MB (None = unlimited)
-                'bandwidth_quota_mb': int|None, # Bandwidth quota in MB
-                'status': str               # Domain status (active/suspended/etc.)
-            }
-
-        Edge Cases:
-        - Malformed response data: Returns default values
-        - Missing usage data: Returns 0 for usage fields
-        - Unlimited quotas: Returns None for quota fields
-        - Invalid status: Returns "unknown"
-
-        Supported Virtualmin Response Formats:
-        - Table format with data items array
-        - Nested structure with name/value pairs
-        - Mixed format responses with partial data
-        """
-        domain_info = {
-            "domain": domain,
-            "disk_usage_mb": 0,
-            "bandwidth_usage_mb": 0,
-            "disk_quota_mb": None,
-            "bandwidth_quota_mb": None,
-            "status": "unknown",
-        }
-
-        # Early validation for response structure
-        if not isinstance(data, dict) or "data" not in data:
-            logger.debug(f"🐛 [Parsing] Invalid response structure for domain {domain}")
-            return domain_info
-
-        data_items = data["data"]
-        if not isinstance(data_items, list):
-            logger.debug(f"🐛 [Parsing] Expected list for data items, got {type(data_items)}")
-            return domain_info
-
-        # Process response items using helper functions
-        for item in data_items:
-            if isinstance(item, dict):
-                self._process_domain_info_item(item, domain_info, domain)
-
-        logger.debug(
-            f"✅ [Parsing] Domain info parsed for {domain}: "
-            f"disk={domain_info['disk_usage_mb']}MB, "
-            f"bandwidth={domain_info['bandwidth_usage_mb']}MB, "
-            f"status={domain_info['status']}"
-        )
-
-        return domain_info
 
     def _parse_size_to_mb_cached(self, size_str: str) -> int:
         """

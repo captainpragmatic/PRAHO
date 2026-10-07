@@ -86,7 +86,7 @@
                         </div>
                         <div>
                             <dt class="text-sm font-medium text-slate-400">{% trans "Retry Count" %}</dt>
-                            <dd class="mt-1 text-sm text-slate-100">{{ job.retry_count }}/3</dd>
+                            <dd class="mt-1 text-sm text-slate-100">{{ job.retry_count }}/{{ job.max_retries }}</dd>
                         </div>
                     </dl>
                 </div>

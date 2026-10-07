@@ -16,7 +16,6 @@ from typing import Any
 from django.conf import settings
 from django.db.models.signals import post_save, pre_delete
 from django.dispatch import receiver
-from django.utils import timezone
 
 from apps.audit.services import (
     AuditContext,
@@ -24,7 +23,6 @@ from apps.audit.services import (
     AuditService,
 )
 from apps.common.transactions import best_effort_atomic, swallow_application_errors
-from apps.common.validators import log_security_event
 
 from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob
 
@@ -321,74 +319,3 @@ def audit_virtualmin_provisioning_jobs(
                         },
                     ),
                 )
-
-
-# ===============================================================================
-# VIRTUALMIN HELPER FUNCTIONS
-# ===============================================================================
-
-
-def log_virtualmin_security_event(event_type: str, details: dict[str, Any], ip_address: str | None = None) -> None:
-    """
-    Log security events related to Virtualmin operations.
-
-    Used by services for logging authentication failures, suspicious activity, etc.
-    """
-    with best_effort_atomic(logger=logger, scope="provisioning", message="log_virtualmin_security_event failed"):
-        log_security_event(
-            event_type,
-            {
-                **details,
-                "source_app": "provisioning",
-                "virtualmin_integration": True,
-                "timestamp": timezone.now().isoformat(),
-            },
-            ip_address,
-        )
-
-        logger.warning(f"🔒 [VirtualminSecurity] {event_type}: {details}")
-
-
-def notify_provisioning_completion(
-    account: VirtualminAccount, success: bool, details: dict[str, Any] | None = None
-) -> None:
-    """
-    Helper function to notify other apps of provisioning completion.
-
-    Can be used by provisioning services to trigger cross-app workflows.
-    """
-    with best_effort_atomic(logger=logger, scope="provisioning", message="notify_provisioning_completion failed"):
-        # Log completion for audit trail
-        AuditService.log_event(
-            AuditEventData(
-                event_type="virtualmin_provisioning_completed",
-                content_object=account,
-                new_values={
-                    "success": success,
-                    "domain": account.domain,
-                    "server": str(account.server.hostname) if account.server else None,
-                    "details": details or {},
-                },
-                description=f"Virtualmin provisioning {'completed successfully' if success else 'failed'} for {account.domain}",
-            ),
-            context=AuditContext(
-                actor_type="system",
-                metadata={
-                    "source_app": "provisioning",
-                    "provisioning_completion": True,
-                    "cross_app_notification": True,
-                    "virtualmin_server": str(account.server.hostname) if account.server else None,
-                    "success": success,
-                },
-            ),
-        )
-
-        # TODO: Add hooks for other apps (billing notifications, customer communications, etc.)
-        # This can be extended to trigger:
-        # - Welcome emails with control panel credentials
-        # - Billing activation notifications
-        # - Customer dashboard updates
-
-        logger.info(
-            f"🔔 [ProvisioningNotification] Notified provisioning completion for {account.domain}: {'success' if success else 'failure'}"
-        )

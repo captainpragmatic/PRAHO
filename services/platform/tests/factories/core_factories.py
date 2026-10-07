@@ -35,6 +35,7 @@ User = get_user_model()
 # USER FACTORIES
 # ===============================================================================
 
+
 @dataclass
 class UserCreationRequest:
     """Parameter object for user creation.
@@ -44,14 +45,15 @@ class UserCreationRequest:
     but is NOT stored on the model — only used to derive a unique email
     when the caller doesn't supply one.
     """
-    username: str = 'testuser'
-    email: str = 'test@pragmatichost.com'
-    password: str = 'SecureTestPass123!'
-    first_name: str = 'Test'
-    last_name: str = 'User'
+
+    username: str = "testuser"
+    email: str = "test@pragmatichost.com"
+    password: str = "SecureTestPass123!"  # noqa: S105  # Test fixture credential.
+    first_name: str = "Test"
+    last_name: str = "User"
     is_staff: bool = False
     is_superuser: bool = False
-    staff_role: str = ''
+    staff_role: str = ""
 
 
 def create_user(request: UserCreationRequest | None = None) -> User:
@@ -68,7 +70,7 @@ def create_user(request: UserCreationRequest | None = None) -> User:
     email = request.email
     counter = 1
     while User.objects.filter(email=email).exists():
-        local, domain = request.email.rsplit('@', 1)
+        local, domain = request.email.rsplit("@", 1)
         email = f"{local}_{counter}@{domain}"
         counter += 1
 
@@ -83,50 +85,53 @@ def create_user(request: UserCreationRequest | None = None) -> User:
     )
 
 
-def create_staff_user(
-    username: str = 'staffuser',
-    staff_role: str = 'support'
-) -> User:
+def create_staff_user(username: str = "staffuser", staff_role: str = "support") -> User:
     """Create a staff user with specific role."""
-    return create_user(UserCreationRequest(
-        username=username,
-        email=f'{username}@pragmatichost.com',
-        is_staff=True,
-        staff_role=staff_role,
-    ))
+    return create_user(
+        UserCreationRequest(
+            username=username,
+            email=f"{username}@pragmatichost.com",
+            is_staff=True,
+            staff_role=staff_role,
+        )
+    )
 
 
-def create_admin_user(username: str = 'adminuser') -> User:
+def create_admin_user(username: str = "adminuser") -> User:
     """Create an admin user with full permissions."""
-    return create_user(UserCreationRequest(
-        username=username,
-        email=f'{username}@pragmatichost.com',
-        is_staff=True,
-        is_superuser=True,
-        staff_role='admin',
-    ))
+    return create_user(
+        UserCreationRequest(
+            username=username,
+            email=f"{username}@pragmatichost.com",
+            is_staff=True,
+            is_superuser=True,
+            staff_role="admin",
+        )
+    )
 
 
 # ===============================================================================
 # CUSTOMER FACTORIES
 # ===============================================================================
 
+
 @dataclass
 class CustomerCreationRequest:
     """Parameter object for customer creation"""
-    name: str = 'SC Test SRL'
-    customer_type: str = 'company'
-    company_name: str = 'SC Test SRL'
-    primary_email: str = 'contact@test.ro'
-    primary_phone: str = '+40721234567'
+
+    name: str = "SC Test SRL"
+    customer_type: str = "company"
+    company_name: str = "SC Test SRL"
+    primary_email: str = "contact@test.ro"
+    primary_phone: str = "+40721234567"
     data_processing_consent: bool = True
-    status: str = 'active'
+    status: str = "active"
     created_by: User | None = None
     with_tax_profile: bool = True
     with_billing_profile: bool = True
     with_address: bool = True
-    cui: str = 'RO12345678'
-    vat_number: str = 'RO12345678'
+    cui: str = "RO12345678"
+    vat_number: str = "RO12345678"
     is_vat_payer: bool = True
 
 
@@ -137,7 +142,7 @@ def create_full_customer(request: CustomerCreationRequest | None = None) -> Cust
 
     # Create admin user if not provided
     if request.created_by is None:
-        request.created_by = create_admin_user(username=f'admin_{timezone.now().timestamp()}')
+        request.created_by = create_admin_user(username=f"admin_{timezone.now().timestamp()}")
 
     # Generate unique email if already exists
     email = request.primary_email
@@ -162,17 +167,17 @@ def create_full_customer(request: CustomerCreationRequest | None = None) -> Cust
             customer=customer,
             cui=request.cui,
             vat_number=request.vat_number,
-            registration_number='J40/1234/2023',
+            registration_number="J40/1234/2023",
             is_vat_payer=request.is_vat_payer,
-            vat_rate=Decimal('21.00'),
+            vat_rate=Decimal("21.00"),
         )
 
     if request.with_billing_profile:
         CustomerBillingProfile.objects.create(
             customer=customer,
             payment_terms=30,
-            credit_limit=Decimal('5000.00'),
-            preferred_currency='RON',
+            credit_limit=Decimal("5000.00"),
+            preferred_currency="RON",
         )
 
     if request.with_address:
@@ -180,11 +185,11 @@ def create_full_customer(request: CustomerCreationRequest | None = None) -> Cust
             customer=customer,
             is_primary=True,
             is_billing=True,
-            address_line1='Str. Test Nr. 1',
-            city='București',
-            county='Sector 1',
-            postal_code='010101',
-            country='România',
+            address_line1="Str. Test Nr. 1",
+            city="București",
+            county="Sector 1",
+            postal_code="010101",
+            country="România",
             is_current=True,
         )
 
@@ -192,39 +197,37 @@ def create_full_customer(request: CustomerCreationRequest | None = None) -> Cust
 
 
 def create_individual_customer(
-    first_name: str = 'Ion',
-    last_name: str = 'Popescu',
-    email: str = 'ion.popescu@example.ro'
+    first_name: str = "Ion", last_name: str = "Popescu", email: str = "ion.popescu@example.ro"
 ) -> Customer:
     """Create an individual (non-company) customer."""
-    admin = create_admin_user(username=f'admin_{timezone.now().timestamp()}')
+    admin = create_admin_user(username=f"admin_{timezone.now().timestamp()}")
 
     customer = Customer.objects.create(
-        name=f'{first_name} {last_name}',
-        customer_type='individual',
-        company_name='',
+        name=f"{first_name} {last_name}",
+        customer_type="individual",
+        company_name="",
         primary_email=email,
-        primary_phone='+40722123456',
+        primary_phone="+40722123456",
         data_processing_consent=True,
-        status='active',
+        status="active",
         created_by=admin,
     )
 
     CustomerBillingProfile.objects.create(
         customer=customer,
         payment_terms=14,
-        preferred_currency='RON',
+        preferred_currency="RON",
     )
 
     CustomerAddress.objects.create(
         customer=customer,
         is_primary=True,
         is_billing=True,
-        address_line1='Bd. Unirii Nr. 10, Ap. 5',
-        city='București',
-        county='Sector 3',
-        postal_code='030167',
-        country='România',
+        address_line1="Bd. Unirii Nr. 10, Ap. 5",
+        city="București",
+        county="Sector 3",
+        postal_code="030167",
+        country="România",
         is_current=True,
     )
 
@@ -235,13 +238,15 @@ def create_individual_customer(
 # PRODUCT FACTORIES
 # ===============================================================================
 
+
 @dataclass
 class ProductCreationRequest:
     """Parameter object for product creation"""
-    name: str = 'Web Hosting Standard'
-    slug: str = ''
-    description: str = 'Standard web hosting package'
-    product_type: str = 'shared_hosting'
+
+    name: str = "Web Hosting Standard"
+    slug: str = ""
+    description: str = "Standard web hosting package"
+    product_type: str = "shared_hosting"
     is_active: bool = True
 
 
@@ -273,21 +278,25 @@ def create_hosting_products() -> list[Product]:
     products = []
 
     product_configs = [
-        ('Web Hosting Basic', 'shared_hosting', 'Basic web hosting - 5GB storage'),
-        ('Web Hosting Standard', 'shared_hosting', 'Standard web hosting - 20GB storage'),
-        ('Web Hosting Premium', 'shared_hosting', 'Premium web hosting - 50GB storage'),
-        ('VPS Basic', 'vps', 'Basic VPS - 2 vCPU, 4GB RAM'),
-        ('VPS Standard', 'vps', 'Standard VPS - 4 vCPU, 8GB RAM'),
-        ('Domain Registration .ro', 'domain', '.ro domain registration - 1 year'),
-        ('SSL Certificate', 'ssl', 'Standard SSL certificate - 1 year'),
+        ("Web Hosting Basic", "shared_hosting", "Basic web hosting - 5GB storage"),
+        ("Web Hosting Standard", "shared_hosting", "Standard web hosting - 20GB storage"),
+        ("Web Hosting Premium", "shared_hosting", "Premium web hosting - 50GB storage"),
+        ("VPS Basic", "vps", "Basic VPS - 2 vCPU, 4GB RAM"),
+        ("VPS Standard", "vps", "Standard VPS - 4 vCPU, 8GB RAM"),
+        ("Domain Registration .ro", "domain", ".ro domain registration - 1 year"),
+        ("SSL Certificate", "ssl", "Standard SSL certificate - 1 year"),
     ]
 
     for name, product_type, desc in product_configs:
-        products.append(create_product(ProductCreationRequest(
-            name=name,
-            product_type=product_type,
-            description=desc,
-        )))
+        products.append(
+            create_product(
+                ProductCreationRequest(
+                    name=name,
+                    product_type=product_type,
+                    description=desc,
+                )
+            )
+        )
 
     return products
 
@@ -296,11 +305,13 @@ def create_hosting_products() -> list[Product]:
 # ORDER FACTORIES
 # ===============================================================================
 
+
 @dataclass
 class OrderCreationRequest:
     """Parameter object for order creation"""
+
     customer: Customer | None = None
-    status: str = 'draft'
+    status: str = "draft"
     currency: Currency | None = None
     items: list[tuple[Product, int]] = field(default_factory=list)  # (product, quantity) pairs
 
@@ -338,10 +349,7 @@ def create_order(request: OrderCreationRequest | None = None) -> Order:
     return order
 
 
-def create_order_with_items(
-    customer: Customer | None = None,
-    num_items: int = 2
-) -> Order:
+def create_order_with_items(customer: Customer | None = None, num_items: int = 2) -> Order:
     """Create an order with random items."""
     products = create_hosting_products()[:num_items]
 
@@ -350,24 +358,28 @@ def create_order_with_items(
 
     items = [(product, 1) for product in products]
 
-    return create_order(OrderCreationRequest(
-        customer=customer,
-        status='pending',
-        items=items,
-    ))
+    return create_order(
+        OrderCreationRequest(
+            customer=customer,
+            status="pending",
+            items=items,
+        )
+    )
 
 
 # ===============================================================================
 # INVOICE FACTORIES
 # ===============================================================================
 
+
 @dataclass
 class InvoiceCreationRequest:
     """Parameter object for invoice creation"""
+
     customer: Customer | None = None
     currency: Currency | None = None
-    number: str = ''
-    status: str = 'issued'
+    number: str = ""
+    status: str = "issued"
     total_cents: int = 10000
     subtotal_cents: int = 8403  # Before 19% VAT
     tax_cents: int = 1597  # 19% VAT
@@ -377,13 +389,12 @@ class InvoiceCreationRequest:
 def create_ron_currency() -> Currency:
     """Create Romanian Lei currency."""
     currency, _ = Currency.objects.get_or_create(
-        code='RON',
+        code="RON",
         defaults={
-            'name': 'Romanian Leu',
-            'symbol': 'L',
-            'decimals': 2,
-            'is_active': True,
-        }
+            "name": "Romanian Leu",
+            "symbol": "L",
+            "decimals": 2,
+        },
     )
     return currency
 
@@ -391,13 +402,13 @@ def create_ron_currency() -> Currency:
 def create_eur_currency() -> Currency:
     """Create Euro currency."""
     currency, _ = Currency.objects.get_or_create(
-        code='EUR',
+        code="EUR",
         defaults={
-            'name': 'Euro',
-            'symbol': '€',
-            'decimals': 2,
-            'is_active': True,
-        }
+            "name": "Euro",
+            "symbol": "€",
+            "decimals": 2,
+            "is_active": True,
+        },
     )
     return currency
 
@@ -414,7 +425,7 @@ def create_full_invoice(request: InvoiceCreationRequest | None = None) -> Invoic
         request.currency = create_ron_currency()
 
     if not request.number:
-        request.number = f'INV-{timezone.now().year}-{Invoice.objects.count() + 1:05d}'
+        request.number = f"INV-{timezone.now().year}-{Invoice.objects.count() + 1:05d}"
 
     invoice = Invoice.objects.create(
         customer=request.customer,
@@ -430,7 +441,7 @@ def create_full_invoice(request: InvoiceCreationRequest | None = None) -> Invoic
     # Add a line item
     InvoiceLine.objects.create(
         invoice=invoice,
-        description='Web Hosting Standard - 1 month',
+        description="Web Hosting Standard - 1 month",
         quantity=1,
         unit_price_cents=request.subtotal_cents,
         line_total_cents=request.subtotal_cents,
@@ -443,12 +454,14 @@ def create_full_invoice(request: InvoiceCreationRequest | None = None) -> Invoic
 # PAYMENT FACTORIES
 # ===============================================================================
 
+
 @dataclass
 class FullPaymentCreationRequest:
     """Parameter object for payment creation with invoice"""
+
     invoice: Invoice | None = None
-    payment_method: str = 'stripe'
-    status: str = 'succeeded'
+    payment_method: str = "stripe"
+    status: str = "succeeded"
     amount_cents: int | None = None  # Defaults to invoice total
 
 
@@ -476,10 +489,9 @@ def create_full_payment(request: FullPaymentCreationRequest | None = None) -> Pa
 # PROFORMA FACTORIES
 # ===============================================================================
 
+
 def create_proforma(
-    customer: Customer | None = None,
-    currency: Currency | None = None,
-    total_cents: int = 10000
+    customer: Customer | None = None, currency: Currency | None = None, total_cents: int = 10000
 ) -> ProformaInvoice:
     """Create a proforma invoice."""
     if customer is None:
@@ -494,8 +506,8 @@ def create_proforma(
     return ProformaInvoice.objects.create(
         customer=customer,
         currency=currency,
-        number=f'PRO-{timezone.now().year}-{ProformaInvoice.objects.count() + 1:05d}',
-        status='draft',
+        number=f"PRO-{timezone.now().year}-{ProformaInvoice.objects.count() + 1:05d}",
+        status="draft",
         total_cents=total_cents,
         subtotal_cents=subtotal,
         tax_cents=tax,
@@ -507,9 +519,8 @@ def create_proforma(
 # HELPER FUNCTIONS
 # ===============================================================================
 
-def create_complete_order_to_invoice_flow(
-    customer: Customer | None = None
-) -> dict[str, Any]:
+
+def create_complete_order_to_invoice_flow(customer: Customer | None = None) -> dict[str, Any]:
     """Create a complete flow from order to paid invoice."""
     if customer is None:
         customer = create_full_customer()
@@ -519,25 +530,29 @@ def create_complete_order_to_invoice_flow(
 
     # Calculate totals
     subtotal = sum(item.line_total_cents for item in order.items.all())
-    vat = int(subtotal * Decimal('0.21'))
+    vat = int(subtotal * Decimal("0.21"))
     total = subtotal + vat
 
     # Create invoice from order
-    invoice = create_full_invoice(InvoiceCreationRequest(
-        customer=customer,
-        subtotal_cents=subtotal,
-        tax_cents=vat,
-        total_cents=total,
-    ))
+    invoice = create_full_invoice(
+        InvoiceCreationRequest(
+            customer=customer,
+            subtotal_cents=subtotal,
+            tax_cents=vat,
+            total_cents=total,
+        )
+    )
 
     # Create payment
-    payment = create_full_payment(FullPaymentCreationRequest(
-        invoice=invoice,
-    ))
+    payment = create_full_payment(
+        FullPaymentCreationRequest(
+            invoice=invoice,
+        )
+    )
 
     return {
-        'customer': customer,
-        'order': order,
-        'invoice': invoice,
-        'payment': payment,
+        "customer": customer,
+        "order": order,
+        "invoice": invoice,
+        "payment": payment,
     }

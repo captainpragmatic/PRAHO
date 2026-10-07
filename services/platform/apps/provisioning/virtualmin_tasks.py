@@ -56,37 +56,10 @@ class RetryableProvisioningError(RuntimeError):
 # ===============================================================================
 
 
-def get_task_timeouts() -> dict[str, int]:
-    """
-    Get task timeout configurations from Django settings.
-
-    Supports runtime configuration updates and environment variable overrides.
-    Uses the centralized VIRTUALMIN_TIMEOUTS configuration system.
-
-    Returns:
-        Dictionary of task timeout values in seconds
-    """
-
-    # Get Virtualmin timeout configuration
-    virtualmin_timeouts = getattr(settings, "VIRTUALMIN_TIMEOUTS", {})
-
-    return {
-        "TASK_RETRY_DELAY": virtualmin_timeouts.get("RETRY_DELAY", 5) * 60,  # Convert to minutes
-        "TASK_MAX_RETRIES": virtualmin_timeouts.get("MAX_RETRIES", 3),
-        "TASK_SOFT_TIME_LIMIT": virtualmin_timeouts.get("PROVISIONING_TIMEOUT", 180) * 2,  # 2x provisioning timeout
-        "TASK_TIME_LIMIT": virtualmin_timeouts.get("PROVISIONING_TIMEOUT", 180) * 3,  # 3x provisioning timeout
-        "BACKUP_TIME_LIMIT": virtualmin_timeouts.get("API_BACKUP_TIMEOUT", 300),
-        "BULK_OPERATION_TIME_LIMIT": virtualmin_timeouts.get("API_BULK_TIMEOUT", 600),
-        "HEALTH_CHECK_TIME_LIMIT": virtualmin_timeouts.get("API_HEALTH_CHECK_TIMEOUT", 10) * 6,  # 1 minute total
-    }
-
-
-# Legacy constants for backward compatibility
-TASK_RETRY_DELAY = 300  # 5 minutes - DEPRECATED: Use get_task_timeouts()['TASK_RETRY_DELAY']
-TASK_MAX_RETRIES = 3  # DEPRECATED: Use get_task_timeouts()['TASK_MAX_RETRIES']
-_DEFAULT_TASK_SOFT_TIME_LIMIT = 600  # 10 minutes - DEPRECATED: Use get_task_timeouts()['TASK_SOFT_TIME_LIMIT']
+# Task budgets
+_DEFAULT_TASK_SOFT_TIME_LIMIT = 600  # 10 minutes
 TASK_SOFT_TIME_LIMIT = _DEFAULT_TASK_SOFT_TIME_LIMIT
-_DEFAULT_TASK_TIME_LIMIT = 900  # 15 minutes - DEPRECATED: Use get_task_timeouts()['TASK_TIME_LIMIT']
+_DEFAULT_TASK_TIME_LIMIT = 900  # 15 minutes
 TASK_TIME_LIMIT = _DEFAULT_TASK_TIME_LIMIT
 
 
@@ -424,11 +397,6 @@ def _validate_service_for_provisioning_secure(service_id: str) -> dict[str, Any]
     return {"success": True, "service": service}
 
 
-def _validate_service_for_provisioning(service_id: str) -> dict[str, Any]:
-    """Legacy function - kept for backward compatibility."""
-    return _validate_service_for_provisioning_secure(service_id)
-
-
 def _check_existing_virtualmin_account_secure(service: Service) -> dict[str, Any] | None:
     """Check if VirtualMin account already exists for service with enhanced logging."""
     if hasattr(service, "virtualmin_account") and service.virtualmin_account:
@@ -456,11 +424,6 @@ def _check_existing_virtualmin_account_secure(service: Service) -> dict[str, Any
             "message": "Account already exists",
         }
     return None
-
-
-def _check_existing_virtualmin_account(service: Service) -> dict[str, Any] | None:
-    """Legacy function - kept for backward compatibility."""
-    return _check_existing_virtualmin_account_secure(service)
 
 
 def _get_provisioning_server_secure(server_id: str | None) -> VirtualminServer | None:
@@ -499,11 +462,6 @@ def _get_provisioning_server_secure(server_id: str | None) -> VirtualminServer |
     except Exception as e:
         logger.warning(f"⚠️ [VirtualminTask] Server validation failed for {server_id}: {e}")
         return None
-
-
-def _get_provisioning_server(server_id: str | None) -> VirtualminServer | None:
-    """Legacy function - kept for backward compatibility."""
-    return _get_provisioning_server_secure(server_id)
 
 
 def _execute_virtualmin_provisioning_with_params(exec_params: ProvisioningExecutionParams) -> dict[str, Any]:
@@ -566,34 +524,6 @@ def _execute_virtualmin_provisioning_with_params(exec_params: ProvisioningExecut
             "error": f"Execution failed: {exec_error}",
             "retriability": Retriability.UNKNOWN.value,
         }
-
-
-def _execute_virtualmin_provisioning(
-    service: Service,
-    domain: str,
-    params: VirtualminProvisioningParams,
-    server: VirtualminServer | None,
-    correlation_id: str,
-) -> dict[str, Any]:
-    """Legacy function - kept for backward compatibility."""
-    safe_log_ctx = {
-        "service_id": str(service.id),
-        "domain": domain,
-        "correlation_id": correlation_id,
-    }
-
-    # Create execution params and use new function
-    exec_params = ProvisioningExecutionParams(
-        service=service,
-        domain=domain,
-        username=params.get("username"),
-        template=params.get("template", "Default"),
-        server=server,
-        correlation_id=correlation_id,
-        safe_log_ctx=safe_log_ctx,
-    )
-
-    return _execute_virtualmin_provisioning_with_params(exec_params)
 
 
 def _handle_successful_provisioning_secure(
@@ -663,16 +593,6 @@ def _handle_successful_provisioning_secure(
             "security_enhanced": True,
             "audit_warning": "Audit logging partially failed",
         }
-
-
-def _handle_successful_provisioning(account: Any, service: Service, correlation_id: str) -> dict[str, Any]:
-    """Legacy function - kept for backward compatibility."""
-    safe_log_ctx = {
-        "service_id": str(service.id),
-        "domain": account.domain,
-        "correlation_id": correlation_id,
-    }
-    return _handle_successful_provisioning_secure(account, service, correlation_id, safe_log_ctx)
 
 
 def _handle_failed_provisioning_secure(  # noqa: PLR0913  # Structured audit context is intentionally explicit
@@ -763,16 +683,6 @@ def _handle_failed_provisioning_secure(  # noqa: PLR0913  # Structured audit con
     }
 
 
-def _handle_failed_provisioning(error_msg: str, service: Service, domain: str, correlation_id: str) -> dict[str, Any]:
-    """Legacy function - kept for backward compatibility."""
-    safe_log_ctx = {
-        "service_id": str(service.id),
-        "domain": domain,
-        "correlation_id": correlation_id,
-    }
-    return _handle_failed_provisioning_secure(error_msg, service, domain, correlation_id, safe_log_ctx)
-
-
 def _handle_critical_provisioning_error_secure(
     error: Exception, domain: str, service_id: str, correlation_id: str, safe_log_ctx: dict[str, Any]
 ) -> dict[str, Any]:
@@ -857,18 +767,6 @@ def _handle_critical_provisioning_error_secure(
         "security_enhanced": True,
         "retriability": retriability.value,
     }
-
-
-def _handle_critical_provisioning_error(
-    error: Exception, domain: str, service_id: str, correlation_id: str
-) -> dict[str, Any]:
-    """Legacy function - kept for backward compatibility."""
-    safe_log_ctx = {
-        "service_id": service_id,
-        "domain": domain,
-        "correlation_id": correlation_id,
-    }
-    return _handle_critical_provisioning_error_secure(error, domain, service_id, correlation_id, safe_log_ctx)
 
 
 def run_node_drain(drain_id: str, task_token: str | None = None) -> dict[str, Any]:
@@ -1140,8 +1038,8 @@ def reclaim_stalled_virtualmin_operations() -> dict[str, int]:
     for drain in stalled_drains:
         try:
             if drain.status == "pending":
-                NodeDrainService._enqueue(drain.pk, drain.task_token)
-                counts["drains_requeued"] += 1
+                if NodeDrainService._enqueue(drain.pk, drain.task_token):
+                    counts["drains_requeued"] += 1
             elif NodeDrainService.close_interrupted(drain.pk):
                 # Never run() here: the worker may have checkpointed the drain
                 # back to pending with a fresh token between selection and now,
