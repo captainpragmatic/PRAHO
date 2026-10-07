@@ -85,7 +85,7 @@ rollback_version() {
     if VERSION="$VERSION" praho_compose single-server up -d --no-build --wait --wait-timeout "$WAIT_TIMEOUT"; then
         log_success "Rollback to ${VERSION} completed successfully!"
     else
-        log_error "Services are not healthy. Inspect: docker logs praho_platform"
+        log_error "Services are not healthy. Inspect: ${SCRIPT_DIR}/deploy.sh single-server --logs"
         exit 1
     fi
 }

@@ -52,8 +52,8 @@ services:
       - STATIC_ROOT=/app/staticfiles
       - PLATFORM_DOMAIN=${PLATFORM_DOMAIN:?PLATFORM_DOMAIN required}
       - PORTAL_DOMAIN=${PORTAL_DOMAIN:?PORTAL_DOMAIN required}
-      - ALLOWED_HOSTS=${DOMAIN:-localhost},localhost,*.ondigitalocean.app
-      - CSRF_TRUSTED_ORIGINS=https://${DOMAIN},https://*.ondigitalocean.app
+      - ALLOWED_HOSTS=${PLATFORM_DOMAIN:?PLATFORM_DOMAIN required},localhost,*.ondigitalocean.app
+      - CSRF_TRUSTED_ORIGINS=https://${PLATFORM_DOMAIN:?PLATFORM_DOMAIN required},https://*.ondigitalocean.app
       - DJANGO_SECURE_SSL_REDIRECT=false
       - SERVICE_NAME=platform
     expose:
@@ -93,11 +93,11 @@ services:
       - PORTAL_TRUSTED_PROXY_CIDRS=${PORTAL_TRUSTED_PROXY_CIDRS:?set PORTAL_TRUSTED_PROXY_CIDRS to your ingress proxy's CIDRs}
       - PLATFORM_API_ALLOW_INSECURE_HTTP=${PLATFORM_API_ALLOW_INSECURE_HTTP:-true}
       - PLATFORM_TO_PORTAL_WEBHOOK_SECRET=${PLATFORM_TO_PORTAL_WEBHOOK_SECRET:?PLATFORM_TO_PORTAL_WEBHOOK_SECRET required}
-      - PORTAL_DOMAIN=${DOMAIN:-localhost}
+      - PORTAL_DOMAIN=${PORTAL_DOMAIN:?PORTAL_DOMAIN required}
       - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY required}
       - DJANGO_SETTINGS_MODULE=${DJANGO_SETTINGS_MODULE:-config.settings.prod}
-      - ALLOWED_HOSTS=${DOMAIN:-localhost},localhost,*.ondigitalocean.app
-      - CSRF_TRUSTED_ORIGINS=https://${DOMAIN},https://*.ondigitalocean.app
+      - ALLOWED_HOSTS=${PORTAL_DOMAIN:?PORTAL_DOMAIN required},localhost,*.ondigitalocean.app
+      - CSRF_TRUSTED_ORIGINS=https://${PORTAL_DOMAIN:?PORTAL_DOMAIN required},https://*.ondigitalocean.app
       - DJANGO_SECURE_SSL_REDIRECT=false
       - SERVICE_NAME=portal
       - SESSION_DB_PATH=/app/data/portal.sqlite3

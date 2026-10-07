@@ -88,7 +88,8 @@ check_requirements() {
     fi
 }
 
-# compose_up TYPE [--profile NAME ...]: start TYPE and wait until every service reports healthy.
+# compose_up TYPE [--profile NAME ...]: start TYPE and wait until every service with a healthcheck
+# reports healthy and the rest (Caddy) are running.
 compose_up() {
     local type="$1"
     shift
@@ -99,9 +100,9 @@ compose_up() {
         up+=(--build)
     fi
 
-    log_info "Starting services and waiting for them to report healthy..."
+    log_info "Starting services and waiting for them to be healthy..."
     if ! praho_compose "$type" "$@" "${up[@]}"; then
-        log_error "Services did not become healthy. Inspect: docker logs praho_platform"
+        log_error "Services did not become healthy. Inspect: $0 $type --logs (or docker logs <container>)"
         praho_compose "$type" "$@" ps || true
         exit 1
     fi
@@ -162,7 +163,7 @@ deploy_container_service() {
 verify_deployment() {
     local type="$1"
     shift
-    log_success "Deployment complete! Every service reports healthy."
+    log_success "Deployment complete! Every service is running, and those with a healthcheck report healthy."
     echo ""
     echo "Services:"
     praho_compose "$type" "$@" ps

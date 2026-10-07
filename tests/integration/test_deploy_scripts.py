@@ -351,6 +351,25 @@ class TestComposeReadsTheChosenFile:
         assert services["portal"]["environment"]["PORTAL_TRUSTED_PROXY_CIDRS"] == "10.200.250.0/24"
 
     @pytest.mark.integration
+    def test_container_service_serves_the_two_documented_domains(self, project: Project) -> None:
+        # The header and docs name PLATFORM_DOMAIN and PORTAL_DOMAIN; the legacy DOMAIN is not set.
+        env_file = project.write_env(
+            ".env.prod",
+            PROD_ENV
+            + "DB_HOST=db.example.com\nDB_NAME=praho\nDB_USER=praho\nDB_PASSWORD=p\nDJANGO_SECRET_KEY=s\n"
+            "PLATFORM_API_SECRET=h\nPLATFORM_TO_PORTAL_WEBHOOK_SECRET=w\nPORTAL_TRUSTED_PROXY_CIDRS=10.0.0.0/8\n"
+            "PLATFORM_DOMAIN=platform.example.com\nPORTAL_DOMAIN=portal.example.com\n"
+            "PLATFORM_API_BASE_URL=https://platform.example.com/api\n",
+        )
+        services = _compose_config(env_file, project.compose_file("container-service"))
+        platform, portal = services["platform"]["environment"], services["portal"]["environment"]
+        assert "platform.example.com" in platform["ALLOWED_HOSTS"].split(",")
+        assert "https://platform.example.com" in platform["CSRF_TRUSTED_ORIGINS"].split(",")
+        assert portal["PORTAL_DOMAIN"] == "portal.example.com"
+        assert "portal.example.com" in portal["ALLOWED_HOSTS"].split(",")
+        assert "https://portal.example.com" in portal["CSRF_TRUSTED_ORIGINS"].split(",")
+
+    @pytest.mark.integration
     def test_staging_values_reach_the_platform_and_secrets_stay_off_the_portal(self, project: Project) -> None:
         common = (
             "DJANGO_SECRET_KEY=s\nDB_PASSWORD=p\nPLATFORM_API_SECRET=h\nPLATFORM_TO_PORTAL_WEBHOOK_SECRET=w\n"

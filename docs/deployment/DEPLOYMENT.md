@@ -554,7 +554,7 @@ cp .env.example.prod .env.prod
 ./deploy/scripts/deploy.sh single-server --stop       # or: make deploy-stop
 ```
 
-The script passes the file to every Compose call and waits until every container reports healthy (`up --wait`; Docker Compose v2 is required). A first boot migrates a fresh database before the platform reports healthy, which can take a few minutes. Health is read from the containers: the stack publishes only Caddy's ports 80 and 443.
+The script passes the file to every Compose call and waits until the platform, portal and database report healthy and Caddy, which has no healthcheck, is running (`up --wait`; Docker Compose v2 is required). A first boot migrates a fresh database before the platform reports healthy, which can take a few minutes. Health is read from the containers: the stack publishes only Caddy's ports 80 and 443.
 
 To run Compose directly, pass the file twice: `--env-file` for `${VAR}` substitution, and `PRAHO_ENV_FILE` for the platform, which receives the whole file:
 
