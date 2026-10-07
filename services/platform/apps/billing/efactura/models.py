@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     pass
 
 
+from apps.billing.efactura.settings import efactura_settings
 from apps.settings.services import SettingsService
 
 
@@ -101,7 +102,7 @@ class EFacturaDocument(models.Model):
     - WebhookEvent (for deduplication)
     """
 
-    # Retry configuration — class-level fallbacks
+    # Legacy public constants; runtime retry policy resolves through efactura_settings.
     MAX_RETRIES: ClassVar[int] = 5
     RETRY_DELAYS: ClassVar[list[int]] = [300, 900, 3600, 7200, 21600]  # 5m, 15m, 1h, 2h, 6h
 
@@ -516,10 +517,9 @@ class EFacturaDocument(models.Model):
         self.retry_count += 1
         self._release_submission_claim()
 
-        # Schedule retry with exponential backoff
-        if self.retry_count <= self.MAX_RETRIES:
-            delay_index = min(self.retry_count - 1, len(self.RETRY_DELAYS) - 1)
-            delay_seconds = self.RETRY_DELAYS[delay_index]
+        # Resolve staff policy when the failure is recorded, preserving the existing retry-count boundary.
+        if self.retry_count <= efactura_settings.max_retries:
+            delay_seconds = efactura_settings.get_retry_delay(self.retry_count)
             self.next_retry_at = timezone.now() + timedelta(seconds=delay_seconds)
         else:
             self.next_retry_at = None  # No more retries
@@ -626,7 +626,7 @@ class EFacturaDocument(models.Model):
         """Check if document can be retried."""
         return (
             self.status in EFacturaStatus.retryable_statuses()
-            and self.retry_count < self.MAX_RETRIES
+            and self.retry_count < efactura_settings.max_retries
             and self.next_retry_at is not None
         )
 
@@ -642,7 +642,7 @@ class EFacturaDocument(models.Model):
         return (
             self.status == EFacturaStatus.ERROR.value
             and self.next_retry_at is None
-            and self.retry_count < self.MAX_RETRIES
+            and self.retry_count < efactura_settings.max_retries
         )
 
     @property
