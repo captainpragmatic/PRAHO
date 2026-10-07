@@ -46,18 +46,18 @@ Dark theme interface for staff/admin audit log monitoring
                             {% trans "Date Range" %}
                         </label>
                         <div class="flex gap-2">
-                            {% include 'components/input.html' with type='date' name='start_date' placeholder='Start date' container_class='flex-1' %}
-                            {% include 'components/input.html' with type='date' name='end_date' placeholder='End date' container_class='flex-1' %}
+                            {% include 'components/input.html' with input_type='date' name='start_date' aria_label=_('Start date') placeholder='Start date' container_class='flex-1' %}
+                            {% include 'components/input.html' with input_type='date' name='end_date' aria_label=_('End date') placeholder='End date' container_class='flex-1' %}
                         </div>
                     </div>
 
                     <!-- User Filter -->
                     <div class="relative">
-                        <label class="block text-sm font-medium text-slate-300 mb-2">
+                        <label for="audit-user" class="block text-sm font-medium text-slate-300 mb-2">
                             {% trans "User" %}
                         </label>
                         <select class="bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white text-sm w-full focus:ring-2 focus:ring-blue-500 focus:border-transparent relative z-10"
-                                name="user">
+                                id="audit-user" name="user">
                             <option value="">{% trans "All Users" %}</option>
                             {% for user in users %}
                                 <option value="{{ user.id }}">{{ user.email }}</option>
@@ -67,11 +67,11 @@ Dark theme interface for staff/admin audit log monitoring
 
                     <!-- Action Type Filter -->
                     <div class="relative">
-                        <label class="block text-sm font-medium text-slate-300 mb-2">
+                        <label for="audit-action" class="block text-sm font-medium text-slate-300 mb-2">
                             {% trans "Action Type" %}
                         </label>
                         <select class="bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white text-sm w-full focus:ring-2 focus:ring-blue-500 focus:border-transparent relative z-10"
-                                name="action">
+                                id="audit-action" name="action">
                             <option value="">{% trans "All Actions" %}</option>
                             {% for action_value, action_label in action_choices %}
                                 <option value="{{ action_value }}">{{ action_label }}</option>
@@ -84,11 +84,11 @@ Dark theme interface for staff/admin audit log monitoring
                 <div class="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     <!-- Content Type Filter -->
                     <div class="relative">
-                        <label class="block text-sm font-medium text-slate-300 mb-2">
+                        <label for="audit-content-type" class="block text-sm font-medium text-slate-300 mb-2">
                             {% trans "Content Type" %}
                         </label>
                         <select class="bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white text-sm w-full focus:ring-2 focus:ring-blue-500 focus:border-transparent relative z-10"
-                                name="content_type">
+                                id="audit-content-type" name="content_type">
                             <option value="">{% trans "All Types" %}</option>
                             {% for ct in content_types %}
                                 <option value="{{ ct.id }}">

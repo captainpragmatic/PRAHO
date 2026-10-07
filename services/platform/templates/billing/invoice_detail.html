@@ -64,7 +64,7 @@
               {% if invoice.status == 'paid' %}bg-green-100 text-green-800
               {% elif invoice.status == 'issued' %}bg-blue-100 text-blue-800
               {% elif invoice.status == 'overdue' %}bg-red-100 text-red-800
-              {% elif invoice.status == 'draft' %}bg-gray-100 text-gray-800
+              {% elif invoice.status == 'draft' %}bg-slate-100 text-slate-800 dark:bg-slate-700 dark:text-slate-200
               {% else %}bg-yellow-100 text-yellow-800{% endif %}">
               {{ invoice.get_status_display }}
             </span>

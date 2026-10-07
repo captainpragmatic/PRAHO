@@ -74,7 +74,7 @@
 
           <div class="space-y-4">
             <div>
-              <label class="block text-sm font-medium text-slate-300 mb-2">
+              <label for="proforma-customer-select" class="block text-sm font-medium text-slate-300 mb-2">
                 {% trans 'Select Customer' %} <span class="text-red-500">*</span>
               </label>
               <select name="customer" required
@@ -128,18 +128,18 @@
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
             <div>
-              <label class="block text-sm font-medium text-slate-300 mb-2">
+              <label for="proforma-number" class="block text-sm font-medium text-slate-300 mb-2">
                 {% trans 'Proforma Number' %}
               </label>
-              <input type="text" readonly
+              <input id="proforma-number" type="text" readonly
                 class="w-full px-3 py-2 bg-slate-600 border border-slate-600 rounded-md text-slate-300"
                 value="{% trans 'Auto-generated (PRO-XXXXXX)' %}">
             </div>
             <div>
-              <label class="block text-sm font-medium text-slate-300 mb-2">
+              <label for="proforma-valid-until" class="block text-sm font-medium text-slate-300 mb-2">
                 {% trans 'Valid Until' %} <span class="text-red-500">*</span>
               </label>
-              <input type="date" name="valid_until" required
+              <input id="proforma-valid-until" type="date" name="valid_until" required
                 {% if proforma %}value="{{ proforma.valid_until|date:'Y-m-d' }}"{% elif posted.valid_until %}value="{{ posted.valid_until }}"{% endif %}
                 class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
             </div>
@@ -147,17 +147,17 @@
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label class="block text-sm font-medium text-slate-300 mb-2">
+              <label for="proforma-currency" class="block text-sm font-medium text-slate-300 mb-2">
                 {% trans 'Currency' %} <span class="text-red-500">*</span>
               </label>
-              <input type="text" name="currency" readonly value="{{ selected_currency }}"
+              <input id="proforma-currency" type="text" name="currency" readonly value="{{ selected_currency }}"
                 class="w-full rounded-md border border-slate-600 bg-slate-700 px-3 py-2 text-white">
             </div>
             <div>
-              <label class="block text-sm font-medium text-slate-300 mb-2">
+              <label for="proforma-status" class="block text-sm font-medium text-slate-300 mb-2">
                 {% trans 'Status' %}
               </label>
-              <input type="text" readonly
+              <input id="proforma-status" type="text" readonly
                 class="w-full px-3 py-2 bg-slate-600 border border-slate-600 rounded-md text-slate-300"
                 value="{% trans 'Draft' %}">
             </div>
@@ -188,20 +188,20 @@
                 <div class="proforma-line grid grid-cols-2 md:grid-cols-12 gap-3 items-center border border-slate-700 md:border-0 rounded-lg md:rounded-none p-3 md:p-0" data-line="{{ forloop.counter0 }}">
                   <div class="col-span-2 md:col-span-4">
                     <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Description' %}</label>
-                    <input type="text" name="line_{{ forloop.counter0 }}_description" value="{{ line.description }}" placeholder="{% trans 'e.g. Web hosting package' %}" class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
-                    <input type="text" name="line_{{ forloop.counter0 }}_domain_name" value="{{ line.domain_name }}" placeholder="{% trans 'e.g. example.com' %}" class="line-domain w-full mt-1 px-3 py-1.5 bg-slate-700/50 border border-slate-600/50 rounded-md text-blue-400 text-xs placeholder-slate-500 focus:ring-2 focus:ring-blue-500">
+                    <input type="text" name="line_{{ forloop.counter0 }}_description" aria-label="{% trans 'Description' %}" value="{{ line.description }}" placeholder="{% trans 'e.g. Web hosting package' %}" class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
+                    <input type="text" name="line_{{ forloop.counter0 }}_domain_name" aria-label="{% trans 'Domain name' %}" value="{{ line.domain_name }}" placeholder="{% trans 'e.g. example.com' %}" class="line-domain w-full mt-1 px-3 py-1.5 bg-slate-700/50 border border-slate-600/50 rounded-md text-blue-400 text-xs placeholder-slate-500 focus:ring-2 focus:ring-blue-500">
                   </div>
                   <div class="col-span-1 md:col-span-2">
                     <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Qty' %}</label>
-                    <input type="number" name="line_{{ forloop.counter0 }}_quantity" value="{{ line.quantity }}" class="line-quantity w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
+                    <input type="number" name="line_{{ forloop.counter0 }}_quantity" aria-label="{% trans 'Quantity' %}" value="{{ line.quantity }}" class="line-quantity w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
                   </div>
                   <div class="col-span-1 md:col-span-2">
                     <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Unit Price' %}</label>
-                    <input type="number" name="line_{{ forloop.counter0 }}_unit_price" step="0.01" value="{{ line.unit_price }}" class="line-price w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
+                    <input type="number" name="line_{{ forloop.counter0 }}_unit_price" aria-label="{% trans 'Unit Price' %}" step="0.01" value="{{ line.unit_price }}" class="line-price w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
                   </div>
                   <div class="col-span-1 md:col-span-2">
                     <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'VAT Rate' %}</label>
-                    <select name="line_{{ forloop.counter0 }}_vat_rate" class="line-vat w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
+                    <select name="line_{{ forloop.counter0 }}_vat_rate" aria-label="{% trans 'VAT Rate' %}" class="line-vat w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
                       <option value="21" {% if line.tax_rate|floatformat:4 == "0.2100" %}selected{% endif %}>21% ({% trans 'Standard' %})</option>
                       <option value="11" {% if line.tax_rate|floatformat:4 == "0.1100" %}selected{% endif %}>11% ({% trans 'Reduced' %})</option>
                       <option value="0" {% if line.tax_rate|floatformat:4 == "0.0000" %}selected{% endif %}>0% ({% trans 'Exempt' %})</option>
@@ -221,20 +221,20 @@
                 <div class="proforma-line grid grid-cols-2 md:grid-cols-12 gap-3 items-center border border-slate-700 md:border-0 rounded-lg md:rounded-none p-3 md:p-0" data-line="0">
                   <div class="col-span-2 md:col-span-4">
                     <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Description' %}</label>
-                    <input type="text" name="line_0_description" placeholder="{% trans 'e.g. Web hosting package' %}" class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
-                    <input type="text" name="line_0_domain_name" placeholder="{% trans 'e.g. example.com' %}" class="line-domain w-full mt-1 px-3 py-1.5 bg-slate-700/50 border border-slate-600/50 rounded-md text-blue-400 text-xs placeholder-slate-500 focus:ring-2 focus:ring-blue-500">
+                    <input type="text" name="line_0_description" aria-label="{% trans 'Description' %}" placeholder="{% trans 'e.g. Web hosting package' %}" class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
+                    <input type="text" name="line_0_domain_name" aria-label="{% trans 'Domain name' %}" placeholder="{% trans 'e.g. example.com' %}" class="line-domain w-full mt-1 px-3 py-1.5 bg-slate-700/50 border border-slate-600/50 rounded-md text-blue-400 text-xs placeholder-slate-500 focus:ring-2 focus:ring-blue-500">
                   </div>
                   <div class="col-span-1 md:col-span-2">
                     <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Qty' %}</label>
-                    <input type="number" name="line_0_quantity" value="1" class="line-quantity w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
+                    <input type="number" name="line_0_quantity" aria-label="{% trans 'Quantity' %}" value="1" class="line-quantity w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
                   </div>
                   <div class="col-span-1 md:col-span-2">
                     <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Unit Price' %}</label>
-                    <input type="number" name="line_0_unit_price" step="0.01" placeholder="0.00" class="line-price w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
+                    <input type="number" name="line_0_unit_price" aria-label="{% trans 'Unit Price' %}" step="0.01" placeholder="0.00" class="line-price w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
                   </div>
                   <div class="col-span-1 md:col-span-2">
                     <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'VAT Rate' %}</label>
-                    <select name="line_0_vat_rate" class="line-vat w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
+                    <select name="line_0_vat_rate" aria-label="{% trans 'VAT Rate' %}" class="line-vat w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
                       <option value="21">21% ({% trans 'Standard' %})</option>
                       <option value="11">11% ({% trans 'Reduced' %})</option>
                       <option value="0">0% ({% trans 'Exempt' %})</option>

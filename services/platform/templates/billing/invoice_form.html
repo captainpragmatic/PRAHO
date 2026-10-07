@@ -114,10 +114,10 @@
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label class="block text-sm font-medium text-slate-300 mb-2">
+              <label for="invoice-currency" class="block text-sm font-medium text-slate-300 mb-2">
                 {% trans 'Currency' %} <span class="text-red-500">*</span>
               </label>
-              <input name="currency" value="{{ invoice.currency.code }}" readonly
+              <input id="invoice-currency" name="currency" value="{{ invoice.currency.code }}" readonly
                      class="w-full rounded-md border border-slate-600 bg-slate-700 px-3 py-2 text-white">
             </div>
             <div>
