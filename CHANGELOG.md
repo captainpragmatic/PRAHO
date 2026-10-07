@@ -81,6 +81,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The portal-only Docker stack pins its network to `10.200.250.0/24` (`PRAHO_WEB_SUBNET`), so
+  `PORTAL_TRUSTED_PROXY_CIDRS` has a known value before the first start. Docker used to choose the
+  subnet, and unless the operator found and set it, the portal attributed every request to its own
+  Caddy, which merged all customers into one rate-limit bucket and one audit address.
 - `make docker-dev` starts again. Since March it built the production images and mounted the source
   over `/app`, hiding their venv and entrypoint, and the production venv lacks the debug toolbar and
   colorlog that the dev settings import. The Dockerfiles now have `dev` targets that install the dev
