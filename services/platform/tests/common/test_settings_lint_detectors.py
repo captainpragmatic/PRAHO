@@ -27,6 +27,8 @@ import ast
 import inspect
 import sys
 import tempfile
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 from pathlib import Path
 from typing import ClassVar
 from unittest.mock import patch
@@ -351,6 +353,98 @@ class FoundationReaderDetectionTests(SimpleTestCase):
         )
         return lint.check_untested_effects({KEY, OTHER}, [], set(), {}, {}, set(), **options)
 
+    def test_reader_baseline_writer_rebuilds_debt_and_keeps_the_ratchet(self) -> None:
+        app_a = lint.APPS_DIR / "reader_a.py"
+        app_z = lint.APPS_DIR / "reader_z.py"
+        test_path = lint.PLATFORM_TESTS_DIR / "common" / "test_reader_probe.py"
+        baseline = lint.PROJECT_ROOT / "scripts" / "reader_probe_baseline.txt"
+        texts = {
+            app_a: (
+                "from apps.settings.services import SettingsService\n"
+                "class Consumer:\n"
+                f'    def tested(self):\n        return SettingsService.get_boolean_setting("{KEY}", False)\n'
+                f'    def sibling(self):\n        return SettingsService.get_boolean_setting("{KEY}", False)\n'
+                "    def duplicate(self):\n"
+                f'        first = SettingsService.get_setting("{OTHER}", "builtin")\n'
+                f'        return first, SettingsService.get_setting("{OTHER}", "builtin")\n'
+                "    def retired(self):\n        return SettingsService.get_setting('retired.flag', False)\n"
+            ),
+            app_z: (
+                "from apps.settings.services import SettingsService\n"
+                "class Consumer:\n"
+                f'    def read(self):\n        return SettingsService.get_boolean_setting("{KEY}", False)\n'
+            ),
+            test_path: (
+                "from apps.reader_a import Consumer\n"
+                "class Effect:\n"
+                "    def test_effect(self):\n"
+                f'        SettingsService.update_setting("{KEY}", True)\n'
+                "        reader = Consumer()\n        self.assertTrue(reader.tested())\n"
+            ),
+            baseline: (f"@ services/platform/apps/reader_z.py\n{KEY}|Consumer.read|1\nobsolete.flag|Removed.read|1\n"),
+            lint.DEFAULT_READER_BASELINE: "# Leave the default reader baseline unchanged.\n",
+            lint.DEFAULT_ALLOWLIST: "",
+            lint.DEFAULT_EFFECT_BASELINE: "",
+            lint.DEFAULT_DRIFT_BASELINE: "",
+            lint.DEFAULT_INERT_BASELINE: "",
+        }
+        original_read = Path.read_text
+        original_exists = Path.exists
+
+        def read(path: Path, encoding: str | None = None, errors: str | None = None) -> str:
+            return texts[path] if path in texts else original_read(path, encoding=encoding, errors=errors)
+
+        def write(path: Path, data: str, encoding: str | None = None, errors: str | None = None) -> int:
+            texts[path] = data
+            return len(data)
+
+        def exists(path: Path) -> bool:
+            return path in texts or original_exists(path)
+
+        def files(root: Path) -> list[Path]:
+            return [test_path] if root == lint.PLATFORM_TESTS_DIR else [app_z, app_a]
+
+        def run(*options: str) -> int | str | None:
+            output = StringIO()
+            argv = ["lint_settings_coverage.py", "--reader-baseline", str(baseline), *options]
+            with patch.object(sys, "argv", argv), redirect_stdout(output), redirect_stderr(output):
+                try:
+                    return lint.main()
+                except SystemExit as exc:
+                    return exc.code
+
+        with (
+            patch.object(Path, "read_text", autospec=True, side_effect=read),
+            patch.object(Path, "write_text", autospec=True, side_effect=write),
+            patch.object(Path, "exists", autospec=True, side_effect=exists),
+            patch.object(lint, "iter_python_files", side_effect=files),
+            patch.object(lint, "iter_template_files", return_value=[]),
+            patch.object(lint, "extract_default_settings", return_value={KEY: False, OTHER: "builtin"}),
+            patch.object(lint, "extract_catalog_keys", return_value={KEY, OTHER}),
+        ):
+            self.assertEqual(run("--write-reader-baseline"), 0)
+            recorded = texts[baseline]
+            self.assertEqual(
+                [line for line in recorded.splitlines() if line and not line.startswith("#")],
+                [
+                    "@ services/platform/apps/reader_a.py",
+                    f"{OTHER}|Consumer.duplicate|1",
+                    f"{OTHER}|Consumer.duplicate|2",
+                    f"{KEY}|Consumer.sibling|1",
+                    "@ services/platform/apps/reader_z.py",
+                    f"{KEY}|Consumer.read|1",
+                ],
+            )
+            self.assertEqual(len(lint.load_reader_baseline(baseline)), 4)
+            self.assertEqual(texts[lint.DEFAULT_READER_BASELINE], "# Leave the default reader baseline unchanged.\n")
+            self.assertEqual(run("--write-reader-baseline"), 0)
+            self.assertEqual(texts[baseline], recorded)
+            self.assertEqual(run("--fail-on", "medium"), 0)
+            self.assertEqual(texts[baseline], recorded)
+            texts[app_z] += f'    def new(self):\n        return SettingsService.get_boolean_setting("{KEY}", False)\n'
+            self.assertEqual(run("--fail-on", "medium"), 1)
+            self.assertEqual(texts[baseline], recorded)
+
     def test_row_only_readers_are_detected_without_default_drift(self) -> None:
         for reader in ("SystemSetting.get_value_by_key", "SettingsService.get_stored_setting"):
             with self.subTest(reader=reader):
@@ -449,6 +543,104 @@ class FoundationReaderDetectionTests(SimpleTestCase):
                 "from apps.probe import run, issue", "from apps.unrelated import run, issue"
             )
             self.assertEqual(lint.effect_tested_keys({KEY}, [test_path], {KEY: {"apps.probe"}}, {}, set()), set())
+
+    def test_tested_callable_does_not_credit_an_untested_sibling(self) -> None:
+        sources = {
+            "apps/probe.py": (
+                "from apps.settings.services import SettingsService\n"
+                f'def tested():\n    return SettingsService.get_boolean_setting("{KEY}", False)\n'
+                f'def untested_sibling():\n    return SettingsService.get_boolean_setting("{KEY}", False)\n'
+            )
+        }
+        calls = self.scan(sources)
+        self.assertEqual([call.scope for call in calls], ["tested", "untested_sibling"])
+        known = set(lint.reader_locations(calls[:1]))
+        for import_line, invocation in (
+            ("from apps.probe import tested", "tested()"),
+            ("from apps.probe import tested as exercised", "exercised()"),
+            ("import apps.probe as probe", "probe.tested()"),
+        ):
+            with self.subTest(import_line=import_line):
+                fixture = (
+                    f"{import_line}\nclass Effect:\n"
+                    f'    def test_effect(self):\n        SettingsService.update_setting("{KEY}", True)\n'
+                    f"        self.assertTrue({invocation})\n"
+                )
+                path = lint.PLATFORM_TESTS_DIR / "test_probe.py"
+                with patch.object(Path, "read_text", return_value=fixture):
+                    findings = lint.check_untested_effects(
+                        {KEY},
+                        [path],
+                        {KEY},
+                        {KEY: {"apps.probe"}},
+                        {},
+                        set(),
+                        reader_baseline=known,
+                        call_sites=calls,
+                    )
+                self.assertEqual(
+                    [
+                        (finding.check, finding.severity, finding.line)
+                        for finding in findings
+                        if finding.severity == "medium"
+                    ],
+                    [("untested-new-reader", "medium", calls[1].line)],
+                )
+                self.assertIn("untested_sibling", findings[0].message)
+                with patch.object(Path, "read_text", return_value=fixture):
+                    findings = lint.check_untested_effects(
+                        {KEY},
+                        [path],
+                        set(),
+                        {KEY: {"apps.probe"}},
+                        {},
+                        set(),
+                        call_sites=calls,
+                    )
+                self.assertEqual(
+                    [finding.line for finding in findings if finding.check == "untested-new-reader"],
+                    [calls[1].line],
+                )
+
+    def test_wrapper_credit_follows_callable_edges_without_crediting_siblings(self) -> None:
+        sources = {
+            "apps/probe.py": (
+                "from apps.settings.services import SettingsService\n"
+                f'def tested():\n    return SettingsService.get_boolean_setting("{KEY}", False)\n'
+                f'def untested_sibling():\n    return SettingsService.get_boolean_setting("{KEY}", False)\n'
+                "def entrypoint():\n    return tested()\n"
+            )
+        }
+        calls = self.scan(sources)
+        fixture = (
+            "from apps.probe import entrypoint\nclass Effect:\n"
+            f'    def test_effect(self):\n        SettingsService.update_setting("{KEY}", True)\n'
+            "        self.assertTrue(entrypoint())\n"
+        )
+        path = lint.PLATFORM_DIR / "apps/probe.py"
+        test_path = lint.PLATFORM_TESTS_DIR / "test_probe.py"
+        texts = {path: sources["apps/probe.py"], test_path: fixture}
+
+        original = Path.read_text
+
+        def read(file: Path, encoding: str | None = None, errors: str | None = None) -> str:
+            return texts[file] if file in texts else original(file, encoding=encoding, errors=errors)
+
+        with patch.object(Path, "read_text", autospec=True, side_effect=read):
+            graph = lint.production_import_graph([path])
+            findings = lint.check_untested_effects(
+                {KEY},
+                [test_path],
+                {KEY},
+                {KEY: {"apps.probe"}},
+                graph,
+                set(),
+                call_sites=calls,
+            )
+        self.assertEqual(
+            [(finding.check, finding.severity, finding.line) for finding in findings if finding.severity == "medium"],
+            [("untested-new-reader", "medium", calls[1].line)],
+        )
 
     def test_new_untested_reader_fails_at_medium(self) -> None:
         calls = self.scan({"apps/probe.py": f'value = SettingsService.get_setting("{OTHER}", "builtin")\n'})

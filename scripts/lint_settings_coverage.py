@@ -38,6 +38,7 @@ import re
 import sys
 from dataclasses import asdict, dataclass
 from functools import cache
+from gettext import gettext
 from pathlib import Path
 from typing import Any
 
@@ -154,6 +155,27 @@ def load_reader_baseline(path: Path) -> set[str]:
             raise ValueError(f"Invalid reader baseline location: {line}")
         locations.add(f"{key}|{consumer}|{scope}|{ordinal}")
     return locations
+
+
+def write_reader_baseline(path: Path, findings: list[Finding], call_sites: list[SettingsCallSite]) -> int:
+    """Replace the grouped baseline with the complete current untested-reader inventory."""
+    untested_sites = {
+        (finding.file, finding.line, finding.name) for finding in findings if finding.check == "untested-new-reader"
+    }
+    grouped: dict[str, list[str]] = {}
+    for location, call in reader_locations(call_sites).items():
+        if (call.file, call.line, call.key) in untested_sites:
+            key, consumer, scope, ordinal = location.split("|")
+            grouped.setdefault(consumer, []).append(f"{key}|{scope}|{ordinal}")
+    lines = [
+        "# Grandfathered untested settings readers.",
+        "# Regenerate intentionally with lint_settings_coverage.py --write-reader-baseline.",
+        "# @ headers name consumer files. Entries are key|qualified callable|ordinal; line shifts are harmless.",
+    ]
+    for consumer, entries in sorted(grouped.items()):
+        lines.extend(["", f"@ {consumer}", *sorted(entries)])
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return sum(len(entries) for entries in grouped.values())
 
 
 def load_allowlist(path: Path) -> tuple[set[str], set[str]]:
@@ -1074,8 +1096,87 @@ def _module_name(relative_path: str) -> str:
     return relative_path.replace("services/platform/", "").removesuffix(".py").replace("/", ".")
 
 
+def _import_bindings(node: ast.AST) -> dict[str, str]:
+    """Resolve import aliases to their fully qualified symbols."""
+    bindings: dict[str, str] = {}
+    for child in ast.walk(node):
+        if isinstance(child, ast.ImportFrom) and child.module and not child.level:
+            for alias in child.names:
+                if alias.name != "*":
+                    bindings[alias.asname or alias.name] = f"{child.module}.{alias.name}"
+        elif isinstance(child, ast.Import):
+            for alias in child.names:
+                bindings[alias.asname or alias.name.split(".")[0]] = (
+                    alias.name if alias.asname else alias.name.split(".")[0]
+                )
+    return bindings
+
+
+def _bound_callable(node: ast.expr, bindings: dict[str, str]) -> str:
+    if isinstance(node, ast.Call):
+        return _bound_callable(node.func, bindings)
+    if isinstance(node, ast.Attribute):
+        parent = _bound_callable(node.value, bindings)
+        return f"{parent}.{node.attr}" if parent else ""
+    if isinstance(node, ast.Name):
+        return bindings.get(node.id, "")
+    return ""
+
+
+def _exercised_callables(node: ast.AST, bindings: dict[str, str]) -> set[str]:
+    """Calls, including imported aliases and methods on locally constructed instances."""
+    local = dict(bindings)
+    for child in ast.walk(node):
+        if isinstance(child, ast.Assign) and isinstance(child.value, ast.Call):
+            target = _bound_callable(child.value.func, local)
+            if target:
+                for name in child.targets:
+                    if isinstance(name, ast.Name):
+                        local[name.id] = target
+    return {
+        target
+        for child in ast.walk(node)
+        if isinstance(child, ast.Call) and (target := _bound_callable(child.func, local))
+    }
+
+
+def _callable_edges(tree: ast.Module, module: str) -> dict[str, set[str]]:
+    """Callable edges share the module graph's bounded reachability, without sibling credit."""
+    edges: dict[str, set[str]] = {}
+
+    def visit(nodes: list[ast.stmt], scope: str, inherited: dict[str, str]) -> None:
+        bindings = dict(inherited)
+        for node in nodes:
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+                bindings[node.name] = f"{scope}.{node.name}"
+        for node in nodes:
+            if isinstance(node, ast.ClassDef):
+                visit(node.body, f"{scope}.{node.name}", bindings)
+            elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                local = {**bindings, **_import_bindings(node)}
+                if scope != module:
+                    local.update({"self": scope, "cls": scope})
+                # Nested declarations are separate callables; defining one does not exercise it.
+                body = ast.Module(
+                    body=[
+                        child
+                        for child in node.body
+                        if not isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+                    ],
+                    type_ignores=[],
+                )
+                target = f"{scope}.{node.name}"
+                edges[target] = _exercised_callables(body, local)
+                visit(node.body, target, local)
+                if node.name == "__init__":
+                    edges.setdefault(scope, set()).add(target)
+
+    visit(tree.body, module, _import_bindings(tree))
+    return edges
+
+
 def production_import_graph(app_files: list[Path]) -> dict[str, set[str]]:
-    """Module -> the `apps.*` modules it imports from, function-level imports included.
+    """Module and callable edges, with function-level imports included.
 
     ADR-0007 pushes cross-app imports inside functions, so a module-level-only scan would miss most
     of this codebase's real edges.
@@ -1085,6 +1186,11 @@ def production_import_graph(app_files: list[Path]) -> dict[str, set[str]]:
         text = path.read_text(errors="ignore")
         module = _module_name(str(path.relative_to(PROJECT_ROOT)))
         graph[module] = set(re.findall(r"from (apps\.[\w.]+) import", text))
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            continue
+        graph.update(_callable_edges(tree, module))
     return graph
 
 
@@ -1237,7 +1343,11 @@ def effect_tested_keys(  # noqa: PLR0913  # Criterion inputs and optional per-co
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and node.module:
                 imported.setdefault(node.module, set()).update(a.asname or a.name for a in node.names)
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    imported.setdefault(alias.name, set()).add(alias.asname or alias.name.split(".")[0])
         lines = source.splitlines()
+        bindings = _import_bindings(tree)
 
         for cls in (n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)):
             referenced = {n.id for n in ast.walk(cls) if isinstance(n, ast.Name)} | {
@@ -1270,7 +1380,7 @@ def effect_tested_keys(  # noqa: PLR0913  # Criterion inputs and optional per-co
                 }
                 observed_through_reader = bool(observed_readers)
                 if reader_credits is not None:
-                    reader_credits.setdefault(key, set()).update(observed_readers)
+                    reader_credits.setdefault(key, set()).update(_exercised_callables(cls, bindings))
                 # A key with no Python reader at all - the `company.*` identity values - can only be
                 # observed on a rendered page.
                 rendered_on_a_page = key in template_keys and makes_request
@@ -1329,7 +1439,10 @@ def check_untested_effects(  # noqa: PLR0913  # One argument per input the crite
     for location, call in reader_locations(call_sites or []).items():
         if (
             call.key in catalog_keys
-            and _module_name(call.file) not in reader_credits.get(call.key, set())
+            and not any(
+                reaches_reader(target, {f"{_module_name(call.file)}.{call.scope}"}, graph)
+                for target in reader_credits.get(call.key, set())
+            )
             and location not in known_readers
         ):
             findings.append(
@@ -1645,6 +1758,11 @@ def main() -> int:
         default=DEFAULT_READER_BASELINE,
         help="Existing untested reader locations (default: scripts/settings_reader_baseline.txt)",
     )
+    parser.add_argument(
+        "--write-reader-baseline",
+        action="store_true",
+        help=gettext("Regenerate the reader baseline from all current untested readers"),
+    )
     args = parser.parse_args()
 
     # Load allowlist (constants for Check 2/3, orphan keys for Check 1)
@@ -1682,7 +1800,7 @@ def main() -> int:
             production_readers(app_files),
             production_import_graph(app_files),
             template_consumed_keys(template_files),
-            load_reader_baseline(args.reader_baseline),
+            set() if args.write_reader_baseline else load_reader_baseline(args.reader_baseline),
             call_sites,
         )
     )
@@ -1695,6 +1813,11 @@ def main() -> int:
             load_key_baseline(args.inert_baseline),
         )
     )
+
+    if args.write_reader_baseline:
+        count = write_reader_baseline(args.reader_baseline, all_findings, call_sites)
+        print(gettext("✅ Reader baseline written: %(count)s entries") % {"count": count})
+        return 0
 
     # Sort by severity, then file, then line
     all_findings.sort(key=lambda f: (SEVERITY_ORDER.get(f.severity, 99), f.file, f.line))

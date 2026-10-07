@@ -8,6 +8,7 @@ Ordinary sync preserves values except old defaults in the activation manifest.
 from __future__ import annotations
 
 import logging
+from decimal import DecimalException
 
 from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand, CommandError, CommandParser
@@ -114,8 +115,15 @@ def _retained_value_is_effective(setting: SystemSetting, definition: SettingDef)
         return False
     validator = SystemSetting(data_type=definition.data_type)
     try:
-        validator._validate_value(setting.get_typed_value(), "value")
-    except (ValidationError, ValueError, TypeError):
+        value = setting.get_typed_value()
+        # The boolean getter accepts every non-null value via string coercion or bool().
+        if definition.data_type == "boolean":
+            return True
+        # The list getter accepts lists and every string, including non-JSON strings.
+        if definition.data_type == "list":
+            return isinstance(value, list | str)
+        validator._validate_value(value, "value")
+    except (ValidationError, ValueError, TypeError, DecimalException):
         return False
     return True
 
@@ -193,7 +201,8 @@ class Command(BaseCommand):
         with transaction.atomic():
             _retire_settings(category_filter, messages)
 
-            for definition in CATALOG:
+            # Match apply_change_set(): overlapping settings must always lock in key order.
+            for definition in sorted(CATALOG, key=lambda item: item.key):
                 if category_filter and definition.group != category_filter:
                     continue
                 if definition.key in RETIRED_SETTING_KEYS:

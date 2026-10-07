@@ -2,6 +2,12 @@
 # Consumer effect coverage is deferred to later packages; no existing debt is hidden by key alone.
 # @ headers name consumer files. Entries are key|qualified callable|ordinal; line shifts are harmless.
 
+@ services/platform/apps/api/billing/views.py
+integrations.stripe_publishable_key|begin_recurring_authorization_api|1
+
+@ services/platform/apps/api/users/serializers.py
+portal.public_base_url|PasswordResetRequestSerializer.create|1
+
 @ services/platform/apps/audit/compliance.py
 audit.compliant_score_threshold|get_compliant_score_threshold|1
 audit.partial_score_threshold|get_partial_score_threshold|1
@@ -26,6 +32,9 @@ billing.bank_accounts|bank_transfer_instructions|1
 @ services/platform/apps/billing/config.py
 billing.event_grace_period_hours|get_event_grace_period_hours|1
 billing.future_event_drift_minutes|get_future_event_drift_minutes|1
+billing.reverse_charge_requires_consultation_reference|reverse_charge_requires_consultation_reference|1
+billing.reverse_charge_requires_name_match|reverse_charge_requires_name_match|1
+billing.reverse_charge_requires_vies|reverse_charge_requires_vies|1
 
 @ services/platform/apps/billing/efactura/client.py
 billing.efactura_api_max_retries|EFacturaConfig.from_settings|1
@@ -33,6 +42,10 @@ billing.efactura_api_timeout_seconds|EFacturaConfig.from_settings|1
 
 @ services/platform/apps/billing/efactura/intents.py
 billing.efactura_submission_deadline_days|reconcile_efactura_documents|1
+
+@ services/platform/apps/billing/efactura/models.py
+billing.efactura_deadline_warning_hours|EFacturaDocument.is_deadline_approaching|1
+billing.efactura_submission_deadline_days|EFacturaDocument.submission_deadline|1
 
 @ services/platform/apps/billing/efactura/service.py
 billing.efactura_submission_deadline_days|EFacturaService.check_approaching_deadlines|1
@@ -49,6 +62,8 @@ efactura.company.phone|EFacturaSettings.company_phone|1
 efactura.company.postal_code|EFacturaSettings.company_address|1
 efactura.company.registration_number|EFacturaSettings.company_registration|1
 efactura.company.street|EFacturaSettings.company_address|1
+efactura.enabled|EFacturaSettings.enabled|1
+efactura.environment|EFacturaSettings.environment|1
 efactura.metrics.enabled|EFacturaSettings.metrics_enabled|1
 efactura.metrics.prefix|EFacturaSettings.metrics_prefix|1
 efactura.oauth.client_id|EFacturaSettings.client_id|1
@@ -87,6 +102,13 @@ billing.efactura_batch_size|poll_all_pending_status_task|1
 billing.efactura_batch_size|process_pending_submissions_task|1
 billing.efactura_deadline_warning_hours|check_efactura_deadlines_task|1
 
+@ services/platform/apps/billing/gateways/stripe_gateway.py
+integrations.stripe_enabled|StripeGateway.validate_configuration|1
+integrations.stripe_publishable_key|StripeGateway.validate_configuration|1
+integrations.stripe_secret_key|StripeGateway._initialize_stripe|1
+integrations.stripe_secret_key|StripeGateway.validate_configuration|1
+integrations.stripe_webhook_secret|StripeGateway.validate_configuration|1
+
 @ services/platform/apps/billing/issuers/smartbill/issuer.py
 integrations.smartbill_cif|_config_from_settings|1
 integrations.smartbill_cif|_credentials_from_settings|1
@@ -124,6 +146,9 @@ common.proximity_line_threshold|get_proximity_line_threshold|1
 common.max_summarized_args|get_max_summarized_args|1
 common.sql_display_limit|get_sql_display_limit|1
 common.value_summary_limit|get_value_summary_limit|1
+
+@ services/platform/apps/common/middleware.py
+system.maintenance_mode|MaintenanceModeMiddleware._maintenance_active|1
 
 @ services/platform/apps/common/mixins.py
 common.default_orphans|get_orphans|1
@@ -168,6 +193,9 @@ billing.large_credit_limit_threshold|_handle_credit_limit_change|1
 @ services/platform/apps/customers/tasks.py
 customers.task_soft_time_limit|get_task_soft_time_limit|1
 customers.task_time_limit|get_task_time_limit|1
+
+@ services/platform/apps/domains/models.py
+domains.whois_privacy_price_cents|TLD.save|1
 
 @ services/platform/apps/domains/views.py
 domains.expiry_critical_days|_build_domain_table_data|1
@@ -269,8 +297,13 @@ products.max_price_cents|get_max_price_cents|1
 promotions.max_coupon_batch_size|CouponBatchForm.clean_count|1
 
 @ services/platform/apps/promotions/gift_purchase_policy.py
+integrations.stripe_enabled|gift_purchase_options|1
+integrations.stripe_publishable_key|gift_purchase_options|1
+integrations.stripe_secret_key|gift_purchase_options|1
 integrations.stripe_webhook_secret|gift_purchase_options|1
+promotions.gift_card_denominations|gift_purchase_options|1
 promotions.gift_card_payment_methods|gift_purchase_options|1
+promotions.gift_card_sales_enabled|gift_purchase_options|1
 
 @ services/platform/apps/promotions/models.py
 promotions.max_discount_amount_cents|get_max_discount_amount_cents|1
@@ -295,12 +328,14 @@ provisioning.sudo_command_timeout|get_sudo_command_timeout|1
 backup.aws_access_key_id|VirtualminBackupService._get_s3_client|1
 backup.aws_region|VirtualminBackupService._get_s3_client|1
 backup.aws_secret_access_key|VirtualminBackupService._get_s3_client|1
+backup.s3_bucket_name|VirtualminBackupService._get_backup_bucket|1
 provisioning.backup_min_transfer_mib_s|backup_task_timeout|1
 provisioning.backup_retention_days|VirtualminBackupService.list_backups|1
 provisioning.max_backup_size_gb|VirtualminBackupService._validate_backup_preconditions|1
 provisioning.max_backup_size_gb|VirtualminBackupService._verify_backup_integrity|1
 provisioning.migration_backup_timeout_seconds|VirtualminBackupService._backup_command_timeout|1
 provisioning.migration_backup_timeout_seconds|backup_task_timeout|1
+provisioning.migration_spool_dir|VirtualminBackupService._spool_dir|1
 provisioning.migration_transfer_timeout_seconds|VirtualminBackupService._download_backup_to_spool|1
 provisioning.migration_transfer_timeout_seconds|VirtualminBackupService._fetch_archive_to_spool|1
 provisioning.migration_transfer_timeout_seconds|VirtualminBackupService._push_archive_to_target|1
@@ -312,7 +347,9 @@ provisioning.recovery_good_threshold|VirtualminDisasterRecoveryService.verify_pr
 provisioning.recovery_warning_threshold|VirtualminDisasterRecoveryService.verify_praho_data_integrity|1
 
 @ services/platform/apps/provisioning/virtualmin_drain_service.py
+infrastructure.auto_drain_enabled|coordinate_health_failure|1
 infrastructure.auto_drain_failure_threshold|coordinate_health_failure|1
+infrastructure.drain_enabled|coordinate_health_failure|1
 provisioning.migration_enabled|NodeDrainService.start_drain|1
 
 @ services/platform/apps/provisioning/virtualmin_gateway.py
@@ -360,11 +397,19 @@ provisioning.overall_health_check_timeout|get_overall_health_check_timeout|1
 @ services/platform/apps/settings/views.py
 system.maintenance_mode|settings_home|1
 
+@ services/platform/apps/tickets/monitoring.py
+tickets.security_alert_threshold|SecurityEventTracker.alert_threshold|1
+
+@ services/platform/apps/tickets/security.py
+tickets.allowed_file_extensions|generate_secure_filename|1
+tickets.max_file_size_bytes|TicketAttachmentSecurityScanner.scan_uploaded_file|1
+
 @ services/platform/apps/tickets/views.py
 tickets.max_file_size_bytes|_is_file_size_valid|1
 tickets.max_file_size_bytes|_process_ticket_attachments|1
 
 @ services/platform/apps/users/services.py
+security.join_request_notification_limit_per_customer_per_hour|SecureCustomerUserService._notify_owners_of_join_request_secure|1
 security.max_customer_lookups_per_hour|SecureCustomerUserService._find_customer_by_identifier_secure|1
 security.max_customer_lookups_per_hour|SecureUserRegistrationService._find_customer_by_identifier_secure|1
 security.suspicious_ip_threshold|SessionSecurityService.detect_suspicious_activity|1
