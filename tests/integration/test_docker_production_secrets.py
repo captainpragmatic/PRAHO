@@ -110,6 +110,15 @@ class TestProductionImages:
 
     @pytest.mark.integration
     @pytest.mark.parametrize("service", ["platform", "portal"])
+    def test_a_build_without_a_target_is_the_production_image(self, service: str) -> None:
+        # `docker build` with no --target builds the last stage, so the dev target must never be it.
+        stages = re.split(r"^FROM ", (DEPLOY / service / "Dockerfile").read_text(), flags=re.MULTILINE)[1:]
+        assert " AS " not in stages[-1].split("\n", 1)[0]
+        assert 'ENTRYPOINT ["/app/entrypoint.sh"]' in stages[-1]
+        assert "COPY --from=builder /app/.venv /app/.venv" in stages[-1]
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("service", ["platform", "portal"])
     def test_the_image_ships_the_shared_ui(self, service: str) -> None:
         dockerfile = (DEPLOY / service / "Dockerfile").read_text()
         assert "COPY shared/ui /shared/ui" in dockerfile

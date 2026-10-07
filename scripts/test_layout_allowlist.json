@@ -26,6 +26,7 @@
     "^TestGDPRCompliantCartSession(Mocked)?\\.test_create_empty_cart$",
     "^CounterStoreTests\\.test_",
     "^CounterStoreConcurrencyTests\\.test_",
-    "^CounterClaimVisibilityTests\\.test_"
+    "^CounterClaimVisibilityTests\\.test_",
+    "^TestRepoDotenvPath\\.test_"
   ]
 }

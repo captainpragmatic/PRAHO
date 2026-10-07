@@ -118,6 +118,8 @@ Visit:
 **Test credentials**: `admin@pragmatichost.com` / `admin123`
 
 > **Using PostgreSQL instead of SQLite?** Run `make docker-dev` to start Platform + Portal + PostgreSQL in Docker containers with hot reload.
+> Its database starts empty; for the sample data and the test credentials above, run
+> `docker compose -f deploy/docker-compose.dev.yml exec platform python manage.py generate_sample_data`.
 
 ## Development Commands
 

@@ -30,8 +30,8 @@ FROM_ENVIRONMENT = "${DJANGO_SETTINGS_MODULE:-config.settings.prod}"
 FROM_ANSIBLE = "{{ docker_django_settings_module }}"
 CONTAINER_STATIC_ROOT = "/app/staticfiles"
 
-# The production-family Compose files and the Django services in each: every one must let `.env`
-# choose staging. The dev and local all-in-Docker stacks pin config.settings.dev on purpose and are
+# The production-family Compose files and the Django services in each: every one must let the env
+# file choose staging. The dev stack (`make docker-dev`) pins config.settings.dev on purpose and is
 # not listed.
 PRODUCTION_FAMILY_COMPOSE = {
     "docker-compose.single-server.yml": ("platform", "portal"),

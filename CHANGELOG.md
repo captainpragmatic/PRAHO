@@ -57,6 +57,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `make docker-dev` starts again. Since March it built the production images and mounted the source
+  over `/app`, hiding their venv and entrypoint, and the production venv lacks the debug toolbar and
+  colorlog that the dev settings import. The Dockerfiles now have `dev` targets that install the dev
+  dependencies outside the mount, and the dev stack uses them. The platform now uses the stack's
+  PostgreSQL, the portal reaches the platform by its container name and keeps its session database out
+  of the checkout, and the dev settings no longer look for a `.env` four directories up inside the
+  container. The stack passed `DEBUG=1`, which the portal's settings read as false, so it derived
+  production values: secure-only session cookies that a browser never returns over plain HTTP, and an
+  https redirect. It now passes `DEBUG=true`, and the portal's dev settings turn both off whatever
+  `DEBUG` says, as the platform's do. Images built without a target are unchanged.
 - The Docker deploy scripts now use the operator's env file. The Compose files live in `deploy/`, so
   Compose looked for `deploy/.env`, which no step creates, and every required variable failed before
   a container started. `deploy.sh`, `rollback.sh`, `restore.sh` and the `make deploy-*`, `rollback`
