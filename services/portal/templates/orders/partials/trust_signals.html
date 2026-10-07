@@ -11,6 +11,8 @@
       <span class="font-medium">{% trans "VAT Included" %}</span>
     </div>
     {% badge _("24/7 Support") variant="warning" icon="phone" %}
-    {% badge _("Romanian Data Center") variant="danger" icon="building" css_class="hidden sm:inline-flex" %}
+    <div class="hidden sm:block">
+      {% badge _("Romanian Data Center") variant="danger" icon="building" %}
+    </div>
   </div>
 </div>

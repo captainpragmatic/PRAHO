@@ -20,6 +20,9 @@ $dispatch('confirm-dangerous-action', {
 
 <!-- Dangerous Action Confirmation Modal -->
 <div x-data="dangerousActionModal"
+data-default-title="{% trans 'Dangerous Action' %}"
+data-default-message="{% trans 'This action cannot be undone.' %}"
+data-default-confirm-text="{% trans 'I really am sure I want to do this!' %}"
 @confirm-dangerous-action.window="onConfirmRequest($event)"
 x-show="show"
 x-cloak

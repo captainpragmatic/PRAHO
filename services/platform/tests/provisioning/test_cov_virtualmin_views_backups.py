@@ -64,6 +64,27 @@ class VirtualminBackupPageCoverageTests(VirtualminViewsFixture):
         self.assertTrue(response.context["can_restore"])
         self.assertEqual(response.context["account_stats"]["disk_quota_mb"], self.account.disk_quota_mb)
 
+    def test_account_detail_shows_only_failed_job_status_messages(self) -> None:
+        for status, message in (
+            ("failed", "Remote failure <script>alert(1)</script>"),
+            ("completed", "Completed job detail must not appear as an error"),
+            ("running", "Running job detail must not appear as an error"),
+            ("failed", ""),
+        ):
+            VirtualminProvisioningJob.objects.create(
+                server=self.server,
+                account=self.account,
+                operation="backup_domain",
+                status=status,
+                status_message=message,
+            )
+        response = self.client.get(reverse("provisioning:virtualmin_account_detail", args=[self.account.pk]))
+        self.assertContains(response, "Remote failure &lt;script&gt;alert(1)&lt;/script&gt;")
+        self.assertNotContains(response, "<script>alert(1)</script>")
+        self.assertNotContains(response, "Completed job detail must not appear as an error")
+        self.assertNotContains(response, "Running job detail must not appear as an error")
+        self.assertContains(response, 'class="mt-3 p-3 bg-red-900/20 border border-red-700 rounded text-sm"', count=1)
+
     def test_account_detail_survives_s3_failure(self) -> None:
         self.s3.get_paginator.side_effect = RuntimeError("S3 unavailable")
         response = self.client.get(reverse("provisioning:virtualmin_account_detail", args=[self.account.pk]))
