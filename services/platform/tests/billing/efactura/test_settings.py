@@ -34,6 +34,7 @@ from apps.billing.efactura.settings import (
 )
 from apps.settings.catalog import CATALOG_BY_KEY
 from apps.settings.models import SystemSetting
+from apps.settings.services import SettingsService
 
 
 class RoLocalDateTestCase(TestCase):
@@ -291,9 +292,11 @@ class EFacturaSettingsTestCase(TestCase):
         forbidden_fragments = ("b2b.enabled", "b2c.enabled", "minimum_amount_cents")
         self.assertFalse(any(fragment in key for key in EFACTURA_DEFAULTS for fragment in forbidden_fragments))
 
-    def test_archive_retention_years(self):
-        """Test archive retention is 10 years (Romanian law)."""
-        self.assertEqual(self.settings.archive_retention_years, 10)
+    def test_deadline_settings_follow_the_billing_keys_documents_use(self):
+        """The e-Factura deadline helpers read the billing settings, the only deadline settings in force."""
+        SettingsService.update_setting("billing.efactura_submission_deadline_days", 7)
+        SettingsService.update_setting("billing.efactura_deadline_warning_hours", 6)
+        self.assertEqual((self.settings.submission_deadline_days, self.settings.deadline_warning_hours), (7, 6))
 
     def test_xsd_validation_enabled_by_default(self):
         """Test XSD validation is enabled."""

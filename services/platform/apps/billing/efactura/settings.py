@@ -167,8 +167,6 @@ class EFacturaSettingKeys:
     # VAT rates (Romanian rates as of Aug 2025)
 
     # Submission settings
-    SUBMISSION_DEADLINE_DAYS = "efactura.submission.deadline_days"
-    DEADLINE_WARNING_HOURS = "efactura.submission.deadline_warning_hours"
     AUTO_SUBMIT_ENABLED = "efactura.submission.auto_submit_enabled"
 
     # Retry configuration
@@ -187,9 +185,7 @@ class EFacturaSettingKeys:
     RATE_LIMIT_DOWNLOAD_PER_MESSAGE_DAY = "efactura.rate_limit.download_per_message_day"
 
     # Polling settings
-    POLL_INTERVAL_SECONDS = "efactura.polling.interval_seconds"
     POLL_BATCH_SIZE = "efactura.polling.batch_size"
-    STALE_SUBMISSION_HOURS = "efactura.polling.stale_submission_hours"
 
     # Validation settings
     XSD_VALIDATION_ENABLED = "efactura.validation.xsd_enabled"
@@ -198,8 +194,6 @@ class EFacturaSettingKeys:
 
     # Storage settings
     XML_STORAGE_PATH = "efactura.storage.xml_path"
-    PDF_STORAGE_PATH = "efactura.storage.pdf_path"
-    ARCHIVE_RETENTION_YEARS = "efactura.storage.archive_retention_years"
 
     # Metrics/observability
     METRICS_ENABLED = "efactura.metrics.enabled"
@@ -231,8 +225,6 @@ EFACTURA_DEFAULTS: dict[str, Any] = {
     EFacturaSettingKeys.COMPANY_BANK_NAME: "",
     # Romanian VAT rates (updated Aug 2025 — Emergency Ordinance 156/2024)
     # Submission (5 WORKING days per OUG 89/2025; was 5 calendar days pre-2026)
-    EFacturaSettingKeys.SUBMISSION_DEADLINE_DAYS: 5,
-    EFacturaSettingKeys.DEADLINE_WARNING_HOURS: 24,
     EFacturaSettingKeys.AUTO_SUBMIT_ENABLED: True,
     # Retry with exponential backoff
     EFacturaSettingKeys.MAX_RETRIES: 5,
@@ -248,17 +240,13 @@ EFACTURA_DEFAULTS: dict[str, Any] = {
     EFacturaSettingKeys.RATE_LIMIT_LIST_PAGINATED_PER_DAY: 100000,
     EFacturaSettingKeys.RATE_LIMIT_DOWNLOAD_PER_MESSAGE_DAY: 10,
     # Polling
-    EFacturaSettingKeys.POLL_INTERVAL_SECONDS: 300,  # 5 minutes
     EFacturaSettingKeys.POLL_BATCH_SIZE: 100,
-    EFacturaSettingKeys.STALE_SUBMISSION_HOURS: 24,
     # Validation
     EFacturaSettingKeys.XSD_VALIDATION_ENABLED: True,
     EFacturaSettingKeys.SCHEMATRON_VALIDATION_ENABLED: True,
     EFacturaSettingKeys.STRICT_MODE: False,
     # Storage
     EFacturaSettingKeys.XML_STORAGE_PATH: "efactura/xml/%Y/%m/",
-    EFacturaSettingKeys.PDF_STORAGE_PATH: "efactura/pdf/%Y/%m/",
-    EFacturaSettingKeys.ARCHIVE_RETENTION_YEARS: 10,  # Romanian law requires 10 years
     # Metrics
     EFacturaSettingKeys.METRICS_ENABLED: True,
 }
@@ -568,13 +556,17 @@ class EFacturaSettings:
 
     @property
     def submission_deadline_days(self) -> int:
-        """Get submission deadline in WORKING days (OUG 89/2025; default: 5)."""
-        return self._get_int(EFacturaSettingKeys.SUBMISSION_DEADLINE_DAYS, 5)
+        """Submission deadline in WORKING days (OUG 89/2025), from the billing setting documents use."""
+        from apps.settings.services import SettingsService  # noqa: PLC0415  # Deferred: avoids circular import
+
+        return SettingsService.get_integer_setting("billing.efactura_submission_deadline_days", 5)
 
     @property
     def deadline_warning_hours(self) -> int:
-        """Hours before deadline to trigger warning."""
-        return self._get_int(EFacturaSettingKeys.DEADLINE_WARNING_HOURS, 24)
+        """Hours before the deadline to warn, from the billing setting documents use."""
+        from apps.settings.services import SettingsService  # noqa: PLC0415  # Deferred: avoids circular import
+
+        return SettingsService.get_integer_setting("billing.efactura_deadline_warning_hours", 24)
 
     @property
     def auto_submit_enabled(self) -> bool:
@@ -635,19 +627,9 @@ class EFacturaSettings:
     # ===== Polling Settings =====
 
     @property
-    def poll_interval_seconds(self) -> int:
-        """Polling interval in seconds."""
-        return self._get_int(EFacturaSettingKeys.POLL_INTERVAL_SECONDS, 300)
-
-    @property
     def poll_batch_size(self) -> int:
         """Number of documents to poll per batch."""
         return self._get_int(EFacturaSettingKeys.POLL_BATCH_SIZE, 100)
-
-    @property
-    def stale_submission_hours(self) -> int:
-        """Hours after which a submission is considered stale."""
-        return self._get_int(EFacturaSettingKeys.STALE_SUBMISSION_HOURS, 24)
 
     # ===== Validation Settings =====
 
@@ -672,16 +654,6 @@ class EFacturaSettings:
     def xml_storage_path(self) -> str:
         """Get XML storage path template."""
         return self._get_string(EFacturaSettingKeys.XML_STORAGE_PATH, "efactura/xml/%Y/%m/")
-
-    @property
-    def pdf_storage_path(self) -> str:
-        """Get PDF storage path template."""
-        return self._get_string(EFacturaSettingKeys.PDF_STORAGE_PATH, "efactura/pdf/%Y/%m/")
-
-    @property
-    def archive_retention_years(self) -> int:
-        """Archive retention period in years (Romanian law: 10 years)."""
-        return self._get_int(EFacturaSettingKeys.ARCHIVE_RETENTION_YEARS, 10)
 
     # ===== Metrics Settings =====
 

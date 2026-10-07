@@ -233,6 +233,12 @@ class SettingsActivationTests(TestCase):
     def test_setup_retires_all_amendment_two_settings(self) -> None:
         keys = (
             "efactura.metrics.prefix",
+            "efactura.polling.interval_seconds",
+            "efactura.polling.stale_submission_hours",
+            "efactura.submission.deadline_days",
+            "efactura.submission.deadline_warning_hours",
+            "efactura.storage.pdf_path",
+            "efactura.storage.archive_retention_years",
             "efactura.vat.rate_reduced_1",
             "efactura.vat.rate_reduced_2",
             "efactura.vat.rate_standard",
