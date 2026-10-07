@@ -31,6 +31,15 @@ DEFAULT_VALUE_MIGRATIONS: dict[str, tuple[object, object]] = {
     "audit.webhook_healthy_response_threshold": (300, 300),
     "audit.webhook_max_retry_threshold": (5, 5),
     "audit.webhook_suspicious_retry_threshold": (3, 3),
+    "common.cache_timeout_medium": (300, 300),
+    "common.cache_timeout_short": (60, 60),
+    "common.default_orphans": (3, 3),
+    "common.max_header_json_length": (1000, 1000),
+    "common.max_summarized_args": (3, 3),
+    "common.proximity_line_threshold": (5, 5),
+    "common.query_warning_threshold": (10, 10),
+    "common.sql_display_limit": (200, 200),
+    "common.value_summary_limit": (50, 50),
 }
 RETIRED_SETTING_KEYS: frozenset[str] = frozenset(
     {

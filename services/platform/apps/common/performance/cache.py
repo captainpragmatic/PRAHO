@@ -15,6 +15,7 @@ import functools
 import hashlib
 import logging
 from collections.abc import Callable
+from enum import Enum
 from typing import Any, ClassVar, TypeVar, cast
 
 from django.conf import settings
@@ -24,6 +25,15 @@ from django.db import models
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
+
+
+class _CacheTimeout(Enum):
+    SETTING = "setting"
+
+
+def _resolve_timeout(timeout: int | None | _CacheTimeout, getter: Callable[[], int]) -> int | None:
+    return getter() if isinstance(timeout, _CacheTimeout) else timeout
+
 
 # Cache timeout constants (seconds)
 _DEFAULT_CACHE_TIMEOUT_SHORT = 60  # 1 minute
@@ -92,15 +102,16 @@ class CacheService:
     def set(
         self,
         key: str,
-        value: Any,
-        timeout: int = CACHE_TIMEOUT_MEDIUM,
+        value: object,
+        timeout: int | None | _CacheTimeout = _CacheTimeout.SETTING,
         version: int | None = None,
     ) -> bool:
         """Set a value in cache with automatic key prefixing."""
         full_key = self._make_key(key, version)
+        resolved_timeout = _resolve_timeout(timeout, get_cache_timeout_medium)
         try:
-            self._cache.set(full_key, value, timeout)
-            logger.debug(f"Cache SET: {key} (timeout={timeout}s)")
+            self._cache.set(full_key, value, resolved_timeout)
+            logger.debug(f"Cache SET: {key} (timeout={resolved_timeout}s)")
             return True
         except Exception as e:
             logger.warning(f"Cache SET failed for {key}: {e}")
@@ -121,7 +132,7 @@ class CacheService:
         self,
         key: str,
         factory: Callable[[], T],
-        timeout: int = CACHE_TIMEOUT_MEDIUM,
+        timeout: int | None | _CacheTimeout = _CacheTimeout.SETTING,
     ) -> T:
         """Get from cache or compute and cache the value."""
         value = self.get(key)
@@ -155,7 +166,7 @@ class CacheService:
         self,
         model_instance: models.Model,
         fields: list[str] | None = None,
-        timeout: int = CACHE_TIMEOUT_MEDIUM,
+        timeout: int | None | _CacheTimeout = _CacheTimeout.SETTING,
     ) -> bool:
         """Cache a model instance."""
         key = cache_key_for_model(model_instance)
@@ -181,8 +192,8 @@ class CacheService:
 
     def cache_queryset_count(
         self,
-        queryset: models.QuerySet[Any],
-        timeout: int = CACHE_TIMEOUT_SHORT,
+        queryset: models.QuerySet[models.Model],
+        timeout: int | None | _CacheTimeout = _CacheTimeout.SETTING,
     ) -> int:
         """Cache a queryset count to avoid repeated COUNT queries."""
         key = self._queryset_count_key(queryset)
@@ -190,7 +201,7 @@ class CacheService:
         count = self.get(key)
         if count is None:
             count = queryset.count()
-            self.set(key, count, timeout)
+            self.set(key, count, _resolve_timeout(timeout, get_cache_timeout_short))
 
         return cast(int, count)
 
@@ -231,7 +242,7 @@ def invalidate_model_cache(instance: models.Model, suffix: str = "") -> bool:
 
 
 def cached_model_property(
-    timeout: int = CACHE_TIMEOUT_MEDIUM,
+    timeout: int | None | _CacheTimeout = _CacheTimeout.SETTING,
     key_suffix: str = "",
 ) -> Callable[[Callable[..., T]], Callable[..., T]]:
     """
@@ -246,7 +257,7 @@ def cached_model_property(
 
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
         @functools.wraps(func)
-        def wrapper(self: models.Model, *args: Any, **kwargs: Any) -> T:
+        def wrapper(self: models.Model, *args: object, **kwargs: object) -> T:
             suffix = key_suffix or func.__name__
             key = cache_key_for_model(self, suffix)
 
@@ -255,7 +266,7 @@ def cached_model_property(
                 return cast(T, cached_value)
 
             value = func(self, *args, **kwargs)
-            cache.set(key, value, timeout)
+            cache.set(key, value, _resolve_timeout(timeout, get_cache_timeout_medium))
             return value
 
         return wrapper
@@ -263,11 +274,11 @@ def cached_model_property(
     return decorator
 
 
-def cached_queryset(
-    timeout: int = CACHE_TIMEOUT_SHORT,
+def cached_queryset[ModelT: models.Model](
+    timeout: int | None | _CacheTimeout = _CacheTimeout.SETTING,
     key_prefix: str = "",
     max_size: int = 1000,
-) -> Callable[[Callable[..., Any]], Callable[..., list[Any]]]:
+) -> Callable[[Callable[..., models.QuerySet[ModelT]]], Callable[..., list[ModelT]]]:
     """
     Decorator to cache queryset results.
 
@@ -279,9 +290,11 @@ def cached_queryset(
             return Product.objects.filter(is_active=True)
     """
 
-    def decorator(func: Callable[..., Any]) -> Callable[..., list[Any]]:
+    def decorator(
+        func: Callable[..., models.QuerySet[ModelT]],
+    ) -> Callable[..., list[ModelT]]:
         @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> list[Any]:
+        def wrapper(*args: object, **kwargs: object) -> list[ModelT]:
             # Create a unique cache key based on function name and arguments
             key_parts = [key_prefix or func.__name__]
 
@@ -306,13 +319,13 @@ def cached_queryset(
             cached_result = cache.get(cache_key)
             if cached_result is not None:
                 logger.debug(f"QuerySet cache HIT: {func.__name__}")
-                return cast("list[Any]", cached_result)
+                return cast("list[ModelT]", cached_result)
 
             # Execute queryset and cache results
             queryset = func(*args, **kwargs)
             result = list(queryset[:max_size])
 
-            cache.set(cache_key, result, timeout)
+            cache.set(cache_key, result, _resolve_timeout(timeout, get_cache_timeout_short))
             logger.debug(f"QuerySet cache SET: {func.__name__} ({len(result)} items)")
 
             return result
@@ -368,8 +381,8 @@ def get_customer_cache_key(customer_id: int, data_type: str) -> str:
 def cache_customer_data(
     customer_id: int,
     data_type: str,
-    data: Any,
-    timeout: int = CACHE_TIMEOUT_MEDIUM,
+    data: object,
+    timeout: int | None | _CacheTimeout = _CacheTimeout.SETTING,
 ) -> bool:
     """Cache customer-specific data."""
     key = get_customer_cache_key(customer_id, data_type)

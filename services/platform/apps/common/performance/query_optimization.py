@@ -263,16 +263,18 @@ class QueryProfiler:
         self._start_time = time.perf_counter()
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    def __exit__(self, *args: object) -> None:
         self.total_time = (time.perf_counter() - self._start_time) * 1000  # ms
 
         if settings.DEBUG:
-            self.query_count = len(connection.queries) - self._start_queries
+            profiled_queries = connection.queries[self._start_queries :]
+            self.query_count = len(profiled_queries)
+            warning_threshold = get_query_warning_threshold()
 
-            if self.log_queries or self.query_count > QUERY_WARNING_THRESHOLD:
+            if self.log_queries or self.query_count > warning_threshold:
                 logger.warning(f"⚠️ Query profiler [{self.name}]: {self.query_count} queries in {self.total_time:.2f}ms")
                 if self.log_queries:
-                    for query in connection.queries[-self.query_count :]:
+                    for query in profiled_queries:
                         logger.debug(f"  SQL: {query['sql'][:200]}...")
 
 

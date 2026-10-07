@@ -186,7 +186,7 @@ class TraceMiddleware:
         # Add summary as JSON
         try:
             summary_json = json.dumps(trace_data, default=str)
-            if len(summary_json) < MAX_HEADER_JSON_LENGTH:  # Only if not too large
+            if len(summary_json) < get_max_header_json_length():
                 response[f"{prefix}-Summary"] = summary_json
         except (TypeError, ValueError):
             pass
