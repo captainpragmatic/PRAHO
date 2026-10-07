@@ -73,7 +73,12 @@ jobs:
 
     - name: Template design-system lint
       run: make lint-templates
-      continue-on-error: true  # TODO: fix 90 blockers, then make blocking
+
+    - name: Accessibility audit
+      run: make audit-a11y
+
+    - name: Dark-mode audit
+      run: make audit-dark-mode
 
     - name: Install semgrep for security scanning
       run: |

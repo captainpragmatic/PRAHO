@@ -778,6 +778,12 @@ else
 	@$(MAKE) lint-error-handling
 	@echo "📋 Phase 10: Status-only test assertion ratchet"
 	@$(MAKE) lint-assertion-quality
+	@echo "📋 Phase 11: Template design-system lint"
+	@$(MAKE) lint-templates
+	@echo "📋 Phase 12: Accessibility audit (critical, serious)"
+	@$(MAKE) audit-a11y
+	@echo "📋 Phase 13: Dark-mode audit (blockers)"
+	@$(MAKE) audit-dark-mode
 	@echo "🎉 All services linting complete!"
 endif
 
@@ -957,8 +963,7 @@ css-audit:
 lint-templates:
 	@echo "🎨 [Templates] Scanning for design-system violations..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@$(VENV_DIR)/bin/python scripts/lint_template_components.py || true
-	@echo "⚠️  (run 'make lint-templates-strict' to fail on blockers)"
+	@$(VENV_DIR)/bin/python scripts/lint_template_components.py
 
 lint-templates-strict:
 	@echo "🎨 [Templates] Strict scan (all codes block)..."
@@ -968,8 +973,7 @@ lint-templates-strict:
 audit-a11y:
 	@echo "♿ [A11Y] Accessibility audit (WCAG AA)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@$(VENV_DIR)/bin/python scripts/audit_accessibility.py --verbose || true
-	@echo "⚠️  (run 'make audit-a11y-strict' to fail on critical+serious)"
+	@$(VENV_DIR)/bin/python scripts/audit_accessibility.py --verbose
 
 audit-a11y-strict:
 	@echo "♿ [A11Y] Strict accessibility audit..."
@@ -978,8 +982,7 @@ audit-a11y-strict:
 audit-dark-mode:
 	@echo "🌙 [DarkMode] Dark mode completeness audit..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@$(VENV_DIR)/bin/python scripts/audit_dark_mode.py --verbose || true
-	@echo "⚠️  (run 'make audit-dark-mode-strict' to fail on blockers)"
+	@$(VENV_DIR)/bin/python scripts/audit_dark_mode.py --verbose
 
 audit-dark-mode-strict:
 	@echo "🌙 [DarkMode] Strict dark mode audit..."
