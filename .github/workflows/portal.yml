@@ -17,12 +17,6 @@ on:
       - '.github/workflows/portal.yml'
   pull_request:
     branches: [master]
-    paths:
-      - 'services/portal/**'
-      - 'shared/**'
-      - 'pyproject.toml'
-      - 'uv.lock'
-      - '.github/workflows/portal.yml'
   workflow_dispatch:
 
 env:
@@ -66,9 +60,7 @@ jobs:
         echo "Portal settings use only SQLite (Django internals only)"
 
     - name: Run portal unit tests with coverage
-      run: |
-        cd services/portal
-        PYTHONPATH=$(pwd) ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/pytest tests/ -v --tb=short --maxfail=10 --cov=apps --cov-report=xml:coverage-portal.xml --cov-report=term-missing
+      run: make coverage-portal-unit
 
     - name: Portal type checking (make check-types-portal)
       run: make check-types-portal

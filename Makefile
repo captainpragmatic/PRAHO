@@ -356,17 +356,22 @@ test-portal:
 # a number that is currently right.
 COVERAGE_BIN = $(PWD)/$(VENV_DIR)/bin/coverage
 COVERAGE_RC = COVERAGE_RCFILE=$(PWD)/pyproject.toml
-# Global floor. 50 was the agreed minimum, but the measured number is 72.39%, and a gate 22
-# points below reality would let coverage rot silently. Set just under the real figure so it
-# ratchets. Raise it as the number climbs; never lower it to make a run pass.
-PLATFORM_COVERAGE_FLOOR ?= 70
+# Global floor. Measured 2026-10-07: 80.26%; the previous 70% floor sat over 10 points
+# below reality. Set just under the real figure so it ratchets. Raise it as the number
+# climbs; never lower it to make a run pass.
+PLATFORM_COVERAGE_FLOOR ?= 78
 # Packages that carry money, provisioning and access decisions get their own floor, because
 # a healthy global average can hide a weak one.
-# Measured 2026-09-26: billing 88.44, settings 78.50, users 74.57, provisioning 55.50.
-# Floors sit just under those so they ratchet and cannot silently slip. The AGREED TARGET is
-# 80% for every one of these; provisioning is the real gap. Raise a floor when the number
-# rises; never lower one to make a run pass.
-PLATFORM_PACKAGE_FLOORS = billing:85 settings:75 users:70 provisioning:55
+# Measured 2026-10-07: billing 89.51, settings 84.69, users 83.52, provisioning 88.39.
+# Provisioning now clears the agreed 80% target; keep the other package floors unchanged.
+# Raise a floor when the number rises; never lower one to make a run pass.
+PLATFORM_PACKAGE_FLOORS = billing:85 settings:75 users:70 provisioning:80
+
+# Read canonical floors from workflows without duplicating their values.
+print-%:
+	@printf '%s\n' '$($*)'
+
+.PHONY: coverage-platform coverage-platform-packages coverage-portal coverage-portal-unit
 
 coverage-platform:
 	@echo "📊 [Platform] Coverage over apps/ and config/ — tests and migrations excluded..."
@@ -399,11 +404,16 @@ coverage-platform-packages:
 	if [ -n "$$failed" ]; then echo "❌ Below floor:$$failed"; echo "   (reads the combined data — run 'make coverage-platform' first)"; exit 1; fi; \
 	echo "✅ Every critical package is at or above its floor."
 
-coverage-portal:
-	@echo "📊 [Portal] Coverage over apps/ — already scoped by pytest.ini --cov=apps..."
+# Measured 2026-10-07: portal unit coverage 79%, independently of the browser union.
+PORTAL_UNIT_COVERAGE_FLOOR ?= 79
+
+coverage-portal: coverage-portal-unit
+
+coverage-portal-unit:
+	@echo "📊 [Portal] Unit coverage over apps/ — already scoped by pytest.ini --cov=apps..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@$(PYTHON_PORTAL) -m pytest -q
-	@echo "✅ Portal coverage complete — see services/portal/htmlcov/."
+	@$(PYTHON_PORTAL) -m pytest -q --cov-fail-under=$(PORTAL_UNIT_COVERAGE_FLOOR) --cov-report=xml:coverage-portal.xml
+	@echo "✅ [Portal] Unit coverage complete (floor $(PORTAL_UNIT_COVERAGE_FLOOR)%)."
 
 # Portal's real figure is the UNION of two datasets that cover different code: the unit suite
 # (no database, platform unimportable, most files mocked) and the browser suite (a live portal

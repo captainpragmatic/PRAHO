@@ -11,6 +11,7 @@ on:
     branches: [master, staging]
     paths:
       - 'services/**'
+      - 'shared/**'
       - 'scripts/**'
       - 'tests/**'
       - 'Makefile'
@@ -21,6 +22,7 @@ on:
     branches: [master]
     paths:
       - 'services/**'
+      - 'shared/**'
       - 'scripts/**'
       - 'tests/**'
       - 'Makefile'
