@@ -17,7 +17,9 @@ WORKDIR /build
 COPY pyproject.toml uv.lock ./
 COPY services/portal/pyproject.toml ./services/portal/pyproject.toml
 
-# Sync portal production dependencies into /build/.venv
+# Build the venv at the path it runs from. Console scripts such as gunicorn carry an absolute
+# shebang to their venv's python, so a venv built elsewhere and copied cannot start them.
+ENV UV_PROJECT_ENVIRONMENT=/app/.venv
 RUN uv sync --group portal --group prod --frozen --no-dev
 
 # ---------------------------------------------------------------------------
@@ -50,13 +52,17 @@ RUN apt-get update \
 WORKDIR /app
 
 # Copy pre-built venv from builder stage
-COPY --from=builder /build/.venv /app/.venv
+COPY --from=builder /app/.venv /app/.venv
 
 # Activate venv — bare `python` resolves to .venv/bin/python
 ENV PATH="/app/.venv/bin:$PATH"
 
 # Copy portal service code
 COPY services/portal/ ./
+
+# Shared design-system templates and static files (ADR-0035). Settings load them from
+# REPO_ROOT/shared/ui, and REPO_ROOT is / here (BASE_DIR is /app).
+COPY shared/ui /shared/ui
 
 # Copy entrypoint script
 COPY deploy/portal/entrypoint.sh /app/entrypoint.sh

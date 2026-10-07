@@ -376,7 +376,9 @@ These are the `[REQUIRED]` variables in the `.env.example.*` files — PRAHO won
 | `PORTAL_DOMAIN` | Customer-facing FQDN | `portal.pragmatichost.com` |
 | `PLATFORM_DOMAIN` | Staff/admin FQDN | `platform.pragmatichost.com` |
 | `ACME_EMAIL` | Let's Encrypt notification email | `admin@pragmatichost.com` |
-| `SECRET_KEY` | Django secret key | `openssl rand -base64 50` |
+| `DJANGO_SECRET_KEY` | Django secret key | `openssl rand -base64 50` |
+| `DJANGO_ENCRYPTION_KEY` | AES-256-GCM key for 2FA secrets and sensitive fields; production refuses to start without it | `python -c "import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"` |
+| `CREDENTIAL_VAULT_MASTER_KEY` | Credential vault key; production refuses to start without it | same command, a different key |
 | `DB_PASSWORD` | PostgreSQL password | `openssl rand -base64 32` |
 | `HMAC_SECRET` | Portal-to-Platform auth secret | `openssl rand -base64 32` |
 | `PLATFORM_TO_PORTAL_WEBHOOK_SECRET` | Platform→Portal webhook HMAC secret | `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
@@ -392,7 +394,7 @@ The `.env.example.*` files also list `[RECOMMENDED]` variables (email, Stripe, e
 Before deploying, the playbook checks:
 1. `praho_env` is defined and one of `dev`, `staging`, `prod`
 2. Ubuntu >= 24.04
-3. The `.env.{praho_env}` file exists and contains all required variables (`SECRET_KEY`, `DB_PASSWORD`, `HMAC_SECRET`, `PLATFORM_TO_PORTAL_WEBHOOK_SECRET`, `PORTAL_DOMAIN`, `PLATFORM_DOMAIN`)
+3. The `.env.{praho_env}` file exists and contains all required variables (`DJANGO_SECRET_KEY`, `DB_PASSWORD`, `HMAC_SECRET`, `PORTAL_DOMAIN`, `PLATFORM_DOMAIN`, and for `prod` also `PLATFORM_TO_PORTAL_WEBHOOK_SECRET`, `DJANGO_ENCRYPTION_KEY` and `CREDENTIAL_VAULT_MASTER_KEY`)
 4. Both FQDNs resolve to the server IP (DNS pre-flight)
 
 #### Post-Deploy
@@ -812,7 +814,9 @@ All variables live in your `.env.{env}` file. See `.env.example.prod` for the fu
 | `PRAHO_SERVER_IP` | Server public IP | `203.0.113.10` |
 | `PORTAL_DOMAIN` | Customer-facing FQDN | `portal.pragmatichost.com` |
 | `PLATFORM_DOMAIN` | Staff/admin FQDN | `platform.pragmatichost.com` |
-| `SECRET_KEY` | Django secret key | `openssl rand -base64 50` |
+| `DJANGO_SECRET_KEY` | Django secret key | `openssl rand -base64 50` |
+| `DJANGO_ENCRYPTION_KEY` | AES-256-GCM key for 2FA secrets and sensitive fields; production refuses to start without it | `python -c "import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"` |
+| `CREDENTIAL_VAULT_MASTER_KEY` | Credential vault key; production refuses to start without it | same command, a different key |
 | `DB_PASSWORD` | PostgreSQL password | `openssl rand -base64 32` |
 | `HMAC_SECRET` | Portal ↔ Platform HMAC auth | `openssl rand -base64 32` |
 | `PLATFORM_TO_PORTAL_WEBHOOK_SECRET` | Platform→Portal webhook HMAC | `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
