@@ -98,6 +98,11 @@ def exception_findings(distance: int) -> list[FlowIssue]:
     ]
 
 
+def statements(queries: CaptureQueriesContext) -> int:
+    """Queries excluding savepoint bookkeeping: settings reads inside atomic() run in their own savepoint."""
+    return sum(not row["sql"].lstrip().upper().startswith(("SAVEPOINT", "RELEASE SAVEPOINT")) for row in queries)
+
+
 class DefaultList(PaginationMixin, ListView):
     model = SystemSetting
 
@@ -397,12 +402,12 @@ class CommonSettingsQueryTests(SimpleTestCase):
                     tracer.queries = [QueryInfo("SELECT 1", 0, []) for _ in range(size)]
                     with CaptureQueriesContext(connection) as queries:
                         summary = tracer.get_summary()
-                    self.assertEqual(len(queries), reads)
+                    self.assertEqual(statements(queries), reads)
                     self.assertEqual([row["sql"] for row in summary["queries"]], ["SELE..."] * size)
                 with self.subTest(path="arguments", size=size):
                     with CaptureQueriesContext(connection) as queries:
                         summary = MethodTracer._summarize_args(("abcdef",) * size, {"value": "abcdef"})
-                    self.assertEqual(len(queries), 2 * reads)
+                    self.assertEqual(statements(queries), 2 * reads)
                     self.assertNotIn("arg1=", summary)
                     self.assertIn('arg0="abc..."', summary)
             self.check_logging_queries(reads)
@@ -411,37 +416,37 @@ class CommonSettingsQueryTests(SimpleTestCase):
                 middleware = TraceMiddleware(response)
                 with CaptureQueriesContext(connection) as queries:
                     middleware._add_trace_headers(result, {"duration_ms": 1})
-                self.assertEqual(len(queries), reads)
+                self.assertEqual(statements(queries), reads)
                 self.assertNotIn("X-Trace-Summary", result)
             with self.subTest(path="pagination"):
                 request = RequestFactory().get("/")
                 with CaptureQueriesContext(connection) as queries:
                     context = get_pagination_context(request, SystemSetting.objects.none())
-                self.assertEqual(len(queries), reads)
+                self.assertEqual(statements(queries), reads)
                 self.assertEqual(cast("Paginator[SystemSetting]", context["paginator"]).orphans, 0)
                 with CaptureQueriesContext(connection) as queries:
                     orphans = DefaultList().get_paginate_orphans()
-                self.assertEqual(len(queries), reads)
+                self.assertEqual(statements(queries), reads)
                 self.assertEqual(orphans, 0)
             with self.subTest(path="profiler"):
                 connection.queries_log.clear()
                 with CaptureQueriesContext(connection) as queries, QueryProfiler("empty-effect") as profiler:
                     pass
-                self.assertEqual(len(queries), reads)
+                self.assertEqual(statements(queries), reads)
                 self.assertEqual(profiler.query_count, 0)
 
     def check_logging_queries(self, reads: int) -> None:
         with self.subTest(path="value"):
             with CaptureQueriesContext(connection) as queries:
                 summary = MethodTracer._summarize_value("abcdef")
-            self.assertEqual(len(queries), reads)
+            self.assertEqual(statements(queries), reads)
             self.assertEqual(summary, '"abc..."')
         with self.subTest(path="proximity"):
             analyzer = HybridFlowAnalyzer()
             issues = exception_findings(3) * 25
             with CaptureQueriesContext(connection) as queries:
                 findings = analyzer._cross_reference_findings(issues, AnalysisContext("sample.py", ""))
-            self.assertEqual(len(queries), reads)
+            self.assertEqual(statements(queries), reads)
             self.assertEqual(findings, [])
 
     def check_cache_queries(self, reads: int) -> None:
@@ -452,24 +457,24 @@ class CommonSettingsQueryTests(SimpleTestCase):
         with patch("django.core.cache.backends.locmem.time.time", return_value=now) as clock:
             with CaptureQueriesContext(connection) as queries:
                 service.set("query-medium", "value")
-            self.assertEqual(len(queries), reads)
+            self.assertEqual(statements(queries), reads)
             clock.return_value = now + 3
             self.assertIsNone(service.get("query-medium"))
             clock.return_value = now
             with CaptureQueriesContext(connection) as queries:
                 self.assertEqual(service.cache_queryset_count(count_rows), 0)
-            self.assertEqual(len(queries), reads + 1)
+            self.assertEqual(statements(queries), reads + 1)
             clock.return_value = now + 3
             self.assertIsNone(service.get(service._queryset_count_key(count_rows)))
             clock.return_value = now
             property_reader = cached_model_property(key_suffix="query-email")(model_email)
             with CaptureQueriesContext(connection) as queries:
                 self.assertEqual(property_reader(user), "before@example.test")
-            self.assertEqual(len(queries), reads)
+            self.assertEqual(statements(queries), reads)
             reader = cached_queryset(key_prefix="query-rows")(empty_queryset)
             with CaptureQueriesContext(connection) as queries:
                 self.assertEqual(reader(), [])
-            self.assertEqual(len(queries), reads)
+            self.assertEqual(statements(queries), reads)
             clock.return_value = now + 3
             user.email = "after@example.test"
             self.assertEqual(property_reader(user), "after@example.test")

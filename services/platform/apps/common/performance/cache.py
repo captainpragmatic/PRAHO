@@ -15,12 +15,13 @@ import functools
 import hashlib
 import logging
 from collections.abc import Callable
+from contextlib import nullcontext
 from enum import Enum
 from typing import Any, ClassVar, TypeVar, cast
 
 from django.conf import settings
 from django.core.cache import cache, caches
-from django.db import DatabaseError, InterfaceError, models
+from django.db import DatabaseError, InterfaceError, models, transaction
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,8 @@ def _resolve_timeout(timeout: int | None | _CacheTimeout, getter: Callable[[], i
     if not isinstance(timeout, _CacheTimeout):
         return timeout
     try:
-        return getter()
+        with transaction.atomic() if transaction.get_connection().in_atomic_block else nullcontext():
+            return getter()
     except (DatabaseError, InterfaceError):
         logger.warning("⚠️ [Cache] Default timeout lookup failed; using %ss", fallback)
         return fallback

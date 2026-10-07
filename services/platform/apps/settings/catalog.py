@@ -17,7 +17,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from django.conf import settings as django_settings
 from django.utils.functional import lazy
 from django.utils.translation import gettext_lazy as _
 
@@ -79,11 +78,10 @@ class SettingDef:
         return ""
 
     def deployment_default(self) -> object:
-        """Resolve the no-row value without querying or exposing a stored override."""
-        if not self.deployment_source:
-            return None
-        value: object = getattr(django_settings, self.deployment_source, None)
-        return self.default if value is None else value
+        """Resolve the consumer's no-row value without disclosing a stored override."""
+        from .services import get_deployment_fallback  # noqa: PLC0415  # Deferred: catalog/service import cycle
+
+        return get_deployment_fallback(self.key)
 
 
 GROUPS: tuple[GroupDef, ...] = (

@@ -530,7 +530,11 @@ def _row_context(definition: SettingDef, row: SystemSetting | None) -> dict[str,
         current = ""
     return {
         "inherited": inherited,
-        "deployment_source": definition.deployment_source or _("Virtualmin default"),
+        "deployment_source": (
+            f"{definition.key.replace('.', '_').upper()} / {definition.deployment_source}"
+            if definition.key.startswith("efactura.company.") and definition.django_setting
+            else definition.deployment_source or _("Virtualmin default")
+        ),
         "fallback_json": json.dumps(None if definition.sensitive else fallback, ensure_ascii=False, default=str),
         "definition": definition,
         "key": definition.key,
@@ -812,7 +816,12 @@ def secret_clear(request: HttpRequest, key: str) -> JsonResponse:
         )
         if isinstance(cleared, Ok):
             return JsonResponse(
-                {"success": True, "configured": bool(definition.deployment_default()), "inherited": True}
+                {
+                    "success": True,
+                    "configured": bool(definition.deployment_default()),
+                    "inherited": True,
+                    "change_set_id": cleared.value.change_set_id,
+                }
             )
         return JsonResponse({"success": False, "error": _("Credential changed; reload and try again")}, status=409)
 

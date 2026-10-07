@@ -218,6 +218,7 @@ document.addEventListener("alpine:init", function () {
             this.replacing = false;
             this.secret = "";
             this.message = "";
+            if (this.$root.dataset.deploymentFallback === "1") window.location.reload();
           } else {
             this.message = data.error;
           }

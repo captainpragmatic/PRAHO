@@ -13,10 +13,11 @@ from __future__ import annotations
 import functools
 import logging
 import time
+from contextlib import nullcontext
 from typing import Any, ClassVar, TypeVar, cast
 
 from django.conf import settings
-from django.db import DatabaseError, InterfaceError, connection, models, reset_queries
+from django.db import DatabaseError, InterfaceError, connection, models, reset_queries, transaction
 from django.db.models import Count, Prefetch, QuerySet
 
 from apps.common.logging import get_sql_display_limit
@@ -34,7 +35,10 @@ def get_query_warning_threshold() -> int:
     )
 
     try:
-        return SettingsService.get_integer_setting("common.query_warning_threshold", _DEFAULT_QUERY_WARNING_THRESHOLD)
+        with transaction.atomic() if transaction.get_connection().in_atomic_block else nullcontext():
+            return SettingsService.get_integer_setting(
+                "common.query_warning_threshold", _DEFAULT_QUERY_WARNING_THRESHOLD
+            )
     except (DatabaseError, InterfaceError, RuntimeError, AssertionError):
         # Never replace the profiled operation's result or exception with a settings failure.
         return _DEFAULT_QUERY_WARNING_THRESHOLD
