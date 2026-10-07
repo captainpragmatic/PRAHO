@@ -28,13 +28,14 @@ from apps.products.models import Product
 from apps.provisioning.models import Service, ServicePlan
 from apps.users.models import User
 from tests.factories.billing_factories import CurrencyFactory, CustomerFactory, InvoiceFactory
+from tests.helpers.task_queue import quiet_task_queue
 
 
 def prepare_case(test: SimpleTestCase) -> tuple[Customer, Currency, Invoice, User]:
-    for target in ("django_q.tasks.async_task", "apps.notifications.services.EmailService.send_template_email"):
-        quiet = patch(target, return_value="test-delivery")
-        quiet.start()
-        test.addCleanup(quiet.stop)
+    quiet_task_queue(test)
+    quiet = patch("apps.notifications.services.EmailService.send_template_email", return_value="test-delivery")
+    quiet.start()
+    test.addCleanup(quiet.stop)
     customer = CustomerFactory()
     currency = CurrencyFactory()
     invoice = InvoiceFactory(customer=customer, currency=currency, number=f"WP13-{uuid4().hex}", bill_to_country="DE")

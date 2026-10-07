@@ -7,6 +7,7 @@ from django.test import TransactionTestCase, override_settings
 
 from apps.customers.models import Customer
 from apps.users.models import CustomerMembership, User
+from tests.helpers.task_queue import quiet_task_queue
 
 
 @override_settings(DISABLE_AUDIT_SIGNALS=False)
@@ -14,9 +15,7 @@ class MembershipSignalPostgresIsolationTests(TransactionTestCase):
     def setUp(self) -> None:
         if connection.vendor != "postgresql":
             self.skipTest("statement-aborts-transaction behavior requires PostgreSQL")
-        delivery = patch("django_q.tasks.async_task", return_value="test-job")
-        delivery.start()
-        self.addCleanup(delivery.stop)
+        quiet_task_queue(self)
         self.user = User.objects.create_user(email="postgres-isolation@example.com", password="test")
         self.customer = Customer.objects.create(name="Isolation", primary_email="postgres-customer@example.com")
         self.failed_sql = False

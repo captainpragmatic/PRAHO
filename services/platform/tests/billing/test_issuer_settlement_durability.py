@@ -25,14 +25,15 @@ from apps.billing.subscription_models import Subscription
 from apps.common.types import Result
 from apps.products.models import Product
 from tests.factories.billing_factories import CustomerFactory
+from tests.helpers.task_queue import quiet_task_queue
 
 
 class IssuedDocumentSettlementTests(TestCase):
     def setUp(self) -> None:
-        for target in ("django_q.tasks.async_task", "apps.notifications.services.EmailService.send_template_email"):
-            quiet = patch(target, return_value="test-delivery")
-            quiet.start()
-            self.addCleanup(quiet.stop)
+        quiet_task_queue(self)
+        quiet = patch("apps.notifications.services.EmailService.send_template_email", return_value="test-delivery")
+        quiet.start()
+        self.addCleanup(quiet.stop)
         self.customer = CustomerFactory()
         self.currency, _created = Currency.objects.get_or_create(code="RON", defaults={"symbol": "L", "decimals": 2})
         self.invoice = Invoice.objects.create(

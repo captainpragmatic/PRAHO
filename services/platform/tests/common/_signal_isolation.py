@@ -8,6 +8,7 @@ from django.db import transaction
 from django.test import TestCase
 
 from apps.billing.models import Currency
+from tests.helpers.task_queue import quiet_task_queue
 
 T = TypeVar("T")
 
@@ -17,9 +18,7 @@ class SignalIsolationTestCase(TestCase):
         super().setUp()
         Currency.objects.get_or_create(code="XTS", defaults={"symbol": "test"})
         self.failed_writes: list[str] = []
-        delivery = patch("django_q.tasks.async_task", return_value="test-job")
-        delivery.start()
-        self.addCleanup(delivery.stop)
+        quiet_task_queue(self)
 
     def fail_write(self, *args: object, **kwargs: object) -> None:
         self.failed_writes.append("duplicate currency")

@@ -38,12 +38,11 @@ from apps.promotions.models import GiftCard, GiftCardReservation
 from apps.provisioning.models import Service, ServicePlan
 from apps.settings.services import SettingsService
 from tests.helpers.fsm_helpers import force_status
+from tests.helpers.task_queue import quiet_task_queue
 
 
 def prepare_case(case: TestCase | TransactionTestCase) -> tuple[Customer, Currency]:
-    delivery = patch("django_q.tasks.async_task", return_value="test-job")
-    delivery.start()
-    case.addCleanup(delivery.stop)
+    quiet_task_queue(case)
     cache.clear()
     case.addCleanup(cache.clear)
     customer = Customer.objects.create(name="Order isolation", primary_email="order-isolation@example.com")

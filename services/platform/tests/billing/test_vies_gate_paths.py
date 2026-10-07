@@ -1,7 +1,7 @@
 """Production order, invoice, signal, and backfill paths require evidence."""
 
 from io import StringIO
-from unittest.mock import call, patch
+from unittest.mock import patch
 
 from django.core.cache import cache
 from django.core.management import call_command
@@ -17,6 +17,7 @@ from apps.orders.models import Order, OrderItem
 from apps.orders.preflight import OrderPreflightValidationService
 from apps.orders.services import OrderCalculationService
 from apps.products.models import Product
+from tests.helpers.task_queue import quiet_task_queue
 
 
 @override_settings(COMPANY_COUNTRY_CODE="RO")
@@ -24,31 +25,54 @@ class VIESGatePathTests(TestCase):
     def setUp(self) -> None:
         cache.clear()
         self.customer = Customer.objects.create(
-            name="Evidence GmbH", company_name="Evidence GmbH", customer_type="company",
+            name="Evidence GmbH",
+            company_name="Evidence GmbH",
+            customer_type="company",
             primary_email="evidence-gate@example.test",
         )
         self.profile = CustomerTaxProfile.objects.create(
-            customer=self.customer, vat_number="DE123456789", is_vat_payer=True,
-            vies_verification_status="valid", reverse_charge_eligible=True,
-            vies_verified_at=timezone.now(), vies_verified_name="Evidence GmbH",
+            customer=self.customer,
+            vat_number="DE123456789",
+            is_vat_payer=True,
+            vies_verification_status="valid",
+            reverse_charge_eligible=True,
+            vies_verified_at=timezone.now(),
+            vies_verified_name="Evidence GmbH",
             vies_consultation_reference="test-reference",
         )
 
     def _order(self) -> Order:
         currency, _created = Currency.objects.get_or_create(code="EUR", defaults={"symbol": "€"})
         order = Order.objects.create(
-            order_number="VIES-GATE-1", customer=self.customer, currency=currency,
-            subtotal_cents=10000, tax_cents=0, total_cents=10000,
+            order_number="VIES-GATE-1",
+            customer=self.customer,
+            currency=currency,
+            subtotal_cents=10000,
+            tax_cents=0,
+            total_cents=10000,
             billing_address={
-                "country": "DE", "vat_number": "DE123456789", "company_name": "Evidence GmbH",
-                "contact_name": "Billing", "email": "evidence-gate@example.test",
-                "address_line1": "Teststrasse 1", "city": "Berlin", "county": "Berlin", "postal_code": "10115",
+                "country": "DE",
+                "vat_number": "DE123456789",
+                "company_name": "Evidence GmbH",
+                "contact_name": "Billing",
+                "email": "evidence-gate@example.test",
+                "address_line1": "Teststrasse 1",
+                "city": "Berlin",
+                "county": "Berlin",
+                "postal_code": "10115",
             },
         )
         product = Product.objects.create(name="Hosting", slug="vies-gate-hosting", product_type="shared_hosting")
         OrderItem.objects.create(
-            order=order, product=product, product_name="Hosting", product_type="shared_hosting",
-            quantity=1, unit_price_cents=10000, tax_rate=0, tax_cents=0, line_total_cents=10000,
+            order=order,
+            product=product,
+            product_name="Hosting",
+            product_type="shared_hosting",
+            quantity=1,
+            unit_price_cents=10000,
+            tax_rate=0,
+            tax_cents=0,
+            line_total_cents=10000,
         )
         return Order.objects.get(pk=order.pk)
 
@@ -82,10 +106,16 @@ class VIESGatePathTests(TestCase):
 
         def record(profile: CustomerTaxProfile) -> None:
             current = CustomerTaxProfile.objects.get(pk=profile.pk)
-            queued.append((
-                current.vat_number, current.vies_verification_status, current.reverse_charge_eligible,
-                current.vies_verified_at, current.vies_verified_name, current.vies_consultation_reference,
-            ))
+            queued.append(
+                (
+                    current.vat_number,
+                    current.vies_verification_status,
+                    current.reverse_charge_eligible,
+                    current.vies_verified_at,
+                    current.vies_verified_name,
+                    current.vies_consultation_reference,
+                )
+            )
 
         with patch("apps.customers.signals._trigger_vat_validation", side_effect=record):
             self.profile.vat_number = "NL123456782"
@@ -93,15 +123,25 @@ class VIESGatePathTests(TestCase):
         expected = ("NL123456782", "pending", False, None, "", "")
         self.assertEqual(queued, [expected])
         self.assertEqual(
-            (self.profile.vat_number, self.profile.vies_verification_status, self.profile.reverse_charge_eligible,
-             self.profile.vies_verified_at, self.profile.vies_verified_name, self.profile.vies_consultation_reference),
+            (
+                self.profile.vat_number,
+                self.profile.vies_verification_status,
+                self.profile.reverse_charge_eligible,
+                self.profile.vies_verified_at,
+                self.profile.vies_verified_name,
+                self.profile.vies_consultation_reference,
+            ),
             expected,
         )
 
     def test_greek_number_with_greek_address_is_queued_for_vies(self) -> None:
         CustomerAddress.objects.create(
-            customer=self.customer, is_billing=True, is_current=True,
-            address_line1="Odos 1", city="Athens", country="GR",
+            customer=self.customer,
+            is_billing=True,
+            is_current=True,
+            address_line1="Odos 1",
+            city="Athens",
+            country="GR",
         )
         with patch("apps.customers.signals._trigger_vat_validation") as trigger:
             self.profile.vat_number = "GR094259216"
@@ -120,12 +160,10 @@ class VIESGatePathTests(TestCase):
         ):
             with self.subTest(label=label):
                 CustomerTaxProfile.objects.filter(pk=self.profile.pk).update(**profile_changes)
-                Order.objects.filter(pk=order.pk).update(
-                    billing_address={**order.billing_address, **address_changes}
-                )
+                Order.objects.filter(pk=order.pk).update(billing_address={**order.billing_address, **address_changes})
                 output = StringIO()
-                with patch("django_q.tasks.async_task"):
-                    call_command("validate_vat_numbers", "--blocked-orders", stdout=output)
+                quiet_task_queue(self)
+                call_command("validate_vat_numbers", "--blocked-orders", stdout=output)
                 self.assertIn("Blocked orders: 1", output.getvalue())
                 self.assertIn(str(order.pk), output.getvalue())
 
@@ -133,22 +171,28 @@ class VIESGatePathTests(TestCase):
         CustomerTaxProfile.objects.filter(pk=self.profile.pk).update(vies_verification_status="pending")
         order = self._order()
         pending_ids = [str(self.profile.pk)]
-        for index, (number, status) in enumerate((
-            ("NL123456782", "format_only"), ("FR40303265045", "valid"), ("GB123456789", "pending"), ("", "pending"),
-        )):
+        for index, (number, status) in enumerate(
+            (
+                ("NL123456782", "format_only"),
+                ("FR40303265045", "valid"),
+                ("GB123456789", "pending"),
+                ("", "pending"),
+            )
+        ):
             customer = Customer.objects.create(name=f"Backfill {index}", primary_email=f"backfill{index}@example.test")
             profile = CustomerTaxProfile.objects.create(
-                customer=customer, vat_number=number, vies_verification_status=status,
+                customer=customer,
+                vat_number=number,
+                vies_verification_status=status,
             )
             if index in {0, 1}:
                 pending_ids.append(str(profile.pk))
         output = StringIO()
-        with patch("django_q.tasks.async_task") as enqueue:
-            call_command("validate_vat_numbers", "--blocked-orders", stdout=output)
+        queue = quiet_task_queue(self)
+        call_command("validate_vat_numbers", "--blocked-orders", stdout=output)
         self.assertIn("Blocked orders: 1", output.getvalue())
         self.assertIn(str(order.pk), output.getvalue())
         self.assertIn("Enqueued: 3", output.getvalue())
         self.assertCountEqual(
-            enqueue.call_args_list,
-            [call("apps.billing.tasks.validate_vat_number", profile_id) for profile_id in pending_ids],
+            queue.queued(), [("apps.billing.tasks.validate_vat_number", profile_id) for profile_id in pending_ids]
         )

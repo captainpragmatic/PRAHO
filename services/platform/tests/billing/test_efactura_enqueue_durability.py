@@ -37,6 +37,7 @@ from apps.settings.models import SystemSetting
 from tests.billing._fiscal_correction_helpers import correction_of
 from tests.billing._storno_helpers import SELLER, v2_evidence
 from tests.factories.billing_factories import CustomerFactory
+from tests.helpers.task_queue import quiet_task_queue
 
 
 @SELLER
@@ -49,10 +50,10 @@ class EFacturaEnqueueDurabilityTests(TestCase):
         self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei"})
         self.sequence, _ = InvoiceSequence.objects.get_or_create(scope="default", defaults={"prefix": "DUR"})
         self._enabled(True)
-        for target in ("django_q.tasks.async_task", "apps.notifications.services.EmailService.send_template_email"):
-            delivery = patch(target, return_value="test-job")
-            delivery.start()
-            self.addCleanup(delivery.stop)
+        quiet_task_queue(self)
+        delivery = patch("apps.notifications.services.EmailService.send_template_email", return_value="test-job")
+        delivery.start()
+        self.addCleanup(delivery.stop)
 
     def _enabled(self, value: bool) -> None:
         SystemSetting.objects.update_or_create(
