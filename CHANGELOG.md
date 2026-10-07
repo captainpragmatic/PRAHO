@@ -66,6 +66,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   known subnet). A portal-only host no longer receives the database password or the keys. The role
   and its rollback script wait on the containers' own health instead of a host port that was never
   published, and the platform's start period covers a first boot.
+- The Docker production images and the standalone Compose files can start a working deployment.
+  Booting them showed five failures in a row:
+  - Gunicorn could not start (exit 127): the venv was built at `/build/.venv` and copied to `/app/.venv`,
+    so its scripts pointed at an interpreter that wasn't there. It is now built where it runs.
+  - Pages using shared components failed: `shared/ui` was not in the images. It is now copied in.
+  - The platform received neither `DJANGO_ENCRYPTION_KEY` nor `CREDENTIAL_VAULT_MASTER_KEY`, which
+    production requires; the Compose files now require both (and `container-service` the two domains).
+  - It could not reach the bundled database: production defaults to `sslmode=require`, which that
+    Postgres doesn't offer. `DB_SSLMODE` is now passed, `disable` for the bundled database and
+    `require` for an external one.
+  - The portal refused to start without trusted proxy CIDRs. Single-server pins the `web` network's
+    subnet and trusts it by default; portal-only and container-service require the value.
+  A first boot also outlasted the platform healthcheck, so the portal never started; the start period
+  now covers it. The native path gets the keys too: `.env.example.prod` lists them, and the production
+  preflight requires them.
 - Removing a product on the cart review page now updates the Order Summary. The totals kept the
   removed item's price, so an empty cart still showed a total to pay. Two things stopped the refresh.
   The Remove button sits inside the list its own response replaces, so by the time htmx reported the
