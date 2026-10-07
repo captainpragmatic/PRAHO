@@ -87,9 +87,9 @@ class EFacturaConfig:
     default_standard: str = "UBL"
 
     @classmethod
-    def from_settings(cls) -> EFacturaConfig:
-        """Create config from stored environment, Django settings and SettingsService."""
-        env_str = efactura_environment().value
+    def from_settings(cls, environment: str | None = None) -> EFacturaConfig:
+        """Resolve configuration for a recorded environment, or the current setting."""
+        env_str = efactura_environment().value if environment is None else environment
         environment = EFacturaEnvironment.PRODUCTION if env_str == "production" else EFacturaEnvironment.TEST
 
         return cls(
@@ -160,6 +160,7 @@ class UploadResponse:
     errors: list[str] = field(default_factory=list)
     raw_response: dict[str, Any] = field(default_factory=dict)
     outcome_is_known: bool = True
+    configuration_error: bool = False
 
     @classmethod
     def from_response(cls, response: requests.Response) -> UploadResponse:
@@ -260,9 +261,9 @@ class UploadResponse:
         )
 
     @classmethod
-    def error(cls, message: str) -> UploadResponse:
-        """Create error response."""
-        return cls(success=False, message=message, errors=[message])
+    def error(cls, message: str, *, configuration_error: bool = False) -> UploadResponse:
+        """Create a deterministic failure, distinguishing unavailable configuration from ANAF refusal."""
+        return cls(success=False, message=message, errors=[message], configuration_error=configuration_error)
 
 
 @dataclass
@@ -612,12 +613,16 @@ class EFacturaClient:
             except AuthenticationError:
                 pass
 
-        # Check for manually configured token (for development)
+        # The unscoped manual token belongs only to the currently configured environment.
         manual_token = getattr(settings, "EFACTURA_ACCESS_TOKEN", "")
-        if manual_token:
+        environment = "production" if self.config.environment == EFacturaEnvironment.PRODUCTION else "test"
+        if manual_token and environment == efactura_environment().value:
             return manual_token
 
-        raise AuthenticationError("No valid access token. User must complete OAuth2 authorization flow.")
+        raise AuthenticationError(
+            _("No valid access token for e-Factura environment %(environment)s. Complete OAuth2 authorization.")
+            % {"environment": environment}
+        )
 
     def _cache_token(self, token: TokenResponse) -> None:
         """Cache token with expiration."""
@@ -666,7 +671,7 @@ class EFacturaClient:
             NetworkError: If network request fails
         """
         if not self.config.is_valid():
-            return UploadResponse.error("Invalid e-Factura configuration")
+            return UploadResponse.error(_("Invalid e-Factura configuration"), configuration_error=True)
 
         params: dict[str, str] = {
             "standard": standard or self.config.default_standard,
@@ -693,7 +698,7 @@ class EFacturaClient:
         with the statutory 13-zero identifier by the XML builder.
         """
         if not self.config.is_valid():
-            return UploadResponse.error("Invalid e-Factura configuration")
+            return UploadResponse.error(_("Invalid e-Factura configuration"), configuration_error=True)
 
         params: dict[str, str] = {
             "standard": standard or self.config.default_standard,

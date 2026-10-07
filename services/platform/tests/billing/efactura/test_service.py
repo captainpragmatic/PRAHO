@@ -80,9 +80,9 @@ class MockInvoice:
     # Set as a class attribute so __init__ keeps its original arity.
     issuer_provider = ISSUER_BUILTIN
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # mirrors the Invoice fields the service reads
         self,
-        id=None,
+        id=None,  # noqa: A002  # same keyword as Invoice.id
         number="INV-001",
         bill_to_country="RO",
         bill_to_tax_id="RO12345678",
@@ -156,6 +156,7 @@ class EFacturaServiceTestCase(TestCase):
             xml_hash="a" * 64,
             is_b2c=False,
             is_credit_note=False,
+            environment="test",
         )
 
     def test_submit_success(self):
@@ -247,7 +248,7 @@ class EFacturaServiceTestCase(TestCase):
 
         self.assertFalse(result.success)
         self.assertIn("Authentication", result.error_message)
-        finalize.assert_called_once_with(claim, "Authentication failed: Token expired")
+        finalize.assert_called_once_with(claim, "Authentication failed: Token expired", credential_failure=True)
 
     def test_submit_network_error(self):
         """Test submission with network error."""

@@ -21,13 +21,15 @@ from __future__ import annotations
 import hashlib
 import logging
 import uuid
-from dataclasses import dataclass, field
+from copy import copy
+from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 from django.core.files.base import ContentFile
 from django.db import transaction
 from django.utils import timezone
+from django.utils.translation import gettext as _
 
 from apps.billing.fiscal_identity import normalize_country_code
 from apps.billing.issuers.policy import (
@@ -39,6 +41,7 @@ from .client import (
     AuthenticationError,
     EFacturaClient,
     EFacturaClientError,
+    EFacturaConfig,
     NetworkError,
     validate_response_archive,
 )
@@ -148,6 +151,7 @@ class SubmissionClaim:
     xml_hash: str
     is_b2c: bool
     is_credit_note: bool
+    environment: str
 
 
 def _repair_stale_document_type(document: EFacturaDocument, invoice: Invoice) -> None:
@@ -244,6 +248,50 @@ class EFacturaService:
     def client(self) -> EFacturaClient:
         return self._client
 
+    def _client_for_environment(self, environment: str) -> EFacturaClient:
+        """Bind a separate client without carrying another environment's in-memory token."""
+        client = copy(self._client)
+        config = EFacturaConfig.from_settings(environment=environment)
+        original_config: object = getattr(self._client, "config", None)
+        if isinstance(original_config, EFacturaConfig):
+            config = replace(original_config, environment=config.environment)
+        client.config = config
+        client._token = None
+        return client
+
+    def _record_credential_failure(self, document: EFacturaDocument, message: str, operation: str) -> None:
+        """Keep ANAF evidence intact while making unavailable credentials visible to staff."""
+        from apps.audit.models import AuditAlert  # noqa: PLC0415  # ADR-0007
+
+        document.last_error = message
+        document.save(update_fields=["last_error", "updated_at"])
+        AuditAlert.objects.get_or_create(
+            alert_type="compliance_violation",
+            status="active",
+            metadata__document_id=str(document.pk),
+            metadata__operation=operation,
+            defaults={
+                "severity": "high",
+                "title": _("e-Factura credentials unavailable: %(document_id)s") % {"document_id": document.pk},
+                "description": _(
+                    "Cannot perform %(operation)s for e-Factura document %(document_id)s "
+                    "in environment %(environment)s: %(error)s"
+                )
+                % {
+                    "operation": operation,
+                    "document_id": document.pk,
+                    "environment": document.environment,
+                    "error": message,
+                },
+                "metadata": {
+                    "document_id": str(document.pk),
+                    "environment": document.environment,
+                    "operation": operation,
+                },
+            },
+        )
+        logger.error("🔥 [e-Factura] Credential failure for %s in %s: %s", document.pk, document.environment, message)
+
     # --- Main Workflow Methods ---
 
     def submit_invoice(self, invoice: Invoice) -> SubmissionResult:  # noqa: C901, PLR0911, PLR0912  # Complexity: multi-step business logic
@@ -306,17 +354,19 @@ class EFacturaService:
         assert_efactura_submission_allowed(invoice)
 
         try:
+            client = self._client_for_environment(claim.environment)
             if claim.is_b2c and claim.is_credit_note:
-                response = self._client.upload_b2c(claim.xml_content, standard="CN")
+                response = client.upload_b2c(claim.xml_content, standard="CN")
             elif claim.is_b2c:
-                response = self._client.upload_b2c(claim.xml_content)
+                response = client.upload_b2c(claim.xml_content)
             elif claim.is_credit_note:
-                response = self._client.upload_credit_note(claim.xml_content)
+                response = client.upload_credit_note(claim.xml_content)
             else:
-                response = self._client.upload_invoice(claim.xml_content)
+                response = client.upload_invoice(claim.xml_content)
         except AuthenticationError as e:
-            logger.error(f"Authentication failed for invoice {invoice.number}: {e}")
-            return self._finalize_safe_failure(claim, f"Authentication failed: {e}")
+            logger.error(f"🔥 [e-Factura] Authentication failed for invoice {invoice.number}: {e}")
+            message = _("Authentication failed: %(error)s") % {"error": e}
+            return self._finalize_safe_failure(claim, message, credential_failure=True)
         except NetworkError as e:
             logger.error(f"Network error for invoice {invoice.number}: {e}")
             return self._finalize_unknown_outcome(claim, f"ANAF upload outcome unknown: {e}")
@@ -329,6 +379,11 @@ class EFacturaService:
             if result.success:
                 logger.info(f"e-Factura submitted for invoice {invoice.number}: {response.upload_index}")
             return result
+        if response.configuration_error:
+            message = _("Invalid e-Factura credentials for environment %(environment)s") % {
+                "environment": claim.environment
+            }
+            return self._finalize_safe_failure(claim, message, credential_failure=True)
         return self._finalize_safe_failure(
             claim,
             response.message,
@@ -441,6 +496,7 @@ class EFacturaService:
             xml_hash=document.xml_hash,
             is_b2c=is_b2c,
             is_credit_note=document.document_type == EFacturaDocumentType.CREDIT_NOTE.value,
+            environment=document.environment,
         )
 
     def _lock_owned_claim(self, claim: SubmissionClaim) -> EFacturaDocument | None:
@@ -471,12 +527,15 @@ class EFacturaService:
         message: str,
         *,
         errors: list[dict[str, Any]] | None = None,
+        credential_failure: bool = False,
     ) -> SubmissionResult:
         document = self._lock_owned_claim(claim)
         if document is None:
             return SubmissionResult.error("e-Factura submission claim is no longer owned by this worker")
         document.mark_error(message)
         document.save()
+        if credential_failure:
+            self._record_credential_failure(document, message, "upload")
         self._log_audit_event(document.invoice, document, "efactura_submission_failed")
         return SubmissionResult.error(message, errors)
 
@@ -504,7 +563,8 @@ class EFacturaService:
             return StatusCheckResult(status="error", errors=[{"message": "No upload index"}])
 
         try:
-            response = self._client.get_upload_status(document.anaf_upload_index)
+            client = self._client_for_environment(document.environment)
+            response = client.get_upload_status(document.anaf_upload_index)
 
             if response.is_accepted:
                 with transaction.atomic():
@@ -542,7 +602,10 @@ class EFacturaService:
                 return StatusCheckResult(status=response.status, is_terminal=False)
 
         except EFacturaClientError as e:
-            logger.error(f"Status check failed for document {document.id}: {e}")
+            if isinstance(e, AuthenticationError):
+                self._record_credential_failure(document, str(e), "poll")
+            else:
+                logger.error(f"🔥 [e-Factura] Status check failed for document {document.id}: {e}")
             return StatusCheckResult(status="error", errors=[{"message": str(e)}])
 
     def download_response(self, document: EFacturaDocument) -> bytes | None:
@@ -567,7 +630,8 @@ class EFacturaService:
                 with document.response_archive.open("rb") as existing:
                     return bytes(existing.read())
 
-            content = self._client.download_response(document.anaf_download_id)
+            client = self._client_for_environment(document.environment)
+            content = client.download_response(document.anaf_download_id)
             validate_response_archive(content)
 
             filename = f"efactura_{document.id}.zip"
@@ -586,6 +650,9 @@ class EFacturaService:
             logger.info(f"Downloaded and archived ANAF response ZIP for document {document.id}")
             return content
 
+        except AuthenticationError as e:
+            self._record_credential_failure(document, str(e), "download")
+            return None
         except (EFacturaClientError, OSError) as e:
             logger.error(f"Download failed for document {document.id}: {e}")
             return None
