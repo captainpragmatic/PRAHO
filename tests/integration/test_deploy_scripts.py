@@ -1,10 +1,10 @@
 """The standalone deployment scripts must hand the operator's env file to every Compose call.
 
 The compose files live in deploy/, so a bare `docker compose -f deploy/...` reads deploy/.env, which
-no documented step creates: every ${VAR:?} failed before a container started. The script also
-health-checked host ports the stacks never publish. These tests run copies of the scripts against a
-recording `docker` stub, so they need no Docker daemon and never touch a real env file; the Compose
-tests run the real `docker compose config`.
+no documented step creates: every ${VAR:?} failed before a container started. The scripts also
+health-checked host ports the stacks never publish, and rollback edited a root .env Compose never
+reads. These tests run copies of the scripts against a recording `docker` stub, so they need no
+Docker daemon and never touch a real env file; one test runs the real `docker compose config`.
 """
 
 from __future__ import annotations
@@ -248,7 +248,60 @@ class TestDeployScript:
         assert _subcommand(call)[0] == subcommand
 
 
+class TestRollbackAndRestore:
+    @pytest.mark.integration
+    def test_rollback_pins_the_version_without_editing_the_env_file(self, project: Project) -> None:
+        env_file = project.write_env(".env.prod", PROD_ENV + "VERSION=v1.0.0\n")
+        before = env_file.read_bytes()
+        result = project.run("rollback.sh", "version", "v1.2.3", stdin="yes\n")
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert env_file.read_bytes() == before
+        assert not (project.root / ".env").exists()
+        calls = project.compose_calls()
+        subcommands = [_subcommand(c)[0] for c in calls]
+        assert subcommands.index("pull") < subcommands.index("up")
+        assert "down" not in subcommands
+        for call in calls:
+            assert call["argv"][2] == str(env_file)
+            assert call["env"]["VERSION"] == "v1.2.3"
+        up = calls[subcommands.index("up")]
+        assert {"--no-build", "--wait"} <= set(_subcommand(up))
+        # Only the application images: a newer postgres or caddy image would recreate those containers.
+        pull = _subcommand(calls[subcommands.index("pull")])
+        assert [a for a in pull if not a.startswith("-")] == ["pull", "platform", "portal"]
+
+    @pytest.mark.integration
+    def test_restore_restarts_through_the_env_file_and_waits_on_container_health(self, project: Project) -> None:
+        env_file = project.write_env(".env.staging", STAGING_ENV)
+        backups = project.root / "backups"
+        backups.mkdir()
+        backup = backups / "praho_backup_20261007_000000.sql.gz"
+        backup.write_bytes(b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03\x03\x00\x00\x00\x00\x00\x00\x00\x00\x00")
+        result = project.run("restore.sh", "--env", "staging", str(backup), stdin="yes\n", DOCKER_START_FAILS="1")
+        assert result.returncode == 0, result.stdout + result.stderr
+        (call,) = project.compose_calls()
+        assert call["argv"][2] == str(env_file)
+        assert "--wait" in _subcommand(call)
+        assert "curl" not in project.log.read_text()
+
+    @pytest.mark.integration
+    def test_health_check_reads_container_health_not_host_ports(self, project: Project) -> None:
+        result = project.run("health-check.sh")
+        assert result.returncode == 0, result.stdout
+        assert "curl" not in project.log.read_text()
+
+
 class TestEveryComposeCallUsesTheHelper:
+    @pytest.mark.integration
+    def test_scripts(self) -> None:
+        offenders = [
+            f"{path.name}:{number}"
+            for path in sorted(SCRIPTS.glob("*.sh"))
+            for number, line in enumerate(path.read_text().splitlines(), 1)
+            if re.search(r"\bdocker[ -]compose\b(?! version)", line.split("#", 1)[0])
+        ]
+        assert offenders == []
+
     @pytest.mark.integration
     def test_makefile_deploy_targets(self) -> None:
         recipes = re.findall(r"^deploy-[\w-]+:.*\n((?:\t.*\n)+)", (PROJECT_ROOT / "Makefile").read_text(), re.MULTILINE)

@@ -57,17 +57,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- The Docker deploy script now uses the operator's env file. The Compose files live in `deploy/`, so
+- The Docker deploy scripts now use the operator's env file. The Compose files live in `deploy/`, so
   Compose looked for `deploy/.env`, which no step creates, and every required variable failed before
-  a container started. `deploy.sh` and the `make deploy-*` targets now pass `.env.prod`, or
-  `.env.staging` with `--env staging` (`DEPLOY_ENV=staging` for make), to every Compose call, and the
-  platform receives the whole file. The script refuses the development `.env`, a settings module the
-  images do not run, and a production file without the encryption keys. A developer's exported
-  `DJANGO_SETTINGS_MODULE` no longer overrides the file. The single-server stack's own database and
-  proxy settings no longer come from that file, which describes a native host, and neither do the
-  platform-only bundled database's. Health is read from the containers (`up --wait`), not from host
-  ports the stacks never published. `make deploy-stop` and `make deploy-logs` act on one deployment,
-  `DEPLOY_TYPE=single-server` by default.
+  a container started. `deploy.sh`, `rollback.sh`, `restore.sh` and the `make deploy-*`, `rollback`
+  and `restore` targets now pass `.env.prod`, or `.env.staging` with `--env staging`
+  (`DEPLOY_ENV=staging` for make), to every Compose call, and the platform receives the whole file.
+  They refuse the development `.env`, a settings module the images do not run, and a production file
+  without the encryption keys. A developer's exported `DJANGO_SETTINGS_MODULE` no longer overrides the
+  file. The single-server stack's own database and proxy settings no longer come from that file,
+  which describes a native host, and neither do the platform-only bundled database's. Health is read
+  from the containers (`up --wait`), not from host ports the stacks never published. A rollback pins
+  its tag for that run, pulls only the application images, and no longer edits a file Compose never
+  read. `make deploy-stop` and `make deploy-logs` act on one deployment, `DEPLOY_TYPE=single-server`
+  by default.
 - The Docker production images and the standalone Compose files can start a working deployment.
   Booting them showed five failures in a row:
   - Gunicorn could not start (exit 127): the venv was built at `/build/.venv` and copied to `/app/.venv`,

@@ -716,7 +716,10 @@ Backups are stored in `./backups/` with format: `praho_backup_YYYYMMDD_HHMMSS.sq
 # Restore latest backup
 ./deploy/scripts/restore.sh --latest
 
-# Using make
+# Docker staging: the scripts read .env.prod unless told otherwise
+./deploy/scripts/restore.sh --latest --env staging
+
+# Using make (DEPLOY_ENV=staging for staging)
 make restore
 
 # Native deployment
@@ -747,10 +750,10 @@ Ansible automatically sets up a cron job for daily backups at 2:00 AM. Manual se
 
 ### Version Rollback
 
-Roll back to a specific image version:
+Roll back to a specific image version. The tag applies to that run only (the env file is not edited), so a later `deploy.sh` run goes back to the `VERSION` in the env file:
 
 ```bash
-# Using script
+# Using script (add --env staging for a staging host)
 ./deploy/scripts/rollback.sh version v1.2.3
 
 # Using make
@@ -874,8 +877,9 @@ These are set in the `.env` file and used by the Portal service:
 # Using make
 make health-check
 
-# Docker publishes no application ports: read container health
+# Docker publishes no application ports: read container health, or probe the public routes
 docker inspect --format '{{.State.Health.Status}}' praho_platform praho_portal
+PLATFORM_URL=https://platform.example.com PORTAL_URL=https://portal.example.com ./deploy/scripts/health-check.sh
 
 # Native deployment
 curl http://localhost:8700/api/users/health/

@@ -1276,12 +1276,12 @@ backup-list:
 restore:
 	@echo "🔄 [Restore] Interactive database restore..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@./deploy/scripts/restore.sh
+	@./deploy/scripts/restore.sh --env $(DEPLOY_ENV)
 
 restore-latest:
 	@echo "🔄 [Restore] Restoring latest backup..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@./deploy/scripts/restore.sh --latest
+	@./deploy/scripts/restore.sh --latest --env $(DEPLOY_ENV)
 
 # ===============================================================================
 # ROLLBACK PROCEDURES ⏪
@@ -1294,12 +1294,12 @@ ifndef VERSION
 endif
 	@echo "⏪ [Rollback] Rolling back to version $(VERSION)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@./deploy/scripts/rollback.sh version $(VERSION)
+	@./deploy/scripts/rollback.sh version $(VERSION) --env $(DEPLOY_ENV)
 
 rollback-db:
 	@echo "⏪ [Rollback] Restoring database from latest backup..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@./deploy/scripts/rollback.sh database
+	@./deploy/scripts/rollback.sh database --env $(DEPLOY_ENV)
 
 # ===============================================================================
 # HEALTH & MONITORING 🏥

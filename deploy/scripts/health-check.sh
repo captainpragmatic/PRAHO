@@ -12,8 +12,11 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-PLATFORM_URL="${PLATFORM_URL:-http://localhost:8700}"
-PORTAL_URL="${PORTAL_URL:-http://localhost:8701}"
+# The stacks publish no application ports (only Caddy's 80/443), so container health is the
+# check. Set PLATFORM_URL / PORTAL_URL (e.g. https://platform.example.com) to also probe the
+# public routes through Caddy.
+PLATFORM_URL="${PLATFORM_URL:-}"
+PORTAL_URL="${PORTAL_URL:-}"
 
 check_service() {
     local NAME=$1
@@ -32,10 +35,16 @@ check_container() {
     local NAME=$1
 
     if docker ps --format '{{.Names}}' | grep -q "^${NAME}$"; then
-        local STATUS=$(docker inspect --format='{{.State.Health.Status}}' "$NAME" 2>/dev/null || echo "unknown")
+        local STATUS
+        # Caddy has no healthcheck: running is all it can report.
+        STATUS=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' "$NAME" 2>/dev/null || echo "unknown")
         case $STATUS in
             healthy)
                 echo -e "${GREEN}[OK]${NC} Container ${NAME}: healthy"
+                return 0
+                ;;
+            no-healthcheck)
+                echo -e "${GREEN}[OK]${NC} Container ${NAME}: running (no healthcheck)"
                 return 0
                 ;;
             unhealthy)
@@ -66,10 +75,16 @@ check_container "praho_platform" || EXIT_CODE=1
 check_container "praho_portal" || EXIT_CODE=1
 check_container "praho_caddy" || EXIT_CODE=1
 
-echo ""
-echo "Services:"
-check_service "Platform" "${PLATFORM_URL}/api/users/health/" || EXIT_CODE=1
-check_service "Portal" "${PORTAL_URL}/status/" || EXIT_CODE=1
+if [ -n "$PLATFORM_URL" ] || [ -n "$PORTAL_URL" ]; then
+    echo ""
+    echo "Public routes:"
+    if [ -n "$PLATFORM_URL" ]; then
+        check_service "Platform" "${PLATFORM_URL}/api/users/health/" || EXIT_CODE=1
+    fi
+    if [ -n "$PORTAL_URL" ]; then
+        check_service "Portal" "${PORTAL_URL}/status/" || EXIT_CODE=1
+    fi
+fi
 
 echo ""
 if [ $EXIT_CODE -eq 0 ]; then
