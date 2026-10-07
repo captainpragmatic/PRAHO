@@ -33,10 +33,9 @@ from django.core.cache import cache
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
+from apps.billing.efactura.settings import efactura_environment, efactura_settings
 from apps.common.outbound_http import OutboundPolicy, safe_request
 from apps.settings.services import SettingsService
-
-from .settings import efactura_environment
 
 logger = logging.getLogger(__name__)
 
@@ -92,9 +91,17 @@ class EFacturaConfig:
         env_str = efactura_environment().value if environment is None else environment
         environment = EFacturaEnvironment.PRODUCTION if env_str == "production" else EFacturaEnvironment.TEST
 
+        stored_client_id = SettingsService.get_stored_setting("efactura.oauth.client_id")
+        stored_client_secret = SettingsService.get_stored_setting("efactura.oauth.client_secret")
         return cls(
-            client_id=getattr(settings, "EFACTURA_CLIENT_ID", ""),
-            client_secret=getattr(settings, "EFACTURA_CLIENT_SECRET", ""),
+            client_id=(
+                str(stored_client_id) if stored_client_id is not None else getattr(settings, "EFACTURA_CLIENT_ID", "")
+            ),
+            client_secret=(
+                str(stored_client_secret)
+                if stored_client_secret is not None
+                else getattr(settings, "EFACTURA_CLIENT_SECRET", "")
+            ),
             company_cui=getattr(settings, "EFACTURA_COMPANY_CUI", ""),
             environment=environment,
             timeout=SettingsService.get_integer_setting("billing.efactura_api_timeout_seconds", 30),
@@ -509,7 +516,7 @@ class EFacturaClient:
         params = {
             "response_type": "code",
             "client_id": self.config.client_id,
-            "redirect_uri": redirect_uri,
+            "redirect_uri": redirect_uri or efactura_settings.redirect_uri,
             "state": state,
             "token_content_type": "jwt",
         }
@@ -532,7 +539,7 @@ class EFacturaClient:
         data = {
             "grant_type": "authorization_code",
             "code": code,
-            "redirect_uri": redirect_uri,
+            "redirect_uri": redirect_uri or efactura_settings.redirect_uri,
             # ANAF wants the JWT-format token; client auth is via Basic Auth, NOT a body secret.
             "token_content_type": "jwt",
         }

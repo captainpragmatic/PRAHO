@@ -21,6 +21,8 @@ from typing import Any, ClassVar, cast
 from django.conf import settings
 from lxml import etree
 
+from apps.billing.efactura.settings import efactura_settings
+
 logger = logging.getLogger(__name__)
 
 # UBL Namespaces for parsing
@@ -223,6 +225,10 @@ class CIUSROValidator:
             result.add_error("XML-SYNTAX", f"XML parsing failed: {e}")
             return result
 
+        # The native business-rule subset is optional; XML parsing remains mandatory.
+        if not efactura_settings.schematron_validation_enabled:
+            return result
+
         # Step 2: Determine document type
         root_tag = etree.QName(doc.tag).localname
         is_credit_note = root_tag == "CreditNote"
@@ -252,6 +258,10 @@ class CIUSROValidator:
         self._validate_monetary_reconciliation(doc, result, is_credit_note)
         self._validate_tax_category_rules(doc, result)
         self._validate_outside_scope_absence_rules(doc, result)
+
+        if efactura_settings.strict_mode:
+            for warning in result.warnings:
+                result.add_error(warning.code, warning.message, warning.location)
 
         return result
 
