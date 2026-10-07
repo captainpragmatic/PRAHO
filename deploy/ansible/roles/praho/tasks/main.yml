@@ -89,14 +89,28 @@
   register: compose_result
 
 # The services publish no host ports (only Caddy does), so read each container's own healthcheck.
+# 150 x 5s outlasts the platform's 600s start period plus three failed 30s checks: a first boot that
+# migrates a fresh database is still `starting`, not failed. The inspection result holds Config.Env
+# (the database password and keys), so it is never logged; the next task names what failed.
 - name: Wait for the application containers to report healthy
   community.docker.docker_container_info:
     name: "{{ item }}"
   register: praho_container
   until: praho_container.exists and (praho_container.container.State.Health.Status | default('')) == 'healthy'
-  retries: 60
+  retries: 150
   delay: 5
   loop: "{{ (['praho_platform'] if deploy_platform else []) + (['praho_portal'] if deploy_portal else []) }}"
+  no_log: true
+  ignore_errors: true
+
+- name: Stop if an application container did not report healthy
+  fail:
+    msg: >-
+      Not healthy after the wait:
+      {% for r in praho_container.results if r.failed | default(false) %}{{ r.item }}
+      ({{ r.container.State.Health.Status | default('missing') if r.exists | default(false) else 'missing' }}){{ ', ' if not loop.last }}{% endfor %}.
+      Inspect with: docker logs <name>
+  when: praho_container.results | selectattr('failed', 'defined') | selectattr('failed') | list | length > 0
 
 - name: Setup backup cron job
   cron:

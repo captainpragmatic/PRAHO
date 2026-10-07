@@ -72,8 +72,9 @@ else
 
     echo "[$(date)] Starting version ${VERSION} and waiting for health..."
     # The services publish no host ports, so health comes from the containers' own healthchecks:
-    # --wait returns once each of them reports healthy, or fails.
-    if docker compose up -d --wait --wait-timeout 300; then
+    # --wait returns once each of them reports healthy, or fails. 900s outlasts the platform's
+    # 600s start period plus its failed-check retries.
+    if docker compose up -d --wait --wait-timeout 900; then
         echo "[$(date)] Rollback successful! Services are healthy."
     else
         echo "[$(date)] WARNING: Health check failed. Check logs with: docker compose logs"

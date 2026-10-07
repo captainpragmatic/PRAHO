@@ -21,7 +21,7 @@ from typing import Any
 
 import pytest
 import yaml
-from jinja2 import Environment, StrictUndefined, UndefinedError
+from jinja2 import ChainableUndefined, Environment, StrictUndefined, UndefinedError
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEPLOY = PROJECT_ROOT / "deploy"
@@ -102,6 +102,10 @@ def _render_role(topology: str, inputs: dict[str, str]) -> dict[str, str]:
     return {name: env.from_string((ROLE / "templates" / name).read_text()).render(context) for name in templates}
 def _dummy_inputs(topology: str) -> dict[str, str]:
     return {name: f"dummy-{name}" for name in _required_inputs(topology)}
+def _health_wait_tasks() -> tuple[dict[str, Any], dict[str, Any]]:
+    tasks = yaml.safe_load((ROLE / "tasks/main.yml").read_text())
+    index = next(i for i, task in enumerate(tasks) if "community.docker.docker_container_info" in task)
+    return tasks[index], tasks[index + 1]
 class TestAnsibleDockerRole:
     @pytest.mark.integration
     @pytest.mark.parametrize("topology", TOPOLOGIES)
@@ -186,3 +190,44 @@ class TestAnsibleDockerRole:
         rendered = _render_role("combined", _dummy_inputs("combined"))
         healthcheck = yaml.safe_load(rendered["docker-compose.yml.j2"])["services"]["platform"]["healthcheck"]
         assert _seconds(healthcheck["start_period"]) >= FIRST_BOOT_SECONDS, healthcheck
+
+    @pytest.mark.integration
+    def test_the_health_waits_outlast_the_start_period(self) -> None:
+        # The platform may legitimately report `starting` for its whole start period and then a few
+        # failed retries; a deploy or rollback that gives up sooner fails a healthy first boot.
+        rendered = _render_role("combined", _dummy_inputs("combined"))
+        healthcheck = yaml.safe_load(rendered["docker-compose.yml.j2"])["services"]["platform"]["healthcheck"]
+        allowance = _seconds(healthcheck["start_period"]) + healthcheck["retries"] * _seconds(healthcheck["interval"])
+        wait, _ = _health_wait_tasks()
+        assert wait["retries"] * wait["delay"] >= allowance, (wait["retries"], wait["delay"], allowance)
+        timeout = re.search(r"--wait-timeout (\d+)", rendered["rollback.sh.j2"])
+        assert timeout and int(timeout.group(1)) >= allowance
+
+    @pytest.mark.integration
+    def test_the_health_wait_logs_no_container_environment(self) -> None:
+        # docker_container_info returns the container's Config.Env: the database password and keys.
+        wait, _ = _health_wait_tasks()
+        assert wait.get("no_log") is True
+        assert wait.get("ignore_errors") is True
+
+    @pytest.mark.integration
+    def test_an_unhealthy_container_is_named_without_its_environment(self) -> None:
+        # The wait hides its results, so the next task says which container failed, and only that.
+        _, stop = _health_wait_tasks()
+        secret = "dummy-db-password-value"
+
+        def result(item: str, status: str | None) -> dict[str, Any]:
+            if status is None:
+                return {"item": item, "failed": True, "exists": False}
+            container = {"Config": {"Env": [f"DB_PASSWORD={secret}"]}, "State": {"Health": {"Status": status}}}
+            return {"item": item, "failed": status != "healthy", "exists": True, "container": container}
+
+        # Ansible lets a.b.c | default(...) pass over missing keys; ChainableUndefined does the same.
+        env = Environment(undefined=ChainableUndefined, autoescape=False)  # noqa: S701  # Plain text, not HTML.
+        failing = {"praho_container": {"results": [result("praho_platform", "starting"), result("praho_portal", None)]}}
+        assert env.compile_expression(stop["when"])(**failing) is True
+        message = env.from_string(stop["fail"]["msg"]).render(failing)
+        assert "praho_platform (starting), praho_portal (missing)." in message
+        assert secret not in message
+        healthy = {"praho_container": {"results": [result("praho_platform", "healthy"), result("praho_portal", "healthy")]}}
+        assert env.compile_expression(stop["when"])(**healthy) is False
