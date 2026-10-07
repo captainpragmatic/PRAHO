@@ -693,7 +693,13 @@ class TestPortalHostEnv:
             capture_output=True, text=True, timeout=30, check=False,
         )
         assert result.returncode == 0, result.stderr
-        assert set(result.stdout.split()) == _portal_only_variables()
+        allowlist = set(result.stdout.split())
+        # Everything Compose interpolates must be allowed, or the helper would drop it. Older Compose
+        # releases leave top-level keys (networks:) out of `config --variables`, so the allowlist may hold
+        # more, but only names the file really references.
+        assert sorted(_portal_only_variables() - allowlist) == []
+        text = (PROJECT_ROOT / "deploy/docker-compose.portal-only.yml").read_text()
+        assert sorted(name for name in allowlist if "${" + name not in text) == []
 
     @pytest.mark.integration
     @pytest.mark.parametrize("name", ["single-server", "container-service"])

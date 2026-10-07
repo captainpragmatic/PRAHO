@@ -30,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `preload` and replaced whatever Django sent, so staging's one-hour policy never reached a
   browser, and `preload` went out for a domain never submitted to the preload list. The edge now
   sends `HSTS_POLICY`: unset in production (one year with `includeSubDomains`), and
-  `max-age=3600` on staging, which the Docker Ansible role derives from `praho_env`. Caddy's own
+  `max-age=3600` on staging, which the native role falls back to on its own. Caddy's own
   502s now carry it too. Where no edge fronts the portal, its `SECURE_HSTS_*` settings now take
   effect; a hardcoded header in its middleware had blocked them. Nothing preloads by default.
   **Upgrading a Docker Compose staging deployment:** add `HSTS_POLICY=max-age=3600` to its
@@ -63,6 +63,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- The Ansible Docker role (`deploy/ansible/roles/praho` and `roles/docker`), its playbooks
+  (`single-server.yml`, `two-servers.yml`, and `rollback.yml`, which only worked with it),
+  `inventory/two-servers.yml`, and the `make deploy-dev` and `make ansible-two-servers` targets. It
+  copied the Docker Compose stack behind a second set of variables, so every fix had to land twice.
+  Servers deploy with the native role (`make deploy-prod`, `deploy-staging`, `deploy-dev-native`) and
+  Docker hosts with `deploy/scripts/deploy.sh`; a two-server layout runs the Compose platform-only and
+  portal-only stacks (ADR-0054).
 - The legacy nginx edge and the local nginx stack. Every supported deployment, Docker or native, runs
   Caddy, which obtains and renews its own certificates. `deploy/nginx/`, the certbot kit in
   `deploy/ssl/` and `deploy/docker-compose.services.yml` are gone, with the `make docker-prod`,
@@ -74,6 +81,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The portal-only Docker stack pins its network to `10.200.250.0/24` (`PRAHO_WEB_SUBNET`), so
+  `PORTAL_TRUSTED_PROXY_CIDRS` has a known value before the first start. Docker used to choose the
+  subnet, and unless the operator found and set it, the portal attributed every request to its own
+  Caddy, which merged all customers into one rate-limit bucket and one audit address.
+  **Upgrading a host that already ran it:** run `deploy.sh portal-only --stop` once before deploying;
+  Compose keeps an existing network's old subnet on `up`.
 - `make docker-dev` starts again. Since March it built the production images and mounted the source
   over `/app`, hiding their venv and entrypoint, and the production venv lacks the debug toolbar and
   colorlog that the dev settings import. The Dockerfiles now have `dev` targets that install the dev
@@ -97,15 +110,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its tag for that run, pulls only the application images, and no longer edits a file Compose never
   read. `make deploy-stop` and `make deploy-logs` act on one deployment, `DEPLOY_TYPE=single-server`
   by default.
-- The Ansible Docker role (`make deploy-dev`, `playbooks/two-servers.yml`) can deploy. Its templates
-  needed variables nothing defined, so it could not even render. It now declares the secrets and
-  domains operators must supply per topology (`praho_required_inputs`) and stops first, naming any that
-  are missing (never their values); the non-secret settings have defaults. It delivers what production
-  requires: both encryption keys to the platform, the webhook secret to both services, a database
-  `sslmode` that fits the database, and trusted proxy CIDRs for the portal (its `web` network now has a
-  known subnet). A portal-only host no longer receives the database password or the keys. The role
-  and its rollback script wait on the containers' own health instead of a host port that was never
-  published, and the platform's start period covers a first boot.
 - The Docker production images and the standalone Compose files can start a working deployment.
   Booting them showed five failures in a row:
   - Gunicorn could not start (exit 127): the venv was built at `/build/.venv` and copied to `/app/.venv`,
@@ -157,14 +161,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Authenticated requests no longer write an audit row each, and load the session user in one
   query instead of two (#553). The session timeout is audited only when it changes. Existing
   sessions are signed out once by the new authentication backend.
-- Docker staging deployments now run the staging Django settings. Every Docker path pinned
-  `DJANGO_SETTINGS_MODULE=config.settings.prod`: the standalone Compose files and the Ansible Docker role.
-  So staging ran production settings, and every staging-only setting was ignored. Compose now takes the
-  module from `.env` (`.env.example.staging` already sets `config.settings.staging`) and defaults to
-  production when it is unset. The Ansible Docker role runs `config.settings.staging` for staging and
-  production settings for every other `praho_env`. The Docker dev inventory stays on production
-  settings, as before: the images lack the dev dependencies that `config.settings.dev` needs. Platform
-  containers also set `STATIC_ROOT=/app/staticfiles`, because the staging default is the native
+- Docker staging deployments now run the staging Django settings. The standalone Compose files pinned
+  `DJANGO_SETTINGS_MODULE=config.settings.prod`, so staging ran production settings, and every
+  staging-only setting was ignored. Compose now takes the module from the env file
+  (`.env.example.staging` already sets `config.settings.staging`) and defaults to production when it is
+  unset. Platform containers also set `STATIC_ROOT=/app/staticfiles`, because the staging default is the native
   layout's `/opt/praho/static`, which the container's non-root user cannot create.
 - The nightly browser job no longer fails before it starts. The job added on 2026-09-28 failed
   at its Node setup step on every one of its first seven nights, before a browser was installed,

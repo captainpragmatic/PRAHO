@@ -55,7 +55,7 @@ PRAHO/                          # 🚀 Romanian Hosting Provider PRAHO Platform
 │  ├─ platform/                # Platform service Dockerfile + entrypoint
 │  ├─ portal/                  # Portal service Dockerfile + entrypoint
 │  ├─ caddy/                   # Caddy edge: automatic HTTPS, hostname routing, edge headers
-│  ├─ ansible/                 # Native (systemd) and Docker deployment roles
+│  ├─ ansible/                 # Native (systemd) deployment role
 │  ├─ docker-compose.single-server.yml  # Production: both services + PostgreSQL + Caddy
 │  └─ docker-compose.dev.yml   # Development services
 ├─ shared/                      # 🎨 Cross-service shared assets (ADR-0035)

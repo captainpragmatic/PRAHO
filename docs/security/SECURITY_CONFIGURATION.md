@@ -167,7 +167,7 @@ Caddy does not replace these application authentication rules.
   Replace/add the actual staff or VPN networks before deploying.
   `PORTAL_TRUSTED_PROXY_CIDRS` is a separate, comma-separated Django setting.
 - Existing Ansible installations must set `platform_allowed_ips` in inventory
-  host_vars/group_vars at upgrade. Both roles now default to
+  host_vars/group_vars at upgrade. The native role defaults to
   `["127.0.0.1/32", "::1/128"]`; an empty list also falls back to loopback.
   The standalone Compose environment variable does not configure Ansible.
 - `DOMAIN` remains a legacy fallback for the Portal in combined/Portal-only
@@ -328,8 +328,7 @@ The deployment check reports `portal.E001` outside DEBUG and `portal.W001` in DE
 For native Caddy on the same host, use `127.0.0.1/32,::1/128`. For Docker,
 use the Compose network subnet containing the proxy; `172.16.0.0/12` is an
 example range and should be narrowed to the actual project subnet. Managed
-container deployments must use their ingress proxy's CIDRs. Docker Ansible
-deployments supply the `portal_trusted_proxy_cidrs` variable; native deployments
+container deployments must use their ingress proxy's CIDRs. Native deployments
 copy the operator env file documented by the root `.env.example.*` files.
 
 If custom settings run outside DEBUG without proxy trust, Portal authentication
@@ -563,7 +562,7 @@ Platform responses standardize `429` handling with parseable error payloads and 
 - [ ] Set `DJANGO_ENCRYPTION_KEY` and `CREDENTIAL_VAULT_MASTER_KEY`
 - [ ] Configure distinct `PORTAL_DOMAIN` and `PLATFORM_DOMAIN`, pass both to both services, and include each public hostname in its service's `ALLOWED_HOSTS` (no wildcards)
 - [ ] Set staff/VPN CIDRs before upgrade: space-separated `PLATFORM_ALLOWED_CIDRS` for Compose or `platform_allowed_ips` for Ansible; empty Ansible lists no longer allow public staff access
-- [ ] Validate all five Caddy configurations and confirm comma-separated staff CIDRs fail validation
+- [ ] Validate all four Caddy configurations and confirm comma-separated staff CIDRs fail validation
 - [ ] Record non-loopback peer addresses through Docker's published port and verify spoofed forwarding headers cannot grant staff access
 - [ ] Verify real Portal login/form submission and allowed staff login through local Caddy with `DEBUG=False`
 - [ ] Restrict direct Django ports and update monitors/bookmarks for the two hostnames and actual health URLs

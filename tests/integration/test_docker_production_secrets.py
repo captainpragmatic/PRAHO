@@ -34,10 +34,6 @@ DENIED_TO_PORTAL = (
     "DATABASE_URL",
 )
 
-# (deploy_platform, deploy_portal, deploy_database, deploy_caddy): the inventories' topologies.
-# Values the repo itself provides (group_vars/all.yml) and facts Ansible gathers. A template that
-# starts using another repo-defined variable fails the render until it is added here.
-
 
 def _environment(service: dict[str, Any]) -> dict[str, str]:
     return dict(str(entry).split("=", 1) for entry in service.get("environment", []))
@@ -191,6 +187,15 @@ class TestPortalTrustsItsProxy:
         # Fixed to the stack's own Caddy network: the env file's value describes a native Caddy.
         portal = _environment(config["services"]["portal"])
         assert portal["PORTAL_TRUSTED_PROXY_CIDRS"] == subnet
+
+    @pytest.mark.integration
+    def test_portal_only_pins_its_network_so_the_proxy_range_is_known(self) -> None:
+        # Its Caddy, or a proxy on the host through the loopback port, reaches the portal over this
+        # network. A pinned subnet gives PORTAL_TRUSTED_PROXY_CIDRS a value the operator can write down
+        # before the first start; Docker's own pick is only known afterwards.
+        config = yaml.safe_load((DEPLOY / "docker-compose.portal-only.yml").read_text())
+        subnet = config["networks"]["default"]["ipam"]["config"][0]["subnet"]
+        assert subnet == f"${{PRAHO_WEB_SUBNET:-{self.WEB_SUBNET}}}"
 
     @pytest.mark.integration
     @pytest.mark.parametrize("name", ["portal-only", "container-service"])

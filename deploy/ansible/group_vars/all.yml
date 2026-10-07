@@ -22,7 +22,7 @@ env_file_path: "{{ playbook_dir }}/../../../.env.{{ praho_env | default('prod') 
 # Note: "environment" is an Ansible reserved keyword — we use "praho_env" instead
 django_settings_module: "config.settings.{{ praho_env | default('prod') }}"
 
-# Both deployment roles restrict staff access to loopback by default.
+# The native role restricts staff access to loopback by default.
 # At upgrade, set platform_allowed_ips in inventory host_vars/group_vars to your
 # staff/VPN CIDRs, e.g. ["198.51.100.10/32", "2001:db8:1234::/64"].
 # Each list item is one CIDR; templates join with spaces for Caddy remote_ip.
@@ -32,10 +32,6 @@ django_settings_module: "config.settings.{{ praho_env | default('prod') }}"
 # Ports (needed by Caddyfile template and health checks)
 platform_port: 8700
 portal_port: 8701
-
-# Docker (only used by Docker deployment path)
-docker_compose_version: "2.24.0"
-praho_version: "{{ lookup('env', 'PRAHO_VERSION') | default('latest', true) }}"
 
 # Backup settings
 backup_enabled: true
