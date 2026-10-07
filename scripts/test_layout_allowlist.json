@@ -26,6 +26,13 @@
     "^TestGDPRCompliantCartSession(Mocked)?\\.test_create_empty_cart$",
     "^CounterStoreTests\\.test_",
     "^CounterStoreConcurrencyTests\\.test_",
-    "^CounterClaimVisibilityTests\\.test_"
+    "^CounterClaimVisibilityTests\\.test_",
+    "^PaginationQueryTests\\.test_",
+    "^TicketPaginationQueryTests\\.test_",
+    "^PaginationPushURLTests\\.test_",
+    "^PasswordFormFieldTests\\.test_",
+    "^RadioInputTests\\.test_",
+    "^SharedTranslationRenderingTests\\.test_",
+    "^OneTimeCodeFormRenderingTests\\.test_"
   ]
 }
