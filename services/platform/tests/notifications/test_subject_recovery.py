@@ -115,7 +115,8 @@ class SubjectRecoveryTests(TestCase):
                     self.assertEqual(self.pending, [])
                     self.assert_permanent_failure(log)
                     self.set_limit(20)
-                    self.assertEqual(retry_failed_emails(), {"retried": 0, "skipped": 1})
+                    # A permanent failure is no longer selected, so it cannot occupy a retry batch.
+                    self.assertEqual(retry_failed_emails(), {"retried": 0, "skipped": 0})
                     self.assertEqual(self.pending, [])
                     self.assert_permanent_failure(log)
 

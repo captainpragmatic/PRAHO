@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from django.db import DatabaseError, InterfaceError
+
 from apps.common.flow_analysis.base import (
     AnalysisContext,
     AnalysisMode,
@@ -44,7 +46,11 @@ def get_proximity_line_threshold() -> int:
         SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
     )
 
-    return SettingsService.get_integer_setting("common.proximity_line_threshold", _DEFAULT_PROXIMITY_LINE_THRESHOLD)
+    try:
+        return SettingsService.get_integer_setting("common.proximity_line_threshold", _DEFAULT_PROXIMITY_LINE_THRESHOLD)
+    except (DatabaseError, InterfaceError, RuntimeError, AssertionError):
+        # Static analysis remains usable without access to runtime settings.
+        return _DEFAULT_PROXIMITY_LINE_THRESHOLD
 
 
 @dataclass

@@ -34,6 +34,7 @@ from functools import wraps
 from typing import Any
 
 from django.conf import settings
+from django.db import DatabaseError, InterfaceError
 from django.http import HttpRequest, HttpResponse
 
 from apps.common.logging import (
@@ -56,7 +57,11 @@ def get_max_header_json_length() -> int:
         SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
     )
 
-    return SettingsService.get_integer_setting("common.max_header_json_length", _DEFAULT_MAX_HEADER_JSON_LENGTH)
+    try:
+        return SettingsService.get_integer_setting("common.max_header_json_length", _DEFAULT_MAX_HEADER_JSON_LENGTH)
+    except (DatabaseError, InterfaceError, RuntimeError, AssertionError):
+        # Optional diagnostics must also work when settings storage is unavailable or forbidden.
+        return _DEFAULT_MAX_HEADER_JSON_LENGTH
 
 
 class TraceMiddleware:

@@ -109,6 +109,25 @@ class SettingsService:
     # Single source of truth: the settings catalog (ADR-0042)
     DEFAULT_SETTINGS: ClassVar[dict[str, Any]] = dict(CATALOG_DEFAULTS)
 
+    # Zero cannot represent a usable attempt or blocking operation budget.
+    # Keep this guard scoped: other settings deliberately use zero to disable retries,
+    # expire caches, or deny requests, and deployment-owned fallbacks remain separate.
+    _POSITIVE_OPERATIONAL_INTEGER_KEYS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "billing.efactura_api_max_retries",
+            "customers.task_soft_time_limit",
+            "customers.task_time_limit",
+            "infrastructure.health_check_timeout_seconds",
+            "infrastructure.network_probe_timeout_seconds",
+            "orders.task_time_limit",
+            "provisioning.ssh_timeout",
+            "provisioning.sudo_command_timeout",
+            "provisioning.task_soft_time_limit",
+            "provisioning.task_time_limit",
+            "virtualmin.max_retries",
+        }
+    )
+
     @classmethod
     def _get_cache_key(cls, key: str) -> str:
         """Generate cache key for setting"""
@@ -514,13 +533,24 @@ class SettingsService:
     @classmethod
     @monitor_performance()
     def get_integer_setting(cls, key: str, default: int = 0) -> int:
-        """🔢 Get integer setting with type safety"""
+        """🔢 Get integer setting with type safety and legacy operational budget guards."""
         value = cls.get_setting(key, default)
         try:
-            return int(value)  # type: ignore[arg-type]
+            integer_value = int(cast("int | str", value))
         except (ValueError, TypeError):
             logger.warning("⚠️ [Settings] Invalid integer value for %s: %s", key, value)
             return default
+
+        if integer_value <= 0 and key in cls._POSITIVE_OPERATIONAL_INTEGER_KEYS:
+            fallback = cast("int", CATALOG_DEFAULTS[key])
+            logger.warning(
+                "⚠️ [Settings] Ignoring non-positive integer value for %s: %s; using default %s",
+                key,
+                integer_value,
+                fallback,
+            )
+            return fallback
+        return integer_value
 
     @classmethod
     @monitor_performance()

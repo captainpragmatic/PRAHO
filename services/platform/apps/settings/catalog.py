@@ -428,7 +428,7 @@ CATALOG: tuple[SettingDef, ...] = (
         help_text=_("Maximum API retry attempts for e-Factura calls"),
         input_kind="number",
         advanced=True,
-        validation={"min": 0},
+        validation={"min": 1},
     ),
     SettingDef(
         key="billing.efactura_api_timeout_seconds",
@@ -1066,7 +1066,7 @@ CATALOG: tuple[SettingDef, ...] = (
         unit="seconds",
         input_kind="number",
         advanced=True,
-        validation={"min": 0},
+        validation={"min": 1},
     ),
     SettingDef(
         key="customers.task_time_limit",
@@ -1078,7 +1078,7 @@ CATALOG: tuple[SettingDef, ...] = (
         unit="seconds",
         input_kind="number",
         advanced=True,
-        validation={"min": 0},
+        validation={"min": 1},
     ),
     SettingDef(
         key="domains.expiry_critical_days",
@@ -1570,7 +1570,7 @@ CATALOG: tuple[SettingDef, ...] = (
         unit="seconds",
         input_kind="number",
         advanced=True,
-        validation={"min": 0},
+        validation={"min": 1},
     ),
     SettingDef(
         key="infrastructure.network_probe_timeout_seconds",
@@ -1582,7 +1582,7 @@ CATALOG: tuple[SettingDef, ...] = (
         unit="seconds",
         input_kind="number",
         advanced=True,
-        validation={"min": 0},
+        validation={"min": 1},
     ),
     SettingDef(
         key="infrastructure.remediation_boot_grace_seconds",
@@ -2113,7 +2113,7 @@ CATALOG: tuple[SettingDef, ...] = (
         unit="seconds",
         input_kind="number",
         advanced=True,
-        validation={"min": 0},
+        validation={"min": 1},
     ),
     SettingDef(
         key="products.max_json_content_size",
@@ -2468,7 +2468,7 @@ CATALOG: tuple[SettingDef, ...] = (
         unit="seconds",
         input_kind="number",
         advanced=True,
-        validation={"min": 0},
+        validation={"min": 1},
     ),
     SettingDef(
         key="provisioning.sudo_command_timeout",
@@ -2480,7 +2480,7 @@ CATALOG: tuple[SettingDef, ...] = (
         unit="seconds",
         input_kind="number",
         advanced=True,
-        validation={"min": 0},
+        validation={"min": 1},
     ),
     SettingDef(
         key="provisioning.task_soft_time_limit",
@@ -2492,7 +2492,7 @@ CATALOG: tuple[SettingDef, ...] = (
         unit="seconds",
         input_kind="number",
         advanced=True,
-        validation={"min": 0},
+        validation={"min": 1},
     ),
     SettingDef(
         key="provisioning.task_time_limit",
@@ -2504,7 +2504,7 @@ CATALOG: tuple[SettingDef, ...] = (
         unit="seconds",
         input_kind="number",
         advanced=True,
-        validation={"min": 0},
+        validation={"min": 1},
     ),
     SettingDef(
         key="security.company_check_rate_limit_per_ip",
@@ -2759,7 +2759,7 @@ CATALOG: tuple[SettingDef, ...] = (
         section=_("Connection"),
         label=_("Max retries"),
         input_kind="number",
-        validation={"min": 0},
+        validation={"min": 1},
     ),
     SettingDef(
         key="virtualmin.rate_limit_max_calls_per_hour",

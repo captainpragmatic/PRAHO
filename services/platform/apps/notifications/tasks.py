@@ -16,6 +16,7 @@ from typing import Any
 
 from django.conf import settings
 from django.core.mail import EmailMessage, EmailMultiAlternatives
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.notifications.models import EmailLog
@@ -432,10 +433,15 @@ def retry_failed_emails(max_age_hours: int = 24) -> dict[str, Any]:
     """
     cutoff = timezone.now() - timedelta(hours=max_age_hours)
 
-    failed_emails = EmailLog.objects.filter(
-        status="failed",
-        sent_at__gte=cutoff,
-    ).order_by("sent_at")[: min(500, max(1, SettingsService.get_integer_setting("notifications.email_batch_size", 50)))]
+    # Negating a JSON comparison alone also drops rows with a missing key (SQL NULL).
+    # Retain those legacy rows and exclude terminal failures before limiting the batch.
+    failed_emails = (
+        EmailLog.objects.filter(status="failed", sent_at__gte=cutoff)
+        .filter(Q(provider_response__permanent_failure__isnull=True) | ~Q(provider_response__permanent_failure=True))
+        .order_by("sent_at")[
+            : min(500, max(1, SettingsService.get_integer_setting("notifications.email_batch_size", 50)))
+        ]
+    )
 
     retried = 0
     skipped = 0
