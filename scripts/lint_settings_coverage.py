@@ -1165,10 +1165,11 @@ def _exercised_callables(
     constructed = set(instance_names or ())
     local = _local_callable_bindings(node, bindings, constructed)
     if isinstance(node, ast.ClassDef):
-        # setUp, setUpTestData and helpers can initialise an instance used by another method.
+        # setUp, setUpTestData and helpers can initialise an instance used by another method. A test
+        # method's own assignments stay in that method, so they never replace the fixture's instance.
         instances: dict[str, str] = {}
         for method in node.body:
-            if isinstance(method, ast.FunctionDef | ast.AsyncFunctionDef):
+            if isinstance(method, ast.FunctionDef | ast.AsyncFunctionDef) and not method.name.startswith("test"):
                 for name, target in _local_callable_bindings(method, local).items():
                     if name.startswith(("self.", "cls.")):
                         attribute = name.split(".", 1)[1]

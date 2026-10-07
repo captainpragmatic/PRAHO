@@ -846,6 +846,32 @@ class FoundationReaderDetectionTests(SimpleTestCase):
                     [call.line for call in calls],
                 )
 
+    def test_a_test_methods_own_instance_does_not_replace_the_fixture_instance(self) -> None:
+        source = (
+            "class Consumer:\n"
+            f'    def read(self):\n        return SettingsService.get_boolean_setting("{KEY}", False)\n'
+            "class OtherConsumer:\n"
+            f'    def read(self):\n        return SettingsService.get_boolean_setting("{KEY}", False)\n'
+        )
+        fixture = (
+            "from apps.probe import Consumer, OtherConsumer\n"
+            "class Effect:\n"
+            "    def setUp(self):\n"
+            "        self.consumer = OtherConsumer()\n"
+            "    def test_name_only(self):\n"
+            "        self.consumer = Consumer()\n"
+            '        self.assertEqual(type(self.consumer).__name__, "Consumer")\n'
+            "    def test_effect(self):\n"
+            f'        SettingsService.update_setting("{KEY}", True)\n'
+            "        self.assertTrue(self.consumer.read())\n"
+        )
+        calls, findings = self.consumer_findings({"apps/probe.py": source}, fixture)
+        self.assertEqual([call.scope for call in calls], ["Consumer.read", "OtherConsumer.read"])
+        self.assertEqual(
+            [(f.check, f.line) for f in findings if f.severity == "medium"],
+            [("untested-new-reader", calls[0].line)],
+        )
+
     def test_property_access_credits_only_resolved_property_getters(self) -> None:
         for import_line, decorator in (
             ("", "property"),
