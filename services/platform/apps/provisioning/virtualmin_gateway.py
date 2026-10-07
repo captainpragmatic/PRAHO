@@ -50,7 +50,6 @@ logger = logging.getLogger(__name__)
 PERFORMANCE_THRESHOLD_MS = 100
 MAX_TIMEOUT_SECONDS = 3600
 MIN_DOMAIN_LENGTH = 3
-BULK_OPERATION_THRESHOLD = 10
 
 
 def performance_monitor(operation_name: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:

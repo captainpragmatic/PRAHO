@@ -19,6 +19,7 @@ from django.core.mail import EmailMessage, EmailMultiAlternatives
 from django.utils import timezone
 
 from apps.notifications.models import EmailLog
+from apps.notifications.services import validate_email_log_subject
 from apps.settings.services import SettingsService, get_default_from_email
 
 logger = logging.getLogger(__name__)
@@ -71,11 +72,13 @@ def send_email_task(  # notification template parameters  # noqa: PLR0913  # Bus
     try:
         # Resolve the default only after loading the log, so retries retain their sender.
         # Get the email log entry
-        try:
-            email_log = EmailLog.objects.get(id=email_log_id)
-        except EmailLog.DoesNotExist:
+        email_log = EmailLog.objects.filter(id=email_log_id).first()
+        if email_log is None:
             logger.error(f"EmailLog not found: {email_log_id}")
             return {"success": False, "error": "EmailLog not found"}
+
+        if (validation_error := validate_email_log_subject(email_log, subject)) is not None:
+            return {"success": False, "error": validation_error, "retry_scheduled": False}
 
         from_email = from_email if from_email is not None else email_log.from_addr or get_default_from_email()
 
@@ -170,7 +173,7 @@ def send_email_task(  # notification template parameters  # noqa: PLR0913  # Bus
                 email_log.save()
 
                 # Queue retry task
-                _schedule_email_retry(
+                retry_scheduled = _schedule_email_retry(
                     email_log_id=email_log_id,
                     to=to,
                     subject=subject,
@@ -190,26 +193,25 @@ def send_email_task(  # notification template parameters  # noqa: PLR0913  # Bus
                 return {
                     "success": False,
                     "error": str(e),
-                    "retry_scheduled": True,
+                    "retry_scheduled": retry_scheduled,
                     "retry_count": retry_count + 1,
                 }
 
-            else:
-                # Max retries exceeded
-                email_log.status = "failed"
-                email_log.provider_response = {
-                    **(email_log.provider_response or {}),
-                    "final_error": str(e),
-                    "retry_count": retry_count,
-                }
-                email_log.save()
+            # Max retries exceeded
+            email_log.status = "failed"
+            email_log.provider_response = {
+                **(email_log.provider_response or {}),
+                "final_error": str(e),
+                "retry_count": retry_count,
+            }
+            email_log.save()
 
-                return {
-                    "success": False,
-                    "error": str(e),
-                    "retry_scheduled": False,
-                    "max_retries_exceeded": True,
-                }
+            return {
+                "success": False,
+                "error": str(e),
+                "retry_scheduled": False,
+                "max_retries_exceeded": True,
+            }
 
         except EmailLog.DoesNotExist:
             pass
@@ -232,12 +234,16 @@ def _schedule_email_retry(  # notification template parameters  # noqa: PLR0913 
     track_clicks: bool,
     retry_count: int,
     attachments: list[tuple[str, bytes, str]] | None = None,
-) -> None:
+) -> bool:
     """Schedule an email retry with exponential backoff.
 
     Carries the attachments through the re-enqueue: a retried proforma email
     must not arrive without its PDF (#228 sibling).
     """
+    email_log = EmailLog.objects.filter(pk=email_log_id).first()
+    if email_log is None or validate_email_log_subject(email_log, subject) is not None:
+        return False
+
     try:
         from django_q.tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
             async_task,  # Deferred: django-q task  # Deferred: avoids circular import
@@ -271,9 +277,11 @@ def _schedule_email_retry(  # notification template parameters  # noqa: PLR0913 
         )
 
         logger.info(f"Scheduled email retry {retry_count} for {email_log_id} in {delay}s")
+        return True
 
     except ImportError:
         logger.error("Cannot schedule email retry - Django-Q2 not available")
+        return False
 
 
 def send_bulk_emails_task(
@@ -377,6 +385,9 @@ def process_email_queue() -> dict[str, Any]:
     failed = 0
 
     for email_log in stuck_emails:
+        if validate_email_log_subject(email_log, email_log.subject) is not None:
+            failed += 1
+            continue
         try:
             # Re-queue the email
             from django_q.tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
@@ -430,6 +441,9 @@ def retry_failed_emails(max_age_hours: int = 24) -> dict[str, Any]:
     skipped = 0
 
     for email_log in failed_emails:
+        if validate_email_log_subject(email_log, email_log.subject) is not None:
+            skipped += 1
+            continue
         # Check if we've already retried too many times
         provider_response = email_log.provider_response or {}
         retry_count = provider_response.get("retry_count", 0)

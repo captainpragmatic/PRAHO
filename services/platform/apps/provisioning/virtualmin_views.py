@@ -61,24 +61,12 @@ def _get_user_email(user: User | AnonymousUser) -> str:
 
 # Health check defaults
 HEALTH_CHECK_STALE_SECONDS = 3600  # 1 hour in seconds
-_DEFAULT_BULK_OPERATION_THRESHOLD = 10
 MIN_DOMAIN_LENGTH = 3
 _DEFAULT_MAX_CONCURRENT_HEALTH_CHECKS = 10
 _DEFAULT_HEALTH_CHECK_TIMEOUT_SECONDS = 30
 HEALTH_CHECK_TIMEOUT_SECONDS = _DEFAULT_HEALTH_CHECK_TIMEOUT_SECONDS
 _DEFAULT_OVERALL_HEALTH_CHECK_TIMEOUT = 300
 _DEFAULT_MAX_ERROR_DISPLAY = 3
-
-
-def get_bulk_operation_threshold() -> int:
-    """Get bulk operation threshold from SettingsService (runtime)."""
-    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
-        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
-    )
-
-    return SettingsService.get_integer_setting(
-        "provisioning.bulk_operation_threshold", _DEFAULT_BULK_OPERATION_THRESHOLD
-    )
 
 
 def get_max_concurrent_health_checks() -> int:
@@ -1414,238 +1402,72 @@ def _execute_bulk_backup(accounts: list[VirtualminAccount], form_data: dict[str,
         )
 
 
-@transaction.atomic
+def _execute_bulk_lifecycle(accounts: list[VirtualminAccount], *, activate: bool) -> BulkOperationResult:
+    """Suspend or activate each account through the provisioning service, one confirmed operation at a time.
+
+    No transaction spans the loop: the service confirms each change with Virtualmin and saves it in its own
+    transaction, so a crash part-way never leaves Virtualmin changed while the stored status still says otherwise.
+    """
+    start_time = time.perf_counter()
+    initial_status = "suspended" if activate else "active"
+    errors: list[str] = []
+    eligible_accounts: list[VirtualminAccount] = []
+
+    for account in accounts:
+        if account.status == initial_status:
+            eligible_accounts.append(account)
+        else:
+            errors.append(
+                _("Account %(domain)s is not %(expected)s (current status: %(status)s)")
+                % {"domain": account.domain, "expected": initial_status, "status": account.status}
+            )
+
+    service = VirtualminProvisioningService()
+    successful_count = 0
+    for account in eligible_accounts:
+        outcome = service.unsuspend_account(account) if activate else service.suspend_account(account)
+        if outcome.is_ok():
+            successful_count += 1
+            continue
+        if activate:
+            error_msg = _("Failed to activate %(domain)s: %(error)s") % {
+                "domain": account.domain,
+                "error": outcome.unwrap_err(),
+            }
+        else:
+            error_msg = _("Failed to suspend %(domain)s: %(error)s") % {
+                "domain": account.domain,
+                "error": outcome.unwrap_err(),
+            }
+        errors.append(error_msg)
+        logger.warning("⚠️ [Bulk Lifecycle] %s", error_msg)
+
+    result = BulkOperationResult(
+        total_processed=len(accounts),
+        successful_count=successful_count,
+        failed_count=len(accounts) - successful_count,
+        errors=errors,
+        rollback_performed=False,
+        processing_time_seconds=time.perf_counter() - start_time,
+    )
+    logger.info(
+        "✅ [Bulk Lifecycle] %s: %s/%s confirmed in %.2fs",
+        "Activate" if activate else "Suspend",
+        result.successful_count,
+        result.total_processed,
+        result.processing_time_seconds,
+    )
+    return result
+
+
 def _execute_bulk_suspend(accounts: list[VirtualminAccount]) -> BulkOperationResult:
-    """
-    Suspend multiple accounts with atomic transaction management.
-
-    Algorithm Complexity: O(n) where n is the number of accounts
-
-    Performance Optimizations:
-    - Atomic database operations with rollback safety
-    - Batch updates using Django's bulk operations
-    - Pre-filtering of eligible accounts
-    - Comprehensive audit logging
-
-    Args:
-        accounts: List of VirtualminAccount objects to suspend
-
-    Returns:
-        BulkOperationResult with detailed operation statistics
-
-    Transaction Safety:
-        - All status changes are atomic
-        - Failed operations trigger complete rollback
-        - Database consistency is maintained
-        - Audit trail for all modifications
-    """
-    start_time = time.perf_counter()
-    errors = []
-    eligible_accounts = []
-    bulk_operation_threshold = get_bulk_operation_threshold()
-
-    # Pre-filter eligible accounts for suspension
-    for account in accounts:
-        if account.status == "active":
-            eligible_accounts.append(account)
-        else:
-            errors.append(f"Account {account.domain} is not active (current status: {account.status})")
-
-    logger.info(f"🚫 [Bulk Suspend] Processing {len(eligible_accounts)} eligible accounts")
-
-    try:
-        # Create savepoint for partial rollback capability
-        savepoint = transaction.savepoint()
-
-        successful_accounts = []
-
-        # Use bulk update for better performance when possible
-        if len(eligible_accounts) > bulk_operation_threshold:
-            try:
-                # Bulk update status
-                account_ids = [acc.id for acc in eligible_accounts]
-                updated_count = VirtualminAccount.objects.filter(id__in=account_ids, status="active").update(
-                    status="suspended", updated_at=timezone.now()
-                )
-
-                successful_accounts = eligible_accounts[:updated_count]
-                logger.info(f"📦 [Bulk Suspend] Bulk updated {updated_count} accounts")
-
-            except Exception as e:
-                # Fallback to individual updates if bulk operation fails
-                logger.warning(f"⚠️ [Bulk Suspend] Bulk operation failed, falling back to individual updates: {e}")
-                transaction.savepoint_rollback(savepoint)
-                savepoint = transaction.savepoint()
-
-                for account in eligible_accounts:
-                    try:
-                        account.status = "suspended"
-                        account.save(update_fields=["status", "updated_at"])
-                        successful_accounts.append(account)
-
-                    except Exception as individual_error:
-                        error_msg = f"Failed to suspend {account.domain}: {individual_error!s}"
-                        errors.append(error_msg)
-                        logger.warning(f"🔥 [Bulk Suspend] {error_msg}")
-        else:
-            # Process individually for smaller datasets
-            for account in eligible_accounts:
-                try:
-                    account.status = "suspended"
-                    account.save(update_fields=["status", "updated_at"])
-                    successful_accounts.append(account)
-
-                except Exception as e:
-                    error_msg = f"Failed to suspend {account.domain}: {e!s}"
-                    errors.append(error_msg)
-                    logger.warning(f"🔥 [Bulk Suspend] {error_msg}")
-
-        # Commit the savepoint
-        transaction.savepoint_commit(savepoint)
-
-        processing_time = time.perf_counter() - start_time
-        result = BulkOperationResult(
-            total_processed=len(accounts),
-            successful_count=len(successful_accounts),
-            failed_count=len(accounts) - len(successful_accounts),
-            errors=errors,
-            rollback_performed=False,
-            processing_time_seconds=processing_time,
-        )
-
-        logger.info(
-            f"✅ [Bulk Suspend] Completed: {result.successful_count}/{result.total_processed} suspended "
-            f"({result.success_rate:.1f}%) in {result.processing_time_seconds:.2f}s"
-        )
-
-        return result
-
-    except Exception as e:
-        # Transaction will be automatically rolled back
-        processing_time = time.perf_counter() - start_time
-        error_msg = f"Bulk suspend operation failed with critical error: {e!s}"
-
-        logger.error(f"🔥 [Bulk Suspend] Transaction rolled back: {error_msg}")
-
-        return BulkOperationResult(
-            total_processed=len(accounts),
-            successful_count=0,
-            failed_count=len(accounts),
-            errors=[error_msg, *errors],
-            rollback_performed=True,
-            processing_time_seconds=processing_time,
-        )
+    """Suspend accounts only after Virtualmin confirms each operation."""
+    return _execute_bulk_lifecycle(accounts, activate=False)
 
 
-@transaction.atomic
 def _execute_bulk_activate(accounts: list[VirtualminAccount]) -> BulkOperationResult:
-    """
-    Activate multiple accounts with atomic transaction management.
-
-    Algorithm Complexity: O(n) where n is the number of accounts
-
-    Performance Optimizations:
-    - Atomic database operations with rollback safety
-    - Batch updates using Django's bulk operations
-    - Pre-filtering of eligible accounts
-    - Optimized for high-volume operations
-
-    Args:
-        accounts: List of VirtualminAccount objects to activate
-
-    Returns:
-        BulkOperationResult with detailed operation statistics
-
-    Transaction Safety:
-        - All status changes are atomic
-        - Database consistency maintained
-        - Complete rollback on critical failures
-    """
-    start_time = time.perf_counter()
-    errors = []
-    eligible_accounts = []
-    bulk_operation_threshold = get_bulk_operation_threshold()
-
-    # Pre-filter eligible accounts for activation
-    for account in accounts:
-        if account.status == "suspended":
-            eligible_accounts.append(account)
-        else:
-            errors.append(f"Account {account.domain} is not suspended (current status: {account.status})")
-
-    logger.info(f"🔓 [Bulk Activate] Processing {len(eligible_accounts)} eligible accounts")
-
-    try:
-        successful_accounts = []
-
-        # Use bulk update for better performance
-        if len(eligible_accounts) > bulk_operation_threshold:
-            try:
-                account_ids = [acc.id for acc in eligible_accounts]
-                updated_count = VirtualminAccount.objects.filter(id__in=account_ids, status="suspended").update(
-                    status="active", updated_at=timezone.now()
-                )
-
-                successful_accounts = eligible_accounts[:updated_count]
-                logger.info(f"📦 [Bulk Activate] Bulk updated {updated_count} accounts")
-
-            except Exception as e:
-                logger.warning(f"⚠️ [Bulk Activate] Bulk operation failed, using individual updates: {e}")
-
-                for account in eligible_accounts:
-                    try:
-                        account.status = "active"
-                        account.save(update_fields=["status", "updated_at"])
-                        successful_accounts.append(account)
-
-                    except Exception as individual_error:
-                        error_msg = f"Failed to activate {account.domain}: {individual_error!s}"
-                        errors.append(error_msg)
-                        logger.warning(f"🔥 [Bulk Activate] {error_msg}")
-        else:
-            # Individual processing for smaller datasets
-            for account in eligible_accounts:
-                try:
-                    account.status = "active"
-                    account.save(update_fields=["status", "updated_at"])
-                    successful_accounts.append(account)
-
-                except Exception as e:
-                    error_msg = f"Failed to activate {account.domain}: {e!s}"
-                    errors.append(error_msg)
-                    logger.warning(f"🔥 [Bulk Activate] {error_msg}")
-
-        processing_time = time.perf_counter() - start_time
-        result = BulkOperationResult(
-            total_processed=len(accounts),
-            successful_count=len(successful_accounts),
-            failed_count=len(accounts) - len(successful_accounts),
-            errors=errors,
-            rollback_performed=False,
-            processing_time_seconds=processing_time,
-        )
-
-        logger.info(
-            f"✅ [Bulk Activate] Completed: {result.successful_count}/{result.total_processed} activated "
-            f"({result.success_rate:.1f}%) in {result.processing_time_seconds:.2f}s"
-        )
-
-        return result
-
-    except Exception as e:
-        processing_time = time.perf_counter() - start_time
-        error_msg = f"Bulk activate operation failed with critical error: {e!s}"
-
-        logger.error(f"🔥 [Bulk Activate] Transaction rolled back: {error_msg}")
-
-        return BulkOperationResult(
-            total_processed=len(accounts),
-            successful_count=0,
-            failed_count=len(accounts),
-            errors=[error_msg, *errors],
-            rollback_performed=True,
-            processing_time_seconds=processing_time,
-        )
+    """Activate accounts only after Virtualmin confirms each operation."""
+    return _execute_bulk_lifecycle(accounts, activate=True)
 
 
 def _validate_account_status(account: VirtualminAccount) -> tuple[bool, str]:

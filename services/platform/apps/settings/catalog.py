@@ -2400,17 +2400,6 @@ CATALOG: tuple[SettingDef, ...] = (
         validation={"min": 0},
     ),
     SettingDef(
-        key="provisioning.bulk_operation_threshold",
-        data_type="integer",
-        default=10,
-        group="advanced",
-        section=_("Provisioning"),
-        label=_("Bulk operation threshold"),
-        input_kind="number",
-        advanced=True,
-        validation={"min": 0},
-    ),
-    SettingDef(
         key="provisioning.cache_timeout",
         data_type="integer",
         default=3600,

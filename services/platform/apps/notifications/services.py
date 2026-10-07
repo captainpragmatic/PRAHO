@@ -302,6 +302,24 @@ class EmailRateLimiter:
 # ===============================================================================
 
 
+def validate_email_log_subject(email_log: EmailLog, subject: str) -> str | None:
+    """Reject invalid queued subjects permanently; return the persisted failure reason."""
+    response = email_log.provider_response or {}
+    if response.get("permanent_failure"):
+        return str(response.get("final_error") or _("Email validation failed"))
+
+    try:
+        validate_email_subject(subject)
+    except DjangoValidationError as exc:
+        reason = "; ".join(exc.messages)
+        email_log.status = "failed"
+        email_log.provider_response = {**response, "final_error": reason, "permanent_failure": True}
+        email_log.save(update_fields=["status", "provider_response"])
+        logger.warning("⚠️ [Email] Permanent subject validation failure for %s: %s", email_log.pk, reason)
+        return reason
+    return None
+
+
 class EmailService:
     """
     Comprehensive email notification service.
@@ -789,6 +807,10 @@ class EmailService:
             from django_q.tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
                 async_task,  # Deferred: django-q task  # Deferred: avoids circular import
             )
+
+            validation_error = validate_email_log_subject(email_log, subject)
+            if validation_error is not None:
+                return EmailResult(success=False, email_log_id=str(email_log.pk), error=validation_error)
 
             retry_config = getattr(settings, "EMAIL_RETRY", {})
             retry_delay = retry_config.get("RETRY_DELAY_SECONDS", 60)

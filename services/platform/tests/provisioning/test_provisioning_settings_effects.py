@@ -22,10 +22,10 @@ from django.http import HttpRequest
 from django.test import RequestFactory, SimpleTestCase, TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 
+import apps.provisioning.virtualmin_views as views
 from apps.audit.models import AuditAlert
 from apps.billing.models import Currency
 from apps.customers.models import Customer
-from apps.provisioning import virtualmin_views as views
 from apps.provisioning.models import Service, ServicePlan
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminServer
 from apps.provisioning.virtualmin_service import VirtualminProvisioningService
@@ -35,14 +35,12 @@ from apps.settings.models import SettingActivation, SystemSetting
 from apps.settings.services import SettingsService
 
 TRANSITIONS = {
-    "provisioning.bulk_operation_threshold": (10, 10),
     "provisioning.max_concurrent_health_checks": (5, 10),
     "provisioning.max_error_display": (10, 3),
     "provisioning.max_username_uniqueness_attempts": (10, 1000),
     "provisioning.overall_health_check_timeout": (30, 300),
 }
 CONFIGURED = {
-    "provisioning.bulk_operation_threshold": 2,
     "provisioning.max_concurrent_health_checks": 1,
     "provisioning.max_error_display": 1,
     "provisioning.max_username_uniqueness_attempts": 2,
@@ -134,42 +132,6 @@ class ProvisioningSettingsEffectTests(TestCase):
             encrypted_password=b"",
             status=status,
         )
-
-    def test_bulk_operation_threshold_controls_guarded_suspend_and_activate_updates(self) -> None:
-        self.set_setting("provisioning.bulk_operation_threshold", 2)
-        for operation, initial, target in (
-            (views._execute_bulk_suspend, "active", "suspended"),
-            (views._execute_bulk_activate, "suspended", "active"),
-        ):
-            for size in (3, 2, 1):
-                with self.subTest(operation=operation.__name__, size=size):
-                    accounts = [self.account(f"{initial}{size}{number}", initial) for number in range(size)]
-                    excluded = self.account(f"excluded{initial}{size}", "provisioning")
-                    with CaptureQueriesContext(connection) as queries:
-                        result = operation([*accounts, excluded])
-                    updates = [
-                        row["sql"]
-                        for row in queries
-                        if row["sql"].startswith("UPDATE") and VirtualminAccount._meta.db_table in row["sql"]
-                    ]
-                    self.assertEqual(len(updates), 1 if size > 2 else size)
-                    if size > 2:
-                        self.assertIn('"status" =', updates[0].split("WHERE", maxsplit=1)[1])
-                        self.assertIn(" IN ", updates[0])
-                    self.assertEqual(
-                        (result.total_processed, result.successful_count, result.failed_count), (size + 1, size, 1)
-                    )
-                    self.assertFalse(result.rollback_performed)
-                    self.assertEqual(
-                        list(
-                            VirtualminAccount.objects.filter(pk__in=[a.pk for a in accounts]).values_list(
-                                "status", flat=True
-                            )
-                        ),
-                        [target] * size,
-                    )
-                    excluded.refresh_from_db()
-                    self.assertEqual(excluded.status, "provisioning")
 
     def test_max_concurrent_health_checks_limits_active_workers_and_handles_empty_batches(self) -> None:
         accounts = [VirtualminAccount(domain=f"worker{number}.example.test") for number in range(3)]
@@ -299,8 +261,8 @@ class ProvisioningSettingsQueryTests(SimpleTestCase):
                     with self.subTest(operation=operation.__name__, size=size):
                         with CaptureQueriesContext(connection) as queries:
                             result = operation(accounts)
-                        # These helpers enter atomic even when invoked from an autocommit caller.
-                        self.assertEqual(self.setting_reads(queries), 1)
+                        # Bulk suspend and activate read no settings since the threshold was retired.
+                        self.assertEqual(self.setting_reads(queries), 0)
                         self.assertEqual((result.successful_count, result.failed_count), (0, size))
                 with self.subTest(operation="health", size=size):
                     with (
@@ -361,7 +323,8 @@ class ProvisioningSettingsActivationTests(TestCase):
                         dict(SystemSetting.objects.filter(key__in=TRANSITIONS).values_list("key", "value")), expected
                     )
                     self.assertEqual(
-                        SettingActivation.objects.filter(key__in=TRANSITIONS, completed_at__isnull=False).count(), 5
+                        SettingActivation.objects.filter(key__in=TRANSITIONS, completed_at__isnull=False).count(),
+                        len(TRANSITIONS),
                     )
                     for definition in definitions:
                         self.assertEqual(
@@ -397,3 +360,19 @@ class ProvisioningSettingsActivationTests(TestCase):
                     self.assertEqual(alerts.count(), int(scenario == "retained"))
                 finally:
                     transaction.set_rollback(True)
+
+
+class RetiredBulkThresholdTests(TestCase):
+    """Bulk suspend and activate now confirm every account with Virtualmin, so the threshold that chose a
+    database-only bulk update has nothing left to control."""
+
+    def test_setup_removes_a_stored_bulk_threshold_and_the_catalog_no_longer_offers_it(self) -> None:
+        key = "provisioning.bulk_operation_threshold"
+        self.assertNotIn(key, CATALOG_BY_KEY)
+        self.assertIn(key, sync.RETIRED_SETTING_KEYS)
+        SystemSetting.objects.create(key=key, name="Bulk threshold", data_type="integer", value=2, default_value=10)
+        output = StringIO()
+        with self.captureOnCommitCallbacks(execute=True):
+            call_command("setup_default_settings", stdout=output)
+        self.assertFalse(SystemSetting.objects.filter(key=key).exists())
+        self.assertIn(key, output.getvalue())
