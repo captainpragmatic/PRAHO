@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- A separate portal host no longer has to hold the platform's secrets. `deploy.sh portal-only`
+  accepted a full `.env.prod`, so a portal host stored the platform's database password, encryption
+  keys, payment and mail credentials and its Django secret key, even though its containers never used
+  them. It now refuses any key the portal-only stack does not use, naming the keys (never the values),
+  and a new `deploy/scripts/portal-env.sh` writes the portal's file from the full one (mode 600, only
+  those variables). The portal also gets its own `PORTAL_DJANGO_SECRET_KEY`: the shared key is the root
+  the platform derives its MFA, audit-chain and unsubscribe keys from. Compose portal-only requires it;
+  single-server and container-service use it when set.
+  **Upgrading a Compose portal-only host:** add `PORTAL_DJANGO_SECRET_KEY` to the full file, run
+  `portal-env.sh`, replace the portal host's env file with the output, then redeploy (`--stop` and
+  `--logs` need the new key too). A new portal key signs customers out and invalidates in-flight cart
+  price seals.
 - HSTS now follows the environment. Every Caddy configuration hardcoded a one-year header with
   `preload` and replaced whatever Django sent, so staging's one-hour policy never reached a
   browser, and `preload` went out for a domain never submitted to the preload list. The edge now

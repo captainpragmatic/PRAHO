@@ -627,17 +627,23 @@ Deploy just the Platform service (admin, API, business logic).
 Deploy just the Portal service (customer-facing).
 
 **Prerequisites:**
-- Platform must be running and accessible
-- PLATFORM_API_BASE_URL must be set
+- Platform must be running and reachable at its public URL
+- A portal host holds only what the portal stack uses. Never copy the full `.env.prod` there: it holds the
+  platform's database password, encryption keys, payment and mail credentials and its Django secret key.
+  `deploy.sh portal-only` refuses a file with anything else, naming the extra keys (never their values).
 
 ```bash
-# In .env.prod: PLATFORM_API_BASE_URL=https://platform.praho.example.com/api, DJANGO_SECRET_KEY,
-# PLATFORM_API_SECRET, PLATFORM_TO_PORTAL_WEBHOOK_SECRET, PORTAL_DOMAIN, PLATFORM_DOMAIN and
-# PORTAL_TRUSTED_PROXY_CIDRS (the proxy in front of the portal)
-./deploy/scripts/deploy.sh portal-only --build
+# On the machine that holds the full .env.prod: set the portal's own key and its public settings
+#   PORTAL_DJANGO_SECRET_KEY=...   (openssl rand -base64 50; must differ from DJANGO_SECRET_KEY)
+#   PLATFORM_API_BASE_URL=https://platform.praho.example.com/api
+#   PORTAL_DOMAIN, PLATFORM_DOMAIN, PORTAL_TRUSTED_PROXY_CIDRS (the proxy in front of the portal)
+# then write the portal's file (mode 600; only the variables the portal stack uses)
+./deploy/scripts/portal-env.sh --env prod          # writes .env.prod.portal
+scp -p .env.prod.portal portal-host:/opt/praho/.env.prod
 
-# With Caddy
-./deploy/scripts/deploy.sh portal-only --with-caddy --build
+# On the portal host
+./deploy/scripts/deploy.sh portal-only --build
+./deploy/scripts/deploy.sh portal-only --with-caddy --build   # with Caddy
 ```
 
 ---
@@ -866,6 +872,7 @@ The same `.env.prod` / `.env.staging` file, passed by `deploy/scripts/deploy.sh`
 | `DJANGO_SECRET_KEY` | Yes | Django secret key | `openssl rand -base64 50` |
 | `PLATFORM_API_SECRET` | Yes | Portal ↔ Platform HMAC (same value as `HMAC_SECRET`) | `openssl rand -base64 32` |
 | `PLATFORM_TO_PORTAL_WEBHOOK_SECRET` | Yes | Platform→Portal webhook HMAC | `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
+| `PORTAL_DJANGO_SECRET_KEY` | portal-only | The portal's own Django key (single-server uses it when set, else `DJANGO_SECRET_KEY`) | `openssl rand -base64 50` |
 | `DJANGO_ENCRYPTION_KEY`, `CREDENTIAL_VAULT_MASTER_KEY` | Production | Checked by `deploy.sh` before Compose runs | see the native table |
 | `ACME_EMAIL` | Yes | Let's Encrypt email | `admin@example.com` |
 | `VERSION` | No | Image tag (default `latest`) | `v1.2.3` |
@@ -1047,6 +1054,7 @@ deploy/
 │   ├── restore.sh                     # Database restore
 │   ├── rollback.sh                    # Version/DB rollback
 │   ├── health-check.sh               # Health check script
+│   ├── portal-env.sh                  # Writes a portal host's env file from the full one
 │   └── lib/compose.sh                 # Passes the env file to every Compose call
 └── ansible/
     ├── inventory/

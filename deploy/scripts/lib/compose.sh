@@ -113,6 +113,72 @@ praho_require_production_keys() {
     [[ -z "$missing" ]] || praho_die "Production settings need${missing} in ${PRAHO_ENV_FILE}"
 }
 
+# The variables docker-compose.portal-only.yml interpolates: everything a separate portal host may
+# hold. Derived from the file, so it follows the stack instead of a list kept by hand.
+praho_portal_allowlist() {
+    awk '/^[[:space:]]*#/ { next }
+        {
+            line = $0
+            gsub(/[$][$]/, "", line)
+            while (match(line, /[$][{][A-Za-z_][A-Za-z0-9_]*/)) {
+                print substr(line, RSTART + 2, RLENGTH - 2)
+                line = substr(line, RSTART + RLENGTH)
+            }
+        }' "${DEPLOY_DIR}/docker-compose.portal-only.yml" | sort -u
+}
+
+# The variables docker-compose.portal-only.yml requires (${NAME:?...}): Compose refuses to start without them.
+praho_portal_required() {
+    awk '/^[[:space:]]*#/ { next }
+        {
+            line = $0
+            while (match(line, /[$][{][A-Za-z_][A-Za-z0-9_]*:[?]/)) {
+                print substr(line, RSTART + 2, RLENGTH - 4)
+                line = substr(line, RSTART + RLENGTH)
+            }
+        }' "${DEPLOY_DIR}/docker-compose.portal-only.yml" | sort -u
+}
+
+# Print what FILE declares beyond the portal allowlist, as key names or "line N", never values. Every
+# line counts: a later `KEY=` does not take a secret off the disk, and Compose also reads `export KEY=`,
+# indented keys and quotes spanning lines, so anything but a plain `KEY=` line on one line is reported.
+praho_portal_env_offenders() {
+    local allowed
+    allowed=" $(praho_portal_allowlist | tr '\n' ' ') "
+    awk -v allowed="$allowed" '
+        # Whether a quoted value closes on its line. In double quotes Compose reads \" as an escaped
+        # quote; single quotes are literal.
+        function closes(rest, quote,    i, c) {
+            for (i = 1; i <= length(rest); i++) {
+                c = substr(rest, i, 1)
+                if (quote == "\"" && c == "\\") { i++; continue }
+                if (c == quote) return 1
+            }
+            return 0
+        }
+        /^[[:space:]]*$/ || /^[[:space:]]*#/ { next }
+        match($0, /^[A-Za-z_][A-Za-z0-9_]*=/) {
+            key = substr($0, 1, RLENGTH - 1)
+            value = substr($0, RLENGTH + 1)
+            quote = substr(value, 1, 1)
+            if (!index(allowed, " " key " ")) print key
+            else if ((quote == "\"" || quote == "\047") && !closes(substr(value, 2), quote)) print "line " NR
+            next
+        }
+        { print "line " NR }' "$1" | sort -u | tr '\n' ' ' | sed 's/ $//'
+}
+
+# A separate portal host must not hold the platform's secrets (database password, encryption keys,
+# payment and mail credentials, its Django secret key), even though its containers never receive them.
+praho_require_portal_env() {
+    local offenders
+    offenders="$(praho_portal_env_offenders "$PRAHO_ENV_FILE")"
+    if [[ -n "$offenders" ]]; then
+        praho_die "A portal host's env file may hold only what the portal stack uses; ${PRAHO_ENV_FILE} also has: ${offenders}
+Write the portal's file where the full one lives: deploy/scripts/portal-env.sh (--env prod|staging or --env-file PATH), then copy it here."
+    fi
+}
+
 # praho_compose TYPE [--profile NAME ...] COMMAND [ARGS...]
 praho_compose() {
     local type="$1"
