@@ -18,7 +18,9 @@ from apps.settings.services import SettingsService
 
 
 @freeze_time("2026-10-07 09:00:00+00:00")
-@override_settings(EFACTURA_ENVIRONMENT="test", EFACTURA_ACCESS_TOKEN="quota-test-token")
+@override_settings(
+    EFACTURA_ENVIRONMENT="test", EFACTURA_ACCESS_TOKEN="quota-test-token", EFACTURA_CLIENT_ID="quota-client"
+)
 class EFacturaQuotaSettingsEffectsTests(TestCase):
     client: EFacturaClient
     requests_seen: list[tuple[str, dict[str, object]]]

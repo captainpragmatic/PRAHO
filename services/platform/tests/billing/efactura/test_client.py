@@ -10,6 +10,7 @@ from datetime import timedelta
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import requests
 from django.conf import settings
 from django.test import TestCase, override_settings
 from django.utils import timezone
@@ -557,7 +558,6 @@ class EFacturaClientTestCase(TestCase):
     @patch("apps.billing.efactura.client.time.sleep")
     def test_request_with_retry_timeout(self, mock_sleep, mock_safe_request):
         """Test request with timeout retry."""
-        import requests
 
         mock_safe_request.side_effect = requests.Timeout()
 
@@ -572,7 +572,6 @@ class EFacturaClientTestCase(TestCase):
     @patch("apps.billing.efactura.client.time.sleep")
     def test_upload_timeout_is_never_replayed(self, mock_sleep, mock_safe_request, _mock_token):
         """A timed-out mutating POST may have landed at ANAF and must run only once."""
-        import requests
 
         mock_safe_request.side_effect = requests.Timeout("response lost")
 
@@ -780,7 +779,6 @@ class AuthenticationFlowTestCase(TestCase):
     @patch("apps.billing.efactura.client.safe_request")
     def test_exchange_code_failure(self, mock_safe_request):
         """Test auth code exchange failure."""
-        import requests
 
         mock_safe_request.side_effect = requests.RequestException("Connection failed")
 
@@ -806,7 +804,7 @@ class AuthenticationFlowTestCase(TestCase):
         self.assertEqual(token.access_token, "refreshed-token")
 
     @patch.object(EFacturaClient, "_get_cached_token")
-    @override_settings(EFACTURA_ACCESS_TOKEN="manual-token")
+    @override_settings(EFACTURA_ACCESS_TOKEN="manual-token", EFACTURA_CLIENT_ID="test-client")
     def test_get_access_token_from_settings(self, mock_cached):
         """Test fallback to manual token from settings."""
         mock_cached.return_value = None  # No cached token

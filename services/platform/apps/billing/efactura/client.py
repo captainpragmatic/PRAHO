@@ -641,10 +641,16 @@ class EFacturaClient:
             except AuthenticationError:
                 pass
 
-        # The unscoped manual token belongs only to the currently configured environment.
+        # The deployment manual token belongs to the deployment OAuth client and current environment.
         manual_token = getattr(settings, "EFACTURA_ACCESS_TOKEN", "")
+        manual_client_id = getattr(settings, "EFACTURA_CLIENT_ID", "")
         environment = "production" if self.config.environment == EFacturaEnvironment.PRODUCTION else "test"
-        if manual_token and environment == efactura_environment().value:
+        if (
+            manual_token
+            and manual_client_id
+            and manual_client_id == self.config.client_id
+            and environment == efactura_environment().value
+        ):
             return manual_token
 
         raise AuthenticationError(
