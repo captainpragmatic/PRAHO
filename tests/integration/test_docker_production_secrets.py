@@ -142,9 +142,17 @@ class TestNativeProductionKeys:
     def test_the_production_example_declares_every_production_key(self) -> None:
         lines = (PROJECT_ROOT / ".env.example.prod").read_text().splitlines()
         for key in PRODUCTION_KEY_VALUES:
-            index = next((i for i, line in enumerate(lines) if line.startswith(f"{key}=")), None)
-            assert index is not None, key
-            assert lines[index - 1].startswith("# [REQUIRED]"), (key, lines[index - 1])
+            indexes = [i for i, line in enumerate(lines) if line.startswith(f"{key}=")]
+            assert len(indexes) == 1, (key, [i + 1 for i in indexes])
+            assert lines[indexes[0] - 1].startswith("# [REQUIRED]"), (key, lines[indexes[0] - 1])
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("example", sorted(p.name for p in PROJECT_ROOT.glob(".env.example*")))
+    def test_no_example_declares_a_key_twice(self, example: str) -> None:
+        # Compose and the native role both keep a key's last value, so a later blank duplicate erases
+        # the value an operator filled in above it.
+        keys = re.findall(r"^([A-Z][A-Z0-9_]*)=", (PROJECT_ROOT / example).read_text(), re.MULTILINE)
+        assert sorted({k for k in keys if keys.count(k) > 1}) == []
 
     @pytest.mark.integration
     def test_preflight_requires_the_keys_for_production(self) -> None:
