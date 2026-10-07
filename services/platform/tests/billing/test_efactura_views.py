@@ -70,9 +70,7 @@ class EfacturaDashboardViewTestCase(TestCase):
         mock_service.check_approaching_deadlines.return_value = []
         mock_service_class.return_value = mock_service
 
-        response = self.client.get(
-            reverse("billing:efactura_dashboard") + "?status=accepted"
-        )
+        response = self.client.get(reverse("billing:efactura_dashboard") + "?status=accepted")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["status_filter"], "accepted")
 
@@ -90,12 +88,24 @@ class EfacturaDocumentDetailViewTestCase(TestCase):
         self.client = Client()
         self.client.force_login(self.user)
 
+    def test_detail_renders_the_resolved_retry_limit(self) -> None:
+        from apps.settings.services import SettingsService  # noqa: PLC0415
+        from tests.factories import InvoiceFactory  # noqa: PLC0415
+
+        result = SettingsService.update_setting("efactura.retry.max_retries", 2)
+        self.assertTrue(result.is_ok(), str(result))
+        self.addCleanup(SettingsService._clear_setting_cache, "efactura.retry.max_retries")
+        document = EFacturaDocument.objects.create(invoice=InvoiceFactory(), retry_count=1)
+
+        response = self.client.get(reverse("billing:efactura_document_detail", kwargs={"pk": document.pk}))
+
+        self.assertContains(response, "1 / 2")
+        self.assertNotContains(response, "1 / 5")
+
     def test_detail_404_for_nonexistent_document(self):
         """Should return 404 for unknown document ID."""
         fake_uuid = str(uuid4())
-        response = self.client.get(
-            reverse("billing:efactura_document_detail", kwargs={"pk": fake_uuid})
-        )
+        response = self.client.get(reverse("billing:efactura_document_detail", kwargs={"pk": fake_uuid}))
         self.assertEqual(response.status_code, 404)
 
     def test_unknown_outcome_requires_reconciliation_and_has_no_retry_action(self):
@@ -161,9 +171,7 @@ class EfacturaSubmitViewTestCase(TestCase):
 
     def test_submit_requires_post(self):
         """Submit should only accept POST requests."""
-        response = self.client.get(
-            reverse("billing:efactura_submit", kwargs={"pk": 999})
-        )
+        response = self.client.get(reverse("billing:efactura_submit", kwargs={"pk": 999}))
         self.assertEqual(response.status_code, 405)
 
 
@@ -183,9 +191,7 @@ class EfacturaRetryViewTestCase(TestCase):
     def test_retry_requires_post(self):
         """Retry should only accept POST requests."""
         fake_uuid = str(uuid4())
-        response = self.client.get(
-            reverse("billing:efactura_retry", kwargs={"pk": fake_uuid})
-        )
+        response = self.client.get(reverse("billing:efactura_retry", kwargs={"pk": fake_uuid}))
         self.assertEqual(response.status_code, 405)
 
     @patch("apps.billing.efactura.service.EFacturaService")

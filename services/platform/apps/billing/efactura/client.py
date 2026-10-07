@@ -32,7 +32,9 @@ from urllib.parse import urlencode, urlsplit
 import requests
 from django.conf import settings
 from django.core.cache import cache
+from django.db import DatabaseError, InterfaceError
 from django.utils import timezone
+from django.utils.connection import ConnectionDoesNotExist
 from django.utils.translation import gettext as _
 
 from apps.billing.efactura.quota import QuotaEndpoint, QuotaExceededError, quota_tracker
@@ -174,6 +176,7 @@ class UploadResponse:
     raw_response: dict[str, Any] = field(default_factory=dict)
     outcome_is_known: bool = True
     configuration_error: bool = False
+    quota_retry_at: datetime | None = None
 
     @classmethod
     def from_response(cls, response: requests.Response) -> UploadResponse:
@@ -373,6 +376,18 @@ class ValidationError(EFacturaClientError):
 
 class RateLimitError(EFacturaClientError):
     """Rate limit exceeded."""
+
+
+class LocalQuotaError(RateLimitError):
+    """No dispatch occurred; an earlier explicit HTTP 429 also proves refusal."""
+
+    def __init__(self, message: str, retry_at: datetime) -> None:
+        super().__init__(message)
+        self.retry_at = retry_at
+
+
+class LocalRequestError(EFacturaClientError):
+    """Request preparation failed before the HTTP transport was invoked."""
 
 
 def extract_zip_members(content: bytes) -> dict[str, bytes]:
@@ -764,8 +779,9 @@ class EFacturaClient:
 
             return result
 
+        except LocalQuotaError as e:
+            return UploadResponse(success=False, message=str(e), quota_retry_at=e.retry_at)
         except RateLimitError as e:
-            # Local refusal and any preceding HTTP 429 prove no upload was accepted.
             return UploadResponse.error(str(e))
         except AuthenticationError:
             raise
@@ -1042,7 +1058,11 @@ class EFacturaClient:
             quota_tracker.check_and_increment(endpoint, cui, message_id)
         except QuotaExceededError as e:
             logger.warning("⚠️ [e-Factura] Local API quota exhausted for %s (CUI: %s)", endpoint.value, cui)
-            raise RateLimitError(_("e-Factura API quota exceeded; retry after the quota resets.")) from e
+            retry_at = datetime.fromisoformat(e.reset_at) if e.reset_at else timezone.now() + timedelta(minutes=1)
+            raise LocalQuotaError(_("e-Factura API quota exceeded; retry after the quota resets."), retry_at) from e
+        except (DatabaseError, InterfaceError, ConnectionDoesNotExist) as e:
+            logger.warning("⚠️ [e-Factura] Quota store unavailable before dispatch: %s", e)
+            raise LocalRequestError(_("e-Factura quota reservation failed before dispatch; retry later.")) from e
 
     def _request_with_retry(
         self,

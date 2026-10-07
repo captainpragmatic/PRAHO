@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     pass
 
 
-from apps.billing.efactura.settings import efactura_settings
+from apps.billing.efactura.settings import EFacturaRetryPolicy, efactura_settings
 from apps.settings.services import SettingsService
 
 
@@ -511,18 +511,28 @@ class EFacturaDocument(models.Model):
         ],
         target=EFacturaStatus.ERROR.value,
     )
-    def mark_error(self, error_message: str) -> None:
-        """Mark document as having an error, schedule retry if possible."""
+    def mark_error(self, error_message: str, *, retry_policy: EFacturaRetryPolicy | None = None) -> None:
+        """Mark a failed submission using the caller's batch policy when supplied."""
+        policy = retry_policy if retry_policy is not None else EFacturaRetryPolicy.resolve()
         self.last_error = error_message
         self.retry_count += 1
         self._release_submission_claim()
 
-        # Resolve staff policy when the failure is recorded, preserving the existing retry-count boundary.
-        if self.retry_count <= efactura_settings.max_retries:
-            delay_seconds = efactura_settings.get_retry_delay(self.retry_count)
-            self.next_retry_at = timezone.now() + timedelta(seconds=delay_seconds)
+        if self.retry_count <= policy.max_retries:
+            self.next_retry_at = timezone.now() + timedelta(seconds=policy.get_retry_delay(self.retry_count))
         else:
-            self.next_retry_at = None  # No more retries
+            self.next_retry_at = None
+
+    @transition(
+        field=status,
+        source=EFacturaStatus.UPLOADING.value,
+        target=EFacturaStatus.QUEUED.value,
+    )
+    def defer_for_quota(self, error_message: str, retry_at: datetime.datetime) -> None:
+        """Release a locally refused upload without consuming a submission attempt."""
+        self.last_error = error_message
+        self.next_retry_at = retry_at
+        self._release_submission_claim()
 
     @transition(
         field=status,
@@ -564,7 +574,7 @@ class EFacturaDocument(models.Model):
         now = timezone.now()
         return (
             cls.objects.filter(
-                Q(status=EFacturaStatus.QUEUED.value)
+                (Q(status=EFacturaStatus.QUEUED.value) & (Q(next_retry_at__isnull=True) | Q(next_retry_at__lte=now)))
                 | Q(
                     status=EFacturaStatus.UPLOADING.value,
                     submission_claim_expires_at__isnull=False,
@@ -620,6 +630,11 @@ class EFacturaDocument(models.Model):
     def is_terminal(self) -> bool:
         """Check if document is in a terminal state."""
         return self.status in EFacturaStatus.terminal_statuses()
+
+    @property
+    def retry_limit(self) -> int:
+        """Current staff policy for the document detail counter."""
+        return efactura_settings.max_retries
 
     @property
     def can_retry(self) -> bool:

@@ -24,6 +24,7 @@ from functools import cached_property
 from typing import TYPE_CHECKING, Any
 
 from django.conf import settings as django_settings
+from django.db import DatabaseError, InterfaceError, transaction
 from django.utils import timezone
 
 if TYPE_CHECKING:
@@ -719,6 +720,54 @@ class EFacturaSettings:
         return issues
 
 
+@dataclass(frozen=True)
+class EFacturaRetryPolicy:
+    """One immutable, row-authoritative policy for a batch or claim finalisation."""
+
+    max_retries: int
+    delays: tuple[int, ...]
+
+    @classmethod
+    def resolve(cls) -> EFacturaRetryPolicy:
+        from apps.settings.models import SystemSetting  # noqa: PLC0415  # Avoid circular imports.
+
+        defaults = {
+            EFacturaSettingKeys.MAX_RETRIES: 5,
+            EFacturaSettingKeys.RETRY_DELAY_1: 300,
+            EFacturaSettingKeys.RETRY_DELAY_2: 900,
+            EFacturaSettingKeys.RETRY_DELAY_3: 3600,
+            EFacturaSettingKeys.RETRY_DELAY_4: 7200,
+            EFacturaSettingKeys.RETRY_DELAY_5: 21600,
+        }
+        stored: dict[str, object] = {}
+        try:
+            with transaction.atomic():
+                stored = {row.key: row.get_typed_value() for row in SystemSetting.objects.filter(key__in=defaults)}
+        except (DatabaseError, InterfaceError):
+            logger.warning("⚠️ [e-Factura] Retry policy store unavailable; using deployment defaults")
+
+        def integer(key: str) -> int:
+            value = stored.get(key)
+            if value is None or value == "":
+                value = getattr(django_settings, key.replace(".", "_").upper(), None)
+                if value is None:
+                    value = EFACTURA_DEFAULTS.get(key, defaults[key])
+            if isinstance(value, str | int | float | Decimal):
+                try:
+                    return int(value)
+                except (ValueError, TypeError):
+                    pass
+            return defaults[key]
+
+        return cls(
+            max_retries=integer(EFacturaSettingKeys.MAX_RETRIES),
+            delays=tuple(integer(key) for key in defaults if key != EFacturaSettingKeys.MAX_RETRIES),
+        )
+
+    def get_retry_delay(self, attempt: int) -> int:
+        return self.delays[max(0, min(attempt - 1, len(self.delays) - 1))]
+
+
 # Global settings instance
 efactura_settings = EFacturaSettings()
 
@@ -736,6 +785,6 @@ def efactura_environment() -> EFacturaEnvironment:
 def company_identity_setting(key: str, legacy_value: str) -> str:
     """Resolve stored identity, then namespaced Django configuration, then legacy identity."""
     value = SettingsService.get_stored_setting(key)
-    if value is None:
+    if value is None or value == "":
         value = getattr(django_settings, key.replace(".", "_").upper(), None)
-    return legacy_value if value is None else str(value)
+    return legacy_value if value is None or value == "" else str(value)

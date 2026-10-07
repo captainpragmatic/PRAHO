@@ -121,6 +121,27 @@ class EFacturaIdentitySettingsEffectsTests(TestCase):
             "RO49AAAA1B31007593840000",
         )
 
+    @override_settings(EFACTURA_COMPANY_BANK_NAME="Deployment Bank")
+    def test_empty_bank_name_uses_deployment_identity_in_xml(self) -> None:
+        from apps.billing.efactura.settings import company_identity_setting  # noqa: PLC0415
+
+        self._write("efactura.company.bank_name", "")
+        self.assertEqual(company_identity_setting("efactura.company.bank_name", "Legacy Bank"), "Deployment Bank")
+        document = self._document()
+        self.assertEqual(
+            document.findtext(
+                "./cac:PaymentMeans/cac:PayeeFinancialAccount/cac:FinancialInstitutionBranch/cbc:Name",
+                namespaces=NAMESPACES,
+            ),
+            "Deployment Bank",
+        )
+        for key, value in (("efactura.enabled", False), ("efactura.retry.max_retries", 0)):
+            with self.subTest(key=key):
+                result = SettingsService.update_setting(key, value)
+                self.assertTrue(result.is_ok(), str(result))
+                self.addCleanup(SettingsService._clear_setting_cache, key)
+                self.assertEqual(company_identity_setting(key, "legacy"), str(value))
+
     def test_bank_name_changes_payment_instructions(self) -> None:
         self._write("efactura.company.bank_name", "Identity Bank")
 

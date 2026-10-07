@@ -24,8 +24,8 @@ import posixpath
 import uuid
 from copy import copy
 from dataclasses import dataclass, field, replace
-from datetime import timedelta
-from typing import TYPE_CHECKING, Any
+from datetime import datetime, timedelta
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from django.core.files.base import ContentFile
 from django.db import transaction
@@ -44,11 +44,12 @@ from .client import (
     EFacturaClient,
     EFacturaClientError,
     EFacturaConfig,
+    LocalRequestError,
     NetworkError,
     validate_response_archive,
 )
 from .models import EFacturaDocument, EFacturaDocumentType, EFacturaStatus
-from .settings import EFacturaSettings, efactura_environment
+from .settings import EFacturaRetryPolicy, EFacturaSettings, efactura_environment
 from .validator import CIUSROValidator, ValidationResult
 from .xml_builder import NAMESPACES, XMLBuilderError, builder_for
 
@@ -141,6 +142,10 @@ class StatusCheckResult:
     is_terminal: bool = False
     download_id: str = ""
     errors: list[dict[str, Any]] = field(default_factory=list)
+
+
+class RetryPolicyOptions(TypedDict, total=False):
+    retry_policy: EFacturaRetryPolicy
 
 
 @dataclass(frozen=True)
@@ -316,7 +321,9 @@ class EFacturaService:
 
     # --- Main Workflow Methods ---
 
-    def submit_invoice(self, invoice: Invoice) -> SubmissionResult:  # noqa: C901, PLR0911, PLR0912  # Complexity: multi-step business logic
+    def submit_invoice(  # noqa: C901, PLR0911, PLR0912  # Explicit lifecycle and replay-safety branches.
+        self, invoice: Invoice, *, retry_policy: EFacturaRetryPolicy | None = None
+    ) -> SubmissionResult:
         """
         Submit an invoice to e-Factura.
 
@@ -370,6 +377,7 @@ class EFacturaService:
         if isinstance(claim_or_result, SubmissionResult):
             return claim_or_result
         claim = claim_or_result
+        failure_options: RetryPolicyOptions = {} if retry_policy is None else {"retry_policy": retry_policy}
 
         # Fail-closed backstop at the lowest boundary that knows the invoice. Reaching
         # this with a non-builtin document means a caller bypassed the check above.
@@ -388,11 +396,14 @@ class EFacturaService:
                 response = client.upload_invoice(claim.xml_content, cif=cif)
         except XMLBuilderError as e:
             logger.error("🔥 [e-Factura] Supplier identity unavailable for invoice %s: %s", invoice.number, e)
-            return self._finalize_safe_failure(claim, str(e))
+            return self._finalize_safe_failure(claim, str(e), **failure_options)
+        except LocalRequestError as e:
+            logger.warning("⚠️ [e-Factura] Local request preparation failed for invoice %s: %s", invoice.number, e)
+            return self._finalize_safe_failure(claim, str(e), **failure_options)
         except AuthenticationError as e:
             logger.error(f"🔥 [e-Factura] Authentication failed for invoice {invoice.number}: {e}")
             message = _("Authentication failed: %(error)s") % {"error": e}
-            return self._finalize_safe_failure(claim, message, credential_failure=True)
+            return self._finalize_safe_failure(claim, message, credential_failure=True, **failure_options)
         except NetworkError as e:
             logger.error(f"Network error for invoice {invoice.number}: {e}")
             return self._finalize_unknown_outcome(claim, f"ANAF upload outcome unknown: {e}")
@@ -405,15 +416,18 @@ class EFacturaService:
             if result.success:
                 logger.info(f"e-Factura submitted for invoice {invoice.number}: {response.upload_index}")
             return result
+        if response.quota_retry_at is not None:
+            return self._finalize_quota_deferral(claim, response.message, response.quota_retry_at)
         if response.configuration_error:
             message = _("Invalid e-Factura credentials for environment %(environment)s") % {
                 "environment": claim.environment
             }
-            return self._finalize_safe_failure(claim, message, credential_failure=True)
+            return self._finalize_safe_failure(claim, message, credential_failure=True, **failure_options)
         return self._finalize_safe_failure(
             claim,
             response.message,
             errors=[{"message": error} for error in response.errors],
+            **failure_options,
         )
 
     @transaction.atomic
@@ -554,16 +568,27 @@ class EFacturaService:
         *,
         errors: list[dict[str, Any]] | None = None,
         credential_failure: bool = False,
+        retry_policy: EFacturaRetryPolicy | None = None,
     ) -> SubmissionResult:
         document = self._lock_owned_claim(claim)
         if document is None:
             return SubmissionResult.error("e-Factura submission claim is no longer owned by this worker")
-        document.mark_error(message)
+        document.mark_error(message, retry_policy=retry_policy)
         document.save()
         if credential_failure:
             self._record_credential_failure(document, message, "upload")
         self._log_audit_event(document.invoice, document, "efactura_submission_failed")
         return SubmissionResult.error(message, errors)
+
+    @transaction.atomic
+    def _finalize_quota_deferral(self, claim: SubmissionClaim, message: str, retry_at: datetime) -> SubmissionResult:
+        document = self._lock_owned_claim(claim)
+        if document is None:
+            return SubmissionResult.error(_("e-Factura submission claim is no longer owned by this worker"))
+        document.defer_for_quota(message, retry_at)
+        document.save()
+        self._log_audit_event(document.invoice, document, "efactura_quota_deferred")
+        return SubmissionResult.error(message)
 
     @transaction.atomic
     def _finalize_unknown_outcome(self, claim: SubmissionClaim, message: str) -> SubmissionResult:
@@ -683,7 +708,9 @@ class EFacturaService:
             logger.error(f"Download failed for document {document.id}: {e}")
             return None
 
-    def retry_failed_submission(self, document: EFacturaDocument) -> SubmissionResult:
+    def retry_failed_submission(
+        self, document: EFacturaDocument, *, retry_policy: EFacturaRetryPolicy | None = None
+    ) -> SubmissionResult:
         """
         Retry a failed submission.
 
@@ -693,12 +720,20 @@ class EFacturaService:
         Returns:
             SubmissionResult
         """
-        if not (document.can_retry or document.can_requeue_after_fix):
+        if retry_policy is None:
+            eligible = document.can_retry or document.can_requeue_after_fix
+        else:
+            eligible = document.retry_count < retry_policy.max_retries and (
+                document.status == EFacturaStatus.ERROR.value
+                or (document.status == EFacturaStatus.QUEUED.value and document.next_retry_at is not None)
+            )
+        if not eligible:
             return SubmissionResult.error("Document cannot be retried (max retries exceeded or wrong status)")
 
-        # submit_invoice() owns the short claim transaction. Do not wrap the ANAF POST in an
-        # outer transaction or pre-transition a stale document instance.
-        return self.submit_invoice(document.invoice)
+        # submit_invoice() owns the short claim transaction; the ANAF POST runs outside it.
+        if retry_policy is None:
+            return self.submit_invoice(document.invoice)
+        return self.submit_invoice(document.invoice, retry_policy=retry_policy)
 
     # --- Batch Operations ---
 
@@ -713,9 +748,10 @@ class EFacturaService:
         if not EFacturaSettings().auto_submit_enabled:
             return results
         pending = EFacturaDocument.get_pending_submissions(limit)
+        retry_policy = EFacturaRetryPolicy.resolve()
 
         for document in pending:
-            result = self.submit_invoice(document.invoice)
+            result = self.submit_invoice(document.invoice, retry_policy=retry_policy)
             if result.success and result.registered_with_anaf:
                 results["submitted"] += 1
             elif result.success:
@@ -768,9 +804,10 @@ class EFacturaService:
         if not EFacturaSettings().auto_submit_enabled:
             return results
         ready = EFacturaDocument.get_ready_for_retry()
+        retry_policy = EFacturaRetryPolicy.resolve()
 
         for document in ready:
-            result = self.retry_failed_submission(document)
+            result = self.retry_failed_submission(document, retry_policy=retry_policy)
             if result.success:
                 results["retried"] += 1
             else:
@@ -920,6 +957,7 @@ class EFacturaService:
                 "efactura_rejected": "failed",
                 "efactura_validation_failed": "validation_failed",
                 "efactura_submission_failed": "failed",
+                "efactura_quota_deferred": "in_progress",
                 "efactura_outcome_unknown": "needs_reconciliation",
             }
 
