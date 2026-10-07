@@ -19,7 +19,19 @@ MARKER = "# signal-isolation:"
 
 _FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
 _TRIES = (ast.Try, ast.TryStar)
-_BOUNDARIES = {"atomic", "best_effort_atomic", "swallow_application_errors"}
+_BOUNDARIES = {"atomic", "best_effort_atomic"}
+_DB_ERRORS = {
+    "Error",
+    "DatabaseError",
+    "OperationalError",
+    "ProgrammingError",
+    "IntegrityError",
+    "DataError",
+    "InternalError",
+    "NotSupportedError",
+    "InterfaceError",
+    "TransactionManagementError",
+}
 _READS = {"get", "exists", "count", "first", "last"}
 _WRITES = {"create", "update", "get_or_create", "update_or_create"}
 _QUERY_METHODS = {
@@ -62,7 +74,7 @@ def _nodes(node: ast.AST) -> Iterator[ast.AST]:
 
 
 class _Scope:
-    def __init__(self, tree: ast.Module, owner: ast.AST) -> None:
+    def __init__(self, tree: ast.Module, owner: ast.AST, *, queries: set[str] | None = None) -> None:
         self.aliases: dict[str, str] = {}
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and node.module:
@@ -73,7 +85,7 @@ class _Scope:
                     self.aliases[alias.asname or alias.name.split(".")[0]] = (
                         alias.name if alias.asname else (alias.name.split(".")[0])
                     )
-        self.queries: set[str] = set()
+        self.queries = set(queries or ())
         self.non_db = set(_NON_DB)
         assignments = [node for node in _nodes(owner) if isinstance(node, (ast.Assign, ast.AnnAssign))]
         for node in assignments:
@@ -106,6 +118,8 @@ class _Scope:
         return isinstance(expr, (ast.Dict, ast.List, ast.Set, ast.Tuple, ast.Constant))
 
     def query(self, expr: ast.expr) -> bool:
+        if isinstance(expr, ast.Subscript) and isinstance(expr.slice, ast.Slice):
+            return self.query(expr.value)
         if isinstance(expr, ast.Name):
             return expr.id in self.queries or expr.id in {"qs", "queryset"}
         if isinstance(expr, ast.Attribute):
@@ -125,25 +139,28 @@ class _Scope:
         kind = name.rsplit(".", 1)[-1]
         if decorator:
             return kind == "best_effort_atomic"
-        return kind in _BOUNDARIES and (
-            kind != "atomic" or name in {"atomic", "transaction.atomic", "django.db.transaction.atomic"}
-        )
+        if kind not in _BOUNDARIES:
+            return False
+        if kind == "atomic":
+            if name not in {"atomic", "transaction.atomic", "django.db.transaction.atomic"}:
+                return False
+            savepoint = next(
+                (keyword.value for keyword in expr.keywords if keyword.arg == "savepoint"),
+                expr.args[1] if len(expr.args) > 1 else ast.Constant(value=True),
+            )
+            return isinstance(savepoint, ast.Constant) and savepoint.value is True
+        return True
 
     def swallowing(self, handler: ast.ExceptHandler) -> bool:
         if handler.type is None:
             return True
         types = handler.type.elts if isinstance(handler.type, ast.Tuple) else [handler.type]
-        return any(
-            self.name(expr) in {"Exception", "BaseException"}
-            or self.name(expr)
-            in {
-                f"{module}.{kind}"
-                for module in ("django.db", "django.db.utils")
-                for kind in ("DatabaseError", "Error", "IntegrityError")
-            }
-            or self.name(expr) in {"DatabaseError", "Error", "IntegrityError"}
-            for expr in types
-        )
+        database_errors = _DB_ERRORS | {
+            f"{module}.{kind}"
+            for module in ("django.db", "django.db.utils", "django.db.transaction")
+            for kind in _DB_ERRORS
+        }
+        return any(self.name(expr) in {"Exception", "BaseException"} | database_errors for expr in types)
 
     def database_call(self, node: ast.Call) -> bool:
         func = node.func
@@ -226,10 +243,19 @@ class _DatabaseVisitor(ast.NodeVisitor):
     def visit_Call(self, node: ast.Call) -> None:
         helper = self.helpers.get(node.func.id) if isinstance(node.func, ast.Name) else None
         if not self.protected and self.depth == 0 and helper is not None:
-            scope = _Scope(self.tree, helper)
-            for parameter, argument in zip(helper.args.args, node.args, strict=False):
-                if self.scope.query(argument):
-                    scope.queries.add(parameter.arg)
+            parameters = [*helper.args.posonlyargs, *helper.args.args]
+            bindings = {parameter.arg: argument for parameter, argument in zip(parameters, node.args, strict=False)}
+            keyword_parameters = {parameter.arg for parameter in [*helper.args.args, *helper.args.kwonlyargs]}
+            bindings.update(
+                (keyword.arg, keyword.value)
+                for keyword in node.keywords
+                if keyword.arg is not None and keyword.arg in keyword_parameters
+            )
+            scope = _Scope(
+                self.tree,
+                helper,
+                queries={name for name, argument in bindings.items() if self.scope.query(argument)},
+            )
             visitor = _DatabaseVisitor(
                 scope,
                 self.helpers,
@@ -242,7 +268,7 @@ class _DatabaseVisitor(ast.NodeVisitor):
             self.unsafe = self.unsafe or visitor.unsafe
         elif not self.protected and self.scope.database_call(node):
             self.unsafe = True
-        if isinstance(node.func, ast.Name) and node.func.id == "list":
+        if isinstance(node.func, ast.Name) and node.func.id in {"list", "bool", "len"}:
             for arg in node.args:
                 self._evaluate(arg)
         self.generic_visit(node)
@@ -251,6 +277,20 @@ class _DatabaseVisitor(ast.NodeVisitor):
         if not self.protected and self.scope.query(expr):
             self.unsafe = True
         self.visit(expr)
+
+    def visit_Subscript(self, node: ast.Subscript) -> None:
+        # A plain slice stays lazy; indexing and slices with a step evaluate.
+        if not isinstance(node.slice, ast.Slice) or (
+            node.slice.step is not None
+            and not (isinstance(node.slice.step, ast.Constant) and node.slice.step.value is None)
+        ):
+            self._evaluate(node.value)
+        self.generic_visit(node)
+
+    def visit_If(self, node: ast.If) -> None:
+        self._evaluate(node.test)
+        for stmt in [*node.body, *node.orelse]:
+            self.visit(stmt)
 
     def visit_For(self, node: ast.For | ast.AsyncFor) -> None:
         self._evaluate(node.iter)
@@ -365,7 +405,7 @@ class SignalHandlerIsolationTests(SimpleTestCase):
         source = "try:\n    instance.save()\nexcept Exception:\n    raise\n"
         self.assertEqual(find_unisolated_handlers(source), [])
 
-    def test_swallow_application_errors_passes(self) -> None:
+    def test_swallow_application_errors_requires_inner_savepoint(self) -> None:
         source = dedent(
             """
             try:
@@ -375,7 +415,95 @@ class SignalHandlerIsolationTests(SimpleTestCase):
                 pass
             """
         ).lstrip()
-        self.assertEqual(find_unisolated_handlers(source), [])
+        self.assertEqual(find_unisolated_handlers(source), [4])
+        isolated = source.replace(
+            "        instance.save()",
+            "        with transaction.atomic():\n            instance.save()",
+        )
+        self.assertEqual(find_unisolated_handlers(isolated), [])
+
+    def test_atomic_without_savepoint_is_flagged(self) -> None:
+        for boundary in (
+            "transaction.atomic(savepoint=False)",
+            "transaction.atomic(None, False)",
+            "savepoint(savepoint=False)",
+        ):
+            with self.subTest(boundary=boundary):
+                source = (
+                    "from django.db.transaction import atomic as savepoint\n"
+                    f"try:\n    with {boundary}:\n        instance.save()\nexcept Exception:\n    pass\n"
+                )
+                self.assertEqual(find_unisolated_handlers(source), [5])
+                isolated = source.replace("False", "True")
+                self.assertEqual(find_unisolated_handlers(isolated), [])
+
+    def test_queryset_evaluation_and_aliases_are_flagged(self) -> None:
+        operations = (
+            "rows[0]",
+            "list(rows[:2])",
+            "rows[::2]",
+            "bool(rows)",
+            "len(rows)",
+            "if rows:\n        consume(rows)",
+        )
+        for operation in operations:
+            with self.subTest(operation=operation):
+                source = (
+                    "query = Model.objects.filter(active=True)\n"
+                    "rows = query\n"
+                    f"try:\n    {operation}\nexcept Exception:\n    pass\n"
+                )
+                expected = 4 + len(operation.splitlines())
+                self.assertEqual(find_unisolated_handlers(source), [expected])
+                isolated = source.replace(
+                    f"    {operation}",
+                    "    with transaction.atomic():\n"
+                    + "\n".join("        " + line for line in operation.splitlines()),
+                )
+                self.assertEqual(find_unisolated_handlers(isolated), [])
+        lazy = "rows = Model.objects.filter(active=True)\ntry:\n    limited = rows[:2]\nexcept Exception:\n    pass\n"
+        self.assertEqual(find_unisolated_handlers(lazy), [])
+
+    def test_database_exception_subclasses_and_aliases_are_flagged(self) -> None:
+        exceptions = (
+            "OperationalError",
+            "ProgrammingError",
+            "IntegrityError",
+            "DataError",
+            "InternalError",
+            "NotSupportedError",
+            "InterfaceError",
+        )
+        for exception in exceptions:
+            for module in ("django.db", "django.db.utils"):
+                for catch, imports in (
+                    (exception, ""),
+                    ("DBFailure", f"from {module} import {exception} as DBFailure\n"),
+                    (f"db.{exception}", f"import {module} as db\n"),
+                ):
+                    with self.subTest(exception=exception, module=module, catch=catch):
+                        source = imports + f"try:\n    instance.save()\nexcept {catch}:\n    pass\n"
+                        self.assertEqual(find_unisolated_handlers(source), [3 + len(imports.splitlines())])
+                        self.assertEqual(find_unisolated_handlers(source.replace("    pass", "    raise")), [])
+
+    def test_keyword_helper_arguments_and_aliases_are_resolved(self) -> None:
+        for parameters in ("rows", "*, rows"):
+            with self.subTest(parameters=parameters):
+                source = (
+                    f"def evaluate({parameters}):\n"
+                    "    alias = rows\n"
+                    "    list(alias)\n"
+                    "try:\n"
+                    "    evaluate(rows=Model.objects.filter(active=True))\n"
+                    "except Exception:\n"
+                    "    pass\n"
+                )
+                self.assertEqual(find_unisolated_handlers(source), [6])
+                isolated = source.replace(
+                    "    list(alias)",
+                    "    with transaction.atomic():\n        list(alias)",
+                )
+                self.assertEqual(find_unisolated_handlers(isolated), [])
 
     def test_unmarked_offender_is_flagged(self) -> None:
         source = "try:\n    instance.save()\nexcept Exception:\n    pass\n"

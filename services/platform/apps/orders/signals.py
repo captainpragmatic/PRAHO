@@ -224,29 +224,37 @@ def _update_services_to_provisioning(order: Order) -> None:
 
 
 def _trigger_service_provisioning(order: Order) -> None:
-    """Trigger service provisioning for completed orders"""
-    with best_effort_atomic(logger=logger, scope="Order Signal", message="Provisioning trigger failed"):
-        from apps.provisioning.services import (  # noqa: PLC0415  # Deferred: avoids circular import
-            ProvisioningService,  # Circular: cross-app signal  # Deferred: avoids circular import
-        )
+    """Trigger service provisioning for completed orders."""
+    try:
+        with transaction.atomic():
+            from apps.provisioning.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+                ProvisioningService,
+            )
 
-        # Queue provisioning tasks for all order items
-        for item in order.items.all():
-            if item.provisioning_status == "pending":
+            items = list(order.items.all())
+    except Exception as e:
+        logger.exception(f"🔥 [Order Signal] Failed to load provisioning items: {e}")
+        return
+
+    for item in items:
+        if item.provisioning_status != "pending":
+            continue
+        try:
+            with transaction.atomic():
                 try:
-                    from django_q.tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
-                        async_task,  # Deferred: django-q task  # Deferred: avoids circular import
-                    )
+                    from django_q.tasks import async_task  # noqa: PLC0415
 
                     async_task("apps.orders.tasks.provision_order_item", str(item.id))
                     logger.info(f"⚡ [Order] Provisioning queued for item {item.id}")
                 except ImportError:
-                    # Fallback to synchronous provisioning
+                    # Fallback to synchronous provisioning.
                     result = ProvisioningService.provision_order_item(item)
                     if result.is_ok():
                         logger.info(f"⚡ [Order] Item {item.id} provisioned successfully")
                     else:
                         logger.error(f"🔥 [Order] Provisioning failed: {result.error}")
+        except Exception as e:
+            logger.exception(f"🔥 [Order Signal] Failed to provision item {item.id}: {e}")
 
 
 def _cancel_linked_subscription_for_order(*, service_id: object, feedback: str) -> None:
