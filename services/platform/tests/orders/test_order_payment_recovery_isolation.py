@@ -96,6 +96,130 @@ class OrderRecoveryIsolationTests(TestCase):
     def setUp(self) -> None:
         self.customer, self.currency = prepare_case(self)
 
+    def test_invoice_void_cancels_only_after_commit_and_rollback_discards_cancellation(self) -> None:
+        order, invoice, payment = make_timeout_payment_case(self.customer, self.currency)
+        payment.delete()
+        assert order.proforma is not None
+        force_status(order.proforma, "converted")
+
+        with self.captureOnCommitCallbacks(execute=True), transaction.atomic():
+            invoice.void()
+            invoice.save(update_fields=["status"])
+            order.refresh_from_db()
+            self.assertEqual(order.status, "awaiting_payment")
+            transaction.set_rollback(True)
+        invoice.refresh_from_db()
+        order.refresh_from_db()
+        self.assertEqual(invoice.status, "issued")
+        self.assertEqual(order.status, "awaiting_payment")
+        self.assertFalse(order.status_history.exists())
+
+        with self.captureOnCommitCallbacks(execute=True), transaction.atomic():
+            invoice.void()
+            invoice.save()
+            order.refresh_from_db()
+            self.assertEqual(order.status, "awaiting_payment")
+
+        invoice.refresh_from_db()
+        order.refresh_from_db()
+        self.assertEqual(invoice.status, "void")
+        self.assertEqual(order.status, "cancelled")
+        self.assertEqual(order.status_history.get().new_status, "cancelled")
+
+    def test_invoice_void_callback_revalidates_the_order_invoice_link(self) -> None:
+        order, invoice, payment = make_timeout_payment_case(self.customer, self.currency)
+        payment.delete()
+        replacement = Invoice.objects.create(customer=self.customer, currency=self.currency, total_cents=12100)
+        force_status(replacement, "issued")
+
+        with self.captureOnCommitCallbacks(execute=True), transaction.atomic():
+            invoice.void()
+            invoice.save(update_fields=["status"])
+            order.refresh_from_db()
+            order.invoice = replacement
+            order.save(update_fields=["invoice"])
+
+        order.refresh_from_db()
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, "void")
+        self.assertEqual(order.invoice_id, replacement.pk)
+        self.assertEqual(order.status, "awaiting_payment")
+        self.assertFalse(order.status_history.exists())
+
+    def test_failed_invoice_void_cancellation_is_visible_and_recovered_by_the_sweep(self) -> None:
+        order, invoice, payment = make_timeout_payment_case(self.customer, self.currency)
+        payment.delete()
+        force_status(order, "provisioning")
+        siblings = [make_order(self.customer, self.currency) for _ in range(3)]
+        for sibling, status in zip(siblings, ("awaiting_payment", "paid", "in_review"), strict=True):
+            force_status(sibling, status)
+            sibling.invoice = invoice
+            sibling.save(update_fields=["invoice"])
+        update_status = OrderService.update_order_status
+
+        def fail_one(candidate: Order, status_data: StatusChangeData) -> Result[Order, str]:
+            if candidate.pk == order.pk:
+                Currency.objects.create(code="XVC", symbol="partial cancellation")
+                return Err("cancellation unavailable")
+            return update_status(candidate, status_data)
+
+        with (
+            self.assertLogs("apps", level="ERROR") as logged,
+            patch.object(OrderService, "update_order_status", side_effect=fail_one),
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            invoice.void()
+            invoice.save(update_fields=["status"])
+
+        invoice.refresh_from_db()
+        order.refresh_from_db()
+        self.assertEqual(invoice.status, "void")
+        self.assertEqual(order.status, "provisioning")
+        self.assertFalse(Currency.objects.filter(code="XVC").exists())
+        self.assertFalse(order.status_history.exists())
+        for sibling in siblings:
+            sibling.refresh_from_db()
+            self.assertEqual(sibling.status, "cancelled")
+            self.assertEqual(sibling.status_history.filter(new_status="cancelled").count(), 1)
+
+        recovered = process_pending_orders()
+
+        order.refresh_from_db()
+        self.assertEqual(order.status, "cancelled")
+        self.assertEqual(order.status_history.filter(new_status="cancelled").count(), 1)
+        self.assertTrue(recovered["success"], str(recovered))
+        self.assertEqual(recovered["results"]["failed_orders"], 0)
+        self.assertTrue(any("CRITICAL" in line and "process_pending_orders" in line for line in logged.output))
+        repeated = process_pending_orders()
+        self.assertTrue(repeated["success"], str(repeated))
+        self.assertEqual(order.status_history.filter(new_status="cancelled").count(), 1)
+
+    def test_sweep_recovers_void_orders_when_commit_callback_does_not_run(self) -> None:
+        invoice = Invoice.objects.create(customer=self.customer, currency=self.currency, total_cents=12100)
+        force_status(invoice, "issued")
+        statuses = ("awaiting_payment", "paid", "in_review", "provisioning")
+        orders = [make_order(self.customer, self.currency) for _ in statuses]
+        for order, status in zip(orders, statuses, strict=True):
+            force_status(order, status)
+            order.invoice = invoice
+            order.save(update_fields=["invoice"])
+
+        with self.captureOnCommitCallbacks():
+            invoice.void()
+            invoice.save(update_fields=["status"])
+
+        for order, status in zip(orders, statuses, strict=True):
+            order.refresh_from_db()
+            self.assertEqual(order.status, status)
+
+        recovered = process_pending_orders()
+
+        self.assertTrue(recovered["success"], str(recovered))
+        for order in orders:
+            order.refresh_from_db()
+            self.assertEqual(order.status, "cancelled")
+            self.assertEqual(order.status_history.filter(new_status="cancelled").count(), 1)
+
     def test_paid_orders_past_deadline_are_confirmed_with_siblings(self) -> None:
         invoice = Invoice.objects.create(customer=self.customer, currency=self.currency, total_cents=12100)
         force_status(invoice, "paid")
@@ -494,6 +618,96 @@ class OrderAuditPostgresIsolationTests(TransactionTestCase):
         with connection.cursor() as cursor:
             cursor.execute("SELECT 1")
             self.assertEqual(cursor.fetchone(), (1,))
+
+    def test_invoice_void_overlaps_sweep_on_converted_proforma(self) -> None:  # noqa: PLR0915
+        order, invoice, payment = make_timeout_payment_case(self.customer, self.currency)
+        payment.delete()
+        assert order.proforma is not None
+        proforma = order.proforma
+        force_status(proforma, "converted")
+        document_locked = Event()
+        resume_sweep = Event()
+        void_ready = Event()
+        backend_pids: dict[str, int] = {}
+        database_errors: list[str] = []
+
+        def void_invoice() -> None:
+            fresh_invoice = Invoice.objects.get(pk=invoice.pk)
+            with transaction.atomic():
+                fresh_invoice.void()
+                fresh_invoice.save(update_fields=["status"])
+
+        def run_worker(name: str, operation: Callable[[], object]) -> object:
+            close_old_connections()
+
+            def observe_sql(
+                execute: Callable[..., object], sql: str, params: object, many: bool, context: dict[str, object]
+            ) -> object:
+                try:
+                    result = execute(sql, params, many, context)
+                except DatabaseError as exc:
+                    database_errors.append(str(exc))
+                    raise
+                if (
+                    name == "sweep"
+                    and not document_locked.is_set()
+                    and f'"{ProformaInvoice._meta.db_table}"' in sql
+                    and "FOR UPDATE" in sql
+                ):
+                    document_locked.set()
+                    if not resume_sweep.wait(timeout=10):
+                        raise AssertionError("Invoice void did not reach the document lock")
+                return result
+
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute("SET lock_timeout = '10s'")
+                    cursor.execute("SET statement_timeout = '15s'")
+                    cursor.execute("SELECT pg_backend_pid()")
+                    row = cursor.fetchone()
+                    assert row is not None
+                    backend_pids[name] = row[0]
+                if name == "void":
+                    void_ready.set()
+                with connection.execute_wrapper(observe_sql):
+                    return operation()
+            finally:
+                connection.close()
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            sweeping = executor.submit(run_worker, "sweep", process_pending_orders)
+            try:
+                self.assertTrue(document_locked.wait(timeout=10), "Sweep did not lock the proforma")
+                voiding = executor.submit(run_worker, "void", void_invoice)
+                self.assertTrue(void_ready.wait(timeout=10), "Invoice void connection did not start")
+                wait_deadline = monotonic() + 5
+                while True:
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            "SELECT %s = ANY(pg_blocking_pids(%s))",
+                            [backend_pids["sweep"], backend_pids["void"]],
+                        )
+                        row = cursor.fetchone()
+                    if row is not None and row[0]:
+                        break
+                    self.assertLess(monotonic(), wait_deadline, "Invoice void never waited on the sweep")
+                    sleep(0.01)
+            finally:
+                resume_sweep.set()
+            sweep_outcome = cast(dict[str, object], sweeping.result(timeout=20))
+            voiding.result(timeout=20)
+
+        self.assertEqual(database_errors, [])
+        self.assertTrue(sweep_outcome["success"], str(sweep_outcome))
+        order.refresh_from_db()
+        invoice.refresh_from_db()
+        proforma.refresh_from_db()
+        self.assertEqual(invoice.status, "void")
+        self.assertEqual(proforma.status, "converted")
+        self.assertEqual(order.status, "cancelled")
+        self.assertEqual(order.status_history.filter(new_status="cancelled").count(), 1)
+        results = cast(OrderProcessingResults, sweep_outcome["results"])
+        self.assertEqual(results["timed_out_orders"], 0)
 
     def test_staff_cancellation_overlaps_sweep(self) -> None:  # noqa: PLR0915  # Two-connection interleaving
         order, _invoice, payment = make_timeout_payment_case(self.customer, self.currency)

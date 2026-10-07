@@ -1082,20 +1082,26 @@ class TestSyncOrdersOnInvoiceStatusChange(TestCase):
         _sync_orders_on_invoice_status_change(invoice, "issued", "paid")
         mock_opcs.confirm_order.assert_called_once_with(order, invoice=invoice)
 
-    @patch("apps.orders.services.OrderService")
-    def test_void_cancels_orders(self, mock_os):
-        invoice = MagicMock()
-        invoice.orders.exists.return_value = True
-        order = MagicMock()
-        order.status = "awaiting_payment"
-        order.order_number = "ORD-002"
-        invoice.orders.all.return_value = [order]
-        mock_result = MagicMock()
-        mock_result.is_ok.return_value = True
-        mock_os.update_order_status.return_value = mock_result
+    def test_void_cancels_orders(self) -> None:
+        from apps.orders.models import Order  # noqa: PLC0415
 
-        _sync_orders_on_invoice_status_change(invoice, "issued", "void")
-        mock_os.update_order_status.assert_called_once()
+        invoice = InvoiceFactory(number="INV-VOID-SYNC")
+        order = Order.objects.create(
+            customer=invoice.customer,
+            currency=invoice.currency,
+            invoice=invoice,
+            status="awaiting_payment",
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            invoice.void()
+            invoice.save(update_fields=["status"])
+            order.refresh_from_db()
+            self.assertEqual(order.status, "awaiting_payment")
+
+        order.refresh_from_db()
+        self.assertEqual(order.status, "cancelled")
+        self.assertEqual(order.status_history.get().new_status, "cancelled")
 
     def test_overdue_no_longer_suspends_from_the_status_change(self):
         """Non-payment suspension belongs to the subscription grace policy.
@@ -2406,43 +2412,40 @@ class VoidedInvoiceOrderCancellationFailureLoggingTest(TestCase):
     the failure is currently silently dropped. The else-branch must log at ERROR level.
     """
 
-    def test_void_order_cancellation_failure_is_logged(self):
-        """Task 2.3 RED: Err result from update_order_status on void path must be logged.
-
-        Currently no else-branch exists — the error is silently swallowed.
-        This test will FAIL until the else-branch with logger.error is added.
-        """
-        from apps.billing.signals import _sync_orders_on_invoice_status_change  # noqa: PLC0415
+    def test_void_order_cancellation_failure_is_logged(self) -> None:
+        """A failed callback keeps the void and exposes the recoverable order."""
         from apps.common.types import Err  # noqa: PLC0415
+        from apps.orders.models import Order  # noqa: PLC0415
 
-        mock_invoice = MagicMock()
-        mock_invoice.orders.exists.return_value = True
-        mock_invoice.number = "INV-VOID-001"
-
-        mock_order = MagicMock()
-        mock_order.order_number = "ORD-VOID-001"
-        mock_order.status = "awaiting_payment"
-        mock_invoice.orders.all.return_value = [mock_order]
-
-        mock_result = Err("cancellation failed — FSM guard")
-
-        with (
-            patch("apps.orders.services.OrderService.update_order_status", return_value=mock_result),
-            self.assertLogs("apps.billing.signals", level="ERROR") as log_ctx,
-        ):
-            _sync_orders_on_invoice_status_change(mock_invoice, "issued", "void")
-
-        # Must log at ERROR level for the failure
-        error_records = [msg for msg in log_ctx.output if "ERROR" in msg]
-        self.assertTrue(
-            len(error_records) > 0,
-            f"Expected ERROR log for void cancellation failure, got: {log_ctx.output}",
+        invoice = InvoiceFactory(number="INV-VOID-001")
+        order = Order.objects.create(
+            customer=invoice.customer,
+            currency=invoice.currency,
+            invoice=invoice,
+            status="awaiting_payment",
         )
 
-        # Must include the order number for traceability
+        with (
+            patch(
+                "apps.orders.services.OrderService.update_order_status", return_value=Err("cancellation unavailable")
+            ),
+            self.assertLogs("apps.orders.services", level="CRITICAL") as log_ctx,
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            invoice.void()
+            invoice.save(update_fields=["status"])
+
+        invoice.refresh_from_db()
+        order.refresh_from_db()
+        self.assertEqual(invoice.status, "void")
+        self.assertEqual(order.status, "awaiting_payment")
+        self.assertFalse(order.status_history.exists())
         self.assertTrue(
-            any(mock_order.order_number in msg for msg in error_records),
-            f"Expected order number {mock_order.order_number!r} in error log, got: {error_records}",
+            any(
+                order.order_number in message and str(invoice.pk) in message and "process_pending_orders" in message
+                for message in log_ctx.output
+            ),
+            str(log_ctx.output),
         )
 
 

@@ -24,7 +24,12 @@ from apps.billing.models import Payment
 from apps.billing.services import InvoiceService
 from apps.common.types import Result
 from apps.orders.models import Order
-from apps.orders.services import OrderService, StatusChangeData
+from apps.orders.services import (
+    VOID_INVOICE_CANCELLABLE_ORDER_STATUSES,
+    OrderService,
+    StatusChangeData,
+    cancel_orders_for_void_invoice,
+)
 
 # Constants
 _DEFAULT_MAX_PAYMENT_FAILURES_BEFORE_ORDER_FAIL = 3
@@ -153,7 +158,18 @@ def get_task_time_limit() -> int:
     return SettingsService.get_integer_setting("orders.task_time_limit", _DEFAULT_TASK_TIME_LIMIT)
 
 
-def process_pending_orders() -> dict[str, Any]:  # noqa: C901, PLR0912  # Complexity: dispatch + lock + per-order branching; helpers already extracted
+def _recover_void_invoice_orders() -> list[str]:
+    """Retry durable void/order pairs, including callbacks lost on process exit."""
+    errors: list[str] = []
+    candidates = Order.objects.filter(
+        invoice__status="void", status__in=VOID_INVOICE_CANCELLABLE_ORDER_STATUSES
+    ).values_list("invoice_id", "pk")
+    for invoice_id, order_id in candidates:
+        errors.extend(cancel_orders_for_void_invoice(invoice_id, (order_id,)))
+    return errors
+
+
+def process_pending_orders() -> dict[str, Any]:  # noqa: C901, PLR0912, PLR0915  # Dispatch and isolated order processing
     """
     Process orders stuck in "awaiting_payment" status.
 
@@ -187,6 +203,11 @@ def process_pending_orders() -> dict[str, Any]:  # noqa: C901, PLR0912  # Comple
             return {"success": True, "message": "Already running"}
 
         try:
+            # Recover void cancellations before applying awaiting-payment timeouts.
+            recovery_errors = _recover_void_invoice_orders()
+            results["failed_orders"] += len(recovery_errors)
+            results["errors"].extend(recovery_errors)
+
             # Get all awaiting_payment orders (B12: include proforma for fallback)
             pending_orders = (
                 Order.objects.filter(status="awaiting_payment")

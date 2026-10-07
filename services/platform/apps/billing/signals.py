@@ -1097,7 +1097,7 @@ def _sync_orders_on_invoice_status_change(invoice: Invoice, old_status: str, new
     """Update related orders when invoice status changes"""
     with swallow_application_errors(logger=logger, scope="Invoice", message="Order sync failed"):
         from apps.orders.models import Order
-        from apps.orders.services import OrderPaymentConfirmationService, OrderService, StatusChangeData
+        from apps.orders.services import OrderPaymentConfirmationService, cancel_orders_for_void_invoice
 
         orders: list[Order] = []
         with best_effort_atomic(logger=logger, scope="Order Sync", message="Failed to load invoice orders"):
@@ -1130,25 +1130,13 @@ def _sync_orders_on_invoice_status_change(invoice: Invoice, old_status: str, new
                         raise RuntimeError(f"Order confirmation failed: {result.unwrap_err()}")
 
         elif new_status == "void" and old_status != "void":
-            # Invoice voided - cancel related orders
-            for order in orders:
-                with best_effort_atomic(
-                    logger=logger,
-                    scope="Order",
-                    message=f"Failed to cancel order {order.order_number} on invoice void",
-                ):
-                    if order.status in ["awaiting_payment", "paid", "in_review", "provisioning"]:
-                        status_change = StatusChangeData(
-                            new_status="cancelled",
-                            notes=f"Related invoice {invoice.number} was voided",
-                            changed_by=None,
-                        )
-
-                        result = OrderService.update_order_status(order, status_change)
-                        if result.is_ok():
-                            logger.info(f"📋 [Order] Cancelled {order.order_number} due to voided invoice")
-                        else:
-                            raise RuntimeError(f"Order cancellation failed: {result.unwrap_err()}")
+            # Invoice.save() still owns the invoice lock here. Release it before
+            # cancellation takes proforma -> invoice -> order locks.
+            transaction.on_commit(
+                lambda invoice_id=invoice.pk, order_ids=tuple(order.pk for order in orders): (
+                    cancel_orders_for_void_invoice(invoice_id, order_ids)
+                )
+            )
 
 
 def _activate_payment_services(payment: Payment) -> None:

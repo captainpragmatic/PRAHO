@@ -124,6 +124,61 @@ def _lock_cancellation_documents(order: Order) -> Order:
     return candidate
 
 
+VOID_INVOICE_CANCELLABLE_ORDER_STATUSES = ("awaiting_payment", "paid", "in_review", "provisioning")
+
+
+def cancel_orders_for_void_invoice(invoice_id: int, order_ids: tuple[uuid.UUID, ...]) -> list[str]:
+    """Cancel after commit, with fresh state and the canonical document lock order.
+
+    A committed void invoice plus a cancellable order is the durable retry marker.
+    process_pending_orders retries these pairs even if the callback never ran.
+    """
+    from apps.billing.models import Invoice  # noqa: PLC0415  # ADR-0007
+
+    from .models import Order as OrderModel  # noqa: PLC0415
+
+    errors: list[str] = []
+    for order_id in order_ids:
+        order_number = str(order_id)
+        try:
+            with transaction.atomic():
+                candidate = OrderModel.objects.get(pk=order_id)
+                order_number = candidate.order_number
+                documents = _lock_cancellation_documents(candidate)
+                order = OrderModel.objects.select_for_update(of=("self",)).get(pk=order_id)
+                if order.invoice_id != invoice_id or order.status not in VOID_INVOICE_CANCELLABLE_ORDER_STATUSES:
+                    continue
+                if order.proforma_id != documents.proforma_id or order.invoice_id != documents.invoice_id:
+                    raise RuntimeError(_("Order payment documents changed; please retry cancellation."))
+                # _lock_cancellation_documents already locked this invoice after the proforma.
+                invoice = Invoice.objects.get(pk=invoice_id)
+                if invoice.status != "void":
+                    continue
+                result = OrderService.update_order_status(
+                    order,
+                    StatusChangeData(
+                        new_status="cancelled",
+                        notes=_("Related invoice %(number)s was voided") % {"number": invoice.display_number},
+                    ),
+                )
+                if result.is_err():
+                    raise RuntimeError(result.unwrap_err())
+                logger.info("📋 [Orders] Cancelled %s due to voided invoice %s", order_number, invoice_id)
+        except OrderModel.DoesNotExist:
+            continue
+        except Exception as exc:
+            errors.append(f"Invoice {invoice_id}, order {order_id}: {exc}")
+            logger.critical(
+                "🔥 [Orders] Cancellation failed for order %s (%s), void invoice %s; "
+                "process_pending_orders will retry; review if failures persist",
+                order_number,
+                order_id,
+                invoice_id,
+                exc_info=True,
+            )
+    return errors
+
+
 # ===============================================================================
 # ORDER SERVICE PARAMETER OBJECTS
 # ===============================================================================
