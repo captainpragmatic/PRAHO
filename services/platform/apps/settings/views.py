@@ -515,13 +515,23 @@ def _requires_admin(definition: SettingDef) -> bool:
     return GROUPS_BY_SLUG[definition.group].zone != ZONE_BUSINESS
 
 
-def _row_context(definition: SettingDef, row: SystemSetting | None) -> dict[str, Any]:
-    """Template context for one setting row"""
-    current = row.get_typed_value() if row is not None else definition.default
-    if definition.data_type == "decimal" and current is not None:
+def _row_context(definition: SettingDef, row: SystemSetting | None) -> dict[str, object]:
+    """Template context for one setting row, with deployment inheritance explicit."""
+    inherited = definition.deployment_fallback and row is None
+    fallback = definition.deployment_default() if definition.deployment_fallback else definition.default
+    current: object = row.get_typed_value() if row is not None else fallback
+    configured = bool(current not in (None, ""))
+    # Credentials remain write-only, including values inherited from deployment.
+    if definition.sensitive:
+        current = None
+    elif definition.data_type == "decimal" and current is not None:
         current = str(current)
-    configured = bool(row is not None and row.value not in (None, ""))
+    elif current is None:
+        current = ""
     return {
+        "inherited": inherited,
+        "deployment_source": definition.deployment_source or _("Virtualmin default"),
+        "fallback_json": json.dumps(None if definition.sensitive else fallback, ensure_ascii=False, default=str),
         "definition": definition,
         "key": definition.key,
         "current": current,
@@ -714,7 +724,17 @@ def save_change_set(request: HttpRequest) -> JsonResponse:
     if isinstance(result, Ok):
         outcome = result.value
         saved = {
-            key: {"baseline": setting.updated_at.isoformat(), "value": setting.get_typed_value()}
+            key: {
+                "baseline": setting.updated_at.isoformat() if setting is not None else None,
+                "value": (
+                    None
+                    if CATALOG_BY_KEY[key].sensitive
+                    else setting.get_typed_value()
+                    if setting is not None
+                    else CATALOG_BY_KEY[key].deployment_default()
+                ),
+                "inherited": setting is None,
+            }
             for key, setting in outcome.settings.items()
         }
         for entry in saved.values():
@@ -780,6 +800,21 @@ def secret_clear(request: HttpRequest, key: str) -> JsonResponse:
     reason = (payload.get("reason") or "").strip()
     if not reason:
         return JsonResponse({"success": False, "error": _("A reason is required to clear a credential")}, status=400)
+
+    if definition.deployment_fallback:
+        row = SystemSetting.objects.filter(key=key).first()
+        cleared = SettingsService.apply_change_set(
+            {key: None},
+            {key: row.updated_at.isoformat() if row is not None else None},
+            user_id=request.user.id,
+            reason=reason,
+            allow_sensitive_clear=True,
+        )
+        if isinstance(cleared, Ok):
+            return JsonResponse(
+                {"success": True, "configured": bool(definition.deployment_default()), "inherited": True}
+            )
+        return JsonResponse({"success": False, "error": _("Credential changed; reload and try again")}, status=409)
 
     result = SettingsService.update_setting(key, "", user_id=request.user.id, reason=reason)
     if isinstance(result, Ok):

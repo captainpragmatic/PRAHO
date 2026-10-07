@@ -37,15 +37,37 @@ document.addEventListener("alpine:init", function () {
         return el.value;
       },
       initField(el) {
+        const row = el.closest("[data-deployment-fallback]");
+        el.dataset.deploymentFallback = row ? row.dataset.deploymentFallback : "0";
+        el.dataset.mode = row && row.dataset.inherited === "1" ? "inherited" : "override";
+        el.dataset.initialMode = el.dataset.mode;
+        el.dataset.fallback = row ? row.dataset.fallback : "null";
         el.dataset.value = JSON.stringify(this.compute(el));
         el.dataset.initial = el.dataset.value;
       },
-      syncField(el) {
+      syncField(el, preserveMode = false) {
+        if (!preserveMode) el.dataset.mode = "override";
         el.dataset.value = JSON.stringify(this.compute(el));
         const key = el.dataset.key;
-        if (el.dataset.value === el.dataset.initial) delete this.dirty[key];
-        else this.dirty[key] = true;
+        if (el.dataset.value === el.dataset.initial && el.dataset.mode === el.dataset.initialMode) {
+          delete this.dirty[key];
+        } else this.dirty[key] = true;
         this.dirty = { ...this.dirty };
+      },
+      overrideField(key) {
+        const el = this.$root.querySelector(`[data-setting-field][data-key="${key}"]`);
+        if (!el) return;
+        el.dataset.mode = "override";
+        this.syncField(el, true);
+      },
+      inheritField(key) {
+        const el = this.$root.querySelector(`[data-setting-field][data-key="${key}"]`);
+        if (!el || el.dataset.deploymentFallback !== "1") return;
+        const fallback = JSON.parse(el.dataset.fallback);
+        if (el.dataset.kind === "toggle") el.checked = Boolean(fallback);
+        else el.value = fallback === null ? "" : String(fallback);
+        el.dataset.mode = "inherited";
+        this.syncField(el, true);
       },
       resetField(key) {
         const el = this.$root.querySelector(`[data-setting-field][data-key="${key}"]`);
@@ -79,7 +101,7 @@ document.addEventListener("alpine:init", function () {
         this.$root.querySelectorAll("[data-setting-field]").forEach((el) => {
           const key = el.dataset.key;
           if (this.dirty[key]) {
-            changes[key] = JSON.parse(el.dataset.value);
+            changes[key] = el.dataset.mode === "inherited" ? null : JSON.parse(el.dataset.value);
             baselines[key] = el.dataset.baseline || null;
           }
         });
@@ -97,13 +119,19 @@ document.addEventListener("alpine:init", function () {
             Object.entries(data.saved).forEach(([key, entry]) => {
               const el = this.$root.querySelector(`[data-setting-field][data-key="${key}"]`);
               if (el) {
-                el.dataset.baseline = entry.baseline;
+                el.dataset.baseline = entry.baseline || "";
+                el.dataset.mode = entry.inherited ? "inherited" : "override";
+                el.dataset.initialMode = el.dataset.mode;
                 el.dataset.initial = el.dataset.value;
               }
             });
             this.dirty = {};
             this.reason = "";
             if (window.showToast) window.showToast("success", this.$root.dataset.savedMessage);
+            if (Object.keys(data.saved).some((key) => {
+              const el = this.$root.querySelector(`[data-setting-field][data-key="${key}"]`);
+              return el && el.dataset.deploymentFallback === "1";
+            })) window.location.reload();
           } else if (response.status === 409) {
             this.conflicts = data.conflicts || [];
           } else {
@@ -167,7 +195,10 @@ document.addEventListener("alpine:init", function () {
               body: JSON.stringify({ reason: "Cleared from settings UI" }),
             });
             const data = await response.json();
-            if (data.success) this.configured = false;
+            if (data.success) {
+              this.configured = data.configured;
+              if (data.inherited) window.location.reload();
+            }
           },
         });
       },

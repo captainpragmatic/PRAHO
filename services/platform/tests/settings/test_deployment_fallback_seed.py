@@ -205,7 +205,8 @@ class DeploymentFallbackSeedTests(TestCase):
         self.addCleanup(restore)
         run_sync()
         self.assertFalse(SystemSetting.objects.filter(key=key).exists())
-        self.assertFalse(SettingActivation.objects.filter(key=key).exists())
+        # Only the seeded-row clean-up receipt may exist; no value activation ran for this key.
+        self.assertFalse(SettingActivation.objects.filter(key=key, version=sync.ACTIVATION_VERSION).exists())
 
     def test_category_filter_limits_cleanup_to_catalog_group(self) -> None:
         sender = seed("company.email_noreply", CATALOG_BY_KEY["company.email_noreply"].default)
@@ -245,15 +246,22 @@ class DeploymentFallbackSeedTests(TestCase):
     @override_settings(DEFAULT_FROM_EMAIL="deployment@example.test")
     def test_seeded_and_empty_sender_rows_do_not_replace_deployment_sender(self) -> None:
         key = "company.email_noreply"
-        for value in (CATALOG_BY_KEY[key].default, ""):
-            SystemSetting.objects.filter(key=key).delete()
-            with self.subTest(value=value):
-                row = seed(key, value)
-                self.assertEqual(get_default_from_email(), "deployment@example.test")
-                row.delete()
+        # An empty stored sender means "not set".
+        seed(key, "")
+        self.assertEqual(get_default_from_email(), "deployment@example.test")
+        # A seeded copy of the catalog default is removed by the one-time clean-up.
         SystemSetting.objects.filter(key=key).delete()
-        seed(key, "staff@example.test")
-        self.assertEqual(get_default_from_email(), "staff@example.test")
+        seed(key, CATALOG_BY_KEY[key].default)
+        run_sync()
+        self.assertFalse(SystemSetting.objects.filter(key=key).exists())
+        self.assertEqual(get_default_from_email(), "deployment@example.test")
+        # After that, any stored sender - even one equal to the catalog default - is a deliberate choice.
+        for value in ("staff@example.test", CATALOG_BY_KEY[key].default):
+            with self.subTest(value=value):
+                SystemSetting.objects.filter(key=key).delete()
+                seed(key, value)
+                run_sync()
+                self.assertEqual(get_default_from_email(), value)
 
     def test_unseeded_keys_remain_visible_and_staff_save_creates_sender_override(self) -> None:
         run_sync()

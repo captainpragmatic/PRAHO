@@ -95,7 +95,7 @@ class ChangeSetOutcome:
     """✅ Applied change set — fresh rows for the UI to rebaseline on"""
 
     change_set_id: str
-    settings: dict[str, SystemSetting]
+    settings: dict[str, SystemSetting | None]
 
 
 class SettingsService:
@@ -612,10 +612,12 @@ class SettingsService:
     @monitor_performance()
     def apply_change_set(  # noqa: C901, PLR0912  # Validation, locking, and write phases in one auditable unit
         cls,
-        changes: dict[str, Any],
+        changes: dict[str, object],
         baselines: dict[str, str | None],
         user_id: int | None = None,
         reason: str | None = None,
+        *,
+        allow_sensitive_clear: bool = False,
     ) -> Result[ChangeSetOutcome, ChangeSetError]:
         """
         📦 Apply a set of non-sensitive setting changes atomically.
@@ -639,6 +641,13 @@ class SettingsService:
                     SettingValidationError(key=key, field="key", message="Unknown setting key", code="unknown_key")
                 )
                 continue
+            # Only the dedicated credential endpoint may request a sensitive clear.
+            if (
+                value is None
+                and CATALOG_BY_KEY[key].deployment_fallback
+                and (not cls._is_sensitive_key(key) or allow_sensitive_clear)
+            ):
+                continue
             if cls._is_sensitive_key(key):
                 errors.append(
                     SettingValidationError(
@@ -657,7 +666,7 @@ class SettingsService:
             return Err(ChangeSetError(code="validation", errors=errors))
 
         change_set_id = str(uuid.uuid4())
-        applied: dict[str, SystemSetting] = {}
+        applied: dict[str, SystemSetting | None] = {}
         conflicts: list[ChangeSetConflict] = []
         with transaction.atomic():
             sorted_keys = sorted(changes)
@@ -673,7 +682,9 @@ class SettingsService:
                 if row is None:
                     if baseline is not None:
                         conflicts.append(ChangeSetConflict(key=key, server_updated_at=None))
-                elif row.is_sensitive:
+                elif row.is_sensitive and not (
+                    allow_sensitive_clear and changes[key] is None and CATALOG_BY_KEY[key].deployment_fallback
+                ):
                     errors.append(
                         SettingValidationError(
                             key=key,
@@ -691,6 +702,12 @@ class SettingsService:
                 )
 
             for key in sorted_keys:
+                if changes[key] is None and CATALOG_BY_KEY[key].deployment_fallback:
+                    row = locked.get(key)
+                    if row is not None:
+                        row.delete()
+                    applied[key] = None
+                    continue
                 result = cls._write_setting_locked(
                     key,
                     changes[key],
@@ -919,9 +936,9 @@ class SettingsService:
 
 
 def get_default_from_email() -> str:
-    """Prefer a staff override; seeded or empty senders preserve the deployment default."""
+    """Prefer an explicit sender; absent or empty values inherit the deployment."""
     stored = SettingsService.get_stored_setting("company.email_noreply")
-    if stored in (None, "", CATALOG_BY_KEY["company.email_noreply"].default):
+    if stored in (None, ""):
         return django_settings.DEFAULT_FROM_EMAIL
     return str(stored)
 

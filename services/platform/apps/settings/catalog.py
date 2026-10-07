@@ -17,6 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from django.conf import settings as django_settings
 from django.utils.functional import lazy
 from django.utils.translation import gettext_lazy as _
 
@@ -64,8 +65,25 @@ class SettingDef:
     requires_restart: bool = False
     advanced: bool = False
     deployment_fallback: bool = False  # No row preserves deployment configuration; never seed the catalog default.
+    django_setting: str = ""
     validation: dict[str, Any] | None = field(default=None, hash=False)
     choice_labels: dict[str, LazyLabel] = field(default_factory=dict, hash=False)
+
+    @property
+    def deployment_source(self) -> str:
+        """Name the deployment setting, or leave server-owned defaults unnamed."""
+        if self.django_setting:
+            return self.django_setting
+        if self.key.startswith("efactura."):
+            return self.key.replace(".", "_").upper()
+        return ""
+
+    def deployment_default(self) -> object:
+        """Resolve the no-row value without querying or exposing a stored override."""
+        if not self.deployment_source:
+            return None
+        value: object = getattr(django_settings, self.deployment_source, None)
+        return self.default if value is None else value
 
 
 GROUPS: tuple[GroupDef, ...] = (
@@ -847,6 +865,7 @@ CATALOG: tuple[SettingDef, ...] = (
     SettingDef(
         key="company.email_noreply",
         deployment_fallback=True,
+        django_setting="DEFAULT_FROM_EMAIL",
         data_type="string",
         default="noreply@pragmatichost.com",
         group="company",
@@ -1136,6 +1155,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.company.bank_account",
+        django_setting="COMPANY_BANK_ACCOUNT",
         deployment_fallback=True,
         data_type="string",
         default="",
@@ -1145,6 +1165,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.company.bank_name",
+        django_setting="COMPANY_BANK_NAME",
         deployment_fallback=True,
         data_type="string",
         default="",
@@ -1154,6 +1175,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.company.city",
+        django_setting="COMPANY_CITY",
         deployment_fallback=True,
         data_type="string",
         default="",
@@ -1163,6 +1185,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.company.country_code",
+        django_setting="COMPANY_COUNTRY_CODE",
         deployment_fallback=True,
         data_type="string",
         default="RO",
@@ -1181,6 +1204,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.company.email",
+        django_setting="COMPANY_EMAIL",
         deployment_fallback=True,
         data_type="string",
         default="",
@@ -1190,6 +1214,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.company.name",
+        django_setting="COMPANY_NAME",
         deployment_fallback=True,
         data_type="string",
         default="",
@@ -1199,6 +1224,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.company.phone",
+        django_setting="COMPANY_PHONE",
         deployment_fallback=True,
         data_type="string",
         default="",
@@ -1208,6 +1234,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.company.postal_code",
+        django_setting="COMPANY_POSTAL_CODE",
         deployment_fallback=True,
         data_type="string",
         default="",
@@ -1217,6 +1244,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.company.registration_number",
+        django_setting="COMPANY_REGISTRATION_NUMBER",
         deployment_fallback=True,
         data_type="string",
         default="",
@@ -1226,6 +1254,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.company.street",
+        django_setting="COMPANY_STREET",
         deployment_fallback=True,
         data_type="string",
         default="",
@@ -1266,6 +1295,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.oauth.client_id",
+        django_setting="EFACTURA_CLIENT_ID",
         deployment_fallback=True,
         data_type="string",
         default="",
@@ -1275,6 +1305,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="efactura.oauth.client_secret",
+        django_setting="EFACTURA_CLIENT_SECRET",
         deployment_fallback=True,
         data_type="string",
         default="",

@@ -108,6 +108,7 @@ RETIRED_SETTING_KEYS: frozenset[str] = frozenset(
     }
 )
 ACTIVATION_VERSION = "wp18-v1"
+DEPLOYMENT_FALLBACK_VERSION = "deployment-fallback-v1"
 
 _METADATA_FIELDS = ("name", "description", "help_text", "data_type", "is_sensitive", "is_required", "category")
 
@@ -149,8 +150,8 @@ def _reconcile(setting: SystemSetting, definition: SettingDef, force: bool, rewr
     return dirty_fields
 
 
-def _activation_receipt(key: str) -> SettingActivation:
-    SettingActivation.objects.get_or_create(key=key, defaults={"version": ACTIVATION_VERSION})
+def _activation_receipt(key: str, version: str = ACTIVATION_VERSION) -> SettingActivation:
+    SettingActivation.objects.get_or_create(key=key, defaults={"version": version})
     return SettingActivation.objects.select_for_update().get(key=key)
 
 
@@ -228,17 +229,26 @@ def _retire_settings(category_filter: str | None, messages: list[str]) -> None:
 
 
 def _sync_deployment_fallback(definition: SettingDef, messages: list[str]) -> None:
-    """Remove catalog-default rows; retain and report deliberate deployment overrides."""
+    """Clean up legacy seeds once; every later stored value is an explicit override."""
+    receipt = _activation_receipt(definition.key, version=DEPLOYMENT_FALLBACK_VERSION)
+    if receipt.version != DEPLOYMENT_FALLBACK_VERSION:
+        # One receipt row per key: a receipt from an earlier activation does not record this clean-up.
+        receipt.version = DEPLOYMENT_FALLBACK_VERSION
+        receipt.completed_at = None
+        receipt.save(update_fields=["version", "completed_at"])
+    activate = receipt.completed_at is None
     setting = SystemSetting.objects.select_for_update().filter(key=definition.key).first()
-    if setting is None:
-        return
-    if setting.value == definition.default:
-        setting.delete()
-        messages.append(_("  🗑️ Removed deployment-fallback default: %(key)s") % {"key": definition.key})
-        return
-    # Metadata can be reconciled, but neither --force nor activation may reset this value.
-    _reconcile(setting, definition, force=False, rewrite=False)
-    messages.append(_("  ✅ Retained deployment-fallback override: %(key)s") % {"key": definition.key})
+    if setting is not None:
+        if activate and setting.value == definition.default:
+            setting.delete()
+            messages.append(_("  🗑️ Removed deployment-fallback default: %(key)s") % {"key": definition.key})
+        else:
+            # Neither --force nor a later catalog sync may reset deployment overrides.
+            _reconcile(setting, definition, force=False, rewrite=False)
+            messages.append(_("  ✅ Retained deployment-fallback override: %(key)s") % {"key": definition.key})
+    if activate:
+        receipt.completed_at = timezone.now()
+        receipt.save(update_fields=["completed_at"])
 
 
 class Command(BaseCommand):
