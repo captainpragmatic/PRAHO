@@ -40,6 +40,7 @@ from apps.notifications.models import (
     EmailLog,
     EmailSuppression,
     EmailTemplate,
+    validate_email_subject,
     validate_template_content,
 )
 from apps.settings.services import SettingsService, get_default_from_email
@@ -323,6 +324,7 @@ class EmailService:
     def _send_email(recipient: str, subject: str, body: str, html_body: str | None = None) -> bool:
         """Internal method to send email using Django's email backend."""
         try:
+            validate_email_subject(subject)
             # Runtime identity takes precedence only when a stored row exists.
             # Catalog defaults must not shadow the deployment's sender.
             from_email = get_default_from_email()
@@ -395,6 +397,13 @@ class EmailService:
         Returns:
             EmailResult with success status and message ID
         """
+        # Reject invalid subjects before sending, queueing retries, or creating logs.
+        try:
+            validate_email_subject(subject)
+        except DjangoValidationError as exc:
+            logger.warning("⚠️ [Email] Subject validation failed: %s", exc)
+            return EmailResult(success=False, error="; ".join(exc.messages))
+
         # Normalize recipients
         recipients = [to] if isinstance(to, str) else to
 

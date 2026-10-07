@@ -753,9 +753,14 @@ class Coupon(models.Model):
         Raises:
             ValidationError: If validate=True and any coupon fails validation.
         """
+        from apps.settings.services import SettingsService  # noqa: PLC0415  # ADR-0007: cross-app import
+
+        max_attempts = SettingsService.get_integer_setting(
+            "promotions.max_code_generation_attempts", cls.MAX_CODE_GENERATION_ATTEMPTS
+        )
         coupons = []
         for _i in range(count):
-            code = cls.generate_code(length=length, prefix=prefix)
+            code = cls.generate_code(length=length, prefix=prefix, max_attempts=max_attempts)
             coupon = cls(code=code, **coupon_defaults)
 
             # Validate each coupon to catch issues before bulk insert

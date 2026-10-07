@@ -16,3 +16,9 @@ class OrdersConfig(AppConfig):
 
         # Connect cross-app billing signals (Phase B: proforma_payment_received)
         signals._connect_billing_signals()
+
+        from django_q.signals import pre_enqueue
+
+        from .tasks import apply_scheduled_order_task_budget
+
+        pre_enqueue.connect(apply_scheduled_order_task_budget, dispatch_uid="orders-scheduled-task-budget")

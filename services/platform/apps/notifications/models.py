@@ -262,6 +262,10 @@ class EmailTemplate(models.Model):
 
     def clean(self) -> None:
         """Validate template content for security and JSON size."""
+        try:
+            validate_email_subject(self.subject)
+        except ValidationError as exc:
+            raise ValidationError({"subject": exc.messages}) from exc
         dangerous_patterns = [r"\{\%\s*debug\s*\%\}", r"<script[\s>]"]
         for pattern in dangerous_patterns:
             if re.search(pattern, self.body_html or "", flags=re.IGNORECASE):

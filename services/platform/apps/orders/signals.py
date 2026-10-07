@@ -231,6 +231,9 @@ def _trigger_service_provisioning(order: Order) -> None:
             ProvisioningService,
         )
 
+        from .tasks import get_task_time_limit  # noqa: PLC0415  # Resolve the budget once per dispatch.
+
+        task_time_limit = get_task_time_limit()
         items = list(order.items.all())
     if items is None:
         return
@@ -242,7 +245,7 @@ def _trigger_service_provisioning(order: Order) -> None:
             try:
                 from django_q.tasks import async_task  # noqa: PLC0415
 
-                async_task("apps.orders.tasks.provision_order_item", str(item.id))
+                async_task("apps.orders.tasks.provision_order_item", str(item.id), timeout=task_time_limit)
                 logger.info(f"⚡ [Order] Provisioning queued for item {item.id}")
             except ImportError:
                 # Fallback to synchronous provisioning.

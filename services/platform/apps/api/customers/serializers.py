@@ -174,35 +174,35 @@ class CustomerRegistrationSerializer(serializers.Serializer):
             user_agent = request.META.get("HTTP_USER_AGENT", "")
 
         try:
-            with transaction.atomic():
-                # Use secure registration service
-                result = SecureUserRegistrationService.register_new_customer_owner(
-                    user_data=user_data, customer_data=customer_data, request_ip=request_ip, user_agent=user_agent
-                )
+            # The decorator consumes allowance before its atomic business transaction.
+            # Use secure registration service
+            result = SecureUserRegistrationService.register_new_customer_owner(
+                user_data=user_data, customer_data=customer_data, request_ip=request_ip, user_agent=user_agent
+            )
 
-                if isinstance(result, Ok):
-                    user, customer = result.value
-                    logger.info(f"✅ [API Registration] Created user {user.email} and customer {customer.company_name}")
-                    return {
-                        "user": {
-                            "id": user.id,
-                            "email": user.email,
-                            "first_name": user.first_name,
-                            "last_name": user.last_name,
-                        },
-                        "customer": {
-                            "id": customer.id,
-                            "company_name": customer.company_name,
-                            "customer_type": customer.customer_type,
-                        },
-                    }
-                else:
-                    # Result is Err — extract the message via unwrap_err(); Err has no .value,
-                    # so the previous `result.value` raised AttributeError and every registration
-                    # failure surfaced as the opaque "temporarily unavailable" catch-all below.
-                    error_msg = str(result.unwrap_err()) if isinstance(result, Err) else "Registration failed"
-                    logger.error(f"🔥 [API Registration] Service error: {error_msg}")
-                    raise serializers.ValidationError({"non_field_errors": [error_msg]})
+            if isinstance(result, Ok):
+                user, customer = result.value
+                logger.info(f"✅ [API Registration] Created user {user.email} and customer {customer.company_name}")
+                return {
+                    "user": {
+                        "id": user.id,
+                        "email": user.email,
+                        "first_name": user.first_name,
+                        "last_name": user.last_name,
+                    },
+                    "customer": {
+                        "id": customer.id,
+                        "company_name": customer.company_name,
+                        "customer_type": customer.customer_type,
+                    },
+                }
+            else:
+                # Result is Err — extract the message via unwrap_err(); Err has no .value,
+                # so the previous `result.value` raised AttributeError and every registration
+                # failure surfaced as the opaque "temporarily unavailable" catch-all below.
+                error_msg = str(result.unwrap_err()) if isinstance(result, Err) else "Registration failed"
+                logger.error(f"🔥 [API Registration] Service error: {error_msg}")
+                raise serializers.ValidationError({"non_field_errors": [error_msg]})
 
         except serializers.ValidationError:
             # The Err branch above raises a ValidationError carrying the real reason;

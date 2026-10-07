@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from collections.abc import MutableMapping
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, NamedTuple, TypedDict, cast
 
 from django.core.cache import cache
 from django.db import transaction
@@ -18,7 +18,7 @@ from django.db.models import Q
 from django.utils import timezone
 from django.utils.translation import gettext as _
 from django_q.models import Schedule
-from django_q.tasks import async_task, schedule
+from django_q.tasks import async_task
 
 from apps.audit.services import AuditService
 from apps.billing.models import Payment
@@ -900,46 +900,51 @@ def sync_order_payment_status_async() -> str:
 # ===============================================================================
 
 
+class _OrderSchedule(NamedTuple):
+    key: str
+    name: str
+    function: str
+    minutes: int
+
+
+_SCHEDULED_ORDER_TASKS = frozenset(
+    {"apps.orders.tasks.process_pending_orders", "apps.orders.tasks.sync_order_payment_status"}
+)
+
+
+def apply_scheduled_order_task_budget(sender: object, task: dict[str, Any], **kwargs: object) -> None:
+    """Give a scheduled order task the budget configured when the scheduler enqueues it.
+
+    The django-q scheduler enqueues these functions itself, never through the wrappers above, so
+    without this the jobs ran on the cluster default. Resolving here, at enqueue, means a settings
+    change applies to the next run without rewriting the schedule rows.
+    """
+    if task.get("func") in _SCHEDULED_ORDER_TASKS and "timeout" not in task:
+        task["timeout"] = get_task_time_limit()
+
+
 def setup_order_scheduled_tasks() -> dict[str, str]:
-    """Set up all order processing scheduled tasks."""
+    """Create the order schedules, or bring existing ones to the current definition."""
     from django_q.models import (  # noqa: PLC0415  # Deferred: avoids circular import
         Schedule as ScheduleModel,  # Deferred: django-q task  # Deferred: avoids circular import
     )
 
-    tasks_created = {}
-
-    # Check for existing tasks first
-    existing_tasks = list(
-        ScheduleModel.objects.filter(name__in=["order-process-pending", "order-sync-payment-status"]).values_list(
-            "name", flat=True
-        )
+    tasks_created: dict[str, str] = {}
+    definitions = (
+        _OrderSchedule("process_pending", "order-process-pending", "apps.orders.tasks.process_pending_orders", 5),
+        _OrderSchedule("sync_payments", "order-sync-payment-status", "apps.orders.tasks.sync_order_payment_status", 15),
     )
-
-    # Process pending orders every 5 minutes
-    if "order-process-pending" not in existing_tasks:
-        schedule(
-            "apps.orders.tasks.process_pending_orders",
-            schedule_type=Schedule.MINUTES,
-            minutes=5,
-            name="order-process-pending",
-            cluster="praho-cluster",
+    for key, name, function, minutes in definitions:
+        _scheduled, created = ScheduleModel.objects.update_or_create(
+            name=name,
+            defaults={
+                "func": function,
+                "schedule_type": Schedule.MINUTES,
+                "minutes": minutes,
+                "cluster": "praho-cluster",
+            },
         )
-        tasks_created["process_pending"] = "created"
-    else:
-        tasks_created["process_pending"] = "already_exists"
-
-    # Sync payment status every 15 minutes
-    if "order-sync-payment-status" not in existing_tasks:
-        schedule(
-            "apps.orders.tasks.sync_order_payment_status",
-            schedule_type=Schedule.MINUTES,
-            minutes=15,
-            name="order-sync-payment-status",
-            cluster="praho-cluster",
-        )
-        tasks_created["sync_payments"] = "created"
-    else:
-        tasks_created["sync_payments"] = "already_exists"
+        tasks_created[key] = "created" if created else "already_exists"
 
     logger.info(f"✅ [OrderTasks] Scheduled tasks setup: {tasks_created}")
     return tasks_created

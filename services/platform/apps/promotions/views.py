@@ -846,11 +846,15 @@ class CouponCreateView(FinancialStaffRequiredMixin, CreateView):
     form_class = CouponForm
     success_url = reverse_lazy("promotions:coupon_list")
 
-    def get_form(self, form_class: Any = None) -> Any:
-        form = super().get_form(form_class)
-        # Generate a code if not provided
-        if not form.data.get("code"):
-            form.initial["code"] = Coupon.generate_code()
+    def get_form(self, form_class: type[CouponForm] | None = None) -> CouponForm:
+        form = cast(CouponForm, super().get_form(form_class))
+        if not form.is_bound:
+            try:
+                form.initial["code"] = Coupon.generate_code()
+            except ValueError:
+                # Unbound forms do not initialize cleaned_data during full_clean().
+                form.cleaned_data = {}
+                form.add_error("code", _("Could not generate a coupon code. Enter a code manually or try again."))
         return form
 
     def form_valid(self, form: Any) -> HttpResponse:
@@ -902,6 +906,9 @@ class CouponBatchCreateView(FinancialStaffRequiredMixin, FormView):
                 )
         except ValidationError as exc:
             form.add_error(None, exc)
+            return self.form_invalid(form)
+        except ValueError:
+            form.add_error(None, _("Could not generate the coupon batch. No coupons were created; please try again."))
             return self.form_invalid(form)
         except IntegrityError:
             logger.exception("Coupon batch could not be saved")
