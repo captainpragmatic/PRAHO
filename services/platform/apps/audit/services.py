@@ -5859,7 +5859,8 @@ class IntegrationsAuditService:
             "security_context": {
                 "ip_address": webhook_event.ip_address,
                 "user_agent": webhook_event.user_agent,
-                "signature_verified": bool(webhook_event.signature),
+                "signature_verified": bool(webhook_event.signature_hash),
+                "signature_hash": webhook_event.signature_hash,
                 "payload_size_bytes": len(str(webhook_event.payload)) if webhook_event.payload else 0,
             },
             "reliability_tracking": reliability_context or {},

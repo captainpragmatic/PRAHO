@@ -346,7 +346,7 @@ def _analyze_security_indicators(webhook_event: WebhookEvent) -> dict[str, bool]
 
     try:
         # Check for invalid signature
-        if webhook_event.signature and "invalid" in webhook_event.error_message.lower():
+        if webhook_event.signature_hash and "invalid" in webhook_event.error_message.lower():
             security_flags["invalid_signature"] = True
 
         # Check for malformed payload

@@ -17,10 +17,18 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext as _
 from django.views.decorators.debug import sensitive_variables
+from requests.exceptions import RequestException
 
 from apps.settings.services import get_default_from_email
 
 from .models import GiftCard, GiftCardDelivery, GiftCardPurchase
+
+try:
+    from anymail.exceptions import AnymailAPIError, AnymailRecipientsRefused
+except ImportError:
+    EMAIL_PROVIDER_ERRORS: tuple[type[Exception], ...] = (OSError, RequestException)
+else:
+    EMAIL_PROVIDER_ERRORS = (OSError, RequestException, AnymailAPIError, AnymailRecipientsRefused)
 
 DELIVERY_LEASE = timedelta(minutes=10)
 RESEND_COOLDOWN = timedelta(minutes=5)
@@ -158,9 +166,9 @@ def _send(delivery: GiftCardDelivery, purchase: GiftCardPurchase) -> str:  # noq
         return ""
     except ValidationError:
         return "recipient_unavailable"
-    except Exception:
-        # Configured email backends have different exceptions. Their text may
-        # contain the body or bearer code, so neither persist nor log it.
+    except EMAIL_PROVIDER_ERRORS:
+        # SMTP/OS, HTTP transport and provider API errors remain retryable.
+        # Exception text may contain the body or bearer code; never log it.
         return "provider_unavailable"
     finally:
         if reserved:

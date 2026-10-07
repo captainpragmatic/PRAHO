@@ -1219,7 +1219,7 @@ class TestIntegrationsAuditService(TestCase):
             "retry_count": 0,
             "ip_address": "1.2.3.4",
             "user_agent": "Stripe/1.0",
-            "signature": "sig_abc",
+            "signature_hash": "a" * 64,
             "payload": {"key": "val"},
             "processed_at": timezone.now(),
             "received_at": timezone.now() - timedelta(minutes=1),

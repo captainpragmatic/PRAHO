@@ -149,6 +149,9 @@
                 {% include "billing/partials/invoice_edit_line.html" with index=forloop.counter0 %}
               {% endfor %}
             </div>
+            <p id="invoice-line-error" role="alert" hidden class="text-sm text-red-300">
+              {% trans "An invoice must contain at least one line." %}
+            </p>
             <template id="invoice-new-line">
               {% include "billing/partials/invoice_edit_line.html" with index="__index__" only %}
             </template>
@@ -255,6 +258,7 @@
 document.addEventListener('DOMContentLoaded', function () {
   const container = document.getElementById('invoice-lines');
   const template = document.getElementById('invoice-new-line');
+  const lineError = document.getElementById('invoice-line-error');
   let lineCounter = {{ form_lines|length }};
   document.querySelector('.add-line-btn').addEventListener('click', function (event) {
     event.preventDefault();
@@ -264,12 +268,16 @@ document.addEventListener('DOMContentLoaded', function () {
     });
     lineCounter += 1;
     container.appendChild(fragment);
+    lineError.hidden = true;
   });
   container.addEventListener('click', function (event) {
     if (!(event.target instanceof Element)) return;
     const button = event.target.closest('.remove-line');
     if (button && container.querySelectorAll('.invoice-line').length > 1) {
       button.closest('.invoice-line').remove();
+      lineError.hidden = true;
+    } else if (button) {
+      lineError.hidden = false;
     }
   });
 });
