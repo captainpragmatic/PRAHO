@@ -86,3 +86,18 @@ tickets.max_file_size_bytes
 tickets.security_alert_threshold
 users.admin_session_timeout_minutes
 users.shared_device_timeout_minutes
+
+# WP18 foundation: protect the 13 previously credited keys omitted from the floor.
+billing.proforma_validity_days
+billing.reverse_charge_requires_consultation_reference
+billing.reverse_charge_requires_name_match
+billing.reverse_charge_requires_vies
+billing.vies_evidence_max_age_days
+billing.vies_outage_grace_days
+domains.whois_privacy_price_cents
+orders.max_price_override_cents
+orders.max_price_override_multiplier
+portal.public_base_url
+promotions.gift_card_denominations
+promotions.gift_card_sales_enabled
+promotions.new_offers_enabled

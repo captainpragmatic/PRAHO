@@ -24,10 +24,12 @@ written to raise a number rather than to check behaviour, and a fair one to keep
 from __future__ import annotations
 
 import ast
+import inspect
 import sys
 import tempfile
 from pathlib import Path
 from typing import ClassVar
+from unittest.mock import patch
 
 from django.test import SimpleTestCase
 
@@ -65,20 +67,12 @@ class WrittenKeyDetectionTests(SimpleTestCase):
         self.assertIn(KEY, lint._written_keys(source))
 
     def test_a_helper_forwarding_its_first_argument_credits_that_argument(self) -> None:
-        source = (
-            "def write(key, value):\n"
-            "    SettingsService.update_setting(key, value)\n"
-            f'write("{KEY}", True)\n'
-        )
+        source = f'def write(key, value):\n    SettingsService.update_setting(key, value)\nwrite("{KEY}", True)\n'
         self.assertIn(KEY, lint._written_keys(source))
 
     def test_a_helper_whose_key_is_its_second_argument_credits_the_second(self) -> None:
         """`def write(value, key)` must not credit whatever happens to be written first."""
-        source = (
-            "def write(value, key):\n"
-            "    SettingsService.update_setting(key, value)\n"
-            f'write("{KEY}", "{OTHER}")\n'
-        )
+        source = f'def write(value, key):\n    SettingsService.update_setting(key, value)\nwrite("{KEY}", "{OTHER}")\n'
         written = lint._written_keys(source)
         self.assertIn(OTHER, written)
         self.assertNotIn(KEY, written)
@@ -119,9 +113,7 @@ class ReaderReachabilityTests(SimpleTestCase):
     def test_a_reader_one_hop_away_is_reached(self) -> None:
         """`test_localisation_api.py` goes through the API view, which calls the reading module."""
         self.assertTrue(
-            lint.reaches_reader(
-                "apps.api.localisation.views", {"apps.common.localisation_services"}, self.GRAPH
-            )
+            lint.reaches_reader("apps.api.localisation.views", {"apps.common.localisation_services"}, self.GRAPH)
         )
 
     def test_an_unrelated_module_does_not_reach_the_reader(self) -> None:
@@ -201,9 +193,7 @@ class EffectCreditScopeTests(SimpleTestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "test_probe.py"
             path.write_text(source)
-            credited = lint.effect_tested_keys(
-                {"company.legal_name"}, [path], {}, {}, {"company.legal_name"}
-            )
+            credited = lint.effect_tested_keys({"company.legal_name"}, [path], {}, {}, {"company.legal_name"})
         self.assertIn("company.legal_name", credited)
 
     def test_a_module_level_key_collection_the_class_uses_counts_as_written(self) -> None:
@@ -334,3 +324,201 @@ class NamedFallbackResolutionTests(SimpleTestCase):
 
     def test_a_computed_value_stays_unresolved(self) -> None:
         self.assertNotIn("LIMIT", lint.module_literal_constants(ast.parse("LIMIT = other() * 2\n")))
+
+
+class FoundationReaderDetectionTests(SimpleTestCase):
+    """Seeded sources exercise detection and credit without importing fixture application code."""
+
+    def scan(self, sources: dict[str, str]) -> list[lint.SettingsCallSite]:
+        exported = getattr(lint, "_exported_key_symbols", None)
+        if exported is not None:
+            exported.cache_clear()
+        original = Path.read_text
+        paths = {lint.PLATFORM_DIR / name: source for name, source in sources.items()}
+
+        def read(path: Path, encoding: str | None = None, errors: str | None = None) -> str:
+            return paths[path] if path in paths else original(path, encoding=encoding, errors=errors)
+
+        with patch.object(Path, "read_text", autospec=True, side_effect=read):
+            return lint.collect_settings_calls(list(paths))
+
+    def findings(self, calls: list[lint.SettingsCallSite], known: set[str] | None = None) -> list[lint.Finding]:
+        # Keep the reproduction assertion reachable on the pre-foundation API.
+        options = (
+            {"reader_baseline": known or set(), "call_sites": calls}
+            if "reader_baseline" in inspect.signature(lint.check_untested_effects).parameters
+            else {}
+        )
+        return lint.check_untested_effects({KEY, OTHER}, [], set(), {}, {}, set(), **options)
+
+    def test_row_only_readers_are_detected_without_default_drift(self) -> None:
+        for reader in ("SystemSetting.get_value_by_key", "SettingsService.get_stored_setting"):
+            with self.subTest(reader=reader):
+                argument = f'"{KEY}", None' if reader.endswith("get_value_by_key") else f'"{KEY}"'
+                calls = self.scan({"apps/probe.py": f"value = {reader}({argument})\n"})
+                self.assertEqual([(c.key, c.file) for c in calls], [(KEY, "services/platform/apps/probe.py")])
+                self.assertEqual(lint.check_default_drift({KEY: True}, calls), [])
+
+    def test_literal_module_and_class_constants_are_read_only_at_calls(self) -> None:
+        calls = self.scan(
+            {
+                "apps/probe.py": f'KEY = "{KEY}"\nclass Keys:\n    ISSUER = "{OTHER}"\n'
+                "unused = Keys.ISSUER\nvalue = SettingsService.get_boolean_setting(KEY, False)\n"
+                'other = SettingsService.get_setting(Keys.ISSUER, "builtin")\n'
+            }
+        )
+        self.assertEqual([c.key for c in calls], [KEY, OTHER])
+        self.assertEqual(len(self.scan({"apps/probe.py": f'class Keys:\n    FLAG = "{KEY}"\n'})), 0)
+
+    def test_bounded_forwarding_preserves_argument_position_and_consumer(self) -> None:
+        source = (
+            "class Resolver:\n"
+            "    def row(self, unused, key):\n        return SystemSetting.get_value_by_key(key, None)\n"
+            "    def flag(self, key):\n        return self.row(None, key=key)\n"
+            f'    def enabled(self):\n        return self.flag("{KEY}")\n'
+            "class Unrelated:\n"
+            "    def flag(self, key):\n        return False\n"
+            f'    def enabled(self):\n        return self.flag("{OTHER}")\n'
+        )
+        calls = self.scan({"apps/probe.py": source})
+        self.assertEqual([(c.key, c.file) for c in calls], [(KEY, "services/platform/apps/probe.py")])
+        self.assertEqual(lint.production_readers([]), {})
+
+    def test_finite_key_map_reads_all_values_but_membership_is_not_a_reader(self) -> None:
+        source = (
+            f'class Keys:\n    FLAG = "{KEY}"\n    ISSUER = "{OTHER}"\n'
+            "def lookup(kind):\n"
+            '    mapping = {"flag": Keys.FLAG, "issuer": Keys.ISSUER}\n'
+            "    if kind in mapping:\n        return SystemSetting.get_value_by_key(mapping[kind], None)\n"
+        )
+        calls = self.scan({"apps/probe.py": source})
+        self.assertEqual({c.key for c in calls}, {KEY, OTHER})
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(
+            self.scan(
+                {
+                    "apps/probe.py": source.replace(
+                        "return SystemSetting.get_value_by_key(mapping[kind], None)", "return kind in mapping"
+                    )
+                }
+            ),
+            [],
+        )
+
+    def test_imported_named_keys_and_persisted_writes_earn_consumer_credit(self) -> None:
+        sources = {
+            "apps/keys.py": f'class Keys:\n    FLAG = "{KEY}"\nMODULE_KEY = "{OTHER}"\n',
+            "apps/probe.py": (
+                "from apps.keys import Keys as Names, MODULE_KEY as ISSUER\n"
+                "def run():\n    return SystemSetting.get_value_by_key(Names.FLAG, None)\n"
+                "def issue():\n    return SettingsService.get_stored_setting(ISSUER)\n"
+            ),
+        }
+        calls = self.scan(sources)
+        self.assertEqual({c.key for c in calls}, {KEY, OTHER})
+        fixture = (
+            "from apps.keys import Keys as Names, MODULE_KEY as ISSUER\n"
+            "from apps.probe import run, issue\n"
+            "class Effect:\n"
+            "    def test_effect(self):\n"
+            "        SystemSetting.objects.update_or_create(key=Names.FLAG, defaults={'value': True})\n"
+            "        SettingsService.update_setting(ISSUER, 'external')\n"
+            "        self.assertTrue(run())\n        self.assertEqual(issue(), 'external')\n"
+        )
+        original = Path.read_text
+        paths = {lint.PLATFORM_DIR / name: source for name, source in sources.items()}
+        test_path = lint.PLATFORM_TESTS_DIR / "test_probe.py"
+        paths[test_path] = fixture
+
+        def read(path: Path, encoding: str | None = None, errors: str | None = None) -> str:
+            return paths[path] if path in paths else original(path, encoding=encoding, errors=errors)
+
+        with patch.object(Path, "read_text", autospec=True, side_effect=read):
+            self.assertEqual(
+                lint.effect_tested_keys(
+                    {KEY, OTHER}, [test_path], {KEY: {"apps.probe"}, OTHER: {"apps.probe"}}, {}, set()
+                ),
+                {KEY, OTHER},
+            )
+            paths[test_path] = fixture.replace("SystemSetting.objects.update_or_create", "Mock.objects.get")
+            self.assertEqual(
+                lint.effect_tested_keys({KEY}, [test_path], {KEY: {"apps.probe"}}, {}, set()),
+                set(),
+            )
+            paths[test_path] = fixture.replace(
+                "from apps.probe import run, issue", "from apps.unrelated import run, issue"
+            )
+            self.assertEqual(lint.effect_tested_keys({KEY}, [test_path], {KEY: {"apps.probe"}}, {}, set()), set())
+
+    def test_new_untested_reader_fails_at_medium(self) -> None:
+        calls = self.scan({"apps/probe.py": f'value = SettingsService.get_setting("{OTHER}", "builtin")\n'})
+        self.assertEqual(
+            [(f.check, f.severity, f.name) for f in self.findings(calls) if f.severity == "medium"],
+            [("untested-new-reader", "medium", OTHER)],
+        )
+        old = self.scan({"apps/old.py": f'value = SettingsService.get_setting("{KEY}", False)\n'})
+        new = self.scan({"apps/new.py": f'value = SettingsService.get_setting("{KEY}", False)\n'})
+        locations = getattr(lint, "reader_locations", lambda _calls: {})
+        options = (
+            {"reader_baseline": set(locations(old)), "call_sites": old + new}
+            if "reader_baseline" in inspect.signature(lint.check_untested_effects).parameters
+            else {}
+        )
+        fixture = (
+            "from apps.old import enforce\nclass Effect:\n"
+            f'    def test_effect(self):\n        SettingsService.update_setting("{KEY}", True)\n'
+            "        self.assertTrue(enforce())\n"
+        )
+        with patch.object(Path, "read_text", return_value=fixture):
+            findings = lint.check_untested_effects(
+                {KEY},
+                [lint.PLATFORM_TESTS_DIR / "test_probe.py"],
+                {KEY},
+                {KEY: {"apps.old", "apps.new"}},
+                {},
+                set(),
+                **options,
+            )
+        self.assertEqual(
+            [(f.file, f.check, f.severity) for f in findings if f.severity == "medium"],
+            [("services/platform/apps/new.py", "untested-new-reader", "medium")],
+        )
+
+    def test_existing_key_new_read_in_same_function_is_not_grandfathered(self) -> None:
+        source = f'def run():\n    return SettingsService.get_setting("{KEY}", False)\n'
+        old = self.scan({"apps/probe.py": source})
+        locations = getattr(lint, "reader_locations", lambda _calls: {})
+        known = set(locations(old))
+        new = self.scan({"apps/probe.py": source + f'    value = SettingsService.get_setting("{KEY}", False)\n'})
+        self.assertEqual(
+            [(f.check, f.severity, f.name) for f in self.findings(new, known) if f.severity == "medium"],
+            [("untested-new-reader", "medium", KEY)],
+        )
+        self.assertEqual([f for f in self.findings(old, known) if f.severity == "medium"], [])
+
+    def test_removing_a_credited_row_reader_effect_test_fails(self) -> None:
+        calls = self.scan({"apps/probe.py": f'value = SettingsService.get_stored_setting("{KEY}")\n'})
+        self.assertEqual([c.key for c in calls], [KEY])
+        path = lint.PLATFORM_TESTS_DIR / "test_probe.py"
+        source = (
+            "from apps.probe import run\n"
+            "class Effect:\n"
+            f'    def test_effect(self):\n        SettingsService.update_setting("{KEY}", True)\n'
+            "        self.assertTrue(run())\n"
+        )
+        readers = {KEY: {"apps.probe"}}
+        with patch.object(Path, "read_text", return_value=source):
+            self.assertEqual(lint.effect_tested_keys({KEY}, [path], readers, {}, set()), {KEY})
+            self.assertEqual(
+                [
+                    f
+                    for f in lint.check_untested_effects({KEY}, [path], {KEY}, readers, {}, set())
+                    if f.severity == "medium"
+                ],
+                [],
+            )
+        findings = lint.check_untested_effects({KEY}, [], {KEY}, readers, {}, set())
+        self.assertEqual(
+            [(f.check, f.severity, f.name) for f in findings if f.severity == "medium"],
+            [("untested-effect-regression", "medium", KEY)],
+        )
