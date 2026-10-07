@@ -222,6 +222,61 @@ class EFacturaEnvironmentConsistencyTests(TestCase):
             self.assertEqual(service.client.config.environment.value, "prod" if current == "production" else "test")
             cache.clear()
 
+    @override_settings(
+        EFACTURA_ACCESS_TOKEN="",
+        CACHES={
+            "default": {
+                "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+                "LOCATION": "efactura-same-environment-token",
+            }
+        },
+    )
+    def test_same_environment_token_submits_when_shared_cache_entry_is_absent(self) -> None:
+        for environment in ("test", "production"):
+            with self.subTest(environment=environment):
+                document = self._queued_document(environment)
+                client = EFacturaClient()
+                token = TokenResponse(
+                    access_token=f"{client.config.environment.value}-in-memory-token",
+                    token_type="Bearer",
+                    expires_in=3600,
+                    expires_at=timezone.now() + timedelta(hours=1),
+                )
+                client._cache_token(token)
+                cache_key = client.TOKEN_CACHE_KEY.format(env=client.config.environment.value)
+                cache.delete(cache_key)
+                self.assertIsNone(cache.get(cache_key))
+                self.assertFalse(token.is_expired)
+                service = EFacturaService(client=client)
+                upload_index = f"3828-{environment}"
+                response = self._http_response(
+                    (Path(__file__).parent / "fixtures" / "anaf_upload_ok.xml")
+                    .read_bytes()
+                    .replace(b"3828", upload_index.encode())
+                )
+
+                with patch("apps.billing.efactura.client.safe_request", return_value=response) as transport:
+                    result = service.submit_invoice(document.invoice)
+
+                self.assertTrue(result.success, result.error_message)
+                document.refresh_from_db()
+                self.assertEqual(document.status, EFacturaStatus.SUBMITTED.value)
+                self.assertEqual(document.anaf_upload_index, upload_index)
+                self.assertEqual(document.environment, environment)
+                self.assertIsNone(document.submission_claim_token)
+                self.assertEqual(document.last_error, "")
+                self.assertFalse(AuditAlert.objects.filter(metadata__document_id=str(document.pk)).exists())
+                request = transport.call_args
+                if request is None:
+                    self.fail("The authenticated submission must reach the HTTP transport")
+                self.assertEqual(request.args, ("POST", f"{document.get_environment_base_url()}/upload"))
+                headers = cast(dict[str, str], request.kwargs["headers"])
+                self.assertEqual(headers["Authorization"], f"Bearer {token.access_token}")
+                self.assertEqual(request.kwargs["data"], document.xml_content.encode("utf-8"))
+                self.assertIs(client._token, token)
+                self.assertIs(service.client, client)
+                self.assertIsNone(cache.get(cache_key))
+
     def test_production_document_keeps_production_for_upload_poll_and_download(self) -> None:
         self._assert_document_routes("production", "test")
 

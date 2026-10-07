@@ -256,7 +256,8 @@ class EFacturaService:
         if isinstance(original_config, EFacturaConfig):
             config = replace(original_config, environment=config.environment)
         client.config = config
-        client._token = None
+        if not isinstance(original_config, EFacturaConfig) or original_config.environment != config.environment:
+            client._token = None
         return client
 
     def _record_credential_failure(self, document: EFacturaDocument, message: str, operation: str) -> None:
