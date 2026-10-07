@@ -8,9 +8,12 @@
 # --env staging) to every Compose call. Directly:
 #   PRAHO_ENV_FILE=$PWD/.env.prod docker compose --env-file .env.prod -f deploy/docker-compose.portal-only.yml up -d
 #
+# The env file on a portal host is the portal's own: deploy/scripts/portal-env.sh writes it from the full
+# file, keeping only the variables this file uses, and deploy.sh refuses one that holds anything else.
+#
 # Required (deploy.sh sets PRAHO_ENV_FILE; the rest belong in the env file):
 #   - PLATFORM_API_BASE_URL (e.g., https://platform.example.com/api)
-#   - DJANGO_SECRET_KEY
+#   - PORTAL_DJANGO_SECRET_KEY (the portal's own Django key; never the platform's DJANGO_SECRET_KEY)
 #   - PLATFORM_API_SECRET (same value as HMAC_SECRET), PLATFORM_TO_PORTAL_WEBHOOK_SECRET
 #   - PORTAL_TRUSTED_PROXY_CIDRS (the proxy in front of the portal)
 #   - PORTAL_DOMAIN and PLATFORM_DOMAIN (distinct hostnames; DOMAIN is a Portal fallback)
@@ -38,7 +41,9 @@ services:
       - PLATFORM_TO_PORTAL_WEBHOOK_SECRET=${PLATFORM_TO_PORTAL_WEBHOOK_SECRET:?PLATFORM_TO_PORTAL_WEBHOOK_SECRET required}
       - PLATFORM_DOMAIN=${PLATFORM_DOMAIN:-platform.localhost}
       - PORTAL_DOMAIN=${PORTAL_DOMAIN:-${DOMAIN:-localhost}}
-      - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY required}
+      # The portal's own key (never the platform's: on the platform it derives the MFA, audit and
+      # unsubscribe keys). deploy/scripts/portal-env.sh refuses a file where the two are equal.
+      - DJANGO_SECRET_KEY=${PORTAL_DJANGO_SECRET_KEY:?PORTAL_DJANGO_SECRET_KEY required (the portal's own key)}
       - DJANGO_SETTINGS_MODULE=${DJANGO_SETTINGS_MODULE:-config.settings.prod}
       - ALLOWED_HOSTS=${PORTAL_DOMAIN:-${DOMAIN:-localhost}},localhost,portal
       - CSRF_TRUSTED_ORIGINS=https://${PORTAL_DOMAIN:-${DOMAIN:-localhost}}

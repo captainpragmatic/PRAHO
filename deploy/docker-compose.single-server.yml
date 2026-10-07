@@ -136,7 +136,8 @@ services:
       - PLATFORM_TO_PORTAL_WEBHOOK_SECRET=${PLATFORM_TO_PORTAL_WEBHOOK_SECRET:?PLATFORM_TO_PORTAL_WEBHOOK_SECRET required}
       - PLATFORM_DOMAIN=${PLATFORM_DOMAIN:-platform.localhost}
       - PORTAL_DOMAIN=${PORTAL_DOMAIN:-${DOMAIN:-localhost}}
-      - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY required}
+      # PORTAL_DJANGO_SECRET_KEY gives the portal its own key; without it, it shares the platform's.
+      - DJANGO_SECRET_KEY=${PORTAL_DJANGO_SECRET_KEY:-${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY required}}
       - DJANGO_SETTINGS_MODULE=${DJANGO_SETTINGS_MODULE:-config.settings.prod}
       - ALLOWED_HOSTS=${PORTAL_DOMAIN:-${DOMAIN:-localhost}},localhost,portal
       - CSRF_TRUSTED_ORIGINS=https://${PORTAL_DOMAIN:-${DOMAIN:-localhost}}
