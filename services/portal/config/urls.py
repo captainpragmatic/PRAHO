@@ -10,6 +10,8 @@ from django.urls import include, path
 
 from apps.common.views import cookie_consent_view, cookie_policy_view
 
+handler500 = "apps.common.error_views.server_error"
+
 
 # Portal status endpoint
 def portal_status(request: HttpRequest) -> JsonResponse:
