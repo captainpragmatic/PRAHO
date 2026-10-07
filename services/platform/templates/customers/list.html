@@ -100,7 +100,7 @@
       </div>
 
       <!-- Hidden status select (driven by tab buttons) -->
-      <select name="status" class="hidden">
+      <select aria-label="{% trans 'Customer status' %}" name="status" class="hidden">
         <option value=""{% if not status_filter %} selected{% endif %}>{% trans 'All' %}</option>
         <option value="active"{% if status_filter == 'active' %} selected{% endif %}>{% trans 'Active' %}</option>
         <option value="prospect"{% if status_filter == 'prospect' %} selected{% endif %}>{% trans 'Prospect' %}</option>

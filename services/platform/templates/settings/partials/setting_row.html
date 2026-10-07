@@ -30,6 +30,7 @@
       {% if row.definition.input_kind == 'toggle' %}
       <label class="relative inline-flex items-center cursor-pointer">
         <input type="checkbox" id="field-{{ row.key }}" {% if row.current %}checked{% endif %} data-setting-field data-key="{{ row.key }}"{% if row.definition.critical %} data-critical="1"{% endif %} data-kind="toggle" data-baseline="{{ row.baseline }}" data-default="{{ row.definition.default|yesno:'true,false' }}" x-init="initField($el)" @change="syncField($el)" class="sr-only peer">
+        {# dm-allow DM001: Toggle knob stays white for contrast against both track states #}
         <div class="w-12 h-6 bg-slate-700 rounded-full peer peer-checked:bg-blue-600 peer-focus:ring-2 peer-focus:ring-blue-500 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-6"></div>
       </label>
       {% elif row.definition.input_kind == 'select' %}

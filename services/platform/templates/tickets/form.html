@@ -71,10 +71,12 @@
 
         <!-- Subject -->
         <div>
-          <label for="subject" class="block text-sm font-medium text-slate-300 mb-2">
+          <label for="input-subject" class="block text-sm font-medium text-slate-300 mb-2">
             {% trans 'Subject' %}
           </label>
-          {% input_field name="subject" placeholder="Brief description of the issue" required=True %}
+          {% trans "Subject" as subject_label %}
+          {% trans "Brief description of the issue" as subject_placeholder %}
+          {% input_field name="subject" aria_label=subject_label placeholder=subject_placeholder required=True %}
         </div>
 
         <!-- Service Selection -->

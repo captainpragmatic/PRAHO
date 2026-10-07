@@ -145,10 +145,12 @@
     <form method="get" class="space-y-4">
       <!-- Search Input -->
       <div class="w-full">
-        <label for="search" class="block text-sm font-medium text-slate-300 mb-2 sm:hidden">
+        <label for="input-search" class="block text-sm font-medium text-slate-300 mb-2 sm:hidden">
           {% icon "search" %} {% trans "Search Orders" %}
         </label>
-        {% input_field "search" placeholder="Search orders by number, company name..." input_type="search" value=current_search %}
+        {% trans "Search Orders" as search_label %}
+        {% trans "Search orders by number, company name..." as search_placeholder %}
+        {% input_field "search" aria_label=search_label placeholder=search_placeholder input_type="search" value=current_search %}
       </div>
 
       <!-- Status Filter and Actions Row -->
@@ -158,7 +160,7 @@
           <label for="status" class="block text-sm font-medium text-slate-300 mb-1 sm:hidden">
             {% icon "chart" %} {% trans "Filter by Status" %}
           </label>
-          <select name="status" class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+          <select id="status" name="status" class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
             <option value="">{% trans "All Statuses" %}</option>
             <option value="draft" {% if current_status == "draft" %}selected{% endif %}>📝 {% trans "Draft" %}</option>
             <option value="awaiting_payment" {% if current_status == "awaiting_payment" %}selected{% endif %}>⏳ {% trans "Awaiting Payment" %}</option>
