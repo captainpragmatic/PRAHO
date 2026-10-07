@@ -83,6 +83,7 @@ providing a historical record of why the system is built the way it is.
 | [ADR-0051](ADR-0051-hosting-account-enabled-state-ownership.md) | Hosting Account Enabled-State Ownership | Accepted | 2026-10-01 |
 | [ADR-0052](ADR-0052-disposable-databases-and-migration-reset.md) | All Databases Are Disposable Until the First One That Must Be Preserved | Accepted | 2026-10-02 |
 | [ADR-0053](ADR-0053-every-settled-refund-issues-a-storno.md) | Every Settled Refund Issues a Storno Credit Note | Accepted | 2026-10-03 |
+| [ADR-0054](ADR-0054-supported-deployment-paths.md) | Two Supported Deployment Paths, Native Ansible and Docker Compose | Accepted | 2026-10-07 |
 
 ### 🟡 Partially Superseded
 
@@ -186,6 +187,9 @@ Billing Ownership
 - [ADR-0037](ADR-0037-psycopg-v3-migration.md) — psycopg v3 PostgreSQL adapter
 - [ADR-0052](ADR-0052-disposable-databases-and-migration-reset.md) — Disposable databases, migration reset, append-only history afterwards
 
+### 🚀 Deployment
+- [ADR-0054](ADR-0054-supported-deployment-paths.md) — native Ansible for servers, Docker Compose for Docker hosts, one operator env file; the Ansible Docker role is retired
+
 ### 💰 Business & Domain
 - [ADR-0019](ADR-0019-virtualmin-automatic-provisioning.md) — VirtualMin provisioning
 - [ADR-0020](ADR-0020-async-task-processing-architecture.md) — Django-Q2 async tasks
@@ -201,8 +205,8 @@ Billing Ownership
 
 ## Statistics
 
-- **Total ADRs**: 53 (ADR-0001 through ADR-0053)
-- **Active**: 47 (in the Active Decisions table: Accepted, Active, Implemented or Proposed)
+- **Total ADRs**: 54 (ADR-0001 through ADR-0054)
+- **Active**: 48 (in the Active Decisions table: Accepted, Active, Implemented or Proposed)
 - **Partially Superseded**: 1
 - **Superseded / Historical**: 5
-- **Next available**: ADR-0054
+- **Next available**: ADR-0055
