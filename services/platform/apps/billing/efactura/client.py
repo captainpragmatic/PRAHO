@@ -20,12 +20,13 @@ import base64
 import json
 import logging
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import StrEnum
 from http import HTTPStatus
-from typing import Any, ClassVar
-from urllib.parse import urlencode
+from typing import Any, ClassVar, cast
+from urllib.parse import urlencode, urlsplit
 
 import requests
 from django.conf import settings
@@ -33,6 +34,7 @@ from django.core.cache import cache
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
+from apps.billing.efactura.quota import QuotaEndpoint, QuotaExceededError, quota_tracker
 from apps.billing.efactura.settings import efactura_environment, efactura_settings
 from apps.common.outbound_http import OutboundPolicy, safe_request
 from apps.settings.services import SettingsService
@@ -748,6 +750,9 @@ class EFacturaClient:
 
             return result
 
+        except RateLimitError as e:
+            # Local refusal and any preceding HTTP 429 prove no upload was accepted.
+            return UploadResponse.error(str(e))
         except AuthenticationError:
             raise
         except requests.RequestException as e:
@@ -1003,6 +1008,28 @@ class EFacturaClient:
 
     # --- Internal Methods ---
 
+    def _reserve_request_quota(self, url: str, params: object) -> None:
+        """Reserve quota for each fiscal API attempt, including retries."""
+        endpoints: dict[str, tuple[QuotaEndpoint, str | None]] = {
+            "upload": (QuotaEndpoint.UPLOAD, None),
+            "uploadb2c": (QuotaEndpoint.UPLOAD, None),
+            "stareMesaj": (QuotaEndpoint.STATUS, "id_incarcare"),
+            "descarcare": (QuotaEndpoint.DOWNLOAD, "id"),
+            "listaMesajeFactura": (QuotaEndpoint.LIST_SIMPLE, None),
+            "listaMesajePaginatieFactura": (QuotaEndpoint.LIST_PAGINATED, None),
+            "validare": (QuotaEndpoint.VALIDATE, None),
+            "transformare": (QuotaEndpoint.CONVERT_PDF, None),
+        }
+        endpoint, message_param = endpoints.get(urlsplit(url).path.rsplit("/", 1)[-1], (QuotaEndpoint.UPLOAD, None))
+        query = cast(Mapping[str, object], params) if isinstance(params, Mapping) else {}
+        cui = str(query.get("cif") or self.config.company_cui)
+        message_id = str(query[message_param]) if message_param and message_param in query else None
+        try:
+            quota_tracker.check_and_increment(endpoint, cui, message_id)
+        except QuotaExceededError as e:
+            logger.warning("⚠️ [e-Factura] Local API quota exhausted for %s (CUI: %s)", endpoint.value, cui)
+            raise RateLimitError(_("e-Factura API quota exceeded; retry after the quota resets.")) from e
+
     def _request_with_retry(
         self,
         method: str,
@@ -1023,6 +1050,7 @@ class EFacturaClient:
 
         for attempt in range(self.config.max_retries):
             try:
+                self._reserve_request_quota(url, kwargs.get("params"))
                 response = safe_request(method, url, policy=EFACTURA_POLICY, headers=merged_headers, **kwargs)
 
                 # Check for rate limiting
