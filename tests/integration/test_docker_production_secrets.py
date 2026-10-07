@@ -50,10 +50,12 @@ def _services(name: str) -> dict[str, Any]:
 class TestStandaloneComposeDeliversProductionKeys:
     @pytest.mark.integration
     @pytest.mark.parametrize("name", [n for n in STANDALONE if "platform" in _services(n)])
-    def test_the_platform_requires_both_keys(self, name: str) -> None:
+    def test_the_platform_gets_both_keys(self, name: str) -> None:
+        # Forwarded, not required by Compose: production settings refuse to start without them and say
+        # which is missing, while staging settings don't need them.
         environment = _environment(_services(name)["platform"])
         for key in PLATFORM_KEYS:
-            assert environment.get(key, "").startswith(f"${{{key}:?"), (name, key, environment.get(key))
+            assert environment.get(key) == f"${{{key}:-}}", (name, key, environment.get(key))
 
     @pytest.mark.integration
     @pytest.mark.parametrize(
@@ -116,7 +118,8 @@ class TestProductionImages:
 
 # A native env that satisfies every check except the two production keys.
 NATIVE_BASE_ENV = {"PORTAL_DOMAIN": "p", "PLATFORM_DOMAIN": "q", "DJANGO_SECRET_KEY": "s", "DB_PASSWORD": "d", "HMAC_SECRET": "h"}
-PRODUCTION_KEY_VALUES = {"DJANGO_ENCRYPTION_KEY": "e", "CREDENTIAL_VAULT_MASTER_KEY": "v"}
+# What production settings require beyond that, and staging settings don't.
+PRODUCTION_KEY_VALUES = {"PLATFORM_TO_PORTAL_WEBHOOK_SECRET": "w", "DJANGO_ENCRYPTION_KEY": "e", "CREDENTIAL_VAULT_MASTER_KEY": "v"}
 
 
 class TestNativeProductionKeys:
@@ -136,7 +139,7 @@ class TestNativeProductionKeys:
         return all(jinja.compile_expression(c)(praho_env=praho_env, preflight_env=env) for c in self._preflight_conditions())
 
     @pytest.mark.integration
-    def test_the_production_example_declares_both_keys(self) -> None:
+    def test_the_production_example_declares_every_production_key(self) -> None:
         lines = (PROJECT_ROOT / ".env.example.prod").read_text().splitlines()
         for key in PRODUCTION_KEY_VALUES:
             index = next((i for i, line in enumerate(lines) if line.startswith(f"{key}=")), None)
@@ -201,3 +204,68 @@ class TestFirstBootFitsTheHealthcheck:
     def test_image_start_period(self) -> None:
         match = re.search(r"--start-period=(\d+[sm])", (DEPLOY / "platform/Dockerfile").read_text())
         assert match and self._seconds(match.group(1)) >= self.MIN_SECONDS
+
+
+class TestNativeMigrateEnvironment:
+    """The native role runs migrate and collectstatic with an explicit environment, not the systemd
+    EnvironmentFile, and production settings don't load the .env. That environment lacked
+    PLATFORM_TO_PORTAL_WEBHOOK_SECRET and both encryption keys (the portal's lacked the webhook
+    secret), so a native production deploy failed at its first migration, at settings import.
+    These tests compute the environment from the role's own task and import the settings with it."""
+
+    TASKS = DEPLOY / "ansible/roles/praho-native/tasks/main.yml"
+
+    def _environment_for(self, task_name: str, deployed_env: dict[str, str], module: str) -> dict[str, str]:
+        import ast  # noqa: PLC0415
+
+        task = next(t for t in yaml.safe_load(self.TASKS.read_text()) if t.get("name") == task_name)
+        jinja = Environment(autoescape=False)  # noqa: S701  # Ansible facts, not HTML.
+        jinja.filters["combine"] = lambda base, extra: {**base, **extra}
+        jinja.filters["dict2items"] = lambda d: [{"key": k, "value": v} for k, v in d.items()]
+        jinja.filters["items2dict"] = lambda items: {i["key"]: i["value"] for i in items}
+        context: dict[str, Any] = {"project_root": "/opt/praho", "platform_port": 8700, "deployed_env": deployed_env,
+                                   "django_settings_module": f"config.settings.{module}"}
+        for name, value in task.get("vars", {}).items():
+            context[name] = (
+                {k: jinja.from_string(str(v)).render(context) for k, v in value.items()} if isinstance(value, dict) else value
+            )
+        (fact,) = task["set_fact"].values()
+        if isinstance(fact, dict):  # a literal dict of templated values
+            return {k: jinja.from_string(str(v)).render(context) for k, v in fact.items()}
+        return ast.literal_eval(jinja.from_string(fact).render(context))
+
+    def _imports(self, service: str, environment: dict[str, str]) -> str:
+        import os  # noqa: PLC0415
+        import subprocess  # noqa: PLC0415
+        import sys  # noqa: PLC0415
+
+        env = {"PATH": os.environ["PATH"], "HOME": os.environ.get("HOME", "/tmp"), **environment,  # noqa: S108  # fallback only
+               "PYTHONPATH": str(PROJECT_ROOT / "services" / service), "PRAHO_SKIP_DOTENV": "1"}
+        code = "import importlib, os; importlib.import_module(os.environ['DJANGO_SETTINGS_MODULE']); print('OK')"
+        result = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, check=False)  # noqa: S603
+        return result.stdout.strip() or result.stderr.strip().splitlines()[-1]
+
+    def _operator_env(self) -> dict[str, str]:
+        import base64  # noqa: PLC0415
+        import secrets  # noqa: PLC0415
+
+        key = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode()
+        return {
+            "PORTAL_DOMAIN": "portal.example.invalid", "PLATFORM_DOMAIN": "platform.example.invalid",
+            "DJANGO_SECRET_KEY": secrets.token_urlsafe(60), "DB_PASSWORD": secrets.token_urlsafe(24),
+            "HMAC_SECRET": secrets.token_urlsafe(40), "PLATFORM_TO_PORTAL_WEBHOOK_SECRET": secrets.token_urlsafe(40),
+            "DJANGO_ENCRYPTION_KEY": key, "CREDENTIAL_VAULT_MASTER_KEY": key,
+        }
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize(("service", "task"), [("platform", "Set Django environment variables from .env file"),
+                                                   ("portal", "Set Portal Django environment")])
+    def test_the_migrate_environment_imports_production_settings(self, service: str, task: str) -> None:
+        environment = self._environment_for(task, self._operator_env(), "prod")
+        assert self._imports(service, environment) == "OK"
+
+    @pytest.mark.integration
+    def test_staging_gets_no_key_it_did_not_define(self) -> None:
+        operator_env = {k: v for k, v in self._operator_env().items() if k not in PRODUCTION_KEY_VALUES}
+        environment = self._environment_for("Set Django environment variables from .env file", operator_env, "staging")
+        assert not set(environment) & set(PRODUCTION_KEY_VALUES)

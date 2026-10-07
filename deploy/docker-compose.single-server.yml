@@ -66,10 +66,11 @@ services:
       - PORTAL_HMAC_MODE=${PORTAL_HMAC_MODE:-legacy}
       - PORTAL_HMAC_CREDENTIALS=${PORTAL_HMAC_CREDENTIALS:-}
       - PLATFORM_TO_PORTAL_WEBHOOK_SECRET=${PLATFORM_TO_PORTAL_WEBHOOK_SECRET:?PLATFORM_TO_PORTAL_WEBHOOK_SECRET required}
-      # Production refuses to start without these two (config/settings/prod.py); the portal never gets them.
-      - DJANGO_ENCRYPTION_KEY=${DJANGO_ENCRYPTION_KEY:?DJANGO_ENCRYPTION_KEY required}
+      # Production settings refuse to start without these two and name the missing one; staging doesn't
+      # need them, so Compose doesn't require them. The portal never gets them.
+      - DJANGO_ENCRYPTION_KEY=${DJANGO_ENCRYPTION_KEY:-}
       - DJANGO_ENCRYPTION_KEY_PREVIOUS=${DJANGO_ENCRYPTION_KEY_PREVIOUS:-}
-      - CREDENTIAL_VAULT_MASTER_KEY=${CREDENTIAL_VAULT_MASTER_KEY:?CREDENTIAL_VAULT_MASTER_KEY required}
+      - CREDENTIAL_VAULT_MASTER_KEY=${CREDENTIAL_VAULT_MASTER_KEY:-}
       - DJANGO_SETTINGS_MODULE=${DJANGO_SETTINGS_MODULE:-config.settings.prod}
       - STATIC_ROOT=/app/staticfiles
       - PLATFORM_DOMAIN=${PLATFORM_DOMAIN:-platform.localhost}

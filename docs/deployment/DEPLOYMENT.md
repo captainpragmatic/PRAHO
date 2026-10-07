@@ -394,7 +394,7 @@ The `.env.example.*` files also list `[RECOMMENDED]` variables (email, Stripe, e
 Before deploying, the playbook checks:
 1. `praho_env` is defined and one of `dev`, `staging`, `prod`
 2. Ubuntu >= 24.04
-3. The `.env.{praho_env}` file exists and contains all required variables (`DJANGO_SECRET_KEY`, `DB_PASSWORD`, `HMAC_SECRET`, `PLATFORM_TO_PORTAL_WEBHOOK_SECRET`, `PORTAL_DOMAIN`, `PLATFORM_DOMAIN`)
+3. The `.env.{praho_env}` file exists and contains all required variables (`DJANGO_SECRET_KEY`, `DB_PASSWORD`, `HMAC_SECRET`, `PORTAL_DOMAIN`, `PLATFORM_DOMAIN`, and for `prod` also `PLATFORM_TO_PORTAL_WEBHOOK_SECRET`, `DJANGO_ENCRYPTION_KEY` and `CREDENTIAL_VAULT_MASTER_KEY`)
 4. Both FQDNs resolve to the server IP (DNS pre-flight)
 
 #### Post-Deploy

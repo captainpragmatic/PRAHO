@@ -72,13 +72,14 @@
           - preflight_env.DJANGO_SECRET_KEY is defined and preflight_env.DJANGO_SECRET_KEY | length > 0
           - preflight_env.DB_PASSWORD is defined and preflight_env.DB_PASSWORD | length > 0
           - preflight_env.HMAC_SECRET is defined and preflight_env.HMAC_SECRET | length > 0
-          # Production settings refuse to start without these two; staging doesn't need them.
+          # Production settings refuse to start without these three; staging doesn't need them.
+          - praho_env != 'prod' or (preflight_env.PLATFORM_TO_PORTAL_WEBHOOK_SECRET | default('') | length > 0)
           - praho_env != 'prod' or (preflight_env.DJANGO_ENCRYPTION_KEY | default('') | length > 0)
           - praho_env != 'prod' or (preflight_env.CREDENTIAL_VAULT_MASTER_KEY | default('') | length > 0)
         fail_msg: >
           Missing required variables in {{ env_file_path }}.
           Ensure PORTAL_DOMAIN, PLATFORM_DOMAIN, DJANGO_SECRET_KEY, DB_PASSWORD, and HMAC_SECRET are set,
-          and for prod also DJANGO_ENCRYPTION_KEY and CREDENTIAL_VAULT_MASTER_KEY.
+          and for prod also PLATFORM_TO_PORTAL_WEBHOOK_SECRET, DJANGO_ENCRYPTION_KEY and CREDENTIAL_VAULT_MASTER_KEY.
 
     # -------------------------------------------------------------------
     # Deploy method + version resolution
