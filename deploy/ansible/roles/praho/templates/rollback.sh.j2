@@ -64,18 +64,16 @@ else
 
     echo "[$(date)] Pulling version ${VERSION}..."
     export VERSION="${VERSION}"
+    # Pull before stopping anything, so a missing tag fails while the current version still runs.
+    docker compose pull
 
     echo "[$(date)] Stopping current services..."
     docker compose down
 
-    echo "[$(date)] Starting version ${VERSION}..."
-    docker compose up -d
-
-    echo "[$(date)] Waiting for services..."
-    sleep 15
-
-    # Health check
-    if curl -sf http://localhost:{{ platform_port }}/health/ > /dev/null; then
+    echo "[$(date)] Starting version ${VERSION} and waiting for health..."
+    # The services publish no host ports, so health comes from the containers' own healthchecks:
+    # --wait returns once each of them reports healthy, or fails.
+    if docker compose up -d --wait --wait-timeout 300; then
         echo "[$(date)] Rollback successful! Services are healthy."
     else
         echo "[$(date)] WARNING: Health check failed. Check logs with: docker compose logs"

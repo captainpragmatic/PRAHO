@@ -818,6 +818,30 @@ All variables live in your `.env.{env}` file. See `.env.example.prod` for the fu
 | `PLATFORM_TO_PORTAL_WEBHOOK_SECRET` | Platform→Portal webhook HMAC | `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
 | `ACME_EMAIL` | Let's Encrypt email | `admin@pragmatichost.com` |
 
+### Docker Deployment (Ansible role)
+
+`make deploy-dev` and `playbooks/two-servers.yml` use the `praho` role, which renders its own `.env` from
+Ansible variables. Pass them in inventory `group_vars` or with `-e @vars.yml`, and keep the secrets in
+Ansible Vault. The role's first task stops and names any that are missing; the list per topology is
+`praho_required_inputs` in `roles/praho/defaults/main.yml`.
+
+| Variable | Needed on | Notes |
+|----------|-----------|-------|
+| `portal_domain`, `platform_domain` | every host | The two hostnames |
+| `acme_email` | every host | Let's Encrypt contact |
+| `secret_key` | every host | Rendered as `DJANGO_SECRET_KEY` |
+| `hmac_secret` | every host | Portal → Platform request signing (`HMAC_SECRET` / `PLATFORM_API_SECRET`) |
+| `platform_to_portal_webhook_secret` | every host | Platform → Portal webhook signing |
+| `db_password` | platform or database host | Not written on a portal-only host |
+| `db_host` | platform host with an external database | |
+| `django_encryption_key`, `credential_vault_master_key` | platform host | Production refuses to start without them; never written on a portal-only host |
+
+Optional: `django_encryption_key_previous` (key rotation), `portal_hmac_secret`, `superuser_email` /
+`superuser_password`, `sentry_dsn`, `db_sslmode` (default `disable` with the bundled database,
+`require` with an external one), and `portal_trusted_proxy_cidrs` (default: `praho_web_subnet`,
+the `web` network Caddy shares with the portal, `10.200.250.0/24`). Role defaults: `db_name` and
+`db_user` (`praho`), `db_port` (`5432`), `debug` (`false`).
+
 ### Docker Deployment
 
 | Variable | Required | Description | Example |
@@ -832,7 +856,7 @@ All variables live in your `.env.{env}` file. See `.env.example.prod` for the fu
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `platform_allowed_ips` | IP whitelist for Platform access (Ansible extra-var) | `[]` (unrestricted) |
+| `platform_allowed_ips` | IP whitelist for Platform access (Ansible extra-var) | loopback only; an empty list also means loopback only, never unrestricted |
 | `HMAC_SECRET` | HMAC shared secret for Portal ↔ Platform auth | (required in `.env`) |
 | `PLATFORM_TO_PORTAL_WEBHOOK_SECRET` | HMAC secret for Platform→Portal webhooks | (required in `.env`) |
 

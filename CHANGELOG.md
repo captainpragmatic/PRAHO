@@ -57,6 +57,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Ansible Docker role (`make deploy-dev`, `playbooks/two-servers.yml`) can deploy. Its templates
+  needed variables nothing defined, so it could not even render. It now declares the secrets and
+  domains operators must supply per topology (`praho_required_inputs`) and stops first, naming any that
+  are missing (never their values); the non-secret settings have defaults. It delivers what production
+  requires: both encryption keys to the platform, the webhook secret to both services, a database
+  `sslmode` that fits the database, and trusted proxy CIDRs for the portal (its `web` network now has a
+  known subnet). A portal-only host no longer receives the database password or the keys. The role
+  and its rollback script wait on the containers' own health instead of a host port that was never
+  published, and the platform's start period covers a first boot.
 - Removing a product on the cart review page now updates the Order Summary. The totals kept the
   removed item's price, so an empty cart still showed a total to pay. Two things stopped the refresh.
   The Remove button sits inside the list its own response replaces, so by the time htmx reported the
