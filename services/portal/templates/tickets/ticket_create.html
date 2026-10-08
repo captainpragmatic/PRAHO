@@ -16,7 +16,7 @@
 
   <!-- Ticket Form -->
   {% section_card css_class="mb-6" %}
-      <form method="post" class="space-y-6">
+      <form id="ticket-create-form" method="post" class="space-y-6">
         {% csrf_token %}
 
         <!-- Inline validation error display -->
@@ -171,7 +171,7 @@
   });
 
   // Form validation helper
-  document.querySelector('form').addEventListener('submit', function (e) {
+  document.getElementById('ticket-create-form').addEventListener('submit', function (e) {
     const title = document.getElementById('title').value.trim();
     const description = document.getElementById('description').value.trim();
 

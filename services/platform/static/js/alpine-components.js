@@ -327,8 +327,8 @@ document.addEventListener("alpine:init", function () {
         const data = this.$root.dataset;
         this.$dispatch("confirm-dangerous-action", {
           title: data.protectionTitle,
-          message: 'Type "I really am sure I want to do this!" to confirm this protection change for ' + escapeHtml(data.domain),
-          confirmText: "I really am sure I want to do this!",
+          message: escapeHtml(data.domain + ": " + data.defaultMessage),
+          confirmText: data.defaultConfirmText,
           action: function () {
             htmx.ajax("POST", data.toggleProtectionUrl, {
               target: "#quick-actions-section",
@@ -341,9 +341,9 @@ document.addEventListener("alpine:init", function () {
       confirmAccountDelete() {
         const data = this.$root.dataset;
         this.$dispatch("confirm-dangerous-action", {
-          title: "Delete Virtualmin Account",
-          message: 'Type "I really am sure I want to do this!" to confirm permanent deletion of ' + escapeHtml(data.domain),
-          confirmText: "I really am sure I want to do this!",
+          title: data.deleteTitle,
+          message: escapeHtml(data.domain + ": " + data.defaultMessage),
+          confirmText: data.defaultConfirmText,
           action: function () {
             htmx.ajax("DELETE", data.deleteUrl, { target: "body" });
           },

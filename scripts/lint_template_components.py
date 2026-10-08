@@ -184,11 +184,50 @@ def load_component_svg_allowlist() -> set[str]:
 # ===============================================================================
 
 
-class _ComponentScriptParser(HTMLParser):
-    """Locate inline execution without treating external script imports as inline code."""
+class _ScriptAttributesParser(HTMLParser):
+    """Read script attributes after conditional attribute regions have been masked."""
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=False)
+        self.attributes: dict[str, str] = {}
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "script":
+            self.attributes = {name: value or "" for name, value in attrs}
+
+
+def _unconditional_script_type(start_tag: str) -> str:
+    """Ignore attributes inside control flow, while retaining unconditional attributes."""
+    pieces: list[str] = []
+    depth = 0
+    cursor = 0
+    for match in _DJANGO_CONTROL_FLOW_RE.finditer(start_tag):
+        chunk = start_tag[cursor : match.start()]
+        pieces.append(re.sub(r"[^\n]", " ", chunk) if depth else chunk)
+        pieces.append(re.sub(r"[^\n]", " ", match.group()))
+        command = match.group()[2:-2].strip().split()[0]
+        if command in {"if", "for"}:
+            depth += 1
+        elif command in {"endif", "endfor"}:
+            depth = max(0, depth - 1)
+        cursor = match.end()
+    chunk = start_tag[cursor:]
+    pieces.append(re.sub(r"[^\n]", " ", chunk) if depth else chunk)
+    parser = _ScriptAttributesParser()
+    parser.feed("".join(pieces))
+    parser.close()
+    return parser.attributes.get("type", "").strip().lower()
+
+
+class _ComponentScriptParser(HTMLParser):
+    """Locate inline execution without treating external script imports as inline code."""
+
+    def __init__(self, original_markup: str) -> None:
+        super().__init__(convert_charrefs=False)
+        self.original_markup = original_markup
+        self.line_offsets = [0]
+        for line in original_markup.splitlines(keepends=True):
+            self.line_offsets.append(self.line_offsets[-1] + len(line))
         self.lines: set[int] = set()
         self.script_line: int | None = None
 
@@ -201,8 +240,11 @@ class _ComponentScriptParser(HTMLParser):
         attributes = {name: value or "" for name, value in attrs}
         script_type = attributes.get("type", "").strip().lower()
         if script_type in {"application/json", "application/ld+json"}:
-            self.script_line = None
-            return
+            start = self.line_offsets[line_no - 1] + self.getpos()[1]
+            start_tag = self.original_markup[start : start + len(self.get_starttag_text())]
+            if _unconditional_script_type(start_tag) in {"application/json", "application/ld+json"}:
+                self.script_line = None
+                return
         self.script_line = line_no
         if not attributes.get("src", "").strip():
             self.lines.add(line_no)
@@ -312,8 +354,8 @@ def scan_file(path: Path) -> list[Violation]:
     consumed_marker_lines: set[int] = set()
     component_script_lines: set[int] = set()
     if is_component:
-        script_parser = _ComponentScriptParser()
         markup = _DJANGO_COMMENT_RE.sub(lambda match: "\n" * match.group().count("\n"), "\n".join(lines))
+        script_parser = _ComponentScriptParser(markup)
         # Control-flow tags may touch an attribute name; separate them before HTML parsing.
         # Keep every newline so findings still refer to the original template.
         markup = _DJANGO_CONTROL_FLOW_RE.sub(lambda match: re.sub(r"[^\n]", " ", match.group()), markup)

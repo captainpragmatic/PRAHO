@@ -1,4 +1,4 @@
-"""Open the translated shared modal with each service's real Alpine CSP build."""
+"""Exercise the rendered modal defaults and actions without a browser."""
 
 from __future__ import annotations
 
@@ -7,82 +7,102 @@ from pathlib import Path
 from django.template.loader import render_to_string
 from django.test import SimpleTestCase
 from django.utils import translation
-from playwright.sync_api import expect, sync_playwright
+
+from tests.ui.node_harness import Markup, dataset, run_node
 
 ROOT = Path(__file__).resolve().parents[4]
+
+HARNESS = r"""
+const fs = require("node:fs");
+const vm = require("node:vm");
+const input = JSON.parse(fs.readFileSync(0, "utf8"));
+const components = {};
+const context = {
+  document: {addEventListener(name, fn) { if (name === "alpine:init") fn(); }},
+  Alpine: {data(name, factory) { components[name] = factory; }}
+};
+vm.runInNewContext(input.source, context);
+const modal = components.dangerousActionModal();
+modal.$root = {dataset: input.defaults};
+const states = [];
+let confirmed = "";
+function state() {
+  return {
+    show: modal.show, title: modal.title, message: modal.message,
+    phrase: modal.confirmText, value: modal.userInput, valid: modal.isValid, confirmed
+  };
+}
+modal.onConfirmRequest({detail: {action() { confirmed = "default"; }}});
+states.push(state());
+modal.userInput = "I understand";
+modal.submitIfValid();
+states.push(state());
+modal.userInput = input.defaults.defaultConfirmText;
+modal.submitIfValid();
+states.push(state());
+modal.open({
+  title: "Titlu ales", message: "<strong>Mesaj ales</strong>",
+  confirmText: "CONFIRMĂ ALES", action() { confirmed = "override"; }
+});
+states.push(state());
+modal.userInput = "CONFIRMĂ ALES";
+modal.confirm();
+states.push(state());
+modal.open({});
+states.push(state());
+process.stdout.write(JSON.stringify({states}));
+"""
 
 
 class DangerousActionModalTests(SimpleTestCase):
     def test_romanian_defaults_and_caller_overrides_survive_opening(self) -> None:
         with translation.override("ro"):
-            markup = render_to_string("components/dangerous_action_modal.html")
-
-        playwright = self.enterContext(sync_playwright())
-        browser = playwright.chromium.launch()
-        self.addCleanup(browser.close)
-        for service in ("platform", "portal"):
-            with self.subTest(service=service):
-                page = browser.new_page()
-                errors: list[str] = []
-                page.on("pageerror", lambda error, captured=errors: captured.append(str(error)))
-                page.set_content("<style>[x-cloak] { display: none !important; }</style>" + markup)
-                page.add_script_tag(path=str(ROOT / "shared/ui/static/js/alpine-shared-components.js"))
-                page.add_script_tag(path=str(ROOT / f"services/{service}/static/js/alpine-csp.min.js"))
-                modal = page.locator('[x-data="dangerousActionModal"]')
-                expect(modal).not_to_have_attribute("x-cloak", "")
-                expect(modal).to_be_hidden()
-                page.evaluate(
-                    """() => {
-                        window.confirmed = '';
-                        window.dispatchEvent(new CustomEvent('confirm-dangerous-action', {
-                            detail: {action: () => { window.confirmed = 'default'; }}
-                        }));
-                    }"""
-                )
-                expect(modal).to_be_visible()
-                expect(modal.locator('[x-text="title"]')).to_have_text("Acțiune periculoasă")
-                expect(modal.locator('[x-html="message"]')).to_have_text("Această acțiune nu poate fi anulată.")
-                phrase = "Sunt sigur că vreau să fac acest lucru!"
-                expect(modal.locator('[x-text="confirmText"]')).to_have_text(phrase)
-                confirmation = modal.locator("#dangerous-action-confirmation")
-                confirm = modal.locator("button").filter(has_text="Confirmă")
-                confirmation.fill("I understand")
-                expect(confirm).to_be_disabled()
-                self.assertEqual(page.evaluate("window.confirmed"), "")
-                confirmation.fill(phrase)
-                expect(confirm).to_be_enabled()
-                confirm.click()
-                expect(modal).to_be_hidden()
-                self.assertEqual(page.evaluate("window.confirmed"), "default")
-
-                page.evaluate(
-                    """() => {
-                        window.dispatchEvent(new CustomEvent('confirm-dangerous-action', {
-                            detail: {
-                                title: 'Titlu ales',
-                                message: '<strong>Mesaj ales</strong>',
-                                confirmText: 'CONFIRMĂ ALES',
-                                action: () => { window.confirmed = 'override'; }
-                            }
-                        }));
-                    }"""
-                )
-                expect(modal).to_be_visible()
-                expect(modal.locator('[x-text="title"]')).to_have_text("Titlu ales")
-                expect(modal.locator('[x-html="message"] strong')).to_have_text("Mesaj ales")
-                expect(modal.locator('[x-text="confirmText"]')).to_have_text("CONFIRMĂ ALES")
-                confirmation.fill("CONFIRMĂ ALES")
-                confirm.click()
-                expect(modal).to_be_hidden()
-                self.assertEqual(page.evaluate("window.confirmed"), "override")
-                page.evaluate(
-                    """() => window.dispatchEvent(
-                        new CustomEvent('confirm-dangerous-action', {detail: {}})
-                    )"""
-                )
-                expect(modal).to_be_visible()
-                expect(modal.locator('[x-text="title"]')).to_have_text("Acțiune periculoasă")
-                expect(modal.locator('[x-text="confirmText"]')).to_have_text(phrase)
-                expect(confirmation).to_have_value("")
-                self.assertEqual(errors, [])
-                page.close()
+            markup = Markup(render_to_string("components/dangerous_action_modal.html"))
+        attributes = markup.find("x-data", "dangerousActionModal")
+        self.assertEqual(attributes["@confirm-dangerous-action.window"], "onConfirmRequest($event)")
+        self.assertEqual(markup.find("id", "dangerous-action-confirmation")["x-model"], "userInput")
+        self.assertEqual(markup.find("@click", "confirm()")[":disabled"], "isInvalid")
+        self.assertEqual(markup.find("id", "dangerous-action-confirmation")["@keyup.enter"], "submitIfValid()")
+        defaults = dataset(attributes)
+        self.assertEqual(defaults["defaultTitle"], "Acțiune periculoasă")
+        self.assertEqual(defaults["defaultMessage"], "Această acțiune nu poate fi anulată.")
+        self.assertEqual(defaults["defaultConfirmText"], "Sunt sigur că vreau să fac acest lucru!")
+        output = run_node(
+            HARNESS,
+            {
+                "source": (ROOT / "shared/ui/static/js/alpine-shared-components.js").read_text(encoding="utf-8"),
+                "defaults": defaults,
+            },
+        )
+        opened = {
+            "show": True,
+            "title": defaults["defaultTitle"],
+            "message": defaults["defaultMessage"],
+            "phrase": defaults["defaultConfirmText"],
+            "value": "",
+            "valid": False,
+            "confirmed": "",
+        }
+        closed = {
+            **opened,
+            "show": False,
+            "confirmed": "default",
+        }
+        overridden = {
+            **opened,
+            "title": "Titlu ales",
+            "message": "<strong>Mesaj ales</strong>",
+            "phrase": "CONFIRMĂ ALES",
+            "confirmed": "default",
+        }
+        self.assertEqual(
+            output["states"],
+            [
+                opened,
+                {**opened, "value": "I understand"},
+                closed,
+                overridden,
+                {**overridden, "show": False, "confirmed": "override"},
+                {**opened, "confirmed": "override"},
+            ],
+        )

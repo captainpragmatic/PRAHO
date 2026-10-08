@@ -40,6 +40,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 PORTAL_TEMPLATES = REPO_ROOT / "services" / "portal" / "templates"
 PLATFORM_TEMPLATES = REPO_ROOT / "services" / "platform" / "templates"
+SHARED_TEMPLATES = REPO_ROOT / "shared" / "ui" / "templates"
 
 # Severity levels
 SEVERITY_BLOCKER = "blocker"  # Definitely broken in dark mode
@@ -291,7 +292,7 @@ def discover_templates(paths: list[str] | None = None) -> list[Path]:
     """Find all HTML templates to audit.
 
     Args:
-        paths: Optional specific paths. If None, audits both services.
+        paths: Optional specific paths. If None, audits both services and shared UI.
 
     Returns:
         Sorted list of template file paths.
@@ -309,7 +310,7 @@ def discover_templates(paths: list[str] | None = None) -> list[Path]:
         return sorted(set(result))
 
     templates: list[Path] = []
-    for tmpl_dir in [PORTAL_TEMPLATES, PLATFORM_TEMPLATES]:
+    for tmpl_dir in [PORTAL_TEMPLATES, PLATFORM_TEMPLATES, SHARED_TEMPLATES]:
         if tmpl_dir.exists():
             templates.extend(tmpl_dir.rglob("*.html"))
     return sorted(set(templates))

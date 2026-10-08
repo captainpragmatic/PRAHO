@@ -473,3 +473,28 @@ class TemplateReviewRegressionTests(SimpleTestCase):
                     )
                     self.assertEqual([finding.line for finding in matches], [2] * len(expected))
                     self.assertEqual([finding for finding in findings if finding.code == "TMPL_ALLOW_STALE"], [])
+
+    def test_conditional_json_types_do_not_hide_executable_component_scripts(self) -> None:
+        cases = (
+            '<script {% if as_json %}type="application/json"{% endif %}>window.run()</script>',
+            '<script {% if as_json %}type="application/ld+json"{% endif %}>window.run()</script>',
+            '<script {% if as_json %}type="application/json"{% else %}type="text/javascript"{% endif %}>run()</script>',
+            '<script type="{% if as_json %}application/json{% endif %}">window.run()</script>',
+            '<script\n{% if as_json %}type="application/json"{% endif %}>window.run()</script>',
+            '<script {% for kind in types %}type="application/json"{% endfor %}>window.run()</script>',
+        )
+        for markup in cases:
+            with self.subTest(markup=markup):
+                path = self.seed("components/conditional_json.html", "\n" + markup)
+                findings = [finding for finding in self.lint.scan_file(path) if finding.code == "TMPL007"]
+                self.assertEqual([finding.line for finding in findings], [2])
+        for markup in (
+            '<script type="application/json">{"value": 1}</script>',
+            '<script type="application/ld+json">{"value": 1}</script>',
+            '<script type="application/json" {% if enabled %}data-extra="yes"{% endif %}>{"value": 1}</script>',
+            '{% if enabled %}<script type="application/json">{"value": 1}</script>{% endif %}',
+        ):
+            with self.subTest(unconditional=markup):
+                path = self.seed("components/unconditional_json.html", markup)
+                findings = [finding for finding in self.lint.scan_file(path) if finding.code == "TMPL007"]
+                self.assertEqual(findings, [])
