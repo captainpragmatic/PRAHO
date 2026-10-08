@@ -81,6 +81,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `make ansible-single-server` now requires `ENV=staging|prod` and runs `make deploy-staging` or
+  `make deploy-prod`. It called the deploy playbook without loading `.env.<env>`, so the inventory had
+  no server address.
+- The interactive `deploy/scripts/restore.sh` (no arguments) works again. The list of backups was
+  captured along with the chosen file name, so nobody saw it and every interactive restore ended in
+  "Backup file not found".
+- A failed database backup no longer leaves a file that `restore --latest` would pick. `pg_dump`
+  creates its output file before connecting, and the Docker script's `gzip` writes one even when the
+  dump fails, so the empty file became the newest backup; the native restore drops the database before
+  `pg_restore` reads it. Both backup scripts now write under a `.partial` name and rename the dump once
+  it is complete; each backup first removes any partial a killed run left that has been untouched for a day.
+- Docker backups get the same per-run name as native ones (`praho_backup_<timestamp>_<pid>.sql.gz`),
+  so a manual backup started in the same second as a scheduled one no longer shares its file.
 - `make ansible-backup ENV=prod FETCH=true` downloads the dump it makes. `ENV` (`staging` or `prod`) is
   now required: the target never loaded `.env.<env>`, so Ansible connected to an empty host unless the
   connection variables were exported by hand. It also had no way to ask for the download, and the

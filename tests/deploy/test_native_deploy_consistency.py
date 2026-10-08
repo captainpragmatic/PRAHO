@@ -19,6 +19,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -103,59 +104,93 @@ class TestBackupPlaybook:
         assert {"0700", "0600"} <= modes, modes
 
 
+# Resolved rather than spelled "make", as in test_e2e_stack: the recipe is what is under test.
+MAKE = shutil.which("make") or "make"
+
+
+def _make(target: str, *args: str, path_prefix: Path | None = None) -> subprocess.CompletedProcess[str]:
+    # This suite runs under make itself; its MAKEFLAGS would leak into the inner call. The recipes
+    # resolve the env file through $(PWD), the environment variable, which `cwd` leaves alone.
+    env = {key: value for key, value in os.environ.items() if key not in {"MAKELEVEL", "MAKEFLAGS", "MFLAGS"}}
+    env["PWD"] = str(PROJECT_ROOT)
+    if path_prefix:
+        env["PATH"] = f"{path_prefix}{os.pathsep}{env['PATH']}"
+    return subprocess.run(  # noqa: S603 -- a fixed make target with fixed variables
+        [MAKE, target, *args],
+        cwd=PROJECT_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _dry_run(target: str, *variables: str) -> str:
+    result = _make(target, "-n", *variables)
+    assert result.returncode == 0, result.stderr
+    return result.stdout
+
+
 class TestBackupMakeTarget:
-    # Resolved rather than spelled "make", as in test_e2e_stack: the recipe is what is under test.
-    MAKE = shutil.which("make") or "make"
-
-    def _make(self, *args: str, path_prefix: Path | None = None) -> subprocess.CompletedProcess[str]:
-        # This suite runs under make itself; its MAKEFLAGS would leak into the inner call. The recipe
-        # resolves the env file through $(PWD), the environment variable, which `cwd` leaves alone.
-        env = {key: value for key, value in os.environ.items() if key not in {"MAKELEVEL", "MAKEFLAGS", "MFLAGS"}}
-        env["PWD"] = str(PROJECT_ROOT)
-        if path_prefix:
-            env["PATH"] = f"{path_prefix}{os.pathsep}{env['PATH']}"
-        return subprocess.run(  # noqa: S603 -- a fixed make target with fixed variables
-            [self.MAKE, "ansible-backup", *args],
-            cwd=PROJECT_ROOT,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-    def _dry_run(self, *variables: str) -> str:
-        result = self._make("-n", "ENV=staging", *variables)
-        assert result.returncode == 0, result.stderr
-        return result.stdout
-
     @pytest.mark.integration
     def test_fetch_true_asks_the_playbook_to_download(self) -> None:
-        assert "-e fetch_backup=true" in self._dry_run("FETCH=true")
+        assert "-e fetch_backup=true" in _dry_run("ansible-backup", "ENV=staging", "FETCH=true")
 
     @pytest.mark.integration
     def test_without_fetch_it_only_backs_up(self) -> None:
-        assert "fetch_backup" not in self._dry_run()
+        assert "fetch_backup" not in _dry_run("ansible-backup", "ENV=staging")
 
     @pytest.mark.integration
     def test_it_loads_the_environments_connection_settings(self) -> None:
         # The inventory reads PRAHO_SERVER_IP and the SSH settings from the environment; without the
         # file, Ansible connects to an empty host.
-        assert "/.env.staging && set +a" in self._dry_run()
+        assert "/.env.staging && set +a" in _dry_run("ansible-backup", "ENV=staging")
+
+
+class TestSingleServerMakeTarget:
+    # It ran the deploy playbook without the env file, so the inventory's host was empty. It now
+    # runs deploy-staging or deploy-prod, and `make -n` follows that call into the sub-make.
+    @pytest.mark.integration
+    def test_it_deploys_through_the_environments_own_target(self) -> None:
+        dry_run = _dry_run("ansible-single-server", "ENV=staging")
+        assert "/.env.staging && set +a" in dry_run
+        assert "-e env_file_path=" in dry_run
+        assert "playbooks/native-single-server.yml" in dry_run
 
     @pytest.mark.integration
+    def test_a_production_version_reaches_the_playbook(self) -> None:
+        assert "-e cli_version=v9.9.9" in _dry_run("ansible-single-server", "ENV=prod", "VERSION=v9.9.9")
+
+
+class TestNativeMakeTargets:
+    @pytest.mark.integration
+    @pytest.mark.parametrize("target", ["ansible-backup", "ansible-single-server"])
     @pytest.mark.parametrize("variables", [[], ["ENV=dev"]])
-    def test_it_refuses_to_run_without_a_deployment_environment(self, tmp_path: Path, variables: list[str]) -> None:
+    def test_they_refuse_to_run_without_a_deployment_environment(
+        self, tmp_path: Path, target: str, variables: list[str]
+    ) -> None:
         marker = tmp_path / "ran"
         stub = tmp_path / "ansible-playbook"
         stub.write_text(f'#!/bin/sh\ntouch "{marker}"\n')
         stub.chmod(0o755)
-        result = self._make(*variables, path_prefix=tmp_path)
+        result = _make(target, *variables, path_prefix=tmp_path)
         assert result.returncode != 0
         assert not marker.exists()
         assert "ENV=staging|prod" in result.stdout + result.stderr
 
+    @pytest.mark.integration
+    def test_every_recipe_using_the_native_inventory_loads_an_env_file(self) -> None:
+        recipes = re.findall(r"^([\w-]+):.*\n((?:\t.*\n)+)", (PROJECT_ROOT / "Makefile").read_text(), re.MULTILINE)
+        users = {name: body for name, body in recipes if "inventory/native-single-server.yml" in body}
+        assert users
+        assert sorted(name for name, body in users.items() if r". $(PWD)/.env." not in body) == []
+
 
 class TestNativeBackupScript:
+    PG_DUMP_WRITES = '#!/bin/sh\nwhile [ "$#" -gt 0 ]; do [ "$1" = -f ] && echo dump > "$2"; shift; done\n'
+    # Like pg_dump on a refused connection: the output file exists, empty, and the exit status is 1.
+    PG_DUMP_FAILS = '#!/bin/sh\nwhile [ "$#" -gt 0 ]; do [ "$1" = -f ] && : > "$2"; shift; done\nexit 1\n'
+
     @staticmethod
     def _render(backups: Path) -> str:
         """The template with its placeholders filled; a new placeholder fails here, not silently."""
@@ -168,36 +203,75 @@ class TestNativeBackupScript:
 
         return re.sub(r"\{\{\s*(.+?)\s*\}\}", fill, NATIVE_BACKUP_SCRIPT.read_text())
 
+    def _script(self, tmp_path: Path, pg_dump: str) -> tuple[Path, dict[str, str]]:
+        """The rendered script, and an environment whose `date` is pinned and `pg_dump` is a stub."""
+        stubs = tmp_path / "bin"
+        stubs.mkdir()
+        (stubs / "date").write_text("#!/bin/sh\necho 20261008_020000\n")
+        (stubs / "pg_dump").write_text(pg_dump)
+        for stub in stubs.iterdir():
+            stub.chmod(0o755)
+        script = tmp_path / "backup.sh"
+        script.write_text(self._render(tmp_path / "backups"))
+        return script, {**os.environ, "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}"}
+
+    @staticmethod
+    def _run(script: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(  # noqa: S603 -- the rendered script in this test's tmp_path
+            ["bash", str(script)],  # noqa: S607
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
     @pytest.mark.integration
     def test_two_runs_in_the_same_second_write_different_files(self, tmp_path: Path) -> None:
         # A manual backup started in the same second as the nightly cron run used to get the same
         # name, so two pg_dump processes wrote one file and the download could copy either.
-        backups, stubs = tmp_path / "backups", tmp_path / "bin"
-        stubs.mkdir()
-        (stubs / "date").write_text("#!/bin/sh\necho 20261008_020000\n")
-        (stubs / "pg_dump").write_text(
-            '#!/bin/sh\nwhile [ "$#" -gt 0 ]; do [ "$1" = -f ] && echo dump > "$2"; shift; done\n'
-        )
-        for stub in stubs.iterdir():
-            stub.chmod(0o755)
-        script = tmp_path / "backup.sh"
-        script.write_text(self._render(backups))
-        env = {**os.environ, "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}"}
-
+        script, env = self._script(tmp_path, self.PG_DUMP_WRITES)
         created = []
         for _ in range(2):
-            result = subprocess.run(  # noqa: S603 -- the rendered script in this test's tmp_path
-                ["bash", str(script)],  # noqa: S607
-                env=env,
-                capture_output=True,
-                text=True,
-                check=True,
-            )
+            result = self._run(script, env)
+            assert result.returncode == 0, result.stdout + result.stderr
             created += re.findall(r"Backup created: (\S+)", result.stdout)
 
         assert len(created) == 2
         assert created[0] != created[1], created
+        backups = tmp_path / "backups"
         assert len(list(backups.glob("praho_backup_*.dump"))) == 2
+        assert list(backups.glob("*.partial")) == []
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("dump_fails", [False, True])
+    def test_every_run_removes_an_abandoned_partial_but_not_one_being_written(
+        self, tmp_path: Path, dump_fails: bool
+    ) -> None:
+        # A killed backup skips its EXIT trap, and the partial matched neither retention pattern.
+        # The cleanup runs before the dump, so a string of failing runs cannot pile them up either.
+        script, env = self._script(tmp_path, self.PG_DUMP_FAILS if dump_fails else self.PG_DUMP_WRITES)
+        backups = tmp_path / "backups"
+        backups.mkdir()
+        abandoned = backups / "praho_backup_20261001_020000_111.dump.partial"
+        being_written = backups / "praho_backup_20261008_020000_222.dump.partial"
+        for partial in (abandoned, being_written):
+            partial.write_bytes(b"x")
+        # A slow dump may not have written for some minutes; only a day of silence means abandoned.
+        for partial, age in ((abandoned, 2 * 86400), (being_written, 600)):
+            os.utime(partial, (time.time() - age, time.time() - age))
+        result = self._run(script, env)
+        assert (result.returncode != 0) == dump_fails, result.stdout + result.stderr
+        assert not abandoned.exists()
+        assert being_written.exists()
+
+    @pytest.mark.integration
+    def test_a_failed_dump_leaves_nothing_a_restore_could_pick(self, tmp_path: Path) -> None:
+        # pg_dump creates its output file before it connects, so a refused connection left an empty
+        # dump behind, and restore --latest drops the database before pg_restore rejects that file.
+        script, env = self._script(tmp_path, self.PG_DUMP_FAILS)
+        result = self._run(script, env)
+        assert result.returncode != 0
+        assert list((tmp_path / "backups").glob("praho_backup_*")) == []
 
 
 class TestDumpsStayOutOfTheCheckout:

@@ -53,27 +53,32 @@ get_latest_backup() {
     ls -t "${BACKUP_DIR}"/praho_backup_*.sql.gz 2>/dev/null | head -n1
 }
 
+# Everything but the chosen path goes to stderr: the caller captures stdout as the file to restore.
 list_and_select_backup() {
     local BACKUPS=($(ls -t "${BACKUP_DIR}"/praho_backup_*.sql.gz 2>/dev/null))
 
     if [ ${#BACKUPS[@]} -eq 0 ]; then
-        log_error "No backups found in ${BACKUP_DIR}"
+        log_error "No backups found in ${BACKUP_DIR}" >&2
         exit 1
     fi
 
-    echo "Available backups:"
-    echo ""
-    for i in "${!BACKUPS[@]}"; do
-        local SIZE=$(du -h "${BACKUPS[$i]}" | cut -f1)
-        local DATE=$(basename "${BACKUPS[$i]}" | sed 's/praho_backup_//' | sed 's/.sql.gz//')
-        echo "  $((i+1))) ${DATE} (${SIZE})"
-    done
-    echo ""
+    {
+        echo "Available backups:"
+        echo ""
+        for i in "${!BACKUPS[@]}"; do
+            local SIZE=$(du -h "${BACKUPS[$i]}" | cut -f1)
+            local DATE=$(basename "${BACKUPS[$i]}" .sql.gz)
+            DATE="${DATE#praho_backup_}"
+            # YYYYMMDD_HHMMSS, without the process id that newer names end in.
+            echo "  $((i+1))) ${DATE:0:15} (${SIZE})"
+        done
+        echo ""
+    } >&2
 
     read -p "Select backup number (1-${#BACKUPS[@]}): " SELECTION
 
     if [[ ! "$SELECTION" =~ ^[0-9]+$ ]] || [ "$SELECTION" -lt 1 ] || [ "$SELECTION" -gt ${#BACKUPS[@]} ]; then
-        log_error "Invalid selection"
+        log_error "Invalid selection" >&2
         exit 1
     fi
 
