@@ -15,8 +15,11 @@ accepts; there is no other or "legacy" format:
 1) METHOD (uppercased)
 2) PATH?QUERY exactly as Platform computes it from `request.get_full_path()`: the path in its
    percent-escaped form (a space is signed as `%20`, `ă` as `%C4%83`, `;` as `%3B`), then the
-   query params percent-encoded and sorted by key, then value. Params whose value is `None` are
-   left out, because the HTTP client never sends them.
+   query params percent-encoded and sorted by key, then value. The Portal derives this from the
+   request as it goes on the wire (after `requests` drops `None` params and re-quotes, and urllib3
+   removes dot segments), decoded the way the WSGI server and Django decode it. Signing the URL
+   as written instead is how signatures drift. Values that end up inside a path segment, such as
+   document numbers, must be quoted with `quote_path_segment()`, which refuses `.`, `..` and `/`.
 3) content-type lowercased, no parameters (e.g., application/json)
 4) body-hash as base64(SHA-256(raw body bytes))
 5) X-Portal-Id value
@@ -214,8 +217,10 @@ A 401 with `{"error": "HMAC authentication failed"}` means the route is not one 
 token can reach; only the token lifecycle routes are.
 
 From the Portal, that same body is Platform's single answer to every request-authentication
-failure: a wrong `PLATFORM_API_SECRET`, a timestamp outside the window, a replayed nonce, a body or
-path altered in transit, or a fault inside the validator. It never says which. Platform logs the
+failure: a signing secret that does not match (the Portal signs with `PORTAL_HMAC_SECRET`, else
+`PLATFORM_API_SECRET`; Platform verifies with `PLATFORM_API_SECRET` or the portal's
+`PORTAL_HMAC_CREDENTIALS` entry), a timestamp outside the window, a replayed nonce, a body or path
+altered in transit, or a fault inside the validator. It never says which. Platform logs the
 reason on a `[HMAC Auth] Authentication failed from <ip>: <reason>` line. The Portal treats the body
 as an outage: customers see the service-unavailable notice (not "invalid password", and no login
 attempt is counted), and the Portal logs one critical line per minute naming the usual causes.

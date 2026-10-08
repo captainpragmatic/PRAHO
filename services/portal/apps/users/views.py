@@ -1092,9 +1092,13 @@ def mfa_backup_codes_view(request: HttpRequest) -> HttpResponse:
             request.session.cycle_key()
             request.session["new_mfa_backup_codes"] = result["backup_codes"]
             return redirect("users:mfa_backup_codes")
-        except PlatformAPIError:
-            mark_auth_failure(request, bucket="reauth")
-            form.add_error(None, _("Could not regenerate codes. Check your password and authentication code."))
+        except PlatformAPIError as exc:
+            if exc.is_unavailable:
+                # Nothing was verified, so this is not a wrong credential and spends no attempt.
+                form.add_error(None, get_degraded_message(exc))
+            else:
+                mark_auth_failure(request, bucket="reauth")
+                form.add_error(None, _("Could not regenerate codes. Check your password and authentication code."))
 
     return render(
         request,
@@ -1127,9 +1131,13 @@ def mfa_disable_view(request: HttpRequest) -> HttpResponse:
                 return redirect("users:mfa_management")
             mark_auth_failure(request, bucket="reauth")
             form.add_error(None, _("Could not disable MFA. Check your password and authentication code."))
-        except PlatformAPIError:
-            mark_auth_failure(request, bucket="reauth")
-            form.add_error(None, _("Could not disable MFA. Check your password and authentication code."))
+        except PlatformAPIError as exc:
+            if exc.is_unavailable:
+                # Nothing was verified, so this is not a wrong credential and spends no attempt.
+                form.add_error(None, get_degraded_message(exc))
+            else:
+                mark_auth_failure(request, bucket="reauth")
+                form.add_error(None, _("Could not disable MFA. Check your password and authentication code."))
 
     return render(request, "users/mfa_disable.html", {"form": form})
 

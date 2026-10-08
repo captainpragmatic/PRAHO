@@ -369,11 +369,23 @@ class ServiceRequestViewTests(SimpleTestCase):
     def test_post_detail_outage_retains_bound_form_without_submitting_action(self) -> None:
         submission_id, _ = self._open_form()
         self.api.get_available_plans.reset_mock()
-        for status_code in (503, 502, 504, 500, None):
-            with self.subTest(status_code=status_code):
-                self.api.get_service_detail.side_effect = PlatformAPIError(
-                    "Service unavailable", status_code=status_code, retry_after=45
-                )
+        outages = [
+            PlatformAPIError("Service unavailable", status_code=status_code, retry_after=45)
+            for status_code in (503, 502, 504, 500, None)
+        ]
+        # Platform refusing the portal's signature: a 401 that is still an outage.
+        outages.append(
+            PlatformAPIError(
+                "Platform refused the portal's request authentication",
+                status_code=401,
+                response_data={"error": "HMAC authentication failed"},
+                retry_after=45,
+                is_unavailable=True,
+            )
+        )
+        for outage in outages:
+            with self.subTest(status_code=outage.status_code):
+                self.api.get_service_detail.side_effect = outage
                 response, _ = self._post(submission_id, action="cancel_request", reason="No longer needed")
                 self.assertContains(response, submission_id, status_code=503)
                 self.assertContains(response, "No longer needed", status_code=503)

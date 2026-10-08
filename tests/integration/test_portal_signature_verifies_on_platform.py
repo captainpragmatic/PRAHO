@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 from typing import Any, ClassVar
 
+from django.core.cache import cache
 from django.http import HttpRequest, HttpResponse
 from django.test import RequestFactory, SimpleTestCase, override_settings
 
@@ -30,7 +31,27 @@ CONFIGURATIONS = {
     "http-debug-off": {"DEBUG": False, "BASE_URL": "http://platform.example.test/api", "INSECURE": True},
     "https-debug-on": {"DEBUG": True, "BASE_URL": "https://platform.example.test/api", "INSECURE": False},
 }
-INVOICE_NUMBERS = {"plain": "INV-0001", "space": "INV 0001", "diacritic": "FACTă-1", "semicolon": "A;B=1"}
+# Raw paths: whatever the HTTP stack does to them on the way out, the signature must match.
+INVOICE_NUMBERS = {
+    "plain": "INV-0001",
+    "space": "INV 0001",
+    "diacritic": "FACTă-1",
+    "semicolon": "A;B=1",
+    "invalid-utf8-escape": "%C8",
+    "malformed-escape": "%C8%99%ZZ",
+    "dot-dot": "..",
+    "encoded-slash": "x%2Fpdf",
+    "bare-percent": "100%",
+}
+# Customer-typed document numbers through the real call site: each must arrive as exactly one
+# path segment, unchanged, or Platform would answer for a different route than the one named.
+DOCUMENT_NUMBERS = {
+    "plain": "INV-0001",
+    "diacritic": "FACTă-1",
+    "invalid-utf8-escape": "%C8",
+    "encoded-slash": "x%2Fpdf",
+    "newline": "a\nb",
+}
 CALLS = (
     "localisation",
     "login",
@@ -39,6 +60,7 @@ CALLS = (
     "binary",
     "binary-with-headers",
     *(f"invoice-{name}" for name in INVOICE_NUMBERS),
+    *(f"document-{name}" for name in DOCUMENT_NUMBERS),
 )
 
 # Runs with services/portal as the working directory, so `apps` is the Portal's package.
@@ -111,6 +133,8 @@ def calls(client):
         yield f"invoice-{name}", lambda number=number: client._make_request(
             "GET", f"/billing/invoices/{number}/", user_id=1
         )
+    for name, number in DOCUMENT_NUMBERS.items():
+        yield f"document-{name}", lambda number=number: client.get_invoice_detail_secure(1, number)
 
 
 with patch("apps.api_client.services.portal_request", side_effect=transport):
@@ -141,6 +165,7 @@ def _record_portal_requests() -> list[dict[str, Any]]:
     constants = (
         f"SECRET = {SECRET!r}\nPORTAL_ID = {PORTAL_ID!r}\n"
         f"CONFIGURATIONS = {CONFIGURATIONS!r}\nINVOICE_NUMBERS = {INVOICE_NUMBERS!r}\n"
+        f"DOCUMENT_NUMBERS = {DOCUMENT_NUMBERS!r}\n"
     )
     completed = subprocess.run(  # noqa: S603 -- fixed interpreter and a test-owned script
         [sys.executable, "-c", constants + PORTAL_RECORDER],
@@ -175,9 +200,10 @@ class PortalSignatureVerifiesOnPlatformTests(SimpleTestCase):
         reached: list[str] = []
 
         def view(request: HttpRequest) -> HttpResponse:
-            reached.append(request.get_full_path())
+            reached.append(request.path)
             return HttpResponse("view reached")
 
+        cache.clear()  # each test replays every record; a nonce is accepted once
         headers = record["headers"]
         request = RequestFactory().generic(
             record["method"],
@@ -212,3 +238,13 @@ class PortalSignatureVerifiesOnPlatformTests(SimpleTestCase):
                 response, reached = self._replay(record)
                 self.assertEqual(response.status_code, 200, response.content)
                 self.assertEqual(len(reached), 1)
+
+    def test_document_numbers_reach_platform_as_one_unchanged_segment(self) -> None:
+        documents = [record for record in self.records if record["call"].startswith("document-")]
+        self.assertEqual(len(documents), len(CONFIGURATIONS) * len(DOCUMENT_NUMBERS))
+        for record in documents:
+            number = DOCUMENT_NUMBERS[record["call"].removeprefix("document-")]
+            with self.subTest(configuration=record["configuration"], number=number):
+                response, reached = self._replay(record)
+                self.assertEqual(response.status_code, 200, response.content)
+                self.assertEqual(reached, [f"/api/billing/invoices/{number}/"])

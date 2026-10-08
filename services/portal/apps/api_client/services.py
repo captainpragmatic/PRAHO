@@ -34,7 +34,8 @@ from typing import Any, cast
 import requests
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
-from django.utils.encoding import escape_uri_path
+from django.utils.encoding import escape_uri_path, repercent_broken_unicode
+from urllib3.util import parse_url
 
 from apps.common.outbound_http import OutboundSecurityError, portal_request
 from apps.common.retry_after import coerce_retry_after_seconds
@@ -63,16 +64,35 @@ class _SignatureRejectionLogGate:
 
     def __init__(self) -> None:
         self.last_logged_at: float | None = None
+        self._lock = threading.Lock()
 
     def should_log(self) -> bool:
-        now = time.monotonic()
-        if self.last_logged_at is not None and now - self.last_logged_at < SIGNATURE_REJECTION_LOG_INTERVAL_SECONDS:
-            return False
-        self.last_logged_at = now
-        return True
+        with self._lock:
+            now = time.monotonic()
+            if self.last_logged_at is not None and now - self.last_logged_at < SIGNATURE_REJECTION_LOG_INTERVAL_SECONDS:
+                return False
+            self.last_logged_at = now
+            return True
 
 
 _signature_rejection_log_gate = _SignatureRejectionLogGate()
+
+
+def quote_path_segment(value: object) -> str:
+    """Quote a caller-supplied value as exactly one path segment of a Platform URL.
+
+    Invoice, proforma and ticket numbers come from the customer's URL. Unquoted, `x%2Fpdf`
+    reaches Platform as `x/pdf` (another route) and `..` is removed by urllib3, so the request
+    lands on a different endpoint than the one the code named. Every character outside the
+    unreserved set is escaped. A value that cannot survive as one segment is refused rather
+    than escaped: `requests` turns `%2E` back into `.`, and Django decodes `%2F` to `/` before
+    routing, so no spelling of `..` or `a/b` keeps its meaning on Platform.
+    """
+    text = str(value)
+    if text in {"", ".", ".."} or "/" in text:
+        raise ValueError(f"Not a single path segment: {text!r}")
+    return urllib.parse.quote(text, safe="")
+
 
 HMAC_TIMING_THRESHOLD = 0.002
 
@@ -133,7 +153,8 @@ class PlatformAPIError(Exception):
         # outage from either, so a maintenance window rendered as "you have nothing yet".
         #
         # Two flags rather than one, because the customer messages are not interchangeable.
-        # `is_unavailable` is "the platform is not answering right now" and covers 502/503/504 - all
+        # `is_unavailable` is "the platform is not answering right now" and covers 502/503/504 (and,
+        # set explicitly, Platform refusing the portal's request authentication: a 401) - all
         # three must be surfaced rather than rendered as an empty list, and the first version of this
         # change covered only 503.
         self.is_unavailable = bool(
@@ -214,15 +235,13 @@ class PlatformAPIClient:
         # Normalize content type (lowercase, no parameters)
         content_type = "application/json"
 
-        # Normalize path+query to match platform canonicalization. Platform signs
-        # `request.get_full_path()`, which re-escapes the decoded path, so a raw space,
-        # diacritic or `;` must be signed in that escaped spelling, not as written.
+        # `path` is already Platform's spelling (see `_normalized_path_with_query`); only the
+        # query order is normalised here, which is idempotent for that input.
         parsed = urllib.parse.urlsplit(path)
         query_pairs = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
         query_pairs.sort(key=lambda kv: (kv[0], kv[1]))
         normalized_query = urllib.parse.urlencode(query_pairs, doseq=True)
-        platform_path = escape_uri_path(urllib.parse.unquote(parsed.path))
-        normalized_path = platform_path + ("?" + normalized_query if normalized_query else "")
+        normalized_path = parsed.path + ("?" + normalized_query if normalized_query else "")
 
         # Build canonical string for signing (Phase 2 strict)
         canonical_string = "\n".join(
@@ -278,23 +297,21 @@ class PlatformAPIClient:
         return body_bytes, serialized_payload
 
     def _normalized_path_with_query(self, url: str, params: dict[str, Any] | None) -> str:
-        parsed_url = urllib.parse.urlsplit(url)
-        pairs = urllib.parse.parse_qsl(parsed_url.query, keep_blank_values=True)
-        if params:
-            for k, v in params.items():
-                # `requests` leaves None-valued params off the wire, so signing them as the
-                # string "None" would describe a query Platform never receives.
-                if v is None:
-                    continue
-                if isinstance(v, list | tuple):
-                    for item in v:
-                        if item is not None:
-                            pairs.append((str(k), str(item)))
-                else:
-                    pairs.append((str(k), str(v)))
+        """The path and query Platform will verify, derived from what actually goes on the wire.
+
+        Platform signs `request.get_full_path()`. Signing the URL as written drifts from that
+        whenever the HTTP stack rewrites it: `requests` drops None-valued params and re-quotes a
+        malformed `%`, urllib3 removes `.`/`..` segments, and Django re-percents invalid UTF-8.
+        So the request is prepared exactly as `portal_request` will send it, the target is taken
+        as urllib3 encodes it, and the path is decoded the way the WSGI server and Django do.
+        """
+        prepared = requests.Request("GET", url, params=params).prepare()
+        target = urllib.parse.urlsplit(parse_url(prepared.path_url or "/").url)
+        decoded_path = repercent_broken_unicode(urllib.parse.unquote_to_bytes(target.path or "/")).decode()
+        pairs = urllib.parse.parse_qsl(target.query, keep_blank_values=True)
         pairs.sort(key=lambda kv: (kv[0], kv[1]))
         normalized_query = urllib.parse.urlencode(pairs, doseq=True)
-        return parsed_url.path + ("?" + normalized_query if normalized_query else "")
+        return escape_uri_path(decoded_path) + ("?" + normalized_query if normalized_query else "")
 
     def _prepare_request_headers(
         self, method: str, url: str, params: dict[str, Any] | None, body: bytes, body_ts: str | None
@@ -372,9 +389,11 @@ class PlatformAPIClient:
             return
         if _signature_rejection_log_gate.should_log():
             logger.critical(
-                "🔥 [API Client] Platform refused the authentication of a request to %s. Platform's log names the "
+                "🔥 [API Client] Platform refused the authentication of a request to %r. Platform's log names the "
                 "reason on its '[HMAC Auth] Authentication failed from <ip>: <reason>' line. Usual causes: "
-                "the portal's signing secret (PLATFORM_API_SECRET) differs from Platform's; the portal clock is more than "
+                "the portal's signing secret (PORTAL_HMAC_SECRET, else PLATFORM_API_SECRET) does not match what Platform "
+                "verifies for this PORTAL_ID (PLATFORM_API_SECRET, or its PORTAL_HMAC_CREDENTIALS entry); the portal "
+                "clock is more than "
                 "%ss behind or %ss ahead of Platform's; a proxy altered the request body or path. "
                 "Customers see the service-unavailable notice until it is fixed (logged once per %ss).",
                 endpoint,
@@ -1066,7 +1085,7 @@ class PlatformAPIClient:
             "timestamp": time.time(),
         }
         return self._make_request(
-            "POST", f"/api/billing/invoices/{invoice_number}/", data=request_data, idempotent=True
+            "POST", f"/api/billing/invoices/{quote_path_segment(invoice_number)}/", data=request_data, idempotent=True
         )
 
     def get_proforma_detail_secure(self, customer_id: int, proforma_number: str) -> dict[str, Any]:
@@ -1078,7 +1097,7 @@ class PlatformAPIClient:
             "timestamp": time.time(),
         }
         return self._make_request(
-            "POST", f"/api/billing/proformas/{proforma_number}/", data=request_data, idempotent=True
+            "POST", f"/api/billing/proformas/{quote_path_segment(proforma_number)}/", data=request_data, idempotent=True
         )
 
     # ===============================================================================
@@ -1098,7 +1117,9 @@ class PlatformAPIClient:
             "action": "get_ticket_detail",
             "timestamp": time.time(),
         }
-        return self._make_request("POST", f"/api/tickets/{ticket_number}/", data=request_data, idempotent=True)
+        return self._make_request(
+            "POST", f"/api/tickets/{quote_path_segment(ticket_number)}/", data=request_data, idempotent=True
+        )
 
     def create_ticket_secure(self, customer_id: int, ticket_data: dict[str, Any]) -> dict[str, Any]:
         """🔒 Create ticket - SECURE HMAC BODY"""
@@ -1114,7 +1135,7 @@ class PlatformAPIClient:
             "action": "reply_to_ticket",
             "timestamp": time.time(),
         }
-        return self._make_request("POST", f"/api/tickets/{ticket_number}/reply/", data=request_data)
+        return self._make_request("POST", f"/api/tickets/{quote_path_segment(ticket_number)}/reply/", data=request_data)
 
     # ===============================================================================
     # SECURE SERVICES API ENDPOINTS 📦

@@ -483,7 +483,9 @@ def _service_request_load_error(request: HttpRequest, error: PlatformAPIError, c
     if request.method == "GET" and is_unavailable_error(error):
         return render_platform_unavailable(request, error)
     if request.method == "POST" and (
-        error.status_code is None or error.status_code >= HTTPStatus.INTERNAL_SERVER_ERROR
+        is_unavailable_error(error)
+        or error.status_code is None
+        or error.status_code >= HTTPStatus.INTERNAL_SERVER_ERROR
     ):
         if is_unavailable_error(error):
             context.update(build_maintenance_context(request, error))
