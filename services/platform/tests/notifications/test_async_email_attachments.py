@@ -83,9 +83,7 @@ class RetryPathAttachmentTestCase(TestCase):
     attachments — a retried proforma email must not arrive without its PDF."""
 
     def _email_log_id(self) -> str:
-        result = EmailService.send_email(
-            to="customer@example.ro", subject="seed", body_text="seed", async_send=False
-        )
+        result = EmailService.send_email(to="customer@example.ro", subject="seed", body_text="seed", async_send=False)
         mail.outbox.clear()
         return str(result.email_log_id)
 
@@ -109,8 +107,10 @@ class RetryPathAttachmentTestCase(TestCase):
 
     @patch("django_q.tasks.async_task")
     def test_schedule_email_retry_forwards_attachments_to_the_task(self, mock_async) -> None:
+        result = EmailService.send_email(to="customer@example.ro", subject="seed", body_text="seed", async_send=False)
+        self.assertTrue(result.success)
         _schedule_email_retry(
-            email_log_id="log-1",
+            email_log_id=str(result.email_log_id),
             to=["customer@example.ro"],
             subject="s",
             body_text="b",

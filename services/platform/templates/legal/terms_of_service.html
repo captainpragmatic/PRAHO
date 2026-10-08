@@ -5,6 +5,7 @@
 {% block title %}{% trans "Terms of Service" %} - PRAHO Platform{% endblock %}
 
 {% block content %}
+{% setting "company.legal_name" as legal_name %}
 <div class="max-w-4xl mx-auto px-4 py-8">
     <!-- Header -->
     <div class="mb-8">
@@ -41,16 +42,16 @@
         <section id="acceptance" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
             <h2 class="text-xl font-semibold text-white mb-4">1. {% trans "Acceptance of Terms" %}</h2>
             <p class="text-slate-300 mb-4">
-                {% filter force_escape %}{% blocktrans %}
-                By accessing or using the PRAHO Platform services provided by PragmaticHost SRL ("Company", "we", "us", "our"),
+                {% blocktrans %}
+                By accessing or using the PRAHO Platform services provided by {{ legal_name }} ("Company", "we", "us", "our"),
                 you ("Customer", "you", "your") agree to be bound by these Terms of Service ("Terms").
-                {% endblocktrans %}{% endfilter %}
+                {% endblocktrans %}
             </p>
             <p class="text-slate-300 mb-4">
-                {% filter force_escape %}{% blocktrans %}
+                {% blocktrans %}
                 If you do not agree to these Terms, you may not access or use our services. These Terms constitute
-                a legally binding agreement between you and PragmaticHost SRL.
-                {% endblocktrans %}{% endfilter %}
+                a legally binding agreement between you and {{ legal_name }}.
+                {% endblocktrans %}
             </p>
             <div class="bg-amber-900/30 rounded p-4 border border-amber-700">
                 <p class="text-amber-300 text-sm">
@@ -66,9 +67,9 @@
         <section id="services" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
             <h2 class="text-xl font-semibold text-white mb-4">2. {% trans "Description of Services" %}</h2>
             <p class="text-slate-300 mb-4">
-                {% filter force_escape %}{% blocktrans %}
-                PragmaticHost SRL provides web hosting and related services through the PRAHO Platform, including but not limited to:
-                {% endblocktrans %}{% endfilter %}
+                {% blocktrans %}
+                {{ legal_name }} provides web hosting and related services through the PRAHO Platform, including but not limited to:
+                {% endblocktrans %}
             </p>
             <ul class="list-disc list-inside text-slate-300 space-y-2">
                 <li>{% trans "Shared and VPS web hosting" %}</li>
@@ -200,10 +201,10 @@
 
             <h3 class="text-lg font-medium text-white mt-4 mb-3">{% trans "6.1 Our Property" %}</h3>
             <p class="text-slate-300 mb-4">
-                {% filter force_escape %}{% blocktrans %}
+                {% blocktrans %}
                 The PRAHO Platform, including its software, design, logos, and documentation, is owned by
-                PragmaticHost SRL and protected by intellectual property laws.
-                {% endblocktrans %}{% endfilter %}
+                {{ legal_name }} and protected by intellectual property laws.
+                {% endblocktrans %}
             </p>
 
             <h3 class="text-lg font-medium text-white mt-6 mb-3">{% trans "6.2 Your Content" %}</h3>

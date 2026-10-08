@@ -32,6 +32,17 @@ MAX_PHONE_PREFIX_DIGITS = 9
 MIN_PHONE_DIGITS = 6
 
 
+class OneTimeCodeInput(forms.TextInput):
+    """A visible code field that, like PasswordInput, never redisplays a submitted value.
+
+    Authenticator and recovery codes are secrets; they must not be echoed back into the page
+    when the form is re-rendered with errors. They stay visible while typing, unlike passwords.
+    """
+
+    def format_value(self, value: object) -> None:
+        return None
+
+
 class CustomerLoginForm(forms.Form):
     """
     Customer login form with dark theme styling.
@@ -65,7 +76,7 @@ class CustomerLoginForm(forms.Form):
         required=False,
         max_length=8,
         help_text=_("Required only when two-factor authentication is enabled."),
-        widget=forms.TextInput(attrs={"autocomplete": "one-time-code", "inputmode": "numeric"}),
+        widget=OneTimeCodeInput(attrs={"autocomplete": "one-time-code", "inputmode": "numeric"}),
     )
 
     remember_me = forms.BooleanField(
@@ -417,7 +428,8 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
             return response
 
         except PlatformAPIError as e:
-            if e.is_rate_limited:
+            # Refusals the customer cannot fix by editing the form go back to the view
+            if e.is_rate_limited or e.is_unavailable:
                 raise
             logger.error(f"🔥 [Portal Registration] Platform API error: {e}")
             return None
@@ -518,7 +530,7 @@ class TwoFactorSetupForm(forms.Form):
         label=_("Verification Code"),
         max_length=6,
         min_length=6,
-        widget=forms.TextInput(
+        widget=OneTimeCodeInput(
             attrs={
                 "class": "w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg text-center focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400",
                 "placeholder": "123456",
@@ -544,7 +556,7 @@ class TwoFactorVerifyForm(forms.Form):
         label=_("2FA Code"),
         max_length=8,
         min_length=6,
-        widget=forms.TextInput(
+        widget=OneTimeCodeInput(
             attrs={
                 "class": "w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg text-center focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400",
                 "placeholder": "123456",
@@ -619,6 +631,7 @@ class ChangePasswordForm(forms.Form):
         required=False,
         max_length=8,
         help_text=_("Required only when two-factor authentication is enabled."),
+        widget=OneTimeCodeInput(attrs={"autocomplete": "one-time-code", "inputmode": "numeric"}),
     )
 
     current_password = forms.CharField(

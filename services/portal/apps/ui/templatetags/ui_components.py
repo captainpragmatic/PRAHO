@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from typing import TYPE_CHECKING, Any
 
 from django import template
 from django.conf import settings
-from django.forms import CheckboxInput, Select, Textarea
+from django.forms import BoundField, CheckboxInput, PasswordInput, Select, Textarea
 from django.template.base import FilterExpression
 from django.template.base import token_kwargs as django_token_kwargs
 from django.utils.html import format_html
@@ -97,6 +97,8 @@ class HTMXAttributes:
     hx_include: str | None = None
     hx_sync: str | None = None
     hx_boost: bool = False
+    hx_vals: str | None = None
+    hx_headers: str | None = None
 
 
 @dataclass
@@ -126,6 +128,7 @@ class InputConfig:
     """Parameter object for input field configuration"""
 
     input_type: str = "text"
+    checked: bool = False
     value: str | None = None
     label: str | None = None
     placeholder: str | None = None
@@ -231,7 +234,7 @@ class DataTableConfig:
     pagination: bool | Any = True  # Can be bool or a Django Paginator object at runtime
     actions: list[dict[str, Any]] | None = None
     css_class: str = ""
-    empty_message: str = "No data available."
+    empty_message: str | _StrPromise = field(default_factory=lambda: _("No data available."))
 
 
 @register.inclusion_tag("components/button.html")
@@ -290,6 +293,8 @@ def button(
         "hx_select": htmx.hx_select,
         "hx_include": htmx.hx_include,
         "hx_boost": htmx.hx_boost,
+        "hx_vals": htmx.hx_vals,
+        "hx_headers": htmx.hx_headers,
         "icon": config.icon,
         "icon_right": config.icon_right,
         "disabled": config.disabled,
@@ -330,6 +335,7 @@ def input_field(
     return {
         "name": name,
         "input_type": config.input_type,
+        "checked": config.checked,
         "value": config.value,
         "label": config.label,
         "placeholder": config.placeholder,
@@ -350,6 +356,8 @@ def input_field(
         "hx_include": htmx.hx_include,
         "hx_sync": htmx.hx_sync,
         "hx_indicator": htmx.hx_indicator,
+        "hx_vals": htmx.hx_vals,
+        "hx_headers": htmx.hx_headers,
         "options": config.options,
         "romanian_validation": config.romanian_validation,
         "has_error": bool(config.error),
@@ -469,7 +477,7 @@ def alert(message: str, *, config: AlertConfig | None = None, **kwargs: Any) -> 
 
 
 @register.inclusion_tag("components/input.html")
-def form_field(field: Any, *, icon_left: str | None = None, **kwargs: str) -> dict[str, Any]:
+def form_field(field: BoundField, *, icon_left: str | None = None, **kwargs: str) -> dict[str, object]:
     """
     Bridge tag: renders a Django BoundField via the {% input_field %} component.
 
@@ -515,9 +523,11 @@ def form_field(field: Any, *, icon_left: str | None = None, **kwargs: str) -> di
         first_error = str(field.errors[0])
 
     # ── Current value ──
-    value = field.value()
-    formatted_value = widget.format_value(value)
-    value_str: str = str(formatted_value) if formatted_value is not None else ""
+    # Match PasswordInput: redisplay a secret only when explicitly enabled.
+    value_str: str | None = None
+    if not isinstance(widget, PasswordInput) or widget.render_value:
+        formatted_value = widget.format_value(field.value())
+        value_str = str(formatted_value) if formatted_value is not None else ""
 
     # ── Label text ──
     label = str(field.label) if field.label else None
@@ -1722,9 +1732,22 @@ _TAG_ARGUMENTS: dict[str, frozenset[str]] = {
         "hx_select",
         "hx_include",
         "hx_boost",
+        "hx_vals",
+        "hx_headers",
     ),
     "input_field": _fields(InputConfig)
-    | _htmx("hx_get", "hx_post", "hx_trigger", "hx_target", "hx_swap", "hx_include", "hx_sync", "hx_indicator"),
+    | _htmx(
+        "hx_get",
+        "hx_post",
+        "hx_trigger",
+        "hx_target",
+        "hx_swap",
+        "hx_include",
+        "hx_sync",
+        "hx_indicator",
+        "hx_vals",
+        "hx_headers",
+    ),
     "checkbox_field": _fields(CheckboxConfig) | _htmx("hx_get", "hx_post", "hx_trigger", "hx_target", "hx_swap"),
     "alert": _fields(AlertConfig),
     "modal": _fields(ModalConfig),

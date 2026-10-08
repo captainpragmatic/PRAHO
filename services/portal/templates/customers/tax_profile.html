@@ -30,48 +30,27 @@
 
             <!-- CUI -->
             <div class="mb-5">
-                <label for="cui" class="block text-sm font-medium text-slate-300 mb-2">
-                    {% trans "CUI (Romanian Company ID)" %}
-                </label>
-                <input type="text" id="cui" name="cui"
-                       value="{{ tax_data.cui|default:'' }}"
-                       class="w-full bg-slate-700 border border-slate-600 text-slate-100 text-sm rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono placeholder-slate-500"
-                       placeholder="RO12345678">
+                {% trans "CUI (Romanian Company ID)" as field_label %}
+                {% input_field "cui" input_type="text" html_id="cui" label=field_label value=tax_data.cui|default:'' placeholder="RO12345678" css_class="font-mono" %}
             </div>
 
             <!-- VAT Number -->
             <div class="mb-5">
-                <label for="vat_number" class="block text-sm font-medium text-slate-300 mb-2">
-                    {% trans "VAT Number" %}
-                </label>
-                <input type="text" id="vat_number" name="vat_number"
-                       value="{{ tax_data.vat_number|default:'' }}"
-                       class="w-full bg-slate-700 border border-slate-600 text-slate-100 text-sm rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono placeholder-slate-500"
-                       placeholder="RO12345678">
+                {% trans "VAT Number" as field_label %}
+                {% input_field "vat_number" input_type="text" html_id="vat_number" label=field_label value=tax_data.vat_number|default:'' placeholder="RO12345678" css_class="font-mono" %}
             </div>
 
             <!-- Trade Registry Number -->
             <div class="mb-5">
-                <label for="trade_registry_number" class="block text-sm font-medium text-slate-300 mb-2">
-                    {% trans "Trade Registry Number" %}
-                </label>
-                <input type="text" id="trade_registry_number" name="trade_registry_number"
-                       value="{{ tax_data.registration_number|default:'' }}"
-                       class="w-full bg-slate-700 border border-slate-600 text-slate-100 text-sm rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono placeholder-slate-500"
-                       placeholder="J40/1234/2020">
+                {% trans "Trade Registry Number" as field_label %}
+                {% input_field "trade_registry_number" input_type="text" html_id="trade_registry_number" label=field_label value=tax_data.registration_number|default:'' placeholder="J40/1234/2020" css_class="font-mono" %}
             </div>
 
             <!-- VAT Payer -->
             <div class="mb-5">
-                <label class="flex items-center space-x-3 cursor-pointer">
-                    <input type="checkbox" name="is_vat_payer" id="is_vat_payer"
-                           {% if tax_data.is_vat_payer %}checked{% endif %}
-                           class="w-5 h-5 rounded border-slate-600 bg-slate-700 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-900">
-                    <div>
-                        <span class="text-sm font-medium text-slate-300">{% trans "VAT Payer" %}</span>
-                        <p class="text-xs text-slate-500">{% trans "Check if your company is registered for VAT" %}</p>
-                    </div>
-                </label>
+                {% trans "VAT Payer" as vat_label %}
+                {% trans "Check if your company is registered for VAT" as vat_help %}
+                {% checkbox_field "is_vat_payer" html_id="is_vat_payer" label=vat_label checked=tax_data.is_vat_payer help_text=vat_help %}
             </div>
 
             <div class="mb-6">
@@ -85,11 +64,8 @@
 
             <!-- Submit -->
             <div class="flex items-center justify-end gap-4">
-                <button type="submit"
-                        class="inline-flex items-center px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-slate-900 transition-colors">
-                    {% icon "save" size="sm" css_class="mr-2" %}
-                    {% trans "Save Tax Profile" %}
-                </button>
+                {% trans "Save Tax Profile" as submit_label %}
+                {% button submit_label type="submit" variant="primary" icon="save" %}
             </div>
         </form>
 

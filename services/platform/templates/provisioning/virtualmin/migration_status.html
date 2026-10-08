@@ -11,7 +11,7 @@
         {% csrf_token %}
         <input type="hidden" name="migration_id" value="{{ migration.pk }}">
 
-        <input type="text" name="note" maxlength="200" placeholder="{% trans 'What was repaired manually?' %}" class="w-full rounded border border-slate-600 bg-slate-900 p-2 text-slate-100">
+        <input type="text" aria-label="{% trans 'Migration resolution note' %}" name="note" maxlength="200" placeholder="{% trans 'What was repaired manually?' %}" class="w-full rounded border border-slate-600 bg-slate-900 p-2 text-slate-100">
         <button type="submit" class="rounded bg-amber-600 px-3 py-2 text-white">{% trans "Mark resolved" %}</button>
       </form>
     {% elif migration.status == "completed" %}

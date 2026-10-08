@@ -1,7 +1,7 @@
 {% load i18n ui_components %}
 
 <!-- Error Message Component (HTMX Response) -->
-<div class="fixed top-4 right-4 bg-red-600 text-white px-4 py-3 rounded-lg shadow-lg z-50 max-w-sm"
+<div class="fixed top-4 right-4 bg-red-600 text-white px-4 py-3 rounded-lg shadow-lg z-50 max-w-sm" {# tmpl-allow TMPL005: needs alert alpine_transition #}
      id="error-notification"
      x-data="autoDismiss(5000)"
      x-show="show"
@@ -18,6 +18,7 @@
       <p class="font-medium">{% trans "Error" %}</p>
       <p class="text-sm opacity-90 mt-1">{{ error }}</p>
     </div>
+    {# tmpl-allow TMPL002: icon-only dismiss button with translated aria-label #}
     <button data-action="dismiss" data-dismiss-target="#error-notification"
             class="ml-2 text-white hover:text-gray-300 transition-colors"
             aria-label="{% trans 'Close notification' %}">

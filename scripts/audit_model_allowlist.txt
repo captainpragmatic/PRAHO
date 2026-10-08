@@ -16,6 +16,7 @@
 # ── 1. Audit infrastructure (self-referential — auditing these is circular) ───
 audit.AuditEvent                # the audit trail itself
 audit.AuditAlert                # audit subsystem alert record
+settings.SettingActivation     # durable activation receipt; value saves and required alerts are audited atomically
 audit.AuditEventReview          # manual review sign-off; the review action logs its own AuditEvent in the view, a signal would double-log
 audit.AuditIntegrityCheck       # audit chain integrity verification
 audit.AuditChainHead            # hash-chain cursor (#313) — auditing it would recurse on every append

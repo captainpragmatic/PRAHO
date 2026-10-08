@@ -66,8 +66,8 @@
 
                 <div class="grid grid-cols-2 gap-6">
                     <div>
-                        <label class="block text-sm font-medium text-slate-300 mb-2">{% trans "Cloud Provider" %}</label>
-                        <select name="provider" x-model="provider" @change="updateRegions()"
+                        <label for="id_provider" class="block text-sm font-medium text-slate-300 mb-2">{% trans "Cloud Provider" %}</label>
+                        <select id="id_provider" name="provider" x-model="provider" @change="updateRegions()"
                                 class="w-full bg-slate-700 border-slate-600 rounded-lg text-white px-4 py-2">
                             <option value="">{% trans "Select Provider" %}</option>
                             {% for provider in form.provider.field.queryset %}
@@ -76,8 +76,8 @@
                         </select>
                     </div>
                     <div>
-                        <label class="block text-sm font-medium text-slate-300 mb-2">{% trans "Region" %}</label>
-                        <select name="region" x-model="region" @change="updateHostname()"
+                        <label for="id_region" class="block text-sm font-medium text-slate-300 mb-2">{% trans "Region" %}</label>
+                        <select id="id_region" name="region" x-model="region" @change="updateHostname()"
                                 class="w-full bg-slate-700 border-slate-600 rounded-lg text-white px-4 py-2">
                             <option value="">{% trans "Select Region" %}</option>
                             <template x-for="r in filteredRegions" :key="r.id">
@@ -95,7 +95,7 @@
                 <div class="grid grid-cols-3 gap-4">
                     <template x-for="size in filteredSizes" :key="size.id">
                         <label class="relative cursor-pointer">
-                            <input type="radio" name="node_size" :value="size.id" x-model="nodeSize" class="sr-only peer">
+                            <input type="radio" name="node_size" aria-label="{% trans 'Node size' %}" :aria-label="size.display_name" :value="size.id" x-model="nodeSize" class="sr-only peer">
                             <div class="p-4 bg-slate-700 rounded-lg border-2 border-transparent peer-checked:border-blue-500 hover:bg-slate-600 transition-all">
                                 <div class="text-white font-medium" x-text="size.name"></div>
                                 <div class="text-slate-400 text-sm" x-text="size.display_name"></div>
@@ -119,8 +119,8 @@
 
                 <div class="grid grid-cols-2 gap-6 mb-6">
                     <div>
-                        <label class="block text-sm font-medium text-slate-300 mb-2">{% trans "Control Panel" %}</label>
-                        <select name="panel_type" class="w-full bg-slate-700 border-slate-600 rounded-lg text-white px-4 py-2">
+                        <label for="id_panel_type" class="block text-sm font-medium text-slate-300 mb-2">{% trans "Control Panel" %}</label>
+                        <select id="id_panel_type" name="panel_type" class="w-full bg-slate-700 border-slate-600 rounded-lg text-white px-4 py-2">
                             {% for panel in form.panel_type.field.queryset %}
                             <option value="{{ panel.id }}" {% if panel.panel_type == 'virtualmin' %}selected{% endif %}>
                                 {{ panel.name }}{% if panel.version %} v{{ panel.version }}{% endif %}
@@ -157,11 +157,11 @@
                     <div class="flex items-center justify-between">
                         <div>
                             <label class="block text-sm font-medium text-slate-400">{% trans "Hostname" %}</label>
-                            <p class="text-xl font-mono text-white" x-text="hostname || '---'"></p>
+                            <p class="text-xl font-mono text-white" x-text="hostname ? hostname : '---'"></p>
                         </div>
                         <div>
                             <label class="block text-sm font-medium text-slate-400">{% trans "FQDN" %}</label>
-                            <p class="text-lg font-mono text-slate-300" x-text="fqdn || '---'"></p>
+                            <p class="text-lg font-mono text-slate-300" x-text="fqdn ? fqdn : '---'"></p>
                         </div>
                     </div>
                 </div>

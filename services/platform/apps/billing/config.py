@@ -161,7 +161,7 @@ def get_event_grace_period_hours() -> int:
     """Get grace period for accepting late usage events (hours) from SettingsService."""
     try:
         return max(
-            1,
+            0,
             SettingsService.get_integer_setting("billing.event_grace_period_hours", _DEFAULT_EVENT_GRACE_PERIOD_HOURS),
         )
     except Exception:
@@ -244,25 +244,6 @@ DEFAULT_USAGE_THRESHOLDS = (
     Decimal("0.90"),  # 90%
     Decimal("1.00"),  # 100%
 )
-
-# Module-level fallback for alert cooldown
-_DEFAULT_ALERT_COOLDOWN_HOURS = 24
-
-
-def get_alert_cooldown_hours() -> int:
-    """Get hours between repeat notifications for same threshold from SettingsService."""
-    try:
-        return max(
-            1, SettingsService.get_integer_setting("billing.alert_cooldown_hours", _DEFAULT_ALERT_COOLDOWN_HOURS)
-        )
-    except Exception:
-        logger.warning("Failed to read alert_cooldown_hours from SettingsService, using fallback", exc_info=True)
-        return _get_positive_int("BILLING_ALERT_COOLDOWN_HOURS", _DEFAULT_ALERT_COOLDOWN_HOURS)
-
-
-# Backward-compatible module-level alias
-DEFAULT_ALERT_COOLDOWN_HOURS = _DEFAULT_ALERT_COOLDOWN_HOURS
-
 
 # ===============================================================================
 # HELPER FUNCTIONS

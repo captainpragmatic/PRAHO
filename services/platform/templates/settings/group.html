@@ -94,7 +94,7 @@
 
         <div x-show="dirtyCount > 0" x-cloak class="sticky bottom-4 mt-6 bg-slate-800/95 backdrop-blur border border-slate-600 rounded-xl shadow-2xl px-4 py-3 flex flex-col sm:flex-row items-center gap-3">
           <span class="text-sm text-white font-medium" x-text="dirtyCount + ' {% trans "unsaved change(s)" %}'"></span>
-          <input type="text" x-model="reason" placeholder="{% trans 'Reason (optional, recorded in audit log)' %}" class="flex-1 w-full px-3 py-2 bg-slate-900/60 border border-slate-600 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500">
+          <input type="text" aria-label="{% trans 'Reason for change' %}" x-model="reason" placeholder="{% trans 'Reason (optional, recorded in audit log)' %}" class="flex-1 w-full px-3 py-2 bg-slate-900/60 border border-slate-600 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500">
           <div class="flex gap-2">
             <button type="button" @click="discard()" class="px-3 py-2 text-sm text-slate-300 hover:text-white">{% trans "Discard" %}</button>
             <button type="button" :disabled="saving" @click="save()" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50" x-text="saving ? '{% trans "Saving…" %}' : '{% trans "Save changes" %}'"></button>

@@ -30,10 +30,12 @@ import json
 import logging
 import time
 from collections.abc import Callable
+from contextlib import nullcontext
 from functools import wraps
 from typing import Any
 
 from django.conf import settings
+from django.db import DatabaseError, InterfaceError, transaction
 from django.http import HttpRequest, HttpResponse
 
 from apps.common.logging import (
@@ -56,7 +58,12 @@ def get_max_header_json_length() -> int:
         SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
     )
 
-    return SettingsService.get_integer_setting("common.max_header_json_length", _DEFAULT_MAX_HEADER_JSON_LENGTH)
+    try:
+        with transaction.atomic() if transaction.get_connection().in_atomic_block else nullcontext():
+            return SettingsService.get_integer_setting("common.max_header_json_length", _DEFAULT_MAX_HEADER_JSON_LENGTH)
+    except (DatabaseError, InterfaceError, RuntimeError, AssertionError):
+        # Optional diagnostics must also work when settings storage is unavailable or forbidden.
+        return _DEFAULT_MAX_HEADER_JSON_LENGTH
 
 
 class TraceMiddleware:
@@ -186,7 +193,7 @@ class TraceMiddleware:
         # Add summary as JSON
         try:
             summary_json = json.dumps(trace_data, default=str)
-            if len(summary_json) < MAX_HEADER_JSON_LENGTH:  # Only if not too large
+            if len(summary_json) < get_max_header_json_length():
                 response[f"{prefix}-Summary"] = summary_json
         except (TypeError, ValueError):
             pass

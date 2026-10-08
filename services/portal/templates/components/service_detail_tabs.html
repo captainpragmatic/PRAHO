@@ -1,0 +1,31 @@
+{% load i18n %}
+<nav class="-mb-px flex min-w-max sm:min-w-0">
+  <button type="button"
+          @click="activeTab = 'overview'"
+          :class="tabClass('overview')"
+          class="whitespace-nowrap border-b-2 py-3 px-6 text-sm font-medium transition-colors">
+    {% trans "Overview" %}
+  </button>
+  {% if service_status == 'active' %}
+  <button type="button"
+          @click="activeTab = 'usage'"
+          :class="tabClass('usage')"
+          class="whitespace-nowrap border-b-2 py-3 px-6 text-sm font-medium transition-colors">
+    {% trans "Usage & Performance" %}
+  </button>
+  {% endif %}
+  <button type="button"
+          @click="activeTab = 'billing'"
+          :class="tabClass('billing')"
+          class="whitespace-nowrap border-b-2 py-3 px-6 text-sm font-medium transition-colors">
+    {% trans "Billing" %}
+  </button>
+  {% if show_domains %}
+  <button type="button"
+          @click="activeTab = 'domains'"
+          :class="tabClass('domains')"
+          class="whitespace-nowrap border-b-2 py-3 px-6 text-sm font-medium transition-colors">
+    {% trans "Domains" %}
+  </button>
+  {% endif %}
+</nav>

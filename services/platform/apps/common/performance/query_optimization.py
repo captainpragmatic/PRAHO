@@ -13,11 +13,14 @@ from __future__ import annotations
 import functools
 import logging
 import time
+from contextlib import nullcontext
 from typing import Any, ClassVar, TypeVar, cast
 
 from django.conf import settings
-from django.db import connection, models, reset_queries
+from django.db import DatabaseError, InterfaceError, connection, models, reset_queries, transaction
 from django.db.models import Count, Prefetch, QuerySet
+
+from apps.common.logging import get_sql_display_limit
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +34,14 @@ def get_query_warning_threshold() -> int:
         SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
     )
 
-    return SettingsService.get_integer_setting("common.query_warning_threshold", _DEFAULT_QUERY_WARNING_THRESHOLD)
+    try:
+        with transaction.atomic() if transaction.get_connection().in_atomic_block else nullcontext():
+            return SettingsService.get_integer_setting(
+                "common.query_warning_threshold", _DEFAULT_QUERY_WARNING_THRESHOLD
+            )
+    except (DatabaseError, InterfaceError, RuntimeError, AssertionError):
+        # Never replace the profiled operation's result or exception with a settings failure.
+        return _DEFAULT_QUERY_WARNING_THRESHOLD
 
 
 T = TypeVar("T", bound=models.Model)
@@ -263,17 +273,20 @@ class QueryProfiler:
         self._start_time = time.perf_counter()
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    def __exit__(self, *args: object) -> None:
         self.total_time = (time.perf_counter() - self._start_time) * 1000  # ms
 
         if settings.DEBUG:
-            self.query_count = len(connection.queries) - self._start_queries
+            profiled_queries = connection.queries[self._start_queries :]
+            self.query_count = len(profiled_queries)
+            warning_threshold = get_query_warning_threshold()
 
-            if self.log_queries or self.query_count > QUERY_WARNING_THRESHOLD:
+            if self.log_queries or self.query_count > warning_threshold:
                 logger.warning(f"⚠️ Query profiler [{self.name}]: {self.query_count} queries in {self.total_time:.2f}ms")
                 if self.log_queries:
-                    for query in connection.queries[-self.query_count :]:
-                        logger.debug(f"  SQL: {query['sql'][:200]}...")
+                    sql_display_limit = get_sql_display_limit()
+                    for query in profiled_queries:
+                        logger.debug(f"  SQL: {query['sql'][:sql_display_limit]}...")
 
 
 def profile_queries(name: str = "", warn_threshold: int = 5) -> Any:

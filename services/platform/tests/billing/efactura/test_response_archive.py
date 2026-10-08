@@ -53,7 +53,7 @@ class EFacturaResponseArchiveTests(TestCase):
             bill_to_tax_id="RO12345678",
             status="issued",
         )
-        self.document = EFacturaDocument.objects.create(invoice=invoice)
+        self.document, _ = EFacturaDocument.objects.get_or_create(invoice=invoice)
         self.document.anaf_download_id = "DOWNLOAD-1"
         self.document.save(update_fields=["anaf_download_id", "updated_at"])
         force_status(self.document, "accepted")
@@ -183,9 +183,10 @@ class EFacturaResponseArchiveTests(TestCase):
     def test_validation_never_extracts_members_to_the_filesystem(self):
         self.client.download_response.return_value = response_zip()
 
-        with patch.object(zipfile.ZipFile, "extract") as extract, patch.object(
-            zipfile.ZipFile, "extractall"
-        ) as extractall:
+        with (
+            patch.object(zipfile.ZipFile, "extract") as extract,
+            patch.object(zipfile.ZipFile, "extractall") as extractall,
+        ):
             result = self.service.download_response(self.document)
 
         self.assertIsNotNone(result)

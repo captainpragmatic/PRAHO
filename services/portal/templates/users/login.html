@@ -11,7 +11,7 @@
     <!-- Header -->
     <div class="text-center">
       <div class="mx-auto h-16 w-16 mb-4">
-        <div class="h-full w-full bg-blue-600 rounded-lg flex items-center justify-center text-white text-2xl font-bold">
+        <div class="h-full w-full bg-blue-600 rounded-lg flex items-center justify-center text-white text-2xl font-bold"> {# tmpl-allow TMPL005: needs badge brand_mark #}
           P
         </div>
       </div>
@@ -28,7 +28,9 @@
     {% comment %} The form is disabled rather than hidden: a customer who sees the fields knows they are in
        the right place and that nothing is wrong with their account or their password. {% endcomment %}
     <div class="mt-8">
-      {% include "components/maintenance_inline_alert.html" %}
+      {% include "components/maintenance_inline_alert.html" with hide_retry=True %}
+      {% trans "Reload login page" as login_retry_label %}
+      {% button login_retry_label variant="info" href=maintenance_retry_url class_="mt-4 w-full" attrs='data-login-retry="true"' %}
     </div>
     {% endif %}
 
@@ -56,7 +58,7 @@
           {% form_checkbox form.remember_me %}
 
           <div class="text-sm">
-            <a href="{% url 'users:password_reset' %}" class="text-blue-400 hover:text-blue-300">
+            <a href="{% url 'users:password_reset' %}" class="text-blue-400 hover:text-blue-300"> {# tmpl-allow TMPL005: needs button inline_link #}
               {% trans 'Forgot password?' %}
             </a>
           </div>
@@ -72,7 +74,7 @@
         <div class="text-center pt-4 border-t border-slate-700">
           <p class="text-slate-400 text-sm">
             {% trans "Don't have an account?" %}
-            <a href="{% url 'users:register' %}" class="text-blue-400 hover:text-blue-300 font-medium">
+            <a href="{% url 'users:register' %}" class="text-blue-400 hover:text-blue-300 font-medium"> {# tmpl-allow TMPL005: needs button inline_link #}
               {% trans 'Register here' %}
             </a>
           </p>

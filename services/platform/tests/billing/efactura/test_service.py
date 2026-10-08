@@ -24,7 +24,18 @@ from apps.billing.efactura.service import (
     submit_invoice_to_efactura,
 )
 from apps.billing.efactura.validator import ValidationResult
-from apps.billing.invoice_models import ISSUER_BUILTIN
+from apps.billing.invoice_models import ISSUER_BUILTIN, Invoice
+
+LIFECYCLE_INVOICE_XML = (
+    '<Invoice xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2" '
+    'xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">'
+    "<cac:AccountingSupplierParty><cac:Party><cac:PartyIdentification>"
+    "<cbc:ID>12345678</cbc:ID>"
+    "</cac:PartyIdentification></cac:Party></cac:AccountingSupplierParty></Invoice>"
+)
+LIFECYCLE_CREDIT_NOTE_XML = LIFECYCLE_INVOICE_XML.replace("<Invoice ", "<CreditNote ").replace(
+    "</Invoice>", "</CreditNote>"
+)
 
 
 class SubmissionResultTestCase(TestCase):
@@ -80,9 +91,9 @@ class MockInvoice:
     # Set as a class attribute so __init__ keeps its original arity.
     issuer_provider = ISSUER_BUILTIN
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # mirrors the Invoice fields the service reads
         self,
-        id=None,
+        id=None,  # noqa: A002  # same keyword as Invoice.id
         number="INV-001",
         bill_to_country="RO",
         bill_to_tax_id="RO12345678",
@@ -152,10 +163,11 @@ class EFacturaServiceTestCase(TestCase):
         return SubmissionClaim(
             document_id=uuid4(),
             token=uuid4(),
-            xml_content="<Invoice/>",
+            xml_content=LIFECYCLE_INVOICE_XML,
             xml_hash="a" * 64,
             is_b2c=False,
             is_credit_note=False,
+            environment="test",
         )
 
     def test_submit_success(self):
@@ -175,7 +187,7 @@ class EFacturaServiceTestCase(TestCase):
 
         self.assertTrue(result.success)
         self.assertEqual(result.document, mock_doc)
-        self.mock_client.upload_invoice.assert_called_once_with("<Invoice/>")
+        self.mock_client.upload_invoice.assert_called_once_with(claim.xml_content, cif="12345678")
         finalize.assert_called_once_with(claim, "12345")
 
     def test_submit_validation_failure(self):
@@ -247,7 +259,7 @@ class EFacturaServiceTestCase(TestCase):
 
         self.assertFalse(result.success)
         self.assertIn("Authentication", result.error_message)
-        finalize.assert_called_once_with(claim, "Authentication failed: Token expired")
+        finalize.assert_called_once_with(claim, "Authentication failed: Token expired", credential_failure=True)
 
     def test_submit_network_error(self):
         """Test submission with network error."""
@@ -301,9 +313,10 @@ class EFacturaStatusCheckTestCase(TestCase):
         mock_response.raw_response = {}
         self.mock_client.get_upload_status.return_value = mock_response
 
-        with patch.object(self.service, "_log_audit_event"), patch.object(
-            self.service, "download_response", return_value=b"response archive"
-        ) as download_response:
+        with (
+            patch.object(self.service, "_log_audit_event"),
+            patch.object(self.service, "download_response", return_value=b"response archive") as download_response,
+        ):
             result = self.service.check_status(mock_doc)
 
         self.assertEqual(result.status, "accepted")
@@ -652,33 +665,27 @@ class EFacturaHelperMethodsTestCase(TestCase):
         with self.assertRaises(TypeError):
             self.service._is_b2c(invoice)
 
-    @patch("apps.billing.invoice_models.Invoice.objects.filter")
-    def test_deadline_monitor_covers_paid_invoices_and_recovers_a_missing_document(self, invoice_filter):
-        paid_invoice = MockInvoice(status="paid")
-        queryset = Mock()
-        queryset.exclude.return_value = [paid_invoice]
-        invoice_filter.return_value = queryset
-        recovered_document = Mock(spec=EFacturaDocument)
-        recovered_document.submission_deadline = timezone.now() + timezone.timedelta(hours=36)
+    def test_deadline_monitor_covers_paid_invoices_and_recovers_a_missing_document(self) -> None:
+        from apps.settings.models import SystemSetting  # noqa: PLC0415
+        from tests.factories import InvoiceFactory  # noqa: PLC0415
 
-        with (
-            patch.object(self.service, "_get_existing_document", return_value=None),
-            patch.object(
-                self.service,
-                "_get_or_create_document",
-                return_value=recovered_document,
-            ) as get_or_create,
-        ):
-            approaching = self.service.check_approaching_deadlines(hours=48)
-
-        self.assertEqual(approaching, [recovered_document])
-        get_or_create.assert_called_once_with(paid_invoice)
-        statuses = set(invoice_filter.call_args.kwargs["status__in"])
-        self.assertEqual(
-            statuses,
-            {"issued", "paid", "overdue", "void", "refunded", "partially_refunded"},
+        SystemSetting.objects.update_or_create(
+            key="efactura.enabled",
+            defaults={"name": "e-Factura", "data_type": "boolean", "value": True, "default_value": False},
         )
-        self.assertEqual(invoice_filter.call_args.kwargs["bill_to_country__iexact"], "RO")
+        invoice = InvoiceFactory(
+            number=f"DEADLINE-{uuid4().hex}",
+            bill_to_country="RO",
+            status="paid",
+            issued_at=timezone.now(),
+        )
+        self.service.check_approaching_deadlines(hours=48)
+        document = EFacturaDocument.objects.get(invoice=invoice)
+        self.assertEqual(document.status, EFacturaStatus.QUEUED.value)
+        before = (document.pk, document.updated_at)
+        self.service.check_approaching_deadlines(hours=48)
+        document.refresh_from_db()
+        self.assertEqual((document.pk, document.updated_at), before)
 
 
 class SubmitInvoiceConvenienceFunctionTestCase(TestCase):
@@ -718,7 +725,7 @@ class SubmissionLifecycleTests(TestCase):
         cls.currency = CurrencyFactory(code="RON")
         cls.customer = CustomerFactory()
 
-    def _ro_invoice(self, number: str, *, bill_to_tax_id: str = "RO12345678"):
+    def _ro_invoice(self, number: str, *, bill_to_tax_id: str = "RO12345678") -> Invoice:
         from tests.factories import InvoiceFactory  # noqa: PLC0415
 
         return InvoiceFactory(
@@ -730,11 +737,11 @@ class SubmissionLifecycleTests(TestCase):
             status="issued",
         )
 
-    def _submitted_doc(self, invoice, upload_index: str) -> EFacturaDocument:
-        """Build an EFacturaDocument in SUBMITTED state via the real FSM transitions."""
-        doc = EFacturaDocument.objects.create(invoice=invoice, document_type=EFacturaDocumentType.INVOICE.value)
-        doc.mark_queued()
-        doc.save()
+    def _submitted_doc(self, invoice: Invoice, upload_index: str) -> EFacturaDocument:
+        """Advance the issuance-created intent to SUBMITTED via the real FSM transitions."""
+        doc = EFacturaDocument.objects.get(invoice=invoice)
+        self.assertEqual(doc.status, EFacturaStatus.QUEUED.value)
+        self.assertEqual(doc.document_type, EFacturaDocumentType.INVOICE.value)
         claimed_at = timezone.now()
         doc.mark_uploading(
             claim_token=uuid4(),
@@ -767,7 +774,7 @@ class SubmissionLifecycleTests(TestCase):
         service = self._service(client)
 
         with (
-            patch.object(service, "_generate_xml", return_value="<Invoice/>"),
+            patch.object(service, "_generate_xml", return_value=LIFECYCLE_INVOICE_XML),
             patch.object(service, "_log_audit_event"),
         ):
             result = service.submit_invoice(invoice)
@@ -852,58 +859,64 @@ class SubmissionLifecycleTests(TestCase):
         service = self._service(client)
 
         with (
-            patch.object(service, "_generate_xml", return_value="<Invoice/>"),
+            patch.object(service, "_generate_xml", return_value=LIFECYCLE_INVOICE_XML),
             patch.object(service, "_log_audit_event"),
         ):
             result = service.submit_invoice(invoice)
 
         self.assertTrue(result.success, msg=result.error_message)
-        client.upload_b2c.assert_called_once_with("<Invoice/>")
+        client.upload_b2c.assert_called_once_with(LIFECYCLE_INVOICE_XML, cif="12345678")
         client.upload_invoice.assert_not_called()
         document = EFacturaDocument.objects.get(invoice=invoice)
         self.assertEqual(document.anaf_upload_index, "B2C-1")
 
     def test_b2b_credit_note_is_submitted_with_credit_note_standard(self):
         invoice = self._ro_invoice("CN-B2B-1")
-        EFacturaDocument.objects.create(
-            invoice=invoice,
-            document_type=EFacturaDocumentType.CREDIT_NOTE.value,
-        )
+        document = EFacturaDocument.objects.get(invoice=invoice)
+        self.assertEqual(document.status, EFacturaStatus.QUEUED.value)
+        document.document_type = EFacturaDocumentType.CREDIT_NOTE.value
+        document.save(update_fields=["document_type"])
         client = Mock(spec=EFacturaClient)
         client.upload_credit_note.return_value = UploadResponse(success=True, upload_index="CN-B2B-1")
         service = self._service(client)
 
         with (
-            patch.object(service, "_generate_xml", return_value="<CreditNote/>"),
+            patch.object(service, "_generate_xml", return_value=LIFECYCLE_CREDIT_NOTE_XML),
             patch.object(service, "_log_audit_event"),
         ):
             result = service.submit_invoice(invoice)
 
         self.assertTrue(result.success, msg=result.error_message)
-        client.upload_credit_note.assert_called_once_with("<CreditNote/>")
+        client.upload_credit_note.assert_called_once_with(LIFECYCLE_CREDIT_NOTE_XML, cif="12345678")
         client.upload_invoice.assert_not_called()
         client.upload_b2c.assert_not_called()
+        document.refresh_from_db()
+        self.assertEqual(document.status, EFacturaStatus.SUBMITTED.value)
+        self.assertEqual(document.anaf_upload_index, "CN-B2B-1")
 
     def test_b2c_credit_note_is_submitted_to_consumer_endpoint_with_credit_note_standard(self):
         invoice = self._ro_invoice("CN-B2C-1", bill_to_tax_id="")
-        EFacturaDocument.objects.create(
-            invoice=invoice,
-            document_type=EFacturaDocumentType.CREDIT_NOTE.value,
-        )
+        document = EFacturaDocument.objects.get(invoice=invoice)
+        self.assertEqual(document.status, EFacturaStatus.QUEUED.value)
+        document.document_type = EFacturaDocumentType.CREDIT_NOTE.value
+        document.save(update_fields=["document_type"])
         client = Mock(spec=EFacturaClient)
         client.upload_b2c.return_value = UploadResponse(success=True, upload_index="CN-B2C-1")
         service = self._service(client)
 
         with (
-            patch.object(service, "_generate_xml", return_value="<CreditNote/>"),
+            patch.object(service, "_generate_xml", return_value=LIFECYCLE_CREDIT_NOTE_XML),
             patch.object(service, "_log_audit_event"),
         ):
             result = service.submit_invoice(invoice)
 
         self.assertTrue(result.success, msg=result.error_message)
-        client.upload_b2c.assert_called_once_with("<CreditNote/>", standard="CN")
+        client.upload_b2c.assert_called_once_with(LIFECYCLE_CREDIT_NOTE_XML, standard="CN", cif="12345678")
         client.upload_invoice.assert_not_called()
         client.upload_credit_note.assert_not_called()
+        document.refresh_from_db()
+        self.assertEqual(document.status, EFacturaStatus.SUBMITTED.value)
+        self.assertEqual(document.anaf_upload_index, "CN-B2C-1")
 
     def test_fresh_network_failure_is_quarantined_as_outcome_unknown(self):
         """A lost POST response cannot be safely classified as a retryable local error."""
@@ -913,7 +926,7 @@ class SubmissionLifecycleTests(TestCase):
         service = self._service(client)
 
         with (
-            patch.object(service, "_generate_xml", return_value="<Invoice/>"),
+            patch.object(service, "_generate_xml", return_value=LIFECYCLE_INVOICE_XML),
             patch.object(service, "_log_audit_event"),
             patch.object(service, "_is_b2c", return_value=False),
         ):
@@ -929,18 +942,7 @@ class SubmissionLifecycleTests(TestCase):
         """#202 review (copilot): submit_invoice on an ANAF-rejected doc must NOT re-POST (duplicate
         submission) — it returns a clear error directing a corrected resubmission."""
         invoice = self._ro_invoice("INV-REJ-1")
-        doc = EFacturaDocument.objects.create(invoice=invoice, document_type=EFacturaDocumentType.INVOICE.value)
-        doc.mark_queued()
-        doc.save()
-        claimed_at = timezone.now()
-        doc.mark_uploading(
-            claim_token=uuid4(),
-            claimed_at=claimed_at,
-            claim_expires_at=claimed_at + EFacturaService.SUBMISSION_CLAIM_LEASE,
-        )
-        doc.save()
-        doc.mark_submitted("IDX-R")
-        doc.save()
+        doc = self._submitted_doc(invoice, "IDX-R")
         doc.mark_rejected([{"message": "bad"}])
         doc.save()
         client = Mock(spec=EFacturaClient)
@@ -964,7 +966,7 @@ class SubmissionLifecycleTests(TestCase):
         service = self._service(client)
 
         with (
-            patch.object(service, "_generate_xml", return_value="<Invoice/>"),
+            patch.object(service, "_generate_xml", return_value=LIFECYCLE_INVOICE_XML),
             patch.object(service, "_log_audit_event"),
             patch.object(service, "_is_b2c", return_value=False),
         ):

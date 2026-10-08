@@ -1,2 +1,3 @@
 {% load i18n ui_components %}
-{% input_field "status" input_type="select" css_class="list-filter-extra-select" hx_get=filter_search_url hx_target="#"|add:filter_content_id hx_sync="closest .list-filters-sync:replace" hx_trigger="change" hx_include="#list-filter-search, #list-filter-active-tab" hx_indicator="#"|add:filter_skeleton_id value=status_filter options=status_choices|as_select_options %}
+{% trans "Status" as status_label %}
+{% input_field "status" input_type="select" aria_label=status_label css_class="list-filter-extra-select" hx_get=filter_search_url hx_target="#"|add:filter_content_id hx_sync="closest .list-filters-sync:replace" hx_trigger="change" hx_include="#list-filter-search, #list-filter-active-tab" hx_indicator="#"|add:filter_skeleton_id value=status_filter options=status_choices|as_select_options %}

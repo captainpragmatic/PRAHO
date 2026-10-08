@@ -7,7 +7,7 @@ NO DATABASE MODELS - API-only communication.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -95,6 +95,9 @@ class Invoice:
     efactura_id: str = ""
     efactura_sent: bool = False
 
+    # Platform is authoritative; None preserves compatibility with older payloads.
+    platform_is_overdue: bool | None = None
+
     # Status display labels
     _STATUS_LABELS: dict[str, str] = field(default_factory=dict, init=False, repr=False)
 
@@ -129,10 +132,19 @@ class Invoice:
 
     @property
     def is_overdue(self) -> bool:
-        """Check if invoice is overdue"""
-        if not self.due_at or self.status in ["paid", "void", "refunded"]:
+        """Use Platform's flag, falling back to its invoice overdue rule."""
+        if self.platform_is_overdue is not None:
+            return self.platform_is_overdue
+        if self.due_at is None or self.status != "issued":
             return False
-        return timezone.now().date() > self.due_at.date()
+        now = timezone.now()
+        due: date | datetime = self.due_at
+        # Handle date vs datetime mismatch (fixtures may store date objects).
+        if not isinstance(due, datetime):
+            due = datetime.combine(due, datetime.min.time(), tzinfo=now.tzinfo)
+        elif timezone.is_naive(due):
+            due = timezone.make_aware(due)
+        return now > due
 
 
 @dataclass

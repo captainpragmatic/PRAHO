@@ -20,7 +20,17 @@ class PortalLocalisationTests(SimpleTestCase):
         self.addCleanup(cache.clear)
 
     def payload(self, **values):
-        return {"success": True, "localisation": {**LocalisationDefaults().customer_payload(), **values}}
+        return {
+            "success": True,
+            "localisation": {**LocalisationDefaults().customer_payload(), **values},
+            "company": {
+                "legal_name": "PragmaticHost SRL",
+                "email_support": "support@pragmatichost.com",
+                "email_privacy": "privacy@pragmatichost.com",
+                "email_finance": "",
+                "phone": "",
+            },
+        }
 
     def test_cached_defaults_then_refresh_change_rendered_values(self) -> None:
         now = time.time()

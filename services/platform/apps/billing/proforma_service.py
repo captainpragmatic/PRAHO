@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from django.db import DatabaseError, transaction
 from django.utils import timezone
-from django.utils.translation import gettext as _t
+from django.utils.translation import gettext
 
 from apps.billing.efactura.settings import ro_local_date
 from apps.billing.tax_evidence import capture_vat_evidence, derive_tax_category
@@ -83,8 +83,8 @@ def send_proforma_email(
         pdf_bytes = generate_proforma_pdf(proforma)
         email_result = EmailService.send_email(
             to=email,
-            subject=_t("Proforma Invoice %(number)s") % {"number": proforma.number},
-            body_text=_t("Please find attached proforma invoice %(number)s.") % {"number": proforma.number},
+            subject=gettext("Proforma Invoice %(number)s") % {"number": proforma.number},
+            body_text=gettext("Please find attached proforma invoice %(number)s.") % {"number": proforma.number},
             attachments=[(f"proforma_{proforma.number}.pdf", pdf_bytes, "application/pdf")],
         )
         if not email_result.success:
@@ -203,6 +203,13 @@ class ProformaService:
                 ),
             )
 
+            valid_until = timezone.now() + timedelta(days=_get_proforma_validity_days())
+            if order.payment_method == "bank_transfer":
+                from apps.settings.services import SettingsService  # noqa: PLC0415
+
+                bank_timeout_hours = SettingsService.get_integer_setting("orders.bank_transfer_timeout_hours", 72)
+                valid_until = min(valid_until, order.created_at + timedelta(hours=bank_timeout_hours))
+
             # Create proforma — status stays "draft" (email sending is separate)
             proforma = ProformaModel.objects.create(
                 customer=order.customer,
@@ -212,7 +219,7 @@ class ProformaService:
                 tax_cents=vat_result.vat_cents,
                 vat_evidence=capture_vat_evidence(vat_result),
                 total_cents=vat_result.total_cents,
-                valid_until=timezone.now() + timedelta(days=_get_proforma_validity_days()),
+                valid_until=valid_until,
                 bill_to_name=bill_to_name,
                 bill_to_email=order.customer_email,
                 bill_to_country=bill_to_country,
@@ -362,14 +369,14 @@ class ProformaPaymentService:
         from apps.billing.payment_models import Payment  # noqa: PLC0415
 
         if proforma.status not in ("draft", "sent", "accepted"):
-            return _t("Proforma %(number)s cannot accept payment (status: %(status)s)") % {
+            return gettext("Proforma %(number)s cannot accept payment (status: %(status)s)") % {
                 "number": proforma.number,
                 "status": proforma.status,
             }
         if proforma.is_expired:
-            return _t("Proforma %(number)s has expired") % {"number": proforma.number}
+            return gettext("Proforma %(number)s has expired") % {"number": proforma.number}
         if manual and Payment.objects.filter(proforma=proforma, payment_method="stripe", status="pending").exists():
-            return _t("Proforma has an unresolved automatic card payment")
+            return gettext("Proforma has an unresolved automatic card payment")
         return None
 
     @staticmethod
@@ -519,6 +526,7 @@ class ProformaPaymentService:
             from django_fsm import TransitionNotAllowed as _TransitionNotAllowed2  # noqa: PLC0415
 
             try:
+                payment._defer_document_settlement = True
                 payment.succeed()
                 payment.save(update_fields=["status", "updated_at"])
             except (_TransitionNotAllowed2, _ConcurrentTransition):

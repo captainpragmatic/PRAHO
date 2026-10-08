@@ -55,6 +55,7 @@ from .serializers import (
     CustomerRegistrationSerializer,
     CustomerSearchSerializer,
     CustomerServiceSerializer,
+    RegistrationRateLimitError,
 )
 
 logger = logging.getLogger(__name__)
@@ -420,6 +421,15 @@ def customer_register_api(request: HttpRequest) -> Response:
                 status=status.HTTP_201_CREATED,
             )
 
+        except RegistrationRateLimitError as e:
+            failure = e.failure
+            logger.warning("⚠️ [Customer Registration] Security refusal: %s", failure)
+            headers = {"Retry-After": str(failure.retry_after)} if failure.retry_after is not None else {}
+            return Response(
+                {"success": False, "error": str(failure)},
+                status=failure.status_code,
+                headers=headers,
+            )
         except Exception as e:
             logger.error(f"🔥 [Customer Registration] Registration failed: {e}")
             return Response(

@@ -16,10 +16,12 @@ from typing import Any
 
 from django.core.paginator import Paginator
 from django.db.models import Q, QuerySet
+from django.db.models.base import Model
 from django.http import HttpRequest
 
 # Generic type variable removed for Python 3.13 compatibility
 from apps.common.constants import DEFAULT_PAGE_SIZE
+from apps.common.pagination import pagination_query
 
 _DEFAULT_DEFAULT_ORPHANS = 3
 DEFAULT_ORPHANS = _DEFAULT_DEFAULT_ORPHANS
@@ -36,11 +38,11 @@ def get_orphans() -> int:
 
 def get_pagination_context(
     request: HttpRequest,
-    queryset: QuerySet[Any],
+    queryset: QuerySet[Model],
     page_size: int = DEFAULT_PAGE_SIZE,
     page_param: str = "page",
-    orphans: int = DEFAULT_ORPHANS,
-) -> dict[str, Any]:
+    orphans: int | None = None,
+) -> dict[str, object]:
     """
     📄 Get pagination context for any Django view
 
@@ -75,18 +77,15 @@ def get_pagination_context(
     """
 
     # Create paginator
-    paginator = Paginator(queryset, page_size, orphans=orphans)
+    resolved_orphans = get_orphans() if orphans is None else orphans
+    paginator = Paginator(queryset, page_size, orphans=resolved_orphans)
 
     # Get current page number
     page_number = request.GET.get(page_param, 1)
     page_obj = paginator.get_page(page_number)
 
     # Build preserved query parameters (exclude page parameter)
-    query_params = request.GET.copy()
-    if page_param in query_params:
-        del query_params[page_param]
-
-    preserved_params = "&" + query_params.urlencode() if query_params else ""
+    preserved_params = pagination_query(request, exclude=(page_param,))
 
     return {
         "page_obj": page_obj,
@@ -157,7 +156,10 @@ class PaginationMixin:
     """
 
     paginate_by = DEFAULT_PAGE_SIZE
-    paginate_orphans = DEFAULT_ORPHANS
+    paginate_orphans: int | None = None
+
+    def get_paginate_orphans(self) -> int:
+        return get_orphans() if self.paginate_orphans is None else self.paginate_orphans
 
     def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         """Add pagination context to template"""
@@ -165,9 +167,6 @@ class PaginationMixin:
 
         # Add preserved query parameters for pagination links
         if hasattr(self, "request"):
-            query_params = self.request.GET.copy()
-            if "page" in query_params:
-                del query_params["page"]
-            context["extra_params"] = "&" + query_params.urlencode() if query_params else ""
+            context["extra_params"] = pagination_query(self.request)
 
         return context

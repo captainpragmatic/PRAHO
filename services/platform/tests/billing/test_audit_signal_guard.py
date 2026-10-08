@@ -12,7 +12,7 @@ the code MUST emit a critical log instead of silently skipping.
 import logging
 from unittest.mock import MagicMock, patch
 
-from django.test import SimpleTestCase, TestCase, override_settings
+from django.test import TestCase, override_settings
 
 from apps.billing.signals import (
     _log_billing_model_event,
@@ -131,8 +131,8 @@ class InvoiceSignalAuditGuardTests(TestCase):
             mock_bas.log_invoice_event.assert_not_called()
 
 
-class PaymentSignalAuditGuardTests(SimpleTestCase):
-    """H10 — location 3: handle_payment_created_or_updated if-not-flag guard."""
+class PaymentSignalAuditGuardTests(TestCase):
+    """H10 — location 3: payment audit policy with real savepoint support."""
 
     def _make_payment_instance(self) -> MagicMock:
         mock_instance = MagicMock()

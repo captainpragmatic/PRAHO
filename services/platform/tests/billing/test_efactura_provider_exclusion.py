@@ -29,6 +29,17 @@ from apps.billing.issuers.policy import (
 )
 from tests.factories.billing_factories import CustomerFactory, InvoiceLineFactory
 
+
+def stub_xml(marker: str = "") -> str:
+    """Minimal UBL that names its supplier; uploads take the ANAF CUI from the XML itself."""
+    return (
+        '<Invoice xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2" '
+        'xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">'
+        "<cac:AccountingSupplierParty><cac:Party><cac:PartyIdentification><cbc:ID>12345678</cbc:ID>"
+        f"</cac:PartyIdentification></cac:Party></cac:AccountingSupplierParty>{marker}</Invoice>"
+    )
+
+
 UPLOAD_METHODS = ("upload_invoice", "upload_credit_note", "upload_b2c")
 
 
@@ -137,9 +148,7 @@ class NoAnafCallForExternallyIssuedInvoiceTests(TestCase):
     def _client(self) -> MagicMock:
         client = MagicMock()
         for name in UPLOAD_METHODS:
-            getattr(client, name).side_effect = AssertionError(
-                f"{name} was called for an externally issued invoice"
-            )
+            getattr(client, name).side_effect = AssertionError(f"{name} was called for an externally issued invoice")
         return client
 
     def _assert_no_upload(self, client: MagicMock) -> None:
@@ -195,7 +204,7 @@ class NoAnafCallForExternallyIssuedInvoiceTests(TestCase):
         # exists — measured, not assumed.
         with (
             patch("apps.billing.efactura.service.EFacturaClient", return_value=client),
-            patch.object(EFacturaService, "_generate_xml", return_value="<Invoice/>"),
+            patch.object(EFacturaService, "_generate_xml", return_value=stub_xml()),
             patch.object(CIUSROValidator, "validate") as validate,
         ):
             validate.return_value.is_valid = True
@@ -219,7 +228,7 @@ class NoAnafCallForExternallyIssuedInvoiceTests(TestCase):
         client = self._client()
         with (
             patch("apps.billing.efactura.service.EFacturaClient", return_value=client),
-            patch.object(EFacturaService, "_generate_xml", return_value="<Invoice/>"),
+            patch.object(EFacturaService, "_generate_xml", return_value=stub_xml()),
             patch.object(CIUSROValidator, "validate") as validate,
         ):
             validate.return_value.is_valid = True
@@ -253,7 +262,6 @@ class NoAnafCallForExternallyIssuedInvoiceTests(TestCase):
         with patch("apps.billing.efactura.xml_builder.UBLCreditNoteBuilder") as builder:
             _handle_efactura_refund_reporting(self.invoice)
         builder.assert_not_called()
-
 
 
 @override_settings(EFACTURA_ENABLED=True)
@@ -308,7 +316,7 @@ class BuiltinInvoiceStillSubmitsTests(TestCase):
         service = EFacturaService(client=client)
 
         with (
-            patch.object(EFacturaService, "_generate_xml", return_value="<Invoice/>"),
+            patch.object(EFacturaService, "_generate_xml", return_value=stub_xml()),
             patch.object(service._validator, "validate") as validate,
         ):
             validate.return_value.is_valid = True
@@ -379,7 +387,7 @@ class BackstopTests(TestCase):
             # Disable ONLY the entry check, so the claim is genuinely acquired and the
             # backstop is the thing under test.
             patch("apps.billing.efactura.service.efactura_submission_denied_reason", return_value=None),
-            patch.object(EFacturaService, "_generate_xml", return_value="<Invoice/>"),
+            patch.object(EFacturaService, "_generate_xml", return_value=stub_xml()),
             patch.object(service._validator, "validate") as validate,
         ):
             validate.return_value.is_valid = True
@@ -405,7 +413,7 @@ class BackstopTests(TestCase):
 
         with (
             patch("apps.billing.efactura.service.efactura_submission_denied_reason", return_value=None),
-            patch.object(EFacturaService, "_generate_xml", return_value="<Invoice/>"),
+            patch.object(EFacturaService, "_generate_xml", return_value=stub_xml()),
             patch.object(service._validator, "validate") as validate,
         ):
             validate.return_value.is_valid = True

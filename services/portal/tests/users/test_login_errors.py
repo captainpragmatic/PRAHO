@@ -78,6 +78,21 @@ class LoginErrorsTestCase(SimpleTestCase):
         form = response.context["form"]
         self.assertTrue(len(form.non_field_errors()) > 0)
 
+    @override_settings(LANGUAGE_CODE="en")
+    def test_invalid_email_post_shows_field_error(self) -> None:
+        """Direct POSTs show the email error even without browser validation."""
+        response = self.client.post(
+            reverse("users:login"),
+            data={"email": "notanemail", "password": "short"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "users/login.html")
+        self.assertFormError(response.context["form"], "email", "Enter a valid email address.")
+        self.assertContains(response, "Enter a valid email address.")
+        self.assertNotIn("user_id", self.client.session)
+        self.assertNotIn("customer_id", self.client.session)
+
     def test_get_request_returns_empty_form(self):
         """GET request renders the login form with no errors."""
         response = self.client.get(reverse("users:login"))

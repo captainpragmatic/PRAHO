@@ -38,19 +38,10 @@ logger = logging.getLogger(__name__)
 # ===============================================================================
 
 # Rate limiting thresholds — defaults; authoritative source is SettingsService
-_DEFAULT_RATE_LIMIT_REGISTRATION_PER_IP = 5  # per hour
 _DEFAULT_RATE_LIMIT_COMPANY_CHECK_PER_IP = 30  # per hour
 
 
-def get_registration_rate_limit() -> int:
-    """Get registration rate limit per IP from SettingsService (runtime)."""
-    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
-        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
-    )
-
-    return SettingsService.get_integer_setting(
-        "security.registration_rate_limit_per_ip", _DEFAULT_RATE_LIMIT_REGISTRATION_PER_IP
-    )
+# Registration resolves its live limit through SecurityConfig in security_decorators.
 
 
 # Input size limits (DoS prevention)

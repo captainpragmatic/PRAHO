@@ -11,7 +11,7 @@
   {% elif usage.error %}
     <!-- Error State -->
     <div class="text-center py-8">
-      <div class="text-red-400 mb-2">
+      <div class="text-red-400 mb-2"> {# tmpl-allow TMPL005: needs badge unframed variant #}
         {% icon "exclamation-circle" size="2xl" css_class="mx-auto" %}
       </div>
       <p class="text-slate-400">{% trans "Unable to load usage data" %}</p>
@@ -26,7 +26,7 @@
           <h4 class="text-xs font-medium text-slate-400 uppercase tracking-wide">{% trans "Disk Usage" %}</h4>
           <span class="text-xs text-slate-500">{{ period|upper }}</span>
         </div>
-        <div class="text-2xl font-bold text-blue-400 mb-1">{{ usage.current_usage.disk_usage_gb|floatformat:1 }}</div>
+        <div class="text-2xl font-bold text-blue-400 mb-1">{{ usage.current_usage.disk_usage_gb|floatformat:1 }}</div> {# tmpl-allow TMPL005: needs stat_tile value_class #}
         <div class="text-xs text-slate-400">GB {% trans "used" %}</div>
 
         <!-- Progress Bar -->
@@ -37,7 +37,7 @@
             <span>{{ usage.current_usage.disk_limit_gb }} GB</span>
           </div>
           <div class="w-full bg-slate-600 rounded-full h-1.5">
-            <div class="bg-blue-500 h-1.5 rounded-full transition-all duration-500"
+            <div class="bg-blue-500 h-1.5 rounded-full transition-all duration-500" {# tmpl-allow TMPL005: needs stat_tile progress_value #}
                  style="width: {{ usage.current_usage.disk_usage_percentage|default:0 }}%"></div>
           </div>
         </div>
@@ -52,7 +52,7 @@
           <h4 class="text-xs font-medium text-slate-400 uppercase tracking-wide">{% trans "Bandwidth" %}</h4>
           <span class="text-xs text-slate-500">{{ period|upper }}</span>
         </div>
-        <div class="text-2xl font-bold text-green-400 mb-1">{{ usage.current_usage.bandwidth_usage_gb|floatformat:1 }}</div>
+        <div class="text-2xl font-bold text-green-400 mb-1">{{ usage.current_usage.bandwidth_usage_gb|floatformat:1 }}</div> {# tmpl-allow TMPL005: needs stat_tile value_class #}
         <div class="text-xs text-slate-400">GB {% trans "used" %}</div>
 
         <!-- Progress Bar -->
@@ -63,7 +63,7 @@
             <span>{{ usage.current_usage.bandwidth_limit_gb }} GB</span>
           </div>
           <div class="w-full bg-slate-600 rounded-full h-1.5">
-            <div class="bg-green-500 h-1.5 rounded-full transition-all duration-500"
+            <div class="bg-green-500 h-1.5 rounded-full transition-all duration-500" {# tmpl-allow TMPL005: needs stat_tile progress_value #}
                  style="width: {{ usage.current_usage.bandwidth_usage_percentage|default:0 }}%"></div>
           </div>
         </div>
@@ -78,7 +78,7 @@
           <h4 class="text-xs font-medium text-slate-400 uppercase tracking-wide">{% trans "Email Accounts" %}</h4>
           <span class="text-xs text-slate-500">{% trans "Current" %}</span>
         </div>
-        <div class="text-2xl font-bold text-purple-400 mb-1">{{ usage.current_usage.email_accounts_used|default:0 }}</div>
+        <div class="text-2xl font-bold text-purple-400 mb-1">{{ usage.current_usage.email_accounts_used|default:0 }}</div> {# tmpl-allow TMPL005: needs stat_tile value_class #}
         <div class="text-xs text-slate-400">{% trans "active accounts" %}</div>
 
         <!-- Progress Bar -->
@@ -89,7 +89,7 @@
             <span>{{ usage.current_usage.email_accounts_limit }}</span>
           </div>
           <div class="w-full bg-slate-600 rounded-full h-1.5">
-            <div class="bg-purple-500 h-1.5 rounded-full transition-all duration-500"
+            <div class="bg-purple-500 h-1.5 rounded-full transition-all duration-500" {# tmpl-allow TMPL005: needs stat_tile progress_value #}
                  style="width: {% if usage.current_usage.email_accounts_limit %}{% widthratio usage.current_usage.email_accounts_used|default:0 usage.current_usage.email_accounts_limit 100 %}{% else %}0{% endif %}%"></div>
           </div>
         </div>
@@ -104,7 +104,7 @@
           <h4 class="text-xs font-medium text-slate-400 uppercase tracking-wide">{% trans "Databases" %}</h4>
           <span class="text-xs text-slate-500">{% trans "Current" %}</span>
         </div>
-        <div class="text-2xl font-bold text-yellow-400 mb-1">{{ usage.current_usage.databases_used|default:0 }}</div>
+        <div class="text-2xl font-bold text-yellow-400 mb-1">{{ usage.current_usage.databases_used|default:0 }}</div> {# tmpl-allow TMPL005: needs stat_tile value_class #}
         <div class="text-xs text-slate-400">{% trans "databases" %}</div>
 
         <!-- Progress Bar -->
@@ -115,7 +115,7 @@
             <span>{{ usage.current_usage.databases_limit }}</span>
           </div>
           <div class="w-full bg-slate-600 rounded-full h-1.5">
-            <div class="bg-yellow-500 h-1.5 rounded-full transition-all duration-500"
+            <div class="bg-yellow-500 h-1.5 rounded-full transition-all duration-500" {# tmpl-allow TMPL005: needs stat_tile progress_value #}
                  style="width: {% if usage.current_usage.databases_limit %}{% widthratio usage.current_usage.databases_used|default:0 usage.current_usage.databases_limit 100 %}{% else %}0{% endif %}%"></div>
           </div>
         </div>
@@ -128,28 +128,7 @@
     {% if usage.alerts %}
     <div class="space-y-2">
       {% for alert in usage.alerts %}
-      <div class="flex items-center p-3 rounded-lg
-                  {% if alert.type == 'warning' %}bg-yellow-500/10 border border-yellow-500/20{% endif %}
-                  {% if alert.type == 'error' %}bg-red-500/10 border border-red-500/20{% endif %}
-                  {% if alert.type == 'info' %}bg-blue-500/10 border border-blue-500/20{% endif %}">
-        <div class="flex-shrink-0">
-          {% if alert.type == 'warning' %}
-            {% icon "warning" size="md" css_class="text-yellow-400" %}
-          {% elif alert.type == 'error' %}
-            {% icon "exclamation-circle" size="md" css_class="text-red-400" %}
-          {% else %}
-            {% icon "info" size="md" css_class="text-blue-400" %}
-          {% endif %}
-        </div>
-        <div class="ml-3">
-          <p class="text-sm
-                   {% if alert.type == 'warning' %}text-yellow-300{% endif %}
-                   {% if alert.type == 'error' %}text-red-300{% endif %}
-                   {% if alert.type == 'info' %}text-blue-300{% endif %}">
-            {{ alert.message }}
-          </p>
-        </div>
-      </div>
+      {% alert alert.message variant=alert.type %}
       {% endfor %}
     </div>
     {% endif %}
@@ -177,13 +156,13 @@
       <div class="flex items-center justify-between mb-4">
         <h4 class="text-lg font-medium text-white">{% trans "Service Uptime" %}</h4>
         <div class="flex items-center space-x-2">
-          <span class="w-2 h-2 bg-green-400 rounded-full"></span>
+          <span class="w-2 h-2 bg-green-400 rounded-full"></span> {# tmpl-allow TMPL005: needs badge dot_only #}
           <span class="text-sm text-slate-400">{% trans "Online" %}</span>
         </div>
       </div>
 
       <div class="text-center">
-        <div class="text-4xl font-bold text-green-400 mb-2">{{ usage.historical_usage.uptime_percentage }}%</div>
+        <div class="text-4xl font-bold text-green-400 mb-2">{{ usage.historical_usage.uptime_percentage }}%</div> {# tmpl-allow TMPL005: needs stat_tile value_class #}
         <div class="text-slate-400">{% trans "uptime for" %} {{ period }}</div>
       </div>
 

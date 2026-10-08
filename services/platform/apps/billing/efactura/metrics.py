@@ -58,37 +58,35 @@ class NoOpMetric:
         pass
 
 
-def _create_counter(name: str, description: str, labels: list[str]) -> Any:
+def _create_counter(name: str, description: str, labels: list[str]) -> Counter | NoOpMetric:
     """Create a Prometheus counter or no-op."""
     if PROMETHEUS_AVAILABLE and efactura_settings.metrics_enabled:
-        prefix = efactura_settings.metrics_prefix
-        return Counter(f"{prefix}_{name}", description, labels)
+        return Counter(f"efactura_{name}", description, labels)
     return NoOpMetric()
 
 
-def _create_histogram(name: str, description: str, labels: list[str], buckets: tuple[float, ...] | None = None) -> Any:
+def _create_histogram(
+    name: str, description: str, labels: list[str], buckets: tuple[float, ...] | None = None
+) -> Histogram | NoOpMetric:
     """Create a Prometheus histogram or no-op."""
     if PROMETHEUS_AVAILABLE and efactura_settings.metrics_enabled:
-        prefix = efactura_settings.metrics_prefix
         if buckets:
-            return Histogram(f"{prefix}_{name}", description, labels, buckets=buckets)
-        return Histogram(f"{prefix}_{name}", description, labels)
+            return Histogram(f"efactura_{name}", description, labels, buckets=buckets)
+        return Histogram(f"efactura_{name}", description, labels)
     return NoOpMetric()
 
 
-def _create_gauge(name: str, description: str, labels: list[str]) -> Any:
+def _create_gauge(name: str, description: str, labels: list[str]) -> Gauge | NoOpMetric:
     """Create a Prometheus gauge or no-op."""
     if PROMETHEUS_AVAILABLE and efactura_settings.metrics_enabled:
-        prefix = efactura_settings.metrics_prefix
-        return Gauge(f"{prefix}_{name}", description, labels)
+        return Gauge(f"efactura_{name}", description, labels)
     return NoOpMetric()
 
 
-def _create_info(name: str, description: str) -> Any:
+def _create_info(name: str, description: str) -> Info | NoOpMetric:
     """Create a Prometheus info metric or no-op."""
     if PROMETHEUS_AVAILABLE and efactura_settings.metrics_enabled:
-        prefix = efactura_settings.metrics_prefix
-        return Info(f"{prefix}_{name}", description)
+        return Info(f"efactura_{name}", description)
     return NoOpMetric()
 
 
@@ -101,7 +99,7 @@ class EFacturaMetrics:
     """
     e-Factura metrics collection.
 
-    All metrics are prefixed with the configured prefix (default: 'efactura').
+    All metrics use the fixed 'efactura' prefix.
     """
 
     def __init__(self) -> None:

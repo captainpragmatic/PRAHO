@@ -15,8 +15,8 @@ from django.utils.translation import gettext_lazy
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_http_methods
 
-from apps.common.decorators import _get_user_role_for_customer
-from apps.common.pagination import PaginatorData, build_pagination_params
+from apps.common.decorators import _get_user_role_for_customer, _render_role_check_degraded
+from apps.common.pagination import PaginatorData, pagination_query
 from apps.common.rate_limit_feedback import (
     build_maintenance_context,
     get_degraded_message,
@@ -24,6 +24,7 @@ from apps.common.rate_limit_feedback import (
     handle_platform_error,
     is_rate_limited_error,
     is_unavailable_error,
+    render_platform_unavailable,
 )
 
 from .services import PlatformAPIError, services_api
@@ -218,7 +219,7 @@ def service_list(request: HttpRequest) -> HttpResponse:
         active_count = summary.get("active_services", 0)
 
         paginator_data = PaginatorData(total_count=total_count, current_page=page, page_size=20)
-        pagination_params = build_pagination_params(status=status_filter, q=search_query)
+        pagination_params = pagination_query(request)
 
         context = {
             "services": services,
@@ -274,7 +275,7 @@ def service_search_api(request: HttpRequest) -> HttpResponse:
         total_count = response.get("count", 0)
 
         paginator_data = PaginatorData(total_count=total_count, current_page=1, page_size=20)
-        pagination_params = build_pagination_params(status=status_filter, q=search_query)
+        pagination_params = pagination_query(request)
 
         return render(
             request,
@@ -319,7 +320,7 @@ def service_detail(request: HttpRequest, service_id: int) -> HttpResponse:
         usage = services_api.get_service_usage(customer_id, user_id, service_id, period="30d")
 
         # Get associated domains
-        domains = services_api.get_service_domains(customer_id, service_id)
+        domains = services_api.get_service_domains(customer_id, user_id, service_id)
 
         context = {
             "service": service,
@@ -329,15 +330,20 @@ def service_detail(request: HttpRequest, service_id: int) -> HttpResponse:
             "can_manage": service.get("status") in {"active", "suspended"}
             and _get_user_role_for_customer(request, str(customer_id)) in {"owner", "billing", "tech"},
             "usage_period": "30d",
+            "usage_history_period_options": [
+                {"value": "7d", "label": _("Last 7 days")},
+                {"value": "30d", "label": _("Last 30 days")},
+                {"value": "90d", "label": _("Last 90 days")},
+            ],
         }
 
         logger.info(f"✅ [Services View] Loaded service {service_id} details for customer {customer_id}")
 
     except PlatformAPIError as e:
         if is_rate_limited_error(e):
-            raise
-        # The list is where the maintenance alert lives, so a degraded platform sends them there
-        # with an explanation rather than a claim that their service is gone.
+            return _render_role_check_degraded(request, e)
+        if is_unavailable_error(e):
+            return render_platform_unavailable(request, e)
         _report_platform_failure(
             request, e, subject=f"Service {service_id}", fallback=_("Service not found or access denied.")
         )
@@ -443,6 +449,7 @@ def _submit_service_request(
             context["form_status"] = HTTPStatus.CONFLICT
             context["submission_conflict"] = True
         elif is_unavailable_error(exc):
+            context.update(build_maintenance_context(request, exc))
             context["form_error"] = get_degraded_message(exc)
         else:
             context["form_error"] = _("Unable to submit service request. Please try again later.")
@@ -472,10 +479,14 @@ def _service_request_load_error(request: HttpRequest, error: PlatformAPIError, c
     """Keep an unsubmitted form recoverable when the service lookup is unavailable."""
     if is_rate_limited_error(error):
         raise error
-    logger.warning("Service request form for service %s unavailable: %s", context["service_id"], error)
+    logger.warning("⚠️ [Services View] Service request form for %s unavailable: %s", context["service_id"], error)
+    if request.method == "GET" and is_unavailable_error(error):
+        return render_platform_unavailable(request, error)
     if request.method == "POST" and (
         error.status_code is None or error.status_code >= HTTPStatus.INTERNAL_SERVER_ERROR
     ):
+        if is_unavailable_error(error):
+            context.update(build_maintenance_context(request, error))
         context.update(
             service={"service_name": _("Hosting service")},
             service_details_unavailable=True,
@@ -483,7 +494,10 @@ def _service_request_load_error(request: HttpRequest, error: PlatformAPIError, c
             form_error=get_degraded_message(error),
         )
         response = render(
-            request, "services/service_request_action.html", context, status=HTTPStatus.SERVICE_UNAVAILABLE
+            request,
+            "services/service_request_action.html",
+            context,
+            status=HTTPStatus.OK if request.headers.get("HX-Request") == "true" else HTTPStatus.SERVICE_UNAVAILABLE,
         )
         retry_after = get_retry_after_from_error(error)
         if retry_after:
@@ -498,12 +512,30 @@ def _service_request_load_error(request: HttpRequest, error: PlatformAPIError, c
 
 @require_http_methods(["GET", "POST"])
 @csrf_protect
-def service_request_action(request: HttpRequest, service_id: int) -> HttpResponse:
+def service_request_action(request: HttpRequest, service_id: int) -> HttpResponse:  # noqa: PLR0911  # HTTP guards
     """Create a support ticket for staff review without changing the hosting service."""
     customer_id, user_id = _get_session_identity(request)
     if not customer_id or not user_id:
         return redirect("/login/")
-    role = _get_user_role_for_customer(request, str(customer_id))
+    try:
+        role = _get_user_role_for_customer(request, str(customer_id))
+    except PlatformAPIError as error:
+        if is_rate_limited_error(error):
+            return _render_role_check_degraded(request, error)
+        _submission_key, submission_id = _service_submission_id(request, customer_id, user_id, service_id)
+        selected_action = request.POST.get("action", "")
+        # Keep only the submitted choice; every retry must pass the role check above.
+        return _service_request_load_error(
+            request,
+            error,
+            {
+                "service_id": service_id,
+                "submission_id": submission_id,
+                "selected_action": selected_action,
+                "reason": request.POST.get("reason", "").strip(),
+                "action_types": [action for action in SERVICE_REQUEST_ACTIONS if action[0] == selected_action],
+            },
+        )
     billing_action = request.method == "POST" and request.POST.get("action") in {"suspend_request", "cancel_request"}
     if role not in {"owner", "billing", "tech"} or (billing_action and role == "tech"):
         return HttpResponseForbidden(_("You do not have permission to request service changes."))
@@ -594,6 +626,8 @@ def service_plans(request: HttpRequest) -> HttpResponse:
         return render(request, "services/plans_list.html", context)
 
     except PlatformAPIError as e:
+        if is_unavailable_error(e):
+            return render_platform_unavailable(request, e, status=200)
         error_ctx = handle_platform_error(
             request, e, logger, fallback_message=_("Unable to load hosting plans. Please try again later.")
         )

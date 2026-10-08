@@ -144,7 +144,7 @@
     {% endfor %}
 
     <!-- Pagination -->
-    {% include 'components/pagination.html' with page_obj=export_requests extra_params='' htmx_target='#gdpr-results' htmx_url='/app/audit/gdpr_management/requests/' %}
+    {% include 'components/pagination.html' with page_obj=export_requests extra_params=extra_params htmx_target='#gdpr-results' htmx_url='/app/audit/gdpr_management/requests/' %}
 
 {% else %}
     <!-- Empty State -->

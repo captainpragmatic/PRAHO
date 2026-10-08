@@ -11,6 +11,7 @@ from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 
 from apps.audit.services import ProductsAuditService
+from apps.common.transactions import best_effort_atomic
 
 from .models import Product, ProductPrice
 
@@ -34,6 +35,7 @@ HIGH_ATTENTION_CATEGORIES: list[str] = [
 
 
 @receiver(pre_save, sender=Product)
+@best_effort_atomic(logger=logger, scope="products", message="capture_product_changes failed")
 def capture_product_changes(sender: type[Product], instance: Product, **kwargs: Any) -> None:
     """
     Capture product changes to determine what changed for audit logging.
@@ -41,6 +43,8 @@ def capture_product_changes(sender: type[Product], instance: Product, **kwargs: 
     This pre_save signal captures the old values so we can compare in post_save.
     Focus on pricing, availability, and key business fields.
     """
+    for field in ["_old_is_active", "_old_is_public", "_old_is_featured", "_old_includes_vat", "_old_product_type"]:
+        instance.__dict__.pop(field, None)
     try:
         if instance.pk:
             # Get the old instance from database to compare
@@ -67,6 +71,7 @@ def capture_product_changes(sender: type[Product], instance: Product, **kwargs: 
         instance._old_product_type = None
     except Exception as e:
         logger.error("🔥 [Products] Error capturing product changes: %s", e)
+        raise
 
 
 @receiver(post_save, sender=Product)
@@ -80,7 +85,7 @@ def log_product_lifecycle_events(sender: type[Product], instance: Product, creat
     - VAT configuration changes (Romanian compliance)
     - Product type changes (affects provisioning)
     """
-    try:
+    with best_effort_atomic(logger=logger, scope="products", message="log_product_lifecycle_events failed"):
         if created:
             # New product created
             from apps.common.tax_service import (  # noqa: PLC0415  # Deferred: avoids circular import
@@ -113,16 +118,23 @@ def log_product_lifecycle_events(sender: type[Product], instance: Product, creat
                     context=None,
                 )
 
-    except Exception as e:
-        logger.error("🔥 [Products] Error in product lifecycle logging: %s", e)
-
 
 @receiver(pre_save, sender=ProductPrice)
+@best_effort_atomic(logger=logger, scope="products", message="capture_price_changes failed")
 def capture_price_changes(sender: type[ProductPrice], instance: ProductPrice, **kwargs: Any) -> None:
     """
     Capture price changes for Romanian VAT compliance and billing transparency.
     Updated for simplified pricing model.
     """
+    for field in [
+        "_old_monthly_price_cents",
+        "_old_setup_cents",
+        "_old_promo_price_cents",
+        "_old_is_active",
+        "_old_semiannual_discount_percent",
+        "_old_annual_discount_percent",
+    ]:
+        instance.__dict__.pop(field, None)
     try:
         if instance.pk:
             # Get the old instance from database to compare pricing
@@ -151,6 +163,7 @@ def capture_price_changes(sender: type[ProductPrice], instance: ProductPrice, **
         instance._old_annual_discount_percent = None
     except Exception as e:
         logger.error("🔥 [Products] Error capturing price changes: %s", e)
+        raise
 
 
 @receiver(post_save, sender=ProductPrice)
@@ -164,7 +177,7 @@ def log_price_changes(sender: type[ProductPrice], instance: ProductPrice, create
     - Promotional pricing audits
     - Billing accuracy
     """
-    try:
+    with best_effort_atomic(logger=logger, scope="products", message="log_price_changes failed"):
         if created:
             from apps.common.tax_service import (  # noqa: PLC0415  # Deferred: avoids circular import
                 TaxService,  # Circular: cross-app signal  # Deferred: avoids circular import
@@ -219,9 +232,6 @@ def log_price_changes(sender: type[ProductPrice], instance: ProductPrice, create
                     romanian_business_context=romanian_context,
                     context=None,
                 )
-
-    except Exception as e:
-        logger.error("🔥 [Products] Error in price change logging: %s", e)
 
 
 def _check_availability_changes(instance: Product) -> dict[str, Any] | None:

@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import timedelta
-from typing import Any, TypedDict
+from datetime import datetime, timedelta
+from typing import Any, TypedDict, cast
 from uuid import UUID
 
 from django.conf import settings
@@ -61,37 +61,10 @@ class RetryableProvisioningError(RuntimeError):
 # ===============================================================================
 
 
-def get_task_timeouts() -> dict[str, int]:
-    """
-    Get task timeout configurations from Django settings.
-
-    Supports runtime configuration updates and environment variable overrides.
-    Uses the centralized VIRTUALMIN_TIMEOUTS configuration system.
-
-    Returns:
-        Dictionary of task timeout values in seconds
-    """
-
-    # Get Virtualmin timeout configuration
-    virtualmin_timeouts = getattr(settings, "VIRTUALMIN_TIMEOUTS", {})
-
-    return {
-        "TASK_RETRY_DELAY": virtualmin_timeouts.get("RETRY_DELAY", 5) * 60,  # Convert to minutes
-        "TASK_MAX_RETRIES": virtualmin_timeouts.get("MAX_RETRIES", 3),
-        "TASK_SOFT_TIME_LIMIT": virtualmin_timeouts.get("PROVISIONING_TIMEOUT", 180) * 2,  # 2x provisioning timeout
-        "TASK_TIME_LIMIT": virtualmin_timeouts.get("PROVISIONING_TIMEOUT", 180) * 3,  # 3x provisioning timeout
-        "BACKUP_TIME_LIMIT": virtualmin_timeouts.get("API_BACKUP_TIMEOUT", 300),
-        "BULK_OPERATION_TIME_LIMIT": virtualmin_timeouts.get("API_BULK_TIMEOUT", 600),
-        "HEALTH_CHECK_TIME_LIMIT": virtualmin_timeouts.get("API_HEALTH_CHECK_TIMEOUT", 10) * 6,  # 1 minute total
-    }
-
-
-# Legacy constants for backward compatibility
-TASK_RETRY_DELAY = 300  # 5 minutes - DEPRECATED: Use get_task_timeouts()['TASK_RETRY_DELAY']
-TASK_MAX_RETRIES = 3  # DEPRECATED: Use get_task_timeouts()['TASK_MAX_RETRIES']
-_DEFAULT_TASK_SOFT_TIME_LIMIT = 600  # 10 minutes - DEPRECATED: Use get_task_timeouts()['TASK_SOFT_TIME_LIMIT']
+# Task budgets
+_DEFAULT_TASK_SOFT_TIME_LIMIT = 600  # 10 minutes
 TASK_SOFT_TIME_LIMIT = _DEFAULT_TASK_SOFT_TIME_LIMIT
-_DEFAULT_TASK_TIME_LIMIT = 900  # 15 minutes - DEPRECATED: Use get_task_timeouts()['TASK_TIME_LIMIT']
+_DEFAULT_TASK_TIME_LIMIT = 900  # 15 minutes
 TASK_TIME_LIMIT = _DEFAULT_TASK_TIME_LIMIT
 
 
@@ -117,7 +90,7 @@ def get_task_time_limit() -> int:
 class VirtualminProvisioningConfig:
     """Configuration for Virtualmin provisioning task."""
 
-    service_id: str
+    service_id: str | int
     domain: str
     username: str | None = None
     password: str | None = None
@@ -149,12 +122,13 @@ class ProvisioningExecutionParams:
     server: Any | None  # VirtualminServer
     correlation_id: str
     safe_log_ctx: dict[str, Any]
+    task_budget_seconds: int | None = None
 
 
 class VirtualminProvisioningParams(TypedDict, total=False):
     """Parameters for Virtualmin account provisioning"""
 
-    service_id: str
+    service_id: str | int
     domain: str
     username: str | None
     password: str | None
@@ -164,7 +138,7 @@ class VirtualminProvisioningParams(TypedDict, total=False):
 
 def _decrypt_and_extract_parameters(
     params: VirtualminProvisioningParams | SecureTaskParameters,
-) -> tuple[dict[str, Any], str, str] | tuple[None, None, None]:
+) -> tuple[VirtualminProvisioningParams, str | int, str] | tuple[None, None, None]:
     """
     Decrypt and extract core parameters from provisioning params.
 
@@ -183,7 +157,7 @@ def _decrypt_and_extract_parameters(
         service_id = decrypted_params["service_id"]
         domain = decrypted_params["domain"]
 
-        return decrypted_params, service_id, domain
+        return cast("VirtualminProvisioningParams", decrypted_params), service_id, domain
 
     except Exception as decrypt_error:
         logger.error(f"🔥 [VirtualminTask] Parameter decryption/extraction failed: {decrypt_error}")
@@ -192,7 +166,7 @@ def _decrypt_and_extract_parameters(
 
 
 def _validate_provisioning_parameters(
-    decrypted_params: dict[str, Any], service_id: str, domain: str
+    decrypted_params: VirtualminProvisioningParams, service_id: str | int, domain: str
 ) -> ProvisioningContext | None:
     """
     Validate provisioning parameters and create context.
@@ -238,8 +212,8 @@ def _validate_provisioning_parameters(
         logger.error(f"❌ [VirtualminTask] Parameter validation failed: {validation_error}")
         log_security_event_safe(
             "virtualmin_task_validation_failed",
-            {"error": str(validation_error), "original_params": sanitize_log_parameters(decrypted_params)},
-            service_id,
+            {"error": str(validation_error), "original_params": sanitize_log_parameters(dict(decrypted_params))},
+            str(service_id),
             domain,
         )
         return None
@@ -264,7 +238,9 @@ def _check_idempotency(context: ProvisioningContext) -> tuple[bool, dict[str, An
     return True, None
 
 
-def _execute_provisioning_transaction(context: ProvisioningContext, server_id: str | None) -> dict[str, Any]:
+def _execute_provisioning_transaction(
+    context: ProvisioningContext, server_id: str | None, *, task_budget_seconds: int | None = None
+) -> dict[str, Any]:
     """
     Execute provisioning within atomic transaction.
 
@@ -302,6 +278,7 @@ def _execute_provisioning_transaction(context: ProvisioningContext, server_id: s
                 server=server,
                 correlation_id=context.correlation_id,
                 safe_log_ctx=context.safe_log_ctx,
+                task_budget_seconds=task_budget_seconds,
             )
 
             # Execute provisioning with rollback capability
@@ -330,7 +307,9 @@ def _execute_provisioning_transaction(context: ProvisioningContext, server_id: s
         }
 
 
-def provision_virtualmin_account(params: VirtualminProvisioningParams | SecureTaskParameters) -> dict[str, Any]:
+def provision_virtualmin_account(
+    params: VirtualminProvisioningParams | SecureTaskParameters, *, task_budget_seconds: int | None = None
+) -> dict[str, Any]:
     """
     Sync task to provision Virtualmin account with comprehensive security fixes.
 
@@ -369,8 +348,10 @@ def provision_virtualmin_account(params: VirtualminProvisioningParams | SecureTa
         if not should_continue:
             return existing_result or {"success": False, "error": "Idempotency check failed"}
 
-        # Step 4: Execute provisioning in transaction
-        return _execute_provisioning_transaction(context, decrypted_params.get("server_id"))
+        # Step 4: Execute provisioning with the enqueue-time budget.
+        return _execute_provisioning_transaction(
+            context, decrypted_params.get("server_id"), task_budget_seconds=task_budget_seconds
+        )
 
     except RetryableProvisioningError:
         raise
@@ -380,7 +361,7 @@ def provision_virtualmin_account(params: VirtualminProvisioningParams | SecureTa
         try:
             validated_domain = context.domain if "context" in locals() and context else (domain or "unknown")
             validated_service_id = (
-                context.service_id if "context" in locals() and context else (service_id or "unknown")
+                context.service_id if "context" in locals() and context else str(service_id or "unknown")
             )
             correlation_id = (
                 context.correlation_id
@@ -421,11 +402,6 @@ def _validate_service_for_provisioning_secure(service_id: str) -> dict[str, Any]
     return {"success": True, "service": service}
 
 
-def _validate_service_for_provisioning(service_id: str) -> dict[str, Any]:
-    """Legacy function - kept for backward compatibility."""
-    return _validate_service_for_provisioning_secure(service_id)
-
-
 def _check_existing_virtualmin_account_secure(service: Service) -> dict[str, Any] | None:
     """Check if VirtualMin account already exists for service with enhanced logging."""
     if hasattr(service, "virtualmin_account") and service.virtualmin_account:
@@ -455,11 +431,6 @@ def _check_existing_virtualmin_account_secure(service: Service) -> dict[str, Any
     return None
 
 
-def _check_existing_virtualmin_account(service: Service) -> dict[str, Any] | None:
-    """Legacy function - kept for backward compatibility."""
-    return _check_existing_virtualmin_account_secure(service)
-
-
 def _get_provisioning_server_secure(server_id: str | None) -> VirtualminServer | None:
     """Get server for provisioning with enhanced security checks."""
     if not server_id:
@@ -467,8 +438,8 @@ def _get_provisioning_server_secure(server_id: str | None) -> VirtualminServer |
         return None
 
     try:
-        # Validate server ID format first
-        validated_server_id = ProvisioningParametersValidator.validate_service_id(server_id)
+        # Validate the UUID primary key independently of integer service IDs.
+        validated_server_id = ProvisioningParametersValidator.validate_server_id(server_id)
 
         server = VirtualminServer.objects.get(id=validated_server_id)
 
@@ -498,16 +469,13 @@ def _get_provisioning_server_secure(server_id: str | None) -> VirtualminServer |
         return None
 
 
-def _get_provisioning_server(server_id: str | None) -> VirtualminServer | None:
-    """Legacy function - kept for backward compatibility."""
-    return _get_provisioning_server_secure(server_id)
-
-
 def _execute_virtualmin_provisioning_with_params(exec_params: ProvisioningExecutionParams) -> dict[str, Any]:
     """Execute VirtualMin provisioning with enhanced security and error handling."""
     try:
-        # Create provisioning service
-        provisioning_service = VirtualminProvisioningService(exec_params.server)
+        # Carry the enqueue-time lease into the initial job producer.
+        provisioning_service = VirtualminProvisioningService(
+            exec_params.server, task_budget_seconds=exec_params.task_budget_seconds
+        )
 
         # Prepare creation data with validated parameters
         creation_data = VirtualminAccountCreationData(
@@ -561,34 +529,6 @@ def _execute_virtualmin_provisioning_with_params(exec_params: ProvisioningExecut
             "error": f"Execution failed: {exec_error}",
             "retriability": Retriability.UNKNOWN.value,
         }
-
-
-def _execute_virtualmin_provisioning(
-    service: Service,
-    domain: str,
-    params: VirtualminProvisioningParams,
-    server: VirtualminServer | None,
-    correlation_id: str,
-) -> dict[str, Any]:
-    """Legacy function - kept for backward compatibility."""
-    safe_log_ctx = {
-        "service_id": str(service.id),
-        "domain": domain,
-        "correlation_id": correlation_id,
-    }
-
-    # Create execution params and use new function
-    exec_params = ProvisioningExecutionParams(
-        service=service,
-        domain=domain,
-        username=params.get("username"),
-        template=params.get("template", "Default"),
-        server=server,
-        correlation_id=correlation_id,
-        safe_log_ctx=safe_log_ctx,
-    )
-
-    return _execute_virtualmin_provisioning_with_params(exec_params)
 
 
 def _handle_successful_provisioning_secure(
@@ -658,16 +598,6 @@ def _handle_successful_provisioning_secure(
             "security_enhanced": True,
             "audit_warning": "Audit logging partially failed",
         }
-
-
-def _handle_successful_provisioning(account: Any, service: Service, correlation_id: str) -> dict[str, Any]:
-    """Legacy function - kept for backward compatibility."""
-    safe_log_ctx = {
-        "service_id": str(service.id),
-        "domain": account.domain,
-        "correlation_id": correlation_id,
-    }
-    return _handle_successful_provisioning_secure(account, service, correlation_id, safe_log_ctx)
 
 
 def _handle_failed_provisioning_secure(  # noqa: PLR0913  # Structured audit context is intentionally explicit
@@ -758,16 +688,6 @@ def _handle_failed_provisioning_secure(  # noqa: PLR0913  # Structured audit con
     }
 
 
-def _handle_failed_provisioning(error_msg: str, service: Service, domain: str, correlation_id: str) -> dict[str, Any]:
-    """Legacy function - kept for backward compatibility."""
-    safe_log_ctx = {
-        "service_id": str(service.id),
-        "domain": domain,
-        "correlation_id": correlation_id,
-    }
-    return _handle_failed_provisioning_secure(error_msg, service, domain, correlation_id, safe_log_ctx)
-
-
 def _handle_critical_provisioning_error_secure(
     error: Exception, domain: str, service_id: str, correlation_id: str, safe_log_ctx: dict[str, Any]
 ) -> dict[str, Any]:
@@ -854,18 +774,6 @@ def _handle_critical_provisioning_error_secure(
     }
 
 
-def _handle_critical_provisioning_error(
-    error: Exception, domain: str, service_id: str, correlation_id: str
-) -> dict[str, Any]:
-    """Legacy function - kept for backward compatibility."""
-    safe_log_ctx = {
-        "service_id": service_id,
-        "domain": domain,
-        "correlation_id": correlation_id,
-    }
-    return _handle_critical_provisioning_error_secure(error, domain, service_id, correlation_id, safe_log_ctx)
-
-
 def run_node_drain(drain_id: str, task_token: str | None = None) -> dict[str, Any]:
     try:
         result = NodeDrainService.run(UUID(drain_id), UUID(task_token) if task_token else None)
@@ -927,7 +835,9 @@ def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:  # n
         return {"status": "failed", "job_id": job_id, "error": "no account"}
 
     token = uuid4()
-    budget = int(job.parameters.get("task_budget_seconds", TASK_TIME_LIMIT))
+    budget = (
+        int(job.parameters["task_budget_seconds"]) if "task_budget_seconds" in job.parameters else get_task_time_limit()
+    )
     deadline = timezone.now() + timedelta(seconds=budget)
     if not VirtualminProvisioningJob.claim_execution(job.pk, token, deadline):
         return {"status": "stale", "job_id": job_id}
@@ -1133,8 +1043,8 @@ def reclaim_stalled_virtualmin_operations() -> dict[str, int]:
     for drain in stalled_drains:
         try:
             if drain.status == "pending":
-                NodeDrainService._enqueue(drain.pk, drain.task_token)
-                counts["drains_requeued"] += 1
+                if NodeDrainService._enqueue(drain.pk, drain.task_token):
+                    counts["drains_requeued"] += 1
             elif NodeDrainService.close_interrupted(drain.pk):
                 # Never run() here: the worker may have checkpointed the drain
                 # back to pending with a fresh token between selection and now,
@@ -1174,6 +1084,8 @@ def _migration_locked(account: VirtualminAccount) -> bool:
 
 def reconcile_virtualmin_service_state(  # noqa: PLR0911  # Convergence matrix: one exit per state pair
     service_id: str,
+    *,
+    task_budget_seconds: int | None = None,
 ) -> dict[str, Any]:
     """
     Idempotent convergence: read the COMMITTED Service + account state and
@@ -1212,12 +1124,14 @@ def reconcile_virtualmin_service_state(  # noqa: PLR0911  # Convergence matrix: 
 
             _trigger_automatic_virtualmin_provisioning(service)
             return {"success": True, "action": "provisioning_triggered"}
-        return _converge_active_service(service, account)
+        return _converge_active_service(service, account, task_budget_seconds=task_budget_seconds)
 
     if service.status in ("suspended", "terminated", "expired"):
         if account is not None and account.status == "active":
             reason = service.suspension_reason or f"service_{service.status}"
-            result = VirtualminProvisioningService(account.server).suspend_account(account, reason)
+            result = VirtualminProvisioningService(
+                account.server, task_budget_seconds=task_budget_seconds
+            ).suspend_account(account, reason)
             if result.is_err():
                 return {"success": False, "action": "suspend", "error": str(result.unwrap_err())}
             _reconcile_again_if_state_moved(service, expected_status=service.status)
@@ -1227,7 +1141,9 @@ def reconcile_virtualmin_service_state(  # noqa: PLR0911  # Convergence matrix: 
     return {"success": True, "action": "noop"}
 
 
-def _converge_active_service(service: Service, account: VirtualminAccount) -> dict[str, Any]:
+def _converge_active_service(
+    service: Service, account: VirtualminAccount, *, task_budget_seconds: int | None = None
+) -> dict[str, Any]:
     """Active Service: hosting is on unless a bound domain holds it off (#566, ADR-0051)."""
     from apps.provisioning.virtualmin_service import (  # noqa: PLC0415  # Deferred: avoids circular import
         VirtualminProvisioningService,  # Circular: cross-app
@@ -1236,7 +1152,9 @@ def _converge_active_service(service: Service, account: VirtualminAccount) -> di
     # Snapshot before any gateway call, so a domain that changes mid-flight is caught below.
     hold = blocking_domain_status(account)
     if account.status == "active" and hold is not None:
-        result = VirtualminProvisioningService(account.server).suspend_account(account, f"domain_{hold}")
+        result = VirtualminProvisioningService(account.server, task_budget_seconds=task_budget_seconds).suspend_account(
+            account, f"domain_{hold}"
+        )
         if result.is_err():
             return {"success": False, "action": "suspend", "error": str(result.unwrap_err())}
         _reconcile_again_if_state_moved(service, expected_status="active", account=account, held_by_domain=True)
@@ -1245,7 +1163,9 @@ def _converge_active_service(service: Service, account: VirtualminAccount) -> di
         logger.info("⏭️ [VirtualminTask] Domain disables hosting; leaving %s suspended", account.domain)
         return {"success": True, "action": "domain_disabled"}
     if account.status == "suspended":
-        result = VirtualminProvisioningService(account.server).unsuspend_account(account)
+        result = VirtualminProvisioningService(
+            account.server, task_budget_seconds=task_budget_seconds
+        ).unsuspend_account(account)
         if result.is_err():
             return {"success": False, "action": "unsuspend", "error": str(result.unwrap_err())}
         _reconcile_again_if_state_moved(service, expected_status="active", account=account, held_by_domain=False)
@@ -1358,14 +1278,18 @@ def reconcile_divergent_services_task() -> dict[str, Any]:
 
 def reconcile_virtualmin_service_state_async(service_id: str) -> str:
     """Queue Virtualmin state reconciliation for a service."""
+    budget = get_task_soft_time_limit()
     return async_task(
         "apps.provisioning.virtualmin_tasks.reconcile_virtualmin_service_state",
         service_id,
-        timeout=TASK_SOFT_TIME_LIMIT,
+        task_budget_seconds=budget,
+        timeout=budget,
     )
 
 
-def suspend_virtualmin_account(account_id: str, reason: str = "") -> dict[str, Any]:
+def suspend_virtualmin_account(
+    account_id: str, reason: str = "", *, task_budget_seconds: int | None = None
+) -> dict[str, Any]:
     """
     Sync task to suspend Virtualmin account.
 
@@ -1387,8 +1311,8 @@ def suspend_virtualmin_account(account_id: str, reason: str = "") -> dict[str, A
             logger.error(f"❌ [VirtualminTask] {error_msg}")
             return {"success": False, "error": error_msg}
 
-        # Create provisioning service
-        provisioning_service = VirtualminProvisioningService(account.server)
+        # Create provisioning service with the enqueue snapshot.
+        provisioning_service = VirtualminProvisioningService(account.server, task_budget_seconds=task_budget_seconds)
 
         if _migration_locked(account):
             return {"success": True, "action": "migration_locked"}
@@ -1417,7 +1341,7 @@ def suspend_virtualmin_account(account_id: str, reason: str = "") -> dict[str, A
         return {"success": False, "error": str(e), "retriability": Retriability.UNKNOWN.value}
 
 
-def unsuspend_virtualmin_account(account_id: str) -> dict[str, Any]:
+def unsuspend_virtualmin_account(account_id: str, *, task_budget_seconds: int | None = None) -> dict[str, Any]:
     """
     Sync task to unsuspend Virtualmin account.
 
@@ -1438,8 +1362,8 @@ def unsuspend_virtualmin_account(account_id: str) -> dict[str, Any]:
             logger.error(f"❌ [VirtualminTask] {error_msg}")
             return {"success": False, "error": error_msg}
 
-        # Create provisioning service
-        provisioning_service = VirtualminProvisioningService(account.server)
+        # Create provisioning service with the enqueue snapshot.
+        provisioning_service = VirtualminProvisioningService(account.server, task_budget_seconds=task_budget_seconds)
 
         if _migration_locked(account):
             return {"success": True, "action": "migration_locked"}
@@ -1477,7 +1401,7 @@ def unsuspend_virtualmin_account(account_id: str) -> dict[str, Any]:
         return {"success": False, "error": str(e), "retriability": Retriability.UNKNOWN.value}
 
 
-def delete_virtualmin_account(account_id: str) -> dict[str, Any]:
+def delete_virtualmin_account(account_id: str, *, task_budget_seconds: int | None = None) -> dict[str, Any]:
     """
     Sync task to delete Virtualmin account.
 
@@ -1504,8 +1428,8 @@ def delete_virtualmin_account(account_id: str) -> dict[str, Any]:
         # Note: Protection check is handled in the service layer
         domain = account.domain  # Store for logging after deletion
 
-        # Create provisioning service
-        provisioning_service = VirtualminProvisioningService(account.server)
+        # Create provisioning service with the enqueue snapshot.
+        provisioning_service = VirtualminProvisioningService(account.server, task_budget_seconds=task_budget_seconds)
 
         # Execute deletion
         result = provisioning_service.delete_account(account)
@@ -1712,10 +1636,10 @@ def retry_virtualmin_job(job_id: str, claim_nonce: str = "") -> dict[str, Any]:
     return {"success": False, "job_id": job_id, "error": str(result.unwrap_err())}
 
 
-def _recover_expired_claims(now: Any) -> int:
-    """Claimed jobs (pending or running) whose lease expired return to the failed pool."""
+def _recover_expired_claims(now: datetime) -> int:
+    """Recover expired dispatch leases and per-job execution deadlines."""
     lease_cutoff = now - timedelta(minutes=_CLAIM_LEASE_MINUTES)
-    return VirtualminProvisioningJob.recover_expired_claims(lease_cutoff, now + timedelta(minutes=5))
+    return VirtualminProvisioningJob.recover_expired_claims(lease_cutoff, now + timedelta(minutes=5), now=now)
 
 
 def process_failed_virtualmin_jobs() -> dict[str, Any]:
@@ -1754,6 +1678,7 @@ def process_failed_virtualmin_jobs() -> dict[str, Any]:
             "jobs": [],
         }
 
+        default_task_budget: int | None = None
         for job in retryable_jobs[:50]:  # Limit to 50 jobs per run
             try:
                 # Validate BEFORE claiming: unsupported/orphaned jobs are
@@ -1770,11 +1695,22 @@ def process_failed_virtualmin_jobs() -> dict[str, Any]:
                     continue
 
                 try:
-                    dispatch_timeout = TASK_TIME_LIMIT
                     if job.operation == "migrate_domain":
                         from .virtualmin_migration_service import migration_task_timeout  # noqa: PLC0415
 
                         dispatch_timeout = migration_task_timeout()
+                    elif "task_budget_seconds" in job.parameters:
+                        dispatch_timeout = int(job.parameters["task_budget_seconds"])
+                    else:
+                        # Resolve once per sweep and persist before a worker can receive the task.
+                        if default_task_budget is None:
+                            default_task_budget = get_task_time_limit()
+                        dispatch_timeout = default_task_budget
+                        job.parameters = {**job.parameters, "task_budget_seconds": dispatch_timeout}
+                        if not VirtualminProvisioningJob.objects.filter(
+                            pk=job.pk, status="pending", claimed_at=now
+                        ).update(parameters=job.parameters):
+                            continue
                     task_id = async_task(
                         "apps.provisioning.virtualmin_tasks.retry_virtualmin_job",
                         str(job.id),
@@ -1844,10 +1780,12 @@ def provision_virtualmin_account_async(params: VirtualminProvisioningParams | Se
         # NOTE: no `retry=` — django-q2 1.9.0 has no such option; it would leak
         # into the task kwargs and TypeError on every dequeue. Retries are
         # DB-driven via VirtualminProvisioningJob + process_failed_virtualmin_jobs.
+        budget = get_task_time_limit()
         return async_task(
             "apps.provisioning.virtualmin_tasks.provision_virtualmin_account",
             params,
-            timeout=TASK_TIME_LIMIT,
+            task_budget_seconds=budget,
+            timeout=budget,
         )
 
     except Exception as e:
@@ -1861,10 +1799,11 @@ def provision_virtualmin_account_async(params: VirtualminProvisioningParams | Se
                 None,
             )
         else:
+            service_ref = params.get("service_id") if isinstance(params, dict) else None
             log_security_event_safe(
                 "virtualmin_task_scheduling_failed",
                 {"error": str(e), "params": sanitize_log_parameters(dict(params))},
-                params.get("service_id") if isinstance(params, dict) else None,
+                None if service_ref is None else str(service_ref),
             )
 
         raise
@@ -1872,25 +1811,35 @@ def provision_virtualmin_account_async(params: VirtualminProvisioningParams | Se
 
 def suspend_virtualmin_account_async(account_id: str, reason: str = "") -> str:
     """Queue Virtualmin account suspension task."""
+    budget = get_task_soft_time_limit()
     return async_task(
         "apps.provisioning.virtualmin_tasks.suspend_virtualmin_account",
         account_id,
         reason,
-        timeout=TASK_SOFT_TIME_LIMIT,
+        task_budget_seconds=budget,
+        timeout=budget,
     )
 
 
 def unsuspend_virtualmin_account_async(account_id: str) -> str:
     """Queue Virtualmin account unsuspension task."""
+    budget = get_task_soft_time_limit()
     return async_task(
-        "apps.provisioning.virtualmin_tasks.unsuspend_virtualmin_account", account_id, timeout=TASK_SOFT_TIME_LIMIT
+        "apps.provisioning.virtualmin_tasks.unsuspend_virtualmin_account",
+        account_id,
+        task_budget_seconds=budget,
+        timeout=budget,
     )
 
 
 def delete_virtualmin_account_async(account_id: str) -> str:
     """Queue Virtualmin account deletion task."""
+    budget = get_task_time_limit()
     return async_task(
-        "apps.provisioning.virtualmin_tasks.delete_virtualmin_account", account_id, timeout=TASK_TIME_LIMIT
+        "apps.provisioning.virtualmin_tasks.delete_virtualmin_account",
+        account_id,
+        task_budget_seconds=budget,
+        timeout=budget,
     )
 
 

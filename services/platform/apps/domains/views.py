@@ -22,6 +22,7 @@ from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_http_methods
 
 from apps.common.decorators import admin_required, staff_required
+from apps.common.pagination import pagination_query
 from apps.customers.models import Customer
 from apps.settings.services import SettingsService
 from apps.users.models import User
@@ -275,6 +276,7 @@ def domain_list(request: HttpRequest) -> HttpResponse:
         "status_filter": status_filter,
         "tld_filter": tld_filter,
         "expiry_filter": expiry_filter,
+        "extra_params": pagination_query(request),
         "total_count": total_count,
         "active_count": active_count,
         "expiring_count": expiring_count,
@@ -835,8 +837,6 @@ def domain_admin_list(request: HttpRequest) -> HttpResponse:
 
     # Build table data
     table_data = _build_domain_table_data(cast(list[Domain], domains_page.object_list), user)
-    filter_params = request.GET.copy()
-    filter_params.pop("page", None)
 
     context = {
         "domains": domains_page,
@@ -850,7 +850,7 @@ def domain_admin_list(request: HttpRequest) -> HttpResponse:
         "expiring_count": expiring_count,
         "auto_renew_count": auto_renew_count,
         "registrars": registrars,
-        "extra_params": "&" + filter_params.urlencode(),
+        "extra_params": pagination_query(request),
     }
 
     return render(request, "domains/staff/domain_admin_list.html", context)

@@ -96,7 +96,6 @@ TEMPLATES = [
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
                 "apps.common.context_processors.current_customer",
-                "apps.common.context_processors.romanian_business_context",
                 "apps.common.context_processors.navigation_dropdowns",
                 "apps.common.context_processors.csp_nonce",
                 # Staff maintenance banner (base.html) needs system_status on every
@@ -199,6 +198,7 @@ LANGUAGES = [
 
 # Romanian locale formatting
 LOCALE_PATHS = [
+    REPO_ROOT / "shared" / "ui" / "locale",
     BASE_DIR / "locale",
 ]
 

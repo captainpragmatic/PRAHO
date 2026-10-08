@@ -7,7 +7,7 @@ accepted. Read-only operations may also retry ambiguous transient failures.
 from unittest.mock import patch
 
 import requests
-from django.test import SimpleTestCase
+from django.test import TestCase
 
 from apps.common.outbound_http import OutboundSecurityError
 from apps.common.types import Err, Retriability
@@ -20,9 +20,7 @@ from apps.provisioning.virtualmin_models import VirtualminServer
 
 
 def _gateway() -> VirtualminGateway:
-    server = VirtualminServer(
-        hostname="retry.example.com", status="active", use_ssl=False, api_username="retry-api"
-    )
+    server = VirtualminServer(hostname="retry.example.com", status="active", use_ssl=False, api_username="retry-api")
     server.set_api_password("retry-pw")
     # use_credential_vault=False: these tests exercise the RETRY contract with _execute_http_request
     # mocked, so the credential must resolve from the server field (no vault/DB) — call() now resolves
@@ -38,7 +36,8 @@ def _response(status_code: int) -> requests.Response:
     return response
 
 
-class VirtualminRetryContractTests(SimpleTestCase):
+# The retry count is read from settings at dispatch, so these tests need the database.
+class VirtualminRetryContractTests(TestCase):
     def test_connect_timeout_retries_mutation_and_preserves_retriable(self) -> None:
         gateway = _gateway()
 
@@ -99,7 +98,8 @@ class VirtualminRetryContractTests(SimpleTestCase):
         with (
             patch.object(gateway, "_check_rate_limit", return_value=True),
             patch.object(
-                gateway, "_execute_http_request",
+                gateway,
+                "_execute_http_request",
                 side_effect=lambda _params, auth=None, timeout_seconds=None: _response(503),
             ) as request_mock,
             patch("apps.provisioning.virtualmin_gateway.time.sleep"),
@@ -116,7 +116,8 @@ class VirtualminRetryContractTests(SimpleTestCase):
         with (
             patch.object(gateway, "_check_rate_limit", return_value=True),
             patch.object(
-                gateway, "_execute_http_request",
+                gateway,
+                "_execute_http_request",
                 side_effect=lambda _params, auth=None, timeout_seconds=None: _response(503),
             ) as request_mock,
             patch("apps.provisioning.virtualmin_gateway.time.sleep"),

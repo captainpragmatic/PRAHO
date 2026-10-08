@@ -4836,7 +4836,8 @@ class AuditSearchService:
     @classmethod
     def _add_performance_hints(cls, query_info: dict[str, Any]) -> None:
         """Add performance optimization hints to query info."""
-        if len(query_info["filters_applied"]) > HIGH_COMPLEXITY_FILTER_THRESHOLD:
+        high_complexity_threshold = get_high_complexity_filter_threshold()
+        if len(query_info["filters_applied"]) > high_complexity_threshold:
             query_info["estimated_cost"] = "high"
             query_info["performance_hints"].append("Consider using saved queries for complex searches")
 
@@ -4898,6 +4899,8 @@ class AuditSearchService:
                     AuditEvent.objects.filter(
                         ip_address__icontains=query, timestamp__gte=timezone.now() - timedelta(days=30)
                     )
+                    # Order by the projected field so DISTINCT deduplicates before the limit.
+                    .order_by("ip_address")
                     .values_list("ip_address", flat=True)
                     .distinct()[:limit]
                 )
@@ -5846,7 +5849,7 @@ class IntegrationsAuditService:
             "service_health": {
                 "source_service": webhook_event.source,
                 "delivery_successful": True,
-                "endpoint_healthy": response_status < WEBHOOK_HEALTHY_RESPONSE_THRESHOLD,
+                "endpoint_healthy": response_status < get_webhook_healthy_response_threshold(),
                 "reliability_score": "high"
                 if response_time_ms < WEBHOOK_FAST_RESPONSE_THRESHOLD_MS
                 else "medium"
@@ -5856,7 +5859,8 @@ class IntegrationsAuditService:
             "security_context": {
                 "ip_address": webhook_event.ip_address,
                 "user_agent": webhook_event.user_agent,
-                "signature_verified": bool(webhook_event.signature),
+                "signature_verified": bool(webhook_event.signature_hash),
+                "signature_hash": webhook_event.signature_hash,
                 "payload_size_bytes": len(str(webhook_event.payload)) if webhook_event.payload else 0,
             },
             "reliability_tracking": reliability_context or {},
@@ -5915,9 +5919,10 @@ class IntegrationsAuditService:
         if context is None:
             context = AuditContext(user=user)
 
-        # Analyze failure severity
+        # Resolve once for both severity and retry-exhaustion metadata.
+        max_retry_threshold = get_webhook_max_retry_threshold()
         failure_severity = "medium"
-        if webhook_event.retry_count >= WEBHOOK_MAX_RETRY_THRESHOLD:  # Max retries exhausted
+        if webhook_event.retry_count >= max_retry_threshold:  # Max retries exhausted
             failure_severity = "high"
         elif security_flags and any(security_flags.values()):
             failure_severity = "critical"  # Security concern
@@ -5936,7 +5941,7 @@ class IntegrationsAuditService:
                 "error_category": error_details.get("category", "processing_error"),
                 "failure_severity": failure_severity,
                 "retry_count": webhook_event.retry_count,
-                "retry_exhausted": webhook_event.retry_count >= WEBHOOK_MAX_RETRY_THRESHOLD,
+                "retry_exhausted": webhook_event.retry_count >= max_retry_threshold,
                 "next_retry_at": webhook_event.next_retry_at.isoformat() if webhook_event.next_retry_at else None,
             },
             "service_degradation": {
@@ -5946,12 +5951,13 @@ class IntegrationsAuditService:
                 "failure_pattern": error_details.get("pattern", "isolated"),
             },
             "security_indicators": security_flags
-            or {
+            if security_flags is not None
+            else {
                 "suspicious_ip": False,
                 "malformed_payload": False,
                 "invalid_signature": False,
                 "rate_limit_exceeded": False,
-                "repeated_failures": webhook_event.retry_count > WEBHOOK_SUSPICIOUS_RETRY_THRESHOLD,
+                "repeated_failures": webhook_event.retry_count > get_webhook_suspicious_retry_threshold(),
             },
             "reliability_tracking": reliability_context or {},
             "failed_at": timezone.now().isoformat(),
@@ -6044,7 +6050,7 @@ class IntegrationsAuditService:
             },
             "alerting_context": {
                 "alert_required": True,
-                "escalation_needed": total_attempts >= WEBHOOK_MAX_RETRY_THRESHOLD,
+                "escalation_needed": total_attempts >= get_webhook_max_retry_threshold(),
                 "ops_team_notification": True,
                 "customer_notification_needed": reliability_impact.get("customer_visible", False)
                 if reliability_impact

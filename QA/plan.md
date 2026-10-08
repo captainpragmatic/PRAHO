@@ -7,13 +7,13 @@
 > against, and the table below records which automated test now enforces each phase — because the
 > reason cycle 1 was never re-run is that its walkthrough stayed prose while only its *findings*
 > became tests. A phase with a test beside it still needs a human for the named gaps: of the 47
-> numbered checks, **21 are fully asserted** by a test, **24 partly** (the page is reached and the
-> main behaviour asserted, but one or two named elements are not), and **2 not at all** — 1.2 root
-> redirect and 1.5 login-form validation. Phase 4 is the only one close to needing no re-walk.
+> numbered checks, **23 are fully asserted** by a test, **24 partly** (the page is reached and the
+> main behaviour asserted, but one or two named elements are not), and **0 not at all**. Checks 1.2
+> and 1.5 now have explicit coverage below. Phase 4 is the only one close to needing no re-walk.
 >
-> | Phase | Enforced by `tests/e2e/portal/` | Asserted / partial / none |
+> | Phase | Enforced by automated tests (e2e paths relative to `tests/e2e/portal/`) | Asserted / partial / none |
 > |---|---|---|
-> | 1 — Authentication & public pages | `test_cookie_consent.py`, `test_navigation.py`, `test_rate_limit_ux.py` (1.6), `test_password_recovery_workflow.py` (1.8) | 3 / 4 / 2 |
+> | 1 — Authentication & public pages | `test_cookie_consent.py`, `test_navigation.py` (1.5 browser validation), `test_rate_limit_ux.py` (1.6), `test_password_recovery_workflow.py` (1.8); `services/portal/tests/common/test_root_redirect.py` (1.2), `services/portal/tests/users/test_login_errors.py` (1.5 server validation) | 5 / 4 / 0 |
 > | 2 — Dashboard | `test_dashboard.py` | 0 / 2 / 0 |
 > | 3 — Profile & account management | `test_customer_company.py`, `test_customer_users.py`, `../test_localisation.py` (3.1 timezone) | 5 / 6 / 0 |
 > | 4 — Billing | `test_customer_billing.py`, `test_customer_invoices.py` | 6 / 1 / 0 |
@@ -133,7 +133,8 @@ QA/
 
 ### 1.2 Root Redirect
 - **URL**: `/`
-- **Check**: Redirects to `/login/` when unauthenticated
+- **Check**: Redirects to `/login/` when unauthenticated and directly to `/dashboard/` when authenticated
+- **Status**: Fully asserted by `RootRedirectTests.test_authenticated_root_redirects_directly_to_dashboard` and `RootRedirectTests.test_anonymous_root_redirects_to_login` in [test_root_redirect.py](../services/portal/tests/common/test_root_redirect.py). The anonymous path is a coverage addition; the authenticated path reproduces the obsolete-cookie redirect defect.
 
 ### 1.3 Cookie Policy
 - **URL**: `/cookie-policy/`
@@ -147,7 +148,8 @@ QA/
 
 ### 1.5 Login Validation Error
 - **Action**: Submit with `notanemail` / `short`
-- **Check**: Validation fires, error messages shown
+- **Check**: The browser's email validation blocks submission and keeps the URL at `/login/`; a direct server POST shows the email field error
+- **Status**: Fully asserted by `test_login_invalid_email_is_blocked_by_browser` in [test_navigation.py](../tests/e2e/portal/test_navigation.py) and `LoginErrorsTestCase.test_invalid_email_post_shows_field_error` in [test_login_errors.py](../services/portal/tests/users/test_login_errors.py). Both are coverage additions for existing validation.
 - **Screenshot**: `01_login_validation_error.png`
 
 ### 1.6 Login Wrong Credentials

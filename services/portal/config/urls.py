@@ -10,6 +10,8 @@ from django.urls import include, path
 
 from apps.common.views import cookie_consent_view, cookie_policy_view
 
+handler500 = "apps.common.error_views.server_error"
+
 
 # Portal status endpoint
 def portal_status(request: HttpRequest) -> JsonResponse:
@@ -29,6 +31,12 @@ def robots_txt(request: HttpRequest) -> HttpResponse:
         "Allow: /register/",
     ]
     return HttpResponse("\n".join(lines), content_type="text/plain")
+
+
+def root_redirect(request: HttpRequest) -> HttpResponse:
+    """Route to the dashboard when the portal session has an authenticated identity."""
+    session_user_id = request.session.get("user_id") or request.session.get("customer_id")
+    return redirect("/dashboard/" if session_user_id else "/login/")
 
 
 urlpatterns = [
@@ -57,12 +65,8 @@ urlpatterns = [
     path("api/", include("apps.api_client.urls")),
     # Internationalization (language switch)
     path("i18n/", include("django.conf.urls.i18n")),
-    # Root redirect to login
-    path(
-        "",
-        lambda request: redirect("/login/") if not request.COOKIES.get("portal_token") else redirect("/dashboard/"),
-        name="root",
-    ),
+    # Root redirect using the same session identity as authentication middleware
+    path("", root_redirect, name="root"),
 ]
 
 # ===============================================================================

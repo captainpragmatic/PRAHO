@@ -7,6 +7,17 @@
 
 from __future__ import annotations
 
+from django.http import HttpRequest
+
+
+def pagination_query(request: HttpRequest, exclude: tuple[str, ...] = ("page",)) -> str:
+    """Return an encoded suffix preserving every non-excluded GET value."""
+    parameters = request.GET.copy()
+    for key in exclude:
+        parameters.pop(key, None)
+    encoded = parameters.urlencode()
+    return f"&{encoded}" if encoded else ""
+
 
 class _Paginator:
     """Minimal paginator matching Django's Paginator interface for template use."""
@@ -73,14 +84,3 @@ class PaginatorData:
     def end_index(self) -> int:
         """Return 1-based end index for the current page."""
         return self._end_index
-
-
-def build_pagination_params(**filters: str) -> str:
-    """Build URL query string from non-empty filter values.
-
-    Usage:
-        build_pagination_params(search=search_query, status=status_filter)
-        # Returns "&search=foo&status=open" (only non-empty values)
-    """
-    parts = [f"&{key}={value}" for key, value in filters.items() if value]
-    return "".join(parts)

@@ -17,22 +17,28 @@ Reference:
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import logging
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import StrEnum
 from http import HTTPStatus
-from typing import Any, ClassVar
-from urllib.parse import urlencode
+from typing import Any, ClassVar, cast
+from urllib.parse import urlencode, urlsplit
 
 import requests
 from django.conf import settings
 from django.core.cache import cache
+from django.db import DatabaseError, InterfaceError
 from django.utils import timezone
+from django.utils.connection import ConnectionDoesNotExist
 from django.utils.translation import gettext as _
 
+from apps.billing.efactura.quota import QuotaEndpoint, QuotaExceededError, quota_tracker
+from apps.billing.efactura.settings import efactura_environment, efactura_settings
 from apps.common.outbound_http import OutboundPolicy, safe_request
 from apps.settings.services import SettingsService
 
@@ -85,14 +91,24 @@ class EFacturaConfig:
     default_standard: str = "UBL"
 
     @classmethod
-    def from_settings(cls) -> EFacturaConfig:
-        """Create config from Django settings and SettingsService."""
-        env_str = getattr(settings, "EFACTURA_ENVIRONMENT", "test")
+    def from_settings(cls, environment: str | None = None) -> EFacturaConfig:
+        """Resolve configuration for a recorded environment, or the current setting."""
+        env_str = efactura_environment().value if environment is None else environment
         environment = EFacturaEnvironment.PRODUCTION if env_str == "production" else EFacturaEnvironment.TEST
 
+        stored_client_id = SettingsService.get_stored_setting("efactura.oauth.client_id")
+        stored_client_secret = SettingsService.get_stored_setting("efactura.oauth.client_secret")
         return cls(
-            client_id=getattr(settings, "EFACTURA_CLIENT_ID", ""),
-            client_secret=getattr(settings, "EFACTURA_CLIENT_SECRET", ""),
+            client_id=(
+                str(stored_client_id)
+                if stored_client_id is not None and stored_client_id != ""
+                else getattr(settings, "EFACTURA_CLIENT_ID", "")
+            ),
+            client_secret=(
+                str(stored_client_secret)
+                if stored_client_secret is not None and stored_client_secret != ""
+                else getattr(settings, "EFACTURA_CLIENT_SECRET", "")
+            ),
             company_cui=getattr(settings, "EFACTURA_COMPANY_CUI", ""),
             environment=environment,
             timeout=SettingsService.get_integer_setting("billing.efactura_api_timeout_seconds", 30),
@@ -113,9 +129,10 @@ class EFacturaConfig:
     def oauth_token_url(self) -> str:
         return f"{self.environment.oauth_base_url}/token"
 
-    def is_valid(self) -> bool:
-        """Check if configuration has required fields."""
-        return bool(self.client_id and self.client_secret and self.company_cui)
+    def is_valid(self, *, company_cui: str | None = None) -> bool:
+        """Check credentials and the effective supplier CUI for this operation."""
+        effective_cui = self.company_cui if company_cui is None else company_cui
+        return bool(self.client_id and self.client_secret and effective_cui)
 
 
 @dataclass
@@ -158,6 +175,8 @@ class UploadResponse:
     errors: list[str] = field(default_factory=list)
     raw_response: dict[str, Any] = field(default_factory=dict)
     outcome_is_known: bool = True
+    configuration_error: bool = False
+    quota_retry_at: datetime | None = None
 
     @classmethod
     def from_response(cls, response: requests.Response) -> UploadResponse:
@@ -258,9 +277,9 @@ class UploadResponse:
         )
 
     @classmethod
-    def error(cls, message: str) -> UploadResponse:
-        """Create error response."""
-        return cls(success=False, message=message, errors=[message])
+    def error(cls, message: str, *, configuration_error: bool = False) -> UploadResponse:
+        """Create a deterministic failure, distinguishing unavailable configuration from ANAF refusal."""
+        return cls(success=False, message=message, errors=[message], configuration_error=configuration_error)
 
 
 @dataclass
@@ -357,6 +376,18 @@ class ValidationError(EFacturaClientError):
 
 class RateLimitError(EFacturaClientError):
     """Rate limit exceeded."""
+
+
+class LocalQuotaError(RateLimitError):
+    """No dispatch occurred; an earlier explicit HTTP 429 also proves refusal."""
+
+    def __init__(self, message: str, retry_at: datetime) -> None:
+        super().__init__(message)
+        self.retry_at = retry_at
+
+
+class LocalRequestError(EFacturaClientError):
+    """Request preparation failed before the HTTP transport was invoked."""
 
 
 def extract_zip_members(content: bytes) -> dict[str, bytes]:
@@ -465,14 +496,14 @@ class EFacturaClient:
             status = client.get_upload_status(response.upload_index)
     """
 
-    # Token cache key prefix
-    TOKEN_CACHE_KEY: ClassVar[str] = (
-        "efactura_token_{env}"  # Not a real secret: cache key name  # noqa: S105  # Not a real secret: config key name
-    )
+    # Cache namespace contains a digest rather than the OAuth client identifier.
+    TOKEN_CACHE_KEY: ClassVar[str] = "efactura_token_{env}_{client_id_hash}"  # noqa: S105  # Cache key, not a secret.
 
     def __init__(self, config: EFacturaConfig | None = None):
-        self.config = config or EFacturaConfig.from_settings()
+        self._config_is_explicit = config is not None
+        self.config = config if config is not None else EFacturaConfig.from_settings()
         self._token: TokenResponse | None = None
+        self._token_cache_key: str | None = None
         self._default_headers: dict[str, str] = {
             "Accept": "application/json",
             "User-Agent": "PRAHO-EFactura/1.0",
@@ -506,7 +537,7 @@ class EFacturaClient:
         params = {
             "response_type": "code",
             "client_id": self.config.client_id,
-            "redirect_uri": redirect_uri,
+            "redirect_uri": redirect_uri or efactura_settings.redirect_uri,
             "state": state,
             "token_content_type": "jwt",
         }
@@ -529,7 +560,7 @@ class EFacturaClient:
         data = {
             "grant_type": "authorization_code",
             "code": code,
-            "redirect_uri": redirect_uri,
+            "redirect_uri": redirect_uri or efactura_settings.redirect_uri,
             # ANAF wants the JWT-format token; client auth is via Basic Auth, NOT a body secret.
             "token_content_type": "jwt",
         }
@@ -610,28 +641,48 @@ class EFacturaClient:
             except AuthenticationError:
                 pass
 
-        # Check for manually configured token (for development)
+        # The deployment manual token belongs to the deployment OAuth client and current environment.
         manual_token = getattr(settings, "EFACTURA_ACCESS_TOKEN", "")
-        if manual_token:
+        manual_client_id = getattr(settings, "EFACTURA_CLIENT_ID", "")
+        environment = "production" if self.config.environment == EFacturaEnvironment.PRODUCTION else "test"
+        if (
+            manual_token
+            and manual_client_id
+            and manual_client_id == self.config.client_id
+            and environment == efactura_environment().value
+        ):
             return manual_token
 
-        raise AuthenticationError("No valid access token. User must complete OAuth2 authorization flow.")
+        raise AuthenticationError(
+            _("No valid access token for e-Factura environment %(environment)s. Complete OAuth2 authorization.")
+            % {"environment": environment}
+        )
+
+    @property
+    def token_cache_key(self) -> str:
+        """Scope OAuth credentials to the effective client identity and ANAF environment."""
+        client_id_hash = hashlib.sha256(self.config.client_id.encode("utf-8")).hexdigest()
+        return self.TOKEN_CACHE_KEY.format(env=self.config.environment.value, client_id_hash=client_id_hash)
 
     def _cache_token(self, token: TokenResponse) -> None:
-        """Cache token with expiration."""
-        cache_key = self.TOKEN_CACHE_KEY.format(env=self.config.environment.value)
+        """Cache token with expiration in this client's namespace."""
+        cache_key = self.token_cache_key
         cache.set(cache_key, token.__dict__, timeout=token.expires_in - 60)
         self._token = token
+        self._token_cache_key = cache_key
 
     def _get_cached_token(self) -> TokenResponse | None:
-        """Get token from cache."""
-        if self._token and not self._token.is_expired:
+        """Read only this environment and client's shared or in-memory token."""
+        cache_key = self.token_cache_key
+        if self._token_cache_key == cache_key and self._token and not self._token.is_expired:
             return self._token
 
-        cache_key = self.TOKEN_CACHE_KEY.format(env=self.config.environment.value)
+        self._token = None
+        self._token_cache_key = None
         data = cache.get(cache_key)
         if data:
             self._token = TokenResponse(**data)
+            self._token_cache_key = cache_key
             return self._token
         return None
 
@@ -663,8 +714,8 @@ class EFacturaClient:
             AuthenticationError: If not authenticated
             NetworkError: If network request fails
         """
-        if not self.config.is_valid():
-            return UploadResponse.error("Invalid e-Factura configuration")
+        if not self.config.is_valid(company_cui=cif):
+            return UploadResponse.error(_("Invalid e-Factura configuration"), configuration_error=True)
 
         params: dict[str, str] = {
             "standard": standard or self.config.default_standard,
@@ -690,8 +741,8 @@ class EFacturaClient:
         endpoint differs. From June 2026, a consumer who supplies no fiscal identifier is encoded
         with the statutory 13-zero identifier by the XML builder.
         """
-        if not self.config.is_valid():
-            return UploadResponse.error("Invalid e-Factura configuration")
+        if not self.config.is_valid(company_cui=cif):
+            return UploadResponse.error(_("Invalid e-Factura configuration"), configuration_error=True)
 
         params: dict[str, str] = {
             "standard": standard or self.config.default_standard,
@@ -734,6 +785,10 @@ class EFacturaClient:
 
             return result
 
+        except LocalQuotaError as e:
+            return UploadResponse(success=False, message=str(e), quota_retry_at=e.retry_at)
+        except RateLimitError as e:
+            return UploadResponse.error(str(e))
         except AuthenticationError:
             raise
         except requests.RequestException as e:
@@ -989,6 +1044,32 @@ class EFacturaClient:
 
     # --- Internal Methods ---
 
+    def _reserve_request_quota(self, url: str, params: object) -> None:
+        """Reserve quota for each fiscal API attempt, including retries."""
+        endpoints: dict[str, tuple[QuotaEndpoint, str | None]] = {
+            "upload": (QuotaEndpoint.UPLOAD, None),
+            "uploadb2c": (QuotaEndpoint.UPLOAD, None),
+            "stareMesaj": (QuotaEndpoint.STATUS, "id_incarcare"),
+            "descarcare": (QuotaEndpoint.DOWNLOAD, "id"),
+            "listaMesajeFactura": (QuotaEndpoint.LIST_SIMPLE, None),
+            "listaMesajePaginatieFactura": (QuotaEndpoint.LIST_PAGINATED, None),
+            "validare": (QuotaEndpoint.VALIDATE, None),
+            "transformare": (QuotaEndpoint.CONVERT_PDF, None),
+        }
+        endpoint, message_param = endpoints.get(urlsplit(url).path.rsplit("/", 1)[-1], (QuotaEndpoint.UPLOAD, None))
+        query = cast(Mapping[str, object], params) if isinstance(params, Mapping) else {}
+        cui = str(query.get("cif") or self.config.company_cui)
+        message_id = str(query[message_param]) if message_param and message_param in query else None
+        try:
+            quota_tracker.check_and_increment(endpoint, cui, message_id)
+        except QuotaExceededError as e:
+            logger.warning("⚠️ [e-Factura] Local API quota exhausted for %s (CUI: %s)", endpoint.value, cui)
+            retry_at = datetime.fromisoformat(e.reset_at) if e.reset_at else timezone.now() + timedelta(minutes=1)
+            raise LocalQuotaError(_("e-Factura API quota exceeded; retry after the quota resets."), retry_at) from e
+        except (DatabaseError, InterfaceError, ConnectionDoesNotExist) as e:
+            logger.warning("⚠️ [e-Factura] Quota store unavailable before dispatch: %s", e)
+            raise LocalRequestError(_("e-Factura quota reservation failed before dispatch; retry later.")) from e
+
     def _request_with_retry(
         self,
         method: str,
@@ -1009,6 +1090,7 @@ class EFacturaClient:
 
         for attempt in range(self.config.max_retries):
             try:
+                self._reserve_request_quota(url, kwargs.get("params"))
                 response = safe_request(method, url, policy=EFACTURA_POLICY, headers=merged_headers, **kwargs)
 
                 # Check for rate limiting

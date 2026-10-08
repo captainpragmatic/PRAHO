@@ -10,6 +10,8 @@ from http import HTTPStatus
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.shortcuts import redirect
 
+from apps.common.rate_limit_feedback import is_unavailable_error, render_platform_unavailable
+
 from .services import PlatformAPIError, platform_api
 
 logger = logging.getLogger(__name__)
@@ -71,6 +73,8 @@ def download_attachment(
     except PlatformAPIError as e:
         if e.status_code == HTTPStatus.NOT_FOUND:
             return HttpResponse("Attachment not found", status=404)
+        if is_unavailable_error(e):
+            return render_platform_unavailable(request, e)
         logger.exception(f"🔥 [API Proxy] Error downloading attachment {attachment_id} for ticket {ticket_id}: {e}")
         return HttpResponse("Download failed", status=500)
     except Exception as e:

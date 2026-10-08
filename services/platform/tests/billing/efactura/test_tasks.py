@@ -123,9 +123,7 @@ class PollEfacturaStatusTaskTestCase(TestCase):
     def test_poll_document_not_found(self, mock_doc_model):
         """Test poll when document not found."""
         doc_id = str(uuid4())
-        mock_doc_model.objects.select_related.return_value.get.side_effect = (
-            EFacturaDocument.DoesNotExist()
-        )
+        mock_doc_model.objects.select_related.return_value.get.side_effect = EFacturaDocument.DoesNotExist()
 
         result = poll_efactura_status_task(doc_id)
 
@@ -328,18 +326,26 @@ class ScheduleEfacturaTasksTestCase(TestCase):
         mock_schedule.HOURLY = 1
         mock_schedule.DAILY = 24
 
-        schedule_efactura_tasks()
+        results = schedule_efactura_tasks()
 
-        # Submission, polling, retries, deadlines, and response-archive recovery.
-        self.assertEqual(mock_schedule.objects.update_or_create.call_count, 5)
+        self.assertEqual(
+            results,
+            dict.fromkeys(
+                (
+                    "poll_status",
+                    "process_retries",
+                    "process_pending",
+                    "check_deadlines",
+                    "archive_missing_responses",
+                    "reconcile_documents",
+                ),
+                "created",
+            ),
+        )
 
-    def test_schedule_tasks_no_django_q(self):
-        """Test scheduling when Django-Q not installed."""
-        with patch(
-            "apps.billing.efactura.tasks.Schedule",
-            side_effect=ImportError("No module"),
-        ):
-            # Should not raise, just log warning
+    def test_schedule_tasks_no_django_q(self) -> None:
+        """Explicit schedule setup cannot silently succeed without its dependency."""
+        with patch("apps.billing.efactura.tasks.Schedule", None), self.assertRaises(ImportError):
             schedule_efactura_tasks()
 
 

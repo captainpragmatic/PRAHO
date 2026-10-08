@@ -20,15 +20,18 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import posixpath
 import uuid
-from dataclasses import dataclass, field
-from datetime import timedelta
-from typing import TYPE_CHECKING, Any
+from copy import copy
+from dataclasses import dataclass, field, replace
+from datetime import datetime, timedelta
+from typing import TYPE_CHECKING, Any, TypedDict
 
-from django.conf import settings
 from django.core.files.base import ContentFile
 from django.db import transaction
 from django.utils import timezone
+from django.utils.translation import gettext as _
+from lxml import etree
 
 from apps.billing.fiscal_identity import normalize_country_code
 from apps.billing.issuers.policy import (
@@ -40,12 +43,15 @@ from .client import (
     AuthenticationError,
     EFacturaClient,
     EFacturaClientError,
+    EFacturaConfig,
+    LocalRequestError,
     NetworkError,
     validate_response_archive,
 )
 from .models import EFacturaDocument, EFacturaDocumentType, EFacturaStatus
+from .settings import EFacturaRetryPolicy, EFacturaSettings, efactura_environment
 from .validator import CIUSROValidator, ValidationResult
-from .xml_builder import XMLBuilderError, builder_for
+from .xml_builder import NAMESPACES, XMLBuilderError, builder_for
 
 if TYPE_CHECKING:
     from apps.billing.invoice_models import Invoice
@@ -95,8 +101,10 @@ class SubmissionResult:
 
 
 def is_efactura_enabled() -> bool:
-    """Whether PRAHO files anything with ANAF at all: the one switch `submit_invoice` obeys."""
-    return bool(getattr(settings, "EFACTURA_ENABLED", False))
+    """The correction worker and submission service share authoritative enablement."""
+    from .settings import efactura_enabled  # noqa: PLC0415
+
+    return efactura_enabled()
 
 
 def credit_note_submission_gate(invoice: Invoice) -> str:
@@ -136,6 +144,10 @@ class StatusCheckResult:
     errors: list[dict[str, Any]] = field(default_factory=list)
 
 
+class RetryPolicyOptions(TypedDict, total=False):
+    retry_policy: EFacturaRetryPolicy
+
+
 @dataclass(frozen=True)
 class SubmissionClaim:
     """Committed ownership and immutable bytes for one ANAF upload attempt."""
@@ -146,6 +158,7 @@ class SubmissionClaim:
     xml_hash: str
     is_b2c: bool
     is_credit_note: bool
+    environment: str
 
 
 def _repair_stale_document_type(document: EFacturaDocument, invoice: Invoice) -> None:
@@ -242,9 +255,75 @@ class EFacturaService:
     def client(self) -> EFacturaClient:
         return self._client
 
+    def _client_for_environment(self, environment: str) -> EFacturaClient:
+        """Refresh runtime configuration, preserving explicit config and the recorded environment."""
+        client = copy(self._client)
+        config = EFacturaConfig.from_settings(environment=environment)
+        original_config: object = getattr(self._client, "config", None)
+        if isinstance(original_config, EFacturaConfig) and self._client._config_is_explicit:
+            config = replace(original_config, environment=config.environment)
+        client.config = config
+        if not isinstance(original_config, EFacturaConfig) or (
+            original_config.environment != config.environment
+            or original_config.client_id != config.client_id
+            or original_config.client_secret != config.client_secret
+        ):
+            client._token = None
+            client._token_cache_key = None
+        return client
+
+    @staticmethod
+    def _supplier_cif(xml_content: str) -> str:
+        """Read the supplier identifier from the exact bytes claimed for upload."""
+        parser = etree.XMLParser(resolve_entities=False, no_network=True)
+        document = etree.fromstring(xml_content.encode("utf-8"), parser=parser)
+        identifier = document.findtext(
+            "./cac:AccountingSupplierParty/cac:Party/cac:PartyIdentification/cbc:ID", namespaces=NAMESPACES
+        )
+        # Same normalization as CompanyInfo.numeric_tax_id in both UBL builders.
+        cif = (identifier or "").removeprefix("RO").strip()
+        if not cif:
+            raise XMLBuilderError(_("Submitted XML has no supplier CUI"))
+        return cif
+
+    def _record_credential_failure(self, document: EFacturaDocument, message: str, operation: str) -> None:
+        """Keep ANAF evidence intact while making unavailable credentials visible to staff."""
+        from apps.audit.models import AuditAlert  # noqa: PLC0415  # ADR-0007
+
+        document.last_error = message
+        document.save(update_fields=["last_error", "updated_at"])
+        AuditAlert.objects.get_or_create(
+            alert_type="compliance_violation",
+            status="active",
+            metadata__document_id=str(document.pk),
+            metadata__operation=operation,
+            defaults={
+                "severity": "high",
+                "title": _("e-Factura credentials unavailable: %(document_id)s") % {"document_id": document.pk},
+                "description": _(
+                    "Cannot perform %(operation)s for e-Factura document %(document_id)s "
+                    "in environment %(environment)s: %(error)s"
+                )
+                % {
+                    "operation": operation,
+                    "document_id": document.pk,
+                    "environment": document.environment,
+                    "error": message,
+                },
+                "metadata": {
+                    "document_id": str(document.pk),
+                    "environment": document.environment,
+                    "operation": operation,
+                },
+            },
+        )
+        logger.error("🔥 [e-Factura] Credential failure for %s in %s: %s", document.pk, document.environment, message)
+
     # --- Main Workflow Methods ---
 
-    def submit_invoice(self, invoice: Invoice) -> SubmissionResult:  # noqa: C901, PLR0911, PLR0912  # Complexity: multi-step business logic
+    def submit_invoice(  # noqa: C901, PLR0911, PLR0912  # Explicit lifecycle and replay-safety branches.
+        self, invoice: Invoice, *, retry_policy: EFacturaRetryPolicy | None = None
+    ) -> SubmissionResult:
         """
         Submit an invoice to e-Factura.
 
@@ -298,23 +377,33 @@ class EFacturaService:
         if isinstance(claim_or_result, SubmissionResult):
             return claim_or_result
         claim = claim_or_result
+        failure_options: RetryPolicyOptions = {} if retry_policy is None else {"retry_policy": retry_policy}
 
         # Fail-closed backstop at the lowest boundary that knows the invoice. Reaching
         # this with a non-builtin document means a caller bypassed the check above.
         assert_efactura_submission_allowed(invoice)
 
         try:
+            cif = self._supplier_cif(claim.xml_content)
+            client = self._client_for_environment(claim.environment)
             if claim.is_b2c and claim.is_credit_note:
-                response = self._client.upload_b2c(claim.xml_content, standard="CN")
+                response = client.upload_b2c(claim.xml_content, standard="CN", cif=cif)
             elif claim.is_b2c:
-                response = self._client.upload_b2c(claim.xml_content)
+                response = client.upload_b2c(claim.xml_content, cif=cif)
             elif claim.is_credit_note:
-                response = self._client.upload_credit_note(claim.xml_content)
+                response = client.upload_credit_note(claim.xml_content, cif=cif)
             else:
-                response = self._client.upload_invoice(claim.xml_content)
+                response = client.upload_invoice(claim.xml_content, cif=cif)
+        except XMLBuilderError as e:
+            logger.error("🔥 [e-Factura] Supplier identity unavailable for invoice %s: %s", invoice.number, e)
+            return self._finalize_safe_failure(claim, str(e), **failure_options)
+        except LocalRequestError as e:
+            logger.warning("⚠️ [e-Factura] Local request preparation failed for invoice %s: %s", invoice.number, e)
+            return self._finalize_safe_failure(claim, str(e), **failure_options)
         except AuthenticationError as e:
-            logger.error(f"Authentication failed for invoice {invoice.number}: {e}")
-            return self._finalize_safe_failure(claim, f"Authentication failed: {e}")
+            logger.error(f"🔥 [e-Factura] Authentication failed for invoice {invoice.number}: {e}")
+            message = _("Authentication failed: %(error)s") % {"error": e}
+            return self._finalize_safe_failure(claim, message, credential_failure=True, **failure_options)
         except NetworkError as e:
             logger.error(f"Network error for invoice {invoice.number}: {e}")
             return self._finalize_unknown_outcome(claim, f"ANAF upload outcome unknown: {e}")
@@ -327,10 +416,18 @@ class EFacturaService:
             if result.success:
                 logger.info(f"e-Factura submitted for invoice {invoice.number}: {response.upload_index}")
             return result
+        if response.quota_retry_at is not None:
+            return self._finalize_quota_deferral(claim, response.message, response.quota_retry_at)
+        if response.configuration_error:
+            message = _("Invalid e-Factura credentials for environment %(environment)s") % {
+                "environment": claim.environment
+            }
+            return self._finalize_safe_failure(claim, message, credential_failure=True, **failure_options)
         return self._finalize_safe_failure(
             claim,
             response.message,
             errors=[{"message": error} for error in response.errors],
+            **failure_options,
         )
 
     @transaction.atomic
@@ -346,7 +443,7 @@ class EFacturaService:
             defaults={
                 "document_type": _document_type_for(invoice),
                 "status": EFacturaStatus.DRAFT.value,
-                "environment": getattr(settings, "EFACTURA_ENVIRONMENT", "test"),
+                "environment": efactura_environment().value,
             },
         )
         # Under the lock, before anything reads `document.document_type` to choose a
@@ -439,6 +536,7 @@ class EFacturaService:
             xml_hash=document.xml_hash,
             is_b2c=is_b2c,
             is_credit_note=document.document_type == EFacturaDocumentType.CREDIT_NOTE.value,
+            environment=document.environment,
         )
 
     def _lock_owned_claim(self, claim: SubmissionClaim) -> EFacturaDocument | None:
@@ -469,14 +567,28 @@ class EFacturaService:
         message: str,
         *,
         errors: list[dict[str, Any]] | None = None,
+        credential_failure: bool = False,
+        retry_policy: EFacturaRetryPolicy | None = None,
     ) -> SubmissionResult:
         document = self._lock_owned_claim(claim)
         if document is None:
             return SubmissionResult.error("e-Factura submission claim is no longer owned by this worker")
-        document.mark_error(message)
+        document.mark_error(message, retry_policy=retry_policy)
         document.save()
+        if credential_failure:
+            self._record_credential_failure(document, message, "upload")
         self._log_audit_event(document.invoice, document, "efactura_submission_failed")
         return SubmissionResult.error(message, errors)
+
+    @transaction.atomic
+    def _finalize_quota_deferral(self, claim: SubmissionClaim, message: str, retry_at: datetime) -> SubmissionResult:
+        document = self._lock_owned_claim(claim)
+        if document is None:
+            return SubmissionResult.error(_("e-Factura submission claim is no longer owned by this worker"))
+        document.defer_for_quota(message, retry_at)
+        document.save()
+        self._log_audit_event(document.invoice, document, "efactura_quota_deferred")
+        return SubmissionResult.error(message)
 
     @transaction.atomic
     def _finalize_unknown_outcome(self, claim: SubmissionClaim, message: str) -> SubmissionResult:
@@ -502,7 +614,8 @@ class EFacturaService:
             return StatusCheckResult(status="error", errors=[{"message": "No upload index"}])
 
         try:
-            response = self._client.get_upload_status(document.anaf_upload_index)
+            client = self._client_for_environment(document.environment)
+            response = client.get_upload_status(document.anaf_upload_index)
 
             if response.is_accepted:
                 with transaction.atomic():
@@ -540,7 +653,10 @@ class EFacturaService:
                 return StatusCheckResult(status=response.status, is_terminal=False)
 
         except EFacturaClientError as e:
-            logger.error(f"Status check failed for document {document.id}: {e}")
+            if isinstance(e, AuthenticationError):
+                self._record_credential_failure(document, str(e), "poll")
+            else:
+                logger.error(f"🔥 [e-Factura] Status check failed for document {document.id}: {e}")
             return StatusCheckResult(status="error", errors=[{"message": str(e)}])
 
     def download_response(self, document: EFacturaDocument) -> bytes | None:
@@ -565,7 +681,8 @@ class EFacturaService:
                 with document.response_archive.open("rb") as existing:
                     return bytes(existing.read())
 
-            content = self._client.download_response(document.anaf_download_id)
+            client = self._client_for_environment(document.environment)
+            content = client.download_response(document.anaf_download_id)
             validate_response_archive(content)
 
             filename = f"efactura_{document.id}.zip"
@@ -584,11 +701,16 @@ class EFacturaService:
             logger.info(f"Downloaded and archived ANAF response ZIP for document {document.id}")
             return content
 
+        except AuthenticationError as e:
+            self._record_credential_failure(document, str(e), "download")
+            return None
         except (EFacturaClientError, OSError) as e:
             logger.error(f"Download failed for document {document.id}: {e}")
             return None
 
-    def retry_failed_submission(self, document: EFacturaDocument) -> SubmissionResult:
+    def retry_failed_submission(
+        self, document: EFacturaDocument, *, retry_policy: EFacturaRetryPolicy | None = None
+    ) -> SubmissionResult:
         """
         Retry a failed submission.
 
@@ -598,12 +720,20 @@ class EFacturaService:
         Returns:
             SubmissionResult
         """
-        if not (document.can_retry or document.can_requeue_after_fix):
+        if retry_policy is None:
+            eligible = document.can_retry or document.can_requeue_after_fix
+        else:
+            eligible = document.retry_count < retry_policy.max_retries and (
+                document.status == EFacturaStatus.ERROR.value
+                or (document.status == EFacturaStatus.QUEUED.value and document.next_retry_at is not None)
+            )
+        if not eligible:
             return SubmissionResult.error("Document cannot be retried (max retries exceeded or wrong status)")
 
-        # submit_invoice() owns the short claim transaction. Do not wrap the ANAF POST in an
-        # outer transaction or pre-transition a stale document instance.
-        return self.submit_invoice(document.invoice)
+        # submit_invoice() owns the short claim transaction; the ANAF POST runs outside it.
+        if retry_policy is None:
+            return self.submit_invoice(document.invoice)
+        return self.submit_invoice(document.invoice, retry_policy=retry_policy)
 
     # --- Batch Operations ---
 
@@ -614,11 +744,14 @@ class EFacturaService:
         Returns:
             Summary of processed documents
         """
-        pending = EFacturaDocument.get_pending_submissions(limit)
         results = {"submitted": 0, "failed": 0, "skipped": 0}
+        if not EFacturaSettings().auto_submit_enabled:
+            return results
+        pending = EFacturaDocument.get_pending_submissions(limit)
+        retry_policy = EFacturaRetryPolicy.resolve()
 
         for document in pending:
-            result = self.submit_invoice(document.invoice)
+            result = self.submit_invoice(document.invoice, retry_policy=retry_policy)
             if result.success and result.registered_with_anaf:
                 results["submitted"] += 1
             elif result.success:
@@ -667,11 +800,14 @@ class EFacturaService:
         Returns:
             Summary of retried documents
         """
-        ready = EFacturaDocument.get_ready_for_retry()
         results = {"retried": 0, "failed": 0}
+        if not EFacturaSettings().auto_submit_enabled:
+            return results
+        ready = EFacturaDocument.get_ready_for_retry()
+        retry_policy = EFacturaRetryPolicy.resolve()
 
         for document in ready:
-            result = self.retry_failed_submission(document)
+            result = self.retry_failed_submission(document, retry_policy=retry_policy)
             if result.success:
                 results["retried"] += 1
             else:
@@ -689,38 +825,38 @@ class EFacturaService:
         Returns:
             List of documents approaching deadline
         """
-        from apps.billing.invoice_models import Invoice  # noqa: PLC0415  # Deferred: avoids circular import
-        from apps.settings.services import SettingsService  # noqa: PLC0415  # Deferred: avoids circular import
+        from apps.settings.services import SettingsService  # noqa: PLC0415
 
-        deadline_days = SettingsService.get_integer_setting("billing.efactura_submission_deadline_days", 5)
+        from .intents import (  # noqa: PLC0415
+            LEGALLY_ISSUED_STATUSES,
+            efactura_intent_required,
+            reconcile_efactura_documents,
+        )
 
-        # Coarse pre-filter on issue date: a WORKING-day deadline spans MORE calendar days than the
-        # raw count (weekends + holidays are skipped), so look back generously and let the precise,
-        # working-day-aware per-document deadline check below do the real filtering.
-        # NOTE: `+7` buffer assumes deadline_days <= 5. The worst calendar span for 5 working days
-        # is the Easter cluster (Good Friday + 2 weekends + Easter Monday) = 5 + 4 skipped = 9 days,
-        # plus a 24h warning window comfortably fits in 12 (5+7). If deadline_days is ever raised,
-        # widen this buffer proportionally (rule-of-thumb: deadline_days + max(holiday_cluster_span)).
+        reconcile_efactura_documents()
+        if not is_efactura_enabled():
+            return []
         now = timezone.now()
+        warning = timedelta(hours=max(0, hours))
+        deadline_days = SettingsService.get_integer_setting("billing.efactura_submission_deadline_days", 5)
         warning_days = (max(0, hours) + 23) // 24
         lookback = timedelta(days=deadline_days + 7 + warning_days)
-
-        invoices = Invoice.objects.filter(
-            issued_at__gte=now - lookback,
-            issued_at__lte=now,
-            bill_to_country__iexact="RO",
-            status__in=["issued", "paid", "overdue", "void", "refunded", "partially_refunded"],
-        ).exclude(efactura_document__status=EFacturaStatus.ACCEPTED.value)
-
-        approaching = []
-        for invoice in invoices:
-            # Recover visibility when the issue signal or task queue failed
-            # before an EFacturaDocument was created.
-            doc = self._get_existing_document(invoice) or self._get_or_create_document(invoice)
-            deadline = doc.submission_deadline
-            if deadline is not None and now >= deadline - timedelta(hours=max(0, hours)):
-                approaching.append(doc)
-
+        documents = (
+            EFacturaDocument.objects.select_related("invoice")
+            .filter(
+                invoice__issued_at__gte=now - lookback,
+                invoice__issued_at__lte=now,
+                invoice__status__in=LEGALLY_ISSUED_STATUSES,
+            )
+            .exclude(status=EFacturaStatus.ACCEPTED.value)
+        )
+        approaching: list[EFacturaDocument] = []
+        for document in documents.iterator():
+            if not efactura_intent_required(document.invoice):
+                continue
+            deadline = document.submission_deadline
+            if deadline is not None and now >= deadline - warning:
+                approaching.append(document)
         return approaching
 
     # --- Helper Methods ---
@@ -763,7 +899,7 @@ class EFacturaService:
             defaults={
                 "document_type": _document_type_for(invoice),
                 "status": EFacturaStatus.DRAFT.value,
-                "environment": getattr(settings, "EFACTURA_ENVIRONMENT", "test"),
+                "environment": efactura_environment().value,
             },
         )
         _repair_stale_document_type(document, invoice)
@@ -779,9 +915,15 @@ class EFacturaService:
             document.xml_generated_at = timezone.now()
             document.save(update_fields=["xml_content", "xml_hash", "xml_generated_at", "updated_at"])
 
-            # Save XML file
-            filename = f"{invoice.number}.xml"
-            document.xml_file.save(filename, ContentFile(xml_content.encode("utf-8")), save=True)
+            # Save XML bytes through the real storage backend at the staff-configured path.
+            directory = document.xml_generated_at.strftime(EFacturaSettings().xml_storage_path)
+            filename = posixpath.join(directory, f"{invoice.number}.xml")
+            document.xml_file.name = document.xml_file.storage.save(
+                filename,
+                ContentFile(xml_content.encode("utf-8")),
+                max_length=document.xml_file.field.max_length,
+            )
+            document.save(update_fields=["xml_file", "updated_at"])
 
             return xml_content
 
@@ -815,6 +957,7 @@ class EFacturaService:
                 "efactura_rejected": "failed",
                 "efactura_validation_failed": "validation_failed",
                 "efactura_submission_failed": "failed",
+                "efactura_quota_deferred": "in_progress",
                 "efactura_outcome_unknown": "needs_reconciliation",
             }
 

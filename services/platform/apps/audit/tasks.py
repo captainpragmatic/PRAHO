@@ -21,6 +21,7 @@ from typing import Any
 
 from django.conf import settings
 from django.utils import timezone
+from django.utils.translation import gettext as _
 
 from apps.audit.models import AuditAlert, AuditIntegrityCheck
 from apps.audit.services import AuditIntegrityService
@@ -469,17 +470,18 @@ def _create_file_integrity_alert(results: dict[str, Any]) -> None:
 
     try:
         changed_files = [c["path"] for c in results["changes_detected"]]
+        max_files_displayed = get_max_files_displayed()
 
         alert = AuditAlert.objects.create(
             alert_type="data_integrity",
             severity="high",
-            title=f"File Integrity: {len(changed_files)} Critical Files Modified",
+            title=_("File Integrity: %(count)s Critical Files Modified") % {"count": len(changed_files)},
             description=(
-                f"File integrity monitoring detected changes to critical "
-                f"application files: {', '.join(changed_files[:MAX_FILES_DISPLAYED])}"
+                _("File integrity monitoring detected changes to critical application files: %(files)s")
+                % {"files": ", ".join(changed_files[:max_files_displayed])}
                 + (
-                    f" and {len(changed_files) - MAX_FILES_DISPLAYED} more"
-                    if len(changed_files) > MAX_FILES_DISPLAYED
+                    _(" and %(count)s more") % {"count": len(changed_files) - max_files_displayed}
+                    if len(changed_files) > max_files_displayed
                     else ""
                 )
             ),
@@ -494,7 +496,7 @@ def _create_file_integrity_alert(results: dict[str, Any]) -> None:
             },
         )
 
-        logger.warning(f"[File Integrity Alert] Created alert {alert.id} for {len(changed_files)} file changes")
+        logger.warning("⚠️ [File Integrity Alert] Created alert %s for %s file changes", alert.id, len(changed_files))
 
         # Send email notification to admins
         if SettingsService.get_boolean_setting("audit.notify_on_file_integrity_alerts", True):

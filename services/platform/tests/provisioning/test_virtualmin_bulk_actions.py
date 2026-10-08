@@ -20,6 +20,7 @@ from django.urls import reverse
 
 from apps.provisioning.models import Service
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
+from apps.provisioning.virtualmin_views import get_max_concurrent_health_checks
 from apps.users.models import User
 from tests.mocks.virtualmin_mock import MockVirtualminGateway
 from tests.provisioning.test_hosting_account_staff_actions import STAFF_TOKEN, _StaffButtonBase
@@ -164,17 +165,25 @@ class BulkFormValidationTests(_BulkBase):
         self.assertEqual(queued, [])
 
     def test_a_health_check_over_the_concurrency_cap_is_refused(self) -> None:
-        """FAILS on master. Every check must run in one wave, with nothing queued behind it.
+        """One account above the configured concurrency cap is refused before any check runs.
 
-        The cap is the `provisioning.max_concurrent_health_checks` setting (default 5), the
-        same value the executor uses, not a hardcoded constant.
+        The cap comes from provisioning.max_concurrent_health_checks (default 10), the
+        same getter used by validation and the executor.
         """
-        accounts = [self._hosted(f"cap{i}.example.com", server=self.server) for i in range(6)]
+        limit = get_max_concurrent_health_checks()
+        accounts = [self._hosted(f"cap{i}.example.com", server=self.server) for i in range(limit + 1)]
 
-        response, _gateway, _queued = self._post("health_check", accounts)
+        response, gateway, queued = self._post("health_check", accounts)
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("selected_accounts", response.context["form"].errors)
+        self.assertContains(response, f"Health checks run on at most {limit} accounts at a time.")
+        self.assertEqual(gateway.get_calls(), [])
+        self.assertEqual(queued, [])
+        for account in accounts:
+            account.refresh_from_db()
+            account.service.refresh_from_db()
+            self.assertEqual((account.status, account.service.status), ("active", "active"))
 
 
 class BulkStaffActionsTests(_BulkBase):

@@ -17,8 +17,13 @@ from django.views.decorators.http import require_http_methods
 
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 from apps.common.decorators import log_access_attempt, require_billing_access
-from apps.common.pagination import PaginatorData, build_pagination_params
-from apps.common.rate_limit_feedback import get_degraded_message, handle_platform_error
+from apps.common.pagination import PaginatorData, pagination_query
+from apps.common.rate_limit_feedback import (
+    get_degraded_message,
+    handle_platform_error,
+    is_unavailable_error,
+    render_platform_unavailable,
+)
 
 from .forms import GiftCardPaymentForm
 from .services import BillingDataSyncService, InvoiceViewService, RecurringPaymentsService
@@ -220,7 +225,7 @@ def invoices_list_view(request: HttpRequest) -> HttpResponse:
             current_page=page_data.current_page,
             page_size=page_data.page_size,
         )
-        pagination_params = build_pagination_params(type=doc_type, status=status_filter, q=search_query)
+        pagination_params = pagination_query(request)
 
         context = {
             "invoices": page_data.documents,
@@ -300,7 +305,7 @@ def invoices_search_api(request: HttpRequest) -> HttpResponse:
             current_page=page_data.current_page,
             page_size=page_data.page_size,
         )
-        pagination_params = build_pagination_params(type=doc_type, status=status_filter, q=search_query)
+        pagination_params = pagination_query(request)
 
         return render(
             request,
@@ -384,6 +389,8 @@ def invoice_detail_view(request: HttpRequest, invoice_number: str) -> HttpRespon
         return render(request, "billing/invoice_detail.html", context)
 
     except Exception as e:
+        if isinstance(e, PlatformAPIError) and is_unavailable_error(e):
+            return render_platform_unavailable(request, e)
         logger.error(f"🔥 [Portal Billing] Invoice detail error for {invoice_number}: {e}")
         messages.error(request, _("Unable to load invoice details. Please try again."))
         return render(request, "billing/invoice_not_found.html", {"invoice_number": invoice_number, "error": True})
@@ -504,6 +511,11 @@ def sync_invoices_action(request: HttpRequest) -> JsonResponse:
         )
 
     except Exception as e:
+        if is_unavailable_error(e):
+            logger.error("🔥 [Portal Billing] Invoice sync unavailable: %s", e)
+            return JsonResponse(
+                {"success": False, "error": get_degraded_message(e)}, status=HTTPStatus.SERVICE_UNAVAILABLE
+            )
         logger.error(f"🔥 [Portal Billing] Sync error for customer {customer_id}: {e}")
         messages.error(request, _("Unable to sync invoices. Please try again."))
 
@@ -544,6 +556,8 @@ def invoice_pdf_export(request: HttpRequest, invoice_number: str) -> HttpRespons
         return response
 
     except Exception as e:
+        if isinstance(e, PlatformAPIError) and is_unavailable_error(e):
+            return render_platform_unavailable(request, e)
         logger.error(f"🔥 [Portal Billing] PDF export error for invoice {invoice_number}: {e}")
         messages.error(request, _("Unable to generate PDF. Please try again."))
         return redirect("billing:invoice_detail", invoice_number=invoice_number)
@@ -578,6 +592,8 @@ def proforma_pdf_export(request: HttpRequest, proforma_number: str) -> HttpRespo
         return response
 
     except Exception as e:
+        if isinstance(e, PlatformAPIError) and is_unavailable_error(e):
+            return render_platform_unavailable(request, e)
         logger.error(f"🔥 [Portal Billing] PDF export error for proforma {proforma_number}: {e}")
         messages.error(request, _("Unable to generate PDF. Please try again."))
         return redirect("billing:proforma_detail", proforma_number=proforma_number)
@@ -636,6 +652,8 @@ def proforma_detail_view(request: HttpRequest, proforma_number: str) -> HttpResp
         return render(request, "billing/proforma_detail.html", context)
 
     except Exception as e:
+        if isinstance(e, PlatformAPIError) and is_unavailable_error(e):
+            return render_platform_unavailable(request, e)
         logger.error(f"🔥 [Portal Billing] Proforma detail error for {proforma_number}: {e}")
         messages.error(request, _("Unable to load proforma details. Please try again."))
         return render(request, "billing/proforma_not_found.html", {"proforma_number": proforma_number, "error": True})

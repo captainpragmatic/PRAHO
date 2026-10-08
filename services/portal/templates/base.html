@@ -57,10 +57,10 @@
                 <!-- Logo -->
                 <div class="w-52 flex-shrink-0">
                   <a href="/dashboard/" class="flex items-center hover:opacity-80 transition-opacity">
-                    <div class="h-8 w-8 bg-blue-600 rounded-lg flex items-center justify-center text-white text-lg font-bold mr-3">
+                    <div class="h-8 w-8 bg-blue-600 rounded-lg flex items-center justify-center text-white text-lg font-bold mr-3"> {# tmpl-allow TMPL005: needs badge branding variant #}
                       P
                     </div>
-                    <span class="text-xl font-bold text-blue-400 whitespace-nowrap">
+                    <span class="text-xl font-bold text-blue-400 whitespace-nowrap"> {# tmpl-allow TMPL005: needs badge branding variant #}
                       PRAHO Portal
                     </span>
                   </a>
@@ -107,10 +107,8 @@
                 {% endif %}
                 <form action="{% url 'users:logout' %}" method="post" class="inline">
                   {% csrf_token %}
-                  <button type="submit"
-                    class="inline-flex items-center justify-center font-medium rounded-lg transition-all duration-200 focus:outline-none focus:ring-4 disabled:opacity-50 disabled:cursor-not-allowed bg-red-600 text-white hover:bg-red-700 focus:ring-red-300 border border-red-600 px-3 py-1.5 text-sm">
-                    <span class="htmx-indicator-text">{% trans "Logout" %}</span>
-                  </button>
+                  {% trans "Logout" as submit_label %}
+                  {% button submit_label type="submit" variant="danger" size="sm" %}
                 </form>
               </div>
             </div>
@@ -138,10 +136,10 @@
                 © {% now "Y" %} PRAHO Portal - {% trans 'PRAHO Really Automates Hosting Operations' %}
               </p>
               <p class="mt-2 text-xs">
-                <span class="text-blue-400">Django 5.2</span> |
-                <span class="text-green-400">Python 3.13</span> |
-                <span class="text-purple-400">PostgreSQL 16+</span> |
-                <span class="text-yellow-400">HTMX</span> |
+                <span class="text-blue-400">Django 5.2</span> | {# tmpl-allow TMPL005: needs badge unframed variant #}
+                <span class="text-green-400">Python 3.13</span> | {# tmpl-allow TMPL005: needs badge unframed variant #}
+                <span class="text-purple-400">PostgreSQL 16+</span> | {# tmpl-allow TMPL005: needs badge unframed variant #}
+                <span class="text-yellow-400">HTMX</span> | {# tmpl-allow TMPL005: needs badge unframed variant #}
                 <span class="text-cyan-400">{% trans 'Version' %} 0.30.0</span>
               </p>
               <p class="mt-2 text-xs space-x-3">

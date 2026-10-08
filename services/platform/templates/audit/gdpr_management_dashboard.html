@@ -110,11 +110,11 @@ Professional interface for staff to manage all user GDPR requests
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     <!-- Status Filter -->
                     <div class="relative">
-                        <label class="block text-sm font-medium text-slate-300 mb-2">
+                        <label for="gdpr-status" class="block text-sm font-medium text-slate-300 mb-2">
                             {% trans "Status" %}
                         </label>
                         <select class="bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white text-sm w-full focus:ring-2 focus:ring-blue-500 focus:border-transparent relative z-10"
-                                name="status">
+                                id="gdpr-status" name="status">
                             <option value="all">{% trans "All Statuses" %}</option>
                             <option value="pending">{% trans "Pending" %}</option>
                             <option value="processing">{% trans "Processing" %}</option>
@@ -125,22 +125,22 @@ Professional interface for staff to manage all user GDPR requests
 
                     <!-- User Email Search -->
                     <div>
-                        <label class="block text-sm font-medium text-slate-300 mb-2">
+                        <label for="gdpr-user-email" class="block text-sm font-medium text-slate-300 mb-2">
                             {% trans "User Email" %}
                         </label>
                         <input type="text"
-                               name="user_email"
+                               id="gdpr-user-email" name="user_email"
                                placeholder="{% trans 'Search by user email...' %}"
                                class="bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white text-sm w-full focus:ring-2 focus:ring-blue-500 focus:border-transparent">
                     </div>
 
                     <!-- Export Type Filter -->
                     <div class="relative">
-                        <label class="block text-sm font-medium text-slate-300 mb-2">
+                        <label for="gdpr-export-type" class="block text-sm font-medium text-slate-300 mb-2">
                             {% trans "Export Type" %}
                         </label>
                         <select class="bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white text-sm w-full focus:ring-2 focus:ring-blue-500 focus:border-transparent relative z-10"
-                                name="export_type">
+                                id="gdpr-export-type" name="export_type">
                             <option value="">{% trans "All Types" %}</option>
                             <option value="gdpr">{% trans "GDPR Export" %}</option>
                             <option value="audit">{% trans "Audit Export" %}</option>
@@ -158,21 +158,21 @@ Professional interface for staff to manage all user GDPR requests
                         </label>
                         <div class="flex gap-2">
                             <input type="date"
-                                   name="start_date"
+                                   name="start_date" aria-label="{% trans 'Start date' %}"
                                    class="bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white text-sm flex-1 focus:ring-2 focus:ring-blue-500 focus:border-transparent">
                             <input type="date"
-                                   name="end_date"
+                                   name="end_date" aria-label="{% trans 'End date' %}"
                                    class="bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white text-sm flex-1 focus:ring-2 focus:ring-blue-500 focus:border-transparent">
                         </div>
                     </div>
 
                     <!-- Expiration Filter -->
                     <div class="relative">
-                        <label class="block text-sm font-medium text-slate-300 mb-2">
+                        <label for="gdpr-expired" class="block text-sm font-medium text-slate-300 mb-2">
                             {% trans "Expiration Status" %}
                         </label>
                         <select class="bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white text-sm w-full focus:ring-2 focus:ring-blue-500 focus:border-transparent relative z-10"
-                                name="expired">
+                                id="gdpr-expired" name="expired">
                             <option value="">{% trans "All Exports" %}</option>
                             <option value="active">{% trans "Active Exports" %}</option>
                             <option value="expired">{% trans "Expired Exports" %}</option>

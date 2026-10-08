@@ -5,6 +5,7 @@
 {% block title %}{% trans "Privacy Policy" %} - PRAHO Platform{% endblock %}
 
 {% block content %}
+{% setting "company.legal_name" as legal_name %}
 <div class="max-w-4xl mx-auto px-4 py-8">
     <!-- Header -->
     <div class="mb-8">
@@ -41,11 +42,11 @@
         <section id="introduction" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
             <h2 class="text-xl font-semibold text-white mb-4">1. {% trans "Introduction" %}</h2>
             <p class="text-slate-300 mb-4">
-                {% filter force_escape %}{% blocktrans %}
-                PragmaticHost SRL ("we", "us", "our") is committed to protecting your privacy and personal data.
+                {% blocktrans %}
+                {{ legal_name }} ("we", "us", "our") is committed to protecting your privacy and personal data.
                 This Privacy Policy explains how we collect, use, store, and protect your personal information
                 when you use our PRAHO Platform hosting services.
-                {% endblocktrans %}{% endfilter %}
+                {% endblocktrans %}
             </p>
             <p class="text-slate-300 mb-4">
                 {% filter force_escape %}{% blocktrans %}

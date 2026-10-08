@@ -702,13 +702,17 @@ class Coupon(models.Model):
             length: Length of the random part of the code.
             prefix: Optional prefix for the code.
             max_attempts: Maximum attempts before raising an error.
-                         Defaults to MAX_CODE_GENERATION_ATTEMPTS.
+                         Omitted values use the runtime setting, falling back to MAX_CODE_GENERATION_ATTEMPTS.
 
         Raises:
             ValueError: If a unique code cannot be generated within max_attempts.
         """
         if max_attempts is None:
-            max_attempts = cls.MAX_CODE_GENERATION_ATTEMPTS
+            from apps.settings.services import SettingsService  # noqa: PLC0415  # ADR-0007: cross-app import
+
+            max_attempts = SettingsService.get_integer_setting(
+                "promotions.max_code_generation_attempts", cls.MAX_CODE_GENERATION_ATTEMPTS
+            )
 
         for _attempt in range(max_attempts):
             random_part = "".join(secrets.choice(COUPON_CODE_CHARS) for _ in range(length))
@@ -717,8 +721,11 @@ class Coupon(models.Model):
                 return code
 
         raise ValueError(
-            f"Could not generate unique coupon code after {max_attempts} attempts. "
-            f"Consider using a longer code length or different prefix."
+            _(
+                "Could not generate unique coupon code after %(max_attempts)s attempts. "
+                "Consider using a longer code length or different prefix."
+            )
+            % {"max_attempts": max_attempts}
         )
 
     @classmethod
@@ -746,9 +753,14 @@ class Coupon(models.Model):
         Raises:
             ValidationError: If validate=True and any coupon fails validation.
         """
+        from apps.settings.services import SettingsService  # noqa: PLC0415  # ADR-0007: cross-app import
+
+        max_attempts = SettingsService.get_integer_setting(
+            "promotions.max_code_generation_attempts", cls.MAX_CODE_GENERATION_ATTEMPTS
+        )
         coupons = []
         for _i in range(count):
-            code = cls.generate_code(length=length, prefix=prefix)
+            code = cls.generate_code(length=length, prefix=prefix, max_attempts=max_attempts)
             coupon = cls(code=code, **coupon_defaults)
 
             # Validate each coupon to catch issues before bulk insert

@@ -11,7 +11,6 @@ from urllib.parse import urlsplit
 import pyotp
 import qrcode
 import qrcode.image.svg
-from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth.tokens import default_token_generator
@@ -268,7 +267,7 @@ class PasswordResetRequestSerializer(serializers.Serializer):
         token = default_token_generator.make_token(user)
         uid = urlsafe_base64_encode(force_bytes(user.pk))
 
-        from apps.settings.services import SettingsService  # noqa: PLC0415
+        from apps.settings.services import SettingsService, get_default_from_email  # noqa: PLC0415
 
         base = str(SettingsService.get_setting("portal.public_base_url", "") or "").strip().rstrip("/")
         try:
@@ -305,7 +304,7 @@ class PasswordResetRequestSerializer(serializers.Serializer):
             sent = send_mail(
                 subject=subject,
                 message=text_message,
-                from_email=settings.DEFAULT_FROM_EMAIL,
+                from_email=get_default_from_email(),
                 recipient_list=[user.email],
                 html_message=html_message,
                 fail_silently=False,

@@ -18,7 +18,7 @@
       <!-- Step 1: Download App -->
       <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
         <div class="flex items-center mb-4">
-          <div class="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white text-sm font-bold mr-3">1</div>
+          {% badge "1" variant="primary" rounded="full" css_class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold mr-3" %}
           <h3 class="text-lg font-medium text-white">
             {% trans 'Download Authenticator App' %}
           </h3>
@@ -27,7 +27,7 @@
         <div class="grid grid-cols-1 gap-3">
           <div class="bg-slate-700 p-3 rounded-md border border-slate-600">
             <div class="flex items-center">
-              <div class="text-blue-400 mr-3">{% icon "phone" size="xl" %}</div>
+              <div class="text-blue-400 mr-3">{% icon "phone" size="xl" %}</div> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
               <div>
                 <div class="font-medium text-white">Google Authenticator</div>
                 <div class="text-xs text-slate-400">Free • iOS & Android</div>
@@ -36,7 +36,7 @@
           </div>
           <div class="bg-slate-700 p-3 rounded-md border border-slate-600">
             <div class="flex items-center">
-              <div class="text-blue-400 mr-3">{% icon "lock" size="xl" %}</div>
+              <div class="text-blue-400 mr-3">{% icon "lock" size="xl" %}</div> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
               <div>
                 <div class="font-medium text-white">Microsoft Authenticator</div>
                 <div class="text-xs text-slate-400">Free • iOS & Android</div>
@@ -45,7 +45,7 @@
           </div>
           <div class="bg-slate-700 p-3 rounded-md border border-slate-600">
             <div class="flex items-center">
-              <div class="text-blue-400 mr-3">{% icon "refresh" size="xl" %}</div>
+              <div class="text-blue-400 mr-3">{% icon "refresh" size="xl" %}</div> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
               <div>
                 <div class="font-medium text-white">Authy</div>
                 <div class="text-xs text-slate-400">Multi-device sync</div>
@@ -58,7 +58,7 @@
       <!-- Step 2: Scan QR Code -->
       <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
         <div class="flex items-center mb-4">
-          <div class="w-8 h-8 bg-green-600 rounded-full flex items-center justify-center text-white text-sm font-bold mr-3">2</div>
+          {% badge "2" variant="success" rounded="full" css_class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold mr-3" %}
           <h3 class="text-lg font-medium text-white">
             {% trans 'Scan QR Code' %}
           </h3>
@@ -66,15 +66,15 @@
 
         <div class="space-y-3 text-sm text-slate-300">
           <div class="flex items-start">
-            <span class="text-green-400 mr-2">•</span>
+            <span class="text-green-400 mr-2">•</span> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
             {% trans 'Open your authenticator app' %}
           </div>
           <div class="flex items-start">
-            <span class="text-green-400 mr-2">•</span>
+            <span class="text-green-400 mr-2">•</span> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
             {% trans 'Select "Scan QR Code" or "+" to add account' %}
           </div>
           <div class="flex items-start">
-            <span class="text-green-400 mr-2">•</span>
+            <span class="text-green-400 mr-2">•</span> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
             {% trans 'Point camera at QR code on the right' %}
           </div>
         </div>
@@ -90,7 +90,7 @@
           {% trans 'QR Code' %}
         </h3>
         {% if qr_code %}
-        <div class="bg-white p-4 rounded-lg inline-block">
+        <div class="bg-white p-4 rounded-lg inline-block"> {# dm-allow DM001: QR quiet zone must remain white for reliable scanning #}
           <img src="data:image/svg+xml;base64,{{ qr_code }}" alt="{% trans 'MFA QR Code' %}" class="max-w-xs">
         </div>
         <p class="text-sm text-slate-400 mt-4">
@@ -106,28 +106,24 @@
             <div class="mt-3 p-3 bg-slate-700 rounded border border-slate-600">
               <p class="text-xs text-slate-400 mb-2">{% trans 'Secret Key:' %}</p>
               <div class="flex items-center justify-between bg-slate-900 px-3 py-2 rounded border">
-                <code id="secret-key" class="text-sm text-green-400 font-mono break-all">{{ secret }}</code>
-                <button type="button" data-action="copy" data-copy-target="#secret-key"
-                        data-copy-feedback="{% trans 'Copied!' %}"
-                        class="ml-2 text-slate-400 hover:text-white transition-colors"
-                        title="{% trans 'Copy secret key' %}">
-                  {% icon "clipboard" size="sm" %}
-                </button>
+                <code id="secret-key" class="text-sm text-green-400 font-mono break-all">{{ secret }}</code> {# tmpl-allow TMPL005: needs badge code_element #}
+                {% trans "Copied!" as copy_feedback %}
+                {% with copy_attrs='data-copy-target="#secret-key" data-copy-feedback="'|add:copy_feedback|add:'"' %}
+                  {% button _("Copy secret key") icon="clipboard" data_action="copy" attrs=copy_attrs variant="secondary" size="sm" class_="ml-2" %}
+                {% endwith %}
               </div>
             </div>
           </details>
         </div>
         {% else %}
-        <div class="bg-red-900 border border-red-700 rounded-md p-4">
-          <p class="text-red-100 text-sm">{% icon "x" size="sm" css_class="text-red-400" %} {% trans 'Failed to generate QR code. Please try again.' %}</p>
-        </div>
+        {% alert _("Failed to generate QR code. Please try again.") variant="danger" %}
         {% endif %}
       </div>
 
       <!-- Verification Form -->
       <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
         <div class="flex items-center mb-4">
-          <div class="w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center text-white text-sm font-bold mr-3">3</div>
+          <div class="w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center text-white text-sm font-bold mr-3">3</div> {# tmpl-allow TMPL005: needs badge purple_variant #}
           <h3 class="text-lg font-medium text-white">
             {% trans 'Verify Setup' %}
           </h3>
@@ -137,28 +133,18 @@
           {% csrf_token %}
 
           {% if form.errors %}
-          <div class="bg-red-900 border border-red-700 rounded-md p-3 mb-4">
             {% for field, errors in form.errors.items %}
               {% for error in errors %}
-              <p class="text-red-100 text-sm">{{ error }}</p>
+                {% alert error variant="danger" %}
               {% endfor %}
             {% endfor %}
-          </div>
           {% endif %}
 
           <div>
             <label for="token" class="block text-sm font-medium text-slate-300 mb-2">
               {% trans 'Enter verification code from your app:' %}
             </label>
-            <input type="text"
-                   name="token"
-                   id="token"
-                   class="w-full px-4 py-3 bg-slate-700 border border-slate-600 rounded-lg text-white text-center text-lg font-mono tracking-wider focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                   placeholder="000000"
-                   maxlength="6"
-                   pattern="[0-9]{6}"
-                   autocomplete="one-time-code"
-                   required>
+            {% input_field "token" html_id="token" aria_label=_("Enter verification code from your app:") placeholder="000000" maxlength=6 pattern="[0-9]{6}" autocomplete="one-time-code" required=True css_class="text-center text-lg font-mono tracking-wider" %}
           </div>
 
           <div class="flex gap-3">
@@ -166,17 +152,14 @@
                class="flex-1 bg-slate-600 hover:bg-slate-700 text-white font-medium py-3 px-6 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-slate-500 text-center">
               {% trans 'Cancel' %}
             </a>
-            <button type="submit"
-                    class="flex-1 bg-green-600 hover:bg-green-700 text-white font-medium py-3 px-6 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-green-500">
-              {% trans 'Verify & Enable MFA' %}
-            </button>
+            {% button _("Verify & Enable MFA") type="submit" variant="success" size="lg" class_="flex-1" %}
           </div>
         </form>
 
-        <div class="mt-4 p-3 bg-blue-900/30 border border-blue-700 rounded-lg">
+        <div class="mt-4 p-3 bg-blue-900/30 border border-blue-700 rounded-lg"> {# tmpl-allow TMPL005: needs alert nested_content #}
           <div class="flex items-start">
-            <div class="text-blue-400 mr-2">{% icon "info" size="md" %}</div>
-            <div class="text-sm text-blue-300">
+            <div class="text-blue-400 mr-2">{% icon "info" size="md" %}</div> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
+            <div class="text-sm text-blue-300"> {# tmpl-allow TMPL005: needs alert nested_content #}
               <strong>{% trans 'Tip:' %}</strong>
               {% trans 'The verification code changes every 30 seconds. If it doesn\'t work, wait for a new code.' %}
             </div>
@@ -189,7 +172,7 @@
   <!-- Back Navigation -->
   <div class="mt-6 text-center">
     <a href="{% url 'users:mfa_management' %}"
-       class="text-blue-400 hover:text-blue-300 text-sm">
+       class="text-blue-400 hover:text-blue-300 text-sm"> {# tmpl-allow TMPL005: needs button inline_link #}
       ← {% trans 'Back to MFA Management' %}
     </a>
   </div>

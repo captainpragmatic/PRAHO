@@ -14,6 +14,8 @@ Uses shared utilities from tests.e2e.utils for consistency.
 Based on real customer onboarding workflows for PragmaticHost.
 """
 
+import html
+import json
 import re
 import secrets
 import string
@@ -533,8 +535,11 @@ def test_customer_mini_cart_partial(monitored_customer_page: Page) -> None:
     response = page.request.get(f"{BASE_URL}/order/partials/mini-cart/", headers={"HX-Request": "true"})
     assert response.status == 200
     assert "E2E Hosting" in response.text()
-    assert '"product_slug": "e2e-hosting"' in response.text()
-    assert '"billing_period": "monthly"' in response.text()
+    # Read the remove button's payload the way HTMX does: decode the attribute, then parse the JSON
+    payloads = re.findall(r"hx-vals='([^']*)'", response.text())
+    assert [json.loads(html.unescape(payload)) for payload in payloads] == [
+        {"product_slug": "e2e-hosting", "billing_period": "monthly"}
+    ]
     assert "/order/cart/" in response.text()
 
 

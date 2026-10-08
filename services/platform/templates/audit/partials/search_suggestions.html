@@ -2,35 +2,35 @@
 
 {# Search suggestions partial for audit search auto-completion #}
 {% if suggestions %}
-<div class="bg-white border border-gray-200 rounded-lg shadow-lg mt-1 max-h-60 overflow-y-auto">
+<div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg mt-1 max-h-60 overflow-y-auto">
     {% if suggestions.actions %}
-        <div class="p-2 border-b border-gray-100">
-            <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">{% trans "Actions" %}</h4>
+        <div class="p-2 border-b border-slate-100 dark:border-slate-700">
+            <h4 class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1">{% trans "Actions" %}</h4>
             {% for action in suggestions.actions %}
-                <div class="px-2 py-1 hover:bg-gray-100 cursor-pointer text-sm rounded suggestion-item" data-value="{{ action }}">
-                    <span class="text-blue-600">{{ action }}</span>
+                <div class="px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer text-sm rounded suggestion-item" data-value="{{ action }}">
+                    <span class="text-blue-600 dark:text-blue-400">{{ action }}</span>
                 </div>
             {% endfor %}
         </div>
     {% endif %}
 
     {% if suggestions.users %}
-        <div class="p-2 border-b border-gray-100">
-            <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">{% trans "Users" %}</h4>
+        <div class="p-2 border-b border-slate-100 dark:border-slate-700">
+            <h4 class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1">{% trans "Users" %}</h4>
             {% for user in suggestions.users %}
-                <div class="px-2 py-1 hover:bg-gray-100 cursor-pointer text-sm rounded suggestion-item" data-value="{{ user }}">
-                    <span class="text-green-600">{{ user }}</span>
+                <div class="px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer text-sm rounded suggestion-item" data-value="{{ user }}">
+                    <span class="text-green-600 dark:text-green-400">{{ user }}</span>
                 </div>
             {% endfor %}
         </div>
     {% endif %}
 
     {% if suggestions.ip_addresses %}
-        <div class="p-2 border-b border-gray-100">
-            <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">{% trans "IP Addresses" %}</h4>
+        <div class="p-2 border-b border-slate-100 dark:border-slate-700">
+            <h4 class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1">{% trans "IP Addresses" %}</h4>
             {% for ip in suggestions.ip_addresses %}
-                <div class="px-2 py-1 hover:bg-gray-100 cursor-pointer text-sm rounded suggestion-item" data-value="{{ ip }}">
-                    <span class="text-purple-600">{{ ip }}</span>
+                <div class="px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer text-sm rounded suggestion-item" data-value="{{ ip }}">
+                    <span class="text-purple-600 dark:text-purple-400">{{ ip }}</span>
                 </div>
             {% endfor %}
         </div>
@@ -38,10 +38,10 @@
 
     {% if suggestions.descriptions %}
         <div class="p-2">
-            <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">{% trans "Descriptions" %}</h4>
+            <h4 class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1">{% trans "Descriptions" %}</h4>
             {% for description in suggestions.descriptions %}
-                <div class="px-2 py-1 hover:bg-gray-100 cursor-pointer text-sm rounded suggestion-item" data-value="{{ description }}">
-                    <span class="text-orange-600">{{ description|truncatechars:50 }}</span>
+                <div class="px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer text-sm rounded suggestion-item" data-value="{{ description }}">
+                    <span class="text-orange-600 dark:text-orange-400">{{ description|truncatechars:50 }}</span>
                 </div>
             {% endfor %}
         </div>
@@ -49,7 +49,7 @@
 </div>
 
 {% else %}
-<div class="bg-white border border-gray-200 rounded-lg shadow-lg mt-1 p-3 text-sm text-gray-500">
+<div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg mt-1 p-3 text-sm text-slate-500 dark:text-slate-400">
     {% trans "No suggestions found" %}
 </div>
 {% endif %}

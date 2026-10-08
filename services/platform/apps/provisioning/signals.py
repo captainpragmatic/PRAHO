@@ -29,7 +29,7 @@ from apps.audit.services import (
     AuditEventData,
     AuditService,
 )
-from apps.common.validators import log_security_event
+from apps.common.transactions import best_effort_atomic
 from apps.settings.services import SettingsService
 
 from .models import (
@@ -85,32 +85,6 @@ DEFAULT_TEMPLATE_NAME = "Default"
 
 # Module-level defaults for SettingsService fallbacks
 _DEFAULT_HIGH_VALUE_PLAN_THRESHOLD_CENTS = 50000  # 500 RON in cents
-_DEFAULT_RESOURCE_USAGE_ALERT_THRESHOLD = 85  # 85% resource usage alert threshold
-_DEFAULT_SERVER_OVERLOAD_THRESHOLD = 90  # 90% resource usage threshold
-_DEFAULT_LONG_PROVISIONING_THRESHOLD_MINUTES = 30  # 30 minutes for provisioning timeout
-
-
-def get_resource_usage_alert_threshold() -> int:
-    """Get resource usage alert threshold from SettingsService (runtime)."""
-    return SettingsService.get_integer_setting(
-        "provisioning.resource_usage_alert_threshold", _DEFAULT_RESOURCE_USAGE_ALERT_THRESHOLD
-    )
-
-
-def get_server_overload_threshold() -> int:
-    """Get server overload threshold from SettingsService (runtime)."""
-    return SettingsService.get_integer_setting(
-        "provisioning.server_overload_threshold", _DEFAULT_SERVER_OVERLOAD_THRESHOLD
-    )
-
-
-def get_long_provisioning_threshold_minutes() -> int:
-    """Get long provisioning threshold from SettingsService (runtime)."""
-    return SettingsService.get_integer_setting(
-        "provisioning.long_provisioning_threshold_minutes", _DEFAULT_LONG_PROVISIONING_THRESHOLD_MINUTES
-    )
-
-
 # Structural constants (not configurable via SettingsService)
 ENTERPRISE_DISK_THRESHOLD = 100  # 100 GB threshold for enterprise plans
 MAX_SERVICES_WARNING_THRESHOLD = 0.8  # 80% of max services capacity
@@ -393,14 +367,12 @@ def handle_service_virtualmin_reconciliation(
     service_id = str(instance.pk)
 
     def _enqueue() -> None:
-        try:
-            from apps.provisioning.virtualmin_tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
-                reconcile_virtualmin_service_state_async,  # Circular: cross-app
+        with best_effort_atomic(logger=logger, scope="Provisioning", message="Reconciliation enqueue failed"):
+            from apps.provisioning.virtualmin_tasks import (  # noqa: PLC0415  # ADR-0007
+                reconcile_virtualmin_service_state_async,
             )
 
             reconcile_virtualmin_service_state_async(service_id)
-        except Exception as e:
-            logger.exception(f"🔥 [Service] Failed to queue Virtualmin reconciliation for {service_id}: {e}")
 
     transaction.on_commit(_enqueue)
 
@@ -701,91 +673,6 @@ def _handle_new_service_creation(instance: Service) -> None:
     logger.info(f"✅ [Service] Created: {instance.service_name} for {instance.customer.company_name}")
 
 
-def log_virtualmin_security_event(event_type: str, details: dict[str, Any], ip_address: str) -> None:
-    """
-    Log security events related to Virtualmin operations.
-
-    Args:
-        event_type: Type of security event (e.g., 'virtualmin_auth_failure', 'access_violation')
-        details: Dictionary containing event details
-        ip_address: IP address of the source of the event
-    """
-    try:
-        # Enhance details with Virtualmin-specific metadata
-        enhanced_details = details.copy()
-        enhanced_details.update(
-            {
-                "source_app": "provisioning",
-                "virtualmin_integration": True,
-            }
-        )
-
-        # Call the log_security_event function with expected parameters
-        log_security_event(event_type, enhanced_details, ip_address)
-
-        logger.info(f"🔒 [Security] Virtualmin {event_type}: {details}")
-
-    except Exception as e:
-        logger.error(f"🔥 [Security] Failed to log Virtualmin security event: {e}")
-
-
-def notify_provisioning_completion(account: Any, success: bool = True, details: dict[str, Any] | None = None) -> None:
-    """
-    Send provisioning completion notifications.
-
-    Args:
-        account: VirtualminAccount object that was provisioned
-        success: Whether the provisioning was successful
-        details: Optional details about the provisioning process
-    """
-    try:
-        details = details or {}
-        status = "success" if success else "failed"
-
-        # Log provisioning completion
-        # Savepoint: a failed audit INSERT must not poison the caller's transaction.
-        with transaction.atomic():
-            AuditService.log_event(
-                AuditEventData(
-                    event_type="virtualmin_provisioning_completed",
-                    content_object=account,
-                    new_values={
-                        "success": success,
-                        "status": status,
-                        "domain": account.domain,
-                        "server_hostname": account.server.hostname if account.server else None,
-                        "details": details,
-                    },
-                    description=f"Virtualmin provisioning {'completed' if success else 'failed'} for domain '{account.domain}'",
-                ),
-                context=AuditContext(
-                    actor_type="system",
-                    metadata={
-                        "source_app": "provisioning",
-                        "provisioning_event": True,
-                        "provisioning_completion": True,
-                        "cross_app_notification": True,
-                        "virtualmin_provisioning": True,
-                        "completion_status": status,
-                        "domain": account.domain,
-                        "server_hostname": account.server.hostname if account.server else None,
-                    },
-                ),
-            )
-
-        logger.info(
-            f"📋 [Provisioning] Virtualmin {'completed' if success else 'failed'} for domain {account.domain}: {details}"
-        )
-
-        # Here you could add email notifications, webhook calls, etc.
-        # For now, we just log the completion
-
-    except Exception as e:
-        logger.error(
-            f"🔥 [Provisioning] Failed to notify completion for domain {getattr(account, 'domain', 'unknown')}: {e}"
-        )
-
-
 def _validate_service_for_provisioning(service: Service) -> bool:
     """Check if service requires and is ready for provisioning."""
     if not service.requires_hosting_account():
@@ -874,18 +761,19 @@ def _schedule_provisioning_task(
     secure_params: SecureTaskParameters, validated_params: dict[str, str]
 ) -> tuple[bool, str | None]:
     """Schedule the async provisioning task."""
-    try:
+    task_id = None
+    with best_effort_atomic(logger=logger, scope="AutoProvisioning", message="Task scheduling failed"):
         task_id = provision_virtualmin_account_async(secure_params)
+    if task_id is not None:
         return True, task_id
-    except Exception as task_error:
-        logger.error(f"🔥 [AutoProvisioning] Task scheduling failed: {task_error}")
-        log_security_event_safe(
-            "virtualmin_task_scheduling_failed",
-            {"error": str(task_error)},
-            validated_params["service_id"],
-            validated_params["domain"],
-        )
-        return False, None
+
+    log_security_event_safe(
+        "virtualmin_task_scheduling_failed",
+        {"error": "Task scheduling failed"},
+        validated_params["service_id"],
+        validated_params["domain"],
+    )
+    return False, None
 
 
 def _log_audit_event(service: Service, audit_data: dict[str, Any]) -> None:
@@ -1044,3 +932,4 @@ def _trigger_automatic_virtualmin_provisioning(service: Service) -> None:
         # Clear any partial idempotency state
         if "idempotency_key" in locals() and idempotency_key:
             IdempotencyManager.clear(idempotency_key)
+        raise

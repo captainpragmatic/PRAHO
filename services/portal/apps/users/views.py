@@ -34,9 +34,12 @@ from apps.common.rate_limit_feedback import (
     get_degraded_message,
     get_rate_limit_message,
     is_rate_limited_error,
+    is_unavailable_error,
+    render_platform_unavailable,
 )
 from apps.common.rate_limiting import mark_auth_failure, mark_auth_success
 from apps.common.request_ip import get_safe_client_ip
+from apps.common.store_unavailable import end_session_or_unavailable
 from apps.users.constants import PASSWORD_RESET_SESSION_KEY
 from apps.users.forms import (
     ChangePasswordForm,
@@ -419,8 +422,10 @@ def logout_view(request: HttpRequest) -> HttpResponse:
     logger.info(f"✅ [Portal Auth] Customer {customer_id} logged out")
 
     if request.method == "POST":
-        # Flush session (secure - rotates session key)
-        request.session.flush()
+        # End authentication and flush as one guarded operation.
+        unavailable_response = end_session_or_unavailable(request)
+        if unavailable_response is not None:
+            return unavailable_response
         messages.success(request, _("You have been logged out successfully."))
         return redirect("/login/")
 
@@ -446,6 +451,23 @@ def check_authentication(request: HttpRequest) -> dict | None:
         "email": request.session.get("email"),
         "authenticated_at": request.session.get("authenticated_at"),
     }
+
+
+def _redisplay_after_registration_refusal(
+    request: HttpRequest, form: CustomerRegistrationForm, error: PlatformAPIError
+) -> None:
+    """Explain a refusal the customer cannot fix by editing, and keep what they typed except passwords."""
+    if error.is_rate_limited:
+        logger.warning("⚠️ [Portal Registration] Registration rate limit exceeded")
+        messages.error(request, _("Too many registration attempts. Please try again later."))
+    else:
+        logger.warning(f"⚠️ [Portal Registration] Platform unavailable: {error}")
+        messages.error(request, _("Registration is temporarily unavailable. Please try again in a few minutes."))
+    redisplay_data = request.POST.copy()
+    for password_field in ("password1", "password2"):
+        redisplay_data.pop(password_field, None)
+        form.cleaned_data.pop(password_field, None)
+    form.data = redisplay_data
 
 
 @never_cache
@@ -480,6 +502,12 @@ def register_view(request: HttpRequest) -> HttpResponse:
                 else:
                     messages.error(request, _("Registration failed. Please check your information and try again."))
 
+            except PlatformAPIError as e:
+                if e.is_rate_limited or e.is_unavailable:
+                    _redisplay_after_registration_refusal(request, form, e)
+                else:
+                    logger.error(f"🔥 [Portal Registration] Platform API error: {e}")
+                    messages.error(request, _("An unexpected error occurred during registration. Please try again."))
             except Exception as e:
                 logger.error(f"🔥 [Portal Registration] Unexpected error: {e}")
                 messages.error(request, _("An unexpected error occurred during registration. Please try again."))
@@ -745,7 +773,10 @@ def password_reset_confirm_view(
             )
             if not result.get("success"):
                 raise PlatformAPIError("Password reset was not accepted")
-            request.session.flush()
+            unavailable_response = end_session_or_unavailable(request)
+            if unavailable_response is not None:
+                unavailable_response["Referrer-Policy"] = "no-referrer"
+                return unavailable_response
             messages.success(request, _("Password reset successfully. Please sign in with your new password."))
             response = redirect("users:login")
             response["Referrer-Policy"] = "no-referrer"
@@ -951,7 +982,9 @@ def consent_history_view(request: HttpRequest) -> HttpResponse:
             if result.get("success"):
                 consent_history = result.get("consent_history", [])
                 cookie_consent_history = result.get("cookie_consent_history", [])
-    except PlatformAPIError:  # rate-limit-aware — informational history fetch, graceful degradation
+    except PlatformAPIError as exc:
+        if is_unavailable_error(exc):
+            return render_platform_unavailable(request, exc, status=200)
         logger.warning("⚠️ [Portal Consent] Failed to fetch consent history from Platform")
 
     context = {
@@ -1160,6 +1193,8 @@ def company_profile_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, P
                             billing_addr = addr
                             break
             except Exception as addr_err:
+                if isinstance(addr_err, PlatformAPIError) and is_unavailable_error(addr_err):
+                    return render_platform_unavailable(request, addr_err, status=200)
                 logger.debug("Could not fetch billing address: %s", addr_err)
 
             company_data = {
@@ -1188,6 +1223,8 @@ def company_profile_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, P
     except PlatformAPIError as e:
         if is_rate_limited_error(e):
             raise
+        if is_unavailable_error(e):
+            return render_platform_unavailable(request, e, status=200)
         logger.error(f"🔥 [Portal] Company profile API error: {e}")
         messages.error(request, _("Error loading company profile. Please try again."))
     except Exception as e:

@@ -17,6 +17,7 @@ from apps.promotions.gift_cards import activate_verified_purchase, create_purcha
 from apps.promotions.gift_refunds import reserve_funding_refund
 from apps.promotions.models import GiftCardFundingRefund
 from apps.users.models import User
+from tests.helpers.task_queue import quiet_task_queue
 
 urlpatterns = [path("qa-admin/", admin.site.urls)]
 
@@ -24,14 +25,19 @@ urlpatterns = [path("qa-admin/", admin.site.urls)]
 class GiftStaffFixture:
     def setUp(self) -> None:
         super().setUp()
-        queue = patch("django_q.tasks.async_task")
-        queue.start()
-        self.addCleanup(queue.stop)
+        self.queue = quiet_task_queue(self)
         ron = Currency.objects.get_or_create(code="RON", defaults={"symbol": "RON"})[0]
         eur = Currency.objects.get_or_create(code="EUR", defaults={"symbol": "EUR"})[0]
         FXRate.objects.get_or_create(
-            base_code=eur, quote_code=ron, as_of=timezone.localdate(),
-            defaults={"rate": Decimal("5"), "source": "bnr", "source_reference": "https://bnr.ro/rate", "fetched_at": timezone.now()},
+            base_code=eur,
+            quote_code=ron,
+            as_of=timezone.localdate(),
+            defaults={
+                "rate": Decimal("5"),
+                "source": "bnr",
+                "source_reference": "https://bnr.ro/rate",
+                "fetched_at": timezone.now(),
+            },
         )
         self.customer = Customer.objects.create(name="Staff gift buyer", primary_email="buyer@example.test")
         self.staff = User.objects.create_user(email="billing@example.test", staff_role="billing")
@@ -46,8 +52,11 @@ class GiftStaffFixture:
 
     def refund_payload(self, client=None):
         response = (client or self.client).get(self.url("detail"))
-        return {"amount": "30.00", "reason": "requested_by_customer",
-                "request_key": str(response.context["refund_form"].initial["request_key"])}
+        return {
+            "amount": "30.00",
+            "reason": "requested_by_customer",
+            "request_key": str(response.context["refund_form"].initial["request_key"]),
+        }
 
 
 class GiftStaffActionTests(GiftStaffFixture, TestCase):
@@ -74,7 +83,8 @@ class GiftStaffActionTests(GiftStaffFixture, TestCase):
         self.assertContains(response, self.card.code)
         self.assertIn("no-store", response["Cache-Control"])
         events = AuditEvent.objects.filter(
-            content_type=ContentType.objects.get_for_model(self.card), object_id=str(self.card.pk),
+            content_type=ContentType.objects.get_for_model(self.card),
+            object_id=str(self.card.pk),
             action="gift_card_code_revealed",
         )
         self.assertEqual(events.count(), 1)
@@ -90,7 +100,9 @@ class GiftStaffActionTests(GiftStaffFixture, TestCase):
             with self.subTest(action=action):
                 self.assertEqual(self.client.post(self.url(action)).status_code, 403)
         for action in ("refund_refresh", "refund_bank_confirm"):
-            self.assertEqual(self.client.post(self.url(action, refund_id=refund.pk), {"reference": "FORGED"}).status_code, 403)
+            self.assertEqual(
+                self.client.post(self.url(action, refund_id=refund.pk), {"reference": "FORGED"}).status_code, 403
+            )
         refund.refresh_from_db()
         self.assertEqual(refund.status, "awaiting_bank_transfer")
         self.assertEqual(GiftCardFundingRefund.objects.count(), 1)
@@ -122,7 +134,9 @@ class GiftStaffActionTests(GiftStaffFixture, TestCase):
                 self.assertEqual(self.client.post(self.url("refund"), payload).status_code, 302)
             factory.assert_not_called()
         refund = GiftCardFundingRefund.objects.get(purchase=self.purchase)
-        self.assertEqual((refund.status, refund.held_cents, refund.currency_id), ("awaiting_bank_transfer", 3000, "EUR"))
+        self.assertEqual(
+            (refund.status, refund.held_cents, refund.currency_id), ("awaiting_bank_transfer", 3000, "EUR")
+        )
         self.assertEqual(self.client.post(self.url("refund"), {**payload, "amount": "20.00"}).status_code, 409)
         confirm = self.url("refund_bank_confirm", refund_id=refund.pk)
         self.assertEqual(self.client.post(confirm, {"reference": ""}).status_code, 400)
@@ -136,16 +150,24 @@ class GiftStaffActionTests(GiftStaffFixture, TestCase):
         record_bank_funding(other.pk, reference="QA-OTHER", actor=self.staff)
         wrong_route = reverse("promotions:gift_card_refund", kwargs={"pk": other.gift_card_id})
         self.assertEqual(self.client.post(wrong_route, payload).status_code, 409)
-        self.assertEqual(self.client.post(self.url("refund"), {**payload, "request_key": "00000000-0000-4000-8000-000000000001"}).status_code, 409)
+        self.assertEqual(
+            self.client.post(
+                self.url("refund"), {**payload, "request_key": "00000000-0000-4000-8000-000000000001"}
+            ).status_code,
+            409,
+        )
         self.assertFalse(GiftCardFundingRefund.objects.exists())
 
     def test_resend_only_queues_record_ids_and_respects_dispute_freeze(self) -> None:
         voucher = self.purchase.deliveries.get(purpose="voucher")
         voucher.status = "failed"
         voucher.save(update_fields=["status"])
-        with patch("django_q.tasks.async_task") as queued, self.captureOnCommitCallbacks(execute=True):
+        queued_before = len(self.queue.packages)
+        with self.captureOnCommitCallbacks(execute=True):
             self.assertEqual(self.client.post(self.url("resend")).status_code, 302)
-        self.assertEqual(queued.call_args.args, ("apps.promotions.gift_delivery.deliver_gift_card", str(voucher.pk)))
+        self.assertEqual(
+            self.queue.queued()[queued_before:], [("apps.promotions.gift_delivery.deliver_gift_card", str(voucher.pk))]
+        )
         self.card.spending_frozen_at = timezone.now()
         self.card.save(update_fields=["spending_frozen_at"])
         self.assertEqual(self.client.post(self.url("resend")).status_code, 400)

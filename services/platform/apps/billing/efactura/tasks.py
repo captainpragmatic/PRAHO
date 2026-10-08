@@ -15,11 +15,15 @@ Usage:
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, NamedTuple
 
+from django.db import transaction
 from django.utils import timezone
+from django.utils.translation import gettext as _
 
 from apps.audit.models import AuditAlert
+
+from .settings import EFacturaSettings
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +75,10 @@ def submit_efactura_task(invoice_id: str) -> dict[str, Any]:
     Returns:
         Dict with result status and details
     """
+    if not EFacturaSettings().auto_submit_enabled:
+        logger.info("✅ [e-Factura] Automatic submission is disabled for invoice %s", invoice_id)
+        return {"success": False, "error": _("Automatic e-Factura submission is disabled"), "invoice_id": invoice_id}
+
     logger.info(f"[e-Factura Task] Starting submission for invoice {invoice_id}")
 
     try:
@@ -159,11 +167,7 @@ def poll_all_pending_status_task() -> dict[str, Any]:
     """
     logger.info("[e-Factura Task] Polling status for all pending documents")
 
-    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
-        SettingsService,  # Deferred: django-q task  # Deferred: avoids circular import
-    )
-
-    batch_size = SettingsService.get_integer_setting("billing.efactura_batch_size", 100)
+    batch_size = EFacturaSettings().poll_batch_size
 
     if EFacturaService is None:
         raise RuntimeError("EFacturaService unavailable")
@@ -345,72 +349,53 @@ def _create_deadline_alerts(approaching_documents: list[Any]) -> None:
         logger.warning(f"Failed to create deadline alerts: {e}")
 
 
+def reconcile_efactura_documents() -> dict[str, int]:
+    """Daily recovery of durable invoice intent, without performing an ANAF upload."""
+    from .intents import reconcile_efactura_documents as reconcile  # noqa: PLC0415
+
+    return reconcile()
+
+
 # --- Task Scheduling Helpers ---
 
 
-def schedule_efactura_tasks() -> None:
-    """
-    Schedule recurring e-Factura tasks.
+class _ScheduleDefinition(NamedTuple):
+    """One Django-Q schedule: its unique name, the task function's name in this module, and its cadence."""
 
-    Call this during application startup to set up scheduled tasks.
-    """
-    try:
-        # Poll status every 15 minutes
-        if Schedule is None:
-            raise ImportError("Django-Q not installed")
-        Schedule.objects.update_or_create(
-            name="efactura_poll_status",
+    name: str
+    function: str
+    schedule_type: str
+    minutes: int | None
+
+
+@transaction.atomic
+def schedule_efactura_tasks() -> dict[str, str]:
+    """Install schedules even while disabled, so runtime enablement needs no restart."""
+    if Schedule is None:
+        raise ImportError(_("Django-Q not installed"))
+    definitions = (
+        _ScheduleDefinition("efactura_poll_status", "poll_all_pending_status_task", Schedule.MINUTES, 15),
+        _ScheduleDefinition("efactura_process_retries", "process_efactura_retries_task", Schedule.HOURLY, None),
+        _ScheduleDefinition("efactura_process_pending", "process_pending_submissions_task", Schedule.MINUTES, 5),
+        _ScheduleDefinition("efactura_check_deadlines", "check_efactura_deadlines_task", Schedule.DAILY, None),
+        _ScheduleDefinition(
+            "efactura_archive_missing_responses", "archive_missing_efactura_responses_task", Schedule.DAILY, None
+        ),
+        _ScheduleDefinition("efactura_reconcile_documents", "reconcile_efactura_documents", Schedule.DAILY, None),
+    )
+    results: dict[str, str] = {}
+    for name, function, schedule_type, minutes in definitions:
+        _schedule, created = Schedule.objects.update_or_create(
+            name=name,
             defaults={
-                "func": "apps.billing.efactura.tasks.poll_all_pending_status_task",
-                "schedule_type": Schedule.MINUTES,
-                "minutes": 15,
+                "func": f"apps.billing.efactura.tasks.{function}",
+                "schedule_type": schedule_type,
+                "minutes": minutes,
             },
         )
-
-        # Process retries every hour
-        Schedule.objects.update_or_create(
-            name="efactura_process_retries",
-            defaults={
-                "func": "apps.billing.efactura.tasks.process_efactura_retries_task",
-                "schedule_type": Schedule.HOURLY,
-            },
-        )
-
-        # Process pending submissions every 5 minutes
-        Schedule.objects.update_or_create(
-            name="efactura_process_pending",
-            defaults={
-                "func": "apps.billing.efactura.tasks.process_pending_submissions_task",
-                "schedule_type": Schedule.MINUTES,
-                "minutes": 5,
-            },
-        )
-
-        # Check deadlines daily at 9 AM
-        Schedule.objects.update_or_create(
-            name="efactura_check_deadlines",
-            defaults={
-                "func": "apps.billing.efactura.tasks.check_efactura_deadlines_task",
-                "schedule_type": Schedule.DAILY,
-            },
-        )
-
-        # Recover accepted response ZIPs missed because of a worker/storage failure. Daily cadence
-        # stays below ANAF's per-message download quota while providing automatic healing.
-        Schedule.objects.update_or_create(
-            name="efactura_archive_missing_responses",
-            defaults={
-                "func": "apps.billing.efactura.tasks.archive_missing_efactura_responses_task",
-                "schedule_type": Schedule.DAILY,
-            },
-        )
-
-        logger.info("e-Factura scheduled tasks configured")
-
-    except ImportError:
-        logger.warning("Django-Q not installed, scheduled tasks not configured")
-    except Exception as e:
-        logger.error(f"Failed to schedule e-Factura tasks: {e}")
+        results[name.removeprefix("efactura_")] = "created" if created else "already_exists"
+    logger.info("✅ [e-Factura] Scheduled tasks configured")
+    return results
 
 
 # --- Async Task Helpers ---
@@ -426,6 +411,9 @@ def queue_efactura_submission(invoice_id: str) -> str | None:
     Returns:
         Task ID if queued, None if failed
     """
+    if not EFacturaSettings().auto_submit_enabled:
+        logger.info("✅ [e-Factura] Automatic submission is disabled for invoice %s", invoice_id)
+        return None
     try:
         if async_task is None:
             raise ImportError("Django-Q not installed")

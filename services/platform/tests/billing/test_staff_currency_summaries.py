@@ -29,21 +29,39 @@ class StaffCurrencySummaryTests(TestCase):
         cls.eur = Currency.objects.get_or_create(code="EUR", defaults={"symbol": "EUR"})[0]
         cls.invoices = []
         for index, (currency, amount) in enumerate(((cls.eur, 10000), (cls.eur, 3000), (cls.ron, 7000))):
-            cls.invoices.append(Invoice.objects.create(
-                customer=cls.customer, currency=currency, number=f"INV-CURRENCY-{index}", status="paid",
-                subtotal_cents=amount, total_cents=amount, due_at=timezone.now(),
-            ))
+            cls.invoices.append(
+                Invoice.objects.create(
+                    customer=cls.customer,
+                    currency=currency,
+                    number=f"INV-CURRENCY-{index}",
+                    status="paid",
+                    subtotal_cents=amount,
+                    total_cents=amount,
+                    due_at=timezone.now(),
+                )
+            )
         for index, (currency, amount) in enumerate(((cls.eur, 1234), (cls.eur, 678), (cls.ron, 555))):
             ProformaInvoice.objects.create(
-                customer=cls.customer, currency=currency, number=f"PRO-CURRENCY-{index}",
-                subtotal_cents=amount, total_cents=amount,
+                customer=cls.customer,
+                currency=currency,
+                number=f"PRO-CURRENCY-{index}",
+                subtotal_cents=amount,
+                total_cents=amount,
                 valid_until=timezone.now() + timezone.timedelta(days=14),
             )
-        Payment.objects.bulk_create([
-            Payment(customer=cls.customer, invoice=invoice, currency=invoice.currency, amount_cents=amount,
-                    payment_method="bank", status="succeeded")
-            for invoice, amount in zip(cls.invoices, (2000, 1500, 5000), strict=True)
-        ])
+        Payment.objects.bulk_create(
+            [
+                Payment(
+                    customer=cls.customer,
+                    invoice=invoice,
+                    currency=invoice.currency,
+                    amount_cents=amount,
+                    payment_method="bank",
+                    status="succeeded",
+                )
+                for invoice, amount in zip(cls.invoices, (2000, 1500, 5000), strict=True)
+            ]
+        )
 
     def setUp(self) -> None:
         self.client.force_login(self.staff)
@@ -112,8 +130,12 @@ class StaffCurrencySummaryTests(TestCase):
 
     def test_draft_invoice_currency_cannot_be_relabelled_in_edit_form(self) -> None:
         invoice = Invoice.objects.create(
-            customer=self.customer, currency=self.eur, number="INV-EUR-DRAFT", status="draft",
-            subtotal_cents=1250, total_cents=1250,
+            customer=self.customer,
+            currency=self.eur,
+            number="INV-EUR-DRAFT",
+            status="draft",
+            subtotal_cents=1250,
+            total_cents=1250,
         )
         response = self.client.get(f"/billing/invoices/{invoice.pk}/edit/")
         self.assertEqual(response.status_code, 200)
@@ -125,6 +147,29 @@ class StaffCurrencySummaryTests(TestCase):
         self.assertContains(response, "0.00 EUR")
         self.assertNotContains(response, "0.00 RON")
 
+    def test_draft_invoice_summary_keeps_two_decimal_places_and_recorded_currency(self) -> None:
+        for currency in (self.eur, self.ron):
+            with self.subTest(currency=currency.code):
+                invoice = Invoice.objects.create(
+                    customer=self.customer,
+                    currency=currency,
+                    status="draft",
+                    subtotal_cents=1250,
+                    tax_cents=0,
+                    total_cents=1250,
+                )
+                response = self.client.get(f"/billing/invoices/{invoice.pk}/edit/")
+                self.assertEqual(response.status_code, 200)
+                doc = etree.HTML(response.content)
+                amounts = doc.xpath(
+                    "//div[span[normalize-space(.)='Subtotal:' or normalize-space(.)='VAT:' "
+                    "or normalize-space(.)='Total:']]/span[last()]"
+                )
+                self.assertEqual(
+                    [" ".join(amount.itertext()).strip() for amount in amounts],
+                    [f"12.50 {currency.code}", f"0.00 {currency.code}", f"12.50 {currency.code}"],
+                )
+
     def test_plan_list_uses_explicit_selling_price_without_relabelling_legacy_price(self) -> None:
         priced = ServicePlan.objects.create(name="Priced plan", price_monthly="51.23")
         unpriced = ServicePlan.objects.create(name="Unpriced plan", price_monthly="84.56")
@@ -133,7 +178,7 @@ class StaffCurrencySummaryTests(TestCase):
         SystemSetting.objects.filter(key="billing.default_currency").update(value="EUR")
         response = self.client.get("/provisioning/plans/")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.context["currency"], "EUR")
+        self.assertEqual(response.context["selling_currency"], "EUR")
         self.assertContains(response, "9,99 EUR")
         self.assertContains(response, unpriced.name)
         self.assertContains(response, "Price unavailable")

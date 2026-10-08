@@ -107,7 +107,7 @@ AuditEventReview companion model, so AuditEvent stays append-only.
                                         {% else %}
                                             <form method="post" action="{% url 'audit:mark_event_reviewed' event.id %}" class="flex items-center gap-2">
                                                 {% csrf_token %}
-                                                <input type="text" name="notes" maxlength="500"
+                                                <input type="text" name="notes" maxlength="500" aria-label="{% trans 'Review notes' %}"
                                                        placeholder="{% trans 'Optional notes' %}"
                                                        class="bg-slate-900 border border-slate-600 text-white text-sm rounded px-2 py-1">
                                                 <button type="submit" class="bg-green-600 hover:bg-green-500 text-white text-sm font-medium py-1 px-3 rounded transition-colors">

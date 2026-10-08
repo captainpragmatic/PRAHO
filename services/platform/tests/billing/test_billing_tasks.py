@@ -25,12 +25,8 @@ from apps.billing.payment_models import (
     PaymentRetryPolicy,
 )
 from apps.billing.tasks import (
-    _DEFAULT_TASK_MAX_RETRIES,
-    _DEFAULT_TASK_RETRY_DELAY,
     TASK_SOFT_TIME_LIMIT,
     TASK_TIME_LIMIT,
-    _get_task_max_retries,
-    _get_task_retry_delay,
     _schedule_next_retry,
     cancel_payment_reminders,
     cancel_payment_reminders_async,
@@ -120,52 +116,6 @@ def _last_audit_call_kwargs(mock_audit: MagicMock) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Helper function tests
 # ---------------------------------------------------------------------------
-
-
-class GetTaskRetryDelayTests(TestCase):
-    """Tests for _get_task_retry_delay()."""
-
-    def test_returns_default_when_setting_matches_fallback(self) -> None:
-        with patch(
-            "apps.settings.services.SettingsService.get_integer_setting",
-            return_value=_DEFAULT_TASK_RETRY_DELAY,
-        ) as mock_get:
-            result = _get_task_retry_delay()
-
-        mock_get.assert_called_once_with("billing.task_retry_delay_seconds", _DEFAULT_TASK_RETRY_DELAY)
-        self.assertEqual(result, _DEFAULT_TASK_RETRY_DELAY)
-
-    def test_returns_custom_value_from_settings(self) -> None:
-        with patch(
-            "apps.settings.services.SettingsService.get_integer_setting",
-            return_value=600,
-        ):
-            result = _get_task_retry_delay()
-
-        self.assertEqual(result, 600)
-
-
-class GetTaskMaxRetriesTests(TestCase):
-    """Tests for _get_task_max_retries()."""
-
-    def test_returns_default_when_setting_matches_fallback(self) -> None:
-        with patch(
-            "apps.settings.services.SettingsService.get_integer_setting",
-            return_value=_DEFAULT_TASK_MAX_RETRIES,
-        ) as mock_get:
-            result = _get_task_max_retries()
-
-        mock_get.assert_called_once_with("billing.task_max_retries", _DEFAULT_TASK_MAX_RETRIES)
-        self.assertEqual(result, _DEFAULT_TASK_MAX_RETRIES)
-
-    def test_returns_custom_value_from_settings(self) -> None:
-        with patch(
-            "apps.settings.services.SettingsService.get_integer_setting",
-            return_value=5,
-        ):
-            result = _get_task_max_retries()
-
-        self.assertEqual(result, 5)
 
 
 class RefundReconciliationLimitTests(TestCase):

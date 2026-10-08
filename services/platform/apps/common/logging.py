@@ -39,13 +39,14 @@ import time
 import traceback
 from collections import defaultdict
 from collections.abc import Callable, Generator
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, ClassVar, TypeVar
 
 from django.conf import settings
 from django.core.cache import cache
-from django.db import connection, reset_queries
+from django.db import DatabaseError, InterfaceError, connection, reset_queries, transaction
 from django.utils import timezone as tz
 
 # Thread-local storage for request context
@@ -61,6 +62,30 @@ _DEFAULT_VALUE_SUMMARY_LIMIT = 50
 VALUE_SUMMARY_LIMIT = _DEFAULT_VALUE_SUMMARY_LIMIT
 
 
+def _guard_summary_setting(default: int) -> Callable[[Callable[[], int]], Callable[[], int]]:
+    """Prevent settings log handlers from re-entering summary setting reads."""
+
+    def decorator(func: Callable[[], int]) -> Callable[[], int]:
+        @functools.wraps(func)
+        def guarded() -> int:
+            if getattr(_request_context, "resolving_summary_setting", False):
+                return default
+            _request_context.resolving_summary_setting = True
+            try:
+                with transaction.atomic() if transaction.get_connection().in_atomic_block else nullcontext():
+                    return func()
+            except (DatabaseError, InterfaceError, RuntimeError, AssertionError):
+                # Tracing also runs where a database is unavailable or explicitly forbidden.
+                return default
+            finally:
+                _request_context.resolving_summary_setting = False
+
+        return guarded
+
+    return decorator
+
+
+@_guard_summary_setting(_DEFAULT_SQL_DISPLAY_LIMIT)
 def get_sql_display_limit() -> int:
     """Get sql display limit from SettingsService (runtime)."""
     from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
@@ -70,6 +95,7 @@ def get_sql_display_limit() -> int:
     return SettingsService.get_integer_setting("common.sql_display_limit", _DEFAULT_SQL_DISPLAY_LIMIT)
 
 
+@_guard_summary_setting(_DEFAULT_MAX_SUMMARIZED_ARGS)
 def get_max_summarized_args() -> int:
     """Get max summarized args from SettingsService (runtime)."""
     from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
@@ -79,6 +105,7 @@ def get_max_summarized_args() -> int:
     return SettingsService.get_integer_setting("common.max_summarized_args", _DEFAULT_MAX_SUMMARIZED_ARGS)
 
 
+@_guard_summary_setting(_DEFAULT_VALUE_SUMMARY_LIMIT)
 def get_value_summary_limit() -> int:
     """Get value summary limit from SettingsService (runtime)."""
     from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
@@ -471,6 +498,7 @@ class QueryTracer:
         """Get summary of traced queries."""
         total_time = sum(q.time_ms for q in self.queries)
         duplicates = [q for q in self.queries if q.is_duplicate]
+        sql_display_limit = get_sql_display_limit()
 
         return {
             "total_queries": len(self.queries),
@@ -480,7 +508,7 @@ class QueryTracer:
             "unique_queries": len(self._query_hashes),
             "queries": [
                 {
-                    "sql": q.sql[:SQL_DISPLAY_LIMIT] + "..." if len(q.sql) > SQL_DISPLAY_LIMIT else q.sql,
+                    "sql": q.sql[:sql_display_limit] + "..." if len(q.sql) > sql_display_limit else q.sql,
                     "time_ms": q.time_ms,
                     "is_duplicate": q.is_duplicate,
                     "stack": q.stack_trace[:3] if q.stack_trace else [],
@@ -661,24 +689,27 @@ class MethodTracer:
                 cls._trace_stack.pop()
 
     @classmethod
-    def _summarize_args(cls, args: tuple[Any, ...], kwargs: dict[str, Any]) -> str:
+    def _summarize_args(cls, args: tuple[object, ...], kwargs: dict[str, object]) -> str:
         """Create a summary of function arguments."""
-        parts = []
-        for i, arg in enumerate(args[:MAX_SUMMARIZED_ARGS]):  # Limit to first 3 args
-            parts.append(f"arg{i}={cls._summarize_value(arg)}")
-        for key, value in list(kwargs.items())[:MAX_SUMMARIZED_ARGS]:  # Limit to first 3 kwargs
-            parts.append(f"{key}={cls._summarize_value(value)}")
-        if len(args) > MAX_SUMMARIZED_ARGS or len(kwargs) > MAX_SUMMARIZED_ARGS:
+        max_args = get_max_summarized_args()
+        value_limit = get_value_summary_limit()
+        parts: list[str] = []
+        for i, arg in enumerate(args[:max_args]):
+            parts.append(f"arg{i}={cls._summarize_value(arg, value_limit)}")
+        for key, value in list(kwargs.items())[:max_args]:
+            parts.append(f"{key}={cls._summarize_value(value, value_limit)}")
+        if len(args) > max_args or len(kwargs) > max_args:
             parts.append("...")
         return ", ".join(parts)
 
     @classmethod
-    def _summarize_value(cls, value: Any) -> str:
+    def _summarize_value(cls, value: object, limit: int | None = None) -> str:
         """Create a summary of a value for logging."""
+        value_limit = get_value_summary_limit() if limit is None else limit
         if value is None:
             return "None"
         if isinstance(value, str):
-            return f'"{value[:VALUE_SUMMARY_LIMIT]}..."' if len(value) > VALUE_SUMMARY_LIMIT else f'"{value}"'
+            return f'"{value[:value_limit]}..."' if len(value) > value_limit else f'"{value}"'
         if isinstance(value, (list, tuple)):
             return f"{type(value).__name__}[{len(value)}]"
         if isinstance(value, dict):

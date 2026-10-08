@@ -8,18 +8,24 @@ import logging
 from django.contrib import messages
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
+from django.urls import reverse
 from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_http_methods
 
 from apps.common.api_utils import DictAsObj
-from apps.common.decorators import _get_user_role_for_customer, require_support_access
-from apps.common.pagination import PaginatorData, build_pagination_params
-from apps.common.rate_limit_feedback import handle_platform_error, is_rate_limited_error
+from apps.common.decorators import _get_user_role_for_customer, _render_role_check_degraded, require_support_access
+from apps.common.pagination import PaginatorData, pagination_query
+from apps.common.rate_limit_feedback import (
+    handle_platform_error,
+    is_rate_limited_error,
+    is_unavailable_error,
+    render_platform_unavailable,
+)
 from apps.services.services import services_api
 
-from .services import PlatformAPIError, TicketCreateRequest, TicketFilters, tickets_api
+from .services import TICKET_PAGE_SIZE, PlatformAPIError, TicketCreateRequest, TicketFilters, tickets_api
 
 # Keep the JSON transport below the Platform request body limit.
 MAX_REPLY_ATTACHMENTS = 5
@@ -144,9 +150,9 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
     # Get filter parameters
     status_filter = _validated_status_filter(request.GET.get("status", ""))
     priority_filter = request.GET.get("priority", "")
-    search_query = request.GET.get("search", "")
+    search_query = request.GET.get("q", "").strip()
     try:
-        page = int(request.GET.get("page", 1))
+        page = max(1, int(request.GET.get("page", 1)))
     except (ValueError, TypeError):
         page = 1
 
@@ -164,9 +170,9 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
         summary = tickets_api.get_tickets_summary(customer_id, user_id)
         open_count = summary.get("open_tickets", 0)
 
-        # Pagination via shared utility
-        paginator_data = PaginatorData(total_count=total_count, current_page=page, page_size=25)
-        pagination_params = build_pagination_params(search=search_query, status=status_filter, priority=priority_filter)
+        # Pagination uses the same limit as the Platform request.
+        paginator_data = PaginatorData(total_count=total_count, current_page=page, page_size=TICKET_PAGE_SIZE)
+        pagination_params = pagination_query(request)
 
         context = {
             "tickets": tickets,
@@ -183,7 +189,7 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
             "page_title": _("Tickets"),
             "page_title_mobile": _("Tickets"),
             "page_subtitle": _("Get help with your hosting services"),
-            "search_placeholder": _("Search by ticket number, subject, description, status, or date…"),
+            "search_placeholder": _("Search by ticket number, subject, description, or status…"),
             "header_stats": [
                 {"value": str(open_count), "label": _("Open Tickets"), "color": "text-amber-400"},
                 {"value": str(total_count), "label": _("Total Tickets"), "color": "text-white"},
@@ -197,7 +203,7 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
         error_ctx = handle_platform_error(
             request, e, logger, fallback_message=_("Unable to load support tickets. Please try again later.")
         )
-        paginator_data = PaginatorData(total_count=0, current_page=1, page_size=25)
+        paginator_data = PaginatorData(total_count=0, current_page=1, page_size=TICKET_PAGE_SIZE)
 
         context = {
             "tickets": [],
@@ -212,7 +218,7 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
             "page_title": _("Tickets"),
             "page_title_mobile": _("Tickets"),
             "page_subtitle": _("Get help with your hosting services"),
-            "search_placeholder": _("Search by ticket number, subject, description, status, or date…"),
+            "search_placeholder": _("Search by ticket number, subject, description, or status…"),
             "header_stats": [
                 {"value": "0", "label": _("Open Tickets"), "color": "text-amber-400"},
                 {"value": "0", "label": _("Total Tickets"), "color": "text-white"},
@@ -258,7 +264,9 @@ def ticket_detail(request: HttpRequest, ticket_id: int) -> HttpResponse:
 
     except PlatformAPIError as e:
         if is_rate_limited_error(e):
-            raise
+            return _render_role_check_degraded(request, e)
+        if is_unavailable_error(e):
+            return render_platform_unavailable(request, e)
         logger.error(f"🔥 [Tickets View] Error loading ticket {ticket_id} for customer {customer_id}: {e}")
         messages.error(request, _("Ticket not found or access denied."))
         return redirect("tickets:list")
@@ -326,14 +334,12 @@ def ticket_create(request: HttpRequest) -> HttpResponse:
             logger.info(f"✅ [Tickets View] Created ticket {ticket_id} for customer {customer_id}")
 
             # Handle missing ticket ID gracefully
-            if ticket_id:
-                return redirect("tickets:detail", ticket_id=ticket_id)
-            else:
+            if not ticket_id:
                 logger.error(f"🔥 [Tickets View] No ticket ID returned from platform API: {ticket}")
                 messages.error(
                     request, _("Ticket created but unable to redirect to details. Please check your tickets list.")
                 )
-                return redirect("tickets:list")
+            return redirect("tickets:detail", ticket_id=ticket_id) if ticket_id else redirect("tickets:list")
 
         except PlatformAPIError as e:
             if is_rate_limited_error(e):
@@ -364,7 +370,9 @@ def ticket_create(request: HttpRequest) -> HttpResponse:
         try:
             svc = services_api.get_service_detail(customer_id, user_id, int(service_id))
             service_name = svc.get("service_name", "") or svc.get("name", "")
-        except Exception:
+        except Exception as exc:
+            if isinstance(exc, PlatformAPIError) and is_unavailable_error(exc):
+                return render_platform_unavailable(request, exc)
             logger.warning(f"⚠️ [Tickets View] Could not resolve service {service_id}, passing ID only")
             # Keep service_id even if name resolution fails — Platform will validate on create
 
@@ -394,6 +402,8 @@ def ticket_attachment_download(request: HttpRequest, ticket_id: int, attachment_
             raise Http404("Attachment not found") from exc
         if is_rate_limited_error(exc):
             raise
+        if is_unavailable_error(exc):
+            return render_platform_unavailable(request, exc)
         return HttpResponse(_("Attachment temporarily unavailable."), status=503)
     headers = {key.lower(): value for key, value in headers.items()}
     response = HttpResponse(content, content_type=headers.get("content-type", "application/octet-stream"))
@@ -443,7 +453,7 @@ def ticket_reply(request: HttpRequest, ticket_id: int) -> HttpResponse:
             attachments.append(file_data)
 
     try:
-        # Add reply via platform API
+        # Only a failed write may re-offer the submitted reply.
         tickets_api.add_ticket_reply(
             customer_id=customer_id,
             user_id=user_id,
@@ -451,35 +461,61 @@ def ticket_reply(request: HttpRequest, ticket_id: int) -> HttpResponse:
             message=reply_text,
             attachments=attachments if attachments else None,
         )
-
-        logger.info(f"✅ [Tickets View] Added reply to ticket {ticket_id} for customer {customer_id}")
-
-        # Get updated ticket details for HTMX response
-        if request.headers.get("HX-Request"):
-            ticket_response = tickets_api.get_ticket_detail(customer_id, user_id, ticket_id)
-
-            # Extract ticket and replies from the response
-            if ticket_response.get("success") and "data" in ticket_response:
-                ticket = ticket_response["data"].get("ticket", {})
-            else:
-                ticket = ticket_response
-            replies = ticket.get("comments", [])
-
-            context = {"ticket": ticket, "replies": replies}
-            template = "tickets/partials/status_and_comments.html"
-            return _handle_ticket_success_response(
-                request, ticket_id, _("Reply added successfully."), context, template
-            )
-
-        return _handle_ticket_success_response(request, ticket_id, _("Reply added successfully."))
-
     except PlatformAPIError as e:
         if is_rate_limited_error(e):
             raise
         logger.error(f"🔥 [Tickets View] Error adding reply to ticket {ticket_id} for customer {customer_id}: {e}")
-        return _handle_ticket_error_response(
-            request, ticket_id, _("Unable to add reply. Please try again later."), status=500
+        htmx_form = request.headers.get("HX-Request") == "true"
+        return (
+            render_platform_unavailable(
+                request,
+                e,
+                template_name="tickets/partials/status_and_comments.html" if htmx_form else None,
+                extra_context={"ticket": {"id": ticket_id}, "reply_text": request.POST.get("message", "")}
+                if htmx_form
+                else None,
+            )
+            if is_unavailable_error(e)
+            else _handle_ticket_error_response(
+                request, ticket_id, _("Unable to add reply. Please try again later."), status=500
+            )
         )
+
+    logger.info(f"✅ [Tickets View] Added reply to ticket {ticket_id} for customer {customer_id}")
+
+    if request.headers.get("HX-Request"):
+        context: dict[str, object]
+        try:
+            ticket_response = tickets_api.get_ticket_detail(customer_id, user_id, ticket_id)
+        except PlatformAPIError as error:
+            logger.warning("⚠️ [Tickets View] Reply saved but ticket %s could not refresh: %s", ticket_id, error)
+            context = {
+                "ticket": {"id": ticket_id},
+                "reply_text": "",
+                "reply_sent": True,
+                "maintenance": True,
+                "maintenance_heading": _("Thread could not refresh"),
+                "maintenance_message": _(
+                    "Your reply was sent, but the thread could not refresh. Refresh the thread to see the latest replies."
+                ),
+                "maintenance_retry_url": reverse("tickets:detail", args=[ticket_id]),
+            }
+        else:
+            if ticket_response.get("success") and "data" in ticket_response:
+                ticket = ticket_response["data"].get("ticket", {})
+            else:
+                ticket = ticket_response
+            context = {"ticket": ticket, "replies": ticket.get("comments", [])}
+
+        return _handle_ticket_success_response(
+            request,
+            ticket_id,
+            _("Reply added successfully."),
+            context,
+            "tickets/partials/status_and_comments.html",
+        )
+
+    return _handle_ticket_success_response(request, ticket_id, _("Reply added successfully."))
 
 
 def ticket_search_api(request: HttpRequest) -> HttpResponse:
@@ -496,13 +532,17 @@ def ticket_search_api(request: HttpRequest) -> HttpResponse:
     search_query = request.GET.get("q", "").strip()
     status_filter = _validated_status_filter(request.GET.get("status", ""))
     priority_filter = request.GET.get("priority", "")
+    try:
+        page = max(1, int(request.GET.get("page", 1)))
+    except (ValueError, TypeError):
+        page = 1
 
     try:
         response = tickets_api.get_customer_tickets(
             customer_id=customer_id,
             user_id=user_id,
             filters=TicketFilters(
-                page=1,
+                page=page,
                 status=status_filter,
                 priority=priority_filter,
                 search=search_query,
@@ -512,8 +552,8 @@ def ticket_search_api(request: HttpRequest) -> HttpResponse:
         tickets = [DictAsObj(t) for t in response.get("results", [])]
         total_count = response.get("count", 0)
 
-        paginator_data = PaginatorData(total_count=total_count, current_page=1, page_size=25)
-        pagination_params = build_pagination_params(search=search_query, status=status_filter, priority=priority_filter)
+        paginator_data = PaginatorData(total_count=total_count, current_page=page, page_size=TICKET_PAGE_SIZE)
+        pagination_params = pagination_query(request)
 
         return render(
             request,
@@ -527,7 +567,7 @@ def ticket_search_api(request: HttpRequest) -> HttpResponse:
 
     except PlatformAPIError as e:
         error_ctx = handle_platform_error(request, e, logger)
-        paginator_data = PaginatorData(total_count=0, current_page=1, page_size=25)
+        paginator_data = PaginatorData(total_count=0, current_page=1, page_size=TICKET_PAGE_SIZE)
 
         context = {
             "tickets": [],

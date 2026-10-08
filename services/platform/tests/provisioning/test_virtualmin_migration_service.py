@@ -44,9 +44,7 @@ class MigrationTestBase(task_tests.VirtualminTaskTestBase):
     def setUp(self) -> None:
         super().setUp()
         # fsm-bypass: establish the existing active account fixture.
-        VirtualminAccount.objects.filter(pk=self.account.pk).update(
-            status="active", domains=[self.account.domain]
-        )
+        VirtualminAccount.objects.filter(pk=self.account.pk).update(status="active", domains=[self.account.domain])
         self.account.refresh_from_db()
         VirtualminServer.objects.filter(pk=self.server.pk).update(last_health_check=timezone.now())
         self.server.refresh_from_db()
@@ -60,26 +58,42 @@ class MigrationTestBase(task_tests.VirtualminTaskTestBase):
         self.target.set_api_password("target-test-password")
         self.target.save()
         provider = CloudProvider.objects.create(
-            name="Migration provider", provider_type="hetzner", code="het",
+            name="Migration provider",
+            provider_type="hetzner",
+            code="het",
             credential_identifier="migration-test",
         )
         region = NodeRegion.objects.create(
-            provider=provider, name="Falkenstein", provider_region_id="fsn1",
-            normalized_code="fsn1", country_code="de", city="Falkenstein",
+            provider=provider,
+            name="Falkenstein",
+            provider_region_id="fsn1",
+            normalized_code="fsn1",
+            country_code="de",
+            city="Falkenstein",
         )
         size = NodeSize.objects.create(
-            provider=provider, name="Migration small", display_name="Small",
-            provider_type_id="cpx21", vcpus=2, memory_gb=4, disk_gb=40,
-            hourly_cost_eur="0.01", monthly_cost_eur="5.00",
+            provider=provider,
+            name="Migration small",
+            display_name="Small",
+            provider_type_id="cpx21",
+            vcpus=2,
+            memory_gb=4,
+            disk_gb=40,
+            hourly_cost_eur="0.01",
+            monthly_cost_eur="5.00",
         )
         panel = PanelType.objects.create(
             name="Migration Virtualmin", panel_type="virtualmin", ansible_playbook="virtualmin.yml"
         )
         for number, server in enumerate((self.server, self.target), start=1):
             NodeDeployment.objects.create(
-                provider=provider, node_size=size, region=region, panel_type=panel,
+                provider=provider,
+                node_size=size,
+                region=region,
+                panel_type=panel,
                 hostname=f"prd-sha-het-de-fsn1-{number:03}",
-                node_number=number, ipv4_address=f"203.0.113.{number}",
+                node_number=number,
+                ipv4_address=f"203.0.113.{number}",
                 virtualmin_server=server,
             )
         self.staff = User.objects.create_user(
@@ -99,16 +113,15 @@ class MigrationTestBase(task_tests.VirtualminTaskTestBase):
         self.addCleanup(settings_patch.stop)
         self.source_gateway = MockVirtualminGateway(server_hostname=self.server.hostname)
         self.target_gateway = MockVirtualminGateway(server_hostname=self.target.hostname)
-        self.source_gateway.seed_domain(
-            self.account.domain, username=self.account.virtualmin_username, enabled=True
-        )
+        self.source_gateway.seed_domain(self.account.domain, username=self.account.virtualmin_username, enabled=True)
         self.gateways = {"source": self.source_gateway, "target": self.target_gateway}
         self.events: list[tuple[str, str, dict[str, Any], int | None]] = []
         self.effects: dict[tuple[str, str], Any] = {}
         self.original_calls = {side: gateway.call for side, gateway in self.gateways.items()}
         for side, gateway in self.gateways.items():
             call_patch = patch.object(
-                gateway, "call",
+                gateway,
+                "call",
                 side_effect=lambda program, params=None, _side=side, **kwargs: self._call(
                     _side, program, params or {}, **kwargs
                 ),
@@ -148,8 +161,11 @@ class MigrationTestBase(task_tests.VirtualminTaskTestBase):
         return self.original_calls[side](program, params, **kwargs)
 
     def _transport(
-        self, deployment: NodeDeployment, playbook: str,
-        extra_vars: dict[str, Any] | None = None, timeout_seconds: int | None = None,
+        self,
+        deployment: NodeDeployment,
+        playbook: str,
+        extra_vars: dict[str, Any] | None = None,
+        timeout_seconds: int | None = None,
     ) -> Any:
         self.assertEqual(timeout_seconds, 3600)
         self.assertIsNotNone(extra_vars)
@@ -161,19 +177,19 @@ class MigrationTestBase(task_tests.VirtualminTaskTestBase):
             self.assertEqual(deployment.virtualmin_server_id, self.target.pk)
             self.assertEqual(extra_vars["expected_sha256"], "a" * 64)
             self.target_gateway._archives.update(deepcopy(self.source_gateway._archives))
-        return Ok(AnsibleResult(
-            success=playbook != self.failed_playbook,
-            playbook=playbook,
-            stdout=f'MIGRATE_SHA256={"a" * 64}',
-            stderr="",
-            return_code=0 if playbook != self.failed_playbook else 2,
-        ))
+        return Ok(
+            AnsibleResult(
+                success=playbook != self.failed_playbook,
+                playbook=playbook,
+                stdout=f"MIGRATE_SHA256={'a' * 64}",
+                stderr="",
+                return_code=0 if playbook != self.failed_playbook else 2,
+            )
+        )
 
     def _start(self) -> VirtualminMigration:
         with self.captureOnCommitCallbacks(execute=True):
-            result = VirtualminMigrationService().start_migration(
-                self.account, self.target, initiated_by=self.staff
-            )
+            result = VirtualminMigrationService().start_migration(self.account, self.target, initiated_by=self.staff)
         self.assertTrue(result.is_ok(), result)
         return result.unwrap()
 
@@ -193,24 +209,29 @@ class MigrationTestBase(task_tests.VirtualminTaskTestBase):
         )
 
     def _partial_restore_error(self) -> Any:
-        self.target_gateway.seed_domain(
-            self.account.domain, username=self.account.virtualmin_username, enabled=False
-        )
+        self.target_gateway.seed_domain(self.account.domain, username=self.account.virtualmin_username, enabled=False)
         return self._error("target", "restore-domain")
 
     def _reservation(self) -> None:
         service = Service.objects.create(
-            customer=self.customer, service_plan=self.plan, currency=self.currency,
-            service_name="reserved.example.com", domain="reserved.example.com",
-            username="reserved", billing_cycle="monthly", price="10.00", status="active",
+            customer=self.customer,
+            service_plan=self.plan,
+            currency=self.currency,
+            service_name="reserved.example.com",
+            domain="reserved.example.com",
+            username="reserved",
+            billing_cycle="monthly",
+            price="10.00",
+            status="active",
         )
         account = VirtualminAccount.objects.create(
-            service=service, server=self.server, domain=service.domain,
-            virtualmin_username="reserved", encrypted_password=self.account.encrypted_password,
+            service=service,
+            server=self.server,
+            domain=service.domain,
+            virtualmin_username="reserved",
+            encrypted_password=self.account.encrypted_password,
         )
-        VirtualminMigration.objects.create(
-            account=account, source_server=self.server, target_server=self.target
-        )
+        VirtualminMigration.objects.create(account=account, source_server=self.server, target_server=self.target)
         VirtualminServer.objects.filter(pk=self.target.pk).update(max_domains=1, current_domains=0)
 
 
@@ -239,10 +260,20 @@ class MigrationTests(MigrationTestBase):
             patch.object(VirtualminAccount, "save", new=record_save),
         ):
             migration = self._run(self._start())
-        self.assertEqual(transitions, [
-            "quiescing", "backing_up", "fetching", "pushing", "restoring",
-            "verifying", "activating", "repointing", "completed",
-        ])
+        self.assertEqual(
+            transitions,
+            [
+                "quiescing",
+                "backing_up",
+                "fetching",
+                "pushing",
+                "restoring",
+                "verifying",
+                "activating",
+                "repointing",
+                "completed",
+            ],
+        )
         source = self._programs("source")
         disable_index = source.index("disable-domain")
         self.assertEqual(source[disable_index + 1], "list-domains")
@@ -262,9 +293,9 @@ class MigrationTests(MigrationTestBase):
         self.assertFalse(account_has_active_migration(self.account))
         self.assertFalse(self.source_gateway.domain_state_of(self.account.domain).enabled)
         self.assertTrue(self.target_gateway.domain_state_of(self.account.domain).enabled)
-        self.assertTrue(AuditEvent.objects.filter(
-            action="virtualmin_migration_completed", object_id=str(migration.pk)
-        ).exists())
+        self.assertTrue(
+            AuditEvent.objects.filter(action="virtualmin_migration_completed", object_id=str(migration.pk)).exists()
+        )
         self.assertGreaterEqual(self.enqueue.call_args.kwargs["timeout"], 10800)
         for _, program, _, timeout in self.events:
             if program in {"backup-domain", "restore-domain"}:
@@ -273,31 +304,44 @@ class MigrationTests(MigrationTestBase):
     def test_preflight_rejections(self) -> None:
         cases = [
             ("disabled", lambda: self.settings_values.update({"provisioning.migration_enabled": False})),
-            ("source inactive", lambda: VirtualminServer.objects.filter(pk=self.server.pk).update(
-                status="maintenance"  # fsm-bypass: preflight fixture.
-            )),
-            ("target inactive", lambda: VirtualminServer.objects.filter(pk=self.target.pk).update(
-                status="maintenance"  # fsm-bypass: preflight fixture.
-            )),
-            ("source manual registration", lambda: NodeDeployment.objects.filter(
-                virtualmin_server=self.server
-            ).delete()),
-            ("target manual registration", lambda: NodeDeployment.objects.filter(
-                virtualmin_server=self.target
-            ).delete()),
-            ("full", lambda: VirtualminServer.objects.filter(pk=self.target.pk).update(
-                current_domains=1000
-            )),
+            (
+                "source inactive",
+                lambda: VirtualminServer.objects.filter(pk=self.server.pk).update(
+                    status="maintenance"  # fsm-bypass: preflight fixture.
+                ),
+            ),
+            (
+                "target inactive",
+                lambda: VirtualminServer.objects.filter(pk=self.target.pk).update(
+                    status="maintenance"  # fsm-bypass: preflight fixture.
+                ),
+            ),
+            (
+                "source manual registration",
+                lambda: NodeDeployment.objects.filter(virtualmin_server=self.server).delete(),
+            ),
+            (
+                "target manual registration",
+                lambda: NodeDeployment.objects.filter(virtualmin_server=self.target).delete(),
+            ),
+            ("full", lambda: VirtualminServer.objects.filter(pk=self.target.pk).update(current_domains=1000)),
             ("reserved", self._reservation),
-            ("unhealthy", lambda: VirtualminServer.objects.filter(pk=self.target.pk).update(
-                health_check_error="unreachable"
-            )),
-            ("local multi-domain", lambda: VirtualminAccount.objects.filter(pk=self.account.pk).update(
-                domains=[self.account.domain, "extra.example.com"]
-            )),
-            ("second migration", lambda: VirtualminMigration.objects.create(
-                account=self.account, source_server=self.server, target_server=self.target
-            )),
+            (
+                "unhealthy",
+                lambda: VirtualminServer.objects.filter(pk=self.target.pk).update(health_check_error="unreachable"),
+            ),
+            (
+                "local multi-domain",
+                lambda: VirtualminAccount.objects.filter(pk=self.account.pk).update(
+                    domains=[self.account.domain, "extra.example.com"]
+                ),
+            ),
+            (
+                "second migration",
+                lambda: VirtualminMigration.objects.create(
+                    account=self.account, source_server=self.server, target_server=self.target
+                ),
+            ),
         ]
         for label, mutate in cases:
             with self.subTest(case=label), transaction.atomic():
@@ -311,9 +355,9 @@ class MigrationTests(MigrationTestBase):
                     self.assertIn("manual registration", result.unwrap_err())
                 transaction.set_rollback(True)
         self.settings_values["provisioning.migration_enabled"] = True
-        self.assertTrue(VirtualminMigrationService().start_migration(
-            self.account, self.server, initiated_by=self.staff
-        ).is_err())
+        self.assertTrue(
+            VirtualminMigrationService().start_migration(self.account, self.server, initiated_by=self.staff).is_err()
+        )
         self.assertNotIn("disable-domain", self._programs("source"))
         self.enqueue.assert_not_called()
 
@@ -330,9 +374,7 @@ class MigrationTests(MigrationTestBase):
                 elif case == "target listing error":
                     self.effects[("target", "list-domains")] = self._error("target", "list-domains")
                 else:
-                    self.source_gateway.seed_domain(
-                        "extra.example.com", username=self.account.virtualmin_username
-                    )
+                    self.source_gateway.seed_domain("extra.example.com", username=self.account.virtualmin_username)
                 result = VirtualminMigrationService().start_migration(
                     self.account, self.target, initiated_by=self.staff
                 )
@@ -390,13 +432,11 @@ class MigrationTests(MigrationTestBase):
         migration = self._run(self._start())
         self.assertEqual(migration.status, "needs_review")
         target = self._programs("target")
-        self.assertEqual(target[target.index("restore-domain"):], ["restore-domain"])
+        self.assertEqual(target[target.index("restore-domain") :], ["restore-domain"])
         self.assertNotIn("enable-domain", self._programs("source"))
 
     def test_verify_owner_quota_and_features_mismatch_require_review(self) -> None:
-        for field, value in (
-            ("username", "wrong-owner"), ("disk_quota_mb", 9999), ("features", ["web"])
-        ):
+        for field, value in (("username", "wrong-owner"), ("disk_quota_mb", 9999), ("features", ["web"])):
             with self.subTest(field=field), transaction.atomic():
                 self.source_gateway.domain_state_of(self.account.domain).enabled = True
                 self.target_gateway._domains.clear()
@@ -429,9 +469,7 @@ class MigrationTests(MigrationTestBase):
         migration = self._start()
         transition = VirtualminMigration.transition
 
-        def fail_repoint(
-            instance: VirtualminMigration, token: Any, before: str, after: str, **fields: Any
-        ) -> bool:
+        def fail_repoint(instance: VirtualminMigration, token: Any, before: str, after: str, **fields: Any) -> bool:
             if before == "activating" and after == "repointing":
                 return False
             return transition(instance, token, before, after, **fields)
@@ -450,9 +488,7 @@ class MigrationTests(MigrationTestBase):
         self.effects[("source", "enable-domain")] = self._error("source", "enable-domain")
         migration = self._run(self._start())
         self.assertEqual(migration.status, "needs_review")
-        event = AuditEvent.objects.get(
-            action="virtualmin_migration_needs_review", object_id=str(migration.pk)
-        )
+        event = AuditEvent.objects.get(action="virtualmin_migration_needs_review", object_id=str(migration.pk))
         self.assertTrue(event.metadata["compensation_failure"])
 
     def test_resume_busy_and_interrupted_states(self) -> None:
@@ -467,16 +503,21 @@ class MigrationTests(MigrationTestBase):
                 if status == "pending":
                     before = len(self.events)
                     result = resume_migration(job)
-                    self.assertEqual(result.unwrap(), {
-                        "action": "busy", "migration_id": str(migration.pk), "lease_acquired": False
-                    })
+                    self.assertEqual(
+                        result.unwrap(), {"action": "busy", "migration_id": str(migration.pk), "lease_acquired": False}
+                    )
                     self.assertEqual(len(self.events), before)
                 else:
-                    self.assertTrue(migration.transition(
-                        token, "pending", status,
-                        restore_issued=status in {"restoring", "verifying"},
-                        lease_token=None, worker_lease_expires_at=None,
-                    ))
+                    self.assertTrue(
+                        migration.transition(
+                            token,
+                            "pending",
+                            status,
+                            restore_issued=status in {"restoring", "verifying"},
+                            lease_token=None,
+                            worker_lease_expires_at=None,
+                        )
+                    )
                     self.source_gateway.domain_state_of(self.account.domain).enabled = False
                     if status == "verifying":
                         self.target_gateway._domains[self.account.domain] = deepcopy(
@@ -521,9 +562,7 @@ class MigrationTests(MigrationTestBase):
         self.assertEqual(self.account.server_id, self.target.pk)
 
     def test_wire_truth_backup_timeout_and_restore_outcomes(self) -> None:
-        self.gateway_factory.side_effect = lambda config: VirtualminGateway(
-            replace(config, use_credential_vault=False)
-        )
+        self.gateway_factory.side_effect = lambda config: VirtualminGateway(replace(config, use_credential_vault=False))
         for side, program, failure in (
             ("source", "backup-domain", "timeout"),
             ("target", "restore-domain", "timeout"),
@@ -575,28 +614,22 @@ class MigrationTests(MigrationTestBase):
                     migration = self._run(self._start())
                 expected = "rolled_back" if failure == "explicit" else "needs_review"
                 self.assertEqual(migration.status, expected)
-                self.assertEqual(sum(
-                    (call_side, operation) == (side, program)
-                    for call_side, operation, _ in wire_calls
-                ), 1)
+                self.assertEqual(
+                    sum((call_side, operation) == (side, program) for call_side, operation, _ in wire_calls), 1
+                )
                 if failure != "explicit":
-                    index = next(
-                        i for i, item in enumerate(wire_calls) if item[:2] == (side, program)
-                    )
-                    self.assertEqual(wire_calls[index + 1:], [])
+                    index = next(i for i, item in enumerate(wire_calls) if item[:2] == (side, program))
+                    self.assertEqual(wire_calls[index + 1 :], [])
                 transaction.set_rollback(True)
 
     def test_account_sync_lock_active_assignment_and_remote_disabled_guards(self) -> None:
         self.client.force_login(self.staff)
         migration = self._start()
-        self.target_gateway.seed_domain(
-            self.account.domain, username=self.account.virtualmin_username, enabled=True
-        )
+        self.target_gateway.seed_domain(self.account.domain, username=self.account.virtualmin_username, enabled=True)
         with patch.object(
-            VirtualminProvisioningService, "_get_gateway",
-            side_effect=lambda server: (
-                self.source_gateway if server.pk == self.server.pk else self.target_gateway
-            ),
+            VirtualminProvisioningService,
+            "_get_gateway",
+            side_effect=lambda server: self.source_gateway if server.pk == self.server.pk else self.target_gateway,
         ):
             response = self.client.post(reverse("provisioning:virtualmin_accounts_sync"))
             self.assertEqual(response.status_code, 302)
@@ -620,14 +653,6 @@ class MigrationTests(MigrationTestBase):
             self.client.post(reverse("provisioning:virtualmin_accounts_sync"))
             self.account.refresh_from_db()
             self.assertEqual(self.account.server_id, self.target.pk)
-
-    def test_enforcement_skips_locked_account(self) -> None:
-        self._start()
-        service = VirtualminProvisioningService(self.server)
-        with patch.object(service, "_get_gateway") as gateway:
-            result = service.enforce_praho_state(self.account, force=True)
-        self.assertEqual(result.unwrap()["action"], "migration_locked")
-        gateway.assert_not_called()
 
     def test_reconciliation_skips_locked_account(self) -> None:
         self._start()
@@ -685,9 +710,7 @@ class MigrationTests(MigrationTestBase):
         self.assertFalse(migration.routing_note_shown)
         with patch("apps.provisioning.virtualmin_views.VirtualminBackupService") as backups:
             backups.return_value.list_backups.return_value = Ok([])
-            response = self.client.get(reverse(
-                "provisioning:virtualmin_account_detail", args=[self.account.pk]
-            ))
+            response = self.client.get(reverse("provisioning:virtualmin_account_detail", args=[self.account.pk]))
         self.assertContains(response, "routing/DNS")
         migration.refresh_from_db()
         self.assertTrue(migration.routing_note_shown)
@@ -713,15 +736,11 @@ class MigrationAnsibleTimeoutTests(SimpleTestCase):
             run.return_value = MagicMock(returncode=0, stdout="", stderr="")
             for requested, expected in ((None, 30), (3600, 3600)):
                 with self.subTest(timeout=requested):
-                    result = service.run_playbook(
-                        deployment, "virtualmin_migrate_fetch.yml", timeout_seconds=requested
-                    )
+                    result = service.run_playbook(deployment, "virtualmin_migrate_fetch.yml", timeout_seconds=requested)
                     self.assertTrue(result.unwrap().success)
                     self.assertEqual(run.call_args.kwargs["timeout"], expected)
             run.side_effect = subprocess.TimeoutExpired("ansible-playbook", 3600)
-            result = service.run_playbook(
-                deployment, "virtualmin_migrate_push.yml", timeout_seconds=3600
-            )
+            result = service.run_playbook(deployment, "virtualmin_migrate_push.yml", timeout_seconds=3600)
             self.assertFalse(result.unwrap().success)
             self.assertIn("3600", result.unwrap().stderr)
         self.assertEqual(service.timeout, 30)

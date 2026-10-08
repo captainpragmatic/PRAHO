@@ -110,23 +110,35 @@ class TestProductionImages:
         # `docker build` with no --target builds the last stage, so the dev target must never be it.
         stages = re.split(r"^FROM ", (DEPLOY / service / "Dockerfile").read_text(), flags=re.MULTILINE)[1:]
         assert " AS " not in stages[-1].split("\n", 1)[0]
-        assert 'ENTRYPOINT ["/app/entrypoint.sh"]' in stages[-1]
+        assert f'ENTRYPOINT ["/app/deploy/{service}/entrypoint.sh"]' in stages[-1]
         assert "COPY --from=builder /app/.venv /app/.venv" in stages[-1]
 
     @pytest.mark.integration
     @pytest.mark.parametrize("service", ["platform", "portal"])
     def test_the_image_ships_the_shared_ui(self, service: str) -> None:
-        dockerfile = (DEPLOY / service / "Dockerfile").read_text()
-        assert "COPY shared/ui /shared/ui" in dockerfile
+        # The image keeps the repository layout, so REPO_ROOT (BASE_DIR.parent.parent) is /app
+        runtime = re.split(r"^FROM ", (DEPLOY / service / "Dockerfile").read_text(), flags=re.MULTILINE)[-1]
+        assert f"WORKDIR /app/services/{service}" in runtime
+        assert "COPY shared/ /app/shared/" in runtime
         settings = (PROJECT_ROOT / "services" / service / "config/settings/base.py").read_text()
         assert 'REPO_ROOT / "shared" / "ui" / "templates"' in settings
         assert "REPO_ROOT = BASE_DIR.parent.parent" in settings
 
 
 # A native env that satisfies every check except the two production keys.
-NATIVE_BASE_ENV = {"PORTAL_DOMAIN": "p", "PLATFORM_DOMAIN": "q", "DJANGO_SECRET_KEY": "s", "DB_PASSWORD": "d", "HMAC_SECRET": "h"}
+NATIVE_BASE_ENV = {
+    "PORTAL_DOMAIN": "p",
+    "PLATFORM_DOMAIN": "q",
+    "DJANGO_SECRET_KEY": "s",
+    "DB_PASSWORD": "d",
+    "HMAC_SECRET": "h",
+}
 # What production settings require beyond that, and staging settings don't.
-PRODUCTION_KEY_VALUES = {"PLATFORM_TO_PORTAL_WEBHOOK_SECRET": "w", "DJANGO_ENCRYPTION_KEY": "e", "CREDENTIAL_VAULT_MASTER_KEY": "v"}
+PRODUCTION_KEY_VALUES = {
+    "PLATFORM_TO_PORTAL_WEBHOOK_SECRET": "w",
+    "DJANGO_ENCRYPTION_KEY": "e",
+    "CREDENTIAL_VAULT_MASTER_KEY": "v",
+}
 
 
 class TestNativeProductionKeys:
@@ -143,7 +155,9 @@ class TestNativeProductionKeys:
 
     def _passes(self, praho_env: str, env: dict[str, str]) -> bool:
         jinja = Environment(autoescape=False)  # noqa: S701  # Ansible conditions, not HTML.
-        return all(jinja.compile_expression(c)(praho_env=praho_env, preflight_env=env) for c in self._preflight_conditions())
+        return all(
+            jinja.compile_expression(c)(praho_env=praho_env, preflight_env=env) for c in self._preflight_conditions()
+        )
 
     @pytest.mark.integration
     def test_the_production_example_declares_every_production_key(self) -> None:
@@ -224,7 +238,6 @@ class TestFirstBootFitsTheHealthcheck:
         healthcheck = _services(name)["platform"]["healthcheck"]
         assert self._seconds(healthcheck["start_period"]) >= self.MIN_SECONDS, healthcheck
 
-
     @pytest.mark.integration
     def test_image_start_period(self) -> None:
         match = re.search(r"--start-period=(\d+[sm])", (DEPLOY / "platform/Dockerfile").read_text())
@@ -248,11 +261,17 @@ class TestNativeMigrateEnvironment:
         jinja.filters["combine"] = lambda base, extra: {**base, **extra}
         jinja.filters["dict2items"] = lambda d: [{"key": k, "value": v} for k, v in d.items()]
         jinja.filters["items2dict"] = lambda items: {i["key"]: i["value"] for i in items}
-        context: dict[str, Any] = {"project_root": "/opt/praho", "platform_port": 8700, "deployed_env": deployed_env,
-                                   "django_settings_module": f"config.settings.{module}"}
+        context: dict[str, Any] = {
+            "project_root": "/opt/praho",
+            "platform_port": 8700,
+            "deployed_env": deployed_env,
+            "django_settings_module": f"config.settings.{module}",
+        }
         for name, value in task.get("vars", {}).items():
             context[name] = (
-                {k: jinja.from_string(str(v)).render(context) for k, v in value.items()} if isinstance(value, dict) else value
+                {k: jinja.from_string(str(v)).render(context) for k, v in value.items()}
+                if isinstance(value, dict)
+                else value
             )
         (fact,) = task["set_fact"].values()
         if isinstance(fact, dict):  # a literal dict of templated values
@@ -264,8 +283,13 @@ class TestNativeMigrateEnvironment:
         import subprocess  # noqa: PLC0415
         import sys  # noqa: PLC0415
 
-        env = {"PATH": os.environ["PATH"], "HOME": os.environ.get("HOME", "/tmp"), **environment,  # noqa: S108  # fallback only
-               "PYTHONPATH": str(PROJECT_ROOT / "services" / service), "PRAHO_SKIP_DOTENV": "1"}
+        env = {
+            "PATH": os.environ["PATH"],
+            "HOME": os.environ.get("HOME", "/tmp"),  # noqa: S108  # fallback only
+            **environment,
+            "PYTHONPATH": str(PROJECT_ROOT / "services" / service),
+            "PRAHO_SKIP_DOTENV": "1",
+        }
         code = "import importlib, os; importlib.import_module(os.environ['DJANGO_SETTINGS_MODULE']); print('OK')"
         result = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, check=False)  # noqa: S603
         return result.stdout.strip() or result.stderr.strip().splitlines()[-1]
@@ -276,15 +300,21 @@ class TestNativeMigrateEnvironment:
 
         key = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode()
         return {
-            "PORTAL_DOMAIN": "portal.example.invalid", "PLATFORM_DOMAIN": "platform.example.invalid",
-            "DJANGO_SECRET_KEY": secrets.token_urlsafe(60), "DB_PASSWORD": secrets.token_urlsafe(24),
-            "HMAC_SECRET": secrets.token_urlsafe(40), "PLATFORM_TO_PORTAL_WEBHOOK_SECRET": secrets.token_urlsafe(40),
-            "DJANGO_ENCRYPTION_KEY": key, "CREDENTIAL_VAULT_MASTER_KEY": key,
+            "PORTAL_DOMAIN": "portal.example.invalid",
+            "PLATFORM_DOMAIN": "platform.example.invalid",
+            "DJANGO_SECRET_KEY": secrets.token_urlsafe(60),
+            "DB_PASSWORD": secrets.token_urlsafe(24),
+            "HMAC_SECRET": secrets.token_urlsafe(40),
+            "PLATFORM_TO_PORTAL_WEBHOOK_SECRET": secrets.token_urlsafe(40),
+            "DJANGO_ENCRYPTION_KEY": key,
+            "CREDENTIAL_VAULT_MASTER_KEY": key,
         }
 
     @pytest.mark.integration
-    @pytest.mark.parametrize(("service", "task"), [("platform", "Set Django environment variables from .env file"),
-                                                   ("portal", "Set Portal Django environment")])
+    @pytest.mark.parametrize(
+        ("service", "task"),
+        [("platform", "Set Django environment variables from .env file"), ("portal", "Set Portal Django environment")],
+    )
     def test_the_migrate_environment_imports_production_settings(self, service: str, task: str) -> None:
         environment = self._environment_for(task, self._operator_env(), "prod")
         assert self._imports(service, environment) == "OK"
@@ -312,6 +342,10 @@ class TestPortalHostHoldsNoPlatformKey:
     @pytest.mark.integration
     def test_the_portal_allowlist_holds_no_platform_secret(self) -> None:
         lines = (DEPLOY / "docker-compose.portal-only.yml").read_text().splitlines()
-        variables = set(re.findall(r"\$\{([A-Za-z_][A-Za-z0-9_]*)", "\n".join(line for line in lines if not line.lstrip().startswith("#"))))
+        variables = set(
+            re.findall(
+                r"\$\{([A-Za-z_][A-Za-z0-9_]*)", "\n".join(line for line in lines if not line.lstrip().startswith("#"))
+            )
+        )
         denied = set(DENIED_TO_PORTAL) | {"DJANGO_SECRET_KEY", "HMAC_SECRET", "PORTAL_HMAC_CREDENTIALS"}
         assert sorted(variables & denied) == []

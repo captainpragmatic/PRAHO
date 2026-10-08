@@ -9,9 +9,9 @@ Checks:
                                    SettingsService imports (informational, won't fail CI)
   4. Default Drift (medium)      — inline fallback value in SettingsService.get_*() disagrees
                                    with the canonical DEFAULT_SETTINGS value (AST-based)
-  5. Untested Effect (medium)    — a key that was effect-tested no longer is. Checks 1-4 are all
-                                   about wiring; this one asks whether anything asserts the
-                                   setting's CONSEQUENCE. Ratchets against a recorded baseline.
+  5. Untested Effect (medium)    — lost effect credit or a new untested production reader.
+                                   The positive key floor and grandfathered reader locations
+                                   ratchet independently.
   6. Inert Setting (medium)      — a key whose only reader is a function nothing calls. Editable
                                    in the UI, no effect anywhere. Check 1 passes on these because
                                    the key IS referenced — inside the dead getter.
@@ -38,6 +38,7 @@ import re
 import sys
 from dataclasses import asdict, dataclass
 from functools import cache
+from gettext import gettext
 from pathlib import Path
 from typing import Any
 
@@ -60,6 +61,7 @@ PLATFORM_TESTS_DIR = PROJECT_ROOT / "services" / "platform" / "tests"
 DEFAULT_EFFECT_BASELINE = PROJECT_ROOT / "scripts" / "settings_effect_baseline.txt"
 DEFAULT_INERT_BASELINE = PROJECT_ROOT / "scripts" / "settings_inert_baseline.txt"
 DEFAULT_DRIFT_BASELINE = PROJECT_ROOT / "scripts" / "settings_drift_baseline.txt"
+DEFAULT_READER_BASELINE = PROJECT_ROOT / "scripts" / "settings_reader_baseline.txt"
 PLATFORM_DIR = PROJECT_ROOT / "services" / "platform"
 
 # The two SettingsService methods that actually persist a value; helpers forwarding to either
@@ -133,6 +135,47 @@ def load_key_baseline(path: Path) -> set[str]:
     return {
         line.strip() for line in path.read_text().splitlines() if line.strip() and not line.lstrip().startswith("#")
     }
+
+
+def load_reader_baseline(path: Path) -> set[str]:
+    """Grouped locations; each @ header gives the consumer path for subsequent entries."""
+    if not path.exists():
+        return set()
+    consumer = ""
+    locations: set[str] = set()
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("@ "):
+            consumer = line[2:]
+            continue
+        key, scope, ordinal = line.split("|")
+        if not consumer or not ordinal.isdecimal():
+            raise ValueError(f"Invalid reader baseline location: {line}")
+        locations.add(f"{key}|{consumer}|{scope}|{ordinal}")
+    return locations
+
+
+def write_reader_baseline(path: Path, findings: list[Finding], call_sites: list[SettingsCallSite]) -> int:
+    """Replace the grouped baseline with the complete current untested-reader inventory."""
+    untested_sites = {
+        (finding.file, finding.line, finding.name) for finding in findings if finding.check == "untested-new-reader"
+    }
+    grouped: dict[str, list[str]] = {}
+    for location, call in reader_locations(call_sites).items():
+        if (call.file, call.line, call.key) in untested_sites:
+            key, consumer, scope, ordinal = location.split("|")
+            grouped.setdefault(consumer, []).append(f"{key}|{scope}|{ordinal}")
+    lines = [
+        "# Grandfathered untested settings readers.",
+        "# Regenerate intentionally with lint_settings_coverage.py --write-reader-baseline.",
+        "# @ headers name consumer files. Entries are key|qualified callable|ordinal; line shifts are harmless.",
+    ]
+    for consumer, entries in sorted(grouped.items()):
+        lines.extend(["", f"@ {consumer}", *sorted(entries)])
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return sum(len(entries) for entries in grouped.values())
 
 
 def load_allowlist(path: Path) -> tuple[set[str], set[str]]:
@@ -271,9 +314,138 @@ class SettingsCallSite:
     # A named fallback that `module_literal_constants` resolved to a literal in the same file.
     # Distinguishing this from a bare literal keeps the unresolved remainder countable.
     fallback_resolved_from_name: bool = False
+    row_only: bool = False
+    scope: str = "<module>"
 
 
 _UNRESOLVED = object()  # sentinel for values we can't statically resolve
+
+# Row-only resolvers must not acquire catalog-fallback semantics.
+_ROW_READERS = {("SystemSetting", "get_value_by_key"), ("SettingsService", "get_stored_setting")}
+_FORWARDING_DEPTH = 4
+
+
+def _expression_name(node: ast.expr) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return f"{_expression_name(node.value)}.{node.attr}"
+    return ""
+
+
+def _key_values(node: ast.expr, symbols: dict[str, set[str]]) -> set[str]:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return {node.value}
+    if isinstance(node, ast.Subscript):
+        # A dynamic index into a finite map can select only its declared values.
+        return symbols.get(_expression_name(node.value), set())
+    if isinstance(node, ast.Attribute) and _expression_name(node.value) in ("self", "cls"):
+        return symbols.get(node.attr, set())
+    return symbols.get(_expression_name(node), set())
+
+
+def _scope_symbols(nodes: list[ast.stmt], inherited: dict[str, set[str]]) -> dict[str, set[str]]:
+    symbols = dict(inherited)
+    for _ in range(_FORWARDING_DEPTH):
+        for node in nodes:
+            if isinstance(node, ast.ClassDef):
+                for name, values in _scope_symbols(node.body, symbols).items():
+                    if name not in symbols:
+                        symbols[f"{node.name}.{name}"] = values
+                continue
+            if isinstance(node, ast.Assign):
+                targets, value = node.targets, node.value
+            elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                targets, value = [node.target], node.value
+            else:
+                continue
+            if isinstance(value, ast.Dict):
+                parts = [_key_values(v, symbols) for v in value.values]
+                values = set().union(*parts) if parts and all(parts) else set()
+            else:
+                values = _key_values(value, symbols)
+            for target in targets:
+                if isinstance(target, ast.Name) and values:
+                    symbols[target.id] = values
+    return symbols
+
+
+def _imported_key_symbols(tree: ast.Module, depth: int = 0) -> dict[str, set[str]]:
+    symbols: dict[str, set[str]] = {}
+    if depth >= _FORWARDING_DEPTH:
+        return symbols
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom) or not node.module or not node.module.startswith("apps."):
+            continue
+        exported = _exported_key_symbols(node.module, depth + 1)
+        for alias in node.names:
+            local = alias.asname or alias.name
+            for name, values in exported.items():
+                if name == alias.name or name.startswith(f"{alias.name}."):
+                    symbols[local + name[len(alias.name) :]] = values
+    return symbols
+
+
+@cache
+def _exported_key_symbols(module: str, depth: int) -> dict[str, set[str]]:
+    path = PLATFORM_DIR.joinpath(*module.split(".")).with_suffix(".py")
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, SyntaxError):
+        return {}
+    return _scope_symbols(tree.body, _imported_key_symbols(tree, depth))
+
+
+def _row_reader(node: ast.expr) -> bool:
+    return (
+        isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and (node.value.id, node.attr) in _ROW_READERS
+    )
+
+
+def _key_argument(call: ast.Call, position: int = 0, parameter: str = "key") -> ast.expr | None:
+    if len(call.args) > position:
+        return call.args[position]
+    return next((kw.value for kw in call.keywords if kw.arg == parameter), None)
+
+
+def _row_forwarders(nodes: list[ast.stmt]) -> dict[str, tuple[int, str]]:
+    """Only explicit parameter forwarding, at most four same-scope hops; never arbitrary getters."""
+    forwarders: dict[str, tuple[int, str]] = {}
+    for _ in range(_FORWARDING_DEPTH):
+        previous = dict(forwarders)
+        for node in nodes:
+            if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            params = [arg.arg for arg in (*node.args.posonlyargs, *node.args.args)]
+            if params and params[0] in ("self", "cls"):
+                params = params[1:]
+            for call in ast.walk(node):
+                if not isinstance(call, ast.Call):
+                    continue
+                target = previous.get(_called_name(call.func))
+                if _row_reader(call.func):
+                    target = (0, "key")
+                elif isinstance(call.func, ast.Attribute) and _expression_name(call.func.value) not in ("self", "cls"):
+                    target = None
+                if target is None:
+                    continue
+                argument = _key_argument(call, *target)
+                if isinstance(argument, ast.Name) and argument.id in params:
+                    forwarders[node.name] = (params.index(argument.id), argument.id)
+    return forwarders
+
+
+def reader_locations(call_sites: list[SettingsCallSite]) -> dict[str, SettingsCallSite]:
+    """Stable path/callable/ordinal identities: line shifts do not excuse a new read."""
+    counts: dict[str, int] = {}
+    locations: dict[str, SettingsCallSite] = {}
+    for call in call_sites:
+        prefix = f"{call.key}|{call.file}|{call.scope}"
+        counts[prefix] = counts.get(prefix, 0) + 1
+        locations[f"{prefix}|{counts[prefix]}"] = call
+    return locations
 
 
 class SettingsCallVisitor(ast.NodeVisitor):
@@ -283,33 +455,56 @@ class SettingsCallVisitor(ast.NodeVisitor):
         self.filepath = filepath
         self.calls: list[SettingsCallSite] = []
         self.module_constants = module_constants or {}
+        self.symbols: dict[str, set[str]] = {}
+        self.forwarders: dict[str, tuple[int, str]] = {}
+        self.scope: list[str] = []
+
+    def visit_Module(self, node: ast.Module) -> None:
+        self.symbols = _scope_symbols(node.body, _imported_key_symbols(node))
+        self.forwarders = _row_forwarders(node.body)
+        self.generic_visit(node)
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        symbols, forwarders = self.symbols, self.forwarders
+        self.symbols = _scope_symbols(node.body, symbols)
+        self.forwarders = _row_forwarders(node.body)
+        self.scope.append(node.name)
+        self.generic_visit(node)
+        self.scope.pop()
+        self.symbols, self.forwarders = symbols, forwarders
+
+    def visit_FunctionDef(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        symbols = self.symbols
+        self.symbols = _scope_symbols(node.body, symbols)
+        self.scope.append(node.name)
+        self.generic_visit(node)
+        self.scope.pop()
+        self.symbols = symbols
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self.visit_FunctionDef(node)
 
     def visit_Call(self, node: ast.Call) -> None:
         self._check_settings_call(node)
         self.generic_visit(node)
 
     def _check_settings_call(self, node: ast.Call) -> None:
-        # Match: SettingsService.get_*_setting("key", default)
         func = node.func
-        if not isinstance(func, ast.Attribute):
-            return
-        if func.attr not in SETTINGS_GETTER_METHODS:
-            return
-        # Check it's on SettingsService (could be cls or direct)
-        if isinstance(func.value, ast.Name) and func.value.id not in ("SettingsService", "cls"):
-            return
+        row_only = _row_reader(func)
+        forwarded = self.forwarders.get(_called_name(func))
+        if isinstance(func, ast.Attribute) and _expression_name(func.value) not in ("self", "cls"):
+            forwarded = None
+        if not row_only and forwarded is None:
+            if not isinstance(func, ast.Attribute) or func.attr not in SETTINGS_GETTER_METHODS:
+                return
+            if isinstance(func.value, ast.Name) and func.value.id not in ("SettingsService", "cls"):
+                return
 
-        # Extract the key argument (first positional or 'key' keyword)
-        key_value: str | None = None
-        if node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str):
-            key_value = node.args[0].value
-        else:
-            for kw in node.keywords:
-                if kw.arg == "key" and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
-                    key_value = kw.value.value
-                    break
-        if not key_value:
+        argument = _key_argument(node, *(forwarded or (0, "key")))
+        keys = _key_values(argument, self.symbols) if argument is not None else set()
+        if not keys:
             return
+        row_only = row_only or forwarded is not None
 
         # Extract the fallback/default argument (second positional or 'default' keyword)
         fallback_node: ast.expr | None = None
@@ -338,17 +533,20 @@ class SettingsCallVisitor(ast.NodeVisitor):
                 if resolved is not None:
                     fallback_value = resolved
 
-        self.calls.append(
-            SettingsCallSite(
-                key=key_value,
-                fallback_value=fallback_value,
-                fallback_is_name=fallback_is_name,
-                fallback_name=fallback_name,
-                line=node.lineno,
-                file=str(self.filepath.relative_to(PROJECT_ROOT)),
-                fallback_resolved_from_name=resolved_from_name,
+        for key_value in sorted(keys):
+            self.calls.append(
+                SettingsCallSite(
+                    key=key_value,
+                    fallback_value=fallback_value,
+                    fallback_is_name=fallback_is_name,
+                    fallback_name=fallback_name,
+                    line=node.lineno,
+                    file=_display_path(self.filepath),
+                    fallback_resolved_from_name=resolved_from_name,
+                    row_only=row_only,
+                    scope=".".join(self.scope) or "<module>",
+                )
             )
-        )
 
 
 def collect_settings_calls(app_files: list[Path]) -> list[SettingsCallSite]:
@@ -359,7 +557,7 @@ def collect_settings_calls(app_files: list[Path]) -> list[SettingsCallSite]:
             source = filepath.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
-        if "SettingsService" not in source:
+        if "SettingsService" not in source and "SystemSetting" not in source:
             continue
         try:
             tree = ast.parse(source, filename=str(filepath))
@@ -679,6 +877,8 @@ def check_default_drift(
     seen: set[str] = set()
 
     for call in call_sites:
+        if call.row_only:
+            continue
         # A named fallback resolved to a module-level literal is as comparable as an inline one.
         # Only a genuinely unresolvable fallback is skipped, and `check_unresolved_fallbacks`
         # counts those so the blind spot cannot go quiet again.
@@ -896,8 +1096,217 @@ def _module_name(relative_path: str) -> str:
     return relative_path.replace("services/platform/", "").removesuffix(".py").replace("/", ".")
 
 
+def _scope_nodes(node: ast.AST) -> list[ast.AST]:
+    """Walk one lexical scope, leaving nested declarations for separate resolution."""
+    nodes = [node]
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Lambda):
+            nodes.append(child)
+        else:
+            nodes.extend(_scope_nodes(child))
+    return nodes
+
+
+def _import_bindings(node: ast.AST) -> dict[str, str]:
+    """Resolve imports in this lexical scope only."""
+    bindings: dict[str, str] = {}
+    for child in _scope_nodes(node):
+        if isinstance(child, ast.ImportFrom) and child.module and not child.level:
+            for alias in child.names:
+                if alias.name != "*":
+                    bindings[alias.asname or alias.name] = f"{child.module}.{alias.name}"
+        elif isinstance(child, ast.Import):
+            for alias in child.names:
+                bindings[alias.asname or alias.name.split(".")[0]] = (
+                    alias.name if alias.asname else alias.name.split(".")[0]
+                )
+    return bindings
+
+
+def _bound_callable(node: ast.expr, bindings: dict[str, str]) -> str:
+    if isinstance(node, ast.Call):
+        return _bound_callable(node.func, bindings)
+    if target := bindings.get(_expression_name(node)):
+        return target
+    if isinstance(node, ast.Attribute):
+        parent = _bound_callable(node.value, bindings)
+        return f"{parent}.{node.attr}" if parent else ""
+    return ""
+
+
+def _local_callable_bindings(
+    node: ast.AST, inherited: dict[str, str], instances: set[str] | None = None
+) -> dict[str, str]:
+    """Resolve constructed instances without merging sibling methods' local variables."""
+    local = {**inherited, **_import_bindings(node)}
+    for child in _scope_nodes(node):
+        if isinstance(child, ast.Assign | ast.AnnAssign) and isinstance(child.value, ast.Call):
+            target = _bound_callable(child.value.func, local)
+            if target:
+                names = child.targets if isinstance(child, ast.Assign) else [child.target]
+                for name in names:
+                    if isinstance(name, ast.Name) or (
+                        isinstance(name, ast.Attribute) and _expression_name(name.value) in ("self", "cls")
+                    ):
+                        symbol = _expression_name(name)
+                        local[symbol] = target
+                        if instances is not None:
+                            instances.add(symbol)
+    return local
+
+
+def _exercised_callables(
+    node: ast.AST,
+    bindings: dict[str, str],
+    graph: dict[str, set[str]] | None = None,
+    instance_names: set[str] | None = None,
+) -> set[str]:
+    """Combine scope-local calls and resolved descriptor accesses, sharing only class instances."""
+    constructed = set(instance_names or ())
+    local = _local_callable_bindings(node, bindings, constructed)
+    if isinstance(node, ast.ClassDef):
+        # setUp, setUpTestData and helpers can initialise an instance used by another method. A test
+        # method's own assignments stay in that method, so they never replace the fixture's instance.
+        instances: dict[str, str] = {}
+        for method in node.body:
+            if isinstance(method, ast.FunctionDef | ast.AsyncFunctionDef) and not method.name.startswith("test"):
+                for name, target in _local_callable_bindings(method, local).items():
+                    if name.startswith(("self.", "cls.")):
+                        attribute = name.split(".", 1)[1]
+                        instances[f"self.{attribute}"] = target
+                        instances[f"cls.{attribute}"] = target
+        local.update(instances)
+        constructed.update(instances)
+    exercised: set[str] = set()
+    for child in _scope_nodes(node):
+        if child is not node and isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            inherited = local
+            if isinstance(child, ast.ClassDef):
+                inherited = {name: target for name, target in local.items() if not name.startswith(("self.", "cls."))}
+            inherited_instances = constructed
+            if isinstance(child, ast.ClassDef):
+                inherited_instances = {name for name in constructed if not name.startswith(("self.", "cls."))}
+            exercised |= _exercised_callables(child, inherited, graph, inherited_instances)
+            if not isinstance(child, ast.ClassDef):
+                # `@factory()` applies the factory's result to the decorated function.
+                exercised |= {
+                    f"{target}()"
+                    for decorator in child.decorator_list
+                    if isinstance(decorator, ast.Call) and (target := _bound_callable(decorator.func, local))
+                }
+        elif isinstance(child, ast.Call) and (target := _bound_callable(child.func, local)):
+            exercised.add(target)
+            if isinstance(child.func, ast.Call):
+                # `factory()(func)` runs what the factory returned, not only the factory.
+                exercised.add(f"{target}()")
+        elif isinstance(child, ast.Attribute) and isinstance(child.ctx, ast.Load) and graph is not None:
+            # Only marked descriptors execute a getter; ordinary attribute reads earn no credit.
+            receiver = _expression_name(child.value)
+            if receiver in constructed or isinstance(child.value, ast.Call) or receiver == "self":
+                target = _bound_callable(child, local)
+                exercised.update(graph.get(f"@property:{target}", set()))
+    return exercised
+
+
+def _callable_edges(tree: ast.Module, module: str) -> dict[str, set[str]]:
+    """Callable edges share the module graph's bounded reachability, without sibling credit.
+
+    Decorator factories need one more node. Calling `factory()` runs only the factory's own body; the
+    closure it returns runs when that result is applied. So the closure's edges - transitively through
+    returned nested functions and returned factory calls - hang off a separate `factory()` node, which
+    is reached only by application: a production function decorated with `@factory()` gets an edge to
+    it, and a test earns it through `@factory()` or `factory()(func)`. That is how
+    `SecureUserRegistrationService.register_new_customer_owner` reaches `_execute_security_checks`
+    through `secure_user_registration()`, `secure_service_method()`, `decorator` and `wrapper`.
+    """
+    edges: dict[str, set[str]] = {}
+    returned: dict[str, set[str]] = {}
+    returned_calls: dict[str, set[str]] = {}
+    decorated: dict[str, set[str]] = {}
+
+    def visit(nodes: list[ast.stmt], scope: str, inherited: dict[str, str]) -> None:
+        bindings = {**inherited, **_import_bindings(ast.Module(body=nodes, type_ignores=[]))}
+        for node in nodes:
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+                bindings[node.name] = f"{scope}.{node.name}"
+        # Descriptor markers point to getter callables, whose own edges remain independent.
+        for node in nodes:
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and any(
+                (_bound_callable(decorator, bindings) or _expression_name(decorator))
+                in {
+                    "property",
+                    "builtins.property",
+                    "functools.cached_property",
+                    "django.utils.functional.cached_property",
+                }
+                for decorator in node.decorator_list
+            ):
+                getter = f"{scope}.{node.name}"
+                edges[f"@property:{getter}"] = {getter}
+        for node in nodes:
+            if isinstance(node, ast.ClassDef):
+                visit(node.body, f"{scope}.{node.name}", bindings)
+            elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                local = {**bindings, **_import_bindings(node)}
+                if scope != module:
+                    local.update({"self": scope, "cls": scope})
+                # Nested declarations are separate callables; defining one does not exercise it.
+                body = ast.Module(
+                    body=[
+                        child
+                        for child in node.body
+                        if not isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+                    ],
+                    type_ignores=[],
+                )
+                target = f"{scope}.{node.name}"
+                edges[target] = _exercised_callables(body, local, edges)
+                nested = {
+                    child.name for child in node.body if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef)
+                }
+                returns = [child.value for child in ast.walk(body) if isinstance(child, ast.Return) and child.value]
+                returned[target] = {
+                    f"{target}.{value.id}" for value in returns if isinstance(value, ast.Name) and value.id in nested
+                }
+                returned_calls[target] = {
+                    factory
+                    for value in returns
+                    if isinstance(value, ast.Call) and (factory := _bound_callable(value.func, local))
+                }
+                decorated[target] = {
+                    factory
+                    for decorator in node.decorator_list
+                    if isinstance(decorator, ast.Call) and (factory := _bound_callable(decorator.func, bindings))
+                }
+                visit(node.body, target, local)
+                if node.name == "__init__":
+                    edges.setdefault(scope, set()).add(target)
+
+    visit(tree.body, module, _import_bindings(tree))
+    applied: dict[str, set[str]] = {target: set() for target in returned}
+    changed = True
+    while changed:
+        changed = False
+        for target, current in applied.items():
+            closure = set().union(
+                *(edges.get(nested, set()) | applied.get(nested, set()) for nested in returned[target]),
+                *(applied.get(factory, set()) for factory in returned_calls[target]),
+            )
+            if closure - current:
+                current |= closure
+                changed = True
+    for target, closure in applied.items():
+        # A factory returned from another module is resolved through its own `()` node.
+        foreign = {f"{factory}()" for factory in returned_calls[target] if factory not in applied}
+        if closure | foreign:
+            edges[f"{target}()"] = closure | foreign
+    for target, factories in decorated.items():
+        edges[target] |= {f"{factory}()" for factory in factories}
+    return edges
+
+
 def production_import_graph(app_files: list[Path]) -> dict[str, set[str]]:
-    """Module -> the `apps.*` modules it imports from, function-level imports included.
+    """Module and callable edges, with function-level imports included.
 
     ADR-0007 pushes cross-app imports inside functions, so a module-level-only scan would miss most
     of this codebase's real edges.
@@ -907,6 +1316,11 @@ def production_import_graph(app_files: list[Path]) -> dict[str, set[str]]:
         text = path.read_text(errors="ignore")
         module = _module_name(str(path.relative_to(PROJECT_ROOT)))
         graph[module] = set(re.findall(r"from (apps\.[\w.]+) import", text))
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            continue
+        graph.update(_callable_edges(tree, module))
     return graph
 
 
@@ -982,8 +1396,10 @@ def _written_under(
             return expr.value
         if isinstance(expr, ast.Name):
             return constants.get(expr.id)
-        if isinstance(expr, ast.Attribute) and isinstance(expr.value, ast.Name) and expr.value.id in ("self", "cls"):
-            return constants.get(expr.attr)
+        if isinstance(expr, ast.Attribute):
+            return constants.get(_expression_name(expr)) or (
+                constants.get(expr.attr) if _expression_name(expr.value) in ("self", "cls") else None
+            )
         return None
 
     written: set[str] = set()
@@ -991,7 +1407,12 @@ def _written_under(
         if not isinstance(call, ast.Call):
             continue
         name = _called_name(call.func)
-        position = 0 if name in _DIRECT_WRITERS else helpers.get(name)
+        persisted_row = _expression_name(call.func) in {
+            "SystemSetting.objects.create",
+            "SystemSetting.objects.get_or_create",
+            "SystemSetting.objects.update_or_create",
+        }
+        position = 0 if name in _DIRECT_WRITERS or persisted_row else helpers.get(name)
         if position is None:
             continue
         if len(call.args) > position and (key := resolve(call.args[position])):
@@ -1010,12 +1431,13 @@ def _written_under(
     return written
 
 
-def effect_tested_keys(
+def effect_tested_keys(  # noqa: PLR0913  # Criterion inputs and optional per-consumer credit output
     catalog_keys: set[str],
     test_files: list[Path],
     readers: dict[str, set[str]],
     graph: dict[str, set[str]],
     template_keys: set[str],
+    reader_credits: dict[str, set[str]] | None = None,
 ) -> set[str]:
     """Keys a test writes and then observes through the code that actually reads them.
 
@@ -1043,13 +1465,19 @@ def effect_tested_keys(
         except SyntaxError:
             continue
         constants = _module_string_constants(source)
+        key_symbols = _imported_key_symbols(tree)
+        constants.update({name: next(iter(values)) for name, values in key_symbols.items() if len(values) == 1})
         helpers = _write_helper_positions(source)
         collections = _module_key_collections(tree, catalog_keys)
         imported: dict[str, set[str]] = {}
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and node.module:
                 imported.setdefault(node.module, set()).update(a.asname or a.name for a in node.names)
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    imported.setdefault(alias.name, set()).add(alias.asname or alias.name.split(".")[0])
         lines = source.splitlines()
+        bindings = _import_bindings(tree)
 
         for cls in (n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)):
             referenced = {n.id for n in ast.walk(cls) if isinstance(n, ast.Name)} | {
@@ -1060,12 +1488,29 @@ def effect_tested_keys(
                 continue
             body = "\n".join(lines[cls.lineno - 1 : (cls.end_lineno or cls.lineno)])
             makes_request = bool(re.search(r"client\.(?:get|post|put|patch|delete)\(", body))
-            used_modules = {module for module, names in imported.items() if names & referenced}
+            used_modules = {
+                module
+                for module, names in imported.items()
+                if {
+                    name
+                    for name in names
+                    if not any(
+                        (symbol == name or symbol.startswith(f"{name}.")) and values & catalog_keys
+                        for symbol, values in key_symbols.items()
+                    )
+                }
+                & referenced
+            }
             for key in written:
                 key_readers = readers.get(key, set())
-                observed_through_reader = bool(key_readers) and any(
-                    reaches_reader(module, key_readers, graph) for module in used_modules
-                )
+                observed_readers = {
+                    reader
+                    for reader in key_readers
+                    if any(reaches_reader(module, {reader}, graph) for module in used_modules)
+                }
+                observed_through_reader = bool(observed_readers)
+                if reader_credits is not None:
+                    reader_credits.setdefault(key, set()).update(_exercised_callables(cls, bindings, graph))
                 # A key with no Python reader at all - the `company.*` identity values - can only be
                 # observed on a rendered page.
                 rendered_on_a_page = key in template_keys and makes_request
@@ -1081,6 +1526,8 @@ def check_untested_effects(  # noqa: PLR0913  # One argument per input the crite
     readers: dict[str, set[str]],
     graph: dict[str, set[str]],
     template_keys: set[str],
+    reader_baseline: set[str] | None = None,
+    call_sites: list[SettingsCallSite] | None = None,
 ) -> list[Finding]:
     """Check 5 — a setting whose EFFECT nothing asserts.
 
@@ -1101,7 +1548,8 @@ def check_untested_effects(  # noqa: PLR0913  # One argument per input the crite
     Reading the test is still the only thing that establishes the assertion discriminates, which is
     why the tests behind entries added here were mutation-checked by hand.
     """
-    tested = effect_tested_keys(catalog_keys, test_files, readers, graph, template_keys)
+    reader_credits: dict[str, set[str]] = {}
+    tested = effect_tested_keys(catalog_keys, test_files, readers, graph, template_keys, reader_credits)
     findings: list[Finding] = [
         Finding(
             file=str(DEFAULT_EFFECT_BASELINE.relative_to(PROJECT_ROOT)),
@@ -1116,6 +1564,27 @@ def check_untested_effects(  # noqa: PLR0913  # One argument per input the crite
         )
         for key in sorted(baseline - tested)
     ]
+
+    known_readers = reader_baseline or set()
+    for location, call in reader_locations(call_sites or []).items():
+        if (
+            call.key in catalog_keys
+            and not any(
+                reaches_reader(target, {f"{_module_name(call.file)}.{call.scope}"}, graph)
+                for target in reader_credits.get(call.key, set())
+            )
+            and location not in known_readers
+        ):
+            findings.append(
+                Finding(
+                    file=call.file,
+                    line=call.line,
+                    severity="medium",
+                    check="untested-new-reader",
+                    name=call.key,
+                    message=f"New reader {location} has no qualifying effect test. Test its consumer.",
+                )
+            )
 
     untested = sorted(catalog_keys - tested)
     if untested:
@@ -1413,6 +1882,17 @@ def main() -> int:
         default=DEFAULT_INERT_BASELINE,
         help="Keys known to be read only from an uncalled getter (default: scripts/settings_inert_baseline.txt)",
     )
+    parser.add_argument(
+        "--reader-baseline",
+        type=Path,
+        default=DEFAULT_READER_BASELINE,
+        help="Existing untested reader locations (default: scripts/settings_reader_baseline.txt)",
+    )
+    parser.add_argument(
+        "--write-reader-baseline",
+        action="store_true",
+        help=gettext("Regenerate the reader baseline from all current untested readers"),
+    )
     args = parser.parse_args()
 
     # Load allowlist (constants for Check 2/3, orphan keys for Check 1)
@@ -1450,6 +1930,8 @@ def main() -> int:
             production_readers(app_files),
             production_import_graph(app_files),
             template_consumed_keys(template_files),
+            set() if args.write_reader_baseline else load_reader_baseline(args.reader_baseline),
+            call_sites,
         )
     )
     # Check 6 sweeps the whole platform tree, not just apps/: a getter may be called from a
@@ -1461,6 +1943,11 @@ def main() -> int:
             load_key_baseline(args.inert_baseline),
         )
     )
+
+    if args.write_reader_baseline:
+        count = write_reader_baseline(args.reader_baseline, all_findings, call_sites)
+        print(gettext("✅ Reader baseline written: %(count)s entries") % {"count": count})
+        return 0
 
     # Sort by severity, then file, then line
     all_findings.sort(key=lambda f: (SEVERITY_ORDER.get(f.severity, 99), f.file, f.line))

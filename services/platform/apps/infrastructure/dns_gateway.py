@@ -51,7 +51,7 @@ CLOUDFLARE_POLICY = OutboundPolicy(
     max_retries=0,
 )
 
-_DEFAULT_TTL = 60
+DNS_RECORD_TTL_SECONDS = 60
 _MAX_RESPONSE_SIZE_BYTES = 256 * 1024
 _HTTP_NOT_FOUND = 404
 
@@ -69,7 +69,7 @@ class DnsRecordSpec:
     name: str
     content: str
     owner_tag: str
-    ttl: int = _DEFAULT_TTL
+    ttl: int = DNS_RECORD_TTL_SECONDS
     proxied: bool = False
 
 

@@ -10,7 +10,7 @@
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between">
       <div>
         <h1 class="text-3xl font-bold text-white mb-2">
-          {% icon "server" size="lg" css_class="text-blue-400" %} {% trans "Available Plans" %}
+          {% icon "server" size="lg" css_class="text-blue-400" %} {% trans "Available Plans" %} {# tmpl-allow TMPL005: needs badge unframed variant #}
         </h1>
         <p class="text-slate-400">{% trans "Upgrade or downgrade your hosting plan" %}</p>
       </div>
@@ -35,14 +35,8 @@
 
   <!-- Error Message -->
   {% if error %}
-  <div class="mb-6 bg-red-900/20 border border-red-700 rounded-lg p-4">
-    <div class="flex items-center space-x-3">
-      {% icon "exclamation-circle" size="xl" css_class="text-red-400" %}
-      <p class="text-red-200 text-sm">
-        {% trans "Unable to load hosting plans. Please try again later." %}
-      </p>
-    </div>
-  </div>
+  {% trans "Unable to load hosting plans. Please try again later." as plans_error %}
+  {% alert plans_error variant="danger" css_class="mb-6" %}
   {% endif %}
 
   <!-- Plans Grid -->
@@ -66,42 +60,42 @@
         <div class="space-y-2 text-sm text-slate-300">
           {% if plan.disk_space_gb %}
           <div class="flex items-center space-x-2">
-            {% icon "check" size="sm" css_class="text-green-400" %}
+            {% icon "check" size="sm" css_class="text-green-400" %} {# tmpl-allow TMPL005: needs badge unframed variant #}
             <span>{{ plan.disk_space_gb }} GB {% trans "disk space" %}</span>
           </div>
           {% endif %}
 
           {% if plan.bandwidth_gb %}
           <div class="flex items-center space-x-2">
-            {% icon "check" size="sm" css_class="text-green-400" %}
+            {% icon "check" size="sm" css_class="text-green-400" %} {# tmpl-allow TMPL005: needs badge unframed variant #}
             <span>{{ plan.bandwidth_gb }} GB {% trans "bandwidth" %}</span>
           </div>
           {% endif %}
 
           {% if plan.email_accounts %}
           <div class="flex items-center space-x-2">
-            {% icon "check" size="sm" css_class="text-green-400" %}
+            {% icon "check" size="sm" css_class="text-green-400" %} {# tmpl-allow TMPL005: needs badge unframed variant #}
             <span>{{ plan.email_accounts }} {% trans "email accounts" %}</span>
           </div>
           {% endif %}
 
           {% if plan.databases %}
           <div class="flex items-center space-x-2">
-            {% icon "check" size="sm" css_class="text-green-400" %}
+            {% icon "check" size="sm" css_class="text-green-400" %} {# tmpl-allow TMPL005: needs badge unframed variant #}
             <span>{{ plan.databases }} {% trans "databases" %}</span>
           </div>
           {% endif %}
 
           {% if plan.cpu_cores %}
           <div class="flex items-center space-x-2">
-            {% icon "check" size="sm" css_class="text-green-400" %}
+            {% icon "check" size="sm" css_class="text-green-400" %} {# tmpl-allow TMPL005: needs badge unframed variant #}
             <span>{{ plan.cpu_cores }} {% trans "CPU cores" %}</span>
           </div>
           {% endif %}
 
           {% if plan.ram_gb %}
           <div class="flex items-center space-x-2">
-            {% icon "check" size="sm" css_class="text-green-400" %}
+            {% icon "check" size="sm" css_class="text-green-400" %} {# tmpl-allow TMPL005: needs badge unframed variant #}
             <span>{{ plan.ram_gb }} GB {% trans "RAM" %}</span>
           </div>
           {% endif %}
@@ -128,7 +122,7 @@
               {{ plan.price_quarterly|romanian_currency:cur }}
             </p>
             {% if plan.quarterly_savings %}
-            <p class="text-xs text-green-400">{% trans "Save" %} {{ plan.quarterly_savings|romanian_currency:cur }}</p>
+            <p class="text-xs text-green-400">{% trans "Save" %} {{ plan.quarterly_savings|romanian_currency:cur }}</p> {# tmpl-allow TMPL005: needs stat_tile value_class #}
             {% endif %}
           </div>
           {% endif %}
@@ -140,7 +134,7 @@
               {{ plan.price_annual|romanian_currency:cur }}
             </p>
             {% if plan.annual_savings %}
-            <p class="text-xs text-green-400">{% trans "Save" %} {{ plan.annual_savings|romanian_currency:cur }}</p>
+            <p class="text-xs text-green-400">{% trans "Save" %} {{ plan.annual_savings|romanian_currency:cur }}</p> {# tmpl-allow TMPL005: needs stat_tile value_class #}
             {% endif %}
           </div>
           {% endif %}
@@ -156,9 +150,8 @@
 
       <!-- Action Button -->
       <div class="px-6 py-4 border-t border-slate-700">
-        <button class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 rounded-lg transition-colors">
-          {% trans "Upgrade Plan" %}
-        </button>
+        {% trans "Upgrade Plan" as submit_label %}
+        {% button submit_label type="button" variant="primary" class_="w-full" %}
       </div>
     </div>
     {% endfor %}
@@ -175,7 +168,7 @@
         {% trans "No hosting plans are currently available." %}
       {% endif %}
     </p>
-    <a href="{% url 'services:list' %}" class="inline-flex items-center space-x-2 text-blue-400 hover:text-blue-300 transition-colors">
+    <a href="{% url 'services:list' %}" class="inline-flex items-center space-x-2 text-blue-400 hover:text-blue-300 transition-colors"> {# tmpl-allow TMPL005: needs button text variant #}
       {% icon "arrow-left" size="sm" %}
       <span>{% trans "Back to Services" %}</span>
     </a>

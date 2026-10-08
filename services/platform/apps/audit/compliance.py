@@ -805,10 +805,12 @@ class ComplianceReportService:
         # Calculate score (100 - penalties, minimum 0)
         report.compliance_score = max(0, 100 - total_penalty)
 
-        # Determine overall status
-        if report.compliance_score >= COMPLIANT_SCORE_THRESHOLD:
+        # Resolve both thresholds once for this classification.
+        compliant_threshold = get_compliant_score_threshold()
+        partial_threshold = get_partial_score_threshold()
+        if report.compliance_score >= compliant_threshold:
             report.overall_status = "compliant"
-        elif report.compliance_score >= PARTIAL_SCORE_THRESHOLD:
+        elif report.compliance_score >= partial_threshold:
             report.overall_status = "partial"
         else:
             report.overall_status = "non_compliant"

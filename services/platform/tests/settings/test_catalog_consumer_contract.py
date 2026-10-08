@@ -58,6 +58,9 @@ class ConsumerContractTests(SimpleTestCase):
         for path in _production_python_files():
             cls.literal_corpus |= extract_string_literals(path)
             cls.consumed_keys |= extract_settings_call_keys(path)
+        # Shared resolvers live in settings/services.py. Credit actual read calls,
+        # never the catalog/default literals in the settings machinery.
+        cls.consumed_keys |= extract_settings_call_keys(APPS_ROOT / "settings" / "services.py")
         template_parts: list[str] = []
         for root in TEMPLATE_ROOTS:
             for html in sorted(root.rglob("*.html")):
@@ -73,6 +76,7 @@ class ConsumerContractTests(SimpleTestCase):
             for key in CATALOG_BY_KEY
             if key not in CONSUMER_EXEMPTIONS
             and key not in self.literal_corpus
+            and key not in self.consumed_keys
             and key not in self.template_corpus
         ]
         self.assertEqual(
@@ -93,6 +97,16 @@ class ConsumerContractTests(SimpleTestCase):
             f"SettingsService reads for keys missing from the catalog: {undeclared}. "
             "Declare them in apps/settings/catalog.py or add a justified CATALOG_EXEMPTIONS entry.",
         )
+
+    def test_row_only_reader_is_extracted_from_the_shared_sender_resolver(self) -> None:
+        keys = extract_settings_call_keys(APPS_ROOT / "settings" / "services.py")
+        self.assertIn("company.email_noreply", keys)
+        self.assertEqual(extract_settings_call_keys(APPS_ROOT / "settings" / "catalog.py"), set())
+
+    def test_shared_sender_resolver_counts_as_a_consumer_without_scanning_catalog_literals(self) -> None:
+        self.assertIn("company.email_noreply", self.consumed_keys)
+        self.assertNotIn(APPS_ROOT / "settings" / "catalog.py", _production_python_files())
+        self.assertNotIn("company.email_noreply", CONSUMER_EXEMPTIONS)
 
     def test_exemption_lists_stay_honest(self) -> None:
         """Exempted keys must still exist in the catalog (stale exemptions rot the guardrail)."""

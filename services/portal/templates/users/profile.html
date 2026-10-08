@@ -39,7 +39,7 @@
             <label for="id_email" class="block text-sm font-medium text-slate-300 mb-1">
               {% trans 'Email Address' %}
             </label>
-            <input type="email" name="email" id="id_email" value="{{ profile.email|default:customer_email }}" disabled class="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded-md text-slate-300 cursor-not-allowed">
+            {% input_field "email" input_type="email" html_id="id_email" aria_label=_("Email Address") value=profile.email|default:customer_email disabled=True %}
             <p class="mt-1 text-xs text-slate-400">
               {% trans 'Contact support to change your email address' %}
             </p>
@@ -67,35 +67,11 @@
           </h4>
 
           <div class="space-y-4">
-            <label class="flex items-center space-x-3 cursor-pointer">
-              <input type="checkbox" name="email_notifications"
-                     {% if form.email_notifications.value %}checked{% endif %}
-                     class="w-5 h-5 rounded border-slate-600 bg-slate-700 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-900">
-              <div>
-                <div class="text-sm font-medium text-white">{% trans "Email Notifications" %}</div>
-                <div class="text-xs text-slate-400">{% trans "Receive important account and billing notifications via email" %}</div>
-              </div>
-            </label>
+            {% checkbox_field "email_notifications" label=_("Email Notifications") help_text=_("Receive important account and billing notifications via email") checked=form.email_notifications.value %}
 
-            <label class="flex items-center space-x-3 cursor-pointer">
-              <input type="checkbox" name="sms_notifications"
-                     {% if form.sms_notifications.value %}checked{% endif %}
-                     class="w-5 h-5 rounded border-slate-600 bg-slate-700 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-900">
-              <div>
-                <div class="text-sm font-medium text-white">{% trans "SMS Notifications" %}</div>
-                <div class="text-xs text-slate-400">{% trans "Receive alerts via SMS" %}</div>
-              </div>
-            </label>
+            {% checkbox_field "sms_notifications" label=_("SMS Notifications") help_text=_("Receive alerts via SMS") checked=form.sms_notifications.value %}
 
-            <label class="flex items-center space-x-3 cursor-pointer">
-              <input type="checkbox" name="marketing_emails"
-                     {% if form.marketing_emails.value %}checked{% endif %}
-                     class="w-5 h-5 rounded border-slate-600 bg-slate-700 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-900">
-              <div>
-                <div class="text-sm font-medium text-white">{% trans "Marketing Emails" %}</div>
-                <div class="text-xs text-slate-400">{% trans "Receive newsletters, product updates, and promotional offers" %}</div>
-              </div>
-            </label>
+            {% checkbox_field "marketing_emails" label=_("Marketing Emails") help_text=_("Receive newsletters, product updates, and promotional offers") checked=form.marketing_emails.value %}
           </div>
         </div>
 
@@ -173,7 +149,8 @@
           {{ user_memberships|length }} {% trans 'companies' %}
         </span>
         <div class="relative w-full sm:w-auto min-w-0 sm:min-w-48">
-          <select data-action="switch-customer" class="w-full bg-slate-700 border border-slate-600 text-white text-sm rounded-lg px-3 py-2 pr-10 appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500 truncate">
+          {# tmpl-allow TMPL003: needs input_field membership_option_labels #}
+          <select data-action="switch-customer" aria-label="{% trans 'Company' %}" class="w-full bg-slate-700 border border-slate-600 text-white text-sm rounded-lg px-3 py-2 pr-10 appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500 truncate">
             {% for membership in user_memberships %}
             <option value="{{ membership.customer_id }}" {% if membership.customer_id|stringformat:'s' == selected_customer_id|stringformat:'s' %}selected{% endif %}>
               {{ membership.customer_name }} ({{ membership.role|title }})
@@ -190,7 +167,7 @@
       <div class="p-4 bg-slate-700/50 border border-slate-600 rounded-lg">
         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div class="flex items-center space-x-3 min-w-0 flex-1">
-            {% icon "building" size="md" css_class="text-blue-400 flex-shrink-0" %}
+            {% icon "building" size="md" css_class="text-blue-400 flex-shrink-0" %} {# tmpl-allow TMPL005: needs badge unboxed_icon #}
             <div class="min-w-0">
               <div class="text-sm font-medium text-white truncate">{{ selected_customer_name }}</div>
               {% if selected_customer_cui %}
@@ -227,7 +204,7 @@
       <!-- Romanian Compliance Notice -->
       <div class="mt-4 p-3 bg-slate-900 border border-slate-600 rounded-lg">
         <div class="flex items-start space-x-3">
-          {% icon "flag" size="sm" css_class="text-blue-400 mt-0.5 flex-shrink-0" %}
+          {% icon "flag" size="sm" css_class="text-blue-400 mt-0.5 flex-shrink-0" %} {# tmpl-allow TMPL005: needs badge unboxed_icon #}
           <p class="text-xs text-slate-400">{% trans 'VAT number (CUI) and legal address required for invoicing. Company owners can invite team members with different access levels.' %}</p>
         </div>
       </div>
@@ -271,21 +248,21 @@
           <h4 class="text-sm font-semibold text-slate-300">{% trans 'Your Data Rights' %}</h4>
 
           <div class="space-y-3">
-            <a href="{% url 'users:privacy_dashboard' %}" class="flex items-center p-3 bg-blue-900/50 hover:bg-blue-800/60 rounded-lg transition-colors group">
-              <span class="text-blue-400 mr-3 text-lg">{% icon "lock" size="md" css_class="text-blue-400" %}</span>
+            <a href="{% url 'users:privacy_dashboard' %}" class="flex items-center p-3 bg-blue-900/50 hover:bg-blue-800/60 rounded-lg transition-colors group"> {# tmpl-allow TMPL005: needs button inline_link #}
+              <span class="text-blue-400 mr-3 text-lg">{% icon "lock" size="md" css_class="" %}</span> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
               <div class="flex-1">
                 <div class="text-sm font-medium text-white group-hover:text-blue-200">
                   {% trans 'Privacy Dashboard' %}
                 </div>
-                <div class="text-xs text-blue-300">
+                <div class="text-xs text-blue-300"> {# tmpl-allow TMPL005: needs alert nested_content #}
                   {% trans 'Manage your privacy settings and data preferences' %}
                 </div>
               </div>
-              <span class="text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity">→</span>
+              <span class="text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity">→</span> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
             </a>
 
             <a href="{% url 'users:data_export' %}" class="flex items-center p-3 bg-slate-700/50 hover:bg-slate-600/60 rounded-lg transition-colors group">
-              <span class="text-green-400 mr-3">{% icon "document" size="md" css_class="text-green-400" %}</span>
+              <span class="text-green-400 mr-3">{% icon "document" size="md" css_class="" %}</span> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
               <div class="flex-1">
                 <div class="text-sm font-medium text-white group-hover:text-green-200">
                   {% trans 'Export My Data' %}
@@ -294,11 +271,11 @@
                   {% trans 'Download a copy of your personal data' %}
                 </div>
               </div>
-              <span class="text-green-400 opacity-0 group-hover:opacity-100 transition-opacity">→</span>
+              <span class="text-green-400 opacity-0 group-hover:opacity-100 transition-opacity">→</span> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
             </a>
 
             <a href="{% url 'users:consent_history' %}" class="flex items-center p-3 bg-slate-700/50 hover:bg-slate-600/60 rounded-lg transition-colors group">
-              <span class="text-yellow-400 mr-3">{% icon "document" size="md" css_class="text-yellow-400" %}</span>
+              <span class="text-yellow-400 mr-3">{% icon "document" size="md" css_class="" %}</span> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
               <div class="flex-1">
                 <div class="text-sm font-medium text-white group-hover:text-yellow-200">
                   {% trans 'Consent History' %}
@@ -307,14 +284,14 @@
                   {% trans 'View and manage your consent preferences' %}
                 </div>
               </div>
-              <span class="text-yellow-400 opacity-0 group-hover:opacity-100 transition-opacity">→</span>
+              <span class="text-yellow-400 opacity-0 group-hover:opacity-100 transition-opacity">→</span> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
             </a>
           </div>
 
           <!-- Legal compliance note -->
           <div class="mt-4 p-3 bg-slate-900 border border-slate-600 rounded-lg">
             <p class="text-xs text-slate-400">
-              {% icon "flag" size="sm" css_class="inline text-blue-400" %} {% trans 'GDPR compliant according to Romanian Law 190/2018 and EU Regulation 2016/679' %}
+              {% icon "flag" size="sm" css_class="inline text-blue-400" %} {% trans 'GDPR compliant according to Romanian Law 190/2018 and EU Regulation 2016/679' %} {# tmpl-allow TMPL005: needs badge unboxed_icon #}
             </p>
           </div>
         </div>

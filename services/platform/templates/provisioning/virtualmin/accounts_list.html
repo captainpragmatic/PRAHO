@@ -46,12 +46,12 @@
     <div class="bg-slate-800 rounded-lg border border-slate-700 p-4">
         <form method="get" class="flex flex-col sm:flex-row gap-4" hx-get="{{ request.path }}" hx-target="#accounts-container" hx-trigger="submit, change delay:500ms">
             <div class="flex-1">
-                <input type="search" name="search" value="{{ request.GET.search }}"
+                <input type="search" aria-label="{% trans 'Search accounts' %}" name="search" value="{{ request.GET.search }}"
                        placeholder="{% trans 'Search accounts by domain...' %}"
                        class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
             </div>
             <div class="sm:w-48">
-                <select name="status" class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                <select aria-label="{% trans 'Account status' %}" name="status" class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
                     <option value="">{% trans "All Status" %}</option>
                     <option value="active" {% if request.GET.status == "active" %}selected{% endif %}>{% trans "Active" %}</option>
                     <option value="disabled" {% if request.GET.status == "disabled" %}selected{% endif %}>{% trans "Disabled" %}</option>
@@ -59,7 +59,7 @@
                 </select>
             </div>
             <div class="sm:w-48">
-                <select name="plan" class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                <select aria-label="{% trans 'Hosting plan' %}" name="plan" class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
                     <option value="">{% trans "All Plans" %}</option>
                     {% for plan in available_plans %}
                     <option value="{{ plan.id }}" {% if request.GET.plan == plan.id|stringformat:"s" %}selected{% endif %}>{{ plan.name }}</option>

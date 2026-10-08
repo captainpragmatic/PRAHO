@@ -116,6 +116,40 @@ class LocalisationHMACIntegrationTests(HMACTestMixin, TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.json()["localisation"]["default_language"], "en")
 
+    def test_company_contract_has_exactly_five_fields_and_rejects_unsigned_requests(self) -> None:
+        from django.core.cache import cache  # noqa: PLC0415
+
+        cache.clear()
+        self.addCleanup(cache.clear)
+        expected = {
+            "legal_name": "Contract Identity SRL",
+            "email_support": "support-contract@example.test",
+            "email_privacy": "privacy-contract@example.test",
+            "email_finance": "finance-contract@example.test",
+            "phone": "+40721123456",
+        }
+        with self.captureOnCommitCallbacks(execute=True):
+            for field, value in expected.items():
+                result = SettingsService.update_setting(f"company.{field}", value)
+                self.assertTrue(result.is_ok(), result)
+            for key, value in (
+                ("company.email_noreply", "private-sender@example.test"),
+                ("company.email_dpo", "private-dpo@example.test"),
+            ):
+                result = SettingsService.update_setting(key, value)
+                self.assertTrue(result.is_ok(), result)
+
+        response = self.portal_post("/api/localisation/")
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json().get("company"), expected)
+        self.assertEqual(set(response.json()["company"]), set(expected))
+        self.assertNotIn("private-sender@example.test", response.content.decode())
+        self.assertNotIn("private-dpo@example.test", response.content.decode())
+
+        unsigned = self.client.post("/api/localisation/", "{}", content_type="application/json")
+        self.assertEqual(unsigned.status_code, 401)
+        self.assertNotIn("company", unsigned.json())
+
     def test_tampered_signature_is_rejected(self):
         response = self.portal_post("/api/localisation/", HTTP_X_SIGNATURE="0" * 64)
         self.assertEqual(response.status_code, 401)

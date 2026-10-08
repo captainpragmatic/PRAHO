@@ -21,6 +21,8 @@ from typing import Any, ClassVar, cast
 from django.conf import settings
 from lxml import etree
 
+from apps.billing.efactura.settings import efactura_settings
+
 logger = logging.getLogger(__name__)
 
 # UBL Namespaces for parsing
@@ -223,6 +225,10 @@ class CIUSROValidator:
             result.add_error("XML-SYNTAX", f"XML parsing failed: {e}")
             return result
 
+        # The native business-rule subset is optional; XML parsing remains mandatory.
+        if not efactura_settings.schematron_validation_enabled:
+            return result
+
         # Step 2: Determine document type
         root_tag = etree.QName(doc.tag).localname
         is_credit_note = root_tag == "CreditNote"
@@ -244,7 +250,7 @@ class CIUSROValidator:
         self._validate_invoice_lines(doc, result, is_credit_note)
 
         # Step 8: Romanian-specific rules
-        self._validate_romanian_rules(doc, result)
+        self._validate_romanian_rules(doc, result, is_credit_note)
 
         # Step 9: Monetary reconciliation (BR-CO-10/13/15/16) and tax-category business rules
         # (BR-CO-14, BR-S/Z-10, BR-*-05, BR-CL-22). These are the arithmetic rules ANAF's
@@ -252,6 +258,10 @@ class CIUSROValidator:
         self._validate_monetary_reconciliation(doc, result, is_credit_note)
         self._validate_tax_category_rules(doc, result)
         self._validate_outside_scope_absence_rules(doc, result)
+
+        if efactura_settings.strict_mode:
+            for warning in result.warnings:
+                result.add_error(warning.code, warning.message, warning.location)
 
         return result
 
@@ -661,8 +671,10 @@ class CIUSROValidator:
             if not item_tax_cat:
                 result.add_error("BR-31", "Item tax category is mandatory", line_path)
 
-    def _validate_romanian_rules(self, doc: etree._Element, result: ValidationResult) -> None:
-        """Validate Romania-specific CIUS-RO rules."""
+    def _validate_romanian_rules(
+        self, doc: etree._Element, result: ValidationResult, is_credit_note: bool = False
+    ) -> None:
+        """Validate Romania-specific CIUS-RO rules for this document type."""
         # BR-RO-100: Validate Romanian VAT rates
         tax_categories = self._find_all(doc, ".//cac:TaxCategory")
         for cat in tax_categories:
@@ -675,16 +687,17 @@ class CIUSROValidator:
         # BR-RO-200: Payment means should be specified
         payment_means = self._find(doc, ".//cac:PaymentMeans")
         if payment_means is None:
-            result.add_warning("BR-RO-200", "Payment means is recommended")
+            if not is_credit_note:
+                result.add_warning("BR-RO-200", "Payment means is recommended")
         else:
             # BT-81: payment means code, when present, must be a valid UNCL4461 code.
             pm_code = self._get_text(payment_means, "cbc:PaymentMeansCode")
             if pm_code and pm_code not in self.VALID_PAYMENT_MEANS:
                 result.add_error("BR-CL-16", f"Invalid UNCL4461 payment means code: {pm_code}", "/PaymentMeans")
 
-        # BR-RO-300: Due date is recommended
+        # BR-RO-300: Invoice due dates do not apply to credit notes.
         due_date = self._get_text(doc, ".//cbc:DueDate")
-        if not due_date:
+        if not is_credit_note and not due_date:
             result.add_warning("BR-RO-300", "Due date is recommended")
 
     def _validate_monetary_reconciliation(

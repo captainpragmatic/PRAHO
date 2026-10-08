@@ -29,6 +29,7 @@ from typing import Any, cast
 
 from django.core.cache import cache
 from django.utils import timezone
+from django.utils.translation import gettext as _
 
 from apps.common.security_decorators import (
     audit_service_call,
@@ -122,22 +123,6 @@ BACKUP_PROGRESS_CACHE_PREFIX = "virtualmin_backup_progress_"
 CACHE_TIMEOUT = 3600  # 1 hour
 
 
-class VirtualminBackupError(Exception):
-    """Base exception for backup operations"""
-
-
-class VirtualminBackupSizeError(VirtualminBackupError):
-    """Backup exceeds size limits"""
-
-
-class VirtualminBackupVerificationError(VirtualminBackupError):
-    """Backup verification failed"""
-
-
-class VirtualminBackupIntegrityError(VirtualminBackupError):
-    """Backup integrity check failed"""
-
-
 class VirtualminBackupService:
     """
     🛡️ Critical: Virtualmin backup service for stateful data preservation.
@@ -195,6 +180,7 @@ class VirtualminBackupService:
         # Validate backup preconditions
         validation_result = self._validate_backup_preconditions(account)
         if validation_result.is_err():
+            self._update_backup_progress(backup_id, "failed", 100)
             return Err(validation_result.unwrap_err())
 
         # Stage boundary: a superseded runner must not dispatch remote work.
@@ -651,8 +637,8 @@ class VirtualminBackupService:
             s3_client = self._get_s3_client()
             bucket_name = self._get_backup_bucket()
 
-            # List all objects for this backup
-            prefix = f"virtualmin-backups/{backup_id}"
+            # Match the backup directory, never a neighbouring backup ID.
+            prefix = f"virtualmin-backups/{backup_id}/"
             objects_to_delete = []
 
             paginator = s3_client.get_paginator("list_objects_v2")
@@ -664,10 +650,21 @@ class VirtualminBackupService:
             if not objects_to_delete:
                 return Err(f"Backup {backup_id} not found")
 
-            # Delete objects
-            s3_client.delete_objects(Bucket=bucket_name, Delete={"Objects": objects_to_delete})
+            # HTTP success can still contain individual object failures.
+            response = s3_client.delete_objects(Bucket=bucket_name, Delete={"Objects": objects_to_delete})
+            errors = response.get("Errors", [])
+            if errors:
+                details = "; ".join(
+                    f"{error.get('Key', '?')}: {error.get('Code', 'Unknown')} - {error.get('Message', '')}"
+                    for error in errors
+                )
+                logger.error("🔥 [Backup] S3 deletion incomplete for %s: %s", backup_id, details)
+                return Err(
+                    _("Backup %(backup_id)s deletion incomplete: %(errors)s")
+                    % {"backup_id": backup_id, "errors": details}
+                )
 
-            logger.info(f"Deleted backup {backup_id} ({len(objects_to_delete)} objects)")
+            logger.info("✅ [Backup] Deleted backup %s (%s objects)", backup_id, len(objects_to_delete))
             return Ok(
                 {
                     "backup_id": backup_id,
@@ -773,8 +770,9 @@ class VirtualminBackupService:
         )
 
     def _update_restore_progress(self, restore_id: str, status: str, progress: int) -> None:
-        """Update restore progress in cache."""
-        progress_key = f"virtualmin_restore_progress_{restore_id}"
+        """Update restore progress in cache using the caller's correlation key."""
+        cache_id = getattr(self, "_progress_key", None) or restore_id
+        progress_key = f"virtualmin_restore_progress_{cache_id}"
         cache.set(
             progress_key,
             {
@@ -858,7 +856,9 @@ class VirtualminBackupService:
         except OSError as error:
             logger.warning("⚠️ [Backup] Spool cleanup failed: %s", error)
 
-    def _validate_backup_preconditions(self, account: VirtualminAccount) -> Result[None, str]:
+    def _validate_backup_preconditions(  # noqa: PLR0911  # Distinct transport, existence and size refusals.
+        self, account: VirtualminAccount
+    ) -> Result[None, str]:
         """Validate that backup can proceed safely."""
         # Transport capability gate BEFORE any remote archive is created:
         # a manually-registered server has no Ansible path off the node.
@@ -874,14 +874,21 @@ class VirtualminBackupService:
         if not ping_result:
             return Err(f"Server {self.server.hostname} is unreachable")
 
-        # Check account exists on server
+        # Existence is independent of usage: absent domains also parse as zero MB.
+        state_result = gateway.get_domain_state(account.domain)
+        if state_result.is_err():
+            return Err(
+                _("Failed to get domain info: %(error)s") % {"error": state_result.unwrap_err()},
+                retriability=retriability_of(state_result),
+            )
+        if not state_result.unwrap()["exists"]:
+            return Err(_("Domain %(domain)s not found on server") % {"domain": account.domain})
+
         account_info_result = gateway.get_domain_info(account.domain)
         if account_info_result.is_err():
             return Err(f"Failed to get domain info: {account_info_result.unwrap_err()}")
 
         account_info = account_info_result.unwrap()
-        if not account_info.get("disk_usage_mb"):
-            return Err(f"Domain {account.domain} not found on server")
 
         # Check available disk space (rough estimate)
         disk_info = account_info.get("disk_usage_mb", 0)
@@ -1027,7 +1034,7 @@ class VirtualminBackupService:
             # 4. Archive structure verification
             try:
                 with tarfile.open(backup_path, "r:gz") as tar:
-                    members = tar.getnames()
+                    members = tar.getmembers()
                     if not members:
                         return Err("Backup archive is empty")
 
@@ -1037,16 +1044,42 @@ class VirtualminBackupService:
             except tarfile.TarError as e:
                 return Err(f"Invalid backup archive: {e}")
 
-            # 5. Feature completeness check
-            expected_features = []
-            if metadata.get("include_email"):
-                expected_features.append("mail")
-            if metadata.get("include_databases"):
-                expected_features.append("mysql")
-            if metadata.get("include_files"):
-                expected_features.append("dir")
-            if metadata.get("include_ssl"):
-                expected_features.append("ssl")
+            # 5. Feature completeness: Virtualmin emits domain_feature members.
+            # Config-only dispatch explicitly requests virtualmin and dir.
+            expected_features: list[str] = []
+            if metadata.get("backup_type") == "config_only":
+                expected_features.extend(("virtualmin", "dir"))
+            else:
+                for flag, feature in (
+                    ("include_email", "mail"),
+                    ("include_databases", "mysql"),
+                    ("include_files", "dir"),
+                    ("include_ssl", "ssl"),
+                ):
+                    if metadata.get(flag):
+                        expected_features.append(feature)
+
+            domain = str(metadata.get("domain", ""))
+            feature_members: set[str] = set()
+            for member in members:
+                if not member.isfile() or ".." in member.name.split("/"):
+                    continue
+                name = member.name.removeprefix("./")
+                # Native newformat members live in .backup/; legacy members are at the root.
+                name = name.removeprefix(".backup/")
+                feature_members.add(name.split("/", 1)[0])
+            suffixes = ("", ".tar.gz", ".tar.bz2", ".tar.zst", ".tar", ".gz", ".bz2", ".zst", ".zip")
+            missing_features = [
+                feature
+                for feature in expected_features
+                if not domain or not any(f"{domain}_{feature}{suffix}" in feature_members for suffix in suffixes)
+            ]
+            if missing_features:
+                logger.error("🔥 [Backup] Backup %s lacks requested features: %s", backup_id, missing_features)
+                return Err(
+                    _("Backup is missing requested feature members: %(features)s")
+                    % {"features": ", ".join(missing_features)}
+                )
 
             metadata["verified_at"] = timezone.now().isoformat()
             metadata["verification_status"] = "passed"

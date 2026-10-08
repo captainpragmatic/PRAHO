@@ -17,7 +17,7 @@
   <!-- Error Card -->
   <div class="bg-slate-800 rounded-lg border border-slate-700 p-8 text-center">
     <div class="mb-6">
-      <div class="text-red-400 mb-4">{% icon "x" size="2xl" %}</div>
+      <div class="text-red-400 mb-4">{% icon "x" size="2xl" %}</div> {# tmpl-allow TMPL005: needs badge unframed variant #}
       <h2 class="text-xl font-semibold text-white mb-2">
         {% trans 'Invoice Not Available' %}
       </h2>
@@ -35,18 +35,14 @@
     </div>
 
     {% if error %}
-    <div class="bg-red-900 border border-red-700 rounded-lg p-4 mb-6">
-      <p class="text-red-200 text-sm">
-        {% trans 'An error occurred while loading the invoice. Please try again or contact support if the problem persists.' %}
-      </p>
-    </div>
+    {% trans "An error occurred while loading the invoice. Please try again or contact support if the problem persists." as document_error %}
+    {% alert document_error variant="danger" css_class="mb-6" %}
     {% endif %}
 
     <div class="flex justify-center space-x-4">
-      <a href="{% url 'billing:invoices_list' %}"
-         class="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium transition-colors">
-        ← {% trans 'Back to Billing' %}
-      </a>
+      {% url 'billing:invoices_list' as action_url %}
+      {% trans "Back to Billing" as action_label %}
+      {% button action_label href=action_url variant="primary" icon="arrow-left" %}
 
       <a href="{% url 'dashboard:dashboard' %}"
          class="inline-flex items-center px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-md font-medium transition-colors">

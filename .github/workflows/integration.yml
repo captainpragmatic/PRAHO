@@ -11,6 +11,7 @@ on:
     branches: [master, staging]
     paths:
       - 'services/**'
+      - 'shared/**'
       - 'scripts/**'
       - 'tests/**'
       - 'Makefile'
@@ -21,6 +22,7 @@ on:
     branches: [master]
     paths:
       - 'services/**'
+      - 'shared/**'
       - 'scripts/**'
       - 'tests/**'
       - 'Makefile'
@@ -71,7 +73,12 @@ jobs:
 
     - name: Template design-system lint
       run: make lint-templates
-      continue-on-error: true  # TODO: fix 90 blockers, then make blocking
+
+    - name: Accessibility audit
+      run: make audit-a11y
+
+    - name: Dark-mode audit
+      run: make audit-dark-mode
 
     - name: Install semgrep for security scanning
       run: |
@@ -179,6 +186,10 @@ jobs:
           tests.billing.test_fiscal_correction_concurrency \
           tests.billing.test_builtin_storno_concurrency \
           tests.billing.test_invoice_signal_transaction_isolation \
+          tests.billing.test_payment_settlement_postgres \
+          tests.billing.test_efactura_enqueue_durability \
+          tests.orders.test_order_payment_recovery_isolation.OrderAuditPostgresIsolationTests \
+          tests.audit.test_membership_signal_postgres_isolation \
           tests.common.test_transactions \
           tests.provisioning.test_hosting_account_staff_actions_concurrency \
           --settings=config.settings.ci --verbosity=2

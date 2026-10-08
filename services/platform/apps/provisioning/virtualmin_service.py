@@ -10,6 +10,7 @@ Implements:
 from __future__ import annotations
 
 import logging
+import re
 import secrets
 import string
 import uuid
@@ -38,7 +39,6 @@ from .virtualmin_gateway import (
 )
 from .virtualmin_models import (
     VirtualminAccount,
-    VirtualminDriftRecord,
     VirtualminProvisioningJob,
     VirtualminServer,
 )
@@ -53,10 +53,9 @@ from .virtualmin_migration_models import account_has_active_migration
 
 logger = logging.getLogger(__name__)
 
-# Username generation constants
+# Username generation defaults
 MIN_USERNAME_LENGTH = 3
 _DEFAULT_MAX_USERNAME_UNIQUENESS_ATTEMPTS = 1000
-MAX_USERNAME_UNIQUENESS_ATTEMPTS = _DEFAULT_MAX_USERNAME_UNIQUENESS_ATTEMPTS
 
 
 def _clear_idempotency_key(idempotency_key: str | None, *, operation: str, domain: str) -> None:
@@ -125,9 +124,19 @@ class VirtualminProvisioningService:
     Integrates with PRAHO's service management and customer billing.
     """
 
-    def __init__(self, server: VirtualminServer | None = None):
+    def __init__(self, server: VirtualminServer | None = None, *, task_budget_seconds: int | None = None) -> None:
         self.server = server
         self._gateway: VirtualminGateway | None = None
+        self._task_budget_seconds = task_budget_seconds
+
+    def _job_parameters(self, parameters: dict[str, object], *, soft_limit: bool = False) -> dict[str, object]:
+        """Persist the worker's enqueue snapshot; direct callers resolve before job creation."""
+        from .virtualmin_tasks import get_task_soft_time_limit, get_task_time_limit  # noqa: PLC0415
+
+        budget = self._task_budget_seconds
+        if budget is None:
+            budget = get_task_soft_time_limit() if soft_limit else get_task_time_limit()
+        return {**parameters, "task_budget_seconds": budget}
 
     def _get_gateway(
         self, server: VirtualminServer | None = None, *, use_credential_vault: bool = True
@@ -225,7 +234,7 @@ class VirtualminProvisioningService:
                     template_name=template,
                     status="provisioning",
                     praho_customer_id=creation_data.service.customer.id,
-                    praho_service_id=creation_data.service.id,
+                    praho_service_id=uuid.UUID(int=creation_data.service.id),
                 )
                 # SECURITY: password is secrets.token_urlsafe(24) — not user input
                 account.set_password(  # nosemgrep: unvalidated-password
@@ -238,12 +247,14 @@ class VirtualminProvisioningService:
                     operation="create_domain",
                     server=server,
                     account=account,
-                    parameters={
-                        "domain": domain,
-                        "username": username,
-                        "template": template,
-                        "recovery_seed": account.get_recovery_seed(),
-                    },
+                    parameters=self._job_parameters(
+                        {
+                            "domain": domain,
+                            "username": username,
+                            "template": template,
+                            "recovery_seed": account.get_recovery_seed(),
+                        }
+                    ),
                     correlation_id=f"create_domain_{account.id}",
                 )
                 job.save()
@@ -306,12 +317,14 @@ class VirtualminProvisioningService:
                     operation="create_domain",
                     server=server,
                     account=account,
-                    parameters={
-                        "domain": account.domain,
-                        "username": account.virtualmin_username,
-                        "template": account.template_name or "Default",
-                        "recovery_seed": account.get_recovery_seed(),
-                    },
+                    parameters=self._job_parameters(
+                        {
+                            "domain": account.domain,
+                            "username": account.virtualmin_username,
+                            "template": account.template_name or "Default",
+                            "recovery_seed": account.get_recovery_seed(),
+                        }
+                    ),
                     correlation_id=f"reprovision_domain_{account.id}",
                 )
                 job.save()
@@ -347,6 +360,7 @@ class VirtualminProvisioningService:
 
             # Mark job as started
             job.mark_started()
+            self._apply_default_quotas(account)
 
             # ===============================================================================
             # PHASE 1: PRE-FLIGHT VALIDATION 🚀 (Quick Win)
@@ -376,12 +390,13 @@ class VirtualminProvisioningService:
                 "comment": account.get_recovery_seed(),  # Store recovery seed
             }
 
-            # Add quota limits if specified
-            if account.disk_quota_mb:
-                params["quota"] = str(account.disk_quota_mb)
+            # Virtualmin expects disk quotas in KiB and bandwidth in bytes.
+            # Zero and the account's -1 bandwidth sentinel mean unlimited.
+            if account.disk_quota_mb is not None:
+                params["quota"] = str(account.disk_quota_mb * 1024)
 
-            if account.bandwidth_quota_mb:
-                params["bw-limit"] = str(account.bandwidth_quota_mb)
+            if account.bandwidth_quota_mb is not None:
+                params["bandwidth"] = str(max(0, account.bandwidth_quota_mb) * 1024 * 1024)
 
             # Make API call
             result = gateway.call("create-domain", params, correlation_id=job.correlation_id)
@@ -460,8 +475,44 @@ class VirtualminProvisioningService:
             job.mark_failed(str(e))
             return Err(str(e))
 
-    def _check_server_capacity(self, account: VirtualminAccount, health_result: Result[Any, str]) -> Result[None, str]:
-        """Check server capacity and disk space"""
+    def _apply_default_quotas(self, account: VirtualminAccount) -> None:
+        """Pin stored defaults; absent rows preserve Virtualmin's existing limits."""
+        from apps.settings.services import SettingsService  # noqa: PLC0415  # Cross-app: avoids circular imports
+
+        fields: list[str] = []
+        if account.disk_quota_mb is None:
+            disk_default = SettingsService.get_stored_setting("virtualmin.domain_quota_default_mb")
+            if isinstance(disk_default, int) and not isinstance(disk_default, bool):
+                account.disk_quota_mb = disk_default
+                fields.append("disk_quota_mb")
+        if account.bandwidth_quota_mb is None:
+            bandwidth_default = SettingsService.get_stored_setting("virtualmin.bandwidth_quota_default_mb")
+            if isinstance(bandwidth_default, int) and not isinstance(bandwidth_default, bool):
+                account.bandwidth_quota_mb = bandwidth_default
+                fields.append("bandwidth_quota_mb")
+        if fields:
+            account.save(update_fields=[*fields, "updated_at"])
+
+    @staticmethod
+    def _available_disk_mb(server_data: object) -> int | None:
+        """Virtualmin info's disk_free text value is bytes, not MiB."""
+        if not isinstance(server_data, dict):
+            return None
+        output = server_data.get("output")
+        if isinstance(output, str):
+            match = re.search(r"(?m)^disk_free:[ \t]*(\d+)[ \t]*$", output)
+            if match:
+                return int(match.group(1)) // (1024 * 1024)
+        # Retain compatibility with already-normalized callers.
+        available = server_data.get("available_disk_mb")
+        if isinstance(available, int) and not isinstance(available, bool) and available >= 0:
+            return available
+        return None
+
+    def _check_server_capacity(
+        self, account: VirtualminAccount, health_result: Result[dict[str, object], str]
+    ) -> Result[None, str]:
+        """Check server capacity and disk space."""
         # Check server capacity
         if account.server.max_domains and account.server.current_domains >= account.server.max_domains:
             return Err(
@@ -471,9 +522,19 @@ class VirtualminProvisioningService:
         # Check disk space if quota specified
         if account.disk_quota_mb and health_result.is_ok():
             server_info = health_result.unwrap()
-            available_mb = server_info.get("available_disk_mb", 0)
-            if available_mb < account.disk_quota_mb:
-                return Err(f"Insufficient disk space: {available_mb}MB available, {account.disk_quota_mb}MB requested")
+            # test_connection() wraps the info response under "data".
+            server_data = server_info.get("data", server_info)
+            available_mb = self._available_disk_mb(server_data)
+            if available_mb is None:
+                logger.warning(
+                    "⚠️ [VirtualminService] Server %s free disk space is unknown; skipping disk capacity check",
+                    account.server.hostname,
+                )
+            elif available_mb < account.disk_quota_mb:
+                return Err(
+                    _("Insufficient disk space: %(available)sMB available, %(requested)sMB requested")
+                    % {"available": available_mb, "requested": account.disk_quota_mb}
+                )
 
         return Ok(None)
 
@@ -572,7 +633,13 @@ class VirtualminProvisioningService:
             return Err(f"Validation error: {e}")
 
     def _execute_rollback(  # Complexity: Virtualmin workflow  # Complexity: multi-step business logic  # noqa: C901, PLR0912, PLR0915  # Complexity: cohesive workflow
-        self, rollback_operations: list[dict[str, Any]], gateway: VirtualminGateway, account: VirtualminAccount
+        self,
+        rollback_operations: list[dict[str, Any]],
+        gateway: VirtualminGateway,
+        account: VirtualminAccount,
+        *,
+        previous_status: str | None = None,
+        previous_status_message: str = "",
     ) -> tuple[str, dict[str, Any]]:
         """
         Execute rollback operations in reverse order (Phase 2).
@@ -665,12 +732,7 @@ class VirtualminProvisioningService:
 
                 rollback_details["operations"].append(op_result)
 
-            # Update account status to failed
-            account.status = "error"
-            account.status_message = "Provisioning failed - rollback executed"
-            account.save(update_fields=["status", "status_message", "updated_at"])
-
-            # Determine overall rollback status
+            # Determine overall rollback status before restoring lifecycle state.
             if rollback_details["failed_operations"] == 0:
                 rollback_status = "success"
                 logger.warning(f"⚠️ [VirtualminService] Rollback completed successfully for {account.domain}")
@@ -681,6 +743,12 @@ class VirtualminProvisioningService:
                 rollback_status = "failed"
                 logger.error(f"🚨 [VirtualminService] Rollback failed for {account.domain}")
 
+            restored = rollback_status == "success" and previous_status is not None
+            account.status = previous_status if restored and previous_status is not None else "error"
+            account.status_message = (
+                previous_status_message if restored else str(_("Provisioning failed - rollback executed"))
+            )
+            account.save(update_fields=["status", "status_message", "updated_at"])
             return rollback_status, rollback_details
 
         except Exception as e:
@@ -749,13 +817,15 @@ class VirtualminProvisioningService:
                 operation="suspend_domain",
                 server=account.server,
                 account=account,
-                parameters={"domain": account.domain, "reason": reason},
+                parameters=self._job_parameters({"domain": account.domain, "reason": reason}, soft_limit=True),
                 correlation_id=f"suspend_domain_{account.id}",
             )
             job.save()
             job.mark_started()
 
-            # Make API call
+            # Snapshot the lifecycle state before the remote mutation.
+            previous_status = account.status
+            previous_status_message = account.status_message
             result = gateway.call("disable-domain", {"domain": account.domain}, correlation_id=job.correlation_id)
 
             if result.is_ok():
@@ -772,11 +842,11 @@ class VirtualminProvisioningService:
                     ]
 
                     try:
-                        account.status = "suspended"
-                        account.status_message = reason
-                        account.save(update_fields=["status", "status_message", "updated_at"])
-
-                        job.mark_completed(response.data)
+                        with transaction.atomic():
+                            account.status = "suspended"
+                            account.status_message = reason
+                            account.save(update_fields=["status", "status_message", "updated_at"])
+                            job.mark_completed(response.data)
 
                         # Mark idempotency as complete
                         IdempotencyManager.complete(idempotency_key, {"success": True})
@@ -789,16 +859,20 @@ class VirtualminProvisioningService:
                         logger.error(
                             f"🔥 [VirtualminService] DB update failed for suspend {account.domain}: {db_error}"
                         )
-                        rollback_status, rollback_details = self._execute_rollback(
-                            rollback_operations, gateway, account
-                        )
-
-                        job.mark_failed(
-                            f"Database update failed: {db_error}",
-                            rollback_executed=True,
-                            rollback_status=rollback_status,
-                            rollback_details=rollback_details,
-                        )
+                        with transaction.atomic():
+                            rollback_status, rollback_details = self._execute_rollback(
+                                rollback_operations,
+                                gateway,
+                                account,
+                                previous_status=previous_status,
+                                previous_status_message=previous_status_message,
+                            )
+                            job.mark_failed(
+                                f"Database update failed: {db_error}",
+                                rollback_executed=True,
+                                rollback_status=rollback_status,
+                                rollback_details=rollback_details,
+                            )
                         _clear_idempotency_key(idempotency_key, operation="suspend", domain=account.domain)
                         return Err(f"Suspension failed during database update: {db_error}")
                 else:
@@ -880,13 +954,15 @@ class VirtualminProvisioningService:
                 operation="unsuspend_domain",
                 server=account.server,
                 account=account,
-                parameters={"domain": account.domain},
+                parameters=self._job_parameters({"domain": account.domain}, soft_limit=True),
                 correlation_id=f"unsuspend_domain_{account.id}",
             )
             job.save()
             job.mark_started()
 
-            # Make API call
+            # Snapshot the lifecycle state before the remote mutation.
+            previous_status = account.status
+            previous_status_message = account.status_message
             result = gateway.call("enable-domain", {"domain": account.domain}, correlation_id=job.correlation_id)
 
             if result.is_ok():
@@ -903,11 +979,11 @@ class VirtualminProvisioningService:
                     ]
 
                     try:
-                        account.status = "active"
-                        account.status_message = ""
-                        account.save(update_fields=["status", "status_message", "updated_at"])
-
-                        job.mark_completed(response.data)
+                        with transaction.atomic():
+                            account.status = "active"
+                            account.status_message = ""
+                            account.save(update_fields=["status", "status_message", "updated_at"])
+                            job.mark_completed(response.data)
 
                         # Mark idempotency as complete
                         IdempotencyManager.complete(idempotency_key, {"success": True})
@@ -920,16 +996,20 @@ class VirtualminProvisioningService:
                         logger.error(
                             f"🔥 [VirtualminService] DB update failed for unsuspend {account.domain}: {db_error}"
                         )
-                        rollback_status, rollback_details = self._execute_rollback(
-                            rollback_operations, gateway, account
-                        )
-
-                        job.mark_failed(
-                            f"Database update failed: {db_error}",
-                            rollback_executed=True,
-                            rollback_status=rollback_status,
-                            rollback_details=rollback_details,
-                        )
+                        with transaction.atomic():
+                            rollback_status, rollback_details = self._execute_rollback(
+                                rollback_operations,
+                                gateway,
+                                account,
+                                previous_status=previous_status,
+                                previous_status_message=previous_status_message,
+                            )
+                            job.mark_failed(
+                                f"Database update failed: {db_error}",
+                                rollback_executed=True,
+                                rollback_status=rollback_status,
+                                rollback_details=rollback_details,
+                            )
                         _clear_idempotency_key(idempotency_key, operation="unsuspend", domain=account.domain)
                         return Err(f"Unsuspension failed during database update: {db_error}")
                 else:
@@ -1017,7 +1097,7 @@ class VirtualminProvisioningService:
                 operation="delete_domain",
                 server=account.server,
                 account=account,
-                parameters={"domain": account.domain},
+                parameters=self._job_parameters({"domain": account.domain}),
                 correlation_id=f"delete_domain_{account.id}",
             )
             job.save()
@@ -1326,7 +1406,8 @@ class VirtualminProvisioningService:
         # Truncate to maximum length
         username = username[:32]
 
-        # Ensure uniqueness by checking existing accounts
+        # Resolve once for the collision loop, preserving the counter and UUID fallback boundary.
+        max_attempts = get_max_username_uniqueness_attempts()
         original_username = username
         counter = 1
 
@@ -1335,7 +1416,7 @@ class VirtualminProvisioningService:
             counter += 1
 
             # Prevent infinite loop
-            if counter > MAX_USERNAME_UNIQUENESS_ATTEMPTS:
+            if counter > max_attempts:
                 username = f"user_{uuid.uuid4().hex[:8]}"
                 break
 
@@ -1396,154 +1477,6 @@ class VirtualminProvisioningService:
             # Gateway setup failures (no server configured, credential decryption)
             # are not transient — stay at the UNKNOWN default.
             return Err(f"Connection test failed: {e}")
-
-    def sync_account_from_virtualmin(self, account: VirtualminAccount) -> Result[dict[str, Any], str]:
-        """
-        Sync account state from Virtualmin server.
-
-        This should be used sparingly - PRAHO is the source of truth.
-        Only use for drift detection and emergency recovery.
-        """
-        try:
-            gateway = self._get_gateway(account.server)
-
-            # Get current state from Virtualmin (normalized multiline probe (#325) —
-            # the raw response never carried "domains"/"status" keys)
-            state_result = gateway.get_domain_state(account.domain)
-            if state_result.is_err():
-                return Err(
-                    f"Failed to query Virtualmin: {state_result.unwrap_err()}",
-                    retriability=retriability_of(state_result),
-                )
-
-            state = state_result.unwrap()
-            virtualmin_data = state
-
-            # Detect drift between PRAHO and Virtualmin
-            drift_detected = []
-
-            if not state["exists"]:
-                drift_detected.append("Domain missing from Virtualmin")
-            elif state["enabled"] is not None:
-                expected_enabled = account.status == "active"
-                if state["enabled"] != expected_enabled:
-                    drift_detected.append(
-                        f"Status mismatch: PRAHO={account.status}, "
-                        f"Virtualmin={'enabled' if state['enabled'] else 'disabled'}"
-                    )
-
-            if drift_detected:
-                # Log drift for audit
-                VirtualminDriftRecord.objects.create(
-                    domain=account.domain,
-                    server=account.server,
-                    drift_type="status_mismatch",
-                    description="; ".join(drift_detected),
-                    praho_state={"status": account.status, "domain": account.domain},
-                    virtualmin_state=virtualmin_data,
-                    resolution_status="pending",
-                )
-
-                logger.warning(f"🔍 [VirtualminService] Drift detected for {account.domain}: {drift_detected}")
-
-            return Ok(
-                {
-                    "drift_detected": drift_detected,
-                    "virtualmin_state": virtualmin_data,
-                    "praho_state": {"status": account.status, "domain": account.domain},
-                }
-            )
-
-        except Exception as e:
-            logger.exception(f"Error syncing account {account.domain}: {e}")
-            return Err(str(e))
-
-    def enforce_praho_state(self, account: VirtualminAccount, force: bool = False) -> Result[dict[str, Any], str]:
-        """
-        🚨 CRITICAL: Enforce PRAHO state as source of truth.
-
-        When drift is detected, this method forces Virtualmin to match PRAHO's state.
-        Use with caution - this can overwrite manual changes in Virtualmin.
-
-        Args:
-            account: VirtualminAccount to enforce
-            force: If True, apply changes without confirmation
-
-        Returns:
-            Result with enforcement actions taken
-        """
-        if account_has_active_migration(account):
-            logger.info("✅ [VirtualminService] Migration lock skips enforcement: %s", account.pk)
-            return Ok({"action": "migration_locked", "actions_taken": []})
-        try:
-            # First detect drift
-            sync_result = self.sync_account_from_virtualmin(account)
-            if sync_result.is_err():
-                return sync_result
-
-            sync_data = sync_result.unwrap()
-            drift_detected = sync_data["drift_detected"]
-
-            if not drift_detected:
-                return Ok({"message": "No drift detected, PRAHO state matches Virtualmin"})
-
-            if not force:
-                return Ok(
-                    {
-                        "drift_detected": drift_detected,
-                        "message": "Drift detected but force=False. Use force=True to apply corrections.",
-                        "praho_state": sync_data["praho_state"],
-                        "virtualmin_state": sync_data["virtualmin_state"],
-                    }
-                )
-
-            # Enforce PRAHO state
-            actions_taken = []
-            gateway = self._get_gateway(account.server)
-
-            # Enforce account status — an action counts only on APPLICATION
-            # success (transport Ok can still carry success=False)
-            failures = []
-            if account.status == "active":
-                result = gateway.call("enable-domain", {"domain": account.domain})
-                if result.is_ok() and result.unwrap().success:
-                    actions_taken.append("enabled_domain")
-                else:
-                    failures.append("enable-domain failed")
-            elif account.status == "suspended":
-                result = gateway.call("disable-domain", {"domain": account.domain})
-                if result.is_ok() and result.unwrap().success:
-                    actions_taken.append("suspended_domain")
-                else:
-                    failures.append("disable-domain failed")
-
-            # Log enforcement action honestly: auto_fixed only when the
-            # remote change actually succeeded.
-            # "praho_state_enforced" is not a DRIFT_TYPE_CHOICES value — the
-            # drift itself is a status mismatch; enforcement is the resolution.
-            VirtualminDriftRecord.objects.create(
-                domain=account.domain,
-                server=account.server,
-                drift_type="status_mismatch",
-                description=f"Enforced PRAHO state: {actions_taken}" + (f"; failures: {failures}" if failures else ""),
-                praho_state=sync_data["praho_state"],
-                virtualmin_state=sync_data["virtualmin_state"],
-                resolution_status="auto_fixed" if actions_taken and not failures else "pending",
-            )
-
-            logger.warning(f"🚨 [VirtualminService] Enforced PRAHO state for {account.domain}: {actions_taken}")
-
-            return Ok(
-                {
-                    "actions_taken": actions_taken,
-                    "drift_resolved": drift_detected,
-                    "enforcement_timestamp": timezone.now().isoformat(),
-                }
-            )
-
-        except Exception as e:
-            logger.exception(f"Error enforcing PRAHO state for {account.domain}: {e}")
-            return Err(str(e))
 
 
 class VirtualminServerManagementService:

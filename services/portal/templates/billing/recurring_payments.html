@@ -80,7 +80,8 @@
               {{ subscription.number }} · {{ subscription.billing_cycle|title }} · {{ subscription.status|title }}
             </div>
           </div>
-          {% input_field subscription.control_name input_type="select" value=subscription.authorization_id options=subscription.authorization_options html_id=subscription.control_id css_class="subscription-authorization" %}
+          {% trans "Automatic payment authorization" as authorization_label %}
+          {% input_field subscription.control_name input_type="select" aria_label=authorization_label value=subscription.authorization_id options=subscription.authorization_options html_id=subscription.control_id css_class="subscription-authorization" %}
         </div>
       {% empty %}
         <p class="text-slate-400">{% trans "No recurring subscriptions are available." %}</p>

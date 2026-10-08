@@ -21,11 +21,9 @@
             </a>
 
             {% if can_manage_team %}
-            <a href="{% url 'customers:team_invite' %}"
-               class="inline-flex items-center px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-slate-900 transition-colors">
-                {% icon "plus" size="sm" css_class="mr-2" %}
-                {% trans "Invite Member" %}
-            </a>
+            {% url 'customers:team_invite' as action_url %}
+            {% trans "Invite Member" as action_label %}
+            {% button action_label href=action_url variant="primary" icon="plus" %}
             {% endif %}
         </div>
 
@@ -67,27 +65,22 @@
                     <!-- Role Change Form -->
                     <form method="post" action="{% url 'customers:team_role' member.user_id %}" class="flex items-center gap-2">
                         {% csrf_token %}
-                        <select name="role"
+                        <select name="role" aria-label="{% trans 'Role' %}" {# tmpl-allow TMPL003: needs input_field inline_options #}
                                 class="bg-slate-700 border border-slate-600 text-slate-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
                             <option value="viewer" {% if member.role == "viewer" %}selected{% endif %}>{% trans "Viewer" %}</option>
                             <option value="tech" {% if member.role == "tech" %}selected{% endif %}>{% trans "Technical" %}</option>
                             <option value="billing" {% if member.role == "billing" %}selected{% endif %}>{% trans "Billing" %}</option>
                             <option value="owner" {% if member.role == "owner" %}selected{% endif %}>{% trans "Owner" %}</option>
                         </select>
-                        <button type="submit"
-                                class="px-3 py-2 bg-slate-600 text-slate-200 text-sm font-medium rounded-lg hover:bg-slate-500 transition-colors">
-                            {% trans "Update" %}
-                        </button>
+                        {% trans "Update" as submit_label %}
+                        {% button submit_label type="submit" variant="secondary" size="sm" %}
                     </form>
 
                     <!-- Remove Form -->
                     <form method="post" action="{% url 'customers:team_remove' member.user_id %}" data-confirm="{% trans "Are you sure you want to remove this team member?" %}">
                         {% csrf_token %}
-                        <button type="submit"
-                                class="px-3 py-2 bg-red-900/50 text-red-400 text-sm font-medium rounded-lg hover:bg-red-900/70 transition-colors border border-red-800/50">
-                            {% icon "x" size="sm" css_class="mr-1" %}
-                            {% trans "Remove" %}
-                        </button>
+                        {% trans "Remove" as submit_label %}
+                        {% button submit_label type="submit" variant="danger" icon="x" size="sm" %}
                     </form>
                 </div>
                 {% endif %}
@@ -103,11 +96,9 @@
             <h3 class="text-lg font-medium text-slate-300 mb-2">{% trans "No team members yet" %}</h3>
             <p class="text-slate-500 mb-6">{% trans "Invite colleagues to collaborate on this account." %}</p>
             {% if can_manage_team %}
-            <a href="{% url 'customers:team_invite' %}"
-               class="inline-flex items-center px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors">
-                {% icon "plus" size="sm" css_class="mr-2" %}
-                {% trans "Invite Member" %}
-            </a>
+            {% url 'customers:team_invite' as action_url %}
+            {% trans "Invite Member" as action_label %}
+            {% button action_label href=action_url variant="primary" icon="plus" %}
             {% endif %}
         </div>
         {% endif %}

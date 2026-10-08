@@ -31,9 +31,7 @@
         {% if messages %}
         <div class="space-y-2">
           {% for message in messages %}
-          <div class="bg-red-500/10 border border-red-500/20 text-red-300 px-4 py-3 rounded-lg text-sm">
-            {{ message }}
-          </div>
+          {% alert message variant="danger" %}
           {% endfor %}
         </div>
         {% endif %}
@@ -125,7 +123,7 @@
         <div class="text-center">
           <p class="text-sm text-slate-400">
             {% trans 'Already have an account?' %}
-            <a href="{% url 'users:login' %}" class="font-medium text-blue-400 hover:text-blue-300 transition-colors">
+            <a href="{% url 'users:login' %}" class="font-medium text-blue-400 hover:text-blue-300 transition-colors"> {# tmpl-allow TMPL005: needs button inline_link #}
               {% trans 'Sign in here' %}
             </a>
           </p>

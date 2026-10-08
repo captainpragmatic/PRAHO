@@ -23,6 +23,7 @@ from django.utils.http import urlencode
 from apps.api_client.services import PlatformAPIError, api_client
 from apps.common import counters
 from apps.common.localisation_services import store_localisation_preferences
+from apps.common.store_unavailable import end_session_or_unavailable
 
 logger = logging.getLogger(__name__)
 
@@ -100,16 +101,16 @@ class PortalAuthenticationMiddleware:
         # Check if session has exceeded its intended lifetime
         if not self._is_session_age_valid(request):
             logger.warning(f"⏰ [Auth] Session for user {session_user_id} has exceeded lifetime, forcing logout")
-            request.session.flush()
-            return self.redirect_to_login(request)
+            unavailable_response = end_session_or_unavailable(request)
+            return unavailable_response if unavailable_response is not None else self.redirect_to_login(request)
 
         # Tier 2: Sophisticated validation with timing controls
         validation_result = self.validate_customer_with_timing(request, str(session_user_id))
 
         if not validation_result:
             logger.warning(f"⚠️ [Auth] User {session_user_id} validation failed, clearing session")
-            request.session.flush()
-            return self.redirect_to_login(request)
+            unavailable_response = end_session_or_unavailable(request)
+            return unavailable_response if unavailable_response is not None else self.redirect_to_login(request)
 
         # Attach customer data to request for views
         # Priority: selected_customer_id (company switcher) > active_customer_id > customer_id (fallback)
@@ -171,7 +172,11 @@ class PortalAuthenticationMiddleware:
         to the production PUBLIC_URLS list.
         """
         extra_public_urls = getattr(settings, "PORTAL_EXTRA_PUBLIC_URLS", ())
-        return any(path.startswith(public_url) for public_url in (*self.PUBLIC_URLS, *extra_public_urls))
+        # Resolve development-only prefixes per request; never mutate the shared class list.
+        debug_public_urls = ("/__debug__/",) if settings.DEBUG and "debug_toolbar" in settings.INSTALLED_APPS else ()
+        return any(
+            path.startswith(public_url) for public_url in (*self.PUBLIC_URLS, *extra_public_urls, *debug_public_urls)
+        )
 
     def redirect_to_login(self, request: HttpRequest) -> HttpResponse:
         """Redirect to login preserving the originally requested URL."""

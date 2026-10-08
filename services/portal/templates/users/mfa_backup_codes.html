@@ -5,9 +5,9 @@
 <div class="max-w-2xl mx-auto space-y-6">
   <h1 class="text-2xl text-white">{% trans 'Backup Codes' %}</h1>
   {% if backup_codes %}
-    <p class="text-yellow-300">{% trans 'Save these codes now. They are shown only once. Each code can be used once.' %}</p>
+    {% alert _("Save these codes now. They are shown only once. Each code can be used once.") variant="warning" %}
     <div class="grid grid-cols-2 gap-4">
-      {% for code in backup_codes %}<code class="bg-slate-800 p-4 text-green-400">{{ code }}</code>{% endfor %}
+      {% for code in backup_codes %}<code class="bg-slate-800 p-4 text-green-400">{{ code }}</code>{% endfor %} {# tmpl-allow TMPL005: needs badge code_element #}
     </div>
   {% else %}
     <p class="text-slate-300">{% trans 'Previously issued codes cannot be displayed again.' %} {{ remaining }} {% trans 'codes remaining' %}.</p>
@@ -21,6 +21,6 @@
     {% form_field form.token icon_left="lock" autocomplete="one-time-code" %}
     {% trans 'Generate New Backup Codes' as generate_label %}{% button generate_label type="submit" variant="primary" %}
   </form>
-  <a href="{% url 'users:mfa_management' %}" class="text-blue-400">{% trans 'Back to MFA Management' %}</a>
+  <a href="{% url 'users:mfa_management' %}" class="text-blue-400">{% trans 'Back to MFA Management' %}</a> {# tmpl-allow TMPL005: needs button inline_link #}
 </div>
 {% endblock %}

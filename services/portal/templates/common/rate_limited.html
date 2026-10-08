@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% trans "Temporarily rate limited" %} - PRAHO Portal{% endblock %}
+
+{% block content %}
+<div class="px-4 max-w-4xl mx-auto">
+  {% include "components/rate_limit_inline_alert.html" %}
+</div>
+{% endblock %}

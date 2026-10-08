@@ -214,6 +214,9 @@
                                     data-csrf="{{ csrf_token }}"
                                     data-domain="{{ account.domain }}"
                                     data-protection-operation="{% if account.protected_from_deletion %}disable{% else %}enable{% endif %}"
+                                    data-confirm-title="{% trans 'Disable Protection' %}"
+                                    data-confirm-message="{% trans 'Deletion protection will be turned off for this account.' %}"
+                                    data-confirm-text="{% trans 'I really am sure I want to do this!' %}"
                                     data-action="invoke" data-invoke="confirmProtectionToggleAction">
                                 {% if account.protected_from_deletion %}
                                     {% icon "lock" %} {% trans "Disable Protection" %}
@@ -227,6 +230,9 @@
                             <button class="w-full px-4 py-2 text-sm font-medium text-red-400 bg-red-500/10 border border-red-500/20 hover:bg-red-500/20 rounded-lg transition-colors"
                                     data-delete-url="{{ delete_url }}"
                                     data-domain="{{ account.domain }}"
+                                    data-confirm-title="{% trans 'Delete Account' %}"
+                                    data-confirm-message="{% trans 'This action cannot be undone.' %}"
+                                    data-confirm-text="{% trans 'I really am sure I want to do this!' %}"
                                     data-action="invoke" data-invoke="confirmAccountDeleteAction">
                                 {% icon "x" %} {% trans "Delete Account" %}
                             </button>
@@ -363,13 +369,13 @@
                                 </div>
                             </div>
 
-                            {% if job.error_message %}
+                            {% if job.status == 'failed' and job.status_message %}
                             <div class="mt-3 p-3 bg-red-900/20 border border-red-700 rounded text-sm">
                                 <div class="flex items-start">
                                     <span class="text-red-400 mr-2">{% icon "x" %}</span>
                                     <div class="text-red-300">
                                         <p class="font-medium">{% trans "Error" %}:</p>
-                                        <p class="mt-1">{{ job.error_message|truncatechars:200 }}</p>
+                                        <p class="mt-1">{{ job.status_message|truncatechars:200 }}</p>
                                     </div>
                                 </div>
                             </div>
@@ -411,18 +417,18 @@
                             <h4 class="text-md font-medium text-slate-200">{% trans "Basic Settings" %}</h4>
 
                             <div>
-                                <label class="block text-sm font-medium text-slate-300 mb-1">
+                                <label for="account-contact-email" class="block text-sm font-medium text-slate-300 mb-1">
                                     {% trans "Contact Email" %}
                                 </label>
-                                <input type="email" value="{{ account.contact_email|default:'' }}"
+                                <input id="account-contact-email" type="email" value="{{ account.contact_email|default:'' }}"
                                        class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
                             </div>
 
                             <div>
-                                <label class="block text-sm font-medium text-slate-300 mb-1">
+                                <label for="account-php-version" class="block text-sm font-medium text-slate-300 mb-1">
                                     {% trans "PHP Version" %}
                                 </label>
-                                <select class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <select id="account-php-version" class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
                                     <option>PHP 8.1</option>
                                     <option>PHP 8.2</option>
                                     <option>PHP 8.3</option>
@@ -435,18 +441,18 @@
                             <h4 class="text-md font-medium text-slate-200">{% trans "Resource Limits" %}</h4>
 
                             <div>
-                                <label class="block text-sm font-medium text-slate-300 mb-1">
+                                <label for="account-disk-quota" class="block text-sm font-medium text-slate-300 mb-1">
                                     {% trans "Disk Quota" %} (GB)
                                 </label>
-                                <input type="number" value="{{ account.disk_quota_gb|default:'' }}"
+                                <input id="account-disk-quota" type="number" value="{{ account.disk_quota_gb|default:'' }}"
                                        class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
                             </div>
 
                             <div>
-                                <label class="block text-sm font-medium text-slate-300 mb-1">
+                                <label for="account-bandwidth-quota" class="block text-sm font-medium text-slate-300 mb-1">
                                     {% trans "Bandwidth Quota" %} (GB)
                                 </label>
-                                <input type="number" value="{% if account.bandwidth_quota_mb == -1 %}-1{% elif account.bandwidth_quota_mb %}{{ account.bandwidth_quota_mb|floatformat:0 }}{% endif %}"
+                                <input id="account-bandwidth-quota" type="number" value="{% if account.bandwidth_quota_mb == -1 %}-1{% elif account.bandwidth_quota_mb %}{{ account.bandwidth_quota_mb|floatformat:0 }}{% endif %}"
                                        placeholder="{% trans "Use -1 for unlimited" %}"
                                        class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
                                 <p class="text-xs text-slate-400 mt-1">{% trans "Use -1 for unlimited bandwidth" %}</p>
@@ -490,15 +496,15 @@ function confirmProtectionToggle(button) {
 
     // Only require confirmation for DISABLING protection (dangerous action)
     if (operation === 'disable') {
-        const actionText = 'Disable Protection';
-        const message = `Type "I really am sure I want to do this!" to confirm disabling protection for ${domain}`;
+        const messageElement = document.createElement('div');
+        messageElement.textContent = domain + ': ' + button.dataset.confirmMessage;
 
         // Use the dangerous action modal from base.html
         window.dispatchEvent(new CustomEvent('confirm-dangerous-action', {
             detail: {
-                title: actionText,
-                message: message,
-                confirmText: 'I really am sure I want to do this!',
+                title: button.dataset.confirmTitle,
+                message: messageElement.innerHTML,
+                confirmText: button.dataset.confirmText,
                 action: function() {
                     htmx.ajax('POST', url, {
                         target: '#quick-actions-section',
@@ -522,14 +528,15 @@ function confirmAccountDelete(button) {
     const domain = button.dataset.domain;
     const url = button.dataset.deleteUrl;
 
-    const message = `Type "I really am sure I want to do this!" to confirm permanent deletion of ${domain}`;
+    const messageElement = document.createElement('div');
+    messageElement.textContent = domain + ': ' + button.dataset.confirmMessage;
 
     // Use the dangerous action modal from base.html
     window.dispatchEvent(new CustomEvent('confirm-dangerous-action', {
         detail: {
-            title: 'Delete Virtualmin Account',
-            message: message,
-            confirmText: 'I really am sure I want to do this!',
+            title: button.dataset.confirmTitle,
+            message: messageElement.innerHTML,
+            confirmText: button.dataset.confirmText,
             action: function() {
                 htmx.ajax('DELETE', url, {
                     target: 'body'

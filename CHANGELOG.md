@@ -60,6 +60,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   inherited the project default authentication classes. For customer registration this also
   removed its only rate limit, because presenting a valid token made the request count as
   authenticated and its limit applies to anonymous callers only.
+- Forms no longer write submitted passwords, API secrets or one-time codes back into the page
+  when they fail validation. This covered the registrar, MFA and password-change forms, and
+  the registrar form no longer erases stored API credentials when the secret field is left
+  blank.
+- During a Platform outage the portal's role checks now refuse with an outage page instead of
+  guessing. A customer whose role could not be verified is never let through, and a revoked
+  owner loses access as soon as Platform answers with an empty membership list.
+- A form on the server pages could inject markup through an unescaped value. It is escaped now.
 
 ### Removed
 
@@ -246,6 +254,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   manually.
 - An invoice that an issued credit note reverses can no longer be restored to paid by refund
   bookkeeping. The attempt is refused and logged.
+- The portal shows an outage notice when Platform is unreachable, instead of empty invoice,
+  ticket and service lists that look like the customer has none. Detail pages answer 503, and
+  the dashboard shows its platform-down banner again.
+- When the session store fails, signing out and session expiry end with a 503 that clears
+  the session cookie, instead of a server error.
+- The overdue flag in the portal matches Platform's own definition. Around midnight it used
+  to disagree, and dunning counted overdue days in UTC rather than local time.
+- Ticket search uses one search parameter everywhere, and paging through filtered results no
+  longer repeats or skips tickets. Pagination links in both services keep their filters.
+- Signed-in customers who open the portal's root address go straight to their dashboard.
+- Service detail pages list the service's domains. The portal had been calling an endpoint
+  that never existed.
+- Long service names wrap on mobile instead of being cut off.
+- Signing out on mobile works on the new-ticket page. The ticket form's validation used to
+  intercept the sign-out form.
+- The company's legal name, sender address and contact addresses come from settings on every
+  page and email customers see, including the terms, privacy policy and error pages.
+- Staff can edit draft invoices from the builtin issuer. Saving used to show a success message
+  and change nothing. Drafts from an external issuer, credit notes and drafts with payments are
+  read-only, and the customer, currency and VAT rates of a draft cannot be changed.
+- e-Factura submission is recorded together with the invoice, so a failed enqueue no longer
+  loses it. A daily reconciliation submits anything that was missed, and the e-Factura
+  schedules are created at deploy.
+- e-Factura uses one supplier identity for the XML and the upload, uploads and polls each
+  document in the environment it was created in, and respects the ANAF request quotas, retry
+  delays and retry limit from settings.
+- A paid order is never cancelled by the order timeout. A bank-transfer proforma is valid
+  until the order's bank-transfer timeout, so the deadline customers see is the real one.
+- Payment settlement no longer depends on optional side effects. A failing audit entry or
+  email cannot undo a payment's settlement, and a failed settlement cannot undo a confirmed
+  external issuance.
+- Queued Virtualmin provisioning accepts real service IDs. Every queued provisioning job used
+  to fail validation.
+- Deleting a Virtualmin backup no longer deletes other backups whose names share its prefix.
+  Bulk suspend and activate confirm every account with Virtualmin.
+- Tables with no rows say "No data available." in the visitor's language. The default used to
+  be a hard-coded Romanian string.
+- Shared UI components have their own translation catalog, and the Docker images now include
+  the shared UI templates, scripts and translations. They had been missing since March 2026.
+- The Romanian catalogs are complete again, including every string added in this release.
+  About 1,100 existing translations that showed the wrong text are corrected. Many had been
+  taken from unrelated strings: the cookie banner's "Accept All" read "Acceptată", "Confirm
+  Deletion" read "Configurație", and some error messages were half English. Messages that
+  addressed customers informally now use the formal register.
+- Template, accessibility and dark-mode findings are fixed across both services: missing
+  labels, unlabeled controls and pages that stayed light in dark mode.
+- A customer who hits the registration limit is told "Too many registration attempts" and keeps
+  what they typed, except the passwords. Platform used to answer with a server error, so the
+  portal asked them to check information that was correct. When registration is briefly
+  unavailable the portal now says so as well.
+- Invoice and proforma PDFs, proforma emails and payment refusals are translated. Their strings
+  were never extracted, so Romanian customers got "FISCAL INVOICE", "TOTAL TO PAY" and
+  "Supplier:" in English. The checkout progress step "Product Selection" is translated again.
 
 
 ### Added
@@ -363,6 +424,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dropped rather than squashed. Delete and recreate every local development and E2E database:
   an old database would look up to date to Django while its tables differ. A fresh install now
   names the RON currency "Romanian Leu" instead of leaving it blank.
+- 40 settings that were stored and editable but never read now take effect. Where a setting's
+  catalog default differed from what the code enforced, the default is now the enforced value.
+  A stored row equal to the old default is updated, and any other stored value is kept and
+  reported, because it now takes effect.
+- Seeded default rows no longer override deployment configuration. Settings that fall back to
+  the deployment show the value they really inherit.
+- The template, accessibility and dark-mode checks block a build. Coverage floors are enforced
+  on every pull request, including 80% for provisioning.
+
+### Removed
+
+- 39 settings that no code enforced are retired, and their stored rows are deleted on the next
+  `setup_default_settings` run. They never had any effect.
+- The unused `romanian_business_context` context processor, which ran two lookups on every
+  render and failed for currencies other than RON, EUR and USD.
 
 ---
 

@@ -10,10 +10,12 @@ import json
 import logging
 import re
 import uuid
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, ClassVar, Final, cast
 
+from django.conf import settings as django_settings
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
@@ -34,6 +36,9 @@ if TYPE_CHECKING:
     pass
 
 logger = logging.getLogger(__name__)
+
+# Context-local no-row previews reuse consumers without altering other requests or tasks.
+_DEPLOYMENT_READ_KEYS: ContextVar[frozenset[str]] = ContextVar("deployment_read_keys", default=frozenset())
 
 # Type alias for setting values
 SettingValue = str | int | bool | Decimal | list[Any] | dict[str, Any] | None
@@ -94,7 +99,7 @@ class ChangeSetOutcome:
     """✅ Applied change set — fresh rows for the UI to rebaseline on"""
 
     change_set_id: str
-    settings: dict[str, SystemSetting]
+    settings: dict[str, SystemSetting | None]
 
 
 class SettingsService:
@@ -107,6 +112,25 @@ class SettingsService:
 
     # Single source of truth: the settings catalog (ADR-0042)
     DEFAULT_SETTINGS: ClassVar[dict[str, Any]] = dict(CATALOG_DEFAULTS)
+
+    # Zero cannot represent a usable attempt or blocking operation budget.
+    # Keep this guard scoped: other settings deliberately use zero to disable retries,
+    # expire caches, or deny requests, and deployment-owned fallbacks remain separate.
+    _POSITIVE_OPERATIONAL_INTEGER_KEYS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "billing.efactura_api_max_retries",
+            "customers.task_soft_time_limit",
+            "customers.task_time_limit",
+            "infrastructure.health_check_timeout_seconds",
+            "infrastructure.network_probe_timeout_seconds",
+            "orders.task_time_limit",
+            "provisioning.ssh_timeout",
+            "provisioning.sudo_command_timeout",
+            "provisioning.task_soft_time_limit",
+            "provisioning.task_time_limit",
+            "virtualmin.max_retries",
+        }
+    )
 
     @classmethod
     def _get_cache_key(cls, key: str) -> str:
@@ -174,6 +198,17 @@ class SettingsService:
                 cache.delete(cache_key, version=cls.CACHE_VERSION)
         logger.debug("⚡ [Settings] Database hit for key: %s (cache enabled: %s)", key, use_cache)
         return value
+
+    @classmethod
+    def get_stored_setting(cls, key: str) -> SettingValue:
+        """Read only the stored row, without consulting catalog defaults or their cache."""
+        if key in _DEPLOYMENT_READ_KEYS.get():
+            return None
+        try:
+            setting = SystemSetting.objects.get(key=key)
+        except SystemSetting.DoesNotExist:
+            return None
+        return setting.get_typed_value()
 
     @classmethod
     def _is_sensitive_key(cls, key: str) -> bool:
@@ -504,13 +539,24 @@ class SettingsService:
     @classmethod
     @monitor_performance()
     def get_integer_setting(cls, key: str, default: int = 0) -> int:
-        """🔢 Get integer setting with type safety"""
+        """🔢 Get integer setting with type safety and legacy operational budget guards."""
         value = cls.get_setting(key, default)
         try:
-            return int(value)  # type: ignore[arg-type]
+            integer_value = int(cast("int | str", value))
         except (ValueError, TypeError):
             logger.warning("⚠️ [Settings] Invalid integer value for %s: %s", key, value)
             return default
+
+        if integer_value <= 0 and key in cls._POSITIVE_OPERATIONAL_INTEGER_KEYS:
+            fallback = cast("int", CATALOG_DEFAULTS[key])
+            logger.warning(
+                "⚠️ [Settings] Ignoring non-positive integer value for %s: %s; using default %s",
+                key,
+                integer_value,
+                fallback,
+            )
+            return fallback
+        return integer_value
 
     @classmethod
     @monitor_performance()
@@ -568,14 +614,47 @@ class SettingsService:
                 SettingValidationError(key=key, field="system", message=f"Unexpected error: {e!s}", code="system_error")
             )
 
+    @staticmethod
+    def _audit_override_clear(
+        row: SystemSetting,
+        *,
+        user_id: int | None,
+        reason: str | None,
+        change_set_id: str,
+    ) -> None:
+        """Persist the attributed transition before deleting the override in the same transaction."""
+        from apps.audit.services import AuditService  # noqa: PLC0415  # ADR-0007
+        from apps.users.models import User  # noqa: PLC0415  # ADR-0007
+
+        sensitive = row.is_sensitive or CATALOG_BY_KEY[row.key].sensitive
+        user = User.objects.filter(pk=user_id).first() if user_id is not None else None
+        AuditService.log_simple_event(
+            event_type="setting_override_cleared",
+            user=user,
+            actor_type="user" if user is not None else "system",
+            content_object=row,
+            description=str(_("Setting override cleared: %(key)s")) % {"key": row.key},
+            old_values={"value": "(hidden)" if sensitive else str(row.get_display_value())},
+            new_values={"value": "inherited"},
+            metadata={
+                "setting_key": row.key,
+                "reason": reason,
+                "change_set_id": change_set_id,
+                "is_sensitive": sensitive,
+                "inherited": True,
+            },
+        )
+
     @classmethod
     @monitor_performance()
     def apply_change_set(  # noqa: C901, PLR0912  # Validation, locking, and write phases in one auditable unit
         cls,
-        changes: dict[str, Any],
+        changes: dict[str, object],
         baselines: dict[str, str | None],
         user_id: int | None = None,
         reason: str | None = None,
+        *,
+        allow_sensitive_clear: bool = False,
     ) -> Result[ChangeSetOutcome, ChangeSetError]:
         """
         📦 Apply a set of non-sensitive setting changes atomically.
@@ -599,6 +678,13 @@ class SettingsService:
                     SettingValidationError(key=key, field="key", message="Unknown setting key", code="unknown_key")
                 )
                 continue
+            # Only the dedicated credential endpoint may request a sensitive clear.
+            if (
+                value is None
+                and CATALOG_BY_KEY[key].deployment_fallback
+                and (not cls._is_sensitive_key(key) or allow_sensitive_clear)
+            ):
+                continue
             if cls._is_sensitive_key(key):
                 errors.append(
                     SettingValidationError(
@@ -617,7 +703,7 @@ class SettingsService:
             return Err(ChangeSetError(code="validation", errors=errors))
 
         change_set_id = str(uuid.uuid4())
-        applied: dict[str, SystemSetting] = {}
+        applied: dict[str, SystemSetting | None] = {}
         conflicts: list[ChangeSetConflict] = []
         with transaction.atomic():
             sorted_keys = sorted(changes)
@@ -633,7 +719,9 @@ class SettingsService:
                 if row is None:
                     if baseline is not None:
                         conflicts.append(ChangeSetConflict(key=key, server_updated_at=None))
-                elif row.is_sensitive:
+                elif row.is_sensitive and not (
+                    allow_sensitive_clear and changes[key] is None and CATALOG_BY_KEY[key].deployment_fallback
+                ):
                     errors.append(
                         SettingValidationError(
                             key=key,
@@ -651,6 +739,13 @@ class SettingsService:
                 )
 
             for key in sorted_keys:
+                if changes[key] is None and CATALOG_BY_KEY[key].deployment_fallback:
+                    row = locked.get(key)
+                    if row is not None:
+                        cls._audit_override_clear(row, user_id=user_id, reason=reason, change_set_id=change_set_id)
+                        row.delete()
+                    applied[key] = None
+                    continue
                 result = cls._write_setting_locked(
                     key,
                     changes[key],
@@ -876,6 +971,83 @@ class SettingsService:
         except Exception as e:
             logger.error("🔥 [Settings] Error getting settings info: %s", str(e))
             return {}
+
+
+def get_default_from_email() -> str:
+    """Prefer an explicit sender; absent or empty values inherit the deployment."""
+    stored = SettingsService.get_stored_setting("company.email_noreply")
+    if stored in (None, ""):
+        return django_settings.DEFAULT_FROM_EMAIL
+    return str(stored)
+
+
+def _efactura_deployment_value(key: str) -> object:
+    """Use the consumer's deployment/default tiers and type conversion without reading a row."""
+    from apps.billing.efactura.settings import EFacturaSettings  # noqa: PLC0415  # ADR-0007
+
+    class DeploymentSettings(EFacturaSettings):
+        @property
+        def settings_service(self) -> None:
+            return None
+
+    reader = DeploymentSettings()
+    definition = CATALOG_BY_KEY[key]
+    if key == "efactura.environment":
+        return reader.environment.value
+    if definition.data_type == "boolean":
+        return reader._get_bool(key, bool(definition.default))
+    if definition.data_type == "integer":
+        return reader._get_int(key, int(str(definition.default)))
+    if definition.data_type == "decimal":
+        return reader._get_decimal(key, str(definition.default))
+    if definition.data_type == "string":
+        return reader._get_string(key, str(definition.default))
+    return cast("object", reader._get_setting(key))
+
+
+def get_deployment_fallback(key: str) -> object:
+    """Resolve the same inherited value as the consumer, even while an override exists."""
+    oauth_fields = {
+        "efactura.oauth.client_id": "client_id",
+        "efactura.oauth.client_secret": "client_secret",
+    }
+    keys = frozenset(oauth_fields) if key in oauth_fields else frozenset({key})
+    token = _DEPLOYMENT_READ_KEYS.set(keys)
+    try:
+        if key == "company.email_noreply":
+            return get_default_from_email()
+        if key.startswith("efactura.company."):
+            from apps.billing.efactura.xml_builder import (  # noqa: PLC0415  # ADR-0007
+                _supplier_setting,
+                get_supplier_info,
+            )
+
+            supplier = get_supplier_info()
+            fallbacks: dict[str, str] = {
+                "efactura.company.name": supplier.name,
+                "efactura.company.cui": supplier.tax_id,
+                "efactura.company.registration_number": supplier.registration_number,
+                "efactura.company.street": supplier.street,
+                "efactura.company.city": supplier.city,
+                "efactura.company.postal_code": supplier.postal_code,
+                "efactura.company.country_code": supplier.country_code,
+                "efactura.company.email": supplier.email,
+                "efactura.company.phone": supplier.phone,
+                "efactura.company.bank_account": cast("str", getattr(django_settings, "COMPANY_BANK_ACCOUNT", "")),
+                "efactura.company.bank_name": cast("str", getattr(django_settings, "COMPANY_BANK_NAME", "")),
+            }
+            return _supplier_setting(key, fallbacks[key])
+        if key in oauth_fields:
+            from apps.billing.efactura.client import EFacturaConfig  # noqa: PLC0415  # ADR-0007
+
+            config = EFacturaConfig.from_settings(environment="test")
+            return cast("str", getattr(config, oauth_fields[key]))
+        if key.startswith("efactura."):
+            return _efactura_deployment_value(key)
+        # Virtualmin quotas are owned by the selected server, rather than a Django setting.
+        return None
+    finally:
+        _DEPLOYMENT_READ_KEYS.reset(token)
 
 
 # ===============================================================================

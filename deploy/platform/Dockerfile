@@ -36,7 +36,7 @@ RUN uv sync --group platform --group prod --frozen --no-dev
 # ---------------------------------------------------------------------------
 FROM builder AS dev-builder
 
-# Outside /app: the dev stack mounts the source over /app, which would hide a venv there. The dev
+# Outside /app: the dev stack mounts the source under /app, which would hide a venv there. The dev
 # group adds the debug toolbar and colorlog that config.settings.dev imports; the service code
 # comes from that mount, so the workspace package itself is not installed.
 ENV UV_PROJECT_ENVIRONMENT=/opt/venv
@@ -46,7 +46,7 @@ FROM python:3.13-slim AS dev
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app \
+    PYTHONPATH=/app/services/platform \
     PATH="/opt/venv/bin:$PATH" \
     DJANGO_SETTINGS_MODULE=config.settings.dev \
     SERVICE_NAME=platform \
@@ -62,7 +62,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=dev-builder /opt/venv /opt/venv
-WORKDIR /app
+# The repository layout, as in the runtime image: REPO_ROOT is /app, so shared/ sits at /app/shared.
+WORKDIR /app/services/platform
 EXPOSE 8700
 # No entrypoint: the dev stack runs migrations, then the autoreloading development server.
 CMD ["python", "manage.py", "runserver", "0.0.0.0:8700"]
@@ -79,7 +80,7 @@ LABEL description="PRAHO Platform Service - Admin and business logic"
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     DJANGO_SETTINGS_MODULE=config.settings.prod \
-    PYTHONPATH=/app \
+    PYTHONPATH=/app/services/platform \
     SERVICE_NAME=platform
 
 # Runtime-only system packages (no build-essential, no git, no uv)
@@ -93,7 +94,7 @@ RUN apt-get update \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+WORKDIR /app/services/platform
 
 # Copy pre-built venv from builder stage
 COPY --from=builder /app/.venv /app/.venv
@@ -102,27 +103,30 @@ COPY --from=builder /app/.venv /app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 
 # Copy platform service code (includes assets/ and static/)
-COPY services/platform/ ./
-
-# Shared design-system templates and static files (ADR-0035). Settings load them from
-# REPO_ROOT/shared/ui, and REPO_ROOT is / here (BASE_DIR is /app).
-COPY shared/ui /shared/ui
+COPY services/platform/ /app/services/platform/
+COPY shared/ /app/shared/
 
 # Copy entrypoint script
-COPY deploy/platform/entrypoint.sh /app/entrypoint.sh
+COPY deploy/platform/entrypoint.sh /app/deploy/platform/entrypoint.sh
 
-# Create required runtime directories
-RUN mkdir -p /app/staticfiles \
-    && mkdir -p /app/media \
-    && mkdir -p /app/logs \
-    && mkdir -p /var/log/praho
+# Preserve legacy volume destinations while settings keep their service-relative paths
+RUN mkdir -p /app/services/platform/staticfiles \
+    && mkdir -p /app/services/platform/media \
+    && mkdir -p /app/services/platform/logs \
+    && mkdir -p /var/log/praho \
+    && mv /app/services/platform/staticfiles /app/staticfiles \
+    && ln -s /app/staticfiles /app/services/platform/staticfiles \
+    && mv /app/services/platform/media /app/media \
+    && ln -s /app/media /app/services/platform/media \
+    && mv /app/services/platform/logs /app/logs \
+    && ln -s /app/logs /app/services/platform/logs
 
 # Create non-root user
 RUN addgroup --system django \
     && adduser --system --group django
 
 # Set proper permissions
-RUN chmod +x /app/entrypoint.sh \
+RUN chmod +x /app/deploy/platform/entrypoint.sh \
     && chown -R django:django /app \
     && chown -R django:django /var/log/praho
 USER django
@@ -134,4 +138,4 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=600s --retries=3 \
 EXPOSE 8700
 
 # Entrypoint runs migrations, collectstatic, and setup_initial_data before Gunicorn
-ENTRYPOINT ["/app/entrypoint.sh"]
+ENTRYPOINT ["/app/deploy/platform/entrypoint.sh"]

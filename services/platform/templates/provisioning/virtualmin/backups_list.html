@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% load i18n ui_components %}
+
+{% block title %}{% trans "Virtualmin Backups" %}{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+  <h1 class="text-2xl font-bold text-slate-100">{% trans "Virtualmin Backups" %}</h1>
+  <form method="get" class="space-y-4 rounded-lg border border-slate-700 bg-slate-800 p-6">
+    <div>
+      <label for="backup-domain" class="text-slate-100">{% trans "Domain" %}</label>
+      <select id="backup-domain" name="domain" class="bg-slate-900 text-slate-100">
+        <option value="">{% trans "All domains" %}</option>
+        {% for domain in filters.domains %}
+          <option value="{{ domain }}" {% if domain == filters.domain_filter %}selected{% endif %}>{{ domain }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="backup-type" class="text-slate-100">{% trans "Backup type" %}</label>
+      <select id="backup-type" name="type" class="bg-slate-900 text-slate-100">
+        <option value="">{% trans "All types" %}</option>
+        {% for backup_type, backup_label in filters.backup_types %}
+          <option value="{{ backup_type }}" {% if backup_type == filters.backup_type_filter %}selected{% endif %}>
+            {{ backup_label }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="backup-age" class="text-slate-100">{% trans "Maximum age in days" %}</label>
+      <input id="backup-age" name="max_age" type="number" min="1" value="{{ filters.max_age_days }}" required>
+    </div>
+    {% trans "Filter backups" as filter_label %}
+    {% button filter_label type="submit" variant="primary" %}
+  </form>
+  <div class="overflow-x-auto rounded-lg border border-slate-700 bg-slate-800 p-6">
+    <table class="w-full text-left text-slate-100">
+      <caption class="sr-only">{% trans "Available backups" %}</caption>
+      <thead>
+        <tr>
+          <th scope="col">{% trans "Backup ID" %}</th>
+          <th scope="col">{% trans "Domain" %}</th>
+          <th scope="col">{% trans "Type" %}</th>
+          <th scope="col">{% trans "Created" %}</th>
+          <th scope="col">{% trans "Status" %}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for backup in backups %}
+          <tr>
+            <td>{{ backup.backup_id }}</td>
+            <td>{{ backup.domain }}</td>
+            <td>{{ backup.type_label }}</td>
+            <td>{{ backup.created_at }}</td>
+            <td>{% badge backup.status_label variant="secondary" %}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="5">{% trans "No backups found." %}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

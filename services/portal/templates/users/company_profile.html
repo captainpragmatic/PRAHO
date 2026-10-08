@@ -21,11 +21,8 @@
             </a>
 
             {% if can_edit_profile %}
-            <a href="{% url 'users:company_profile_edit' %}"
-               class="inline-flex items-center px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-slate-900 transition-colors">
-                {% icon "edit" size="sm" css_class="mr-2" %}
-                {% trans "Edit Company Profile" %}
-            </a>
+            {% url 'users:company_profile_edit' as wp16_url %}
+            {% button _("Edit Company Profile") href=wp16_url variant="primary" icon="edit" %}
             {% else %}
             <div class="inline-flex items-center px-6 py-3 bg-gray-600 text-gray-300 font-medium rounded-lg cursor-not-allowed">
                 {% icon "lock" size="sm" css_class="mr-2" %}
@@ -168,7 +165,7 @@
                         <dt class="text-sm font-medium text-slate-400 mb-1">{% trans "Primary Email" %}</dt>
                         <dd class="text-lg text-white">
                             {% if company_data.contact.primary_email %}
-                                <a href="mailto:{{ company_data.contact.primary_email }}" class="text-blue-400 hover:text-blue-300 transition-colors">
+                                <a href="mailto:{{ company_data.contact.primary_email }}" class="text-blue-400 hover:text-blue-300 transition-colors"> {# tmpl-allow TMPL005: needs button inline_link #}
                                     {{ company_data.contact.primary_email }}
                                 </a>
                             {% else %}
@@ -182,7 +179,7 @@
                         <dt class="text-sm font-medium text-slate-400 mb-1">{% trans "Primary Phone" %}</dt>
                         <dd class="text-lg text-white">
                             {% if company_data.contact.primary_phone %}
-                                <a href="tel:{{ company_data.contact.primary_phone }}" class="text-blue-400 hover:text-blue-300 transition-colors font-mono">
+                                <a href="tel:{{ company_data.contact.primary_phone }}" class="text-blue-400 hover:text-blue-300 transition-colors font-mono"> {# tmpl-allow TMPL005: needs button inline_link #}
                                     {{ company_data.contact.primary_phone }}
                                 </a>
                             {% else %}
@@ -197,7 +194,7 @@
                         <dd class="text-lg text-white">
                             {% if company_data.contact.website %}
                                 <a href="{{ company_data.contact.website }}" target="_blank" rel="noopener noreferrer"
-                                   class="text-blue-400 hover:text-blue-300 transition-colors inline-flex items-center">
+                                   class="text-blue-400 hover:text-blue-300 transition-colors inline-flex items-center"> {# tmpl-allow TMPL005: needs button inline_link #}
                                     {{ company_data.contact.website }}
                                     {% icon "external" size="sm" css_class="ml-1" %}
                                 </a>
@@ -215,7 +212,7 @@
             <a href="{% url 'customers:team' %}"
                class="flex items-center p-4 bg-slate-800 border border-slate-700 rounded-xl hover:bg-slate-700/70 transition-colors group">
                 <div class="w-10 h-10 bg-slate-700 rounded-lg flex items-center justify-center mr-4 group-hover:bg-slate-600 transition-colors">
-                    {% icon "users" size="md" css_class="text-blue-400" %}
+                    {% icon "users" size="md" css_class="text-blue-400" %} {# tmpl-allow TMPL005: needs badge unboxed_icon #}
                 </div>
                 <div>
                     <div class="text-white font-medium text-sm">{% trans "Team Members" %}</div>
@@ -226,7 +223,7 @@
             <a href="{% url 'customers:tax_profile' %}"
                class="flex items-center p-4 bg-slate-800 border border-slate-700 rounded-xl hover:bg-slate-700/70 transition-colors group">
                 <div class="w-10 h-10 bg-slate-700 rounded-lg flex items-center justify-center mr-4 group-hover:bg-slate-600 transition-colors">
-                    {% icon "receipt" size="md" css_class="text-green-400" %}
+                    {% icon "receipt" size="md" css_class="text-green-400" %} {# tmpl-allow TMPL005: needs badge unboxed_icon #}
                 </div>
                 <div>
                     <div class="text-white font-medium text-sm">{% trans "Tax Profile" %}</div>
@@ -249,7 +246,7 @@
         <!-- Help Text -->
         <div class="mt-6 p-4 bg-slate-800/50 rounded-lg border border-slate-700">
             <div class="flex items-start">
-                {% icon "info" size="md" css_class="text-blue-400 mr-3 mt-0.5 flex-shrink-0" %}
+                {% icon "info" size="md" css_class="text-blue-400 mr-3 mt-0.5 flex-shrink-0" %} {# tmpl-allow TMPL005: needs badge unboxed_icon #}
                 <div class="text-sm text-slate-400">
                     <p class="mb-2">{% trans "Your company profile information is used for:" %}</p>
                     <ul class="list-disc list-inside space-y-1 ml-4">
@@ -260,7 +257,7 @@
                     </ul>
                     <p class="mt-2">
                         {% trans "Keep your information up-to-date to ensure smooth operations." %}
-                        <a href="{% url 'users:company_profile_edit' %}" class="text-blue-400 hover:text-blue-300 font-medium transition-colors">
+                        <a href="{% url 'users:company_profile_edit' %}" class="text-blue-400 hover:text-blue-300 font-medium transition-colors"> {# tmpl-allow TMPL005: needs button inline_link #}
                             {% trans "Update now" %}
                         </a>
                     </p>

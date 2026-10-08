@@ -21,7 +21,7 @@
             <!-- Data Processing Consent -->
             <div class="flex items-center justify-between p-3 bg-slate-700 rounded-lg">
               <div class="flex items-center">
-                <span class="text-green-400 mr-2">{% icon "lock" size="sm" %}</span>
+                <span class="text-green-400 mr-2">{% icon "lock" size="sm" %}</span> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
                 <div>
                   <div class="text-sm font-medium text-white">{% trans 'Data Processing' %}</div>
                   <div class="text-xs text-slate-400">{% trans 'Required for service operation' %}</div>
@@ -37,7 +37,7 @@
             <!-- Marketing Consent -->
             <div class="flex items-center justify-between p-3 bg-slate-700 rounded-lg">
               <div class="flex items-center">
-                <span class="text-blue-400 mr-2">{% icon "mail" size="sm" %}</span>
+                <span class="text-blue-400 mr-2">{% icon "mail" size="sm" %}</span> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
                 <div>
                   <div class="text-sm font-medium text-white">{% trans 'Marketing Communications' %}</div>
                   <div class="text-xs text-slate-400">{% trans 'Newsletters and promotional content' %}</div>
@@ -57,21 +57,21 @@
           <h4 class="text-sm font-semibold text-slate-300">{% trans 'Quick Actions' %}</h4>
 
           <div class="space-y-3">
-            <a href="{% url 'users:data_export' %}" class="flex items-center p-3 bg-blue-900/50 hover:bg-blue-800/60 rounded-lg transition-colors group">
-              <span class="text-blue-400 mr-3">{% icon "document" size="md" %}</span>
+            <a href="{% url 'users:data_export' %}" class="flex items-center p-3 bg-blue-900/50 hover:bg-blue-800/60 rounded-lg transition-colors group"> {# tmpl-allow TMPL005: needs button inline_link #}
+              <span class="text-blue-400 mr-3">{% icon "document" size="md" %}</span> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
               <div class="flex-1">
                 <div class="text-sm font-medium text-white group-hover:text-blue-200">
                   {% trans 'Export My Data' %}
                 </div>
-                <div class="text-xs text-blue-300">
+                <div class="text-xs text-blue-300"> {# tmpl-allow TMPL005: needs alert nested_content #}
                   {% trans 'Download your data' %}
                 </div>
               </div>
-              <span class="text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity">→</span>
+              <span class="text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity">→</span> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
             </a>
 
             <a href="{% url 'users:consent_history' %}" class="flex items-center p-3 bg-slate-700/50 hover:bg-slate-600/60 rounded-lg transition-colors group">
-              <span class="text-yellow-400 mr-3">{% icon "document" size="md" %}</span>
+              <span class="text-yellow-400 mr-3">{% icon "document" size="md" %}</span> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
               <div class="flex-1">
                 <div class="text-sm font-medium text-white group-hover:text-yellow-200">
                   {% trans 'Consent History' %}
@@ -80,7 +80,7 @@
                   {% trans 'View consent changes' %}
                 </div>
               </div>
-              <span class="text-yellow-400 opacity-0 group-hover:opacity-100 transition-opacity">→</span>
+              <span class="text-yellow-400 opacity-0 group-hover:opacity-100 transition-opacity">→</span> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
             </a>
           </div>
         </div>
@@ -93,9 +93,8 @@
         {% trans 'Manage which cookies you allow on this website. You can change your preferences at any time.' %}
       </p>
       <div class="flex flex-wrap gap-3">
-        <button data-action="cookie-prefs" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors">
-          {% icon "settings" size="sm" css_class="text-white" %} {% trans 'Manage Cookie Preferences' %}
-        </button>
+        {% trans 'Manage Cookie Preferences' as cookie_preferences_label %}
+        {% button cookie_preferences_label data_action="cookie-prefs" icon="settings" variant="primary" %}
         <a href="/cookie-policy/" class="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors inline-block">
           {% icon "document" size="sm" css_class="text-white" %} {% trans 'Cookie Policy' %}
         </a>
@@ -107,37 +106,37 @@
 
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         <div class="p-4 bg-slate-700 rounded-lg">
-          <div class="text-green-400 mb-2">{% icon "search" size="xl" %}</div>
+          <div class="text-green-400 mb-2">{% icon "search" size="xl" %}</div> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
           <h4 class="text-white font-medium mb-1">{% trans 'Right to Access' %}</h4>
           <p class="text-xs text-slate-400">{% trans 'View what personal data we hold about you' %}</p>
         </div>
 
         <div class="p-4 bg-slate-700 rounded-lg">
-          <div class="text-blue-400 mb-2">{% icon "document" size="xl" %}</div>
+          <div class="text-blue-400 mb-2">{% icon "document" size="xl" %}</div> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
           <h4 class="text-white font-medium mb-1">{% trans 'Right to Rectification' %}</h4>
           <p class="text-xs text-slate-400">{% trans 'Correct any inaccurate personal data' %}</p>
         </div>
 
         <div class="p-4 bg-slate-700 rounded-lg">
-          <div class="text-red-400 mb-2">{% icon "x" size="xl" %}</div>
+          <div class="text-red-400 mb-2">{% icon "x" size="xl" %}</div> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
           <h4 class="text-white font-medium mb-1">{% trans 'Right to Erasure' %}</h4>
           <p class="text-xs text-slate-400">{% trans 'Request deletion of your data ("Right to be forgotten")' %}</p>
         </div>
 
         <div class="p-4 bg-slate-700 rounded-lg">
-          <div class="text-yellow-400 mb-2">{% icon "download" size="xl" %}</div>
+          <div class="text-yellow-400 mb-2">{% icon "download" size="xl" %}</div> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
           <h4 class="text-white font-medium mb-1">{% trans 'Right to Portability' %}</h4>
           <p class="text-xs text-slate-400">{% trans 'Export your data in machine-readable format' %}</p>
         </div>
 
         <div class="p-4 bg-slate-700 rounded-lg">
-          <div class="text-purple-400 mb-2">{% icon "ban" size="xl" %}</div>
+          <div class="text-purple-400 mb-2">{% icon "ban" size="xl" %}</div> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
           <h4 class="text-white font-medium mb-1">{% trans 'Right to Object' %}</h4>
           <p class="text-xs text-slate-400">{% trans 'Object to processing for direct marketing' %}</p>
         </div>
 
         <div class="p-4 bg-slate-700 rounded-lg">
-          <div class="text-orange-400 mb-2">{% icon "clock" size="xl" %}</div>
+          <div class="text-orange-400 mb-2">{% icon "clock" size="xl" %}</div> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
           <h4 class="text-white font-medium mb-1">{% trans 'Right to Restrict' %}</h4>
           <p class="text-xs text-slate-400">{% trans 'Limit how we process your data' %}</p>
         </div>
@@ -150,7 +149,7 @@
       <div class="bg-slate-700 rounded-lg p-4">
         <p class="text-white mb-2">{% trans 'For any privacy-related questions or to exercise your rights:' %}</p>
         <div class="text-sm text-slate-300 space-y-1">
-          <p><strong>{% trans 'Email:' %}</strong> privacy@pragmatichost.com</p>
+          <p><strong>{% trans 'Email:' %}</strong> {{ company.email_privacy }}</p>
           <p><strong>{% trans 'Subject:' %}</strong> GDPR Request - {{ customer_email }}</p>
           <p class="text-xs text-slate-400 mt-2">
             {% trans 'We will respond to your request within 30 days as required by GDPR Article 12.' %}

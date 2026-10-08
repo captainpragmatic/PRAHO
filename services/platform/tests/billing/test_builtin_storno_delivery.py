@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 
 from django.core import mail
 from django.test import override_settings
-from django.utils import timezone
+from django.utils import timezone, translation
 
 from apps.billing.efactura.client import UploadResponse
 from apps.billing.efactura.models import EFacturaDocument, EFacturaDocumentType, EFacturaStatus
@@ -56,9 +56,11 @@ def pdf_rows(document: Invoice) -> list[str]:
 
 
 def _anaf_document(invoice: Invoice, status: str) -> EFacturaDocument:
-    document = EFacturaDocument.objects.create(
-        invoice=invoice, document_type=EFacturaDocumentType.INVOICE.value, environment="test"
+    document, _ = EFacturaDocument.objects.get_or_create(
+        invoice=invoice,
+        defaults={"document_type": EFacturaDocumentType.INVOICE.value, "environment": "test"},
     )
+    # fsm-bypass: historical ANAF response fixture.
     EFacturaDocument.objects.filter(pk=document.pk).update(status=status)
     return EFacturaDocument.objects.get(pk=document.pk)
 
@@ -98,6 +100,15 @@ class StornoDocumentTests(StornoTestCase):
 
         self.assertIn("FISCAL INVOICE", rows)
         self.assertIn("TOTAL TO PAY: 121.00 RON", rows)
+
+    def test_a_romanian_invoice_pdf_is_labelled_in_romanian(self) -> None:
+        with translation.override("ro"):
+            rows = pdf_rows(self.original())
+
+        self.assertIn("FACTURĂ FISCALĂ", rows)
+        self.assertIn("TOTAL DE PLATĂ: 121.00 RON", rows)
+        self.assertIn("Furnizor:", rows)
+        self.assertNotIn("FISCAL INVOICE", rows)
 
 
 @SELLER
@@ -313,8 +324,9 @@ class InFlightUploadTests(StornoTestCase):
         original = self.original()
         payment = self.collected(original, original.total_cents)
         correction = self.process(self.refund(original, payment, 1000))
-        EFacturaDocument.objects.create(
-            invoice=original, document_type=EFacturaDocumentType.INVOICE.value, environment="test"
+        EFacturaDocument.objects.get_or_create(
+            invoice=original,
+            defaults={"document_type": EFacturaDocumentType.INVOICE.value, "environment": "test"},
         )
         EFacturaDocument.objects.filter(invoice=original).update(status=EFacturaStatus.ACCEPTED.value)
         uploading = EFacturaDocument(status=EFacturaStatus.UPLOADING.value)

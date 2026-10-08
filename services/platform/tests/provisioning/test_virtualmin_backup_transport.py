@@ -29,10 +29,11 @@ from tests.provisioning import test_virtualmin_tasks as task_tests
 def _tiny_archive_bytes() -> bytes:
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
-        payload = io.BytesIO(b"backup-content")
-        info = tarfile.TarInfo(name="home/site/index.html")
-        info.size = len(b"backup-content")
-        tar.addfile(info, payload)
+        for feature in ("virtualmin", "mail", "mysql", "dir", "ssl"):
+            payload = io.BytesIO(b"backup-content")
+            info = tarfile.TarInfo(name=f"test.example.com_{feature}")
+            info.size = len(b"backup-content")
+            tar.addfile(info, payload)
     return buffer.getvalue()
 
 
@@ -62,19 +63,35 @@ class BackupTransportTests(task_tests.VirtualminTaskTestBase):
             name="Backup provider", provider_type="hetzner", code="het", credential_identifier="backup-test"
         )
         region = NodeRegion.objects.create(
-            provider=provider, name="Falkenstein", provider_region_id="fsn1",
-            normalized_code="fsn1", country_code="de", city="Falkenstein",
+            provider=provider,
+            name="Falkenstein",
+            provider_region_id="fsn1",
+            normalized_code="fsn1",
+            country_code="de",
+            city="Falkenstein",
         )
         size = NodeSize.objects.create(
-            provider=provider, name="Backup small", display_name="Small", provider_type_id="cpx21",
-            vcpus=2, memory_gb=4, disk_gb=40, hourly_cost_eur="0.01", monthly_cost_eur="5.00",
+            provider=provider,
+            name="Backup small",
+            display_name="Small",
+            provider_type_id="cpx21",
+            vcpus=2,
+            memory_gb=4,
+            disk_gb=40,
+            hourly_cost_eur="0.01",
+            monthly_cost_eur="5.00",
         )
         panel = PanelType.objects.create(
             name="Backup Virtualmin", panel_type="virtualmin", ansible_playbook="virtualmin.yml"
         )
         NodeDeployment.objects.create(
-            provider=provider, node_size=size, region=region, panel_type=panel,
-            hostname="prd-bak-het-de-fsn1-001", node_number=1, ipv4_address="203.0.113.10",
+            provider=provider,
+            node_size=size,
+            region=region,
+            panel_type=panel,
+            hostname="prd-bak-het-de-fsn1-001",
+            node_number=1,
+            ipv4_address="203.0.113.10",
             virtualmin_server=self.server,
         )
         self.server.refresh_from_db()
@@ -94,6 +111,8 @@ class BackupTransportTests(task_tests.VirtualminTaskTestBase):
         self.gateway = MagicMock()
         self.gateway.ping_server.return_value = True
         self.gateway.get_domain_info.return_value = Ok({"disk_usage_mb": 100, "disk_quota_mb": 1000})
+        # Backups probe existence separately: absent domains also report zero usage.
+        self.gateway.get_domain_state.return_value = Ok({"exists": True, "enabled": True, "owner": "owner"})
         self.gateway.call.return_value = _response("backup-domain")
         gateway_patch = patch(
             "apps.provisioning.virtualmin_backup_service.VirtualminGateway", return_value=self.gateway
@@ -231,7 +250,11 @@ class BackupTransportTests(task_tests.VirtualminTaskTestBase):
     def test_migration_fetch_leg_aborts_when_spool_is_reserved(self) -> None:
         """Drive the REAL migration _transfer fetch leg against a standing reservation."""
         migration = VirtualminMigration.objects.create(
-            account=self.account, source_server=self.server, target_server=self.server, reason="manual", status="fetching"
+            account=self.account,
+            source_server=self.server,
+            target_server=self.server,
+            reason="manual",
+            status="fetching",
         )
         service = VirtualminMigrationService()
         service.spool = Path(self.spool.name)

@@ -1,7 +1,7 @@
 {% load i18n ui_components %}
 
 {# Romanian hosting provider dropdown navigation component #}
-<div class="relative inline-block text-left" x-data="navDropdown" @click.away="open = false">
+<div class="relative inline-block text-left" x-data="navDropdown" @click.away="open = false" role="group" tabindex="-1" aria-label="{{ title }}">
   <div>
     <button type="button" @click="toggle()"
       class="text-slate-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center transition-colors"

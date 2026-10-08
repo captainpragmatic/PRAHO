@@ -2,6 +2,7 @@
 
 from datetime import timedelta
 from decimal import Decimal
+from smtplib import SMTPException
 from unittest.mock import patch
 
 from django.apps import apps
@@ -9,6 +10,7 @@ from django.core import mail
 from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
 from django.utils import timezone
+from requests.exceptions import HTTPError, Timeout
 
 from apps.billing.models import Currency, FXRate
 from apps.customers.models import Customer
@@ -16,11 +18,14 @@ from apps.notifications.models import EmailLog
 from apps.promotions.gift_cards import activate_verified_purchase, create_purchase
 from apps.promotions.gift_delivery import (
     MAX_DELIVERY_ATTEMPTS,
+    _send,
     deliver_gift_card,
     purchase_delivery_summary,
     queue_purchase_delivery,
 )
 from apps.promotions.tasks import reconcile_gift_delivery
+from apps.settings.models import SystemSetting
+from apps.settings.services import SettingsService
 from apps.users.models import User
 
 
@@ -30,17 +35,28 @@ class GiftDeliveryTests(TestCase):
         self.currency = Currency.objects.get_or_create(code="EUR", defaults={"symbol": "EUR"})[0]
         ron = Currency.objects.get_or_create(code="RON", defaults={"symbol": "RON"})[0]
         FXRate.objects.get_or_create(
-            base_code=self.currency, quote_code=ron, as_of=timezone.localdate(),
-            defaults={"rate": Decimal("5"), "source": "bnr", "source_reference": "https://bnr.ro/rate",
-                      "fetched_at": timezone.now()},
+            base_code=self.currency,
+            quote_code=ron,
+            as_of=timezone.localdate(),
+            defaults={
+                "rate": Decimal("5"),
+                "source": "bnr",
+                "source_reference": "https://bnr.ro/rate",
+                "fetched_at": timezone.now(),
+            },
         )
         self.customer = Customer.objects.create(
             name="Delivery buyer", customer_type="individual", primary_email="buyer@example.test"
         )
         self.actor = User.objects.create_user(email="buyer@example.test")
         self.purchase = create_purchase(
-            self.customer, self.currency, 5000, "delivery", actor=self.actor,
-            is_gift=True, buyer_email=self.actor.email,
+            self.customer,
+            self.currency,
+            5000,
+            "delivery",
+            actor=self.actor,
+            is_gift=True,
+            buyer_email=self.actor.email,
             recipient={"email": "recipient@example.test", "name": "Recipient", "message": "Enjoy your gift"},
         )
 
@@ -52,14 +68,46 @@ class GiftDeliveryTests(TestCase):
         payment.save()
         self.purchase = activate_verified_purchase(self.purchase.pk)
 
+    @override_settings(
+        CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
+        DEFAULT_FROM_EMAIL="deployment@example.test",
+    )
+    def test_gift_sender_uses_row_then_deployment_default(self) -> None:
+        from django.core.cache import cache  # noqa: PLC0415
+
+        cache.clear()
+        self.addCleanup(cache.clear)
+        self._fund()
+        rows = {row.purpose: row for row in queue_purchase_delivery(self.purchase.pk)}
+        with self.captureOnCommitCallbacks(execute=True):
+            result = SettingsService.update_setting("company.email_noreply", "runtime@example.test")
+        self.assertTrue(result.is_ok(), result)
+        mail.outbox.clear()
+        self.assertTrue(deliver_gift_card(str(rows["receipt"].pk)))
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].from_email, "runtime@example.test")
+        self.assertEqual(mail.outbox[0].to, [self.purchase.buyer_email])
+
+        with self.captureOnCommitCallbacks(execute=True):
+            SystemSetting.objects.filter(key="company.email_noreply").delete()
+        mail.outbox.clear()
+        self.assertTrue(deliver_gift_card(str(rows["voucher"].pk)))
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].from_email, "deployment@example.test")
+        self.assertEqual(mail.outbox[0].to, ["recipient@example.test"])
+
     def test_activation_persists_delivery_rows_and_queues_only_ids_after_commit(self) -> None:
         with patch("django_q.tasks.async_task") as queued, self.captureOnCommitCallbacks(execute=True):
             self._fund()
             self.assertFalse(queued.called)
         deliveries = list(apps.get_model("promotions", "GiftCardDelivery").objects.filter(purchase=self.purchase))
-        self.assertEqual({row.purpose: row.target_email for row in deliveries}, {
-            "voucher": "recipient@example.test", "receipt": "buyer@example.test",
-        })
+        self.assertEqual(
+            {row.purpose: row.target_email for row in deliveries},
+            {
+                "voucher": "recipient@example.test",
+                "receipt": "buyer@example.test",
+            },
+        )
         self.assertEqual(queued.call_count, 2)
         for call in queued.call_args_list:
             self.assertEqual(call.args[0], "apps.promotions.gift_delivery.deliver_gift_card")
@@ -67,13 +115,34 @@ class GiftDeliveryTests(TestCase):
             self.assertEqual(len(call.args), 2)
             self.assertNotIn(self.purchase.gift_card.code, str(call))
 
+    def test_programming_errors_propagate_from_message_building_and_delivery(self) -> None:
+        self._fund()
+        voucher = self.purchase.deliveries.get(purpose="voucher")
+        for target in ("apps.promotions.gift_delivery._message", "django.core.mail.EmailMessage.send"):
+            for error_type in (TypeError, NameError, RuntimeError):
+                with (
+                    self.subTest(target=target, error_type=error_type.__name__),
+                    patch(target, side_effect=error_type("programming bug")),
+                    self.assertRaisesRegex(error_type, "programming bug"),
+                ):
+                    _send(voucher, self.purchase)
+
     def test_retry_delivers_original_code_once_and_buyer_receipt_has_no_code(self) -> None:
         self._fund()
         rows = {row.purpose: row for row in queue_purchase_delivery(self.purchase.pk)}
+        for error_type in (OSError, SMTPException, HTTPError, Timeout):
+            with (
+                self.subTest(error_type=error_type.__name__),
+                patch("django.core.mail.EmailMessage.send", side_effect=error_type("provider unavailable")),
+            ):
+                self.assertEqual(_send(rows["voucher"], self.purchase), "provider_unavailable")
         with patch("django.core.mail.EmailMessage.send", side_effect=OSError("provider unavailable")):
             self.assertFalse(deliver_gift_card(str(rows["voucher"].pk)))
         rows["voucher"].refresh_from_db()
         self.assertEqual(rows["voucher"].status, "failed")
+        self.assertEqual(rows["voucher"].error_code, "provider_unavailable")
+        self.assertIsNotNone(rows["voucher"].next_attempt_at)
+        self.assertIsNone(rows["voucher"].lease_until)
         with patch("django.utils.timezone.now", return_value=timezone.now() + timedelta(minutes=11)):
             self.assertTrue(deliver_gift_card(str(rows["voucher"].pk)))
         self.assertTrue(deliver_gift_card(str(rows["voucher"].pk)))
@@ -87,8 +156,13 @@ class GiftDeliveryTests(TestCase):
 
     def test_for_me_uses_buyer_address_snapshot_after_customer_changes(self) -> None:
         self.purchase = create_purchase(
-            self.customer, self.currency, 5000, "for-me", actor=self.actor,
-            buyer_email=self.actor.email, is_gift=False,
+            self.customer,
+            self.currency,
+            5000,
+            "for-me",
+            actor=self.actor,
+            buyer_email=self.actor.email,
+            is_gift=False,
         )
         self.customer.primary_email = "new-address@example.test"
         self.customer.save(update_fields=["primary_email"])
@@ -210,7 +284,7 @@ class GiftDeliveryTests(TestCase):
     def test_backend_exception_does_not_persist_sensitive_error_text(self) -> None:
         self._fund()
         voucher = self.purchase.deliveries.get(purpose="voucher")
-        with patch("django.core.mail.EmailMessage.send", side_effect=RuntimeError(self.purchase.gift_card.code)):
+        with patch("django.core.mail.EmailMessage.send", side_effect=OSError(self.purchase.gift_card.code)):
             self.assertFalse(deliver_gift_card(voucher.pk))
         voucher.refresh_from_db()
         self.assertEqual(voucher.error_code, "provider_unavailable")

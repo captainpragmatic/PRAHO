@@ -19,13 +19,20 @@ from apps.common.types import Ok, Result
 from apps.customers.models import Customer
 from tests.billing import _fiscal_correction_helpers as h
 from tests.factories.billing_factories import CurrencyFactory, CustomerFactory
+from tests.helpers.task_queue import quiet_task_queue
 
 
 def _quiet_delivery(test: SimpleTestCase) -> MagicMock:
-    for target in ("django_q.tasks.async_task", "apps.notifications.services.EmailService.send_template_email"):
-        delivery = patch(target, return_value="test-job")
-        delivery.start()
-        test.addCleanup(delivery.stop)
+    from apps.settings.models import SystemSetting  # noqa: PLC0415
+
+    SystemSetting.objects.update_or_create(
+        key="efactura.enabled",
+        defaults={"name": "e-Factura", "data_type": "boolean", "value": True, "default_value": False},
+    )
+    quiet_task_queue(test)
+    delivery = patch("apps.notifications.services.EmailService.send_template_email", return_value="test-job")
+    delivery.start()
+    test.addCleanup(delivery.stop)
     queued = patch("apps.billing.efactura.tasks.queue_efactura_submission", return_value="efactura-job")
     result = queued.start()
     test.addCleanup(queued.stop)

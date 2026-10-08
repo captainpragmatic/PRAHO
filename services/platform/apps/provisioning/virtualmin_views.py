@@ -6,8 +6,10 @@ Staff interface for managing Virtualmin servers, accounts, and backups.
 import logging
 import time
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from contextvars import ContextVar
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any, TypedDict, cast
 from urllib.parse import urlencode
 from uuid import UUID
@@ -64,18 +66,15 @@ def _get_user_email(user: User | AnonymousUser) -> str:
     return user.email
 
 
-# Health check constants
+# Health check defaults
 HEALTH_CHECK_STALE_SECONDS = 3600  # 1 hour in seconds
 MIN_DOMAIN_LENGTH = 3
 _DEFAULT_MAX_CONCURRENT_HEALTH_CHECKS = 10
 # Most accounts the bulk page lists at once: one POST field each, under Django's 1,000-field cap.
 BULK_ACCOUNT_LIMIT = 500
-_DEFAULT_HEALTH_CHECK_TIMEOUT_SECONDS = 30
-HEALTH_CHECK_TIMEOUT_SECONDS = _DEFAULT_HEALTH_CHECK_TIMEOUT_SECONDS
 _DEFAULT_OVERALL_HEALTH_CHECK_TIMEOUT = 300
-OVERALL_HEALTH_CHECK_TIMEOUT = _DEFAULT_OVERALL_HEALTH_CHECK_TIMEOUT
 _DEFAULT_MAX_ERROR_DISPLAY = 3
-MAX_ERROR_DISPLAY = _DEFAULT_MAX_ERROR_DISPLAY
+_HEALTH_CHECK_DEADLINE: ContextVar[float | None] = ContextVar("virtualmin_health_check_deadline", default=None)
 
 
 def get_max_concurrent_health_checks() -> int:
@@ -86,17 +85,6 @@ def get_max_concurrent_health_checks() -> int:
 
     return SettingsService.get_integer_setting(
         "provisioning.max_concurrent_health_checks", _DEFAULT_MAX_CONCURRENT_HEALTH_CHECKS
-    )
-
-
-def get_health_check_timeout_seconds() -> int:
-    """Get health check timeout seconds from SettingsService (runtime)."""
-    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
-        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
-    )
-
-    return SettingsService.get_integer_setting(
-        "provisioning.health_check_timeout_seconds", _DEFAULT_HEALTH_CHECK_TIMEOUT_SECONDS
     )
 
 
@@ -607,7 +595,7 @@ def virtualmin_account_backup(request: HttpRequest, account_id: str) -> HttpResp
             if backup_result.is_ok():
                 job = backup_result.unwrap()
                 messages.success(request, f"Backup job created successfully! Job ID: {job.id}")
-                return redirect("provisioning:virtualmin_backup_status", job_id=job.id)
+                return redirect("provisioning:virtualmin_job_status", job_id=job.id)
             else:
                 messages.error(request, f"Failed to create backup: {backup_result.unwrap_err()}")
     else:
@@ -674,7 +662,7 @@ def virtualmin_account_restore(request: HttpRequest, account_id: str) -> HttpRes
             if restore_result.is_ok():
                 job = restore_result.unwrap()
                 messages.success(request, f"Restore job created successfully! Job ID: {job.id}")
-                return redirect("provisioning:virtualmin_backup_status", job_id=job.id)
+                return redirect("provisioning:virtualmin_job_status", job_id=job.id)
             else:
                 messages.error(request, f"Failed to create restore: {restore_result.unwrap_err()}")
     else:
@@ -700,49 +688,6 @@ def virtualmin_account_restore(request: HttpRequest, account_id: str) -> HttpRes
     }
 
     return render(request, "provisioning/virtualmin/restore_form.html", context)
-
-
-@login_required
-@user_passes_test(is_staff_or_superuser)
-@monitor_performance(max_duration_seconds=3.0, alert_threshold=1.0)
-def virtualmin_backup_status(request: HttpRequest, job_id: str) -> HttpResponse:
-    """📊 Monitor backup/restore job status."""
-
-    job = get_object_or_404(VirtualminProvisioningJob, id=job_id)
-
-    # Get real-time status from backup service
-    backup_service = VirtualminBackupService(job.server)
-
-    if job.operation == "backup_domain":
-        live_status = backup_service.get_backup_status(str(job.id))
-    elif job.operation == "restore_domain":
-        live_status = backup_service.get_restore_status(str(job.id))
-    else:
-        live_status = {"status": "unknown", "progress": 0}
-
-    # If it's an HTMX request, return partial template
-    if request.headers.get("HX-Request"):
-        return render(
-            request,
-            "provisioning/virtualmin/partials/job_status.html",
-            {
-                "job": job,
-                "live_status": live_status,
-                "is_complete": job.status in ["completed", "failed", "attention"],
-                "refresh_url": reverse("provisioning:virtualmin_backup_status", args=[job.id]),
-            },
-        )
-
-    context = {
-        "page_title": f"Job Status: {job.operation}",
-        "job": job,
-        "live_status": live_status,
-        "refresh_url": reverse("provisioning:virtualmin_backup_status", args=[job.id]),
-        "account_url": reverse("provisioning:virtualmin_account_detail", args=[job.account.id]) if job.account else "",
-        "is_complete": job.status in ["completed", "failed", "attention"],
-    }
-
-    return render(request, "provisioning/virtualmin/backup_status.html", context)
 
 
 # ===============================================================================
@@ -992,9 +937,12 @@ def virtualmin_server_test_connection(request: HttpRequest) -> HttpResponse:
             '<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" /></svg>'
             "</div>"
             '<div class="ml-3">'
-            '<h3 class="text-sm font-medium text-red-400">Test Failed</h3>'
-            f'<p class="text-sm text-red-300 mt-1">An error occurred during connection test: {e!s}</p>'
-            "</div>"
+            + format_html('<h3 class="text-sm font-medium text-red-400">{}</h3>', _("Test Failed"))
+            + format_html(
+                '<p class="text-sm text-red-300 mt-1">{}</p>',
+                _("An error occurred during connection test: %(error)s") % {"error": str(e)},
+            )
+            + "</div>"
             "</div>"
             "</div>",
             content_type="text/html",
@@ -1059,7 +1007,15 @@ def virtualmin_backups_list(request: HttpRequest) -> HttpResponse:
     # Apply filters
     domain_filter = request.GET.get("domain")
     backup_type_filter = request.GET.get("type")
-    max_age_days = int(request.GET.get("max_age", 30))
+    try:
+        max_age_days = int(request.GET.get("max_age", "30"))
+        if max_age_days <= 0:
+            raise ValueError("Nonpositive backup age")
+    except ValueError:
+        return HttpResponse(
+            format_html("<p>{}</p>", _("Maximum backup age must be a positive integer.")),
+            status=400,
+        )
 
     # Get account if domain filter specified
     account = None
@@ -1079,6 +1035,21 @@ def virtualmin_backups_list(request: HttpRequest) -> HttpResponse:
         backups: list[Any] = []
     else:
         backups = backups_result.unwrap()
+
+    # Translate display labels; keep stored enum values unchanged for filtering.
+    backup_type_labels = {
+        "full": _("Full Backup"),
+        "incremental": _("Incremental Backup"),
+        "config_only": _("Configuration Only"),
+    }
+    backup_status_labels = {
+        "completed": _("Completed"),
+        "failed": _("Failed"),
+        "in_progress": _("In Progress"),
+    }
+    for backup in backups:
+        backup["type_label"] = backup_type_labels.get(backup["backup_type"], _("Unknown"))
+        backup["status_label"] = backup_status_labels.get(backup["status"], _("Unknown"))
 
     # Prepare table data
     table_data = [
@@ -1116,7 +1087,7 @@ def virtualmin_backups_list(request: HttpRequest) -> HttpResponse:
 
     # Get filter options
     domains = VirtualminAccount.objects.values_list("domain", flat=True).order_by("domain")
-    backup_types = ["full", "incremental", "config_only"]
+    backup_types = list(backup_type_labels.items())
 
     context = {
         "page_title": "Virtualmin Backups",
@@ -1235,10 +1206,14 @@ class BulkOperationResult:
 def _handle_backup_action_result(request: HttpRequest, result: BulkOperationResult) -> None:
     """Handle backup action result and add appropriate messages."""
     if result.rollback_performed:
+        max_error_display = get_max_error_display()
         messages.error(
             request,
-            f"Backup operation failed and was rolled back. "
-            f"Errors: {'; '.join(result.errors[:MAX_ERROR_DISPLAY])}{'...' if len(result.errors) > MAX_ERROR_DISPLAY else ''}",
+            _("Backup operation failed and was rolled back. Errors: %(errors)s%(omission)s")
+            % {
+                "errors": "; ".join(result.errors[:max_error_display]),
+                "omission": "..." if len(result.errors) > max_error_display else "",
+            },
         )
     else:
         messages.success(
@@ -1259,8 +1234,9 @@ def _handle_staff_action_result(request: HttpRequest, result: BulkOperationResul
         ),
     )
     if result.errors:
-        shown = "; ".join(result.errors[:MAX_ERROR_DISPLAY])
-        more = "…" if len(result.errors) > MAX_ERROR_DISPLAY else ""
+        max_error_display = get_max_error_display()
+        shown = "; ".join(result.errors[:max_error_display])
+        more = "…" if len(result.errors) > max_error_display else ""
         messages.warning(
             request,
             _("{count} refused: {reasons}{more}").format(count=result.failed_count, reasons=shown, more=more),
@@ -1467,8 +1443,8 @@ def _validate_domain_configuration(account: VirtualminAccount) -> tuple[bool, st
 
 def _validate_disk_usage_data(account: VirtualminAccount) -> tuple[bool, str]:
     """Validate disk usage data for health check."""
-    if hasattr(account, "disk_usage_mb") and account.disk_usage_mb < 0:
-        return False, "Invalid disk usage data"
+    if account.current_disk_usage_mb < 0:
+        return False, str(_("Invalid disk usage data"))
     return True, ""
 
 
@@ -1478,9 +1454,18 @@ def _perform_gateway_connectivity_test(account: VirtualminAccount) -> tuple[bool
         config = VirtualminConfig(server=account.server)
         gateway = VirtualminGateway(config)
 
-        ping_result = gateway.ping_server()
-        if not ping_result:
-            return False, "Virtualmin server connectivity failed"
+        deadline = _HEALTH_CHECK_DEADLINE.get()
+        if deadline is None:
+            healthy = gateway.ping_server()
+        else:
+            if time.perf_counter() >= deadline:
+                return False, str(_("Health check timed out"))
+            result = gateway.call("info", deadline=deadline)
+            if time.perf_counter() >= deadline:
+                return False, str(_("Health check timed out"))
+            healthy = result.is_ok() and result.unwrap().success
+        if not healthy:
+            return False, str(_("Virtualmin server connectivity failed"))
         return True, ""
 
     except Exception as gateway_error:
@@ -1521,6 +1506,19 @@ def _perform_single_health_check(account: VirtualminAccount) -> tuple[Virtualmin
         connections.close_all()
 
 
+def _health_check_until_deadline(
+    account: VirtualminAccount, deadline: float
+) -> tuple[VirtualminAccount, bool, str | None]:
+    """Propagate the batch deadline without changing the single-check interface."""
+    token = _HEALTH_CHECK_DEADLINE.set(deadline)
+    try:
+        if time.perf_counter() >= deadline:
+            return account, False, str(_("Health check timed out"))
+        return _perform_single_health_check(account)
+    finally:
+        _HEALTH_CHECK_DEADLINE.reset(token)
+
+
 # Not atomic: it writes nothing, and a transaction would stay open across network pings.
 def _execute_bulk_health_check(accounts: list[VirtualminAccount]) -> BulkOperationResult:
     """
@@ -1555,35 +1553,58 @@ def _execute_bulk_health_check(accounts: list[VirtualminAccount]) -> BulkOperati
     logger.info(f"🏥 [Bulk Health Check] Starting health checks for {len(accounts)} accounts")
 
     try:
-        # Use thread pool for parallel health checks (with reasonable concurrency limit)
-        # The provisioning.max_concurrent_health_checks setting, as the form's cap.
-        max_workers = min(get_max_concurrent_health_checks(), len(accounts))
+        if not accounts:
+            return BulkOperationResult(
+                total_processed=0,
+                successful_count=0,
+                failed_count=0,
+                errors=[],
+                processing_time_seconds=time.perf_counter() - start_time,
+            )
 
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Submit all health check tasks
+        # Snapshot the batch limits before dispatch; invalid legacy worker rows use the enforced default.
+        worker_limit = get_max_concurrent_health_checks()
+        if worker_limit < 1:
+            worker_limit = _DEFAULT_MAX_CONCURRENT_HEALTH_CHECKS
+        max_workers = min(worker_limit, len(accounts))
+        overall_timeout = get_overall_health_check_timeout()
+
+        deadline = time.perf_counter() + overall_timeout
+        executor = ThreadPoolExecutor(max_workers=max_workers)
+        future_to_account: dict[Future[tuple[VirtualminAccount, bool, str | None]], VirtualminAccount] = {}
+        collected: set[Future[tuple[VirtualminAccount, bool, str | None]]] = set()
+        try:
             future_to_account = {
-                executor.submit(_perform_single_health_check, account): account for account in accounts
+                executor.submit(_health_check_until_deadline, account, deadline): account for account in accounts
             }
-
-            # Process completed checks
-            for future in as_completed(future_to_account, timeout=OVERALL_HEALTH_CHECK_TIMEOUT):  # Overall timeout
-                try:
-                    account, success, error_msg = future.result(
-                        timeout=HEALTH_CHECK_TIMEOUT_SECONDS
-                    )  # Per-check timeout
-
-                    if success:
-                        successful_checks.append(account)
-                        logger.debug(f"✅ [Health Check] {account.domain} - OK")
-                    else:
-                        errors.append(f"Health check failed for {account.domain}: {error_msg}")
-                        logger.warning(f"⚠️ [Health Check] {account.domain} - {error_msg}")
-
-                except Exception as e:
+            try:
+                for future in as_completed(future_to_account, timeout=max(0.0, deadline - time.perf_counter())):
+                    collected.add(future)
                     account = future_to_account[future]
-                    error_msg = f"Health check timeout or error for {account.domain}: {e!s}"
-                    errors.append(error_msg)
-                    logger.warning(f"⏰ [Health Check] {error_msg}")
+                    try:
+                        account, success, error_msg = future.result()
+                        if success:
+                            successful_checks.append(account)
+                            logger.debug(f"✅ [Health Check] {account.domain} - OK")
+                        else:
+                            errors.append(
+                                _("Health check failed for %(domain)s: %(error)s")
+                                % {"domain": account.domain, "error": error_msg}
+                            )
+                            logger.warning(f"⚠️ [Health Check] {account.domain} - {error_msg}")
+                    except Exception as error:
+                        errors.append(
+                            _("Health check error for %(domain)s: %(error)s")
+                            % {"domain": account.domain, "error": str(error)}
+                        )
+            except TimeoutError:
+                logger.warning("⚠️ [Health Check] Overall sweep deadline reached")
+        finally:
+            for future, account in future_to_account.items():
+                if future not in collected:
+                    future.cancel()
+                    errors.append(_("Health check timed out for %(domain)s") % {"domain": account.domain})
+            executor.shutdown(wait=False, cancel_futures=True)
 
         processing_time = time.perf_counter() - start_time
         result = BulkOperationResult(
@@ -1764,19 +1785,36 @@ def virtualmin_accounts_sync(  # noqa: C901, PLR0912, PLR0915  # Complexity: mul
                             sync_results["errors"].append(error_msg)
                             continue
 
-                        # Get or create Service record
-                        service, created = Service.objects.get_or_create(
-                            username=username,
-                            defaults={
-                                "customer": default_customer,
-                                "service_plan": default_service_plan,
-                                "service_name": f"Virtualmin Account - {username}",
-                                "domain": account_data["primary_domain"],
-                                "status": "active",
-                                "billing_cycle": "monthly",
-                                "price": default_service_plan.price_monthly or 0.00,
-                            },
-                        )
+                        from apps.billing.currency_policy import get_selling_currency_policy  # noqa: PLC0415
+
+                        # Existing services retain their stored money; only new imports need a retail price.
+                        service = Service.objects.filter(username=username).first()
+                        if service is None:
+                            currency_code = get_selling_currency_policy().currency_code
+                            retail_price = default_service_plan.get_price_for_currency(currency_code)
+                            if retail_price is None:
+                                error_msg = _("No active monthly price for plan %(plan)s in %(currency)s.") % {
+                                    "plan": default_service_plan.name,
+                                    "currency": currency_code,
+                                }
+                                sync_results["errors"].append(error_msg)
+                                logger.warning("⚠️ [AccountSync] %s", error_msg)
+                                continue
+                            service, created = Service.objects.get_or_create(
+                                username=username,
+                                defaults={
+                                    "currency_id": currency_code,
+                                    "customer": default_customer,
+                                    "service_plan": default_service_plan,
+                                    "service_name": f"Virtualmin Account - {username}",
+                                    "domain": account_data["primary_domain"],
+                                    "status": "active",
+                                    "billing_cycle": "monthly",
+                                    "price": Decimal(retail_price.monthly_price_cents) / 100,
+                                },
+                            )
+                        else:
+                            created = False
 
                         # Update service if it exists
                         if not created:
@@ -2095,12 +2133,11 @@ def virtualmin_job_status(request: HttpRequest, job_id: str) -> HttpResponse:
         {"text": f"Job {job.correlation_id[:8]}", "url": ""},
     ]
 
-    max_retry_count = 3  # Maximum number of retry attempts allowed
     context = {
         "job": job,
         "page_title": f"Job Status - {job.operation}",
         "breadcrumb_items": breadcrumb_items,
-        "can_retry": job.status == "failed" and job.retry_count < max_retry_count,
+        "can_retry": job.status == "failed" and job.retry_count < job.max_retries,
     }
 
     return render(request, "provisioning/virtualmin/job_status.html", context)

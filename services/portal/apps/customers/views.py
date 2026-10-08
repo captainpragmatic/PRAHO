@@ -23,7 +23,7 @@ from apps.common.decorators import (
 )
 from apps.common.localisation import country_choices
 from apps.common.localisation_services import get_request_localisation
-from apps.common.rate_limit_feedback import is_rate_limited_error
+from apps.common.rate_limit_feedback import is_rate_limited_error, is_unavailable_error, render_platform_unavailable
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +110,8 @@ def company_team_view(request: HttpRequest) -> HttpResponse:
             raw = response.get("users") or response.get("results") or []
             team_users = raw if isinstance(raw, list) else []
     except PlatformAPIError as exc:
+        if is_unavailable_error(exc):
+            return render_platform_unavailable(request, exc, status=200)
         if is_rate_limited_error(exc):
             messages.warning(request, _("Too many requests. Please wait and try again."))
         else:
@@ -338,6 +340,8 @@ def company_addresses_view(request: HttpRequest) -> HttpResponse:
             raw = response.get("addresses") or response.get("results") or []
             address_list = raw if isinstance(raw, list) else []
     except PlatformAPIError as exc:
+        if is_unavailable_error(exc):
+            return render_platform_unavailable(request, exc, status=200)
         if is_rate_limited_error(exc):
             messages.warning(request, _("Too many requests. Please wait and try again."))
         else:

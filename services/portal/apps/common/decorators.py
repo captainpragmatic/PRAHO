@@ -10,18 +10,69 @@ from functools import wraps
 from typing import Any, cast
 
 from django.http import HttpRequest, HttpResponse, HttpResponseForbidden, JsonResponse
-from django.shortcuts import redirect
+from django.shortcuts import redirect, render
 from django.template.loader import render_to_string
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
 from apps.api_client.services import PlatformAPIError, api_client
+from apps.common.rate_limit_feedback import (
+    build_rate_limited_context,
+    get_degraded_message,
+    get_retry_after_from_error,
+    render_platform_unavailable,
+)
 from apps.common.request_ip import get_safe_client_ip
 
 logger = logging.getLogger(__name__)
 
 # TTL for cached memberships — force refresh after this many seconds
 _MEMBERSHIP_CACHE_TTL = 300  # 5 minutes
+
+
+def _render_role_check_degraded(request: HttpRequest, error: PlatformAPIError) -> HttpResponse:
+    """Render an unverifiable role without invoking the protected view."""
+    logger.warning("⚠️ [Security] Role verification unavailable: %s", error)
+    retry_after = get_retry_after_from_error(error)
+    status = 429 if error.is_rate_limited else 503
+    response: HttpResponse
+    if request.headers.get("Accept") == "application/json":
+        response = JsonResponse(
+            {"error": get_degraded_message(error), "retry_after": retry_after},
+            status=status,
+        )
+    elif request.headers.get("HX-Request") == "true" and request.method not in ("GET", "HEAD"):
+        # Keep the unsent form in the DOM; base.html always renders this notice container.
+        response = render(
+            request,
+            "components/toast.html",
+            {
+                "message": get_degraded_message(error),
+                "variant": "warning",
+                "dismissible": True,
+                "auto_dismiss": 0,
+            },
+        )
+        response["HX-Retarget"] = "#toast-container"
+        response["HX-Reswap"] = "beforeend"
+    elif error.is_rate_limited:
+        template = (
+            "components/rate_limit_inline_alert.html"
+            if request.headers.get("HX-Request") == "true"
+            else "common/rate_limited.html"
+        )
+        response = render(
+            request,
+            template,
+            build_rate_limited_context(request, error),
+            status=200 if request.headers.get("HX-Request") == "true" else status,
+        )
+    else:
+        return render_platform_unavailable(request, error)
+
+    if retry_after:
+        response["Retry-After"] = str(retry_after)
+    return response
 
 
 def _get_selected_customer_id(request: HttpRequest) -> str | None:
@@ -34,7 +85,7 @@ def _get_selected_customer_id(request: HttpRequest) -> str | None:
     return cast(str, request.session.get("customer_id")) if request.session.get("customer_id") else None
 
 
-def _fetch_user_memberships(request: HttpRequest) -> list[dict[str, Any]]:
+def _fetch_user_memberships(request: HttpRequest) -> list[dict[str, object]]:
     """Lazy-fetch user memberships from Platform API and cache in session"""
     user_id = request.session.get("user_id")
     if not user_id:
@@ -57,8 +108,8 @@ def _fetch_user_memberships(request: HttpRequest) -> list[dict[str, Any]]:
             len(results) if isinstance(results, list) else "n/a",
         )
         logger.debug("🔍 [Decorator] Membership API raw response: %s", response)
-        if response and success and results:
-            memberships = [
+        if success and isinstance(results, list):
+            memberships: list[dict[str, object]] = [
                 {
                     "customer_id": customer.get("id"),
                     "customer_name": customer.get("name", customer.get("company_name", "")),
@@ -75,6 +126,8 @@ def _fetch_user_memberships(request: HttpRequest) -> list[dict[str, Any]]:
             logger.info("🔍 [Decorator] Stored %d memberships in session", len(memberships))
             return memberships
     except Exception as e:
+        if isinstance(e, PlatformAPIError) and (e.is_degraded or e.is_maintenance):
+            raise
         logger.error(f"🔥 [Decorator] Failed to fetch memberships: {e}")
     return []
 
@@ -113,7 +166,7 @@ def _get_user_role_for_customer(request: HttpRequest, customer_id: str) -> str |
     return None
 
 
-def _verify_customer_access_realtime(request: HttpRequest, customer_id: str) -> dict[str, Any] | None:
+def _verify_customer_access_realtime(request: HttpRequest, customer_id: str) -> dict[str, object] | None:
     """🔒 Real-time verification of user access to customer via Platform API"""
     user_id = request.session.get("user_id")
     if not user_id:
@@ -135,7 +188,7 @@ def _verify_customer_access_realtime(request: HttpRequest, customer_id: str) -> 
         return None
 
     except PlatformAPIError as e:
-        if e.is_rate_limited:
+        if e.is_degraded or e.is_maintenance:
             raise
         logger.error(f"🔥 [Security] Failed to verify customer access: {e}")
         return None
@@ -192,11 +245,14 @@ def require_customer_role(  # noqa: C901
                             request=request,
                         ),
                     )
-                return HttpResponseForbidden(_("No customer selected"), content_type="text/plain")
+                return render(request, "403.html", status=403)
 
             # Real-time verification if requested
             if realtime_verification:
-                verification = _verify_customer_access_realtime(request, customer_id)
+                try:
+                    verification = _verify_customer_access_realtime(request, customer_id)
+                except PlatformAPIError as error:
+                    return _render_role_check_degraded(request, error)
                 if not verification or not verification.get("has_access"):
                     logger.warning(
                         f"🚨 [Security] Real-time access verification failed: "
@@ -212,12 +268,15 @@ def require_customer_role(  # noqa: C901
                                 request=request,
                             ),
                         )
-                    return HttpResponseForbidden(_("Access denied"), content_type="text/plain")
+                    return render(request, "403.html", status=403)
 
                 user_role = verification.get("role", "viewer")
             else:
                 # Use cached role from session
-                user_role = _get_user_role_for_customer(request, customer_id)
+                try:
+                    user_role = _get_user_role_for_customer(request, customer_id)
+                except PlatformAPIError as error:
+                    return _render_role_check_degraded(request, error)
 
             if not user_role:
                 logger.warning(
@@ -233,7 +292,7 @@ def require_customer_role(  # noqa: C901
                             request=request,
                         ),
                     )
-                return HttpResponseForbidden(_("Role not found"), content_type="text/plain")
+                return render(request, "403.html", status=403)
 
             # Check role permissions
             if user_role not in required_roles:
@@ -251,7 +310,7 @@ def require_customer_role(  # noqa: C901
                             request=request,
                         ),
                     )
-                return HttpResponseForbidden(_("Insufficient permissions"), content_type="text/plain")
+                return render(request, "403.html", status=403)
 
             # Store current role in request for use in view
             request.user_role = user_role  # type: ignore[attr-defined]

@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load i18n %}
+{% load i18n ui_components %}
 
 {% block title %}{% trans 'Cookie Policy' %} - PragmaticHost{% endblock %}
 
@@ -45,7 +45,8 @@
       <div class="p-6">
         <div class="flex items-center justify-between mb-4">
           <h2 class="text-lg font-medium text-white">{% trans 'Essential Cookies' %}</h2>
-          <span class="bg-green-700 text-green-100 text-xs px-2.5 py-1 rounded-full font-medium">{% trans 'Always Active' %}</span>
+          {% trans "Always Active" as status_label %}
+          {% badge status_label variant="success" rounded="full" %}
         </div>
         <p class="text-sm text-slate-300 mb-4">
           {% filter force_escape %}{% blocktrans %}
@@ -103,7 +104,8 @@
       <div class="p-6">
         <div class="flex items-center justify-between mb-4">
           <h2 class="text-lg font-medium text-white">{% trans 'Functional Cookies' %}</h2>
-          <span class="bg-blue-700 text-blue-100 text-xs px-2.5 py-1 rounded-full font-medium">{% trans 'Optional' %}</span>
+          {% trans "Optional" as status_label %}
+          {% badge status_label variant="primary" rounded="full" %}
         </div>
         <p class="text-sm text-slate-300 mb-4">
           {% filter force_escape %}{% blocktrans %}
@@ -150,7 +152,8 @@
       <div class="p-6">
         <div class="flex items-center justify-between mb-4">
           <h2 class="text-lg font-medium text-white">{% trans 'Analytics Cookies' %}</h2>
-          <span class="bg-yellow-700 text-yellow-100 text-xs px-2.5 py-1 rounded-full font-medium">{% trans 'Optional' %}</span>
+          {% trans "Optional" as status_label %}
+          {% badge status_label variant="warning" rounded="full" %}
         </div>
         <p class="text-sm text-slate-300 mb-4">
           {% filter force_escape %}{% blocktrans %}
@@ -191,7 +194,8 @@
       <div class="p-6">
         <div class="flex items-center justify-between mb-4">
           <h2 class="text-lg font-medium text-white">{% trans 'Marketing Cookies' %}</h2>
-          <span class="bg-red-700 text-red-100 text-xs px-2.5 py-1 rounded-full font-medium">{% trans 'Optional' %}</span>
+          {% trans "Optional" as status_label %}
+          {% badge status_label variant="danger" rounded="full" %}
         </div>
         <p class="text-sm text-slate-300 mb-4">
           {% filter force_escape %}{% blocktrans %}
@@ -220,9 +224,8 @@
         as giving it, as required by GDPR Article 7(3).
         {% endblocktrans %}{% endfilter %}
       </p>
-      <button data-action="cookie-prefs" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md font-medium transition-colors text-sm">
-        {% trans 'Open Cookie Preferences' %}
-      </button>
+      {% trans 'Open Cookie Preferences' as cookie_preferences_label %}
+      {% button cookie_preferences_label data_action="cookie-prefs" variant="primary" %}
     </div>
   </div>
 
@@ -239,9 +242,9 @@
           {% endblocktrans %}{% endfilter %}
         </p>
         <p>
-          {% filter force_escape %}{% blocktrans %}
+          {% filter force_escape %}{% blocktrans with privacy_email=company.email_privacy %}
           For any questions about our use of cookies, please contact our Data Protection Officer
-          at privacy@pragmatichost.com.
+          at {{ privacy_email }}.
           {% endblocktrans %}{% endfilter %}
         </p>
       </div>

@@ -182,10 +182,11 @@ class MeteringService:
                 return Err(f"Customer not found: {event_data.customer_id}")
 
             # Validate timestamp
-            timestamp = event_data.timestamp or timezone.now()
+            now = timezone.now()
+            timestamp = event_data.timestamp or now
             grace_period = timedelta(hours=meter.event_grace_period_hours)
-            min_timestamp = timezone.now() - grace_period
-            max_timestamp = timezone.now() + timedelta(minutes=billing_config.get_future_event_drift_minutes())
+            min_timestamp = now - grace_period
+            max_timestamp = now + timedelta(minutes=billing_config.get_future_event_drift_minutes())
 
             if timestamp < min_timestamp:
                 return Err(
@@ -288,11 +289,11 @@ class MeteringService:
     def _schedule_aggregation_update(self, event: Any) -> None:
         """Schedule async update of aggregation for this event"""
         try:
-            from django_q.tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
-                async_task,  # Deferred: optional dependency  # Deferred: avoids circular import
+            from apps.billing.metering_tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
+                update_aggregation_for_event_async,
             )
 
-            async_task("apps.billing.metering_tasks.update_aggregation_for_event", str(event.id), timeout=60)
+            update_aggregation_for_event_async(str(event.id))
         except Exception as e:
             logger.warning(f"Could not schedule aggregation update: {e}")
             # Fall back to sync update
@@ -412,16 +413,12 @@ class MeteringService:
     def _check_thresholds_async(self, customer: Any, meter: Any, subscription: Any | None) -> None:
         """Schedule async threshold check"""
         try:
-            from django_q.tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
-                async_task,  # Deferred: optional dependency  # Deferred: avoids circular import
+            from apps.billing.metering_tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
+                check_usage_thresholds_async,
             )
 
-            async_task(
-                "apps.billing.metering_tasks.check_usage_thresholds",
-                str(customer.id),
-                str(meter.id),
-                str(subscription.id) if subscription else None,
-                timeout=30,
+            check_usage_thresholds_async(
+                str(customer.id), str(meter.id), str(subscription.id) if subscription else None
             )
         except Exception as e:
             logger.warning(f"Could not schedule threshold check: {e}")
@@ -1127,11 +1124,11 @@ class UsageAlertService:
     def _schedule_alert_notification(self, alert: Any) -> None:
         """Schedule async notification for an alert"""
         try:
-            from django_q.tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
-                async_task,  # Deferred: optional dependency  # Deferred: avoids circular import
+            from apps.billing.metering_tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
+                send_usage_alert_notification_async,
             )
 
-            async_task("apps.billing.metering_tasks.send_usage_alert_notification", str(alert.id), timeout=60)
+            send_usage_alert_notification_async(str(alert.id))
         except Exception as e:
             logger.warning(f"Could not schedule alert notification: {e}")
 

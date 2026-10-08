@@ -17,22 +17,41 @@ from apps.billing.efactura.client import EFacturaClient, NetworkError, UploadRes
 from apps.billing.efactura.models import EFacturaDocument, EFacturaStatus
 from apps.billing.efactura.service import EFacturaService
 from apps.billing.efactura.validator import ValidationResult
+from apps.billing.invoice_models import Invoice
+
+
+def stub_xml(marker: str = "") -> str:
+    """Minimal UBL that names its supplier; uploads take the ANAF CUI from the XML itself."""
+    return (
+        '<Invoice xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2" '
+        'xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">'
+        "<cac:AccountingSupplierParty><cac:Party><cac:PartyIdentification><cbc:ID>12345678</cbc:ID>"
+        f"</cac:PartyIdentification></cac:Party></cac:AccountingSupplierParty>{marker}</Invoice>"
+    )
 
 
 class _SubmissionClaimFixture:
-    def create_invoice(self, number: str):
-        from tests.factories import CurrencyFactory, CustomerFactory, InvoiceFactory  # noqa: PLC0415
+    def create_invoice(self, number: str) -> Invoice:
+        from tests.factories import CurrencyFactory, CustomerFactory  # noqa: PLC0415
 
         currency = CurrencyFactory(code="RON")
         customer = CustomerFactory()
-        return InvoiceFactory(
-            customer=customer,
-            currency=currency,
-            number=number,
-            bill_to_country="RO",
-            bill_to_tax_id="RO12345678",
-            status="issued",
-        )
+        # Historical claim fixtures bypass issuance; each test constructs its own document state.
+        return Invoice.objects.bulk_create(
+            [
+                Invoice(
+                    customer=customer,
+                    currency=currency,
+                    number=number,
+                    bill_to_name="Test Company SRL",
+                    bill_to_country="RO",
+                    bill_to_tax_id="RO12345678",
+                    status="issued",
+                    subtotal_cents=10000,
+                    total_cents=10000,
+                )
+            ]
+        )[0]
 
     @staticmethod
     def service(client: EFacturaClient) -> EFacturaService:
@@ -58,7 +77,7 @@ class _SubmissionClaimFixture:
 class SubmissionClaimLifecycleTests(_SubmissionClaimFixture, TestCase):
     def test_active_upload_claim_is_an_idempotent_noop(self):
         invoice = self.create_invoice("INV-CLAIM-ACTIVE")
-        document = EFacturaDocument.objects.create(invoice=invoice, xml_content="<Invoice/>")
+        document = EFacturaDocument.objects.create(invoice=invoice, xml_content=stub_xml())
         self.mark_uploading(document)
         client = Mock(spec=EFacturaClient)
 
@@ -74,21 +93,19 @@ class SubmissionClaimLifecycleTests(_SubmissionClaimFixture, TestCase):
         invoice is corrected, retry regenerates and sends the new bytes."""
         invoice = self.create_invoice("INV-REFUSED-REGEN")
         client = Mock(spec=EFacturaClient)
-        client.upload_invoice.return_value = UploadResponse(
-            success=False, message="refused", errors=["bad field"]
-        )
+        client.upload_invoice.return_value = UploadResponse(success=False, message="refused", errors=["bad field"])
         service = self.service(client)
         with (
             patch.object(service, "_is_b2c", return_value=False),
             patch.object(service, "_log_audit_event"),
-            patch.object(service, "_generate_xml", return_value="<Invoice>v1</Invoice>"),
+            patch.object(service, "_generate_xml", return_value=stub_xml("v1")),
         ):
             first = service.submit_invoice(invoice)
 
         self.assertFalse(first.success)
         document = EFacturaDocument.objects.get(invoice=invoice)
         self.assertEqual(document.status, EFacturaStatus.ERROR.value)
-        self.assertEqual(document.xml_content, "<Invoice>v1</Invoice>")
+        self.assertEqual(document.xml_content, stub_xml("v1"))
 
         client_retry = Mock(spec=EFacturaClient)
         client_retry.upload_invoice.return_value = UploadResponse(success=True, upload_index="IDX-REGEN")
@@ -96,7 +113,7 @@ class SubmissionClaimLifecycleTests(_SubmissionClaimFixture, TestCase):
         with (
             patch.object(service_retry, "_is_b2c", return_value=False),
             patch.object(service_retry, "_log_audit_event"),
-            patch.object(service_retry, "_generate_xml", return_value="<Invoice>v2-corrected</Invoice>"),
+            patch.object(service_retry, "_generate_xml", return_value=stub_xml("v2-corrected")),
         ):
             second = service_retry.submit_invoice(invoice)
 
@@ -104,21 +121,21 @@ class SubmissionClaimLifecycleTests(_SubmissionClaimFixture, TestCase):
         document.refresh_from_db()
         self.assertEqual(
             document.xml_content,
-            "<Invoice>v2-corrected</Invoice>",
+            stub_xml("v2-corrected"),
             "a refused document with no active claim must regenerate corrected XML",
         )
         sent_xml = client_retry.upload_invoice.call_args[0][0]
-        self.assertEqual(sent_xml, "<Invoice>v2-corrected</Invoice>")
+        self.assertEqual(sent_xml, stub_xml("v2-corrected"))
 
     def test_reentrant_submit_cannot_reach_anaf_twice(self):
         """A second caller arriving during the POST observes the committed claim."""
         invoice = self.create_invoice("INV-CLAIM-REENTRANT")
-        EFacturaDocument.objects.create(invoice=invoice, xml_content="<Invoice/>")
+        EFacturaDocument.objects.create(invoice=invoice, xml_content=stub_xml())
         client = Mock(spec=EFacturaClient)
         service = self.service(client)
         nested_results = []
 
-        def upload(_xml: str) -> UploadResponse:
+        def upload(_xml: str, **_kwargs: object) -> UploadResponse:
             nested_results.append(service.submit_invoice(invoice))
             return UploadResponse(success=True, upload_index="IDX-REENTRANT")
 
@@ -136,7 +153,7 @@ class SubmissionClaimLifecycleTests(_SubmissionClaimFixture, TestCase):
 
     def test_expired_upload_claim_becomes_outcome_unknown_without_repost(self):
         invoice = self.create_invoice("INV-CLAIM-EXPIRED")
-        document = EFacturaDocument.objects.create(invoice=invoice, xml_content="<Invoice/>")
+        document = EFacturaDocument.objects.create(invoice=invoice, xml_content=stub_xml())
         self.mark_uploading(document, expired=True)
         client = Mock(spec=EFacturaClient)
 
@@ -152,7 +169,7 @@ class SubmissionClaimLifecycleTests(_SubmissionClaimFixture, TestCase):
 
     def test_network_failure_after_claim_is_quarantined_and_never_replayed(self):
         invoice = self.create_invoice("INV-CLAIM-NETWORK")
-        EFacturaDocument.objects.create(invoice=invoice, xml_content="<Invoice/>")
+        EFacturaDocument.objects.create(invoice=invoice, xml_content=stub_xml())
         client = Mock(spec=EFacturaClient)
         client.upload_invoice.side_effect = NetworkError("response lost")
         service = self.service(client)
@@ -171,7 +188,7 @@ class SubmissionClaimLifecycleTests(_SubmissionClaimFixture, TestCase):
 
     def test_explicit_anaf_rejection_remains_safely_retryable(self):
         invoice = self.create_invoice("INV-CLAIM-REFUSED")
-        EFacturaDocument.objects.create(invoice=invoice, xml_content="<Invoice/>")
+        EFacturaDocument.objects.create(invoice=invoice, xml_content=stub_xml())
         client = Mock(spec=EFacturaClient)
         client.upload_invoice.return_value = UploadResponse.error("ANAF explicitly refused the upload")
         service = self.service(client)
@@ -190,30 +207,30 @@ class SubmissionClaimLifecycleTests(_SubmissionClaimFixture, TestCase):
 
         # New contract: an explicit refusal releases the claim, so the XML may be
         # corrected — those bytes were provably never accepted by ANAF.
-        document.xml_content = "<Invoice>corrected after refusal</Invoice>"
+        document.xml_content = stub_xml("corrected after refusal")
         document.save()
         document.refresh_from_db()
-        self.assertEqual(document.xml_content, "<Invoice>corrected after refusal</Invoice>")
+        self.assertEqual(document.xml_content, stub_xml("corrected after refusal"))
         self.assertTrue(document.verify_xml_integrity())
 
     def test_ambiguous_outcome_keeps_xml_frozen(self):
         """outcome_unknown bytes may already be at ANAF — they stay immutable."""
         invoice = self.create_invoice("INV-CLAIM-FROZEN-UNKNOWN")
-        document = EFacturaDocument.objects.create(invoice=invoice, xml_content="<Invoice/>")
+        document = EFacturaDocument.objects.create(invoice=invoice, xml_content=stub_xml())
         self.mark_uploading(document)
         document.mark_outcome_unknown("response lost")
         document.save()
 
-        document.xml_content = "<Invoice>mutated after ambiguity</Invoice>"
+        document.xml_content = stub_xml("mutated after ambiguity")
         with self.assertRaisesRegex(DjangoValidationError, "immutable"):
             document.save()
 
     def test_never_claimed_local_error_regenerates_xml_after_data_fix(self):
         invoice = self.create_invoice("INV-CLAIM-LOCAL-FIX")
-        document = EFacturaDocument.objects.create(invoice=invoice, xml_content="<Invoice>stale</Invoice>")
+        document = EFacturaDocument.objects.create(invoice=invoice, xml_content=stub_xml("stale"))
         document.mark_local_error("local validation failed")
         document.save()
-        fresh_xml = "<Invoice>regenerated after fix</Invoice>"
+        fresh_xml = stub_xml("regenerated after fix")
         client = Mock(spec=EFacturaClient)
         client.upload_invoice.return_value = UploadResponse(success=True, upload_index="IDX-LOCAL-FIX")
         service = self.service(client)
@@ -227,12 +244,12 @@ class SubmissionClaimLifecycleTests(_SubmissionClaimFixture, TestCase):
 
         self.assertTrue(result.success, result.error_message)
         generate_xml.assert_called_once()
-        client.upload_invoice.assert_called_once_with(fresh_xml)
+        client.upload_invoice.assert_called_once_with(fresh_xml, cif="12345678")
 
     def test_error_retry_with_unchanged_invoice_resends_identical_bytes(self):
         """Regeneration on retry is byte-stable when the invoice did not change."""
         invoice = self.create_invoice("INV-CLAIM-RETRY")
-        frozen_xml = "<Invoice>frozen fiscal bytes</Invoice>"
+        frozen_xml = stub_xml("frozen fiscal bytes")
         document = EFacturaDocument.objects.create(invoice=invoice, xml_content=frozen_xml)
         self.mark_uploading(document)
         document.mark_error("ANAF explicitly refused before accepting the upload")
@@ -249,7 +266,7 @@ class SubmissionClaimLifecycleTests(_SubmissionClaimFixture, TestCase):
             result = service.submit_invoice(invoice)
 
         self.assertTrue(result.success, result.error_message)
-        client.upload_invoice.assert_called_once_with(frozen_xml)
+        client.upload_invoice.assert_called_once_with(frozen_xml, cif="12345678")
         document.refresh_from_db()
         self.assertEqual(document.xml_content, frozen_xml)
         self.assertTrue(document.verify_xml_integrity())
@@ -264,14 +281,14 @@ class SubmissionClaimPostgresConcurrencyTests(_SubmissionClaimFixture, Transacti
         if connection.vendor != "postgresql":
             self.skipTest("PostgreSQL row-lock behavior required")
         self.invoice = self.create_invoice("INV-CLAIM-CONCURRENT")
-        EFacturaDocument.objects.create(invoice=self.invoice, xml_content="<Invoice/>")
+        EFacturaDocument.objects.create(invoice=self.invoice, xml_content=stub_xml())
 
     def test_concurrent_second_caller_never_reaches_anaf(self):
         remote_started = threading.Event()
         release_remote = threading.Event()
         client = Mock(spec=EFacturaClient)
 
-        def upload(_xml: str) -> UploadResponse:
+        def upload(_xml: str, **_kwargs: object) -> UploadResponse:
             remote_started.set()
             if not release_remote.wait(timeout=10):
                 raise AssertionError("Timed out releasing ANAF upload")
@@ -283,9 +300,7 @@ class SubmissionClaimPostgresConcurrencyTests(_SubmissionClaimFixture, Transacti
             close_old_connections()
             try:
                 service = self.service(client)
-                with patch.object(service, "_is_b2c", return_value=False), patch.object(
-                    service, "_log_audit_event"
-                ):
+                with patch.object(service, "_is_b2c", return_value=False), patch.object(service, "_log_audit_event"):
                     return service.submit_invoice(type(self.invoice).objects.get(pk=self.invoice.pk))
             finally:
                 connection.close()

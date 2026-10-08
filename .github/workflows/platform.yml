@@ -27,17 +27,6 @@ on:
       - '.gitignore'
   pull_request:
     branches: [master, staging]
-    paths:
-      - 'services/platform/**'
-      - 'shared/**'
-      - 'scripts/affected_test_modules.py'
-      - 'pyproject.toml'
-      - 'uv.lock'
-      - '.github/workflows/**'
-      # Root files tests/common/test_ci_node_lockfile.py reads: a change to them alone must run it.
-      - 'package.json'
-      - 'package-lock.json'
-      - '.gitignore'
   workflow_dispatch:
 
 env:
@@ -46,6 +35,29 @@ env:
   UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv-linux
 
 jobs:
+  coverage-gate:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install uv and sync dependencies
+      uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+        cache-dependency-glob: "uv.lock"
+
+    - name: Set up Python and install dependencies
+      run: |
+        uv python install
+        uv sync --group platform --group dev
+
+    - name: Platform global coverage floor
+      run: make coverage-platform
+
+    - name: Platform per-package coverage floors
+      run: make coverage-platform-packages
+
   platform-test:
     runs-on: ubuntu-latest
 

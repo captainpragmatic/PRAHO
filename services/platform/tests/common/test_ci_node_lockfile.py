@@ -180,7 +180,13 @@ class WorkflowNodeLockfileTests(SimpleTestCase):
         )
 
     def test_a_pull_request_that_changes_only_the_guards_inputs_still_runs_it(self) -> None:
-        paths = _pull_request_paths(yaml.safe_load(_GUARD_WORKFLOW.read_text(encoding="utf-8")))
+        workflow = yaml.safe_load(_GUARD_WORKFLOW.read_text(encoding="utf-8"))
+        paths = _pull_request_paths(workflow)
+        if not paths:
+            # No path filter: the workflow runs on every pull request, these inputs included.
+            triggers = workflow.get("on", workflow.get(True))
+            self.assertIn("pull_request", triggers)
+            return
         # Canary: an unreadable filter would leave every input "unmatched" for the wrong reason.
         self.assertIn("services/platform/**", paths)
 
@@ -235,7 +241,10 @@ class LockfileNeedResolutionTests(SimpleTestCase):
         step = {"name": "n", "uses": "actions/setup-node@v4", "with": {"cache": "npm"}}
         self.assertEqual(self._needs(step=step, job=self._defaults("frontend")), {"w.yml:j:n": [_LOCKFILE]})
 
-        explicit = {**step, "with": {"cache": "npm", "cache-dependency-path": "a/package-lock.json\nb/package-lock.json"}}
+        explicit = {
+            **step,
+            "with": {"cache": "npm", "cache-dependency-path": "a/package-lock.json\nb/package-lock.json"},
+        }
         self.assertEqual(self._needs(step=explicit), {"w.yml:j:n": ["a/package-lock.json", "b/package-lock.json"]})
 
     def test_same_named_steps_keep_both_requirements(self) -> None:

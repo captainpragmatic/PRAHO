@@ -24,6 +24,7 @@ from apps.provisioning.virtualmin_gateway import (
     resolve_server_credentials,
 )
 from apps.provisioning.virtualmin_models import VirtualminServer
+from apps.provisioning.virtualmin_service import VirtualminProvisioningService
 
 
 def create_test_server(**kwargs) -> Server:
@@ -418,6 +419,42 @@ class ConfigDictNoEnvCredentialsTest(TestCase):
     def test_config_dict_retains_pinned_cert(self):
         config = get_virtualmin_config()
         self.assertIn("pinned_cert_sha256", config)
+
+    def test_retired_global_fields_are_absent_and_server_configuration_stays_authoritative(self) -> None:
+        retired_fields = {
+            "auth_health_check_interval",
+            "backup_compression_enabled",
+            "backup_retention_days",
+            "connection_pool_size",
+            "hostname",
+            "log_retention_days",
+            "monitoring_enabled",
+            "mysql_enabled",
+            "php_version_default",
+            "port",
+            "postgresql_enabled",
+            "ssl_auto_renewal_enabled",
+            "ssl_verify",
+        }
+        config = get_virtualmin_config()
+        self.assertFalse(retired_fields.intersection(config))
+        self.assertEqual(config["timeout"], 30)
+        self.assertIn("pinned_cert_sha256", config)
+
+        server = VirtualminServer(
+            name="Per-server configuration",
+            hostname="server-only.example.com",
+            api_port=10443,
+            use_ssl=True,
+            ssl_verify=False,
+            ssl_cert_fingerprint="ab" * 32,
+        )
+        gateway = VirtualminProvisioningService(server)._get_gateway(use_credential_vault=False)
+        self.assertIs(gateway.server, server)
+        self.assertEqual(gateway.server.api_url, "https://server-only.example.com:10443/virtual-server/remote.cgi")
+        self.assertFalse(gateway.config.verify_ssl)
+        self.assertEqual(gateway.config.cert_fingerprint, "ab" * 32)
+        self.assertEqual(gateway.config.timeout, config["timeout"])
 
 
 class CredentialVaultRBACTest(TestCase):

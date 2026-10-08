@@ -69,9 +69,10 @@ document.addEventListener('alpine:init', function () {
           action: null,
 
           open(data) {
-              this.title = data.title || 'Confirm Action';
-              this.message = data.message || 'Are you sure?';
-              this.confirmText = data.confirmText || 'I understand';
+              const defaults = this.$root.dataset;
+              this.title = data.title || defaults.defaultTitle;
+              this.message = data.message || defaults.defaultMessage;
+              this.confirmText = data.confirmText || defaults.defaultConfirmText;
               this.userInput = '';
               this.action = data.action;
               this.show = true;

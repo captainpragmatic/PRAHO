@@ -23,7 +23,7 @@
         <h2 class="text-lg font-medium text-white">{% trans "Features" %}</h2>
         <ul class="grid sm:grid-cols-2 gap-2">
           {% for feature in product.meta.features %}
-          <li class="text-slate-300 flex items-center"><span class="mr-2">{% icon "check" size="sm" css_class="text-green-400" %}</span>{{ feature }}</li>
+          <li class="text-slate-300 flex items-center"><span class="mr-2">{% icon "check" size="sm" css_class="text-green-400" %}</span>{{ feature }}</li> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
           {% endfor %}
         </ul>
         {% endif %}
@@ -33,7 +33,7 @@
         <div class="bg-slate-900/40 border border-slate-700 rounded-lg p-4">
           {% if product.prices %}
           <div class="text-center mb-4 p-3 bg-slate-700/50 rounded-lg">
-            <div class="text-2xl font-bold text-green-400">
+            <div class="text-2xl font-bold text-green-400"> {# tmpl-allow TMPL005: needs badge unboxed_value #}
               {{ product.prices.0.monthly_price|romanian_currency:product.prices.0.currency }} /{% trans "mo" %}
             </div>
             {% if product.prices.0.setup_fee and product.prices.0.setup_fee != "0.00" %}
@@ -49,8 +49,9 @@
             {% csrf_token %}
             <input type="hidden" name="product_slug" value="{{ product.slug }}">
             <div class="mb-3">
-              <label class="block text-sm text-slate-300 mb-1">{% trans "Billing period" %}</label>
-              <select name="billing_period" class="w-full bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2">
+              <label for="id_billing_period" class="block text-sm text-slate-300 mb-1">{% trans "Billing period" %}</label>
+              {# tmpl-allow TMPL003: needs input_field formatted_option_labels #}
+              <select id="id_billing_period" name="billing_period" class="w-full bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2">
                 {% for period in billing_periods %}
                 <option value="{{ period.value }}">{{ period.label }} — {{ period.amount|romanian_currency:product.prices.0.currency }}</option>
                 {% endfor %}
@@ -58,7 +59,7 @@
             </div>
             <div class="mb-3">
               <label for="id_quantity" class="block text-sm text-slate-300 mb-1">{% trans "Quantity" %}</label>
-              <input type="number" name="quantity" id="id_quantity" value="1" min="1" class="w-full bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2">
+              {% input_field "quantity" input_type="number" html_id="id_quantity" aria_label=_("Quantity") value="1" min=1 %}
             </div>
             {% if product.requires_domain %}
             <div class="mb-4">

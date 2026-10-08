@@ -14,7 +14,7 @@ from pathlib import Path
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpResponse
-from django.utils.translation import gettext as _t
+from django.utils.translation import gettext
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import cm
 from reportlab.pdfbase import pdfmetrics
@@ -191,7 +191,7 @@ class RomanianDocumentPDFGenerator:
         y_pos = self.height - 8 * cm
 
         self.canvas.setFont(_FONT_BOLD, 14)
-        self.canvas.drawString(2 * cm, y_pos, str(_t("Supplier:")))
+        self.canvas.drawString(2 * cm, y_pos, str(gettext("Supplier:")))
 
         self.canvas.setFont(_FONT, 10)
         step = 0.4 * cm
@@ -205,30 +205,34 @@ class RomanianDocumentPDFGenerator:
         )
         current_y -= step
 
-        self.canvas.drawString(2 * cm, current_y, str(_t("CUI/CIF: {cui}")).format(cui=company_info["cui"]))
+        self.canvas.drawString(2 * cm, current_y, str(gettext("CUI/CIF: {cui}")).format(cui=company_info["cui"]))
         current_y -= step
 
         if company_info["registration_number"]:
             self.canvas.drawString(
                 2 * cm,
                 current_y,
-                str(_t("Nr. Reg. Com.: {reg}")).format(reg=company_info["registration_number"]),
+                str(gettext("Nr. Reg. Com.: {reg}")).format(reg=company_info["registration_number"]),
             )
             current_y -= step
 
-        self.canvas.drawString(2 * cm, current_y, str(_t("Email: {email}")).format(email=company_info["email"]))
+        self.canvas.drawString(2 * cm, current_y, str(gettext("Email: {email}")).format(email=company_info["email"]))
         current_y -= step
 
         if company_info["phone"]:
-            self.canvas.drawString(2 * cm, current_y, str(_t("Tel: {phone}")).format(phone=company_info["phone"]))
+            self.canvas.drawString(2 * cm, current_y, str(gettext("Tel: {phone}")).format(phone=company_info["phone"]))
             current_y -= step
 
         if company_info["bank_name"]:
-            self.canvas.drawString(2 * cm, current_y, str(_t("Banca: {bank}")).format(bank=company_info["bank_name"]))
+            self.canvas.drawString(
+                2 * cm, current_y, str(gettext("Banca: {bank}")).format(bank=company_info["bank_name"])
+            )
             current_y -= step
 
         if company_info["bank_account"]:
-            self.canvas.drawString(2 * cm, current_y, str(_t("IBAN: {iban}")).format(iban=company_info["bank_account"]))
+            self.canvas.drawString(
+                2 * cm, current_y, str(gettext("IBAN: {iban}")).format(iban=company_info["bank_account"])
+            )
 
     def _render_client_information(self) -> None:
         """Render client information section with full address and tax details."""
@@ -237,7 +241,7 @@ class RomanianDocumentPDFGenerator:
         step = 0.4 * cm
 
         self.canvas.setFont(_FONT_BOLD, 14)
-        self.canvas.drawString(x_pos, y_pos, str(_t("Client:")))
+        self.canvas.drawString(x_pos, y_pos, str(gettext("Client:")))
 
         self.canvas.setFont(_FONT, 10)
         current_y = y_pos - step
@@ -280,7 +284,7 @@ class RomanianDocumentPDFGenerator:
         # Tax ID
         if self.document.bill_to_tax_id:
             self.canvas.drawString(
-                x_pos, current_y, str(_t("CUI/CIF: {tax_id}")).format(tax_id=self.document.bill_to_tax_id)
+                x_pos, current_y, str(gettext("CUI/CIF: {tax_id}")).format(tax_id=self.document.bill_to_tax_id)
             )
             current_y -= step
 
@@ -289,14 +293,14 @@ class RomanianDocumentPDFGenerator:
             self.canvas.drawString(
                 x_pos,
                 current_y,
-                str(_t("Nr. Reg. Com.: {reg}")).format(reg=self.document.bill_to_registration_number),
+                str(gettext("Nr. Reg. Com.: {reg}")).format(reg=self.document.bill_to_registration_number),
             )
             current_y -= step
 
         # Email
         if self.document.bill_to_email:
             self.canvas.drawString(
-                x_pos, current_y, str(_t("Email: {email}")).format(email=self.document.bill_to_email)
+                x_pos, current_y, str(gettext("Email: {email}")).format(email=self.document.bill_to_email)
             )
 
     def _render_items_table(self) -> None:
@@ -312,11 +316,11 @@ class RomanianDocumentPDFGenerator:
     def _render_table_headers(self, table_y: float) -> None:
         """Render table column headers with VAT% column."""
         self.canvas.setFont(_FONT_BOLD, 10)
-        self.canvas.drawString(2 * cm, table_y, str(_t("Description")))
-        self.canvas.drawString(9 * cm, table_y, str(_t("Qty")))
-        self.canvas.drawString(11 * cm, table_y, str(_t("Unit Price")))
-        self.canvas.drawString(13.5 * cm, table_y, str(_t("VAT%")))
-        self.canvas.drawString(15.5 * cm, table_y, str(_t("Total")))
+        self.canvas.drawString(2 * cm, table_y, str(gettext("Description")))
+        self.canvas.drawString(9 * cm, table_y, str(gettext("Qty")))
+        self.canvas.drawString(11 * cm, table_y, str(gettext("Unit Price")))
+        self.canvas.drawString(13.5 * cm, table_y, str(gettext("VAT%")))
+        self.canvas.drawString(15.5 * cm, table_y, str(gettext("Total")))
 
         # Draw line under headers
         self.canvas.line(2 * cm, table_y - 0.3 * cm, 18 * cm, table_y - 0.3 * cm)
@@ -360,7 +364,7 @@ class RomanianDocumentPDFGenerator:
                 self.canvas.drawString(
                     2.5 * cm,
                     current_y,
-                    str(_t("Domeniu: {domain}")).format(domain=self._fit(line.domain_name, _MAX_SUBLINE_CHARS)),
+                    str(gettext("Domeniu: {domain}")).format(domain=self._fit(line.domain_name, _MAX_SUBLINE_CHARS)),
                 )
                 current_y -= 0.35 * cm
 
@@ -368,7 +372,7 @@ class RomanianDocumentPDFGenerator:
                 self.canvas.drawString(
                     2.5 * cm,
                     current_y,
-                    str(_t("Perioada: {start} - {end}")).format(
+                    str(gettext("Perioada: {start} - {end}")).format(
                         start=line.period_start.strftime("%d.%m.%Y"),
                         end=line.period_end.strftime("%d.%m.%Y"),
                     ),
@@ -379,7 +383,7 @@ class RomanianDocumentPDFGenerator:
                 self.canvas.drawString(
                     2.5 * cm,
                     current_y,
-                    str(_t("Cod produs: {code}")).format(code=self._fit(line.seller_item_id, _MAX_SUBLINE_CHARS)),
+                    str(gettext("Cod produs: {code}")).format(code=self._fit(line.seller_item_id, _MAX_SUBLINE_CHARS)),
                 )
                 current_y -= 0.35 * cm
 
@@ -413,7 +417,7 @@ class RomanianDocumentPDFGenerator:
         richer per-rate breakdown is exact and kept.
         """
         self.canvas.setFont(_FONT, 11)
-        line_tmpl = _t("TVA {rate}%: {tax} {currency} (baza: {base} {currency})")
+        line_tmpl = gettext("TVA {rate}%: {tax} {currency} (baza: {base} {currency})")
         # Signed: a credit note's discount is negative. Gated on `> 0` this branch never
         # ran for one, so the breakdown re-derived the tax from the GROSS lines and printed
         # a rate line contradicting the Total TVA directly beneath it.
@@ -525,7 +529,7 @@ class RomanianDocumentPDFGenerator:
         self.canvas.drawString(
             12 * cm,
             totals_y,
-            str(_t("Subtotal: {amount} {currency}")).format(amount=f"{subtotal_shown:.2f}", currency=currency),
+            str(gettext("Subtotal: {amount} {currency}")).format(amount=f"{subtotal_shown:.2f}", currency=currency),
         )
         totals_y -= 0.5 * cm
 
@@ -535,7 +539,7 @@ class RomanianDocumentPDFGenerator:
             self.canvas.drawString(
                 12 * cm,
                 totals_y,
-                str(_t("Discount: {amount} {currency}")).format(amount=f"{-discount:.2f}", currency=currency),
+                str(gettext("Discount: {amount} {currency}")).format(amount=f"{-discount:.2f}", currency=currency),
             )
             totals_y -= 0.5 * cm
 
@@ -547,7 +551,7 @@ class RomanianDocumentPDFGenerator:
         self.canvas.drawString(
             12 * cm,
             totals_y,
-            str(_t("Total TVA: {amount} {currency}")).format(
+            str(gettext("Total TVA: {amount} {currency}")).format(
                 amount=f"{self.document.tax_amount:.2f}", currency=currency
             ),
         )
@@ -569,7 +573,7 @@ class RomanianDocumentPDFGenerator:
             self.canvas.drawString(
                 2 * cm,
                 totals_y,
-                str(_t("Taxare inversă / Reverse charge — {legal_basis}")).format(
+                str(gettext("Taxare inversă / Reverse charge — {legal_basis}")).format(
                     legal_basis=REVERSE_CHARGE_LEGAL_BASIS
                 ),
             )
@@ -584,7 +588,9 @@ class RomanianDocumentPDFGenerator:
                 self.canvas.drawString(
                     2 * cm,
                     totals_y,
-                    str(_t("Curs valutar: 1 {currency} = {rate} RON")).format(currency=currency, rate=exchange_rate),
+                    str(gettext("Curs valutar: 1 {currency} = {rate} RON")).format(
+                        currency=currency, rate=exchange_rate
+                    ),
                 )
                 totals_y -= 0.5 * cm
 
@@ -593,7 +599,7 @@ class RomanianDocumentPDFGenerator:
 
     def _get_total_label(self) -> str:
         """Get the appropriate total label for the document type."""
-        return _t("TOTAL: {amount} {currency}")
+        return gettext("TOTAL: {amount} {currency}")
 
     def _render_status_information(self, totals_y: float) -> None:
         """Render document-specific status information."""
@@ -606,7 +612,9 @@ class RomanianDocumentPDFGenerator:
         self.canvas.setFont(_FONT, 8)
         self.canvas.drawString(2 * cm, 2 * cm, str(self._get_legal_disclaimer()))
         self.canvas.drawString(
-            2 * cm, 1.5 * cm, str(_t("Generated automatically by {platform}")).format(platform=company_info["name"])
+            2 * cm,
+            1.5 * cm,
+            str(gettext("Generated automatically by {platform}")).format(platform=company_info["name"]),
         )
 
     def _get_legal_disclaimer(self) -> str:
@@ -628,41 +636,41 @@ class RomanianInvoicePDFGenerator(RomanianDocumentPDFGenerator):
         # A storno is its own fiscal document (Cod Fiscal art. 330), and the copy the customer
         # receives has to say so rather than present a correction as a new invoice.
         if self._is_credit_note():
-            return _t("FACTURĂ STORNO / CREDIT NOTE")
-        return _t("FISCAL INVOICE")
+            return gettext("FACTURĂ STORNO / CREDIT NOTE")
+        return gettext("FISCAL INVOICE")
 
     def _get_filename(self) -> str:
         prefix = "storno" if self._is_credit_note() else "factura"
         return f"{prefix}_{self.invoice.display_number}.pdf"
 
     def _get_legal_disclaimer(self) -> str:
-        return _t("Factură fiscală emisă conform art. 319 din Legea nr. 227/2015 privind Codul fiscal.")
+        return gettext("Factură fiscală emisă conform art. 319 din Legea nr. 227/2015 privind Codul fiscal.")
 
     def _get_total_label(self) -> str:
         # Nothing is payable on a credit note; its total is what was credited.
         if self._is_credit_note():
-            return _t("Total creditat / Total credited: {amount} {currency}")
-        return _t("TOTAL TO PAY: {amount} {currency}")
+            return gettext("Total creditat / Total credited: {amount} {currency}")
+        return gettext("TOTAL TO PAY: {amount} {currency}")
 
     def _render_document_details(self) -> None:
         """Render invoice-specific details."""
         self.canvas.setFont(_FONT, 12)
         self.canvas.drawString(
-            2 * cm, self.height - 5 * cm, str(_t("Number: {number}")).format(number=self.invoice.number)
+            2 * cm, self.height - 5 * cm, str(gettext("Number: {number}")).format(number=self.invoice.number)
         )
 
         if self.invoice.issued_at:
             self.canvas.drawString(
                 2 * cm,
                 self.height - 5.5 * cm,
-                str(_t("Issue date: {date}")).format(date=format_romanian_date(self.invoice.issued_at)),
+                str(gettext("Issue date: {date}")).format(date=format_romanian_date(self.invoice.issued_at)),
             )
 
         if self.invoice.due_at:
             self.canvas.drawString(
                 2 * cm,
                 self.height - 6 * cm,
-                str(_t("Due date: {date}")).format(date=format_romanian_date(self.invoice.due_at)),
+                str(gettext("Due date: {date}")).format(date=format_romanian_date(self.invoice.due_at)),
             )
 
         # Art. 330 requires a correction to reference the invoice it corrects. A credit note has no
@@ -673,7 +681,7 @@ class RomanianInvoicePDFGenerator(RomanianDocumentPDFGenerator):
             self.canvas.drawString(
                 2 * cm,
                 self.height - 6 * cm,
-                str(_t("Storno la factura {number} din {date}")).format(
+                str(gettext("Storno la factura {number} din {date}")).format(
                     number=original.display_number, date=original_date
                 ),
             )
@@ -681,7 +689,7 @@ class RomanianInvoicePDFGenerator(RomanianDocumentPDFGenerator):
         # Status indicator
         self.canvas.setFont(_FONT_BOLD, 10)
         self.canvas.drawString(
-            14 * cm, self.height - 5 * cm, str(_t("Status: {status}")).format(status=self.invoice.status.upper())
+            14 * cm, self.height - 5 * cm, str(gettext("Status: {status}")).format(status=self.invoice.status.upper())
         )
 
     def _render_status_information(self, totals_y: float) -> None:
@@ -698,16 +706,18 @@ class RomanianInvoicePDFGenerator(RomanianDocumentPDFGenerator):
             return
         if self.invoice.status != "paid":
             self.canvas.setFont(_FONT_BOLD, 10)
-            due_date_str = format_romanian_date(self.invoice.due_at) if self.invoice.due_at else str(_t("undefined"))
+            due_date_str = (
+                format_romanian_date(self.invoice.due_at) if self.invoice.due_at else str(gettext("undefined"))
+            )
             self.canvas.drawString(
-                2 * cm, totals_y - 0.5 * cm, str(_t("Unpaid invoice - Due: {date}")).format(date=due_date_str)
+                2 * cm, totals_y - 0.5 * cm, str(gettext("Unpaid invoice - Due: {date}")).format(date=due_date_str)
             )
         elif self.invoice.status == "paid" and hasattr(self.invoice, "paid_at") and self.invoice.paid_at:
             self.canvas.setFont(_FONT_BOLD, 10)
             self.canvas.drawString(
                 2 * cm,
                 totals_y - 0.5 * cm,
-                str(_t("Invoice paid on: {date}")).format(date=format_romanian_date(self.invoice.paid_at)),
+                str(gettext("Invoice paid on: {date}")).format(date=format_romanian_date(self.invoice.paid_at)),
             )
 
 
@@ -722,29 +732,29 @@ class RomanianProformaPDFGenerator(RomanianDocumentPDFGenerator):
         self.proforma = proforma  # Type-specific reference
 
     def _get_document_title(self) -> str:
-        return _t("FACTURĂ PROFORMA")
+        return gettext("FACTURĂ PROFORMA")
 
     def _get_filename(self) -> str:
         return f"proforma_{self.proforma.number}.pdf"
 
     def _get_legal_disclaimer(self) -> str:
-        return _t("Factura proforma nu constituie document fiscal. Nu dă drept de deducere a TVA.")
+        return gettext("Factura proforma nu constituie document fiscal. Nu dă drept de deducere a TVA.")
 
     def _render_document_details(self) -> None:
         """Render proforma-specific details."""
         self.canvas.setFont(_FONT, 12)
         self.canvas.drawString(
-            2 * cm, self.height - 5 * cm, str(_t("Number: {number}")).format(number=self.proforma.number)
+            2 * cm, self.height - 5 * cm, str(gettext("Number: {number}")).format(number=self.proforma.number)
         )
         self.canvas.drawString(
             2 * cm,
             self.height - 5.5 * cm,
-            str(_t("Date: {date}")).format(date=format_romanian_date(self.proforma.created_at)),
+            str(gettext("Date: {date}")).format(date=format_romanian_date(self.proforma.created_at)),
         )
         self.canvas.drawString(
             2 * cm,
             self.height - 6 * cm,
-            str(_t("Valid until: {date}")).format(date=format_romanian_date(self.proforma.valid_until)),
+            str(gettext("Valid until: {date}")).format(date=format_romanian_date(self.proforma.valid_until)),
         )
 
 

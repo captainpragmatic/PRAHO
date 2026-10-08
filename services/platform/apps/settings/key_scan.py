@@ -67,7 +67,14 @@ def iter_scannable_python_files(root: Path) -> list[Path]:
 
 
 SETTINGS_READ_METHODS = frozenset(
-    {"get_setting", "get_boolean_setting", "get_integer_setting", "get_decimal_setting", "get_list_setting"}
+    {
+        "get_setting",
+        "get_stored_setting",
+        "get_boolean_setting",
+        "get_integer_setting",
+        "get_decimal_setting",
+        "get_list_setting",
+    }
 )
 
 

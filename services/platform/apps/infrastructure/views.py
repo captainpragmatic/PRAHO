@@ -27,6 +27,7 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
+from apps.common.pagination import pagination_query
 from apps.infrastructure.audit_service import InfrastructureAuditContext, InfrastructureAuditService
 from apps.infrastructure.provider_config import get_provider_sync_fn, get_provider_token, store_provider_token
 from apps.settings.services import SettingsService
@@ -237,6 +238,7 @@ def deployment_list(request: HttpRequest) -> HttpResponse:
         "page_title": "Node Deployments",
         "breadcrumb_items": breadcrumb_items,
         "deployments_page": deployments_page,
+        "extra_params": pagination_query(request),
         "table_data": table_data,
         "filters": {
             "environment": env_filter,

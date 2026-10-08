@@ -10,11 +10,11 @@ from typing import TYPE_CHECKING, Any
 
 from django.db import transaction
 from django.utils import timezone
+from django.utils.translation import gettext as _
 
 from apps.common.types import Err, Ok, Result
 
 if TYPE_CHECKING:
-    from apps.billing.models import Invoice
     from apps.provisioning.models import Service
 
 logger = logging.getLogger(__name__)
@@ -76,83 +76,6 @@ class ProvisioningService:
             error_msg = f"Failed to activate service {service.id}: {e}"
             logger.error(f"🔥 [Provisioning] {error_msg}")
             return Err(error_msg)
-
-    @staticmethod
-    def activate_services_for_invoice(invoice: Invoice | None) -> dict[str, Any]:
-        """
-        Activate services when invoice is paid.
-
-        Args:
-            invoice: Paid invoice containing service references
-
-        Returns:
-            Dictionary with activation results
-        """
-        from apps.audit.services import (  # noqa: PLC0415  # Deferred: avoids circular import
-            AuditService,  # Circular: cross-app  # Deferred: avoids circular import
-        )
-        from apps.provisioning.models import (  # noqa: PLC0415  # Deferred: avoids circular import
-            Service,  # Circular: same-app  # Deferred: avoids circular import
-        )
-
-        if invoice is None:
-            logger.warning("⚠️ [Provisioning] Cannot activate services for None invoice")
-            return {"success": False, "error": "Invoice is None", "services_activated": 0}
-
-        results: dict[str, Any] = {
-            "success": True,
-            "invoice_id": str(invoice.id),
-            "services_activated": 0,
-            "errors": [],
-        }
-
-        try:
-            # Get services linked to this invoice's order items
-            services_to_activate = Service.objects.filter(
-                customer=invoice.customer, status__in=["pending", "provisioning"]
-            )
-
-            with transaction.atomic():
-                for service in services_to_activate:
-                    try:
-                        activation_result = ProvisioningService.activate_service(
-                            service, activation_reason=f"Invoice {invoice.number} paid"
-                        )
-                        if activation_result.is_ok():
-                            results["services_activated"] += 1
-                        else:
-                            results["errors"].append(
-                                {
-                                    "service_id": str(service.id),
-                                    "error": activation_result.unwrap_err(),
-                                }
-                            )
-                    except Exception as e:
-                        results["errors"].append({"service_id": str(service.id), "error": str(e)})
-
-            AuditService.log_simple_event(
-                event_type="invoice_services_activated",
-                user=None,
-                content_object=invoice,
-                description=f"Activated {results['services_activated']} services for invoice {invoice.number}",
-                actor_type="system",
-                metadata={
-                    "invoice_id": str(invoice.id),
-                    "invoice_number": invoice.number,
-                    "services_activated": results["services_activated"],
-                    "errors_count": len(results["errors"]),
-                    "source_app": "provisioning",
-                },
-            )
-
-            logger.info(
-                f"⚙️ [Provisioning] Activated {results['services_activated']} services for invoice {invoice.number}"
-            )
-            return results
-
-        except Exception as e:
-            logger.error(f"🔥 [Provisioning] Failed to activate services for invoice {invoice.number}: {e}")
-            return {"success": False, "error": str(e), "services_activated": 0}
 
     @staticmethod
     def suspend_services_for_customer(customer_id: int, reason: str = "payment_overdue") -> dict[str, Any]:
@@ -219,79 +142,7 @@ class ProvisioningService:
             return {"success": False, "error": str(e), "services_suspended": 0}
 
     @staticmethod
-    def reactivate_services_for_customer(customer_id: int, reason: str = "payment_received") -> dict[str, Any]:
-        """
-        Reactivate suspended services for customer.
-
-        Args:
-            customer_id: Customer ID whose services should be reactivated
-            reason: Reason for reactivation (e.g., 'payment_received', 'issue_resolved')
-
-        Returns:
-            Dictionary with reactivation results
-        """
-        from apps.audit.services import (  # noqa: PLC0415  # Deferred: avoids circular import
-            AuditService,  # Circular: cross-app  # Deferred: avoids circular import
-        )
-        from apps.customers.models import (  # noqa: PLC0415  # Deferred: avoids circular import
-            Customer,  # Circular: cross-app  # Deferred: avoids circular import
-        )
-        from apps.provisioning.models import (  # noqa: PLC0415  # Deferred: avoids circular import
-            Service,  # Circular: same-app  # Deferred: avoids circular import
-        )
-
-        results: dict[str, Any] = {"success": True, "customer_id": customer_id, "services_reactivated": 0, "errors": []}
-
-        try:
-            customer = Customer.objects.get(id=customer_id)
-            suspended_services = Service.objects.filter(customer=customer, status="suspended")
-
-            with transaction.atomic():
-                for service in suspended_services:
-                    try:
-                        service.activate()
-                        service.save(
-                            update_fields=[
-                                "status",
-                                "activated_at",
-                                "suspended_at",
-                                "suspension_reason",
-                                "updated_at",
-                            ]
-                        )
-                        results["services_reactivated"] += 1
-                    except Exception as e:
-                        results["errors"].append({"service_id": str(service.id), "error": str(e)})
-
-            AuditService.log_simple_event(
-                event_type="customer_services_reactivated",
-                user=None,
-                content_object=customer,
-                description=f"Reactivated {results['services_reactivated']} services for customer: {reason}",
-                actor_type="system",
-                metadata={
-                    "customer_id": str(customer.id),
-                    "reason": reason,
-                    "services_reactivated": results["services_reactivated"],
-                    "source_app": "provisioning",
-                },
-            )
-
-            logger.info(
-                f"✅ [Provisioning] Reactivated {results['services_reactivated']} services "
-                f"for customer {customer_id} - {reason}"
-            )
-            return results
-
-        except Customer.DoesNotExist:
-            logger.error(f"🔥 [Provisioning] Customer {customer_id} not found")
-            return {"success": False, "error": "Customer not found", "services_reactivated": 0}
-        except Exception as e:
-            logger.error(f"🔥 [Provisioning] Failed to reactivate services for customer {customer_id}: {e}")
-            return {"success": False, "error": str(e), "services_reactivated": 0}
-
-    @staticmethod
-    def provision_service(  # noqa: PLR0911, PLR0915  # Complexity: multi-step business logic
+    def provision_service(
         service: Service,
     ) -> dict[str, Any]:  # Complexity: provisioning workflow  # Complexity: multi-step business logic
         """
@@ -312,7 +163,7 @@ class ProvisioningService:
             # Check if we have a server assigned and it has API access
             if service.server:
                 server_info = f"Server: {service.server.name} ({service.server.control_panel})"
-                if not hasattr(service.server, "api_url") or not service.server.api_url:
+                if not service.server.management_api_url:
                     # Server exists but no API configured
                     error_msg = f"Server {service.server.name} has no API configured for {service.server.control_panel}"
                     logger.warning(f"⚠️ [Provisioning] {error_msg}")
@@ -328,58 +179,18 @@ class ProvisioningService:
 
                 # Implement actual provisioning based on control panel type
                 if service.server.control_panel == "Virtualmin":
-                    try:
-                        from .virtualmin_gateway import (  # Circular: same-app  # noqa: PLC0415  # Deferred: avoids circular import
-                            VirtualminAuthError,
-                            VirtualminConfig,
-                            VirtualminGateway,
-                            VirtualminQuotaExceededError,
-                            VirtualminTransientError,
-                        )
-
-                        # Create gateway and test connection
-                        config = VirtualminConfig(server=service.server)  # type: ignore[arg-type]
-                        gateway = VirtualminGateway(config)
-
-                        logger.info(f"📡 [Provisioning] Testing connection to {service.server.name}")
-                        health_result = gateway.test_connection()
-
-                        if health_result.is_err():
-                            # REAL INFRASTRUCTURE FAILURE -> FAILED STATUS
-                            error_msg = f"Server unreachable: {health_result.unwrap_err()}"
-                            logger.error(f"❌ [Provisioning] {error_msg}")
-                            service.fail_provisioning()
-                            service.provisioning_errors = error_msg
-                            service.save(update_fields=["status", "provisioning_errors"])
-
-                            return {"status": "failed", "message": error_msg, "server": server_info}
-
-                        # Server is reachable, but domain creation not implemented yet
-                        logger.info(f"📡 [Provisioning] {service.server.name} is healthy - domain creation pending")
-                        service.provisioning_errors = "Server accessible - domain creation API pending implementation"
-                        service.save(update_fields=["provisioning_errors"])
-
-                        return {
-                            "status": "pending_implementation",
-                            "message": "Server healthy - domain creation pending implementation",
-                            "server": server_info,
-                            "gateway_status": "connected",
-                        }
-
-                    except (VirtualminAuthError, VirtualminTransientError, VirtualminQuotaExceededError) as api_error:
-                        # REAL API/INFRASTRUCTURE FAILURES -> FAILED STATUS
-                        error_msg = f"Virtualmin error: {api_error}"
-                        logger.error(f"❌ [Provisioning] {error_msg}")
-                        service.fail_provisioning()
-                        service.provisioning_errors = error_msg
-                        service.save(update_fields=["status", "provisioning_errors"])
-
-                        return {
-                            "status": "failed",
-                            "message": error_msg,
-                            "server": server_info,
-                            "error_type": type(api_error).__name__,
-                        }
+                    # Service.server is a generic Server; automated Virtualmin provisioning
+                    # uses VirtualminServer through VirtualminProvisioningService.
+                    error_msg = _("Manual Virtualmin provisioning required. Configure a VirtualminServer.")
+                    logger.warning("⚠️ [Provisioning] %s", error_msg)
+                    service.provisioning_errors = error_msg
+                    service.save(update_fields=["provisioning_errors"])
+                    return {
+                        "status": "pending_manual",
+                        "message": error_msg,
+                        "server": server_info,
+                        "requires_action": True,
+                    }
 
                 elif service.server.control_panel == "Virtualizor":
                     # VPS provisioning

@@ -100,7 +100,7 @@
     {% endfor %}
 
     <!-- Pagination using Component -->
-    {% include 'components/pagination.html' with page_obj=audit_events extra_params='' htmx_target='#audit-results' htmx_url='/app/audit/logs/list/' %}
+    {% include 'components/pagination.html' with page_obj=audit_events extra_params=extra_params htmx_target='#audit-results' htmx_url='/app/audit/logs/list/' %}
 
 {% else %}
     <!-- Empty State -->

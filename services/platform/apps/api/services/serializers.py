@@ -10,6 +10,7 @@ from rest_framework import serializers
 
 from apps.billing.currency_policy import get_selling_currency_policy
 from apps.common.tax_service import TaxService
+from apps.provisioning.relationship_models import ServiceDomain
 from apps.provisioning.service_models import Server, Service, ServicePlan, ServicePlanPrice
 
 
@@ -17,6 +18,26 @@ def service_monthly_price(service: Service) -> Decimal:
     """Display the saved service charge, without repricing it from today's catalog."""
     months = {"monthly": 1, "quarterly": 3, "semi_annual": 6, "annual": 12}[service.billing_cycle]
     return service.price / months
+
+
+class ServiceDomainSerializer(serializers.ModelSerializer):
+    """Customer-visible domain relationships for a hosting service."""
+
+    name = serializers.CharField(source="full_domain_name", read_only=True)
+    status = serializers.CharField(source="domain.status", read_only=True)
+
+    class Meta:
+        model = ServiceDomain
+        fields: ClassVar[list[str]] = [
+            "id",
+            "name",
+            "status",
+            "domain_type",
+            "subdomain",
+            "is_active",
+            "ssl_enabled",
+        ]
+        read_only_fields: ClassVar[list[str]] = fields
 
 
 class ServicePlanListSerializer(serializers.ModelSerializer):

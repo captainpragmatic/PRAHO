@@ -27,9 +27,8 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse_lazy
 from django.utils import timezone
-from django.utils.translation import gettext
+from django.utils.translation import gettext, gettext_lazy
 from django.utils.translation import gettext as _
-from django.utils.translation import gettext_lazy as _l
 from django.views.decorators.http import require_http_methods
 
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
@@ -53,10 +52,10 @@ logger = logging.getLogger(__name__)
 MINI_CART_MAX_ITEMS = 3
 
 ORDER_STEPS = [
-    {"label": _l("Product Selection"), "icon": "orders", "url": reverse_lazy("orders:catalog")},
-    {"label": _l("Cart Review"), "icon": "orders", "url": reverse_lazy("orders:cart_review")},
-    {"label": _l("Checkout"), "icon": "credit-card", "url": reverse_lazy("orders:checkout")},
-    {"label": _l("Confirmation"), "icon": "check"},
+    {"label": gettext_lazy("Product Selection"), "icon": "orders", "url": reverse_lazy("orders:catalog")},
+    {"label": gettext_lazy("Cart Review"), "icon": "orders", "url": reverse_lazy("orders:cart_review")},
+    {"label": gettext_lazy("Checkout"), "icon": "credit-card", "url": reverse_lazy("orders:checkout")},
+    {"label": gettext_lazy("Confirmation"), "icon": "check"},
 ]
 
 

@@ -1,6 +1,9 @@
 {% load i18n %}
 {% load ui_components %}
-<div class="py-5 border-b border-slate-700/50 last:border-b-0 grid grid-cols-1 md:grid-cols-12 gap-4" id="setting-{{ row.key }}">
+<div class="py-5 border-b border-slate-700/50 last:border-b-0 grid grid-cols-1 md:grid-cols-12 gap-4"
+     id="setting-{{ row.key }}"
+     data-deployment-fallback="{{ row.definition.deployment_fallback|yesno:'1,0' }}"
+     data-inherited="{{ row.inherited|yesno:'1,0' }}" data-fallback='{{ row.fallback_json }}'>
   <div class="md:col-span-7">
     <div class="flex items-center gap-2">
       <label for="field-{{ row.key }}" class="text-sm font-semibold text-white">{{ row.definition.label }}</label>
@@ -12,6 +15,12 @@
       {% endif %}
     </div>
     <code class="inline-block mt-1 text-xs text-slate-500 font-mono bg-slate-900/50 px-1.5 py-0.5 rounded">{{ row.key }}</code>
+    {% if row.definition.deployment_fallback %}
+    <p class="mt-1 text-xs text-slate-400">
+      {% if row.inherited %}{% trans "Inherited from deployment" %}{% else %}{% trans "Explicit override" %}{% endif %}
+      · {{ row.deployment_source }}
+    </p>
+    {% endif %}
     {% if row.definition.help_text %}
     <p class="mt-1.5 text-sm text-slate-400 leading-relaxed">{{ row.definition.help_text }}</p>
     {% endif %}
@@ -21,6 +30,7 @@
       {% if row.definition.input_kind == 'toggle' %}
       <label class="relative inline-flex items-center cursor-pointer">
         <input type="checkbox" id="field-{{ row.key }}" {% if row.current %}checked{% endif %} data-setting-field data-key="{{ row.key }}"{% if row.definition.critical %} data-critical="1"{% endif %} data-kind="toggle" data-baseline="{{ row.baseline }}" data-default="{{ row.definition.default|yesno:'true,false' }}" x-init="initField($el)" @change="syncField($el)" class="sr-only peer">
+        {# dm-allow DM001: Toggle knob stays white for contrast against both track states #}
         <div class="w-12 h-6 bg-slate-700 rounded-full peer peer-checked:bg-blue-600 peer-focus:ring-2 peer-focus:ring-blue-500 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-6"></div>
       </label>
       {% elif row.definition.input_kind == 'select' %}
@@ -41,7 +51,16 @@
       {% if row.definition.unit %}
       <span class="text-xs text-slate-500 whitespace-nowrap">{{ row.definition.unit }}</span>
       {% endif %}
+      {% if row.definition.deployment_fallback %}
+      <button type="button" @click="overrideField('{{ row.key }}')" class="text-sm text-blue-400 hover:text-blue-300">
+        {% trans "Save as override" %}
+      </button>
+      <button type="button" @click="inheritField('{{ row.key }}')" class="text-sm text-blue-400 hover:text-blue-300">
+        {% trans "Use deployment value" %}
+      </button>
+      {% else %}
       <button type="button" @click="resetField('{{ row.key }}')" title="{% trans 'Reset to default' %}" class="text-slate-500 hover:text-blue-400 transition-colors">↺</button>
+      {% endif %}
       <button type="button" title="{% trans 'History' %}" class="text-slate-500 hover:text-blue-400 transition-colors" hx-get="{% url 'settings:setting_history' row.key %}" hx-target="#history-drawer" hx-swap="innerHTML">🕘</button>
     </div>
     {% if row.definition.default != '' %}

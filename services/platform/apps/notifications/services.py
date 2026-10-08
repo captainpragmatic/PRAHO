@@ -40,9 +40,10 @@ from apps.notifications.models import (
     EmailLog,
     EmailSuppression,
     EmailTemplate,
+    validate_email_subject,
     validate_template_content,
 )
-from apps.settings.services import SettingsService
+from apps.settings.services import SettingsService, get_default_from_email
 
 if TYPE_CHECKING:
     from apps.billing.models import Invoice
@@ -53,16 +54,6 @@ logger = logging.getLogger(__name__)
 
 # Security constants
 MAX_CONTEXT_VALUE_LENGTH = 1000  # Maximum length for template context values
-_DEFAULT_MAX_RECIPIENTS_PER_BATCH = 50  # Maximum recipients per batch send
-
-
-def get_max_recipients_per_batch() -> int:
-    """Get max recipients per batch from SettingsService (runtime)."""
-    return SettingsService.get_integer_setting(
-        "notifications.max_recipients_per_batch", _DEFAULT_MAX_RECIPIENTS_PER_BATCH
-    )
-
-
 TEMPLATE_CACHE_PREFIX = "email_template:"
 TEMPLATE_CACHE_TIMEOUT = 3600  # 1 hour
 SUPPRESSION_CACHE_PREFIX = "email_suppressed:"
@@ -311,6 +302,24 @@ class EmailRateLimiter:
 # ===============================================================================
 
 
+def validate_email_log_subject(email_log: EmailLog, subject: str) -> str | None:
+    """Reject invalid queued subjects permanently; return the persisted failure reason."""
+    response = email_log.provider_response or {}
+    if response.get("permanent_failure"):
+        return str(response.get("final_error") or _("Email validation failed"))
+
+    try:
+        validate_email_subject(subject)
+    except DjangoValidationError as exc:
+        reason = "; ".join(exc.messages)
+        email_log.status = "failed"
+        email_log.provider_response = {**response, "final_error": reason, "permanent_failure": True}
+        email_log.save(update_fields=["status", "provider_response"])
+        logger.warning("⚠️ [Email] Permanent subject validation failure for %s: %s", email_log.pk, reason)
+        return reason
+    return None
+
+
 class EmailService:
     """
     Comprehensive email notification service.
@@ -333,9 +342,10 @@ class EmailService:
     def _send_email(recipient: str, subject: str, body: str, html_body: str | None = None) -> bool:
         """Internal method to send email using Django's email backend."""
         try:
-            from_email = getattr(settings, "DEFAULT_FROM_EMAIL", None) or str(
-                SettingsService.get_setting("company.email_noreply", "noreply@pragmatichost.com")
-            )
+            validate_email_subject(subject)
+            # Runtime identity takes precedence only when a stored row exists.
+            # Catalog defaults must not shadow the deployment's sender.
+            from_email = get_default_from_email()
 
             email = EmailMultiAlternatives(
                 subject=subject,
@@ -405,6 +415,13 @@ class EmailService:
         Returns:
             EmailResult with success status and message ID
         """
+        # Reject invalid subjects before sending, queueing retries, or creating logs.
+        try:
+            validate_email_subject(subject)
+        except DjangoValidationError as exc:
+            logger.warning("⚠️ [Email] Subject validation failed: %s", exc)
+            return EmailResult(success=False, error="; ".join(exc.messages))
+
         # Normalize recipients
         recipients = [to] if isinstance(to, str) else to
 
@@ -531,7 +548,7 @@ class EmailService:
         track_clicks: bool = True,
     ) -> EmailResult:
         """Send email synchronously."""
-        from_email = from_email or settings.DEFAULT_FROM_EMAIL
+        from_email = get_default_from_email() if from_email is None else from_email
         provider = getattr(settings, "EMAIL_PROVIDER", "smtp")
 
         # Create email log entry
@@ -668,7 +685,7 @@ class EmailService:
         track_clicks: bool = True,
     ) -> EmailResult:
         """Queue email for async sending via Django-Q2."""
-        from_email = from_email or settings.DEFAULT_FROM_EMAIL
+        from_email = get_default_from_email() if from_email is None else from_email
         provider = getattr(settings, "EMAIL_PROVIDER", "smtp")
 
         # Create email log entry with queued status
@@ -768,7 +785,7 @@ class EmailService:
         queued task; the rate-limited path previously degraded the email
         silently (#228 sibling).
         """
-        from_email = from_email or settings.DEFAULT_FROM_EMAIL
+        from_email = get_default_from_email() if from_email is None else from_email
         provider = getattr(settings, "EMAIL_PROVIDER", "smtp")
 
         email_log = cls._create_email_log(
@@ -790,6 +807,10 @@ class EmailService:
             from django_q.tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
                 async_task,  # Deferred: django-q task  # Deferred: avoids circular import
             )
+
+            validation_error = validate_email_log_subject(email_log, subject)
+            if validation_error is not None:
+                return EmailResult(success=False, email_log_id=str(email_log.pk), error=validation_error)
 
             retry_config = getattr(settings, "EMAIL_RETRY", {})
             retry_delay = retry_config.get("RETRY_DELAY_SECONDS", 60)

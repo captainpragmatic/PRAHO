@@ -8,9 +8,9 @@ from __future__ import annotations
 import contextlib
 import logging
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import Any, ClassVar
 
 from django.core.validators import MinValueValidator
 from django.db import models
@@ -21,9 +21,6 @@ from django.utils.translation import gettext_lazy as _
 from apps.common.encryption import decrypt_sensitive_data, encrypt_sensitive_data
 from apps.common.types import Retriability
 
-if TYPE_CHECKING:
-    from apps.customers.models import Customer
-
 logger = logging.getLogger(__name__)
 
 # Health check constants. The sweep runs every 10 minutes; freshness covers
@@ -32,6 +29,7 @@ HEALTH_CHECK_FRESH_SECONDS = 1500  # 25 minutes
 # Consecutive failed checks (~1h at 10-min cadence) before a server is
 # auto-failed; only auto-failed servers are auto-recovered.
 HEALTH_AUTO_FAIL_THRESHOLD = 6
+_EXECUTION_RECOVERY_MARGIN_SECONDS = 60
 
 
 class VirtualminServer(models.Model):
@@ -209,15 +207,6 @@ class VirtualminServer(models.Model):
             and self.current_domains + VirtualminMigration.active_reservations(self) < self.max_domains
         )
 
-    def update_stats(self, domains: int, disk_gb: float, bandwidth_gb: float) -> None:
-        """Update server statistics"""
-        self.current_domains = domains
-        self.current_disk_usage_gb = Decimal(str(disk_gb))
-        self.current_bandwidth_usage_gb = Decimal(str(bandwidth_gb))
-        self.save(
-            update_fields=["current_domains", "current_disk_usage_gb", "current_bandwidth_usage_gb", "updated_at"]
-        )
-
 
 class VirtualminAccount(models.Model):
     """
@@ -368,11 +357,6 @@ class VirtualminAccount(models.Model):
         """Check if account is active"""
         return self.status == "active"
 
-    @property
-    def customer(self) -> Customer:
-        """Get customer associated with this account"""
-        return self.service.customer
-
     def get_password(self) -> str:
         """Decrypt and return account password"""
         try:
@@ -445,65 +429,6 @@ class VirtualminAccount(models.Model):
 
         return data
 
-    def update_usage_stats(self, disk_mb: int, bandwidth_mb: int) -> None:
-        """Update current usage statistics"""
-        self.current_disk_usage_mb = disk_mb
-        self.current_bandwidth_usage_mb = bandwidth_mb
-        self.last_sync_at = timezone.now()
-        self.save(update_fields=["current_disk_usage_mb", "current_bandwidth_usage_mb", "last_sync_at", "updated_at"])
-
-    def is_over_quota(self) -> dict[str, bool]:
-        """Check if account is over quota limits"""
-        result = {"disk": False, "bandwidth": False}
-
-        if self.disk_quota_mb and self.current_disk_usage_mb > self.disk_quota_mb:
-            result["disk"] = True
-
-        if self.bandwidth_quota_mb and self.current_bandwidth_usage_mb > self.bandwidth_quota_mb:
-            result["bandwidth"] = True
-
-        return result
-
-    @property
-    def backup_url(self) -> str:
-        """Get URL for account backup"""
-        return reverse("provisioning:virtualmin_account_backup", kwargs={"account_id": self.id})
-
-    @property
-    def edit_url(self) -> str:
-        """Get URL for editing account"""
-        # For now, return the detail URL since we don't have an edit view yet
-        return self.get_absolute_url()
-
-    @property
-    def reset_password_url(self) -> str:
-        """Get URL for resetting account password"""
-        # Placeholder - would need to implement password reset functionality
-        return self.get_absolute_url()
-
-    @property
-    def suspend_url(self) -> str:
-        """Get URL for suspending account"""
-        return reverse("provisioning:virtualmin_account_suspend", kwargs={"account_id": self.id})
-
-    @property
-    def activate_url(self) -> str:
-        """Get URL for activating account"""
-        return reverse("provisioning:virtualmin_account_activate", kwargs={"account_id": self.id})
-
-    @property
-    def delete_url(self) -> str:
-        """Get URL for deleting account"""
-        # Return delete URL if account can be deleted, empty string otherwise
-        if self.can_be_deleted:
-            return reverse("provisioning:virtualmin_account_delete", kwargs={"account_id": self.id})
-        return ""
-
-    @property
-    def toggle_protection_url(self) -> str:
-        """Get URL for toggling deletion protection"""
-        return reverse("provisioning:virtualmin_account_toggle_protection", kwargs={"account_id": self.id})
-
     @property
     def can_be_deleted(self) -> bool:
         """Check if account can be deleted"""
@@ -535,12 +460,6 @@ class VirtualminAccount(models.Model):
         if self.bandwidth_quota_mb == -1:
             return -1  # Unlimited bandwidth
         return self.bandwidth_quota_mb * 1024 * 1024 if self.bandwidth_quota_mb else None
-
-    @property
-    def last_backup(self) -> None:
-        """Get last backup date - placeholder for future implementation"""
-        # This would need to be implemented by checking backup records
-        return None
 
     @property
     def plan(self) -> str:
@@ -693,40 +612,41 @@ class VirtualminProvisioningJob(models.Model):
         )
 
     @classmethod
-    def recover_expired_claims(cls, cutoff: Any, retry_at: Any) -> int:
-        """Return orphaned in-flight jobs to the failed pool so the sweep retries them.
+    def recover_expired_claims(cls, cutoff: datetime, retry_at: datetime, *, now: datetime | None = None) -> int:
+        """Recover pending dispatch leases and expired running execution budgets.
 
-        Three orphan classes, all recovered by age:
-        - a leased retry whose claimed_at lease expired; and
-        - an INITIAL execution that died mid-run — mark_started() sets
-          status='running' and started_at but never claims (claimed_at stays
-          NULL), so without the started_at arm a first-execution worker death
-          (SIGKILL/OOM/deploy restart) would strand the job in 'running'
-          forever; and
-        - a legacy pre-lease pending/running row with neither timestamp, aged
-          by updated_at so a freshly-created initial job keeps its full lease.
-
-        started_at/updated_at are only compared for unclaimed rows so a live
-        leased job is never reclaimed on either timestamp alone.
+        Pending jobs and legacy jobs without a persisted budget keep the age-based
+        lease. A budgeted running job gets its full budget from started_at, plus
+        a minute for worker termination. Older rows fall back to claim/update time.
         """
-        return (
-            cls.objects.filter(
-                models.Q(status="pending") | models.Q(status="running"),
-            )
-            # Backup/restore run for hours under their own execution_deadline;
-            # the dedicated janitor sweep owns their recovery (two clocks).
+        recovery_time = timezone.now() if now is None else now
+        jobs = (
+            cls.objects.filter(status__in=("pending", "running"))
+            # Backup/restore have their own execution_deadline and janitor.
             .exclude(operation__in=("backup_domain", "restore_domain"))
-            .filter(
-                models.Q(claimed_at__isnull=False, claimed_at__lt=cutoff)
-                | models.Q(claimed_at__isnull=True, started_at__isnull=False, started_at__lt=cutoff)
-                | models.Q(
-                    claimed_at__isnull=True,
-                    started_at__isnull=True,
-                    updated_at__lt=cutoff,
-                ),
-            )
-            .update(status="failed", next_retry_at=retry_at, claimed_at=None, updated_at=timezone.now())
+            .only("status", "parameters", "claimed_at", "started_at", "updated_at")
         )
+        recovered = 0
+        for job in jobs.iterator():
+            budget: object = job.parameters.get("task_budget_seconds")
+            if job.status == "running" and isinstance(budget, int) and budget > 0:
+                started_at = job.started_at or job.claimed_at or job.updated_at
+                deadline = started_at + timedelta(seconds=budget + _EXECUTION_RECOVERY_MARGIN_SECONDS)
+                expired = deadline < recovery_time
+            else:
+                lease_started_at = job.claimed_at or job.started_at or job.updated_at
+                expired = lease_started_at < cutoff
+            if expired:
+                # Fence against a worker completing, starting or refreshing the row
+                # after this sweep read it.
+                recovered += cls.objects.filter(
+                    pk=job.pk,
+                    status=job.status,
+                    claimed_at=job.claimed_at,
+                    started_at=job.started_at,
+                    updated_at=job.updated_at,
+                ).update(status="failed", next_retry_at=retry_at, claimed_at=None, updated_at=recovery_time)
+        return recovered
 
     @classmethod
     def restore_after_enqueue_failure(cls, job_id: Any, retry_at: Any) -> int:
@@ -947,11 +867,3 @@ class VirtualminDriftRecord(models.Model):
 
     def __str__(self) -> str:
         return f"{self.domain}: {self.get_drift_type_display()}"
-
-    def mark_resolved(self, resolution: str, notes: str = "", resolved_by: str = "") -> None:
-        """Mark drift as resolved"""
-        self.resolution_status = resolution
-        self.resolution_notes = notes
-        self.resolved_by = resolved_by
-        self.resolved_at = timezone.now()
-        self.save(update_fields=["resolution_status", "resolution_notes", "resolved_by", "resolved_at"])

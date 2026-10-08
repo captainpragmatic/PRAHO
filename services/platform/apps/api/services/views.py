@@ -10,6 +10,7 @@ from django.db import transaction
 from django.db.models import Count, Q
 from django.http import HttpRequest
 from django.utils import timezone
+from django.utils.translation import gettext as _
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -28,6 +29,7 @@ from apps.provisioning.service_models import Service, ServicePlan
 
 from .serializers import (
     ServiceDetailSerializer,
+    ServiceDomainSerializer,
     ServiceListSerializer,
     ServicePlanAvailableSerializer,
     service_monthly_price,
@@ -206,6 +208,25 @@ def customer_service_detail_api(request: HttpRequest, customer: Customer, servic
     except Exception as e:
         logger.error(f"🔥 [Services API] Error fetching service detail {service_id}: {e}")
         return Response({"success": False, "error": "Unable to fetch service details"}, status=500)
+
+
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([AllowAny])
+@require_customer_authentication
+def customer_service_domains_api(request: HttpRequest, customer: Customer, service_id: int) -> Response:
+    """Return domain relationships only for the authenticated customer's service."""
+    try:
+        try:
+            service = Service.objects.get(id=service_id, customer=customer)
+        except Service.DoesNotExist:
+            return Response({"success": False, "error": _("Service not found or access denied")}, status=404)
+
+        serializer = ServiceDomainSerializer(service.domains.select_related("domain"), many=True)
+        return Response({"success": True, "data": {"domains": serializer.data}})
+    except Exception:
+        logger.exception("🔥 [Services API] Error fetching domains for service %s", service_id)
+        return Response({"success": False, "error": _("Unable to fetch service domains")}, status=500)
 
 
 @api_view(["POST"])

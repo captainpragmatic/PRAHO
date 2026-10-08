@@ -290,9 +290,10 @@
                         <div class="flex-shrink-0 w-8 h-8 rounded-full
                             {% if service.status == 'active' %}bg-green-600
                             {% elif service.status == 'suspended' %}bg-red-600
-                            {% elif service.status == 'cancelled' %}bg-gray-600
+                            {% elif service.status == 'cancelled' %}bg-slate-600
                             {% else %}bg-yellow-600{% endif %}
                             flex items-center justify-center">
+                            {# dm-allow DM001: White status marker contrasts with the coloured timeline node in both themes #}
                             <div class="w-3 h-3 bg-white rounded-full"></div>
                         </div>
                         <div>

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import time
+from html.parser import HTMLParser
 from typing import Any
 from unittest.mock import MagicMock, patch
 from uuid import UUID, uuid4
@@ -16,6 +17,18 @@ from django.urls import reverse
 from apps.api_client.services import PlatformAPIError
 from apps.services.services import ServicesAPIClient
 from apps.services.views import service_detail, service_request_action
+
+
+class _ActionRadioParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.radios: dict[str, dict[str, str | None]] = {}
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = dict(attrs)
+        value = attributes.get("value")
+        if tag == "input" and attributes.get("type") == "radio" and value is not None:
+            self.radios[value] = attributes
 
 
 class ServiceRequestAPIContractTests(SimpleTestCase):
@@ -118,7 +131,7 @@ class ServiceRequestViewTests(SimpleTestCase):
         }
         self.api.get_available_plans.return_value = [{"name": "Plus", "price_monthly": "20.00"}]
         self.api.get_service_usage.return_value = {}
-        self.api.get_service_domains.return_value = []
+        self.api.get_service_domains.return_value = [{"name": "wp8-example.com", "status": "active"}]
         self.receipt = {"request_id": str(uuid4()), "ticket_id": 91, "ticket_number": "TKT-2026-000091"}
         self.api.request_service_action.return_value = self.receipt
 
@@ -145,6 +158,24 @@ class ServiceRequestViewTests(SimpleTestCase):
             {"submission_id": submission_id, "action": "upgrade_request", "reason": "More storage"} | overrides,
         )
         return service_request_action(request, service_id=55), request
+
+    def test_detail_lists_domains_from_the_signed_platform_response(self) -> None:
+        domains = [{"name": "blog.wp8-example.com", "status": "active", "domain_type": "subdomain"}]
+        self.api.get_service_domains.side_effect = ServicesAPIClient().get_service_domains
+        with patch.object(
+            ServicesAPIClient, "_make_request", return_value={"success": True, "data": {"domains": domains}}
+        ) as send:
+            response = service_detail(self._request(), service_id=55)
+
+        self.assertContains(response, "blog.wp8-example.com")
+        self.assertContains(response, "Associated Domains")
+        send.assert_called_once_with(
+            "POST",
+            "/services/55/domains/",
+            user_id=7,
+            data={"customer_id": 101, "user_id": 7},
+            idempotent=True,
+        )
 
     def test_get_keeps_same_submission_id_until_a_request_is_accepted(self) -> None:
         first, _ = self._open_form()
@@ -252,10 +283,21 @@ class ServiceRequestViewTests(SimpleTestCase):
         response, _ = self._post(submission_id, action="cancel_request", reason="No longer needed")
         self.assertContains(response, submission_id, status_code=200)
         self.assertContains(response, "No longer needed")
-        self.assertIn('value="cancel_request"', response.content.decode())
-        self.assertIn("temporarily unavailable", response.content.decode())
+        html = response.content.decode()
+        parser = _ActionRadioParser()
+        parser.feed(html)
+        parser.close()
+        self.assertIn("checked", parser.radios["cancel_request"])
+        self.assertNotIn("checked", parser.radios["upgrade_request"])
+        self.assertIn(f'name="submission_id" value="{submission_id}"', html)
+        reason = re.search(r'<textarea\b[^>]*name="reason"[^>]*>(.*?)</textarea>', html, re.DOTALL)
+        self.assertIsNotNone(reason)
+        assert reason is not None
+        self.assertEqual(reason[1], "No longer needed")
+        self.assertIn("temporarily unavailable", html)
+        self.assertNotContains(response, 'aria-label="Try again"')
 
-        response, _ = self._post(submission_id, action="cancel_request", reason="No longer needed")
+        response, _ = self._post(submission_id, action="cancel_request", reason=reason[1])
         self.assertEqual(response.url, reverse("tickets:detail", kwargs={"ticket_id": 91}))
         self.assertEqual(self.api.request_service_action.call_count, 2)
         self.assertEqual(
@@ -335,7 +377,15 @@ class ServiceRequestViewTests(SimpleTestCase):
                 response, _ = self._post(submission_id, action="cancel_request", reason="No longer needed")
                 self.assertContains(response, submission_id, status_code=503)
                 self.assertContains(response, "No longer needed", status_code=503)
-                self.assertRegex(response.content.decode(), r'value="cancel_request"\s+class="sr-only peer"\s+checked')
+                radios = _ActionRadioParser()
+                radios.feed(response.content.decode())
+                radios.close()
+                self.assertIn("cancel_request", radios.radios)
+                cancel_radio = radios.radios["cancel_request"]
+                self.assertEqual(cancel_radio["name"], "action")
+                self.assertEqual(cancel_radio["id"], "action_cancel_request")
+                self.assertEqual(cancel_radio["class"], "sr-only peer")
+                self.assertIn("checked", cancel_radio)
                 self.assertContains(response, "Service details are temporarily unavailable", status_code=503)
                 self.assertEqual(response.headers["Retry-After"], "45")
                 self.assertNotContains(response, "Monthly Cost", status_code=503)

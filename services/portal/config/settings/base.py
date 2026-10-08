@@ -82,6 +82,7 @@ TEMPLATES = [
                 "django.contrib.messages.context_processors.messages",  # Messages in templates
                 "apps.common.context_processors.csp_nonce",
                 "apps.common.context_processors.portal_context",
+                "apps.common.context_processors.company_identity",
             ],
         },
     },
@@ -116,11 +117,10 @@ DATABASES: dict[str, dict[str, Any]] = {
 # revocation is possible. See ADR-0017 addendum for rationale.
 SESSION_ENGINE = "django.contrib.sessions.backends.db"
 
-# Portal uses LocMemCache (per-process, in-memory).
-# Limitation: rate limit counters are NOT shared across gunicorn workers.
-# In multi-worker deployments, effective rate limits are multiplied by worker count.
-# This is an accepted tradeoff for the portal's stateless architecture (no database).
-# cache.add()/cache.incr() are still atomic within each worker process.
+# Portal uses LocMemCache for disposable cached data and per-worker coordination (ADR-0050).
+# Rate limits and payment/checkout idempotency use apps.common.counters in the shared session database.
+# Clearing LocMemCache does not reset those counters or claims.
+# Protected memberships have a 300 s session TTL and are invalidated when validation changes membership_hash.
 if os.environ.get("DEBUG", "True").lower() == "true":
     CACHES = {
         "default": {
@@ -148,6 +148,15 @@ PLATFORM_API_BASE_URL = os.environ.get("PLATFORM_API_BASE_URL", "http://localhos
 PLATFORM_API_SECRET = os.environ.get("PLATFORM_API_SECRET")
 PLATFORM_API_TIMEOUT = int(os.environ.get("PLATFORM_API_TIMEOUT", "30"))
 
+# Cold-outage defaults mirror Platform's public company catalog entries.
+COMPANY_IDENTITY_DEFAULTS: dict[str, str] = {
+    "legal_name": "PragmaticHost SRL",
+    "email_support": "support@pragmatichost.com",
+    "email_privacy": "privacy@pragmatichost.com",
+    "email_finance": "",
+    "phone": "",
+}
+
 # Company bank details for bank transfer payment instructions
 COMPANY_BANK_IBAN = os.environ.get("COMPANY_BANK_IBAN", "")
 COMPANY_BANK_NAME = os.environ.get("COMPANY_BANK_NAME", "")
@@ -169,6 +178,7 @@ LANGUAGES = [
 ]
 
 LOCALE_PATHS = [
+    REPO_ROOT / "shared" / "ui" / "locale",
     BASE_DIR / "locale",
 ]
 

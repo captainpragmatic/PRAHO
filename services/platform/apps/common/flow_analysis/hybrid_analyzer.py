@@ -16,9 +16,12 @@ from __future__ import annotations
 
 import logging
 import time
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from django.db import DatabaseError, InterfaceError, transaction
 
 from apps.common.flow_analysis.base import (
     AnalysisContext,
@@ -44,7 +47,14 @@ def get_proximity_line_threshold() -> int:
         SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
     )
 
-    return SettingsService.get_integer_setting("common.proximity_line_threshold", _DEFAULT_PROXIMITY_LINE_THRESHOLD)
+    try:
+        with transaction.atomic() if transaction.get_connection().in_atomic_block else nullcontext():
+            return SettingsService.get_integer_setting(
+                "common.proximity_line_threshold", _DEFAULT_PROXIMITY_LINE_THRESHOLD
+            )
+    except (DatabaseError, InterfaceError, RuntimeError, AssertionError):
+        # Static analysis remains usable without access to runtime settings.
+        return _DEFAULT_PROXIMITY_LINE_THRESHOLD
 
 
 @dataclass
@@ -363,12 +373,13 @@ class HybridFlowAnalyzer:
 
         # Check for missing exception handlers with tainted data
         exception_issues = [i for i in control_issues if i.category == IssueCategory.EXCEPTION_FLOW]
+        proximity_line_threshold = get_proximity_line_threshold()
 
         for exc_issue in exception_issues:
             # Look for nearby tainted data usage
             for data_issue in data_issues:
                 line_diff = abs(data_issue.location.line_number - exc_issue.location.line_number)
-                if line_diff <= PROXIMITY_LINE_THRESHOLD:  # Within 5 lines
+                if line_diff <= proximity_line_threshold:
                     cross_ref_issues.append(
                         FlowIssue(
                             category=IssueCategory.TAINTED_DATA,

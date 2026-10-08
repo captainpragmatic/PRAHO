@@ -265,3 +265,17 @@ class SystemSetting(models.Model):
         if setting is None:
             return default
         return setting.get_typed_value()
+
+
+class SettingActivation(models.Model):
+    """Durable per-key receipt; catalog sync timestamps are not activation provenance."""
+
+    key = models.CharField(max_length=100, primary_key=True)
+    version = models.CharField(max_length=40)
+    created_at = models.DateTimeField(default=timezone.now)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "setting_activations"
+        verbose_name = _("Setting activation")
+        verbose_name_plural = _("Setting activations")

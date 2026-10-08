@@ -8,9 +8,12 @@ from django.test import TestCase, override_settings
 
 from apps.billing.models import Invoice
 from apps.common.e2e_fixtures import seed_baseline, seed_scenario, validate_baseline
+from apps.common.security_decorators import secure_user_registration
+from apps.common.types import Ok, Result
 from apps.customers.models import Customer
 from apps.orders.models import Order
 from apps.products.models import Product
+from apps.settings.models import SystemSetting
 from apps.users.models import CustomerMembership
 
 
@@ -56,3 +59,14 @@ class E2EFixtureTests(TestCase):
         product = Product.objects.get(pk=pricing["product_id"])
         self.assertEqual(product.meta["fixture_name"], "pricing001")
         self.assertFalse(product.prices.exists())
+
+    def test_baseline_seeds_a_registration_allowance_for_a_full_browser_run(self) -> None:
+        seed_baseline()
+
+        @secure_user_registration()
+        def register(*, request_ip: str) -> Result[str, str]:
+            return Ok("accepted")
+
+        results = [register(request_ip="127.0.0.1") for _attempt in range(12)]
+        self.assertEqual([result.unwrap_or("refused") for result in results], ["accepted"] * 12)
+        self.assertEqual(SystemSetting.objects.get(key="security.registration_rate_limit_per_ip").value, 10000)

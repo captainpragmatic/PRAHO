@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{{ maintenance_heading }} - PRAHO Portal{% endblock %}
+
+{% block content %}
+<div class="px-4 max-w-4xl mx-auto">
+  {% include "components/maintenance_inline_alert.html" %}
+</div>
+{% endblock %}

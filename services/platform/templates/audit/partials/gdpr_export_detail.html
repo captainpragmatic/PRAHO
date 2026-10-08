@@ -194,10 +194,10 @@
             <input type="hidden" name="action" value="mark_failed">
 
             <div class="mb-4">
-                <label class="block text-sm font-medium text-slate-300 mb-2">
+                <label for="export-error-{{ export_request.id }}" class="block text-sm font-medium text-slate-300 mb-2">
                     {% trans "Error Message" %}
                 </label>
-                <textarea name="error_message"
+                <textarea id="export-error-{{ export_request.id }}" name="error_message"
                           rows="3"
                           required
                           placeholder="{% trans 'Describe why this export failed...' %}"

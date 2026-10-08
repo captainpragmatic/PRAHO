@@ -353,17 +353,22 @@ test-portal:
 # a number that is currently right.
 COVERAGE_BIN = $(PWD)/$(VENV_DIR)/bin/coverage
 COVERAGE_RC = COVERAGE_RCFILE=$(PWD)/pyproject.toml
-# Global floor. 50 was the agreed minimum, but the measured number is 72.39%, and a gate 22
-# points below reality would let coverage rot silently. Set just under the real figure so it
-# ratchets. Raise it as the number climbs; never lower it to make a run pass.
-PLATFORM_COVERAGE_FLOOR ?= 70
+# Global floor. Measured 2026-10-07: 80.26%; the previous 70% floor sat over 10 points
+# below reality. Set just under the real figure so it ratchets. Raise it as the number
+# climbs; never lower it to make a run pass.
+PLATFORM_COVERAGE_FLOOR ?= 78
 # Packages that carry money, provisioning and access decisions get their own floor, because
 # a healthy global average can hide a weak one.
-# Measured 2026-09-26: billing 88.44, settings 78.50, users 74.57, provisioning 55.50.
-# Floors sit just under those so they ratchet and cannot silently slip. The AGREED TARGET is
-# 80% for every one of these; provisioning is the real gap. Raise a floor when the number
-# rises; never lower one to make a run pass.
-PLATFORM_PACKAGE_FLOORS = billing:85 settings:75 users:70 provisioning:55
+# Measured 2026-10-07: billing 89.51, settings 84.69, users 83.52, provisioning 88.39.
+# Provisioning now clears the agreed 80% target; keep the other package floors unchanged.
+# Raise a floor when the number rises; never lower one to make a run pass.
+PLATFORM_PACKAGE_FLOORS = billing:85 settings:75 users:70 provisioning:80
+
+# Read canonical floors from workflows without duplicating their values.
+print-%:
+	@printf '%s\n' '$($*)'
+
+.PHONY: coverage-platform coverage-platform-packages coverage-portal coverage-portal-unit
 
 coverage-platform:
 	@echo "📊 [Platform] Coverage over apps/ and config/ — tests and migrations excluded..."
@@ -396,18 +401,24 @@ coverage-platform-packages:
 	if [ -n "$$failed" ]; then echo "❌ Below floor:$$failed"; echo "   (reads the combined data — run 'make coverage-platform' first)"; exit 1; fi; \
 	echo "✅ Every critical package is at or above its floor."
 
-coverage-portal:
-	@echo "📊 [Portal] Coverage over apps/ — already scoped by pytest.ini --cov=apps..."
+# Measured 2026-10-07: portal unit coverage 79%, independently of the browser union.
+PORTAL_UNIT_COVERAGE_FLOOR ?= 79
+
+coverage-portal: coverage-portal-unit
+
+coverage-portal-unit:
+	@echo "📊 [Portal] Unit coverage over apps/ — already scoped by pytest.ini --cov=apps..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@$(PYTHON_PORTAL) -m pytest -q
-	@echo "✅ Portal coverage complete — see services/portal/htmlcov/."
+	@$(PYTHON_PORTAL) -m pytest -q --cov-fail-under=$(PORTAL_UNIT_COVERAGE_FLOOR) --cov-report=xml:coverage-portal.xml
+	@echo "✅ [Portal] Unit coverage complete (floor $(PORTAL_UNIT_COVERAGE_FLOOR)%)."
 
 # Portal's real figure is the UNION of two datasets that cover different code: the unit suite
 # (no database, platform unimportable, most files mocked) and the browser suite (a live portal
 # against a live platform over real HMAC). Measured 2026-09-26: units 63%, browser 57.31%,
 # union 72.02% - so neither dataset alone is the answer, and reporting either as "portal
-# coverage" understates it by ~9 to ~15 points.
-PORTAL_COVERAGE_FLOOR ?= 70
+# coverage" understates it by ~9 to ~15 points. Measured 2026-10-08: units 79%, browser 55.77%,
+# union 81.26%; the floor is the union rounded down.
+PORTAL_COVERAGE_FLOOR ?= 81
 # Each half of the union must have measured SOMETHING. `coverage report` exits 0 on a dataset whose
 # files are all at 0%, so "the dataset is readable" was never evidence that the suite ran under the
 # tracer: a browser half that measured nothing passed, and the union silently became the unit half
@@ -772,6 +783,12 @@ else
 	@$(MAKE) lint-error-handling
 	@echo "📋 Phase 10: Status-only test assertion ratchet"
 	@$(MAKE) lint-assertion-quality
+	@echo "📋 Phase 11: Template design-system lint"
+	@$(MAKE) lint-templates
+	@echo "📋 Phase 12: Accessibility audit (critical, serious)"
+	@$(MAKE) audit-a11y
+	@echo "📋 Phase 13: Dark-mode audit (blockers)"
+	@$(MAKE) audit-dark-mode
 	@echo "🎉 All services linting complete!"
 endif
 
@@ -951,8 +968,7 @@ css-audit:
 lint-templates:
 	@echo "🎨 [Templates] Scanning for design-system violations..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@$(VENV_DIR)/bin/python scripts/lint_template_components.py || true
-	@echo "⚠️  (run 'make lint-templates-strict' to fail on blockers)"
+	@$(VENV_DIR)/bin/python scripts/lint_template_components.py
 
 lint-templates-strict:
 	@echo "🎨 [Templates] Strict scan (all codes block)..."
@@ -962,8 +978,7 @@ lint-templates-strict:
 audit-a11y:
 	@echo "♿ [A11Y] Accessibility audit (WCAG AA)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@$(VENV_DIR)/bin/python scripts/audit_accessibility.py --verbose || true
-	@echo "⚠️  (run 'make audit-a11y-strict' to fail on critical+serious)"
+	@$(VENV_DIR)/bin/python scripts/audit_accessibility.py --verbose
 
 audit-a11y-strict:
 	@echo "♿ [A11Y] Strict accessibility audit..."
@@ -972,8 +987,7 @@ audit-a11y-strict:
 audit-dark-mode:
 	@echo "🌙 [DarkMode] Dark mode completeness audit..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@$(VENV_DIR)/bin/python scripts/audit_dark_mode.py --verbose || true
-	@echo "⚠️  (run 'make audit-dark-mode-strict' to fail on blockers)"
+	@$(VENV_DIR)/bin/python scripts/audit_dark_mode.py --verbose
 
 audit-dark-mode-strict:
 	@echo "🌙 [DarkMode] Strict dark mode audit..."
@@ -1029,12 +1043,14 @@ PYTHON_I18N = uv run python
 
 i18n-extract:
 	@echo "🌍 Extracting translatable strings..."
+	@cd shared/ui && DJANGO_SETTINGS_MODULE=config.settings.dev PYTHONPATH="$(PWD)/services/platform" "$(PWD)/$(VENV_DIR)/bin/django-admin" makemessages -l ro -e html,txt --no-wrap
 	@cd services/platform && PORTAL_IMPORT_ISOLATION_BYPASS=true $(PWD)/$(VENV_DIR)/bin/python manage.py makemessages -l ro --no-wrap --settings=config.settings.dev
 	@cd services/portal && PORTAL_IMPORT_ISOLATION_BYPASS=true $(PWD)/$(VENV_DIR)/bin/python manage.py makemessages -l ro --no-wrap --settings=config.settings.dev
-	@echo "✅ Strings extracted for both services."
+	@echo "✅ Strings extracted for shared UI and both services."
 
 i18n-compile:
 	@echo "🌍 Compiling translation files..."
+	@cd shared/ui && DJANGO_SETTINGS_MODULE=config.settings.dev PYTHONPATH="$(PWD)/services/platform" "$(PWD)/$(VENV_DIR)/bin/django-admin" compilemessages
 	@cd services/platform && $(PWD)/$(VENV_DIR)/bin/python manage.py compilemessages --settings=config.settings.dev
 	@cd services/portal && $(PWD)/$(VENV_DIR)/bin/python manage.py compilemessages --settings=config.settings.dev
 	@echo "✅ Translations compiled."

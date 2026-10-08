@@ -257,6 +257,20 @@ repos:
         files: \.html$
         exclude: ^(services/platform/templates/|services/portal/static/)
         pass_filenames: true
+      - id: audit-accessibility
+        name: "Design System: Accessibility audit (critical, serious)"
+        entry: scripts/run_project_python
+        args: [scripts/audit_accessibility.py]
+        language: system
+        files: ^(services/(platform|portal)/templates/|shared/ui/templates/).*\.html$
+        pass_filenames: true
+      - id: audit-dark-mode
+        name: "Design System: Dark-mode audit (blockers)"
+        entry: scripts/run_project_python
+        args: [scripts/audit_dark_mode.py]
+        language: system
+        files: ^(services/(platform|portal)/templates/|shared/ui/templates/).*\.html$
+        pass_filenames: true
 
 # ===============================================================================
 # CONFIGURATION OPTIONS ⚙️

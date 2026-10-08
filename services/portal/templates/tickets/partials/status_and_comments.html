@@ -1,6 +1,15 @@
 {% load i18n %}
 {% load ui_components %}
 
+{% if maintenance %}
+  {% if reply_sent %}
+    {% trans "Reply added successfully." as reply_sent_message %}
+    {% alert reply_sent_message variant="success" %}
+    {% include "components/maintenance_inline_alert.html" %}
+  {% else %}
+    {% include "components/maintenance_inline_alert.html" with hide_retry=True %}
+  {% endif %}
+{% else %}
 <!-- Status Card -->
 <div class="bg-slate-800 rounded-lg p-6 border border-slate-700 mb-6">
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -76,11 +85,14 @@
     </div>
 </div>
 
+{% endif %}
+
 <!-- Ticket Replies/Comments -->
 <div class="bg-slate-800 rounded-lg border border-slate-700 mb-6" id="replies-section">
+    {% if not maintenance %}
     <div class="px-6 py-4 border-b border-slate-700 relative">
         <h3 class="text-lg font-medium text-white flex items-center">
-            {% icon "chat" size="md" css_class="mr-2 text-blue-400" %}
+            {% icon "chat" size="md" css_class="mr-2 text-blue-400" %} {# tmpl-allow TMPL005: needs badge unframed variant #}
             {% trans 'Conversation' %}
             <span class="ml-2 text-sm font-normal text-slate-400" id="reply-count">({{ replies|length }} {% trans 'replies' %})</span>
         </h3>
@@ -105,6 +117,8 @@
         </div>
     </div>
 
+    {% endif %}
+
     {% if ticket.status != 'closed' %}
     <div class="border-t border-slate-700 px-6 py-4">
         <form method="post" action="{% url 'tickets:reply' ticket_id=ticket.id %}" class="space-y-4" id="reply-form" hx-post="{% url 'tickets:reply' ticket_id=ticket.id %}" hx-target="#ticket-status-and-comments" hx-swap="innerHTML" data-htmx-after="reset-reply" enctype="multipart/form-data">
@@ -112,16 +126,17 @@
             <div class="flex items-start space-x-3">
                 <!-- User Avatar -->
                 <div class="flex-shrink-0">
-                    <div class="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-sm font-medium text-blue-800">
-                        {{ request.user.first_name|first|upper }}{{ request.user.last_name|first|upper }}
-                    </div>
+                    {% with first_initial=request.user.first_name|first|upper last_initial=request.user.last_name|first|upper %}
+                      {% badge first_initial|add:last_initial variant="primary" rounded="full" css_class="w-8 h-8 justify-center" %}
+                    {% endwith %}
                 </div>
 
                 <!-- Reply Form -->
                 <div class="flex-1">
                     <div class="relative">
+                        {% trans "Reply" as reply_label %}
                         {% trans "Write your reply..." as reply_placeholder %}
-                        {% input_field "message" input_type="textarea" rows=3 placeholder=reply_placeholder required=True %}
+                        {% input_field "message" input_type="textarea" aria_label=reply_label rows=3 placeholder=reply_placeholder required=True value=reply_text %}
 
                         <!-- Character Counter -->
                         <div class="absolute bottom-2 right-2">
@@ -145,8 +160,8 @@
                         <!-- Submit Button -->
                         <div class="flex items-center space-x-2">
                             {% trans "Cancel" as cancel_label %}{% button cancel_label type="button" size="sm" variant="secondary" data_action="reset-form" attrs='data-reset-target="#reply-form" data-counter-target="#char-counter"' %}
-                            {# tmpl-allow TMPL002: loading state driven by ticket_detail.html's htmx:beforeRequest/afterRequest JS reading #submit-text/#submit-spinner by exact id; {% button %} can't carry caller ids on its fixed label/spinner spans #}
-                            <button type="submit" class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 focus:ring-offset-slate-800 disabled:opacity-50 disabled:cursor-not-allowed">
+                            {# tmpl-allow TMPL002: needs button label_id and spinner_id for #submit-text/#submit-spinner #}
+                            <button type="submit" class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 focus:ring-offset-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"> {# tmpl-allow TMPL005: needs button label_id and spinner_id #}
                                 <svg class="w-4 h-4 mr-2 hidden" id="submit-spinner" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
                                 </svg>

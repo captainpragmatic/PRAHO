@@ -23,6 +23,7 @@ from django.urls import reverse
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.pagination import pagination_query
 from apps.common.rate_limiting import rate_limit
 from apps.settings.services import SettingsService
 from apps.users.models import User
@@ -129,13 +130,8 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
     page_number = request.GET.get("page")
     tickets_page = paginator.get_page(page_number)
 
-    # Build URL parameters for pagination
-    url_params = []
-    if search_query:
-        url_params.append(f"search={search_query}")
-    if status_filter:
-        url_params.append(f"status={status_filter}")
-    url_params_str = "&".join(url_params)
+    # Preserve encoded query parameters for pagination
+    url_params_str = pagination_query(request)
 
     open_count = tickets.filter(status__in=["open", "in_progress"]).count()
     waiting_count = tickets.filter(status="waiting_on_customer").count()

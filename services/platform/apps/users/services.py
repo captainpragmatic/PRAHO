@@ -51,7 +51,7 @@ from apps.common.validators import (
 from apps.customers.contact_models import CustomerAddress
 from apps.customers.models import Customer
 from apps.customers.profile_models import CustomerBillingProfile, CustomerTaxProfile
-from apps.settings.services import SettingsService
+from apps.settings.services import SettingsService, get_default_from_email
 
 from .models import APIToken, CustomerMembership, UserSession
 
@@ -194,7 +194,7 @@ def _render_and_send_welcome_email(user: User, customer: Customer, request_ip: s
         send_mail(
             subject=subject,
             message=text_message,
-            from_email=settings.DEFAULT_FROM_EMAIL,
+            from_email=get_default_from_email(),
             recipient_list=[user.email],
             html_message=html_message,
             fail_silently=False,
@@ -321,117 +321,120 @@ class SecureUserRegistrationService:
         """
 
         try:
-            # Input validation is handled by @secure_user_registration decorator
-            # At this point, user_data and customer_data are already validated
+            # Business writes get their own savepoint: a failure discards a partial user and
+            # customer, while the security event logged below still commits with the caller.
+            with transaction.atomic():
+                # Input validation is handled by @secure_user_registration decorator
+                # At this point, user_data and customer_data are already validated
 
-            # Step 1: Additional business logic validation
-            # (Company uniqueness check is done in decorator with proper locking)
+                # Step 1: Additional business logic validation
+                # (Company uniqueness check is done in decorator with proper locking)
 
-            # Both registration entry points record affirmative consent; the onboarding
-            # form carries the checkbox in customer_data instead of a user timestamp.
-            consent_date = user_data.get("gdpr_consent_date")
-            if consent_date is None and customer_data.get("data_processing_consent") is True:
-                consent_date = timezone.now()
+                # Both registration entry points record affirmative consent; the onboarding
+                # form carries the checkbox in customer_data instead of a user timestamp.
+                consent_date = user_data.get("gdpr_consent_date")
+                if consent_date is None and customer_data.get("data_processing_consent") is True:
+                    consent_date = timezone.now()
 
-            # Step 2: Create the user account with security measures
-            user = User.objects.create_user(
-                email=user_data["email"],  # Validated email
-                password=user_data["password"],  # Validated (min length) by the registration serializer
-                first_name=user_data["first_name"],  # XSS-safe
-                last_name=user_data["last_name"],  # XSS-safe
-                phone=user_data.get("phone", ""),  # Romanian format validated
-                accepts_marketing=user_data.get("accepts_marketing", False),
-                gdpr_consent_date=consent_date,
-                # Security: No admin fields can be injected due to validation
-            )
+                # Step 2: Create the user account with security measures
+                user = User.objects.create_user(
+                    email=user_data["email"],  # Validated email
+                    password=user_data["password"],  # Validated (min length) by the registration serializer
+                    first_name=user_data["first_name"],  # XSS-safe
+                    last_name=user_data["last_name"],  # XSS-safe
+                    phone=user_data.get("phone", ""),  # Romanian format validated
+                    accepts_marketing=user_data.get("accepts_marketing", False),
+                    gdpr_consent_date=consent_date,
+                    # Security: No admin fields can be injected due to validation
+                )
 
-            # Step 3: Create customer organization with validated data
-            customer = Customer.objects.create(
-                name=customer_data["company_name"],
-                company_name=customer_data["company_name"],  # Sanitized
-                customer_type=customer_data.get("customer_type", "other"),
-                primary_email=user.email,
-                primary_phone=user.phone or "",
-                data_processing_consent=bool(user.gdpr_consent_date),
-                marketing_consent=user.accepts_marketing,
-                status="active",
-                created_by=user,
-            )
+                # Step 3: Create customer organization with validated data
+                customer = Customer.objects.create(
+                    name=customer_data["company_name"],
+                    company_name=customer_data["company_name"],  # Sanitized
+                    customer_type=customer_data.get("customer_type", "other"),
+                    primary_email=user.email,
+                    primary_phone=user.phone or "",
+                    data_processing_consent=bool(user.gdpr_consent_date),
+                    marketing_consent=user.accepts_marketing,
+                    status="active",
+                    created_by=user,
+                )
 
-            # Step 4: Create tax profile with Romanian compliance
-            vat_number = customer_data.get("vat_number", "").strip()
-            cnp = (customer_data.get("cnp", "") or "").strip()
-            registration_number = customer_data.get("registration_number", "").strip()
+                # Step 4: Create tax profile with Romanian compliance
+                vat_number = customer_data.get("vat_number", "").strip()
+                cnp = (customer_data.get("cnp", "") or "").strip()
+                registration_number = customer_data.get("registration_number", "").strip()
 
-            if vat_number or registration_number or cnp:
-                CustomerTaxProfile.objects.update_or_create(
+                if vat_number or registration_number or cnp:
+                    CustomerTaxProfile.objects.update_or_create(
+                        customer=customer,
+                        defaults={
+                            "vat_number": vat_number,  # RO prefix validated
+                            "cnp": cnp,
+                            "registration_number": registration_number,  # CUI format validated
+                            "is_vat_payer": bool(vat_number),
+                        },
+                    )
+
+                    # Log tax profile creation for Romanian compliance
+                    log_security_event(
+                        "tax_profile_created",
+                        {
+                            "customer_id": customer.id,
+                            "has_vat": bool(vat_number),
+                            "has_cui": bool(registration_number),
+                            "has_cnp": bool(cnp),
+                        },
+                        request_ip,
+                    )
+
+                # Step 5: Create billing profile (secure defaults)
+                CustomerBillingProfile.objects.update_or_create(
                     customer=customer,
                     defaults={
-                        "vat_number": vat_number,  # RO prefix validated
-                        "cnp": cnp,
-                        "registration_number": registration_number,  # CUI format validated
-                        "is_vat_payer": bool(vat_number),
+                        "payment_terms": 30,  # Default 30 days
+                        "preferred_currency": "RON",  # Romanian Lei
                     },
                 )
 
-                # Log tax profile creation for Romanian compliance
+                # Step 6: Create billing address with validated data
+                CustomerAddress.objects.create(
+                    customer=customer,
+                    is_billing=True,
+                    is_primary=True,
+                    address_line1=customer_data.get("billing_address", ""),  # Sanitized
+                    city=customer_data.get("billing_city", ""),  # Sanitized
+                    postal_code=customer_data.get("billing_postal_code", ""),  # Sanitized
+                    county=customer_data.get("county") or detect_county(customer_data.get("billing_city", "")),
+                    country=customer_data.get("country") or country_name(get_localisation_defaults().default_country),
+                    is_current=True,
+                )
+
+                # Step 7: Associate user as OWNER with security checks
+                CustomerMembership.objects.create(
+                    user=user,
+                    customer=customer,
+                    role="owner",  # Validated role
+                    is_primary=True,
+                )
+
+                # Step 8: Security audit logging
                 log_security_event(
-                    "tax_profile_created",
+                    "customer_registration_success",
                     {
+                        "user_id": user.id,
                         "customer_id": customer.id,
-                        "has_vat": bool(vat_number),
-                        "has_cui": bool(registration_number),
-                        "has_cnp": bool(cnp),
+                        "email": user.email,
+                        "company_name": customer.company_name,
+                        "has_vat_number": bool(vat_number),
+                        "user_agent": user_agent,
                     },
                     request_ip,
                 )
 
-            # Step 5: Create billing profile (secure defaults)
-            CustomerBillingProfile.objects.update_or_create(
-                customer=customer,
-                defaults={
-                    "payment_terms": 30,  # Default 30 days
-                    "preferred_currency": "RON",  # Romanian Lei
-                },
-            )
-
-            # Step 6: Create billing address with validated data
-            CustomerAddress.objects.create(
-                customer=customer,
-                is_billing=True,
-                is_primary=True,
-                address_line1=customer_data.get("billing_address", ""),  # Sanitized
-                city=customer_data.get("billing_city", ""),  # Sanitized
-                postal_code=customer_data.get("billing_postal_code", ""),  # Sanitized
-                county=customer_data.get("county") or detect_county(customer_data.get("billing_city", "")),
-                country=customer_data.get("country") or country_name(get_localisation_defaults().default_country),
-                is_current=True,
-            )
-
-            # Step 7: Associate user as OWNER with security checks
-            CustomerMembership.objects.create(
-                user=user,
-                customer=customer,
-                role="owner",  # Validated role
-                is_primary=True,
-            )
-
-            # Step 8: Security audit logging
-            log_security_event(
-                "customer_registration_success",
-                {
-                    "user_id": user.id,
-                    "customer_id": customer.id,
-                    "email": user.email,
-                    "company_name": customer.company_name,
-                    "has_vat_number": bool(vat_number),
-                    "user_agent": user_agent,
-                },
-                request_ip,
-            )
-
-            logger.info(f"✅ [Secure Registration] User {user.email} registered customer {customer.company_name}")
-            return Ok((user, customer))
+                logger.info(f"✅ [Secure Registration] User {user.email} registered customer {customer.company_name}")
+                return Ok((user, customer))
 
         except ValidationError:
             # Validation errors are handled by decorator
@@ -607,7 +610,7 @@ class SecureUserRegistrationService:
                 send_mail(
                     subject=_("[PRAHO] New Access Request for {company}").format(company=customer.company_name),
                     message=_("A user has requested access to your organization. Please review in your dashboard."),
-                    from_email=settings.DEFAULT_FROM_EMAIL,
+                    from_email=get_default_from_email(),
                     recipient_list=[owner.email],
                     fail_silently=True,  # Don't fail the whole process if email fails
                 )
@@ -1032,7 +1035,7 @@ class SecureCustomerUserService:
                 send_mail(
                     subject=_("[PRAHO] New Access Request for {company}").format(company=customer.company_name),
                     message=_("A user has requested access to your organization. Please review in your dashboard."),
-                    from_email=settings.DEFAULT_FROM_EMAIL,
+                    from_email=get_default_from_email(),
                     recipient_list=[owner.email],
                     fail_silently=True,  # Don't fail the whole process if email fails
                 )
@@ -1072,7 +1075,7 @@ class SecureCustomerUserService:
                 message=_(
                     "You have been invited to join an organization on PRAHO. Please check your dashboard to accept."
                 ),
-                from_email=settings.DEFAULT_FROM_EMAIL,
+                from_email=get_default_from_email(),
                 recipient_list=[user.email],
                 fail_silently=True,
             )

@@ -34,6 +34,7 @@ from apps.billing.efactura.settings import (
 )
 from apps.settings.catalog import CATALOG_BY_KEY
 from apps.settings.models import SystemSetting
+from apps.settings.services import SettingsService
 
 
 class RoLocalDateTestCase(TestCase):
@@ -146,7 +147,6 @@ class RomanianVATRatesTestCase(TestCase):
         """Test 11% reduced rate."""
         rate = ROMANIAN_VAT_RATES["reduced"]
         self.assertEqual(rate.rate, Decimal("11.00"))
-
 
     def test_zero_rate(self):
         """Test zero rate for exports."""
@@ -292,9 +292,11 @@ class EFacturaSettingsTestCase(TestCase):
         forbidden_fragments = ("b2b.enabled", "b2c.enabled", "minimum_amount_cents")
         self.assertFalse(any(fragment in key for key in EFACTURA_DEFAULTS for fragment in forbidden_fragments))
 
-    def test_archive_retention_years(self):
-        """Test archive retention is 10 years (Romanian law)."""
-        self.assertEqual(self.settings.archive_retention_years, 10)
+    def test_deadline_settings_follow_the_billing_keys_documents_use(self):
+        """The e-Factura deadline helpers read the billing settings, the only deadline settings in force."""
+        SettingsService.update_setting("billing.efactura_submission_deadline_days", 7)
+        SettingsService.update_setting("billing.efactura_deadline_warning_hours", 6)
+        self.assertEqual((self.settings.submission_deadline_days, self.settings.deadline_warning_hours), (7, 6))
 
     def test_xsd_validation_enabled_by_default(self):
         """Test XSD validation is enabled."""
@@ -307,6 +309,11 @@ class EFacturaSettingsTestCase(TestCase):
     def test_metrics_enabled_by_default(self):
         """Test metrics are enabled by default."""
         self.assertTrue(self.settings.metrics_enabled)
+
+    def test_metrics_prefix_is_no_longer_a_runtime_setting(self) -> None:
+        self.assertFalse(hasattr(self.settings, "metrics_prefix"))
+        self.assertFalse(hasattr(EFacturaSettingKeys, "METRICS_PREFIX"))
+        self.assertNotIn("efactura.metrics.prefix", EFACTURA_DEFAULTS)
 
 
 class EFacturaSettingsTimezoneTestCase(TestCase):
@@ -417,13 +424,11 @@ class EFacturaSettingsFallbackTestCase(TestCase):
         self.assertFalse(settings._get_bool(EFacturaSettingKeys.ENABLED, True))
 
     @override_settings(EFACTURA_VAT_RATE_STANDARD="20.00")
-    def test_django_settings_for_vat_rate(self):
-        """Test Django settings for VAT rate."""
-        settings = EFacturaSettings()
-        # The key mapping should work
-        rate = settings._get_decimal(EFacturaSettingKeys.VAT_RATE_STANDARD, "19.00")
-        # Note: This depends on key mapping working correctly
-        self.assertIsInstance(rate, Decimal)
+    def test_vat_rates_ignore_the_retired_rate_settings(self):
+        """VAT rates come from TaxService and stored invoice lines, never from e-Factura settings."""
+        rate = EFacturaSettings().get_vat_rate("standard")
+        self.assertEqual(rate.rate, ROMANIAN_VAT_RATES["standard"].rate)
+        self.assertEqual(EFacturaSettings().get_vat_rate("reduced_9"), ROMANIAN_VAT_RATES["reduced"])
 
 
 class ConstantsTestCase(TestCase):
@@ -470,13 +475,11 @@ class EFacturaSettingsCatalogTestCase(TestCase):
         }
         self.assertEqual(catalog_efactura, dict(EFACTURA_DEFAULTS))
 
-    def test_catalog_sync_persists_every_runtime_efactura_setting(self) -> None:
+    def test_catalog_sync_preserves_deployment_fallback_for_every_runtime_efactura_setting(self) -> None:
         call_command("setup_default_settings", stdout=StringIO())
 
-        persisted_keys = set(
-            SystemSetting.objects.filter(key__startswith="efactura.").values_list("key", flat=True)
-        )
-        self.assertEqual(persisted_keys, set(EFACTURA_DEFAULTS))
+        persisted_keys = set(SystemSetting.objects.filter(key__startswith="efactura.").values_list("key", flat=True))
+        self.assertEqual(persisted_keys, set())
 
     def test_catalog_marks_client_secret_sensitive(self) -> None:
         self.assertTrue(CATALOG_BY_KEY["efactura.oauth.client_secret"].sensitive)

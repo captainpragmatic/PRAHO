@@ -28,6 +28,7 @@ from apps.audit.services import (
     AuditService,
     DomainsAuditService,
 )
+from apps.common.transactions import best_effort_atomic, swallow_application_errors
 from apps.common.validators import log_security_event
 
 from .models import (
@@ -111,7 +112,14 @@ def handle_domain_created_or_updated(sender: type[Domain], instance: Domain, cre
     - Security logging for sensitive operations
     - Business analytics updates
     """
-    try:
+    old_values = getattr(instance, "_original_domain_values", {}) if not created else {}
+    new_values: dict[str, object] = {
+        "expires_at": instance.expires_at.isoformat() if instance.expires_at else None,
+        "is_locked": instance.locked,
+        "whois_privacy": instance.whois_privacy,
+    }
+    audit_values_ready = False
+    with best_effort_atomic(logger=logger, scope="Domains", message="handle_domain_created_or_updated failed"):
         # Enhanced audit logging using DomainsAuditService
         event_type = "domain_registered" if created else "domain_updated"
 
@@ -134,6 +142,7 @@ def handle_domain_created_or_updated(sender: type[Domain], instance: Domain, cre
             "currency_hold_reason": instance.currency_hold_reason,
         }
 
+        audit_values_ready = True
         if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
             # Use specialized domains audit service for richer metadata
             DomainsAuditService.log_domain_event(
@@ -146,10 +155,12 @@ def handle_domain_created_or_updated(sender: type[Domain], instance: Domain, cre
                 description=f"Domain {instance.name} {'registered' if created else 'updated'}",
             )
 
+    with swallow_application_errors(logger=logger, scope="Domains", message="Domain follow-up failed"):
         if created:
             # New domain registered
             _handle_new_domain_registration(instance)
-            logger.info(f"🌐 [Domain] Registered {instance.name} with {instance.registrar}")
+            with best_effort_atomic(logger=logger, scope="Domains", message="Domain display logging failed"):
+                logger.info(f"🌐 [Domain] Registered {instance.name} with {instance.registrar}")
 
         else:
             # Domain updated - check for status changes
@@ -165,7 +176,7 @@ def handle_domain_created_or_updated(sender: type[Domain], instance: Domain, cre
             # Check for registrar changes (transfers)
             old_registrar = old_values.get("registrar")
             new_registrar = cast(str | None, new_values.get("registrar"))
-            if old_registrar and old_registrar != new_registrar:
+            if audit_values_ready and old_registrar and old_registrar != new_registrar:
                 _handle_domain_transfer(instance, old_registrar, new_registrar)
 
             # Check for security-related changes
@@ -173,9 +184,6 @@ def handle_domain_created_or_updated(sender: type[Domain], instance: Domain, cre
 
         # Update domain analytics
         _update_domain_analytics(instance, created)
-
-    except Exception as e:
-        logger.exception(f"🔥 [Domain Signal] Failed to handle domain save: {e}")
 
 
 @receiver(pre_save, sender=Domain)
@@ -208,6 +216,7 @@ def store_original_domain_values(sender: type[Domain], instance: Domain, **kwarg
                 instance._original_domain_values = {}
     except Exception as e:
         logger.exception(f"🔥 [Domain Signal] Failed to store original values: {e}")
+        raise
 
 
 @receiver(post_delete, sender=Domain)
@@ -216,30 +225,30 @@ def handle_domain_cleanup(sender: type[Domain], instance: Domain, **kwargs: Any)
     Clean up related data when domains are deleted.
     Security consideration: log domain deletion for audit purposes.
     """
-    try:
+    with swallow_application_errors(logger=logger, scope="domains", message="handle_domain_cleanup failed"):
         # Log domain deletion for security audit
-        log_security_event(
-            "domain_deleted",
-            {
-                "domain_id": str(instance.id),
-                "domain_name": instance.name,
-                "registrar": instance.registrar.name if instance.registrar else None,
-                "customer_id": str(instance.customer.id) if instance.customer else None,
-                "status": instance.status,
-                "expires_at": instance.expires_at.isoformat() if instance.expires_at else None,
-            },
-        )
+        with best_effort_atomic(logger=logger, scope="Domains", message="log_security_event failed"):
+            log_security_event(
+                "domain_deleted",
+                {
+                    "domain_id": str(instance.id),
+                    "domain_name": instance.name,
+                    "registrar": instance.registrar.name if instance.registrar else None,
+                    "customer_id": str(instance.customer.id) if instance.customer else None,
+                    "status": instance.status,
+                    "expires_at": instance.expires_at.isoformat() if instance.expires_at else None,
+                },
+            )
 
         # Clean up domain-related caches
         _invalidate_domain_caches(instance)
 
-        # Cancel any pending domain renewal tasks
-        _cancel_domain_renewal_tasks(instance)
+        # A deferred display field can fail even after the security audit was isolated.
+        with best_effort_atomic(logger=logger, scope="Domains", message="Domain renewal cleanup logging failed"):
+            _cancel_domain_renewal_tasks(instance)
 
-        logger.warning(f"🗑️ [Domain] Cleaned up deleted domain {instance.name}")
-
-    except Exception as e:
-        logger.exception(f"🔥 [Domain Signal] Cleanup failed: {e}")
+        with best_effort_atomic(logger=logger, scope="Domains", message="Domain cleanup display logging failed"):
+            logger.warning(f"🗑️ [Domain] Cleaned up deleted domain {instance.name}")
 
 
 # ===============================================================================
@@ -258,7 +267,9 @@ def handle_tld_created_or_updated(sender: type[TLD], instance: TLD, created: boo
     - Business analytics updates
     - Cross-app notification for pricing changes
     """
-    try:
+    old_values = getattr(instance, "_original_tld_values", {}) if not created else {}
+    new_values = {}
+    with best_effort_atomic(logger=logger, scope="Domains", message="handle_tld_created_or_updated failed"):
         event_type = "tld_created" if created else "tld_updated"
 
         old_values = getattr(instance, "_original_tld_values", {}) if not created else {}
@@ -281,7 +292,8 @@ def handle_tld_created_or_updated(sender: type[TLD], instance: TLD, created: boo
                 description=f"TLD .{instance.extension} {'created' if created else 'updated'}",
             )
 
-        if not created:
+    with swallow_application_errors(logger=logger, scope="Domains", message="Domain follow-up failed"):
+        if not created and old_values:
             # Check for pricing changes
             pricing_fields = ["registration_price_cents", "renewal_price_cents", "transfer_price_cents"]
             pricing_changed = any(old_values.get(field) != new_values.get(field) for field in pricing_fields)
@@ -294,13 +306,12 @@ def handle_tld_created_or_updated(sender: type[TLD], instance: TLD, created: boo
 
         logger.info(f"🌐 [TLD] {'Created' if created else 'Updated'} .{instance.extension}")
 
-    except Exception as e:
-        logger.exception(f"🔥 [TLD Signal] Failed to handle TLD save: {e}")
-
 
 @receiver(pre_save, sender=TLD)
+@best_effort_atomic(logger=logger, scope="domains", message="store_original_tld_values failed")
 def store_original_tld_values(sender: type[TLD], instance: TLD, **kwargs: Any) -> None:
     """Store original TLD values for comparison"""
+    instance.__dict__.pop("_original_tld_values", None)
     try:
         if instance.pk:
             try:
@@ -319,6 +330,7 @@ def store_original_tld_values(sender: type[TLD], instance: TLD, **kwargs: Any) -
                 instance._original_tld_values = {}
     except Exception as e:
         logger.exception(f"🔥 [TLD Signal] Failed to store original values: {e}")
+        raise
 
 
 # ===============================================================================
@@ -339,7 +351,8 @@ def handle_registrar_created_or_updated(
     - Cache invalidation for registrar listings
     - Business analytics updates
     """
-    try:
+    security_sensitive = False
+    with best_effort_atomic(logger=logger, scope="Domains", message="handle_registrar_created_or_updated failed"):
         event_type = "registrar_created" if created else "registrar_updated"
 
         old_values = getattr(instance, "_original_registrar_values", {}) if not created else {}
@@ -351,7 +364,7 @@ def handle_registrar_created_or_updated(
 
         # Check if this is a security-sensitive update
         security_sensitive = not created and (
-            old_values.get("api_url") != "[REDACTED]"  # API URL changed
+            (bool(old_values) and old_values.get("api_url") != "[REDACTED]")  # API URL changed
             or "api_key" in str(kwargs.get("update_fields", []))  # API credentials updated
         )
 
@@ -367,29 +380,31 @@ def handle_registrar_created_or_updated(
                 security_sensitive=security_sensitive,
             )
 
+    with swallow_application_errors(logger=logger, scope="Domains", message="Domain follow-up failed"):
         if security_sensitive:
             # Log security event for API credential changes
-            log_security_event(
-                "registrar_api_credentials_updated",
-                {
-                    "registrar_id": str(instance.id),
-                    "registrar_name": instance.name,
-                    "timestamp": timezone.now().isoformat(),
-                },
-            )
+            with best_effort_atomic(logger=logger, scope="Domains", message="log_security_event failed"):
+                log_security_event(
+                    "registrar_api_credentials_updated",
+                    {
+                        "registrar_id": str(instance.id),
+                        "registrar_name": instance.name,
+                        "timestamp": timezone.now().isoformat(),
+                    },
+                )
 
         # Invalidate registrar-related caches
         _invalidate_registrar_caches(instance)
 
-        logger.info(f"🔧 [Registrar] {'Created' if created else 'Updated'} {instance.name}")
-
-    except Exception as e:
-        logger.exception(f"🔥 [Registrar Signal] Failed to handle registrar save: {e}")
+        with best_effort_atomic(logger=logger, scope="Domains", message="Registrar display logging failed"):
+            logger.info(f"🔧 [Registrar] {'Created' if created else 'Updated'} {instance.name}")
 
 
 @receiver(pre_save, sender=Registrar)
+@best_effort_atomic(logger=logger, scope="domains", message="store_original_registrar_values failed")
 def store_original_registrar_values(sender: type[Registrar], instance: Registrar, **kwargs: Any) -> None:
     """Store original registrar values for comparison"""
+    instance.__dict__.pop("_original_registrar_values", None)
     try:
         if instance.pk:
             try:
@@ -403,6 +418,7 @@ def store_original_registrar_values(sender: type[Registrar], instance: Registrar
                 instance._original_registrar_values = {}
     except Exception as e:
         logger.exception(f"🔥 [Registrar Signal] Failed to store original values: {e}")
+        raise
 
 
 # ===============================================================================
@@ -422,7 +438,7 @@ def handle_tld_registrar_assignment(
     - Failover scenarios
     - Pricing optimization
     """
-    try:
+    with best_effort_atomic(logger=logger, scope="Domains", message="handle_tld_registrar_assignment failed"):
         event_type = "tld_registrar_assignment_created" if created else "tld_registrar_assignment_updated"
 
         # Audit the assignment change
@@ -435,13 +451,13 @@ def handle_tld_registrar_assignment(
         if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
             AuditService.log_event(event_data)
 
+    with swallow_application_errors(logger=logger, scope="Domains", message="Domain follow-up failed"):
         # Invalidate related caches
-        _invalidate_tld_registrar_caches(instance.tld, instance.registrar)
+        with best_effort_atomic(logger=logger, scope="Domains", message="Assignment cache invalidation failed"):
+            _invalidate_tld_registrar_caches(instance.tld, instance.registrar)
 
-        logger.info(f"🔗 [TLD Assignment] .{instance.tld.extension} ↔ {instance.registrar.name}")
-
-    except Exception as e:
-        logger.exception(f"🔥 [TLD Assignment Signal] Failed to handle assignment: {e}")
+        with best_effort_atomic(logger=logger, scope="Domains", message="Assignment display logging failed"):
+            logger.info(f"🔗 [TLD Assignment] .{instance.tld.extension} ↔ {instance.registrar.name}")
 
 
 # ===============================================================================
@@ -461,7 +477,9 @@ def handle_domain_order_item_processing(
     - Cross-app integration with billing and orders
     - Domain provisioning workflows
     """
-    try:
+    old_values = getattr(instance, "_original_order_item_values", {}) if not created else {}
+    new_values = {}
+    with best_effort_atomic(logger=logger, scope="Domains", message="handle_domain_order_item_processing failed"):
         event_type = "domain_order_created" if created else "domain_order_updated"
 
         old_values = getattr(instance, "_original_order_item_values", {}) if not created else {}
@@ -488,23 +506,25 @@ def handle_domain_order_item_processing(
                 description=f"Domain order {instance.action}: {instance.domain_name}",
             )
 
+    with swallow_application_errors(logger=logger, scope="Domains", message="Domain follow-up failed"):
         if created:
             # New domain order created
             _handle_new_domain_order(instance)
         else:
             # Check for processing status changes
             # This would typically involve checking order item status fields
-            _handle_domain_order_processing(instance, old_values, new_values)
+            with best_effort_atomic(logger=logger, scope="Domains", message="Domain order processing logging failed"):
+                _handle_domain_order_processing(instance, old_values, new_values)
 
-        logger.info(f"📋 [Domain Order] {instance.action} for {instance.domain_name}")
-
-    except Exception as e:
-        logger.exception(f"🔥 [Domain Order Signal] Failed to handle order item: {e}")
+        with best_effort_atomic(logger=logger, scope="Domains", message="Domain order display logging failed"):
+            logger.info(f"📋 [Domain Order] {instance.action} for {instance.domain_name}")
 
 
 @receiver(pre_save, sender=DomainOrderItem)
+@best_effort_atomic(logger=logger, scope="domains", message="store_original_order_item_values failed")
 def store_original_order_item_values(sender: type[DomainOrderItem], instance: DomainOrderItem, **kwargs: Any) -> None:
     """Store original order item values for comparison"""
+    instance.__dict__.pop("_original_order_item_values", None)
     try:
         if instance.pk:
             try:
@@ -524,6 +544,7 @@ def store_original_order_item_values(sender: type[DomainOrderItem], instance: Do
                 instance._original_order_item_values = {}
     except Exception as e:
         logger.exception(f"🔥 [Domain Order Signal] Failed to store original values: {e}")
+        raise
 
 
 # ===============================================================================
@@ -533,7 +554,7 @@ def store_original_order_item_values(sender: type[DomainOrderItem], instance: Do
 
 def _handle_new_domain_registration(domain: Domain) -> None:
     """Handle new domain registration tasks"""
-    try:
+    with swallow_application_errors(logger=logger, scope="domains", message="_handle_new_domain_registration failed"):
         # Send domain registration confirmation
         _send_domain_registration_email(domain)
 
@@ -542,32 +563,31 @@ def _handle_new_domain_registration(domain: Domain) -> None:
             _schedule_domain_renewal_reminders(domain)
 
         # Update customer domain statistics
-        _update_customer_domain_stats(domain.customer)
+        with best_effort_atomic(logger=logger, scope="Domains", message="Customer domain statistics failed"):
+            _update_customer_domain_stats(domain.customer)
 
         # Cross-app integration: update billing if needed
         _sync_domain_billing(domain, "registered")
 
-    except Exception as e:
-        logger.exception(f"🔥 [Domain Signal] New registration handling failed: {e}")
-
 
 def _handle_domain_status_change(domain: Domain, old_status: str, new_status: str) -> None:
     """Handle domain status changes with various triggers"""
-    try:
+    with swallow_application_errors(logger=logger, scope="domains", message="_handle_domain_status_change failed"):
         logger.info(f"🔄 [Domain] Status change {domain.name}: {old_status} → {new_status}")
 
         # Security logging for important status changes
-        log_security_event(
-            "domain_status_changed",
-            {
-                "domain_id": str(domain.id),
-                "domain_name": domain.name,
-                "customer_id": str(domain.customer.id) if domain.customer else None,
-                "old_status": old_status,
-                "new_status": new_status,
-                "registrar": domain.registrar.name if domain.registrar else None,
-            },
-        )
+        with best_effort_atomic(logger=logger, scope="Domains", message="log_security_event failed"):
+            log_security_event(
+                "domain_status_changed",
+                {
+                    "domain_id": str(domain.id),
+                    "domain_name": domain.name,
+                    "customer_id": str(domain.customer.id) if domain.customer else None,
+                    "old_status": old_status,
+                    "new_status": new_status,
+                    "registrar": domain.registrar.name if domain.registrar else None,
+                },
+            )
 
         # Handle specific status transitions. NOTE: only statuses that exist in the
         # Domain FSM (pending/active/expired/suspended/transfer_in/transfer_out/
@@ -579,9 +599,6 @@ def _handle_domain_status_change(domain: Domain, old_status: str, new_status: st
             _handle_domain_expiration(domain)
         elif new_status == "suspended" and old_status == "active":
             _handle_domain_suspension(domain)
-
-    except Exception as e:
-        logger.exception(f"🔥 [Domain Signal] Status change handling failed: {e}")
 
 
 def _handle_domain_expiration_change(domain: Domain, old_expires_at: str | None) -> None:
@@ -604,19 +621,20 @@ def _handle_domain_expiration_change(domain: Domain, old_expires_at: str | None)
 
 def _handle_domain_transfer(domain: Domain, old_registrar: str | None, new_registrar: str | None) -> None:
     """Handle domain transfer between registrars"""
-    try:
+    with swallow_application_errors(logger=logger, scope="domains", message="_handle_domain_transfer failed"):
         # Log security event for domain transfer
-        DomainsAuditService.log_domain_security_event(
-            event_type="domain_transfer_completed",
-            domain=domain,
-            security_action="registrar_transfer",
-            security_metadata={
-                "old_registrar": old_registrar,
-                "new_registrar": new_registrar,
-                "transfer_date": timezone.now().isoformat(),
-            },
-            description=f"Domain {domain.name} transferred from {old_registrar} to {new_registrar}",
-        )
+        with best_effort_atomic(logger=logger, scope="Domains", message="log_domain_security_event failed"):
+            DomainsAuditService.log_domain_security_event(
+                event_type="domain_transfer_completed",
+                domain=domain,
+                security_action="registrar_transfer",
+                security_metadata={
+                    "old_registrar": old_registrar,
+                    "new_registrar": new_registrar,
+                    "transfer_date": timezone.now().isoformat(),
+                },
+                description=f"Domain {domain.name} transferred from {old_registrar} to {new_registrar}",
+            )
 
         # Send transfer confirmation email
         _send_domain_transfer_email(domain, old_registrar, new_registrar)
@@ -626,44 +644,40 @@ def _handle_domain_transfer(domain: Domain, old_registrar: str | None, new_regis
 
         logger.info(f"🔄 [Domain] Transfer completed: {domain.name} ({old_registrar} → {new_registrar})")
 
-    except Exception as e:
-        logger.exception(f"🔥 [Domain Signal] Transfer handling failed: {e}")
-
 
 def _check_domain_security_changes(domain: Domain, old_values: dict[str, Any], new_values: dict[str, Any]) -> None:
     """Check for security-related domain changes"""
-    try:
+    with swallow_application_errors(logger=logger, scope="domains", message="_check_domain_security_changes failed"):
         # Check for lock status changes
         if old_values.get("is_locked") != new_values.get("is_locked"):
-            DomainsAuditService.log_domain_security_event(
-                event_type="domain_lock_changed",
-                domain=domain,
-                security_action="lock_status_changed",
-                security_metadata={
-                    "old_locked": old_values.get("is_locked"),
-                    "new_locked": new_values.get("is_locked"),
-                },
-            )
+            with best_effort_atomic(logger=logger, scope="Domains", message="log_domain_security_event failed"):
+                DomainsAuditService.log_domain_security_event(
+                    event_type="domain_lock_changed",
+                    domain=domain,
+                    security_action="lock_status_changed",
+                    security_metadata={
+                        "old_locked": old_values.get("is_locked"),
+                        "new_locked": new_values.get("is_locked"),
+                    },
+                )
 
         # Check for WHOIS privacy changes
         if old_values.get("whois_privacy") != new_values.get("whois_privacy"):
-            DomainsAuditService.log_domain_security_event(
-                event_type="whois_privacy_changed",
-                domain=domain,
-                security_action="whois_privacy_changed",
-                security_metadata={
-                    "old_privacy": old_values.get("whois_privacy"),
-                    "new_privacy": new_values.get("whois_privacy"),
-                },
-            )
-
-    except Exception as e:
-        logger.exception(f"🔥 [Domain Signal] Security check failed: {e}")
+            with best_effort_atomic(logger=logger, scope="Domains", message="log_domain_security_event failed"):
+                DomainsAuditService.log_domain_security_event(
+                    event_type="whois_privacy_changed",
+                    domain=domain,
+                    security_action="whois_privacy_changed",
+                    security_metadata={
+                        "old_privacy": old_values.get("whois_privacy"),
+                        "new_privacy": new_values.get("whois_privacy"),
+                    },
+                )
 
 
 def _handle_tld_pricing_change(tld: TLD, old_values: dict[str, Any], new_values: dict[str, Any]) -> None:
     """Handle TLD pricing changes with notifications"""
-    try:
+    with swallow_application_errors(logger=logger, scope="domains", message="_handle_tld_pricing_change failed"):
         # Calculate pricing changes
         pricing_changes = {}
         pricing_fields = ["registration_price_cents", "renewal_price_cents", "transfer_price_cents"]
@@ -688,9 +702,6 @@ def _handle_tld_pricing_change(tld: TLD, old_values: dict[str, Any], new_values:
 
             # Update billing system caches
             _invalidate_billing_tld_caches(tld)
-
-    except Exception as e:
-        logger.exception(f"🔥 [TLD Signal] Pricing change handling failed: {e}")
 
 
 # ===============================================================================
@@ -891,7 +902,7 @@ def _schedule_domain_order_processing(domain_order_item: DomainOrderItem) -> Non
 
 def _invalidate_domain_caches(domain: Domain) -> None:
     """Invalidate caches related to the domain"""
-    try:
+    with best_effort_atomic(logger=logger, scope="domains", message="_invalidate_domain_caches failed"):
         cache_keys = [
             f"domain:{domain.id}",
             f"domain_name:{domain.name}",
@@ -902,52 +913,37 @@ def _invalidate_domain_caches(domain: Domain) -> None:
 
         cache.delete_many(cache_keys)
 
-    except Exception as e:
-        logger.exception(f"🔥 [Cache] Domain cache cleanup failed: {e}")
-
 
 def _invalidate_tld_caches(tld: TLD) -> None:
     """Invalidate TLD-related caches"""
-    try:
+    with best_effort_atomic(logger=logger, scope="domains", message="_invalidate_tld_caches failed"):
         cache_keys = [f"tld:{tld.id}", f"tld_extension:{tld.extension}", "active_tlds", "tld_pricing"]
 
         cache.delete_many(cache_keys)
 
-    except Exception as e:
-        logger.exception(f"🔥 [Cache] TLD cache cleanup failed: {e}")
-
 
 def _invalidate_registrar_caches(registrar: Registrar) -> None:
     """Invalidate registrar-related caches"""
-    try:
+    with best_effort_atomic(logger=logger, scope="domains", message="_invalidate_registrar_caches failed"):
         cache_keys = [f"registrar:{registrar.id}", "active_registrars", "registrar_tlds"]
 
         cache.delete_many(cache_keys)
 
-    except Exception as e:
-        logger.exception(f"🔥 [Cache] Registrar cache cleanup failed: {e}")
-
 
 def _invalidate_tld_registrar_caches(tld: TLD, registrar: Registrar) -> None:
     """Invalidate TLD-registrar assignment caches"""
-    try:
+    with best_effort_atomic(logger=logger, scope="domains", message="_invalidate_tld_registrar_caches failed"):
         cache_keys = [f"tld_registrars:{tld.id}", f"registrar_tlds:{registrar.id}", "tld_registrar_assignments"]
 
         cache.delete_many(cache_keys)
 
-    except Exception as e:
-        logger.exception(f"🔥 [Cache] TLD-registrar cache cleanup failed: {e}")
-
 
 def _invalidate_billing_tld_caches(tld: TLD) -> None:
     """Invalidate billing-related TLD caches"""
-    try:
+    with best_effort_atomic(logger=logger, scope="domains", message="_invalidate_billing_tld_caches failed"):
         cache_keys = [f"tld_pricing:{tld.extension}", "domain_pricing", "billing_tld_rates"]
 
         cache.delete_many(cache_keys)
-
-    except Exception as e:
-        logger.exception(f"🔥 [Cache] Billing TLD cache cleanup failed: {e}")
 
 
 # ===============================================================================
@@ -962,7 +958,9 @@ def _sync_domain_to_virtualmin_by_pk(domain_pk: Any) -> None:
     that actually committed. A domain deleted between commit and callback is a no-op,
     not a crash.
     """
-    domain = Domain.objects.filter(pk=domain_pk).first()
+    domain = None
+    with best_effort_atomic(logger=logger, scope="Domains", message="Committed domain lookup failed"):
+        domain = Domain.objects.filter(pk=domain_pk).first()
     if domain is None:
         logger.warning("⚠️ [CrossApp] Domain %s vanished before Virtualmin sync; skipping", domain_pk)
         return
@@ -979,25 +977,20 @@ def sync_domain_to_virtualmin(domain: Domain) -> None:
 
     Cross-app integration point: domains → provisioning
     """
-    try:
-        from apps.provisioning.relationship_models import (  # noqa: PLC0415  # Deferred: avoids circular import
-            ServiceDomain,  # Circular: cross-app
-        )
-        from apps.provisioning.virtualmin_tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
-            reconcile_virtualmin_service_state_async,  # Circular: cross-app
-        )
+    from apps.provisioning.relationship_models import ServiceDomain  # noqa: PLC0415  # ADR-0007
+    from apps.provisioning.virtualmin_tasks import (  # noqa: PLC0415  # ADR-0007
+        reconcile_virtualmin_service_state_async,
+    )
 
+    service_ids: list[object] = []
+    with best_effort_atomic(logger=logger, scope="CrossApp", message="Failed to find services bound to a domain"):
         service_ids = list(ServiceDomain.objects.filter(domain=domain).values_list("service_id", flat=True).distinct())
-    except Exception as e:
-        logger.error(f"🔥 [CrossApp] Failed to find services bound to domain {domain.name}: {e}")
-        return
 
     for service_id in service_ids:
         # One failed enqueue must not skip the rest; the divergence sweep re-queues it.
-        try:
+        # The ORM task broker writes to the database, so each enqueue gets its own savepoint.
+        with best_effort_atomic(logger=logger, scope="CrossApp", message="Failed to queue a hosting reconcile"):
             reconcile_virtualmin_service_state_async(str(service_id))
-        except Exception as e:
-            logger.error(f"🔥 [CrossApp] Failed to queue a hosting reconcile for service {service_id}: {e}")
     if service_ids:
         logger.info(f"🔄 [CrossApp] Domain {domain.name} queued hosting reconciles for {len(service_ids)} services")
 
@@ -1008,7 +1001,9 @@ def _handle_domain_status_change_with_virtualmin_sync(domain: Domain, old_status
 
     Extends the existing status change handler to include control panel sync.
     """
-    try:
+    with swallow_application_errors(
+        logger=logger, scope="domains", message="_handle_domain_status_change_with_virtualmin_sync failed"
+    ):
         # Call existing status change logic
         _handle_domain_status_change(domain, old_status, new_status)
 
@@ -1029,6 +1024,3 @@ def _handle_domain_status_change_with_virtualmin_sync(domain: Domain, old_status
                 lambda domain_pk=domain.pk: _sync_domain_to_virtualmin_by_pk(domain_pk),
                 robust=True,
             )
-
-    except Exception as e:
-        logger.error(f"🔥 [CrossApp] Enhanced domain status change handling failed for {domain.name}: {e}")

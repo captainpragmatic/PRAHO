@@ -14,18 +14,20 @@ import re
 import time
 import uuid
 from collections.abc import Callable
+from contextlib import nullcontext
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from enum import Enum
 from functools import lru_cache, wraps
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 import requests
 from django.conf import settings
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
+from django.db import DatabaseError, InterfaceError, transaction
 from django.utils import timezone
+from django.utils.translation import gettext as _
 
 from apps.common.encryption import DecryptionError
 from apps.common.outbound_http import OutboundPolicy, OutboundSecurityError, safe_request
@@ -38,8 +40,6 @@ from .virtualmin_validators import VirtualminValidator, is_virtualmin_read_only_
 if TYPE_CHECKING:
     from apps.common.credential_vault import CredentialVault
 
-    from .virtualmin_auth_manager import VirtualminAuthenticationManager
-
 logger = logging.getLogger(__name__)
 
 # ===============================================================================
@@ -50,7 +50,6 @@ logger = logging.getLogger(__name__)
 PERFORMANCE_THRESHOLD_MS = 100
 MAX_TIMEOUT_SECONDS = 3600
 MIN_DOMAIN_LENGTH = 3
-BULK_OPERATION_THRESHOLD = 10
 
 
 def performance_monitor(operation_name: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
@@ -104,56 +103,6 @@ def performance_monitor(operation_name: str) -> Callable[[Callable[..., Any]], C
     return decorator
 
 
-def create_error_context(
-    operation: str, params: dict[str, Any], server: VirtualminServer, correlation_id: str | None = None
-) -> dict[str, Any]:
-    """
-    Create enhanced error context for debugging and operational monitoring.
-
-    Provides structured error information without exposing sensitive data.
-    Includes correlation IDs for distributed tracing and debugging.
-
-    Args:
-        operation: The operation being performed
-        params: Operation parameters (will be sanitized)
-        server: VirtualminServer instance
-        correlation_id: Optional correlation ID for request tracking
-
-    Returns:
-        Dictionary containing sanitized error context for logging and debugging.
-
-    Security:
-        - Automatically sanitizes sensitive parameters
-        - Never includes passwords, keys, or credentials
-        - Suitable for production logging and monitoring
-    """
-    if correlation_id is None:
-        correlation_id = str(uuid.uuid4())[:8]
-
-    # Sanitize parameters to remove sensitive data
-    sanitized_params = {}
-    sensitive_keys = {"password", "passwd", "key", "token", "secret", "credential"}
-
-    for key, value in params.items():
-        key_lower = key.lower()
-        if any(sensitive_key in key_lower for sensitive_key in sensitive_keys):
-            sanitized_params[key] = "[REDACTED]"
-        elif isinstance(value, str | int | float | bool):
-            sanitized_params[key] = str(value)
-        else:
-            sanitized_params[key] = str(type(value).__name__)
-
-    return {
-        "operation": operation,
-        "server_id": str(server.id),
-        "server_hostname": server.hostname,
-        "timestamp": datetime.now(UTC).isoformat(),
-        "correlation_id": correlation_id,
-        "sanitized_params": sanitized_params,
-        "version": "v2.0",  # For tracking error context format evolution
-    }
-
-
 # ===============================================================================
 # CONSTANTS
 # ===============================================================================
@@ -193,40 +142,62 @@ DOMAIN_USERNAME_INDEX = 1  # Index of username in domain parts
 DOMAIN_DESCRIPTION_INDEX = 2  # Starting index of description in domain parts
 
 
-def get_virtualmin_config() -> dict[str, Any]:
+class VirtualminGlobalConfig(TypedDict):
+    """Global operational values; connection identity and TLS policy belong to the server."""
+
+    timeout: int
+    max_retries: int
+    rate_limit_qps: int
+    rate_limit_max_calls_per_hour: int
+    auth_fallback_enabled: bool
+    domain_quota_default_mb: int
+    bandwidth_quota_default_mb: int
+    pinned_cert_sha256: str
+
+
+def _read_integer_setting(key: str, default: int) -> int:
+    """A failed SQL read must not poison a caller's existing transaction."""
+    context = transaction.atomic() if transaction.get_connection().in_atomic_block else nullcontext()
+    with context:
+        return SettingsService.get_integer_setting(key, default)
+
+
+def _integer_config_or_default(read: Callable[[], int], default: int) -> int:
+    """Operational configuration keeps its constant default when settings are unavailable.
+
+    Callers pass the read itself, with its literal key, so the settings lint can see each reader.
     """
-    Get Virtualmin configuration from SystemSettings and credential vault.
+    # A failed SQL read must not poison a caller's existing transaction.
+    context = transaction.atomic() if transaction.get_connection().in_atomic_block else nullcontext()
+    try:
+        with context:
+            return read()
+    except (DatabaseError, InterfaceError):
+        logger.warning("⚠️ [Virtualmin] Could not read a setting; using default %s", default, exc_info=True)
+        return default
 
-    Uses the credential vault for sensitive data (API keys, passwords) and
-    SystemSettings for operational configuration.
 
-    Returns a dict that can be used to create VirtualminConfig with a server.
+def get_virtualmin_config() -> VirtualminGlobalConfig:
+    """Read global operational settings and the environment certificate pin.
+
+    Hostname, API port and TLS verification remain authoritative on VirtualminServer.
     """
     return {
-        # Operational settings from database
-        "hostname": SettingsService.get_setting("virtualmin.hostname", "localhost"),
-        "port": SettingsService.get_setting("virtualmin.port", 10000),
-        "ssl_verify": SettingsService.get_setting("virtualmin.ssl_verify", True),
-        "timeout": SettingsService.get_setting("virtualmin.request_timeout_seconds", 30),
-        "max_retries": SettingsService.get_setting("virtualmin.max_retries", 3),
-        "rate_limit_qps": SettingsService.get_setting("virtualmin.rate_limit_qps", 10),
-        "connection_pool_size": SettingsService.get_setting("virtualmin.connection_pool_size", 10),
-        "rate_limit_max_calls_per_hour": SettingsService.get_setting("virtualmin.rate_limit_max_calls_per_hour", 100),
-        "auth_health_check_interval": SettingsService.get_setting(
-            "virtualmin.auth_health_check_interval_seconds", 3600
+        "timeout": _integer_config_or_default(
+            lambda: SettingsService.get_integer_setting("virtualmin.request_timeout_seconds", 30), 30
         ),
-        "auth_fallback_enabled": SettingsService.get_setting("virtualmin.auth_fallback_enabled", True),
-        "backup_retention_days": SettingsService.get_setting("virtualmin.backup_retention_days", 7),
-        "backup_compression_enabled": SettingsService.get_setting("virtualmin.backup_compression_enabled", True),
-        "domain_quota_default_mb": SettingsService.get_setting("virtualmin.domain_quota_default_mb", 1000),
-        "bandwidth_quota_default_mb": SettingsService.get_setting("virtualmin.bandwidth_quota_default_mb", 10000),
-        "mysql_enabled": SettingsService.get_setting("virtualmin.mysql_enabled", True),
-        "postgresql_enabled": SettingsService.get_setting("virtualmin.postgresql_enabled", False),
-        "php_version_default": SettingsService.get_setting("virtualmin.php_version_default", "8.1"),
-        "ssl_auto_renewal_enabled": SettingsService.get_setting("virtualmin.ssl_auto_renewal_enabled", True),
-        "monitoring_enabled": SettingsService.get_setting("virtualmin.monitoring_enabled", True),
-        "log_retention_days": SettingsService.get_setting("virtualmin.log_retention_days", 30),
-        # Security credentials
+        "max_retries": _integer_config_or_default(
+            lambda: SettingsService.get_integer_setting("virtualmin.max_retries", 3), 3
+        ),
+        "rate_limit_qps": cast(int, SettingsService.get_setting("virtualmin.rate_limit_qps", 10)),
+        "rate_limit_max_calls_per_hour": cast(
+            int, SettingsService.get_setting("virtualmin.rate_limit_max_calls_per_hour", 100)
+        ),
+        "auth_fallback_enabled": cast(bool, SettingsService.get_setting("virtualmin.auth_fallback_enabled", True)),
+        "domain_quota_default_mb": cast(int, SettingsService.get_setting("virtualmin.domain_quota_default_mb", 1000)),
+        "bandwidth_quota_default_mb": cast(
+            int, SettingsService.get_setting("virtualmin.bandwidth_quota_default_mb", 10000)
+        ),
         "pinned_cert_sha256": os.environ.get("VIRTUALMIN_PINNED_CERT_SHA256", ""),
     }
 
@@ -287,8 +258,14 @@ def get_virtualmin_timeouts() -> dict[str, int]:
     # Try to get configuration from Django settings
     timeout_config = getattr(settings, "VIRTUALMIN_TIMEOUTS", {})
 
-    # Merge with defaults
-    result = {**defaults, **timeout_config}
+    # Runtime settings supply the default; explicit Django/environment overrides retain precedence.
+    result = {
+        **defaults,
+        "API_REQUEST_TIMEOUT": _integer_config_or_default(
+            lambda: SettingsService.get_integer_setting("virtualmin.request_timeout_seconds", 30), 30
+        ),
+        **timeout_config,
+    }
 
     # Override with environment variables if present
     for key in result:
@@ -759,19 +736,7 @@ class VirtualminGateway:
     def __init__(self, config: VirtualminConfig):
         self.config = config
         self.server = config.server
-        self._auth_manager: VirtualminAuthenticationManager | None = None
         self._credential_vault: CredentialVault | None = None
-
-    def _get_auth_manager(self) -> VirtualminAuthenticationManager:
-        """Lazy load authentication manager"""
-        if not self._auth_manager:
-            # Import here to avoid circular imports
-            from .virtualmin_auth_manager import (  # noqa: PLC0415  # Deferred: avoids circular import
-                VirtualminAuthenticationManager,  # Circular: same-app  # Deferred: avoids circular import
-            )
-
-            self._auth_manager = VirtualminAuthenticationManager(self.server)
-        return self._auth_manager
 
     def _get_credential_vault(self) -> CredentialVault:
         """Lazy load credential vault"""
@@ -795,31 +760,6 @@ class VirtualminGateway:
         vault = self._get_credential_vault() if self.config.use_credential_vault else None
         return resolve_server_credentials(self.server, vault=vault, reason=reason)
 
-    def call_with_auth_fallback(
-        self, program: str, parameters: dict[str, Any] | None = None, use_fallback_auth: bool = True
-    ) -> Result[dict[str, Any], str]:
-        """
-        Call Virtualmin API with credential vault integration and multi-path authentication.
-
-        Args:
-            program: Virtualmin program to execute
-            parameters: Command parameters
-            use_fallback_auth: Whether to use authentication fallback
-
-        Returns:
-            Result with API response or error
-        """
-        if use_fallback_auth:
-            # Use multi-path authentication manager
-            return self._get_auth_manager().execute_virtualmin_command(program, parameters or {})
-        else:
-            # Use direct API call (legacy path)
-            return self._call_direct_api(program, parameters or {})
-
-    def _call_direct_api(self, program: str, parameters: dict[str, Any]) -> Result[dict[str, Any], str]:
-        """Direct API call without authentication fallback (legacy method)"""
-        raise NotImplementedError("Direct API call not implemented")
-
     # _create_session removed — safe_request() handles sessions with DNS-pinned adapters
 
     def _check_rate_limit(self, operation: str) -> RateLimitOutcome:
@@ -834,19 +774,34 @@ class VirtualminGateway:
         scope = hashlib.sha256(f"{self.server.hostname}\0{operation}".encode()).hexdigest()[:24]
         cache_key_prefix = f"virtualmin_rate_limit:{scope}:{window}"
         try:
-            for slot in range(VIRTUALMIN_RATE_LIMIT_MAX_CALLS):
+            hourly_limit = _read_integer_setting("virtualmin.rate_limit_max_calls_per_hour", 100)
+            for slot in range(hourly_limit):
                 if cache.add(f"{cache_key_prefix}:{slot}", 1, VIRTUALMIN_RATE_LIMIT_WINDOW):
                     return RateLimitOutcome.ALLOWED
         except Exception:
-            logger.exception("Virtualmin rate-limit counter failed for %s", self.server.hostname)
+            logger.exception("🔥 [Virtualmin] Rate-limit counter failed for %s", self.server.hostname)
             return RateLimitOutcome.BACKEND_ERROR
 
         logger.warning(
-            "Rate limit exceeded for %s operation %s: %s slots claimed",
+            "⚠️ [Virtualmin] Rate limit exceeded for %s operation %s: %s slots claimed",
             self.server.hostname,
             operation,
-            VIRTUALMIN_RATE_LIMIT_MAX_CALLS,
+            hourly_limit,
         )
+        return RateLimitOutcome.EXHAUSTED
+
+    def _check_qps_limit(self) -> RateLimitOutcome:
+        """Atomically reserve a per-server HTTP dispatch slot for the current second."""
+        scope = hashlib.sha256(self.server.hostname.encode()).hexdigest()[:24]
+        prefix = f"virtualmin_rate_limit_qps:{scope}:{int(time.time())}"
+        try:
+            limit = _read_integer_setting("virtualmin.rate_limit_qps", 10)
+            for slot in range(limit):
+                if cache.add(f"{prefix}:{slot}", 1, 1):
+                    return RateLimitOutcome.ALLOWED
+        except Exception:
+            logger.exception("🔥 [Virtualmin] QPS counter failed for %s", self.server.hostname)
+            return RateLimitOutcome.BACKEND_ERROR
         return RateLimitOutcome.EXHAUSTED
 
     # Programs an auto-failed server may still receive: the health probe only.
@@ -867,13 +822,15 @@ class VirtualminGateway:
 
         return Ok(True)
 
-    def call(  # noqa: PLR0911, PLR0912, C901  # Explicit per-stage guards + retry loop
+    def call(  # noqa: PLR0911, PLR0912, PLR0913, PLR0915, C901  # Explicit per-stage guards + bounded retry loop
         self,
         program: str,
         params: dict[str, Any] | None = None,
         response_format: str = "json",
         correlation_id: str = "",
         timeout_seconds: int | None = None,
+        *,
+        deadline: float | None = None,
     ) -> Result[VirtualminResponse, VirtualminAPIError]:
         """
         Make authenticated call to Virtualmin API.
@@ -884,11 +841,17 @@ class VirtualminGateway:
             response_format: Response format ('json', 'xml', 'text')
             correlation_id: Correlation ID for request tracking
             timeout_seconds: Per-call read timeout; None retains the current configured timeout
+            deadline: Absolute perf_counter deadline shared by every attempt and backoff
 
         Returns:
             Result containing VirtualminResponse or error
         """
         start_time = time.time()
+        if deadline is not None and time.perf_counter() >= deadline:
+            return Err(
+                VirtualminAPIError(_("Virtualmin call deadline exceeded"), self.server.hostname, program),
+                retriability=Retriability.NOT_RETRIABLE,
+            )
 
         # Input validation
         try:
@@ -963,9 +926,21 @@ class VirtualminGateway:
         # Make API request with retries
         last_error: VirtualminAPIError | None = None
         is_read_only = is_virtualmin_read_only_program(program)
-        for attempt in range(VIRTUALMIN_MAX_RETRIES):
+        max_retries = _integer_config_or_default(
+            lambda: SettingsService.get_integer_setting("virtualmin.max_retries", 3), 3
+        )
+        for attempt in range(max_retries):
+            if deadline is not None and time.perf_counter() >= deadline:
+                break
             try:
-                response = self._make_request(api_params, attempt + 1, auth=call_auth, timeout_seconds=timeout_seconds)
+                if deadline is None:
+                    response = self._make_request(
+                        api_params, attempt + 1, auth=call_auth, timeout_seconds=timeout_seconds
+                    )
+                else:
+                    response = self._make_request(
+                        api_params, attempt + 1, auth=call_auth, timeout_seconds=timeout_seconds, deadline=deadline
+                    )
                 execution_time = time.time() - start_time
 
                 # Parse response
@@ -997,7 +972,7 @@ class VirtualminGateway:
                 return Ok(virtualmin_response)
             except VirtualminAPIError as e:
                 last_error = e
-                logger.warning(f"⚠️ [Virtualmin] Attempt {attempt + 1}/{VIRTUALMIN_MAX_RETRIES} failed: {e}")
+                logger.warning(f"⚠️ [Virtualmin] Attempt {attempt + 1}/{max_retries} failed: {e}")
 
                 should_retry = e.retriability is Retriability.RETRIABLE or (
                     e.retriability is Retriability.UNKNOWN and is_read_only
@@ -1005,14 +980,26 @@ class VirtualminGateway:
                 if not should_retry:
                     return Err(e, retriability=e.retriability)
 
-                # Exponential backoff for retries
-                if attempt < VIRTUALMIN_MAX_RETRIES - 1:
+                # Exponential backoff cannot extend the caller's total budget.
+                if attempt < max_retries - 1:
                     backoff_seconds = (2**attempt) * 0.5
+                    if deadline is not None:
+                        remaining = deadline - time.perf_counter()
+                        if remaining <= 0:
+                            break
+                        backoff_seconds = min(backoff_seconds, remaining)
                     time.sleep(backoff_seconds)
+
+        if deadline is not None and time.perf_counter() >= deadline:
+            logger.warning("⚠️ [Virtualmin] %s stopped at the call deadline", program)
+            return Err(
+                VirtualminAPIError(_("Virtualmin call deadline exceeded"), self.server.hostname, program),
+                retriability=Retriability.NOT_RETRIABLE,
+            )
 
         # All retries failed
         execution_time = time.time() - start_time
-        error_msg = f"All {VIRTUALMIN_MAX_RETRIES} attempts failed. Last error: {last_error}"
+        error_msg = f"All {max_retries} attempts failed. Last error: {last_error}"
 
         logger.error(f"❌ [Virtualmin] {program} failed after {execution_time:.2f}s: {error_msg}")
 
@@ -1026,6 +1013,7 @@ class VirtualminGateway:
         attempt: int,
         auth: tuple[str, str] | None = None,
         timeout_seconds: int | None = None,
+        deadline: float | None = None,
     ) -> requests.Response:
         """
         Make HTTP request to Virtualmin API.
@@ -1044,7 +1032,12 @@ class VirtualminGateway:
             VirtualminAPIError: On API-specific errors
         """
         try:
-            response = self._execute_http_request(params, auth=auth, timeout_seconds=timeout_seconds)
+            if deadline is None:
+                response = self._execute_http_request(params, auth=auth, timeout_seconds=timeout_seconds)
+            else:
+                response = self._execute_http_request(
+                    params, auth=auth, timeout_seconds=timeout_seconds, deadline=deadline
+                )
             self._validate_response_size(response)
             self._validate_http_status(response)
             return response
@@ -1089,6 +1082,7 @@ class VirtualminGateway:
         params: dict[str, Any],
         auth: tuple[str, str] | None = None,
         timeout_seconds: int | None = None,
+        deadline: float | None = None,
     ) -> requests.Response:
         """Execute HTTPS with DNS pinning and optional handshake-time certificate pinning.
 
@@ -1113,14 +1107,28 @@ class VirtualminGateway:
                 )
             auth = creds.unwrap()
 
+        if deadline is not None and time.perf_counter() >= deadline:
+            raise VirtualminAPIError(_("Virtualmin call deadline exceeded"), self.server.hostname)
+
+        qps_outcome = self._check_qps_limit()
+        if qps_outcome is RateLimitOutcome.EXHAUSTED:
+            raise VirtualminRateLimitedError(_("Virtualmin requests per second limit exceeded"), self.server.hostname)
+        if qps_outcome is RateLimitOutcome.BACKEND_ERROR:
+            raise VirtualminAPIError(_("Virtualmin rate-limit backend unavailable"), self.server.hostname)
+
         # Get current timeout configuration (supports hot-reloading).
         # The policy below is constructed per request; shared config is never mutated.
         timeout_config = get_virtualmin_timeouts()
-        request_timeout = (
+        request_timeout = float(
             timeout_seconds
             if timeout_seconds is not None
             else timeout_config.get("API_REQUEST_TIMEOUT", self.config.timeout)
         )
+        if deadline is not None:
+            remaining = deadline - time.perf_counter()
+            if remaining <= 0:
+                raise VirtualminAPIError(_("Virtualmin call deadline exceeded"), self.server.hostname)
+            request_timeout = min(request_timeout, remaining)
 
         # Build per-server policy — Virtualmin uses self-signed certs on some nodes
         virtualmin_policy = OutboundPolicy(
@@ -1129,7 +1137,8 @@ class VirtualminGateway:
             verify_tls=bool(self.config.verify_ssl),
             tls_cert_fingerprint=self.config.cert_fingerprint,
             allowed_schemes=frozenset({"https"}),
-            timeout_seconds=float(request_timeout),
+            timeout_seconds=request_timeout,
+            connect_timeout_seconds=min(10.0, request_timeout) if deadline is not None else 10.0,
             blocked_ports=frozenset(),  # Virtualmin runs on non-standard ports
         )
 
@@ -1341,19 +1350,6 @@ class VirtualminGateway:
         # Use test_connection method as ping
         result = self.test_connection()
         return result.is_ok()
-
-    def call_api(self, command: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        """
-        Generic API call method that delegates to the core call() method.
-
-        Returns raw response data as a dict, or raises RuntimeError on failure.
-        """
-        result = self.call(command, params or {})
-        if result.is_err():
-            error = result.unwrap_err()
-            raise RuntimeError(f"Virtualmin API call '{command}' failed: {error}")
-        response = result.unwrap()
-        return {"status": "ok", "command": command, "data": response.data}
 
     def list_domains_with_owners(self) -> Result[list[dict[str, str]], str]:
         """Full multiline listing normalized to [{'domain', 'username'}] rows."""
@@ -1612,41 +1608,6 @@ class VirtualminGateway:
 
         return quota_mb
 
-    def _extract_usage_from_domain_data(self, domain_data: dict[str, Any]) -> dict[str, Any]:
-        """Extract usage information from domain data returned by list-domains."""
-        domain_info = {
-            "disk_usage_mb": 0,
-            "bandwidth_usage_mb": 0,
-            "disk_quota_mb": None,
-            "bandwidth_quota_mb": None,
-        }
-
-        # Extract disk usage if available
-        if "disk_usage" in domain_data:
-            domain_info["disk_usage_mb"] = self._parse_size_to_mb(domain_data["disk_usage"])
-        elif "used" in domain_data:
-            domain_info["disk_usage_mb"] = self._parse_size_to_mb(domain_data["used"])
-
-        # Extract disk quota if available
-        if "disk_quota" in domain_data:
-            domain_info["disk_quota_mb"] = self._parse_size_to_mb(domain_data["disk_quota"])
-        elif "quota" in domain_data:
-            domain_info["disk_quota_mb"] = self._parse_size_to_mb(domain_data["quota"])
-
-        # Extract bandwidth usage if available
-        if "bandwidth_usage" in domain_data:
-            domain_info["bandwidth_usage_mb"] = self._parse_size_to_mb(domain_data["bandwidth_usage"])
-        elif "bw_used" in domain_data:
-            domain_info["bandwidth_usage_mb"] = self._parse_size_to_mb(domain_data["bw_used"])
-
-        # Extract bandwidth quota if available
-        if "bandwidth_quota" in domain_data:
-            domain_info["bandwidth_quota_mb"] = self._parse_size_to_mb(domain_data["bandwidth_quota"])
-        elif "bw_limit" in domain_data:
-            domain_info["bandwidth_quota_mb"] = self._parse_size_to_mb(domain_data["bw_limit"])
-
-        return domain_info
-
     @performance_monitor("Multiline Domain Response Parsing")
     def _parse_multiline_domain_response(self, data: dict[str, Any]) -> dict[str, Any]:
         """
@@ -1814,7 +1775,14 @@ class VirtualminGateway:
         patterns = get_compiled_patterns()
 
         # Priority fields for quota detection
-        quota_priority_fields = ["disk_quota", "quota_limit", "size_limit", "disk_limit"]
+        quota_priority_fields = [
+            "disk_quota",
+            "quota_limit",
+            "size_limit",
+            "disk_limit",
+            "Server byte quota",
+            "server byte quota",
+        ]
 
         # Check priority fields first
         for field in quota_priority_fields:
@@ -1871,6 +1839,40 @@ class VirtualminGateway:
         except (ValueError, IndexError, TypeError, AttributeError) as e:
             logger.debug(f"🐛 [Parsing] Failed to parse value size '{value}': {e}")
             return 0
+
+    @staticmethod
+    def _parse_bandwidth_rows(rows: list[object]) -> int:
+        """Sum Virtualmin byte counters, preferring totals over their components."""
+        total_bytes = 0
+        for row in rows:
+            if not isinstance(row, dict) or not isinstance(row.get("values"), dict):
+                continue
+            raw_values = cast("dict[str, object]", row["values"])
+            values = {key.casefold(): value for key, value in raw_values.items()}
+            fields = ("total bytes",) if "total bytes" in values else ("bytes in", "bytes out")
+            for field in fields:
+                value = values.get(field, 0)
+                if isinstance(value, list):
+                    value = value[0] if value else 0
+                try:
+                    total_bytes += max(0, int(str(value)))
+                except (TypeError, ValueError):
+                    continue
+        return total_bytes // (1024 * 1024)
+
+    def _parse_bandwidth_dict(self, data: dict[str, object]) -> int:
+        """Handle nested byte counters and legacy top-level bandwidth fields."""
+        rows = data.get("data")
+        if isinstance(rows, list):
+            return self._parse_bandwidth_rows(cast("list[object]", rows))
+        total_mb = 0
+        for key, value in data.items():
+            if "bandwidth" in key.lower() or "bytes" in key.lower():
+                try:
+                    total_mb += self._parse_size_to_mb_cached(str(value))
+                except (ValueError, TypeError):
+                    continue
+        return total_mb
 
     @performance_monitor("Bandwidth Response Parsing")
     def _parse_bandwidth_response(self, data: dict[str, Any] | str) -> int:
@@ -1929,140 +1931,9 @@ class VirtualminGateway:
                         continue
 
         elif isinstance(data, dict):
-            # Optimized structured data parsing
-            bandwidth_keys = [key for key in data if "bandwidth" in key.lower() or "bytes" in key.lower()]
-
-            for key in bandwidth_keys:
-                value = data[key]
-                try:
-                    total_mb += self._parse_size_to_mb_cached(str(value))
-                except (ValueError, TypeError):
-                    continue
+            return self._parse_bandwidth_dict(data)
 
         return total_mb
-
-    def _process_domain_info_item(self, item: dict[str, Any], domain_info: dict[str, Any], domain: str) -> None:
-        """Process a single domain info item and update domain_info dictionary."""
-        name = item.get("name", "").lower()
-        value = item.get("value", "")
-
-        if not name:  # Skip items without names
-            return
-
-        # Disk-related fields
-        if "disk" in name:
-            self._process_disk_field(name, value, domain_info, domain)
-        # Bandwidth-related fields
-        elif "bandwidth" in name or "bw" in name:
-            self._process_bandwidth_field(name, value, domain_info, domain)
-        # Status fields
-        elif ("status" in name or "state" in name) and isinstance(value, str) and value.strip():
-            domain_info["status"] = value.strip().lower()
-            logger.debug(f"📊 [Parsing] Status: {domain_info['status']} for {domain}")
-
-    def _process_disk_field(self, name: str, value: Any, domain_info: dict[str, Any], domain: str) -> None:
-        """Process disk-related field."""
-        if "used" in name or "usage" in name:
-            parsed_value = self._parse_size_to_mb_cached(str(value))
-            if parsed_value > 0:  # Only update if we got a valid value
-                domain_info["disk_usage_mb"] = parsed_value
-                logger.debug(f"📊 [Parsing] Disk usage: {parsed_value}MB for {domain}")
-        elif "quota" in name or "limit" in name:
-            parsed_value = self._parse_size_to_mb_cached(str(value))
-            if parsed_value > 0:  # 0 typically means unlimited
-                domain_info["disk_quota_mb"] = parsed_value
-                logger.debug(f"📊 [Parsing] Disk quota: {parsed_value}MB for {domain}")
-
-    def _process_bandwidth_field(self, name: str, value: Any, domain_info: dict[str, Any], domain: str) -> None:
-        """Process bandwidth-related field."""
-        if "used" in name or "usage" in name:
-            parsed_value = self._parse_size_to_mb_cached(str(value))
-            if parsed_value > 0:
-                domain_info["bandwidth_usage_mb"] = parsed_value
-                logger.debug(f"📊 [Parsing] Bandwidth usage: {parsed_value}MB for {domain}")
-        elif "quota" in name or "limit" in name:
-            parsed_value = self._parse_size_to_mb_cached(str(value))
-            if parsed_value > 0:
-                domain_info["bandwidth_quota_mb"] = parsed_value
-                logger.debug(f"📊 [Parsing] Bandwidth quota: {parsed_value}MB for {domain}")
-
-    @performance_monitor("Domain Info Response Parsing")
-    def _parse_domain_info_response(self, data: dict[str, Any], domain: str) -> dict[str, Any]:
-        """
-        Parse domain info response to extract comprehensive usage data.
-
-        Algorithm Complexity: O(n) where n is the number of response items
-
-        Performance Optimizations:
-        - Pre-compiled regex patterns for field name matching
-        - Optimized string comparison using lowercase conversion
-        - Early exit for malformed responses
-        - Cached size parsing for repeated values
-
-        Response Format Handling:
-        - Handles Virtualmin's structured response format
-        - Processes nested data items with name/value pairs
-        - Extracts disk usage, quotas, bandwidth, and status information
-        - Graceful degradation for missing or malformed data
-
-        Args:
-            data: Raw response data from Virtualmin API
-            domain: Domain name for context and validation
-
-        Returns:
-            Dictionary containing parsed domain information:
-            {
-                'domain': str,              # Domain name
-                'disk_usage_mb': int,       # Current disk usage in MB
-                'bandwidth_usage_mb': int,  # Current bandwidth usage in MB
-                'disk_quota_mb': int|None,  # Disk quota in MB (None = unlimited)
-                'bandwidth_quota_mb': int|None, # Bandwidth quota in MB
-                'status': str               # Domain status (active/suspended/etc.)
-            }
-
-        Edge Cases:
-        - Malformed response data: Returns default values
-        - Missing usage data: Returns 0 for usage fields
-        - Unlimited quotas: Returns None for quota fields
-        - Invalid status: Returns "unknown"
-
-        Supported Virtualmin Response Formats:
-        - Table format with data items array
-        - Nested structure with name/value pairs
-        - Mixed format responses with partial data
-        """
-        domain_info = {
-            "domain": domain,
-            "disk_usage_mb": 0,
-            "bandwidth_usage_mb": 0,
-            "disk_quota_mb": None,
-            "bandwidth_quota_mb": None,
-            "status": "unknown",
-        }
-
-        # Early validation for response structure
-        if not isinstance(data, dict) or "data" not in data:
-            logger.debug(f"🐛 [Parsing] Invalid response structure for domain {domain}")
-            return domain_info
-
-        data_items = data["data"]
-        if not isinstance(data_items, list):
-            logger.debug(f"🐛 [Parsing] Expected list for data items, got {type(data_items)}")
-            return domain_info
-
-        # Process response items using helper functions
-        for item in data_items:
-            if isinstance(item, dict):
-                self._process_domain_info_item(item, domain_info, domain)
-
-        logger.debug(
-            f"✅ [Parsing] Domain info parsed for {domain}: "
-            f"disk={domain_info['disk_usage_mb']}MB, "
-            f"bandwidth={domain_info['bandwidth_usage_mb']}MB, "
-            f"status={domain_info['status']}"
-        )
-
-        return domain_info
 
     def _parse_size_to_mb_cached(self, size_str: str) -> int:
         """

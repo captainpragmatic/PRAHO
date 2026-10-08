@@ -102,29 +102,3 @@ def provisioning_complete_hook(task: object) -> None:
 
     except Exception as e:
         logger.error(f"🔥 [Hook] Error in provisioning complete hook: {e}")
-
-
-def retry_failed_provisioning(service_id: int) -> str:
-    """
-    Retry provisioning for a failed service.
-    """
-    try:
-        service = Service.objects.get(id=service_id)
-
-        if service.status != "failed":
-            raise ValueError(f"Service {service_id} is not in failed status (current: {service.status})")
-
-        logger.info(f"🔄 [Retry] Retrying provisioning for service {service_id}")
-
-        # Clear previous errors and reset status via FSM transition
-        service.provisioning_errors = ""
-        service.retry()
-        service.save(update_fields=["provisioning_errors", "status"])
-
-        # Queue for provisioning
-        return queue_service_provisioning(service)
-
-    except Service.DoesNotExist:
-        error_msg = f"Service {service_id} not found"
-        logger.error(f"❌ [Retry] {error_msg}")
-        raise

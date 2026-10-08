@@ -17,11 +17,12 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from functools import wraps
 from typing import TYPE_CHECKING, Any
 
+from django.db import router, transaction
 from django.utils import timezone
 
 from apps.common import counters
@@ -301,18 +302,48 @@ class ANAFQuotaTracker:
         Raises:
             QuotaExceededError: If quota is exceeded
         """
-        if not self.can_call(endpoint, cui, message_id):
-            status = self.get_status(endpoint, cui, message_id)
-            raise QuotaExceededError(
-                endpoint=endpoint,
-                cui=cui,
-                current=status.current,
-                limit=status.limit,
-                reset_at=status.reset_at,
-            )
+        global_limit = self._settings.rate_limit_global_per_minute
+        limit = self.get_limit(endpoint)
+        global_key = self._get_global_minute_key()
+        endpoint_key = self._get_cache_key(endpoint, cui, message_id)
+        reset_at = self._get_reset_time()
+        timeout = self._seconds_until_midnight()
 
-        self.increment(endpoint, cui, message_id)
-        return self.get_status(endpoint, cui, message_id)
+        # Both increments use the write database and roll back together on any refusal or store failure.
+        # The global row is always acquired first, so callers cannot deadlock across endpoint rows.
+        from apps.common.models import Counter  # noqa: PLC0415  # ADR-0007: cross-app model import
+
+        with transaction.atomic(using=router.db_for_write(Counter)):
+            global_count = counters.increment(global_key, self.MINUTE_WINDOW_SECONDS)
+            if global_limit > 0 and global_count > global_limit:
+                minute = int(global_key.rsplit(":", 1)[-1])
+                raise QuotaExceededError(
+                    endpoint=endpoint,
+                    cui=cui,
+                    current=global_count - 1,
+                    limit=global_limit,
+                    reset_at=datetime.fromtimestamp((minute + 1) * 60, tz=UTC).isoformat(),
+                )
+
+            current = counters.increment(endpoint_key, timeout)
+            if limit > 0 and current > limit:
+                raise QuotaExceededError(
+                    endpoint=endpoint,
+                    cui=cui,
+                    current=current - 1,
+                    limit=limit,
+                    reset_at=reset_at,
+                )
+
+        return QuotaStatus(
+            endpoint=endpoint,
+            cui=cui,
+            message_id=message_id,
+            current=current,
+            limit=limit,
+            remaining=max(0, limit - current) if limit > 0 else -1,
+            reset_at=reset_at,
+        )
 
     def _seconds_until_midnight(self) -> int:
         """Get seconds until midnight Romanian time."""

@@ -54,10 +54,10 @@
         <div>
           <p class="text-xs text-slate-400 mb-2">Design Token Colors</p>
           <div class="flex flex-wrap gap-2">
-            <span class="px-3 py-1 rounded bg-blue-600 text-white text-xs">primary (blue-600)</span>
-            <span class="px-3 py-1 rounded bg-green-600 text-white text-xs">success (green-600)</span>
-            <span class="px-3 py-1 rounded bg-yellow-600 text-white text-xs">warning (yellow-600)</span>
-            <span class="px-3 py-1 rounded bg-red-600 text-white text-xs">danger (red-600)</span>
+            <span class="px-3 py-1 rounded bg-blue-600 text-white text-xs">primary (blue-600)</span> {# tmpl-allow TMPL005: needs badge swatch variant #}
+            <span class="px-3 py-1 rounded bg-green-600 text-white text-xs">success (green-600)</span> {# tmpl-allow TMPL005: needs badge swatch variant #}
+            <span class="px-3 py-1 rounded bg-yellow-600 text-white text-xs">warning (yellow-600)</span> {# tmpl-allow TMPL005: needs badge swatch variant #}
+            <span class="px-3 py-1 rounded bg-red-600 text-white text-xs">danger (red-600)</span> {# tmpl-allow TMPL005: needs badge swatch variant #}
             <span class="px-3 py-1 rounded bg-slate-600 text-white text-xs">secondary (slate-600)</span>
             <span class="px-3 py-1 rounded bg-cyan-600 text-white text-xs">info (cyan-600)</span>
           </div>
@@ -70,7 +70,7 @@
       <h2 class="text-lg font-semibold text-white mb-4">Icons</h2>
       <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
         <p class="text-xs text-slate-400 mb-4">
-          Usage: <code class="text-green-400">{% verbatim %}{% icon "name" size="sm|md|lg" %}{% endverbatim %}</code>
+          Usage: <code class="text-green-400">{% verbatim %}{% icon "name" size="sm|md|lg" %}{% endverbatim %}</code> {# tmpl-allow TMPL005: needs badge code_element #}
         </p>
         <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-4">
           {% for name in icon_names %}
@@ -88,7 +88,7 @@
       <h2 class="text-lg font-semibold text-white mb-4">Badges</h2>
       <div class="bg-slate-800 rounded-lg p-6 border border-slate-700 space-y-4">
         <p class="text-xs text-slate-400">
-          Usage: <code class="text-green-400">{% verbatim %}{% badge "Text" variant="success" %}{% endverbatim %}</code>
+          Usage: <code class="text-green-400">{% verbatim %}{% badge "Text" variant="success" %}{% endverbatim %}</code> {# tmpl-allow TMPL005: needs badge code_element #}
         </p>
         <div>
           <p class="text-xs text-slate-500 mb-2">Standard</p>
@@ -123,7 +123,7 @@
       <h2 class="text-lg font-semibold text-white mb-4">Buttons</h2>
       <div class="bg-slate-800 rounded-lg p-6 border border-slate-700 space-y-4">
         <p class="text-xs text-slate-400">
-          Usage: <code class="text-green-400">{% verbatim %}{% button "Label" variant="primary" %}{% endverbatim %}</code>
+          Usage: <code class="text-green-400">{% verbatim %}{% button "Label" variant="primary" %}{% endverbatim %}</code> {# tmpl-allow TMPL005: needs badge code_element #}
         </p>
         <div>
           <p class="text-xs text-slate-500 mb-2">Variants</p>
@@ -165,7 +165,7 @@
       <h2 class="text-lg font-semibold text-white mb-4">Alerts</h2>
       <div class="bg-slate-800 rounded-lg p-6 border border-slate-700 space-y-3">
         <p class="text-xs text-slate-400 mb-2">
-          Usage: <code class="text-green-400">{% verbatim %}{% alert "message" variant="success" title="X" %}{% endverbatim %}</code>
+          Usage: <code class="text-green-400">{% verbatim %}{% alert "message" variant="success" title="X" %}{% endverbatim %}</code> {# tmpl-allow TMPL005: needs badge code_element #}
         </p>
         {% for sample in alert_samples %}
         {% alert sample.message variant=sample.variant title=sample.title %}
@@ -182,7 +182,7 @@
       <h2 class="text-lg font-semibold text-white mb-4">Status Labels</h2>
       <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
         <p class="text-xs text-slate-400 mb-4">
-          Usage: <code class="text-green-400">{% verbatim %}{% badge status|status_label variant=status|status_variant icon=status|status_icon %}{% endverbatim %}</code>
+          Usage: <code class="text-green-400">{% verbatim %}{% badge status|status_label variant=status|status_variant icon=status|status_icon %}{% endverbatim %}</code> {# tmpl-allow TMPL005: needs badge code_element #}
         </p>
         <div class="flex flex-wrap gap-2">
           {% for status in status_samples %}
@@ -197,7 +197,7 @@
       <h2 class="text-lg font-semibold text-white mb-4">Stat Tiles</h2>
       <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
         <p class="text-xs text-slate-400 mb-4">
-          Usage: <code class="text-green-400">{% verbatim %}{% stat_tile "Label" "Value" icon="currency" variant="success" %}{% endverbatim %}</code>
+          Usage: <code class="text-green-400">{% verbatim %}{% stat_tile "Label" "Value" icon="currency" variant="success" %}{% endverbatim %}</code> {# tmpl-allow TMPL005: needs badge code_element #}
         </p>
         <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 auto-rows-fr">
           {% for tile in stat_tile_samples %}
@@ -212,7 +212,7 @@
       <h2 class="text-lg font-semibold text-white mb-4">Breadcrumbs</h2>
       <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
         <p class="text-xs text-slate-400 mb-4">
-          Usage: <code class="text-green-400">{% verbatim %}{% breadcrumb items %}{% endverbatim %}</code>
+          Usage: <code class="text-green-400">{% verbatim %}{% breadcrumb items %}{% endverbatim %}</code> {# tmpl-allow TMPL005: needs badge code_element #}
         </p>
         {% breadcrumb breadcrumb_items %}
       </div>
@@ -223,7 +223,7 @@
       <h2 class="text-lg font-semibold text-white mb-4">Step Progress</h2>
       <div class="bg-slate-800 rounded-lg p-6 border border-slate-700 space-y-8">
         <p class="text-xs text-slate-400">
-          Usage: <code class="text-green-400">{% verbatim %}{% step_progress steps current_step=2 separator="arrow" %}{% endverbatim %}</code>
+          Usage: <code class="text-green-400">{% verbatim %}{% step_progress steps current_step=2 separator="arrow" %}{% endverbatim %}</code> {# tmpl-allow TMPL005: needs badge code_element #}
         </p>
 
         <!-- Default with arrows + icons (order flow, step 2) -->
@@ -281,7 +281,7 @@
       <h2 class="text-lg font-semibold text-white mb-4">Cards</h2>
       <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
         <p class="text-xs text-slate-400 mb-4">
-          Usage: <code class="text-green-400">{% verbatim %}{% section_card title="Title" %}...{% end_section_card %}{% endverbatim %}</code>
+          Usage: <code class="text-green-400">{% verbatim %}{% section_card title="Title" %}...{% end_section_card %}{% endverbatim %}</code> {# tmpl-allow TMPL005: needs badge code_element #}
         </p>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           {% section_card title="Simple Card" icon="grid" %}
@@ -301,7 +301,7 @@
       <div class="rounded-lg p-6 border border-slate-700 space-y-6">
         <div>
           <p class="text-xs text-slate-400 mb-3">
-            Usage: <code class="text-green-400">{% verbatim %}{% data_table columns rows %}{% endverbatim %}</code>
+            Usage: <code class="text-green-400">{% verbatim %}{% data_table columns rows %}{% endverbatim %}</code> {# tmpl-allow TMPL005: needs badge code_element #}
           </p>
           {% data_table table_headers table_rows show_actions=False pagination=False %}
         </div>
@@ -317,7 +317,7 @@
       <h2 class="text-lg font-semibold text-white mb-4">Forms</h2>
       <div class="bg-slate-800 rounded-lg p-6 border border-slate-700 space-y-4">
         <p class="text-xs text-slate-400">
-          Usage: <code class="text-green-400">{% verbatim %}{% input_field name="field" label="Label" %}{% endverbatim %}</code>
+          Usage: <code class="text-green-400">{% verbatim %}{% input_field name="field" label="Label" %}{% endverbatim %}</code> {# tmpl-allow TMPL005: needs badge code_element #}
         </p>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl">
           {% input_field "email" label="Email address" input_type="email" placeholder="user@example.com" icon_left="email" %}
@@ -337,11 +337,11 @@
       <h2 class="text-lg font-semibold text-white mb-4">Modals</h2>
       <div class="bg-slate-800 rounded-lg p-6 border border-slate-700 space-y-4">
         <p class="text-xs text-slate-400">
-          Usage: <code class="text-green-400">{% verbatim %}{% modal "modal-id" "Title" %}...{% endmodal %}{% endverbatim %}</code>
+          Usage: <code class="text-green-400">{% verbatim %}{% modal "modal-id" "Title" %}...{% endmodal %}{% endverbatim %}</code> {# tmpl-allow TMPL005: needs badge code_element #}
         </p>
         <p class="text-sm text-slate-300">
-          Modals are controlled via HTMX or Alpine.js. The <code class="text-green-400">{% verbatim %}{% modal %}{% endverbatim %}</code> tag generates
-          the modal HTML shell — open via <code class="text-green-400">hx-target</code> or Alpine.
+          Modals are controlled via HTMX or Alpine.js. The <code class="text-green-400">{% verbatim %}{% modal %}{% endverbatim %}</code> tag generates {# tmpl-allow TMPL005: needs badge code_element #}
+          the modal HTML shell — open via <code class="text-green-400">hx-target</code> or Alpine. {# tmpl-allow TMPL005: needs badge code_element #}
         </p>
         <div class="mt-4 p-4 rounded-lg bg-slate-700 border border-slate-600">
           <p class="text-xs text-slate-400 mb-2">Standard modal (HTML shell)</p>

@@ -15,7 +15,7 @@ import logging
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 from django.conf import settings
@@ -25,7 +25,6 @@ from django.db import transaction
 from django.db.models.signals import post_delete, post_save, pre_delete, pre_save
 from django.dispatch import receiver
 from django.utils import timezone
-from django_fsm import TransitionNotAllowed
 
 from apps.audit.services import (
     AuditContext,
@@ -56,6 +55,10 @@ from .models import (
     TaxRule,
     VATValidation,
 )
+
+if TYPE_CHECKING:
+    from apps.customers.models import Customer
+    from apps.provisioning.models import Service
 
 logger = logging.getLogger(__name__)
 
@@ -596,6 +599,13 @@ def handle_invoice_created_or_updated(sender: type[Invoice], instance: Invoice, 
     - Cross-app order synchronization
     - Post-refund side effects
     """
+    # Required in BOTH issuance paths, before the outer dispatch wrapper can swallow anything.
+    original_values: dict[str, object] = getattr(instance, "_original_invoice_values", {})
+    if instance.status == "issued" and (created or original_values.get("status") == "draft"):
+        from apps.billing.efactura.intents import ensure_efactura_intent
+
+        ensure_efactura_intent(instance)
+
     with swallow_application_errors(logger=logger, scope="Invoice Signal", message="Failed to handle invoice save"):
         # Enhanced audit logging using BillingAuditService
         event_type = "invoice_created" if created else "invoice_status_changed"
@@ -795,116 +805,82 @@ def handle_invoice_cleanup(sender: type[Invoice], instance: Invoice, **kwargs: A
 
 
 @receiver(post_save, sender=Payment)
-def handle_payment_created_or_updated(sender: type[Payment], instance: Payment, created: bool, **kwargs: Any) -> None:
-    """
-    Handle payment creation and updates.
-
-    Triggers:
-    - Invoice status updates when payment succeeds
-    - Payment confirmation emails
-    - Failed payment retry scheduling
-    - Customer credit updates
-    - Service activation
-    """
-    try:
-        old_values = (
-            _serialize_values_for_audit(getattr(instance, "_original_payment_values", {})) if not created else {}
+def handle_payment_created_or_updated(
+    sender: type[Payment], instance: Payment, created: bool, **kwargs: object
+) -> None:
+    """Isolate optional effects; required settlement failures reach the caller."""
+    old_values = _serialize_values_for_audit(getattr(instance, "_original_payment_values", {})) if not created else {}
+    disable_flag = getattr(settings, "DISABLE_AUDIT_SIGNALS", False)
+    in_testing = getattr(settings, "TESTING", False)
+    if disable_flag and not in_testing:
+        logger.critical(
+            "DISABLE_AUDIT_SIGNALS is set outside of TESTING context — ignoring flag and continuing audit for safety"
         )
-        new_values = _serialize_values_for_audit(
-            {
-                "status": instance.status,
-                "amount_cents": instance.amount_cents,
-                "payment_method": instance.payment_method,
-                "customer_id": str(instance.customer.id),
-            }
-        )
-
-        # Enhanced payment audit logging
-        _disable_flag = getattr(settings, "DISABLE_AUDIT_SIGNALS", False)
-        _in_testing = getattr(settings, "TESTING", False)
-        if _disable_flag and not _in_testing:
-            logger.critical(
-                "DISABLE_AUDIT_SIGNALS is set outside of TESTING context — "
-                "ignoring flag and continuing audit for safety"
-            )
-        if not _disable_flag or not _in_testing:
-            # Determine specific event type based on status change
-            audit_event_type = "payment_initiated" if created else f"payment_{instance.status}"
-
+    if not disable_flag or not in_testing:
+        with best_effort_atomic(logger=logger, scope="Payment Audit", message="Failed to audit payment save"):
             from apps.audit.services import BusinessEventData
 
             event_data = BusinessEventData(
-                event_type=audit_event_type,
+                event_type="payment_initiated" if created else f"payment_{instance.status}",
                 business_object=instance,
-                user=None,  # System event
+                user=None,
                 context=AuditContext(actor_type="system"),
                 old_values=old_values,
-                new_values=new_values,
+                new_values=_serialize_values_for_audit(
+                    {
+                        "status": instance.status,
+                        "amount_cents": instance.amount_cents,
+                        "payment_method": instance.payment_method,
+                        "customer_id": str(instance.customer_id),
+                    }
+                ),
                 description=f"Payment {instance.amount} {instance.currency.code} - {instance.status}",
             )
             BillingAuditService.log_payment_event(event_data)
 
-        if created:
-            logger.info(f"💳 [Payment] Created payment {instance.id} for {instance.customer}")
+    if created:
+        logger.info(f"💳 [Payment] Created payment {instance.id} for customer {instance.customer_id}")
 
-        # Check for status changes
-        old_status = old_values.get("status")
-        if old_status and old_status != instance.status:
-            _handle_payment_status_change(instance, old_status, instance.status)
-
-            # EXTENDED: Service activation.
-            # Guard is `old_status == "pending"` (not `!= "succeeded"`) DELIBERATELY: the only
-            # FSM edges into 'succeeded' are succeed() from 'pending' (a genuine first success)
-            # and restore_after_refund_reversal() from refunded/partially_refunded (a projection
-            # un-refunding a payment). Only the first should (re)activate services — a refund
-            # reversal must not re-trigger activation or positive credit scoring. Creates carry
-            # old_status=None and are already excluded by the outer `if old_status` check above.
-            if instance.status == "succeeded" and old_status == "pending":
-                _activate_payment_services(instance)
-
-            # EXTENDED: Customer credit scoring
-            _update_customer_payment_credit(instance, old_status)
-
-    except Exception as e:
-        logger.exception(f"🔥 [Payment Signal] Failed to handle payment save: {e}")
+    old_status = old_values.get("status")
+    if isinstance(old_status, str) and old_status != instance.status:
+        _handle_payment_status_change(instance, old_status, instance.status)
+        # Refund reversals are projections, not fresh successes.
+        if instance.status == "succeeded" and old_status == "pending":
+            _activate_payment_services(instance)
+        _update_customer_payment_credit(instance, old_status)
 
 
 @receiver(pre_save, sender=Payment)
-def store_original_payment_values(sender: type[Payment], instance: Payment, **kwargs: Any) -> None:
-    """Store original payment values for comparison"""
-    try:
-        if instance.pk:
-            try:
-                original = Payment.objects.get(pk=instance.pk)
-                instance._original_payment_values = {"status": original.status, "amount_cents": original.amount_cents}
-            except Payment.DoesNotExist:
-                instance._original_payment_values = {}
-    except Exception as e:
-        logger.exception(f"🔥 [Payment Signal] Failed to store original values: {e}")
+def store_original_payment_values(sender: type[Payment], instance: Payment, **kwargs: object) -> None:
+    """Read required original state; only a missing row means a new instance."""
+    if instance.pk:
+        try:
+            original = Payment.objects.get(pk=instance.pk)
+        except Payment.DoesNotExist:
+            instance._original_payment_values = {}
+        else:
+            instance._original_payment_values = {"status": original.status, "amount_cents": original.amount_cents}
 
 
 @receiver(post_delete, sender=Payment)
-def handle_payment_cleanup(sender: type[Payment], instance: Payment, **kwargs: Any) -> None:
-    """Clean up payment-related data and handle compliance requirements."""
-    try:
-        # Log payment deletion for audit
+def handle_payment_cleanup(sender: type[Payment], instance: Payment, **kwargs: object) -> None:
+    """Keep deletion auditing, file cleanup and credit reversion independent."""
+    with best_effort_atomic(logger=logger, scope="Payment Cleanup", message="Deletion logging failed"):
         log_security_event(
             "payment_deleted",
             {
                 "payment_id": str(instance.id),
-                "customer_id": str(instance.customer.id),
-                "invoice_id": str(instance.invoice.id) if instance.invoice else None,
+                "customer_id": str(instance.customer_id),
+                "invoice_id": str(instance.invoice_id) if instance.invoice_id else None,
                 "amount_cents": instance.amount_cents,
                 "status": instance.status,
                 "payment_method": instance.payment_method,
             },
         )
 
-        # Clean up payment-related files
-        _cleanup_payment_files(instance)
-
-        # Update customer payment statistics
-        if instance.status == "succeeded":
+    _cleanup_payment_files(instance)
+    if instance.status == "succeeded":
+        with best_effort_atomic(logger=logger, scope="Payment Cleanup", message="Credit reversion failed"):
             applied_adjustment = _get_payment_credit_adjustment(instance, "positive_payment")
             if applied_adjustment is None:
                 _revert_customer_credit_score(instance.customer, "positive_payment")
@@ -915,10 +891,7 @@ def handle_payment_cleanup(sender: type[Payment], instance: Payment, **kwargs: A
                     applied_adjustment=applied_adjustment,
                 )
 
-        logger.info(f"🗑️ [Payment] Cleaned up deleted payment {instance.id}")
-
-    except Exception as e:
-        logger.exception(f"🔥 [Payment Signal] Cleanup failed: {e}")
+    logger.info(f"🗑️ [Payment] Cleaned up deleted payment {instance.id}")
 
 
 # ===============================================================================
@@ -928,13 +901,13 @@ def handle_payment_cleanup(sender: type[Payment], instance: Payment, **kwargs: A
 
 @receiver(post_save, sender=ProformaInvoice)
 def handle_proforma_invoice_conversion(
-    sender: type[ProformaInvoice], instance: ProformaInvoice, created: bool, **kwargs: Any
+    sender: type[ProformaInvoice], instance: ProformaInvoice, created: bool, **kwargs: object
 ) -> None:
     """
     Handle automatic conversion of proformas to invoices based on business rules.
     Romanian business practice: Proformas convert to invoices upon payment or acceptance.
     """
-    try:
+    with best_effort_atomic(logger=logger, scope="Proforma Audit", message="Conversion audit failed"):
         # Enhanced proforma audit logging
         event_type = "proforma_created" if created else "proforma_updated"
 
@@ -967,22 +940,17 @@ def handle_proforma_invoice_conversion(
         # This signal handler does NOT convert proformas — the convergence
         # point handles locking, idempotency, and signal emission.
 
-    except Exception as e:
-        logger.exception(f"🔥 [Proforma Signal] Conversion handling failed: {e}")
-
 
 @receiver(pre_save, sender=ProformaInvoice)
-def store_original_proforma_values(sender: type[ProformaInvoice], instance: ProformaInvoice, **kwargs: Any) -> None:
-    """Store original proforma values for comparison"""
-    try:
-        if instance.pk:
-            try:
-                original = ProformaInvoice.objects.get(pk=instance.pk)
-                instance._original_proforma_values = {"status": original.status, "total_cents": original.total_cents}
-            except ProformaInvoice.DoesNotExist:
-                instance._original_proforma_values = {}
-    except Exception as e:
-        logger.exception(f"🔥 [Proforma Signal] Failed to store original values: {e}")
+def store_original_proforma_values(sender: type[ProformaInvoice], instance: ProformaInvoice, **kwargs: object) -> None:
+    """Read required original state; only a missing row means a new instance."""
+    if instance.pk:
+        try:
+            original = ProformaInvoice.objects.get(pk=instance.pk)
+        except ProformaInvoice.DoesNotExist:
+            instance._original_proforma_values = {}
+        else:
+            instance._original_proforma_values = {"status": original.status, "total_cents": original.total_cents}
 
 
 # ===============================================================================
@@ -991,7 +959,7 @@ def store_original_proforma_values(sender: type[ProformaInvoice], instance: Prof
 
 
 @receiver(post_save, sender=TaxRule)
-def handle_tax_rule_changes(sender: type[TaxRule], instance: TaxRule, created: bool, **kwargs: Any) -> None:
+def handle_tax_rule_changes(sender: type[TaxRule], instance: TaxRule, created: bool, **kwargs: object) -> None:
     """
     Handle tax rule creation/updates.
 
@@ -1000,7 +968,7 @@ def handle_tax_rule_changes(sender: type[TaxRule], instance: TaxRule, created: b
     - Compliance logging for Romanian VAT changes
     - Notification to finance team for rate changes
     """
-    try:
+    with swallow_application_errors(logger=logger, scope="Tax Signal", message="Failed to handle tax rule change"):
         event_type = "tax_rule_created" if created else "tax_rule_updated"
 
         # Audit log
@@ -1010,7 +978,8 @@ def handle_tax_rule_changes(sender: type[TaxRule], instance: TaxRule, created: b
             description=f"Tax rule {instance.country_code} {instance.tax_type}: {instance.rate * 100}%",
         )
         if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
-            AuditService.log_event(event_data)
+            with best_effort_atomic(logger=logger, scope="Tax Audit", message="Failed to audit tax rule"):
+                AuditService.log_event(event_data)
 
         # Invalidate tax calculation cache
         _invalidate_tax_cache(instance.country_code, instance.tax_type)
@@ -1028,17 +997,15 @@ def handle_tax_rule_changes(sender: type[TaxRule], instance: TaxRule, created: b
                     "effective_date": instance.valid_from.isoformat(),
                 },
             )
-            AuditService.log_compliance_event(compliance_request)
+            with best_effort_atomic(logger=logger, scope="Tax Compliance", message="Failed to log VAT rule"):
+                AuditService.log_compliance_event(compliance_request)
 
         logger.info(f"📊 [Tax] Rule {'created' if created else 'updated'}: {instance}")
-
-    except Exception as e:
-        logger.exception(f"🔥 [Tax Signal] Failed to handle tax rule change: {e}")
 
 
 @receiver(post_save, sender=VATValidation)
 def handle_vat_validation_result(
-    sender: type[VATValidation], instance: VATValidation, created: bool, **kwargs: Any
+    sender: type[VATValidation], instance: VATValidation, created: bool, **kwargs: object
 ) -> None:
     """
     Handle VAT validation results.
@@ -1048,13 +1015,15 @@ def handle_vat_validation_result(
     - Customer profile updates for valid VAT numbers
     - Alert generation for invalid VAT numbers
     """
-    try:
+    with swallow_application_errors(logger=logger, scope="VAT Signal", message="Failed to handle VAT validation"):
         if created:
             # Log VAT validation for compliance
             compliance_request = ComplianceEventRequest(
                 compliance_type="vat_validation",
                 reference_id=instance.full_vat_number,
-                description=f"VAT validation: {instance.full_vat_number} - {'Valid' if instance.is_valid else 'Invalid'}",
+                description=(
+                    f"VAT validation: {instance.full_vat_number} - {'Valid' if instance.is_valid else 'Invalid'}"
+                ),
                 status="success" if instance.is_valid else "validation_failed",
                 evidence={
                     "vat_number": instance.full_vat_number,
@@ -1063,7 +1032,8 @@ def handle_vat_validation_result(
                     "validation_source": instance.validation_source,
                 },
             )
-            AuditService.log_compliance_event(compliance_request)
+            with best_effort_atomic(logger=logger, scope="VAT Compliance", message="Failed to log VAT validation"):
+                AuditService.log_compliance_event(compliance_request)
 
             # Update customer tax profiles if VAT is valid
             if instance.is_valid:
@@ -1074,9 +1044,6 @@ def handle_vat_validation_result(
             logger.info(
                 f"🏛️ [VAT] Validation {'✅ valid' if instance.is_valid else '❌ invalid'}: {instance.full_vat_number}"
             )
-
-    except Exception as e:
-        logger.exception(f"🔥 [VAT Signal] Failed to handle VAT validation: {e}")
 
 
 # ===============================================================================
@@ -1111,15 +1078,13 @@ def store_original_retry_values(
     sender: type[PaymentRetryAttempt], instance: PaymentRetryAttempt, **kwargs: Any
 ) -> None:
     """Store original retry values for comparison"""
-    try:
+    with best_effort_atomic(logger=logger, scope="Payment Retry Signal", message="Failed to store original values"):
         if instance.pk:
             try:
                 original = PaymentRetryAttempt.objects.get(pk=instance.pk)
                 instance._original_retry_status = original.status
             except PaymentRetryAttempt.DoesNotExist:
                 instance._original_retry_status = ""
-    except Exception as e:
-        logger.exception(f"🔥 [Payment Retry Signal] Failed to store original values: {e}")
 
 
 # ===============================================================================
@@ -1131,7 +1096,7 @@ def _sync_orders_on_invoice_status_change(invoice: Invoice, old_status: str, new
     """Update related orders when invoice status changes"""
     with swallow_application_errors(logger=logger, scope="Invoice", message="Order sync failed"):
         from apps.orders.models import Order
-        from apps.orders.services import OrderPaymentConfirmationService, OrderService, StatusChangeData
+        from apps.orders.services import OrderPaymentConfirmationService, cancel_orders_for_void_invoice
 
         orders: list[Order] = []
         with best_effort_atomic(logger=logger, scope="Order Sync", message="Failed to load invoice orders"):
@@ -1164,47 +1129,44 @@ def _sync_orders_on_invoice_status_change(invoice: Invoice, old_status: str, new
                         raise RuntimeError(f"Order confirmation failed: {result.unwrap_err()}")
 
         elif new_status == "void" and old_status != "void":
-            # Invoice voided - cancel related orders
-            for order in orders:
-                with best_effort_atomic(
-                    logger=logger,
-                    scope="Order",
-                    message=f"Failed to cancel order {order.order_number} on invoice void",
-                ):
-                    if order.status in ["awaiting_payment", "paid", "in_review", "provisioning"]:
-                        status_change = StatusChangeData(
-                            new_status="cancelled",
-                            notes=f"Related invoice {invoice.number} was voided",
-                            changed_by=None,
-                        )
-
-                        result = OrderService.update_order_status(order, status_change)
-                        if result.is_ok():
-                            logger.info(f"📋 [Order] Cancelled {order.order_number} due to voided invoice")
-                        else:
-                            raise RuntimeError(f"Order cancellation failed: {result.unwrap_err()}")
+            # Invoice.save() still owns the invoice lock here. Release it before
+            # cancellation takes proforma -> invoice -> order locks.
+            transaction.on_commit(
+                lambda invoice_id=invoice.pk, order_ids=tuple(order.pk for order in orders): (
+                    cancel_orders_for_void_invoice(invoice_id, order_ids)
+                )
+            )
 
 
 def _activate_payment_services(payment: Payment) -> None:
-    """Activate services when payment is received"""
-    try:
-        if not payment.invoice:
+    """Isolate loading and each service activation, including Err results."""
+    with swallow_application_errors(logger=logger, scope="Payment", message="Service activation failed"):
+        if not payment.invoice_id:
             return
-
+        from apps.provisioning.models import Service
         from apps.provisioning.services import ServiceActivationService
 
-        for order in payment.invoice.orders.all():
-            for item in order.items.filter(service__isnull=False):
-                if item.service and item.service.status in ["pending", "suspended"]:
-                    result = ServiceActivationService.activate_service(
-                        service=item.service, activation_reason=f"Payment received for invoice {payment.invoice.number}"
-                    )
-
-                    if result.is_ok():
-                        logger.info(f"⚡ [Service] Activated {item.service.id} after payment")
-
-    except Exception as e:
-        logger.exception(f"🔥 [Payment] Service activation failed: {e}")
+        invoice: Invoice | None = None
+        services: list[Service] = []
+        with best_effort_atomic(logger=logger, scope="Payment Services", message="Failed to load services"):
+            invoice = payment.invoice
+            if invoice is not None:
+                services = [
+                    item.service
+                    for order in invoice.orders.all()
+                    for item in order.items.filter(service__isnull=False)
+                    if item.service and item.service.status in ["pending", "suspended"]
+                ]
+        if invoice is None:
+            return
+        for service in services:
+            with best_effort_atomic(logger=logger, scope="Payment Services", message="Failed to activate service"):
+                result = ServiceActivationService.activate_service(
+                    service=service, activation_reason=f"Payment received for invoice {invoice.number}"
+                )
+                if result.is_err():
+                    raise RuntimeError(f"Service activation failed: {result.unwrap_err()}")
+                logger.info(f"⚡ [Service] Activated {service.id} after payment")
 
 
 def _apply_customer_payment_credit(payment: Payment, event_type: str) -> None:
@@ -1247,7 +1209,7 @@ def _revert_customer_payment_credit(payment: Payment, event_type: str) -> bool:
 
 def _update_customer_payment_credit(payment: Payment, old_status: str) -> None:
     """Update customer credit score based on payment events"""
-    try:
+    with best_effort_atomic(logger=logger, scope="Customer Credit", message="Credit score update failed"):
         if (payment.meta or {}).get("reservation_abandoned") is True:
             return
 
@@ -1274,9 +1236,6 @@ def _update_customer_payment_credit(payment: Payment, old_status: str) -> None:
                 payment.customer.id,
                 reverted_event_type,
             )
-
-    except Exception as e:
-        logger.exception(f"🔥 [Customer] Credit score update failed: {e}")
 
 
 def _get_payment_credit_adjustment(payment: Payment, event_type: str) -> int | None:
@@ -1458,17 +1417,15 @@ def _handle_invoice_status_change(invoice: Invoice, old_status: str, new_status:
 
 
 def _handle_payment_status_change(payment: Payment, old_status: str, new_status: str) -> None:
-    """Handle payment status changes"""
-    try:
-        logger.info(f"💳 [Payment] Status change {payment.id}: {old_status} → {new_status}")
-
-        # Security logging for payment status changes
+    """Keep optional logging independent from required settlement."""
+    logger.info(f"💳 [Payment] Status change {payment.id}: {old_status} → {new_status}")
+    with best_effort_atomic(logger=logger, scope="Payment Security", message="Status change logging failed"):
         log_security_event(
             "payment_status_changed",
             {
                 "payment_id": str(payment.id),
-                "customer_id": str(payment.customer.id),
-                "invoice_id": str(payment.invoice.id) if payment.invoice else None,
+                "customer_id": str(payment.customer_id),
+                "invoice_id": str(payment.invoice_id) if payment.invoice_id else None,
                 "old_status": old_status,
                 "new_status": new_status,
                 "amount_cents": payment.amount_cents,
@@ -1476,21 +1433,18 @@ def _handle_payment_status_change(payment: Payment, old_status: str, new_status:
             },
         )
 
-        # `old_status == "pending"` only: a refund-reversal projection restoring 'succeeded'
-        # (see handle_payment_created_or_updated) is not a fresh payment success.
-        if new_status == "succeeded" and old_status == "pending":
-            _handle_payment_success(payment)
-        elif (
-            new_status == "failed"
-            and old_status in ["pending", "processing"]
-            and (payment.meta or {}).get("reservation_abandoned") is not True
-        ):
+    if new_status == "succeeded" and old_status == "pending":
+        _handle_payment_success(payment)
+    elif (
+        new_status == "failed"
+        and old_status in ["pending", "processing"]
+        and (payment.meta or {}).get("reservation_abandoned") is not True
+    ):
+        with best_effort_atomic(logger=logger, scope="Payment Failure", message="Failure handling failed"):
             _handle_payment_failure(payment)
-        elif new_status == "refunded":
+    elif new_status == "refunded":
+        with best_effort_atomic(logger=logger, scope="Payment Refund", message="Refund handling failed"):
             _handle_payment_refund(payment)
-
-    except Exception as e:
-        logger.exception(f"🔥 [Payment Signal] Payment status change failed: {e}")
 
 
 # ===============================================================================
@@ -1539,6 +1493,7 @@ def _handle_invoice_paid(invoice: Invoice) -> None:
         with best_effort_atomic(logger=logger, scope="Invoice History", message="Failed to update payment history"):
             _update_customer_payment_history(invoice.customer, "positive")
         _activate_pending_services(invoice)
+        transaction.on_commit(lambda inv=invoice: _trigger_virtualmin_provisioning_on_payment(inv))
 
         logger.info(f"✅ [Invoice] Payment completed for {invoice.number}")
 
@@ -1594,36 +1549,22 @@ def _handle_invoice_voided(invoice: Invoice) -> None:
 
 
 def _handle_payment_success(payment: Payment) -> None:
-    """Handle successful payment"""
-    try:
-        if payment.invoice and getattr(payment, "_defer_document_settlement", False) is not True:
-            remaining_amount = payment.invoice.get_remaining_amount()
-            if remaining_amount <= 0:
-                try:
-                    payment.invoice.mark_as_paid()
-                except TransitionNotAllowed:
-                    logger.warning(
-                        "⚠️ [Invoice Signal] Cannot mark invoice %s as paid from status '%s'",
-                        payment.invoice.number,
-                        payment.invoice.status,
-                    )
-                else:
-                    payment.invoice.save(update_fields=["status", "paid_at"])
+    """Settle undeferred successes, propagating required reads and writes."""
+    if payment.invoice_id and getattr(payment, "_defer_document_settlement", False) is not True:
+        # A cached related instance may predate a previous settlement.
+        invoice = Invoice.objects.get(pk=payment.invoice_id)
+        if invoice.status != "paid" and invoice.get_remaining_amount() <= 0:
+            if invoice.status == "draft" and not invoice.number and invoice.issuer_provider != "builtin":
+                logger.info("💳 [Billing] Skipping unnumbered external draft %s until issuance completes", invoice.pk)
+            else:
+                # Any other TransitionNotAllowed is a required settlement failure.
+                invoice.mark_as_paid()
+                invoice.save(update_fields=["status", "paid_at"])
 
-                    # 🚀 CROSS-APP INTEGRATION: Trigger Virtualmin provisioning on invoice payment
-                    # Deferred to post-commit — provisioning must not fire if transaction rolls back
-                    transaction.on_commit(lambda inv=payment.invoice: _trigger_virtualmin_provisioning_on_payment(inv))
-
-        # All external side-effects deferred to post-commit to prevent ghost
-        # emails/analytics if the enclosing transaction rolls back.
-        transaction.on_commit(lambda p=payment: _send_payment_success_email(p))
-        transaction.on_commit(lambda p=payment: _update_customer_payment_history(p.customer, "positive"))
-        transaction.on_commit(lambda p=payment: _cancel_payment_retries(p))
-
-        logger.info(f"✅ [Payment] Success: {payment.amount} {payment.currency.code}")
-
-    except Exception as e:
-        logger.exception(f"🔥 [Payment Signal] Payment success handling failed: {e}")
+    transaction.on_commit(lambda p=payment: _send_payment_success_email(p))
+    transaction.on_commit(lambda p=payment: _update_customer_payment_history(p.customer, "positive"))
+    transaction.on_commit(lambda p=payment: _cancel_payment_retries(p))
+    logger.info(f"✅ [Payment] Success: {payment.amount} {payment.currency.code}")
 
 
 def _handle_payment_failure(payment: Payment) -> None:
@@ -1659,7 +1600,7 @@ def _handle_retry_completion(retry_attempt: PaymentRetryAttempt) -> None:
     try:
         if retry_attempt.status == "success":
             logger.info(f"✅ [Payment Retry] Successful retry for payment {retry_attempt.payment.id}")
-            _send_retry_success_email(retry_attempt)
+            transaction.on_commit(lambda retry=retry_attempt: _send_retry_success_email(retry))
 
         elif retry_attempt.status == "failed":
             if retry_attempt.attempt_number >= retry_attempt.policy.max_attempts:
@@ -1782,7 +1723,7 @@ def _send_invoice_voided_email(invoice: Invoice) -> None:
 
 def _send_payment_success_email(payment: Payment) -> None:
     """Send payment success notification"""
-    try:
+    with best_effort_atomic(logger=logger, scope="Payment Email", message="Failed to send notification"):
         from apps.notifications.services import EmailService
 
         EmailService.send_template_email(
@@ -1790,13 +1731,11 @@ def _send_payment_success_email(payment: Payment) -> None:
             recipient=payment.customer.primary_email,
             context={"payment": payment, "customer": payment.customer, "invoice": payment.invoice},
         )
-    except Exception as e:
-        logger.exception(f"🔥 [Payment] Failed to send success email: {e}")
 
 
 def _send_payment_failed_email(payment: Payment) -> None:
     """Send payment failure notification"""
-    try:
+    with best_effort_atomic(logger=logger, scope="Payment Email", message="Failed to send notification"):
         from apps.notifications.services import EmailService
 
         EmailService.send_template_email(
@@ -1805,13 +1744,11 @@ def _send_payment_failed_email(payment: Payment) -> None:
             context={"payment": payment, "customer": payment.customer, "invoice": payment.invoice},
             priority="high",
         )
-    except Exception as e:
-        logger.exception(f"🔥 [Payment] Failed to send failure email: {e}")
 
 
 def _send_payment_refund_email(payment: Payment) -> None:
     """Send payment refund notification"""
-    try:
+    with best_effort_atomic(logger=logger, scope="Payment Email", message="Failed to send notification"):
         from apps.notifications.services import EmailService
 
         EmailService.send_template_email(
@@ -1819,8 +1756,6 @@ def _send_payment_refund_email(payment: Payment) -> None:
             recipient=payment.customer.primary_email,
             context={"payment": payment, "customer": payment.customer, "invoice": payment.invoice},
         )
-    except Exception as e:
-        logger.exception(f"🔥 [Payment] Failed to send refund email: {e}")
 
 
 def _send_invoice_refund_confirmation(invoice: Invoice) -> None:
@@ -1840,7 +1775,7 @@ def _send_invoice_refund_confirmation(invoice: Invoice) -> None:
 
 def _send_retry_success_email(retry_attempt: PaymentRetryAttempt) -> None:
     """Send retry success notification"""
-    try:
+    with best_effort_atomic(logger=logger, scope="Payment Email", message="Failed to send notification"):
         from apps.notifications.services import EmailService
 
         EmailService.send_template_email(
@@ -1852,8 +1787,6 @@ def _send_retry_success_email(retry_attempt: PaymentRetryAttempt) -> None:
                 "customer": retry_attempt.payment.customer,
             },
         )
-    except Exception as e:
-        logger.exception(f"🔥 [Payment Retry] Failed to send success email: {e}")
 
 
 def _notify_finance_team_large_refund(invoice: Invoice) -> None:
@@ -1901,12 +1834,10 @@ def _requires_efactura_submission(invoice: Invoice) -> bool:
 
 
 def _trigger_efactura_submission(invoice: Invoice) -> None:
-    """Queue Romanian e-Factura submission only after the invoice commit succeeds."""
-    from apps.billing.issuers.policy import efactura_submission_denied_reason
+    """Queue the fast path post-commit; synchronous tasks must see committed rows."""
+    from apps.billing.efactura.intents import efactura_intent_required
 
-    denied = efactura_submission_denied_reason(invoice)
-    if denied is not None:
-        logger.info(f"⏭️ [e-Factura] Not queueing {invoice.display_number}: {denied}")
+    if not efactura_intent_required(invoice):
         return
 
     invoice_id = str(invoice.id)
@@ -2070,16 +2001,13 @@ def _consider_service_suspension(payment: Payment) -> None:
 
 def _cancel_payment_retries(payment: Payment) -> None:
     """Cancel any pending payment retries"""
-    try:
+    with best_effort_atomic(logger=logger, scope="Payment", message="Failed to cancel retries"):
         PaymentRetryAttempt.objects.filter(
             payment=payment,
             status="pending",
         ).update(status="cancelled")  # fsm-bypass: PaymentRetryAttempt is not FSM-protected
 
         logger.info(f"🚫 [Payment] Cancelled pending retries for payment {payment.id}")
-
-    except Exception as e:
-        logger.exception(f"🔥 [Payment] Failed to cancel retries: {e}")
 
 
 def _handle_efactura_refund_reporting(invoice: Invoice) -> None:
@@ -2178,16 +2106,20 @@ def _cleanup_invoice_files(invoice: Invoice) -> None:
 
 
 def _cleanup_payment_files(payment: Payment) -> None:
-    """Clean up files related to deleted payment"""
-    try:
-        if payment.meta.get("receipt_file"):
-            receipt_path = payment.meta["receipt_file"]
+    """Capture receipt paths before deletion and touch storage only after commit."""
+    receipt_path = (payment.meta or {}).get("receipt_file")
+    if not isinstance(receipt_path, str) or not receipt_path:
+        return
+
+    def _delete_after_commit() -> None:
+        try:
             if default_storage.exists(receipt_path):
                 default_storage.delete(receipt_path)
                 logger.info(f"🗑️ [File] Deleted payment receipt {receipt_path}")
+        except Exception:
+            logger.exception(f"🔥 [File] Payment file cleanup failed: {receipt_path}")
 
-    except Exception as e:
-        logger.exception(f"🔥 [File] Payment file cleanup failed: {e}")
+    transaction.on_commit(_delete_after_commit)
 
 
 def _invalidate_invoice_caches(invoice: Invoice) -> None:
@@ -2224,13 +2156,13 @@ def _cancel_invoice_webhooks(invoice: Invoice) -> None:
 
 
 def _revert_customer_credit_score(
-    customer: Any,
+    customer: "Customer",
     event_type: str,
     *,
     applied_adjustment: int | None = None,
 ) -> None:
     """Revert customer credit score changes"""
-    try:
+    with best_effort_atomic(logger=logger, scope="Customer Credit", message="Credit score reversion failed"):
         from apps.customers.services import CustomerCreditService
 
         CustomerCreditService.revert_credit_change(
@@ -2239,9 +2171,6 @@ def _revert_customer_credit_score(
             event_date=timezone.now(),
             applied_adjustment=applied_adjustment,
         )
-
-    except Exception as e:
-        logger.exception(f"🔥 [Customer] Credit score reversion failed: {e}")
 
 
 # ===============================================================================
@@ -2255,56 +2184,55 @@ def _trigger_virtualmin_provisioning_on_payment(invoice: Invoice) -> None:
 
     Cross-app integration point: billing → provisioning
     """
-    try:
-        # Import here to avoid circular imports
+    hosting_services: list[Service] | None = None
+    with best_effort_atomic(logger=logger, scope="CrossApp", message="Failed to load Virtualmin provisioning services"):
+        # Import here to avoid circular imports.
         from django_q.tasks import async_task
 
         from apps.orders.models import OrderItem
+        from apps.provisioning.virtualmin_tasks import get_task_time_limit
 
-        # Find hosting services in the paid invoice
+        task_budget = get_task_time_limit()
         order_items = OrderItem.objects.filter(order__invoice=invoice).select_related("service")
-
         hosting_services = [
             item.service for item in order_items if item.service and item.service.requires_hosting_account()
         ]
+    if hosting_services is None:
+        return
 
-        if hosting_services:
-            logger.info(
-                f"🚀 [CrossApp] Triggering Virtualmin provisioning for {len(hosting_services)} services on invoice {invoice.number}"
-            )
+    if not hosting_services:
+        logger.debug(
+            f"📋 [CrossApp] No hosting services found in invoice {invoice.number}, skipping Virtualmin provisioning"
+        )
+        return
 
-            # Queue provisioning tasks for each hosting service
-            for service in hosting_services:
-                try:
-                    # Get primary domain for the service
-                    primary_domain = service.get_primary_domain()
-                    if primary_domain:
-                        # Queue async provisioning task
-                        params = {
-                            "service_id": str(service.id),
-                            "domain": primary_domain,
-                            "template": "Default",  # Use default template, can be customized per service plan
-                        }
-                        async_task("apps.provisioning.virtualmin_tasks.provision_virtualmin_account", params)
-
-                        logger.info(
-                            f"🔄 [CrossApp] Queued Virtualmin provisioning for {primary_domain} (service: {service.id})"
-                        )
-                    else:
-                        logger.warning(
-                            f"⚠️ [CrossApp] No primary domain found for service {service.id}, skipping Virtualmin provisioning"
-                        )
-
-                except Exception as e:
-                    logger.error(f"🔥 [CrossApp] Failed to queue Virtualmin provisioning for service {service.id}: {e}")
-
-        else:
-            logger.debug(
-                f"📋 [CrossApp] No hosting services found in invoice {invoice.number}, skipping Virtualmin provisioning"
-            )
-
-    except Exception as e:
-        logger.error(f"🔥 [CrossApp] Failed to trigger Virtualmin provisioning on payment: {e}")
+    logger.info(
+        f"🚀 [CrossApp] Triggering Virtualmin provisioning for {len(hosting_services)} services "
+        f"on invoice {invoice.number}"
+    )
+    for service in hosting_services:
+        with best_effort_atomic(
+            logger=logger,
+            scope="CrossApp",
+            message=f"Failed to queue Virtualmin provisioning for service {service.id}",
+        ):
+            primary_domain = service.get_primary_domain()
+            if primary_domain:
+                params = {
+                    "service_id": str(service.id),
+                    "domain": primary_domain,
+                    "template": "Default",
+                }
+                async_task(
+                    "apps.provisioning.virtualmin_tasks.provision_virtualmin_account", params, timeout=task_budget
+                )
+                logger.info(
+                    f"🔄 [CrossApp] Queued Virtualmin provisioning for {primary_domain} (service: {service.id})"
+                )
+            else:
+                logger.warning(
+                    f"⚠️ [CrossApp] No primary domain found for service {service.id}, skipping Virtualmin provisioning"
+                )
 
 
 # ===============================================================================
@@ -2372,7 +2300,7 @@ def handle_issuance_audit(
 @receiver(post_delete, sender=ProviderIssuance)
 def handle_issuance_deletion(sender: type[ProviderIssuance], instance: ProviderIssuance, **kwargs: Any) -> None:
     """Deleting the record of a provider call destroys the only evidence it happened."""
-    try:
+    with best_effort_atomic(logger=logger, scope="Issuance Signal", message="Failed to log issuance deletion"):
         log_security_event(
             event_type="provider_issuance_deleted",
             details={
@@ -2382,8 +2310,6 @@ def handle_issuance_deletion(sender: type[ProviderIssuance], instance: ProviderI
                 "provider_number": str(instance.provider_number),
             },
         )
-    except Exception as e:
-        logger.exception(f"🔥 [Issuance Signal] Failed to log issuance deletion: {e}")
 
 
 def _issuance_event_type(state: str) -> str:

@@ -271,6 +271,7 @@ class UsageInvoiceService:
                     reference_number=f"credit:{invoice.audit_reference}",
                     meta={"source": "customer_credit"},
                 )
+                credit_payment._defer_document_settlement = True
                 credit_payment.succeed()
                 credit_payment.save(update_fields=["status", "updated_at"])
 

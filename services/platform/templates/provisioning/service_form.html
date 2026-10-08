@@ -87,7 +87,7 @@
               </label>
               {% trans "example.com" as domain_placeholder %}
               {% trans "Primary domain for this hosting service" as domain_help %}
-              {% input_field name="domain" input_type="text" value=service.domain placeholder=domain_placeholder required=True html_id="domain" help_text=domain_help %}
+              {% input_field name="domain" aria_label=_('Domain') input_type="text" value=service.domain placeholder=domain_placeholder required=True html_id="domain" help_text=domain_help %}
             </div>
           </div>
         </div>

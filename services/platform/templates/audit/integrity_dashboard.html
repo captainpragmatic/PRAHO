@@ -7,60 +7,60 @@
 {% block content %}
 <div class="container mx-auto px-4 py-8">
     {% breadcrumb breadcrumb_items css_class="mb-4" %}
-    <h1 class="text-3xl font-bold text-gray-900 mb-6">{% trans "Audit Data Integrity" %}</h1>
+    <h1 class="text-3xl font-bold text-slate-900 dark:text-slate-100 mb-6">{% trans "Audit Data Integrity" %}</h1>
 
-    <div class="bg-white shadow rounded-lg p-6 mb-6">
+    <div class="bg-white dark:bg-slate-800 shadow rounded-lg p-6 mb-6">
         <h2 class="text-xl font-semibold mb-4">{% trans "Integrity Status" %}</h2>
 
         <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
-            <div class="bg-gray-50 p-4 rounded">
-                <h3 class="font-medium text-gray-900">{% trans "Total Checks" %}</h3>
-                <p class="text-2xl font-bold text-gray-700">{{ stats.total_checks|default:0 }}</p>
+            <div class="bg-slate-50 dark:bg-slate-900 p-4 rounded">
+                <h3 class="font-medium text-slate-900 dark:text-slate-100">{% trans "Total Checks" %}</h3>
+                <p class="text-2xl font-bold text-slate-700 dark:text-slate-300">{{ stats.total_checks|default:0 }}</p>
             </div>
 
-            <div class="bg-green-50 p-4 rounded">
-                <h3 class="font-medium text-green-900">{% trans "Healthy" %}</h3>
-                <p class="text-2xl font-bold text-green-600">{{ stats.healthy_checks|default:0 }}</p>
+            <div class="bg-green-50 dark:bg-green-900/30 p-4 rounded">
+                <h3 class="font-medium text-green-900 dark:text-green-300">{% trans "Healthy" %}</h3>
+                <p class="text-2xl font-bold text-green-600 dark:text-green-400">{{ stats.healthy_checks|default:0 }}</p>
             </div>
 
-            <div class="bg-yellow-50 p-4 rounded">
-                <h3 class="font-medium text-yellow-900">{% trans "Warnings" %}</h3>
-                <p class="text-2xl font-bold text-yellow-600">{{ stats.warning_checks|default:0 }}</p>
+            <div class="bg-yellow-50 dark:bg-yellow-900/30 p-4 rounded">
+                <h3 class="font-medium text-yellow-900 dark:text-yellow-300">{% trans "Warnings" %}</h3>
+                <p class="text-2xl font-bold text-yellow-600 dark:text-yellow-400">{{ stats.warning_checks|default:0 }}</p>
             </div>
 
-            <div class="bg-red-50 p-4 rounded">
-                <h3 class="font-medium text-red-900">{% trans "Compromised" %}</h3>
-                <p class="text-2xl font-bold text-red-600">{{ stats.compromised_checks|default:0 }}</p>
+            <div class="bg-red-50 dark:bg-red-900/30 p-4 rounded">
+                <h3 class="font-medium text-red-900 dark:text-red-300">{% trans "Compromised" %}</h3>
+                <p class="text-2xl font-bold text-red-600 dark:text-red-400">{{ stats.compromised_checks|default:0 }}</p>
             </div>
 
-            <div class="bg-orange-50 p-4 rounded">
-                <h3 class="font-medium text-orange-900">{% trans "Check Errors" %}</h3>
-                <p class="text-2xl font-bold text-orange-600">{{ stats.error_checks|default:0 }}</p>
+            <div class="bg-orange-50 dark:bg-orange-900/30 p-4 rounded">
+                <h3 class="font-medium text-orange-900 dark:text-orange-300">{% trans "Check Errors" %}</h3>
+                <p class="text-2xl font-bold text-orange-600 dark:text-orange-400">{{ stats.error_checks|default:0 }}</p>
             </div>
         </div>
     </div>
 
-    <div class="bg-white shadow rounded-lg p-6">
+    <div class="bg-white dark:bg-slate-800 shadow rounded-lg p-6">
         <h2 class="text-xl font-semibold mb-4">{% trans "Recent Integrity Checks" %}</h2>
 
         {% if recent_checks %}
             <div class="space-y-3">
                 {% for check in recent_checks %}
-                    <div class="border border-gray-200 rounded p-3">
+                    <div class="border border-slate-200 dark:border-slate-700 rounded p-3">
                         <div class="flex justify-between items-center">
                             <span class="font-medium">{{ check.check_type }} — {{ check.get_status_display }}</span>
-                            <span class="text-sm text-gray-500">{{ check.checked_at }}</span>
+                            <span class="text-sm text-slate-500 dark:text-slate-400">{{ check.checked_at }}</span>
                         </div>
                         {% if check.issues_found %}
-                            <p class="text-sm text-red-600 mt-1">{{ check.issues_found }} issues found</p>
+                            <p class="text-sm text-red-600 dark:text-red-400 mt-1">{% blocktrans with issue_count=check.issues_found %}{{ issue_count }} issues found{% endblocktrans %}</p>
                         {% else %}
-                            <p class="text-sm text-green-600 mt-1">{% trans "No issues found" %}</p>
+                            <p class="text-sm text-green-600 dark:text-green-400 mt-1">{% trans "No issues found" %}</p>
                         {% endif %}
                     </div>
                 {% endfor %}
             </div>
         {% else %}
-            <p class="text-gray-500">{% trans "No integrity checks performed yet." %}</p>
+            <p class="text-slate-500 dark:text-slate-400">{% trans "No integrity checks performed yet." %}</p>
         {% endif %}
     </div>
 </div>

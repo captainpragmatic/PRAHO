@@ -10,7 +10,7 @@ Verifies:
 3. Page size consistent between constants.py and REST_FRAMEWORK
 4. Dead constants stay removed
 5. VAT breakdown helper reads from TaxService (not hardcoded)
-6. Context processor reads VAT rate from TaxService
+6. Unused Romanian business context processor stays unregistered
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from pathlib import Path
 
 from django.conf import settings
 from django.core.cache import cache
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 
 import apps.common.constants as constants_mod
 from apps.common.constants import (
@@ -143,42 +143,13 @@ class CalculateRomanianVATTaxServiceTest(TestCase):
         self.assertEqual(result["amount_with_vat"], Decimal("100"))
 
 
-class ContextProcessorVATTest(TestCase):
-    """Verify context processor reads VAT rate from TaxService."""
+class ContextProcessorRegistrationTest(SimpleTestCase):
+    """Verify the unused Romanian business context processor stays unregistered."""
 
-    def setUp(self) -> None:
-        cache.clear()
-
-    def test_vat_rate_from_tax_service_default(self) -> None:
-        """Context processor returns 21 (int) from TaxService defaults."""
-        from django.test import RequestFactory  # noqa: PLC0415
-
-        from apps.common.context_processors import romanian_business_context  # noqa: PLC0415
-
-        request = RequestFactory().get("/")
-        context = romanian_business_context(request)
-
-        self.assertEqual(context["vat_rate"], 21)
-
-    def test_vat_rate_responds_to_db_change(self) -> None:
-        """Context processor reflects TaxRule changes."""
-        from django.test import RequestFactory  # noqa: PLC0415
-
-        from apps.billing.tax_models import TaxRule  # noqa: PLC0415
-        from apps.common.context_processors import romanian_business_context  # noqa: PLC0415
-        from apps.common.tax_service import TaxService  # noqa: PLC0415
-
-        TaxRule.objects.create(
-            country_code="RO",
-            tax_type="vat",
-            rate=Decimal("0.2500"),
-            valid_from=date(2020, 1, 1),
-            valid_to=None,
-            is_eu_member=True,
-        )
-        TaxService.invalidate_cache("RO")
-
-        request = RequestFactory().get("/")
-        context = romanian_business_context(request)
-
-        self.assertEqual(context["vat_rate"], 25)
+    def test_romanian_business_context_is_not_registered(self) -> None:
+        for backend in settings.TEMPLATES:
+            with self.subTest(backend=backend["BACKEND"]):
+                self.assertNotIn(
+                    "apps.common.context_processors.romanian_business_context",
+                    backend.get("OPTIONS", {}).get("context_processors", []),
+                )

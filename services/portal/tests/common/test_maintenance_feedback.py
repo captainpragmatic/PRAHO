@@ -294,9 +294,7 @@ class TheMaintenanceAlertItselfTests(SimpleTestCase):
     an element's whole text content, rather than prose the page carries for other reasons.
     """
 
-    DECLARED = PlatformAPIError(
-        "maint", status_code=503, response_data={"error": "maintenance"}, retry_after=600
-    )
+    DECLARED = PlatformAPIError("maint", status_code=503, response_data={"error": "maintenance"}, retry_after=600)
     UNDECLARED = PlatformAPIError("boom", status_code=503, response_data={"error": "boom"}, retry_after=600)
     # A paragraph carrying at least one character that is neither whitespace nor the start of a tag.
     # `<p[^>]*>\s*\S` would be satisfied by `<p class="x"></p>`, because `\S` matches the `<` of the
@@ -308,7 +306,7 @@ class TheMaintenanceAlertItselfTests(SimpleTestCase):
             return Client().post("/login/", {"email": "someone@example.com", "password": "correct-horse"})
 
     def _alert_region(self, response: HttpResponse, heading: str) -> str:
-        """The alert's OWN markup, sliced between its heading and its retry link.
+        """The alert's OWN markup, sliced between its heading and the end of its paragraph.
 
         Both halves of this page put their message in a `<p>`: the alert uses `text-blue-100/90` and
         `components/form_error_summary.html` uses `text-red-100`. So "some `<p>` contains this
@@ -321,7 +319,7 @@ class TheMaintenanceAlertItselfTests(SimpleTestCase):
         """
         body = response.content.decode()
         start = body.index(heading)
-        return body[start : body.index("Try again", start)]
+        return body[start : body.index("</p>", start) + len("</p>")]
 
     def test_a_declared_window_supplies_the_heading_the_template_reads(self) -> None:
         response = self._post_login_with(self.DECLARED)
@@ -422,7 +420,7 @@ class TheServicesAppWasSkippedByTheWideningTests(SimpleTestCase):
         return {
             "get_services_summary": lambda: client.get_services_summary(1, 2),
             "get_service_usage": lambda: client.get_service_usage(1, 2, 3),
-            "get_service_domains": lambda: client.get_service_domains(1, 3),
+            "get_service_domains": lambda: client.get_service_domains(1, 2, 3),
             "get_available_plans": lambda: client.get_available_plans(1),
         }
 
@@ -437,7 +435,7 @@ class TheServicesAppWasSkippedByTheWideningTests(SimpleTestCase):
         client = ServicesAPIClient()
         with self._platform_raising(self.ORDINARY):
             self.assertEqual(client.get_available_plans(1), [])
-            self.assertEqual(client.get_service_domains(1, 3), [])
+            self.assertEqual(client.get_service_domains(1, 2, 3), [])
             self.assertEqual(client.get_services_summary(1, 2).get("active_services"), 0)
             self.assertEqual(client.get_service_usage(1, 2, 3).get("bandwidth_used"), 0)
 

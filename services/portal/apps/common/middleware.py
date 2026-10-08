@@ -11,12 +11,12 @@ import uuid
 from collections.abc import Callable
 
 from django.conf import settings
-from django.contrib.auth import logout
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
 from django.utils.deprecation import MiddlewareMixin
 
 from apps.common.request_ip import get_safe_client_ip
+from apps.common.store_unavailable import end_session_or_unavailable
 
 logger = logging.getLogger(__name__)
 
@@ -223,10 +223,9 @@ class SessionSecurityMiddleware(MiddlewareMixin):
         )
 
         # Clear potentially compromised session
-        if hasattr(request, "user") and request.user.is_authenticated:
-            logout(request)
-
-        request.session.flush()
+        unavailable_response = end_session_or_unavailable(request)
+        if unavailable_response is not None:
+            return unavailable_response
 
         # Redirect to login with security message
         return redirect("/login/?security=session_security_violation")
@@ -239,10 +238,9 @@ class SessionSecurityMiddleware(MiddlewareMixin):
         logger.info(f"🕒 [Session] Session timeout for {session_key}...")
 
         # Clear expired session
-        if hasattr(request, "user") and request.user.is_authenticated:
-            logout(request)
-
-        request.session.flush()
+        unavailable_response = end_session_or_unavailable(request)
+        if unavailable_response is not None:
+            return unavailable_response
 
         # Redirect to login with timeout message
         return redirect("/login/?timeout=session_expired")

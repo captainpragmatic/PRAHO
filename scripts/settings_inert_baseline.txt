@@ -32,73 +32,19 @@
 
 
 # audit
-audit.compliant_score_threshold
-audit.high_complexity_filter_threshold
-audit.max_files_displayed
-audit.max_violations_displayed
-audit.partial_score_threshold
-audit.webhook_healthy_response_threshold
-audit.webhook_max_retry_threshold
-audit.webhook_suspicious_retry_threshold
 
 # billing
-billing.alert_cooldown_hours
-billing.event_grace_period_hours
-billing.max_payment_retry_attempts
-billing.metering_task_timeout
-billing.subscription_grace_period_days
-billing.task_max_retries
-billing.task_retry_delay_seconds
 
 # common
-common.cache_timeout_long
-common.cache_timeout_medium
-common.cache_timeout_short
-common.cache_timeout_very_long
-common.default_orphans
-common.max_header_json_length
-common.max_summarized_args
-common.proximity_line_threshold
-common.query_warning_threshold
-common.sql_display_limit
-common.value_summary_limit
 
 # notifications
-notifications.max_name_length
-notifications.max_recipients_per_batch
-notifications.max_subject_length
-notifications.max_template_size
 
 # orders
-orders.max_payment_failures_before_fail
-orders.max_search_query_length
-orders.task_soft_time_limit
-orders.task_time_limit
 
 # products
-products.max_json_content_size
-products.max_price_cents
 
 # promotions
-promotions.max_code_generation_attempts
 
 # provisioning
-provisioning.bulk_operation_threshold
-provisioning.cache_timeout
-provisioning.health_check_timeout_seconds
-provisioning.long_provisioning_threshold_minutes
-provisioning.max_concurrent_health_checks
-provisioning.max_error_display
-provisioning.max_username_uniqueness_attempts
-provisioning.overall_health_check_timeout
-provisioning.resource_usage_alert_threshold
-provisioning.server_overload_threshold
-provisioning.ssh_timeout
-provisioning.sudo_command_timeout
-provisioning.task_soft_time_limit
-provisioning.task_time_limit
 
 # common
-security.registration_rate_limit_per_ip
-users.credential_max_age_days
-users.credential_rotation_retry_limit

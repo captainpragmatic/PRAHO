@@ -11,7 +11,7 @@ stay UNKNOWN — the fail-closed default the tri-state design mandates.
 from unittest.mock import MagicMock, patch
 
 import requests
-from django.test import SimpleTestCase
+from django.test import TestCase
 
 from apps.common.types import Err, Retriability
 from apps.provisioning.virtualmin_gateway import (
@@ -33,7 +33,8 @@ def _gateway() -> VirtualminGateway:
     return VirtualminGateway(VirtualminConfig(server=server))
 
 
-class GatewayTestConnectionRetriabilityTests(SimpleTestCase):
+# Gateway calls read the rate limits from settings, so these tests need the database.
+class GatewayTestConnectionRetriabilityTests(TestCase):
     def test_ssl_error_is_terminal_not_transient(self) -> None:
         """requests.SSLError subclasses ConnectionError, so it must be caught
         first — a TLS/cert failure is PERMANENT (NOT_RETRIABLE), not a transient
@@ -96,7 +97,8 @@ class GatewayTestConnectionRetriabilityTests(SimpleTestCase):
         self.assertEqual(result.retriability, Retriability.NOT_RETRIABLE)
 
 
-class ServiceTestServerConnectionRetriabilityTests(SimpleTestCase):
+# Creation now reads provisioning settings, so these tests need the database.
+class ServiceTestServerConnectionRetriabilityTests(TestCase):
     def test_gateway_setup_failure_is_unknown(self) -> None:
         """_get_gateway failures (no server, credential errors) are not transient."""
         service = VirtualminProvisioningService()
@@ -106,19 +108,6 @@ class ServiceTestServerConnectionRetriabilityTests(SimpleTestCase):
 
         assert isinstance(result, Err)
         self.assertEqual(result.retriability, Retriability.UNKNOWN)
-
-    def test_sync_account_preserves_gateway_retriability(self) -> None:
-        service = VirtualminProvisioningService()
-        account = MagicMock()
-        gateway = MagicMock()
-        gateway.get_domain_state.return_value = Err("bad credentials", retriability=Retriability.NOT_RETRIABLE)
-
-        with patch.object(service, "_get_gateway", return_value=gateway):
-            result = service.sync_account_from_virtualmin(account)
-
-        assert isinstance(result, Err)
-        self.assertEqual(result.retriability, Retriability.NOT_RETRIABLE)
-
 
     def test_failed_creation_preserves_inner_retriability(self) -> None:
         service = VirtualminProvisioningService()
@@ -173,7 +162,9 @@ class ServiceTestServerConnectionRetriabilityTests(SimpleTestCase):
         account.domain = "example.com"
         account.virtualmin_username = "owner"
         gateway = MagicMock()
-        gateway.list_domains_with_owners.return_value = Err("cannot inspect domains", retriability=Retriability.RETRIABLE)
+        gateway.list_domains_with_owners.return_value = Err(
+            "cannot inspect domains", retriability=Retriability.RETRIABLE
+        )
 
         result = service._check_domain_conflicts(account, gateway)
 

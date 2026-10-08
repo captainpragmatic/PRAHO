@@ -37,12 +37,11 @@ services:
     ports:
       - "8700:8700"
     volumes:
-      # Hot reload - mount source code
-      - ../services/platform:/app:delegated
-      # Shared design-system templates and static files, where the settings look for them (ADR-0035)
-      - ../shared/ui:/shared/ui:ro
-      - dev_static_volume:/app/staticfiles
-      - dev_media_volume:/app/media
+      # Hot reload - the repository layout the settings expect: REPO_ROOT is /app (ADR-0035)
+      - ../services/platform:/app/services/platform:delegated
+      - ../shared:/app/shared:ro
+      - dev_static_volume:/app/services/platform/staticfiles
+      - dev_media_volume:/app/services/platform/media
     environment:
       # `true`, not 1: the settings read DEBUG as .lower() == "true"
       - DEBUG=true
@@ -55,7 +54,7 @@ services:
       - DB_PASSWORD=praho123
       - DJANGO_SECRET_KEY=dev-secret-key-for-development-only
       - DJANGO_SETTINGS_MODULE=config.settings.dev
-      - PYTHONPATH=/app
+      - PYTHONPATH=/app/services/platform
       # Debug-toolbar allowlist for non-loopback dev clients (empty = localhost only)
       - DEV_INTERNAL_IPS=${DEV_INTERNAL_IPS:-}
       - SERVICE_NAME=platform
@@ -79,10 +78,10 @@ services:
     ports:
       - "8701:8701"
     volumes:
-      # Hot reload - mount source code
-      - ../services/portal:/app:delegated
-      - ../shared/ui:/shared/ui:ro
-      - dev_portal_static_volume:/app/staticfiles
+      # Hot reload - the repository layout the settings expect: REPO_ROOT is /app (ADR-0035)
+      - ../services/portal:/app/services/portal:delegated
+      - ../shared:/app/shared:ro
+      - dev_portal_static_volume:/app/services/portal/staticfiles
       # Session store, kept out of the mounted checkout
       - dev_portal_data:/data
     environment:

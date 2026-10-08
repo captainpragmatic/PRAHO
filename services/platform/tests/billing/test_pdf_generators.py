@@ -1559,7 +1559,7 @@ class PDFGeneratorMockingTestCase(TestCase):
         # Verify company info was called multiple times
         self.assertGreaterEqual(mock_get_company_info.call_count, 3)
 
-    @patch('apps.billing.pdf_generators._t')  # Mock translation function
+    @patch('apps.billing.pdf_generators.gettext')  # Mock translation function
     def test_translation_function_usage(self, mock_translation):
         """Test that translation function is used correctly"""
         mock_translation.side_effect = lambda x: f"Translated: {x}"

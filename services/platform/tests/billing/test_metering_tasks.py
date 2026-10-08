@@ -609,7 +609,7 @@ class AsyncWrapperTestCase(TestCase):
 
         self.assertEqual(result, "task_id_123")
         mock_async_task.assert_called_once_with(
-            "apps.billing.metering_tasks.update_aggregation_for_event", "event123", timeout=300
+            "apps.billing.metering_tasks.update_aggregation_for_event", "event123", timeout=60
         )
 
     @patch("apps.billing.metering_tasks.async_task")
@@ -621,7 +621,7 @@ class AsyncWrapperTestCase(TestCase):
 
         self.assertEqual(result, "task_id_456")
         mock_async_task.assert_called_once_with(
-            "apps.billing.metering_tasks.check_usage_thresholds", "cust123", "meter456", "sub789", timeout=300
+            "apps.billing.metering_tasks.check_usage_thresholds", "cust123", "meter456", "sub789", timeout=60
         )
 
     @patch("apps.billing.metering_tasks.async_task")

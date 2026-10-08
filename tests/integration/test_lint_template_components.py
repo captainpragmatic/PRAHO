@@ -3,8 +3,12 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from typing import Protocol, cast
+from unittest.mock import patch
 
 import pytest
+from django.test import SimpleTestCase
 
 
 def _load_lint_module():
@@ -148,9 +152,7 @@ def test_fail_on_excluding_every_present_code_exits_0_without_claiming_warnings_
     """A selective --fail-on that matches nothing still exits 0, but real blockers exist that this
     run was simply never asked to fail on - the old "Warnings only" message was wrong here."""
     feature_file = _feature_file_with_one_blocker_and_one_warning(tmp_path, lint, monkeypatch)
-    monkeypatch.setattr(
-        sys, "argv", ["lint_template_components.py", str(feature_file), "--fail-on", "TMPL009"]
-    )
+    monkeypatch.setattr(sys, "argv", ["lint_template_components.py", str(feature_file), "--fail-on", "TMPL009"])
 
     exit_code = lint.main()
 
@@ -190,7 +192,7 @@ def test_marked_line_is_exempt_not_a_blocker(tmp_path, lint, monkeypatch):
         tmp_path,
         lint,
         monkeypatch,
-        '{# tmpl-allow TMPL002: Alpine @click rejected by the button attrs allowlist #}\n'
+        "{# tmpl-allow TMPL002: Alpine @click rejected by the button attrs allowlist #}\n"
         '<button @click="open = true">Open</button>\n',
     )
 
@@ -215,8 +217,7 @@ def test_marker_for_a_different_code_does_not_exempt(tmp_path, lint, monkeypatch
         tmp_path,
         lint,
         monkeypatch,
-        "{# tmpl-allow TMPL001: unrelated reason #}\n"
-        '<button type="submit">Pay</button>\n',
+        '{# tmpl-allow TMPL001: unrelated reason #}\n<button type="submit">Pay</button>\n',
     )
 
     violations = lint.scan_file(feature_file)
@@ -233,9 +234,7 @@ def test_marker_two_lines_up_does_not_apply(tmp_path, lint, monkeypatch):
         tmp_path,
         lint,
         monkeypatch,
-        "{# tmpl-allow TMPL002: reason #}\n"
-        "\n"
-        '<button type="submit">Pay</button>\n',
+        '{# tmpl-allow TMPL002: reason #}\n\n<button type="submit">Pay</button>\n',
     )
 
     violations = lint.scan_file(feature_file)
@@ -252,8 +251,7 @@ def test_stale_marker_with_no_matching_violation_is_an_error(tmp_path, lint, mon
         tmp_path,
         lint,
         monkeypatch,
-        "{# tmpl-allow TMPL002: reason #}\n"
-        '{% button "Pay" %}\n',
+        '{# tmpl-allow TMPL002: reason #}\n{% button "Pay" %}\n',
     )
 
     violations = lint.scan_file(feature_file)
@@ -267,8 +265,7 @@ def test_marker_with_no_reason_is_an_error(tmp_path, lint, monkeypatch):
         tmp_path,
         lint,
         monkeypatch,
-        "{# tmpl-allow TMPL002: #}\n"
-        '<button type="submit">Pay</button>\n',
+        '{# tmpl-allow TMPL002: #}\n<button type="submit">Pay</button>\n',
     )
 
     violations = lint.scan_file(feature_file)
@@ -286,7 +283,7 @@ def test_exempted_violations_are_reported_but_not_counted_as_blockers(tmp_path, 
         tmp_path,
         lint,
         monkeypatch,
-        '{# tmpl-allow TMPL002: Alpine @click rejected by the button attrs allowlist #}\n'
+        "{# tmpl-allow TMPL002: Alpine @click rejected by the button attrs allowlist #}\n"
         '<button @click="open = true">Open</button>\n',
     )
     monkeypatch.setattr(sys, "argv", ["lint_template_components.py", str(feature_file)])
@@ -326,8 +323,7 @@ def test_two_markers_on_one_line_is_an_error_not_a_silent_first_match(tmp_path, 
         tmp_path,
         lint,
         monkeypatch,
-        '{# tmpl-allow TMPL002: Alpine #} {# tmpl-allow TMPL001: #}\n'
-        '<button type="submit">Pay</button>\n',
+        '{# tmpl-allow TMPL002: Alpine #} {# tmpl-allow TMPL001: #}\n<button type="submit">Pay</button>\n',
     )
 
     violations = lint.scan_file(feature_file)
@@ -360,9 +356,10 @@ def test_real_element_sharing_a_line_with_a_marker_is_still_reported(tmp_path, l
 def test_real_element_on_the_same_line_as_a_marker_meant_for_the_next_line_is_still_reported(
     tmp_path, lint, monkeypatch
 ):
-    """codex finding: `<button>x</button> {# tmpl-allow TMPL002: for the next one #}` - the
-    marker is meant to exempt a DIFFERENT button on the line below, but sharing its line with a
-    real button silently hid that real button entirely."""
+    """A same-line marker exempts its own button, which remains explicitly reported.
+
+    Its reason cannot redirect the exemption onto the following line.
+    """
     feature_file = _write_feature_file(
         tmp_path,
         lint,
@@ -374,9 +371,9 @@ def test_real_element_on_the_same_line_as_a_marker_meant_for_the_next_line_is_st
     violations = lint.scan_file(feature_file)
     tmpl002_by_line = {v.line: v for v in violations if v.code == "TMPL002"}
     assert 1 in tmpl002_by_line, f"the button sharing the marker's own line must still be reported, got: {violations}"
-    assert tmpl002_by_line[1].exempted is False
+    assert tmpl002_by_line[1].exempted is True
     assert 2 in tmpl002_by_line
-    assert tmpl002_by_line[2].exempted is False, "the marker was never clean, so nothing below it is exempted either"
+    assert tmpl002_by_line[2].exempted is False, "a same-line marker must not exempt the following line"
 
 
 def test_second_matching_element_on_an_exempted_line_is_not_also_exempted(tmp_path, lint, monkeypatch):
@@ -396,3 +393,111 @@ def test_second_matching_element_on_an_exempted_line_is_not_also_exempted(tmp_pa
     assert len(tmpl002) == 2, f"both buttons must be reported as separate records, got: {violations}"
     assert tmpl002[0].exempted is True
     assert tmpl002[1].exempted is False, "only the first matching element on the line may be exempted"
+
+
+class _ReviewViolation(Protocol):
+    code: str
+    line: int
+    exempted: bool
+    reason: str
+
+
+class _ReviewLint(Protocol):
+    def scan_file(self, path: Path) -> list[_ReviewViolation]: ...
+
+
+class TemplateReviewRegressionTests(SimpleTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        # resolve(): on macOS /tmp is a symlink, and scan_file compares resolved paths against REPO_ROOT.
+        self.root = Path(self.enterContext(TemporaryDirectory())).resolve()
+        self.lint = cast("_ReviewLint", _load_lint_module())
+        templates = self.root / "services/portal/templates"
+        self.enterContext(
+            patch.multiple(
+                self.lint,
+                REPO_ROOT=self.root,
+                PORTAL_TEMPLATES=templates,
+                COMPONENT_DIR=templates / "components",
+                COMPONENT_SVG_ALLOWLIST_FILE=self.root / ".component-svg-allowlist",
+            )
+        )
+        self.templates = templates
+
+    def seed(self, relative: str, content: str) -> Path:
+        path = self.templates / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        return path
+
+    def test_conditional_event_handlers_are_detected_at_the_original_line(self) -> None:
+        cases = (
+            ('<button {% if enabled %}onclick="run()"{% endif %}>Run</button>', 2),
+            ('<button {% if enabled %}onclick="run()"{% else %}onfocus="focus()"{% endif %}>Run</button>', 2),
+            ('<button\n{% if enabled %}onclick="run()"{% endif %}>Run</button>', 2),
+            ('<button {% if\n enabled %}onclick="run()"{% endif %}>Run</button>', 2),
+        )
+        for markup, expected_line in cases:
+            with self.subTest(markup=markup):
+                path = self.seed(
+                    "components/conditional.html",
+                    "\n"
+                    + markup
+                    + '\n<div onkeydown="next()"></div>\n'
+                    + """<script src="{% static 'component.js' %}"></script>\n""",
+                )
+                handlers = [finding for finding in self.lint.scan_file(path) if finding.code == "TMPL007"]
+                self.assertEqual([finding.line for finding in handlers], [expected_line, 3 + markup.count("\n")])
+
+    def test_two_marker_placements_exempt_two_elements_without_reuse(self) -> None:
+        cases = (
+            ("TMPL001", '<input name="a"><input name="b">', '<input name="c">'),
+            ("TMPL002", "<button>A</button><button>B</button>", "<button>C</button>"),
+            ("TMPL003", "<select></select><select></select>", "<select></select>"),
+            ("TMPL004", "<textarea></textarea><textarea></textarea>", "<textarea></textarea>"),
+        )
+        for code, pair, third in cases:
+            for extra in ("", third):
+                with self.subTest(code=code, extra=extra):
+                    path = self.seed(
+                        "billing/allowances.html",
+                        f"{{# tmpl-allow {code}: standalone allowance #}}\n"
+                        f"{pair}{extra} {{# tmpl-allow {code}: inline allowance #}}\n",
+                    )
+                    findings = self.lint.scan_file(path)
+                    matches = [finding for finding in findings if finding.code == code]
+                    expected = [True, True] + ([False] if extra else [])
+                    self.assertEqual([finding.exempted for finding in matches], expected)
+                    self.assertEqual(
+                        [finding.reason for finding in matches[:2]], ["inline allowance", "standalone allowance"]
+                    )
+                    self.assertEqual([finding.line for finding in matches], [2] * len(expected))
+                    self.assertEqual([finding for finding in findings if finding.code == "TMPL_ALLOW_STALE"], [])
+
+    def test_conditional_json_types_do_not_hide_executable_component_scripts(self) -> None:
+        cases = (
+            '<script {% if as_json %}type="application/json"{% endif %}>window.run()</script>',
+            '<script {% if as_json %}type="application/ld+json"{% endif %}>window.run()</script>',
+            '<script {% if as_json %}type="application/json"{% else %}type="text/javascript"{% endif %}>run()</script>',
+            '<script type="{% if as_json %}application/json{% endif %}">window.run()</script>',
+            '<script\n{% if as_json %}type="application/json"{% endif %}>window.run()</script>',
+            '<script {% for kind in types %}type="application/json"{% endfor %}>window.run()</script>',
+            # The browser keeps the first of duplicate attributes, so a conditional executable type wins
+            '<script {% if executable %}type="text/javascript"{% endif %} type="application/json">run()</script>',
+            '<script {% if executable %}TYPE="module"{% endif %}\ntype="application/ld+json">run()</script>',
+        )
+        for markup in cases:
+            with self.subTest(markup=markup):
+                path = self.seed("components/conditional_json.html", "\n" + markup)
+                findings = [finding for finding in self.lint.scan_file(path) if finding.code == "TMPL007"]
+                self.assertEqual([finding.line for finding in findings], [2])
+        for markup in (
+            '<script type="application/json">{"value": 1}</script>',
+            '<script type="application/ld+json">{"value": 1}</script>',
+            '<script type="application/json" {% if enabled %}data-extra="yes"{% endif %}>{"value": 1}</script>',
+            '{% if enabled %}<script type="application/json">{"value": 1}</script>{% endif %}',
+        ):
+            with self.subTest(unconditional=markup):
+                path = self.seed("components/unconditional_json.html", markup)
+                findings = [finding for finding in self.lint.scan_file(path) if finding.code == "TMPL007"]
+                self.assertEqual(findings, [])

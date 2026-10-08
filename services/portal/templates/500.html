@@ -85,8 +85,8 @@
     <!-- Help Text -->
     <div class="mt-8 text-sm text-slate-500">
       {% trans 'If the problem persists, please contact our support team at' %}
-      <a href="mailto:support@pragmatichost.com" class="text-blue-400 hover:text-blue-300">
-        support@pragmatichost.com
+      <a href="mailto:{{ company.email_support }}" class="text-blue-400 hover:text-blue-300">
+        {{ company.email_support }}
       </a>
     </div>
   </div>

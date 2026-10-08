@@ -17,6 +17,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from django.conf import settings
+from django.utils.translation import gettext as _
 from lxml import etree
 
 if TYPE_CHECKING:
@@ -134,8 +135,18 @@ class CompanyInfo:
         return tax_id.strip()
 
 
+def _supplier_setting(key: str, fallback: str) -> str:
+    """Resolve nonempty UBL overrides, then deployment identity; ignore catalog defaults."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415  # ADR-0007
+
+    stored = SettingsService.get_stored_setting(key)
+    if stored is None or stored == "":
+        stored = getattr(settings, key.replace(".", "_").upper(), None)
+    return fallback if stored is None or stored == "" else str(stored)
+
+
 def get_supplier_info() -> CompanyInfo:
-    """Resolve the operating entity from the shared invoice supplier settings."""
+    """Return deployment-only supplier identity shared with statutory exports such as D390."""
     return CompanyInfo(
         name=getattr(settings, "COMPANY_NAME", ""),
         tax_id=getattr(settings, "EFACTURA_COMPANY_CUI", ""),
@@ -164,10 +175,48 @@ class BaseUBLBuilder:
         self._customer: CompanyInfo | None = None
 
     def _get_supplier_info(self) -> CompanyInfo:
-        """Get supplier (seller) information from settings."""
+        """Resolve e-Factura overrides for this document's supplier."""
         if self._supplier is None:
-            self._supplier = get_supplier_info()
+            supplier = get_supplier_info()
+            supplier.name = _supplier_setting("efactura.company.name", supplier.name)
+            supplier.tax_id = _supplier_setting("efactura.company.cui", supplier.tax_id)
+            supplier.registration_number = _supplier_setting(
+                "efactura.company.registration_number", supplier.registration_number
+            )
+            supplier.street = _supplier_setting("efactura.company.street", supplier.street)
+            supplier.city = _supplier_setting("efactura.company.city", supplier.city)
+            supplier.postal_code = _supplier_setting("efactura.company.postal_code", supplier.postal_code)
+            supplier.country_code = _supplier_setting("efactura.company.country_code", supplier.country_code)
+            supplier.email = _supplier_setting("efactura.company.email", supplier.email)
+            supplier.phone = _supplier_setting("efactura.company.phone", supplier.phone)
+            self._supplier = supplier
         return self._supplier
+
+    def _validate_supplier(self, errors: list[str]) -> None:
+        """Apply the same Romanian supplier requirements to invoices and credit notes."""
+        supplier = self._get_supplier_info()
+        # RO e-Factura is a Romanian statutory format: the CIUS-RO profile, the RO:CUI
+        # identifier scheme and the ANAF endpoints all presuppose a Romanian supplier.
+        # A non-RO operator must be refused rather than described as both German and
+        # Romanian in different fields of the same document. Mirrors validate_supplier
+        # in d390.py, the other RO-specific statutory export.
+        operator_jurisdiction = operator_country()
+        supplier_country = (
+            operator_jurisdiction if operator_jurisdiction != REFERENCE_OPERATOR_COUNTRY else supplier.country_code
+        )
+        if supplier_country != REFERENCE_OPERATOR_COUNTRY:
+            errors.append(
+                _(
+                    "e-Factura is a Romanian statutory format but the operator or supplier is established in "
+                    "%(country)s; it cannot represent this supplier"
+                )
+                % {"country": supplier_country or _("an unconfigured country")}
+            )
+        if not supplier.name:
+            errors.append(_("Supplier company name not configured (COMPANY_NAME setting)"))
+
+        if not supplier.tax_id:
+            errors.append(_("Supplier tax ID not configured (EFACTURA_COMPANY_CUI setting)"))
 
     def _get_customer_info(self) -> CompanyInfo:
         """Get customer (buyer) information from invoice."""
@@ -632,22 +681,7 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
                 "supports a single rate per document (single-category invariant)"
             )
 
-        supplier = self._get_supplier_info()
-        # RO e-Factura is a Romanian statutory format: the CIUS-RO profile, the RO:CUI
-        # identifier scheme and the ANAF endpoints all presuppose a Romanian supplier.
-        # A non-RO operator must be refused rather than described as both German and
-        # Romanian in different fields of the same document. Mirrors validate_supplier
-        # in d390.py, the other RO-specific statutory export.
-        if supplier.country_code != REFERENCE_OPERATOR_COUNTRY:
-            errors.append(
-                f"e-Factura is a Romanian statutory format but the operator is established in "
-                f"{supplier.country_code or 'an unconfigured country'}; it cannot represent this supplier"
-            )
-        if not supplier.name:
-            errors.append("Supplier company name not configured (COMPANY_NAME setting)")
-
-        if not supplier.tax_id:
-            errors.append("Supplier tax ID not configured (EFACTURA_COMPANY_CUI setting)")
+        self._validate_supplier(errors)
 
         if errors:
             raise XMLBuilderError(f"Invalid invoice data: {'; '.join(errors)}")
@@ -785,7 +819,18 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         from apps.billing.bank_transfer import bank_transfer_instructions  # noqa: PLC0415  # ADR-0007
 
         code = self._get_payment_means_code()
-        bank = bank_transfer_instructions(self.invoice.currency_id)
+        ron_fallback = None
+        if self.invoice.currency_id == "RON":
+            ron_fallback = {
+                "iban": _supplier_setting(
+                    "efactura.company.bank_account", getattr(settings, "COMPANY_BANK_ACCOUNT", "")
+                ),
+                "bank_name": _supplier_setting(
+                    "efactura.company.bank_name", getattr(settings, "COMPANY_BANK_NAME", "")
+                ),
+                "beneficiary": self._get_supplier_info().name,
+            }
+        bank = bank_transfer_instructions(self.invoice.currency_id, ron_fallback=ron_fallback)
         if code in {"30", "58"} and bank is None:
             raise XMLBuilderError(
                 f"{self.invoice.currency_id} bank account is required for credit-transfer payment instructions (BR-61)"
@@ -1108,6 +1153,7 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
         if self.original_invoice is None:
             errors.append("Original invoice reference is required for credit notes")
 
+        self._validate_supplier(errors)
         self._validate_original_currency_snapshot(errors)
 
         self._validate_supported_adjustments(errors)

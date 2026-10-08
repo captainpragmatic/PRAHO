@@ -25,8 +25,7 @@ from . import config as billing_config
 logger = logging.getLogger(__name__)
 
 # Task configuration
-_DEFAULT_TASK_TIMEOUT = 300  # 5 minutes
-TASK_TIMEOUT = _DEFAULT_TASK_TIMEOUT
+_DEFAULT_TASK_TIMEOUT = 60  # the budget production enqueues enforced before the setting governed them
 
 
 def get_task_timeout() -> int:
@@ -632,7 +631,9 @@ def collect_service_usage() -> dict[str, Any]:
 
 def update_aggregation_for_event_async(event_id: str) -> str:
     """Queue aggregation update task."""
-    return str(async_task("apps.billing.metering_tasks.update_aggregation_for_event", event_id, timeout=TASK_TIMEOUT))
+    return str(
+        async_task("apps.billing.metering_tasks.update_aggregation_for_event", event_id, timeout=get_task_timeout())
+    )
 
 
 def check_usage_thresholds_async(customer_id: str, meter_id: str, subscription_id: str | None = None) -> str:
@@ -643,14 +644,16 @@ def check_usage_thresholds_async(customer_id: str, meter_id: str, subscription_i
             customer_id,
             meter_id,
             subscription_id,
-            timeout=TASK_TIMEOUT,
+            timeout=get_task_timeout(),
         )
     )
 
 
 def send_usage_alert_notification_async(alert_id: str) -> str:
     """Queue alert notification task."""
-    return str(async_task("apps.billing.metering_tasks.send_usage_alert_notification", alert_id, timeout=TASK_TIMEOUT))
+    return str(
+        async_task("apps.billing.metering_tasks.send_usage_alert_notification", alert_id, timeout=get_task_timeout())
+    )
 
 
 # ===============================================================================

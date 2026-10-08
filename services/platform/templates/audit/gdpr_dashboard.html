@@ -331,16 +331,16 @@
           {% alert "This action cannot be undone. Your account will be anonymized to comply with Romanian business law." variant="danger" %}
 
           <div>
-            <label class="block text-sm font-medium text-white mb-2">{% trans 'Deletion Type:' %}</label>
-            <select name="deletion_type" class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white">
+            <label for="deletion-type" class="block text-sm font-medium text-white mb-2">{% trans 'Deletion Type:' %}</label>
+            <select id="deletion-type" name="deletion_type" class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white">
               <option value="anonymize">{% trans 'Anonymize (recommended)' %}</option>
               <option value="delete">{% trans 'Full Deletion (if legally possible)' %}</option>
             </select>
           </div>
 
           <div>
-            <label class="block text-sm font-medium text-white mb-2">{% trans 'Reason for deletion:' %}</label>
-            <textarea name="reason" required class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white" rows="3" placeholder="{% trans 'Please provide a reason for this request...' %}"></textarea>
+            <label for="deletion-reason" class="block text-sm font-medium text-white mb-2">{% trans 'Reason for deletion:' %}</label>
+            <textarea id="deletion-reason" name="reason" required class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white" rows="3" placeholder="{% trans 'Please provide a reason for this request...' %}"></textarea>
           </div>
 
           <label class="flex items-center">

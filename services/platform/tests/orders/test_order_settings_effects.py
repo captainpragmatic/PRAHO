@@ -133,15 +133,10 @@ class OrderTimeoutSettingEffectTests(OrderSettingEffectBase):
         self.assertEqual(self.status_of(order), "awaiting_payment")
 
     def test_the_bank_transfer_fallback_window_governs_when_there_is_no_proforma_to_anchor_on(self) -> None:
-        """Asserted on the deadline function the sweep itself calls, for the reason below.
+        """Without a proforma, the configured bank window supplies the fallback deadline.
 
-        Offline orders anchor on the proforma the customer was emailed; this setting is the deadline
-        only when there is none. Driving it through `process_pending_orders` cannot show that,
-        because the sweep CREATES a missing proforma at `tasks.py:206` before it checks the timeout
-        at `:227` - so by the time the deadline is computed the order has a proforma and the
-        fallback branch is unreachable for any order with a positive total. The setting is live and
-        read, but in practice it governs only an order whose proforma creation failed. That is worth
-        knowing about a setting the UI presents as the bank-transfer window.
+        Proforma creation also caps bank-transfer validity at this deadline. The sweep test below
+        covers that path; this test covers an order whose proforma has not been created.
         """
         order = self.order(payment_method="bank_transfer", hours_old=10)
 
@@ -158,18 +153,25 @@ class OrderTimeoutSettingEffectTests(OrderSettingEffectBase):
         self.assertLess(near_deadline, timezone.now())
         self.assertGreater(far_deadline, timezone.now())
 
-    def test_the_sweep_creates_a_proforma_first_so_the_proforma_then_governs(self) -> None:
-        """Pins the shadowing described above, so a change to that order of operations is visible."""
+    def test_the_sweep_caps_a_repaired_proforma_at_the_configured_bank_deadline(self) -> None:
+        """A repaired proforma keeps the effective deadline anchored to order creation."""
         order = self.order(payment_method="bank_transfer", hours_old=10)
         self.assertIsNone(order.proforma)
         self.set_value(BANK_TIMEOUT_KEY, 5)
 
-        self.sweep()
+        with self.captureOnCommitCallbacks(execute=False) as callbacks:
+            process_pending_orders()
+            order.refresh_from_db()
+            self.assertEqual(order.status, "cancelled")
+            self.assertIsNotNone(order.proforma, "the sweep repairs the missing proforma before timing out")
+            assert order.proforma is not None
+            self.assertEqual(order.proforma.valid_until, order.created_at + timedelta(hours=5))
+            self.assertEqual(_order_timeout_deadline(order), (order.proforma.valid_until, "proforma_valid_until"))
 
+        for callback in callbacks:
+            callback()
         order.refresh_from_db()
-        self.assertIsNotNone(order.proforma, "the sweep repairs a missing proforma before timing out")
-        self.assertEqual(self.status_of(order), "awaiting_payment")
-        self.assertEqual(_order_timeout_deadline(order)[1], "proforma_valid_until")
+        self.assertIsNone(order.proforma, "cancellation removes the unsent draft")
 
     def test_the_two_windows_are_not_crossed(self) -> None:
         """Both are read in the same function; swapping them would pass a one-setting test."""
@@ -202,9 +204,7 @@ class ReviewThresholdSettingEffectTests(OrderSettingEffectBase):
 
     def setUp(self) -> None:
         super().setUp()
-        self.product = Product.objects.create(
-            name="Effect VPS", slug="effect-vps", product_type="vps", is_active=True
-        )
+        self.product = Product.objects.create(name="Effect VPS", slug="effect-vps", product_type="vps", is_active=True)
         self.product.default_service_plan = ServicePlan.objects.create(
             name="Effect VPS Plan", plan_type="vps", price_monthly=Decimal("100.00")
         )
@@ -291,7 +291,9 @@ class ConfirmationFailureLimitSettingEffectTests(OrderSettingEffectBase):
         """The clamp in the getter can only fire on a value the UI cannot store. Prove it cannot."""
         result = SettingsService.update_setting(CONFIRMATION_FAILURES_KEY, 999_999)
         self.assertTrue(result.is_err(), "validation must reject a limit above the catalog maximum")
-        self.assertEqual(get_max_paid_order_confirmation_failures(), SettingsService.DEFAULT_SETTINGS[CONFIRMATION_FAILURES_KEY])
+        self.assertEqual(
+            get_max_paid_order_confirmation_failures(), SettingsService.DEFAULT_SETTINGS[CONFIRMATION_FAILURES_KEY]
+        )
 
     def test_the_catalog_validation_rejects_zero(self) -> None:
         """A limit of 0 would mean "escalate on the first failure", which the floor of 1 also prevents."""

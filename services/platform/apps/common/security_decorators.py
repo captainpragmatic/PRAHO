@@ -16,6 +16,7 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+from apps.common import counters
 from apps.common.constants import (
     CUSTOMER_DATA_ARG_POSITION,
     INVITATION_CUSTOMER_ARG_POSITION,
@@ -24,10 +25,10 @@ from apps.common.constants import (
     INVITER_ARG_POSITION,
     USER_DATA_ARG_POSITION,
 )
+from apps.common.security_errors import RateLimitFailure, RateLimitValidationError
 from apps.common.types import Err, Ok, Result
 
 from .validators import (
-    _DEFAULT_RATE_LIMIT_REGISTRATION_PER_IP,
     BusinessLogicValidator,
     SecureErrorHandler,
     SecureInputValidator,
@@ -38,6 +39,8 @@ logger = logging.getLogger(__name__)
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
+_REGISTRATION_RATE_LIMIT_KEY = "security.registration_rate_limit_per_ip"
+_REGISTRATION_RATE_LIMIT_DEFAULT = 5  # per hour
 
 
 # ===============================================================================
@@ -161,13 +164,14 @@ def secure_service_method_legacy(  # security decorator parameters  # noqa: PLR0
 
 
 def secure_user_registration(
-    rate_limit: int = _DEFAULT_RATE_LIMIT_REGISTRATION_PER_IP,
-) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    """Security decorator specifically for user registration methods"""
+    rate_limit: int | None = None,
+) -> Callable[[Callable[_P, Result[_R, str]]], Callable[_P, Result[_R, str]]]:
+    """Resolve omitted registration limits per attempt; preserve explicit limits, including zero."""
     return secure_service_method(
         validation_type="user_registration",
         rate_limit_key="registration",
-        rate_limit=rate_limit,
+        rate_limit=_REGISTRATION_RATE_LIMIT_DEFAULT if rate_limit is None else rate_limit,
+        rate_limit_setting_key=_REGISTRATION_RATE_LIMIT_KEY if rate_limit is None else None,
         log_attempts=True,
         prevent_timing_attacks=True,
     )
@@ -277,7 +281,11 @@ def _execute_security_checks(
         if config.rate_limit_setting_key:
             from apps.settings.services import SettingsService  # noqa: PLC0415  # Deferred: avoids app import cycle
 
-            rate_limit = SettingsService.get_integer_setting(config.rate_limit_setting_key, rate_limit)
+            # Same read either way; naming the registration key lets settings lint see this reader.
+            if config.rate_limit_setting_key == _REGISTRATION_RATE_LIMIT_KEY:
+                rate_limit = SettingsService.get_integer_setting(_REGISTRATION_RATE_LIMIT_KEY, rate_limit)
+            else:
+                rate_limit = SettingsService.get_integer_setting(config.rate_limit_setting_key, rate_limit)
         rate_limit_user = user
         if config.validation_type == "invitation":
             rate_limit_user, _ = _extract_user_and_customer(args, kwargs, user)
@@ -330,6 +338,8 @@ def _handle_validation_error(
             request_ip,
         )
 
+    if isinstance(e, RateLimitValidationError):
+        return Err(e.failure)
     return Err(SecureErrorHandler.safe_error_response(e, config.validation_type))
 
 
@@ -359,8 +369,11 @@ def _check_rate_limit(key_prefix: str, limit: int, request_ip: str, user: Any = 
     for identifier in identifiers:
         cache_key = f"rate_limit:{key_prefix}:{identifier}"
         try:
-            # Try to get current count
-            current_count = cache.get(cache_key, 0)
+            # Registration uses atomic, shared counters; other decorators retain their cache policy.
+            if key_prefix == "registration":
+                current_count = counters.increment(cache_key, 3600) - 1
+            else:
+                current_count = cache.get(cache_key, 0)
 
             if current_count >= limit:
                 try:
@@ -372,21 +385,28 @@ def _check_rate_limit(key_prefix: str, limit: int, request_ip: str, user: Any = 
                 except Exception as e:
                     # Log the logging error but don't fail rate limiting
                     logger.warning(f"⚠️ [Security] Failed to log rate limit event: {e}")  # nosec B110 - Intentional exception handling with logging
-                raise ValidationError(_("Rate limit exceeded"))
+                message = (
+                    _("Too many registration attempts. Please try again later.")
+                    if key_prefix == "registration"
+                    else _("Rate limit exceeded")
+                )
+                raise RateLimitValidationError(RateLimitFailure(str(message), status_code=429, retry_after=3600))
 
-            # Increment counter with add/set pattern for race condition safety
-            new_count = current_count + 1
-            try:
-                cache.set(cache_key, new_count, timeout=3600)
-            except Exception as cache_err:
-                # Fallback if cache.set fails
-                logger.warning(f"🚨 [Security] Cache set failed for rate limiting key: {cache_key}: {cache_err}")
+            if key_prefix != "registration":
+                # Preserve the existing cache policy for unrelated security decorators.
+                new_count = current_count + 1
+                try:
+                    cache.set(cache_key, new_count, timeout=3600)
+                except Exception as cache_err:
+                    logger.warning(f"🚨 [Security] Cache set failed for rate limiting key: {cache_key}: {cache_err}")
         except ValidationError:
             # Re-raise ValidationError (rate limit exceeded)
             raise
         except Exception as e:
-            logger.critical("[Security] Rate limiting cache unreachable — failing closed: %s", e)
-            raise ValidationError(_("Service temporarily unavailable. Please try again later.")) from e
+            logger.critical("🔥 [Security] Rate limiting store unreachable — failing closed: %s", e)
+            raise RateLimitValidationError(
+                RateLimitFailure(str(_("Service temporarily unavailable. Please try again later.")), status_code=503)
+            ) from e
 
 
 def _validate_user_registration_input(args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:

@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% load i18n ui_components %}
+
+{% block title %}{% trans "Virtualmin Job Logs" %}{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+  <h1 class="text-2xl font-bold text-slate-100">{% trans "Virtualmin Job Logs" %}</h1>
+  <div class="space-y-4 rounded-lg border border-slate-700 bg-slate-800 p-6 text-slate-100">
+    <dl class="space-y-2">
+      <dt>{% trans "Correlation ID" %}</dt><dd>{{ job.correlation_id }}</dd>
+      <dt>{% trans "Operation" %}</dt><dd>{{ job.get_operation_display }}</dd>
+      <dt>{% trans "Status" %}</dt><dd>{% badge job.get_status_display variant="secondary" %}</dd>
+      <dt>{% trans "Account" %}</dt><dd>{{ job.account.domain|default:"—" }}</dd>
+    </dl>
+    <h2 class="text-lg font-semibold">{% trans "Status message" %}</h2>
+    <pre class="whitespace-pre-wrap">{{ job.status_message }}</pre>
+    <h2 class="text-lg font-semibold">{% trans "Result" %}</h2>
+    <pre class="whitespace-pre-wrap">{{ job.result }}</pre>
+    {% url "provisioning:virtualmin_job_status" job.id as status_url %}
+    {% trans "View job status" as status_label %}
+    {% button status_label href=status_url variant="secondary" %}
+  </div>
+</div>
+{% endblock %}
