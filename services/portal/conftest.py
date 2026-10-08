@@ -67,8 +67,6 @@ def stabilize_auth_timing_for_security_tests(request: pytest.FixtureRequest, set
     nodeid = request.node.nodeid
     if "tests/security/test_hmac_production_security.py" in nodeid:
         settings.PLATFORM_API_AUTH_MIN_DURATION_SECONDS = 0.25
-    elif "tests/security/test_hmac_timing_attacks.py" in nodeid:
-        settings.PLATFORM_API_AUTH_MIN_DURATION_SECONDS = 0.01
     else:
         settings.PLATFORM_API_AUTH_MIN_DURATION_SECONDS = 0.0
     yield

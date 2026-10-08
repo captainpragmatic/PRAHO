@@ -4,6 +4,7 @@ import hmac
 import json
 import time
 import urllib.parse
+import uuid
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -13,7 +14,7 @@ from django.test import RequestFactory, TestCase, override_settings
 
 from apps.common import middleware as _middleware_module
 from apps.common.middleware import PortalServiceHMACMiddleware, _is_auth_exempt
-from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
+from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin, sign_request
 
 User = get_user_model()
 
@@ -358,3 +359,131 @@ class HMACAuthBucketRoutingTests(HMACTestMixin, TestCase):
         response = self.client.post("/api/users/password/reset/", {}, content_type="application/json")
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.json(), {"error": "HMAC authentication failed"})
+
+
+# The one response every rejection gets: nothing in it may say WHY a request failed.
+_UNIFORM_REJECTION = (401, "application/json", {"error": "HMAC authentication failed"})
+_FROZEN_NOW = 1_800_000_000
+
+
+@override_settings(
+    PLATFORM_API_SECRET=HMAC_TEST_SECRET,
+    PORTAL_HMAC_MODE="legacy",
+    RATE_LIMITING_ENABLED=False,
+    CACHES=LOCMEM_TEST_CACHE,
+)
+class HMACRejectionUniformityTests(TestCase):
+    """Deterministic checks of what an attacker can learn from a rejected request.
+
+    These replace timing tests that measured a mocked Platform: here the real middleware decides,
+    against a frozen clock, so each assertion holds or fails for the same reason on every run.
+    """
+
+    path = "/api/test/"
+    portal_id = "portal-uniformity"
+    body = json.dumps({"user_id": 1, "customer_id": 2}).encode()
+
+    def setUp(self) -> None:
+        cache.clear()
+        self.addCleanup(cache.clear)
+        self.view_calls = 0
+        clock = patch("apps.common.middleware.time.time", return_value=float(_FROZEN_NOW))
+        clock.start()
+        self.addCleanup(clock.stop)
+
+    def _view(self, request: object) -> HttpResponse:
+        self.view_calls += 1
+        return HttpResponse("ok", status=200)
+
+    def _headers(self, *, timestamp: str, nonce: str | None = None, **overrides: str) -> dict[str, str]:
+        nonce = nonce or f"nonce-{uuid.uuid4().hex}"
+        headers = {
+            "HTTP_X_PORTAL_ID": self.portal_id,
+            "HTTP_X_NONCE": nonce,
+            "HTTP_X_TIMESTAMP": timestamp,
+            "HTTP_X_BODY_HASH": base64.b64encode(hashlib.sha256(self.body).digest()).decode("ascii"),
+        }
+        headers.update({key: value for key, value in overrides.items() if key != "HTTP_X_SIGNATURE"})
+        headers["HTTP_X_SIGNATURE"] = overrides.get(
+            "HTTP_X_SIGNATURE",
+            sign_request(
+                "POST", self.path, self.body, headers["HTTP_X_PORTAL_ID"], headers["HTTP_X_NONCE"], timestamp
+            ),
+        )
+        return headers
+
+    def _send(self, headers: dict[str, str], *, drop: str = "") -> HttpResponse:
+        request = RequestFactory().post(self.path, data=self.body, content_type="application/json")
+        request.META.update({key: value for key, value in headers.items() if key != drop})
+        return PortalServiceHMACMiddleware(self._view)(request)
+
+    @staticmethod
+    def _shape(response: HttpResponse) -> tuple[int, str, object]:
+        return response.status_code, response["Content-Type"], json.loads(response.content)
+
+    def test_the_timestamp_window_is_exactly_300s_back_and_2s_forward(self) -> None:
+        for offset, accepted in ((0, True), (-300, True), (2, True), (-301, False), (3, False)):
+            with self.subTest(offset=offset):
+                response = self._send(self._headers(timestamp=str(_FROZEN_NOW + offset)))
+                if accepted:
+                    self.assertEqual(response.status_code, 200)
+                else:
+                    self.assertEqual(self._shape(response), _UNIFORM_REJECTION)
+        for malformed in ("invalid_timestamp", "1.8e9x", " "):
+            with self.subTest(timestamp=malformed):
+                self.assertEqual(self._shape(self._send(self._headers(timestamp=malformed))), _UNIFORM_REJECTION)
+        self.assertEqual(self.view_calls, 3)
+
+    def test_every_rejection_reason_gets_the_same_response(self) -> None:
+        now = str(_FROZEN_NOW)
+        valid = self._headers(timestamp=now)
+        wrong_signature = valid["HTTP_X_SIGNATURE"][:-1] + ("0" if valid["HTTP_X_SIGNATURE"][-1] != "0" else "1")
+        other_body_hash = base64.b64encode(hashlib.sha256(b"{}").digest()).decode("ascii")
+        replayed = self._headers(timestamp=now)
+        self.assertEqual(self._send(replayed).status_code, 200)
+        cases = {
+            "missing signature": (self._headers(timestamp=now), "HTTP_X_SIGNATURE"),
+            "bad portal id": (self._headers(timestamp=now, HTTP_X_PORTAL_ID="bad portal!"), ""),
+            "bad nonce format": (self._headers(timestamp=now, nonce="short"), ""),
+            "bad signature format": (self._headers(timestamp=now, HTTP_X_SIGNATURE="XYZ"), ""),
+            "body hash mismatch": (self._headers(timestamp=now, HTTP_X_BODY_HASH=other_body_hash), ""),
+            "wrong signature": (self._headers(timestamp=now, HTTP_X_SIGNATURE=wrong_signature), ""),
+            "stale timestamp": (self._headers(timestamp=str(_FROZEN_NOW - 301)), ""),
+            "future timestamp": (self._headers(timestamp=str(_FROZEN_NOW + 3)), ""),
+            "malformed timestamp": (self._headers(timestamp="invalid_timestamp"), ""),
+            "replayed nonce": (replayed, ""),
+        }
+        for reason, (headers, drop) in cases.items():
+            with self.subTest(reason=reason):
+                self.assertEqual(self._shape(self._send(headers, drop=drop)), _UNIFORM_REJECTION)
+        self.assertEqual(self.view_calls, 1)
+
+    def test_a_signature_wrong_at_any_position_is_rejected_the_same_way(self) -> None:
+        for position in (0, 31, 63):
+            with self.subTest(position=position):
+                headers = self._headers(timestamp=str(_FROZEN_NOW))
+                signature = headers["HTTP_X_SIGNATURE"]
+                flipped = "0" if signature[position] != "0" else "1"
+                headers["HTTP_X_SIGNATURE"] = signature[:position] + flipped + signature[position + 1 :]
+                self.assertEqual(self._shape(self._send(headers)), _UNIFORM_REJECTION)
+        self.assertEqual(self.view_calls, 0)
+
+    def test_the_signature_is_compared_in_constant_time(self) -> None:
+        # Constant time cannot be observed deterministically; prove the constant-time primitive
+        # is the one that decides, by checking it receives the submitted signature.
+        headers = self._headers(timestamp=str(_FROZEN_NOW))
+        with patch("apps.common.middleware.hmac.compare_digest", wraps=hmac.compare_digest) as compare:
+            self.assertEqual(self._send(headers).status_code, 200)
+        self.assertIn(headers["HTTP_X_SIGNATURE"], [call.args[0] for call in compare.call_args_list])
+
+    def test_a_rejected_request_does_not_use_up_its_nonce(self) -> None:
+        for reason, overrides in (
+            ("stale timestamp", {"timestamp": str(_FROZEN_NOW - 301)}),
+            ("wrong signature", {"timestamp": str(_FROZEN_NOW), "HTTP_X_SIGNATURE": "0" * 64}),
+        ):
+            with self.subTest(reason=reason):
+                nonce = f"nonce-{uuid.uuid4().hex}"
+                self.assertEqual(self._shape(self._send(self._headers(nonce=nonce, **overrides))), _UNIFORM_REJECTION)
+                retry = self._headers(timestamp=str(_FROZEN_NOW), nonce=nonce)
+                self.assertEqual(self._send(retry).status_code, 200)
+                self.assertEqual(self._shape(self._send(retry)), _UNIFORM_REJECTION)
