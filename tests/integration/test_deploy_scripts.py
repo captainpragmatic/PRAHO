@@ -15,6 +15,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -381,6 +382,23 @@ class TestBackupFiles:
         result = project.run("backup.sh", DOCKER_EXEC_FAILS="1")
         assert result.returncode != 0
         assert list((project.root / "backups").glob("praho_backup_*")) == []
+
+    @pytest.mark.integration
+    def test_retention_removes_an_abandoned_partial_but_not_one_being_written(self, project: Project) -> None:
+        # A killed backup skips its EXIT trap, and the partial matched neither retention pattern.
+        backups = project.root / "backups"
+        backups.mkdir()
+        abandoned = backups / "praho_backup_20261001_020000_111.sql.gz.partial"
+        being_written = backups / "praho_backup_20261008_020000_222.sql.gz.partial"
+        for partial in (abandoned, being_written):
+            partial.write_bytes(b"x")
+        # A slow dump may not have written for some minutes; only a day of silence means abandoned.
+        for partial, age in ((abandoned, 2 * 86400), (being_written, 600)):
+            os.utime(partial, (time.time() - age, time.time() - age))
+        result = project.run("backup.sh")
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert not abandoned.exists()
+        assert being_written.exists()
 
     @pytest.mark.integration
     def test_the_interactive_restore_restores_the_backup_chosen_from_the_list(self, project: Project) -> None:

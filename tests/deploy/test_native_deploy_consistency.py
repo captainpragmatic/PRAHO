@@ -19,6 +19,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -186,6 +187,8 @@ class TestNativeMakeTargets:
 
 
 class TestNativeBackupScript:
+    PG_DUMP_WRITES = '#!/bin/sh\nwhile [ "$#" -gt 0 ]; do [ "$1" = -f ] && echo dump > "$2"; shift; done\n'
+
     @staticmethod
     def _render(backups: Path) -> str:
         """The template with its placeholders filled; a new placeholder fails here, not silently."""
@@ -224,9 +227,7 @@ class TestNativeBackupScript:
     def test_two_runs_in_the_same_second_write_different_files(self, tmp_path: Path) -> None:
         # A manual backup started in the same second as the nightly cron run used to get the same
         # name, so two pg_dump processes wrote one file and the download could copy either.
-        script, env = self._script(
-            tmp_path, '#!/bin/sh\nwhile [ "$#" -gt 0 ]; do [ "$1" = -f ] && echo dump > "$2"; shift; done\n'
-        )
+        script, env = self._script(tmp_path, self.PG_DUMP_WRITES)
         created = []
         for _ in range(2):
             result = self._run(script, env)
@@ -238,6 +239,24 @@ class TestNativeBackupScript:
         backups = tmp_path / "backups"
         assert len(list(backups.glob("praho_backup_*.dump"))) == 2
         assert list(backups.glob("*.partial")) == []
+
+    @pytest.mark.integration
+    def test_retention_removes_an_abandoned_partial_but_not_one_being_written(self, tmp_path: Path) -> None:
+        # A killed backup skips its EXIT trap, and the partial matched neither retention pattern.
+        script, env = self._script(tmp_path, self.PG_DUMP_WRITES)
+        backups = tmp_path / "backups"
+        backups.mkdir()
+        abandoned = backups / "praho_backup_20261001_020000_111.dump.partial"
+        being_written = backups / "praho_backup_20261008_020000_222.dump.partial"
+        for partial in (abandoned, being_written):
+            partial.write_bytes(b"x")
+        # A slow dump may not have written for some minutes; only a day of silence means abandoned.
+        for partial, age in ((abandoned, 2 * 86400), (being_written, 600)):
+            os.utime(partial, (time.time() - age, time.time() - age))
+        result = self._run(script, env)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert not abandoned.exists()
+        assert being_written.exists()
 
     @pytest.mark.integration
     def test_a_failed_dump_leaves_nothing_a_restore_could_pick(self, tmp_path: Path) -> None:

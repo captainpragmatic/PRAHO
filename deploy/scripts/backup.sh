@@ -45,6 +45,10 @@ cleanup_backups() {
     local DAYS=${1:-$RETENTION_DAYS}
     log_info "Removing backups older than ${DAYS} days..."
 
+    # A killed backup skips its EXIT trap. A partial untouched for a day (1440 minutes) is
+    # abandoned; one being written changes as the dump streams in.
+    find "${BACKUP_DIR}" -name "praho_backup_*.partial" -mmin +1440 -delete
+
     local COUNT=$(find "${BACKUP_DIR}" -name "praho_backup_*.sql.gz" -mtime +${DAYS} | wc -l)
 
     if [ "$COUNT" -gt 0 ]; then

@@ -91,7 +91,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   creates its output file before connecting, and the Docker script's `gzip` writes one even when the
   dump fails, so the empty file became the newest backup; the native restore drops the database before
   `pg_restore` reads it. Both backup scripts now write under a `.partial` name and rename the dump once
-  it is complete.
+  it is complete; retention removes a partial a killed backup left once it has been untouched for a day.
 - Docker backups get the same per-run name as native ones (`praho_backup_<timestamp>_<pid>.sql.gz`),
   so a manual backup started in the same second as a scheduled one no longer shares its file.
 - `make ansible-backup ENV=prod FETCH=true` downloads the dump it makes. `ENV` (`staging` or `prod`) is

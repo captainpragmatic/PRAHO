@@ -43,6 +43,9 @@ fi
 # Cleanup old backups
 echo "[$(date)] Cleaning up backups older than ${RETENTION_DAYS} days..."
 find "${BACKUP_DIR}" -name "praho_backup_*.dump" -mtime +${RETENTION_DAYS} -delete
+# A killed backup skips its EXIT trap. A partial untouched for a day (1440 minutes) is abandoned; one
+# being written changes as the dump streams in.
+find "${BACKUP_DIR}" -name "praho_backup_*.partial" -mmin +1440 -delete
 
 echo "[$(date)] Current backups:"
 ls -lh "${BACKUP_DIR}"/praho_backup_*.dump 2>/dev/null || echo "No backups found"
