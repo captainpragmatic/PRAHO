@@ -113,6 +113,7 @@ _XCLOAK_ONLY_RE = re.compile(r"<style[^>]*>\s*\[x-cloak\][^<]{0,60}</style>", re
 # External scripts and non-executable JSON data are allowed; Alpine directives remain allowed.
 _DJANGO_COMMENT_RE = re.compile(r"\{#.*?#\}", re.DOTALL)
 _DJANGO_CONTROL_FLOW_RE = re.compile(r"\{%\s*(?:if|elif|else|endif|for|empty|endfor)\b.*?%\}", re.DOTALL)
+_TYPE_ATTRIBUTE_RE = re.compile(r"(?:^|\s)type\s*=", re.IGNORECASE)
 
 # TMPL008: Unicode emoji characters (ranges cover most common emoji blocks)
 # Dingbats block (U+2700-U+27BF) is intentionally excluded because it contains
@@ -197,12 +198,18 @@ class _ScriptAttributesParser(HTMLParser):
 
 
 def _unconditional_script_type(start_tag: str) -> str:
-    """Ignore attributes inside control flow, while retaining unconditional attributes."""
+    """Ignore attributes inside control flow, while retaining unconditional attributes.
+
+    A type inside control flow returns no type: the browser keeps the first of duplicate
+    attributes, so a conditional executable type would win over an unconditional JSON one.
+    """
     pieces: list[str] = []
     depth = 0
     cursor = 0
     for match in _DJANGO_CONTROL_FLOW_RE.finditer(start_tag):
         chunk = start_tag[cursor : match.start()]
+        if depth and _TYPE_ATTRIBUTE_RE.search(chunk):
+            return ""
         pieces.append(re.sub(r"[^\n]", " ", chunk) if depth else chunk)
         pieces.append(re.sub(r"[^\n]", " ", match.group()))
         command = match.group()[2:-2].strip().split()[0]
@@ -212,6 +219,8 @@ def _unconditional_script_type(start_tag: str) -> str:
             depth = max(0, depth - 1)
         cursor = match.end()
     chunk = start_tag[cursor:]
+    if depth and _TYPE_ATTRIBUTE_RE.search(chunk):
+        return ""
     pieces.append(re.sub(r"[^\n]", " ", chunk) if depth else chunk)
     parser = _ScriptAttributesParser()
     parser.feed("".join(pieces))

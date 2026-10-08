@@ -482,6 +482,9 @@ class TemplateReviewRegressionTests(SimpleTestCase):
             '<script type="{% if as_json %}application/json{% endif %}">window.run()</script>',
             '<script\n{% if as_json %}type="application/json"{% endif %}>window.run()</script>',
             '<script {% for kind in types %}type="application/json"{% endfor %}>window.run()</script>',
+            # The browser keeps the first of duplicate attributes, so a conditional executable type wins
+            '<script {% if executable %}type="text/javascript"{% endif %} type="application/json">run()</script>',
+            '<script {% if executable %}TYPE="module"{% endif %}\ntype="application/ld+json">run()</script>',
         )
         for markup in cases:
             with self.subTest(markup=markup):
