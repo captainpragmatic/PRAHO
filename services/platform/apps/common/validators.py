@@ -559,14 +559,22 @@ class SecureInputValidator:
         return validated_data
 
     @staticmethod
+    def first_malicious_pattern(input_string: str) -> str | None:
+        """Return the first suspicious pattern the string matches, or None. Logs nothing."""
+        for pattern in SUSPICIOUS_PATTERNS:
+            if re.search(pattern, input_string, re.IGNORECASE):
+                return pattern
+        return None
+
+    @staticmethod
     def _check_malicious_patterns(input_string: str) -> None:
         """
         Check for malicious patterns (XSS, SQL injection, etc.)
         """
-        for pattern in SUSPICIOUS_PATTERNS:
-            if re.search(pattern, input_string, re.IGNORECASE):
-                logger.warning(f"🚨 [Security] Malicious pattern detected: {pattern}")
-                raise ValidationError(_("Invalid input detected"))
+        pattern = SecureInputValidator.first_malicious_pattern(input_string)
+        if pattern is not None:
+            logger.warning(f"🚨 [Security] Malicious pattern detected: {pattern}")
+            raise ValidationError(_("Invalid input detected"))
 
 
 # ===============================================================================

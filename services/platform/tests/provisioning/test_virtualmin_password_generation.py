@@ -37,7 +37,11 @@ class VirtualminPasswordGenerationTests(SimpleTestCase):
     def test_a_candidate_the_parameter_validator_rejects_is_regenerated(self) -> None:
         rejected = "aA1--bbbbbbbbbbb"  # "--" trips the SQL-comment heuristic
         accepted = "cC2!dddddddddddd"
-        with patch("apps.provisioning.virtualmin_service.secrets", _ScriptedSecrets(rejected + accepted)):
+        # A discarded candidate is not an attack: it must not raise a security alert
+        with (
+            patch("apps.provisioning.virtualmin_service.secrets", _ScriptedSecrets(rejected + accepted)),
+            self.assertNoLogs("apps.common.validators", level="WARNING"),
+        ):
             password = self.service._generate_secure_password()
 
         self.assertEqual(password, accepted)
