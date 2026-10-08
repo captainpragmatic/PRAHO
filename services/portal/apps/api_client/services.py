@@ -34,6 +34,7 @@ from typing import Any, cast
 import requests
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
+from django.utils.encoding import escape_uri_path
 
 from apps.common.outbound_http import OutboundSecurityError, portal_request
 from apps.common.retry_after import coerce_retry_after_seconds
@@ -44,6 +45,34 @@ HTTP_MULTIPLE_CHOICES = 300
 HTTP_TOO_MANY_REQUESTS = 429
 
 logger = logging.getLogger(__name__)
+
+# Platform's one answer to every request-authentication failure (`PortalServiceHMACMiddleware`):
+# a wrong signature, a stale or future timestamp, a replayed nonce, an altered body or a fault in
+# its own validator. It never says which, so the Portal cannot either - it can only say where the
+# reason is logged. Pinned against the real middleware by tests/integration/test_cross_service_parity.py.
+PLATFORM_SIGNATURE_REJECTED = "HMAC authentication failed"
+SIGNATURE_REJECTION_LOG_INTERVAL_SECONDS = 60.0
+# Platform's accepted clock window (`HMAC_TIMESTAMP_WINDOW_SECONDS` / `HMAC_NTP_SKEW_SECONDS` in its
+# middleware), quoted in the log so an operator can rule skew in or out. Pinned by the parity test.
+PLATFORM_MAX_CLOCK_BEHIND_SECONDS = 300
+PLATFORM_MAX_CLOCK_AHEAD_SECONDS = 2
+
+
+class _SignatureRejectionLogGate:
+    """One critical log per window per process: every request fails the same way during an outage."""
+
+    def __init__(self) -> None:
+        self.last_logged_at: float | None = None
+
+    def should_log(self) -> bool:
+        now = time.monotonic()
+        if self.last_logged_at is not None and now - self.last_logged_at < SIGNATURE_REJECTION_LOG_INTERVAL_SECONDS:
+            return False
+        self.last_logged_at = now
+        return True
+
+
+_signature_rejection_log_gate = _SignatureRejectionLogGate()
 
 HMAC_TIMING_THRESHOLD = 0.002
 
@@ -185,12 +214,15 @@ class PlatformAPIClient:
         # Normalize content type (lowercase, no parameters)
         content_type = "application/json"
 
-        # Normalize path+query to match platform canonicalization
+        # Normalize path+query to match platform canonicalization. Platform signs
+        # `request.get_full_path()`, which re-escapes the decoded path, so a raw space,
+        # diacritic or `;` must be signed in that escaped spelling, not as written.
         parsed = urllib.parse.urlsplit(path)
         query_pairs = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
         query_pairs.sort(key=lambda kv: (kv[0], kv[1]))
         normalized_query = urllib.parse.urlencode(query_pairs, doseq=True)
-        normalized_path = parsed.path + ("?" + normalized_query if normalized_query else "")
+        platform_path = escape_uri_path(urllib.parse.unquote(parsed.path))
+        normalized_path = platform_path + ("?" + normalized_query if normalized_query else "")
 
         # Build canonical string for signing (Phase 2 strict)
         canonical_string = "\n".join(
@@ -250,64 +282,25 @@ class PlatformAPIClient:
         pairs = urllib.parse.parse_qsl(parsed_url.query, keep_blank_values=True)
         if params:
             for k, v in params.items():
+                # `requests` leaves None-valued params off the wire, so signing them as the
+                # string "None" would describe a query Platform never receives.
+                if v is None:
+                    continue
                 if isinstance(v, list | tuple):
                     for item in v:
-                        pairs.append((str(k), str(item)))
+                        if item is not None:
+                            pairs.append((str(k), str(item)))
                 else:
                     pairs.append((str(k), str(v)))
         pairs.sort(key=lambda kv: (kv[0], kv[1]))
         normalized_query = urllib.parse.urlencode(pairs, doseq=True)
         return parsed_url.path + ("?" + normalized_query if normalized_query else "")
 
-    def _should_use_legacy_canonical(self, url: str) -> bool:
-        """
-        Use legacy canonical format in production HTTPS mode for backward compatibility
-        with older Platform signature validators.
-        """
-        return urllib.parse.urlsplit(url).scheme.lower() == "https" and not settings.DEBUG
-
     def _prepare_request_headers(
         self, method: str, url: str, params: dict[str, Any] | None, body: bytes, body_ts: str | None
     ) -> dict[str, str]:
-        if self._should_use_legacy_canonical(url):
-            return self._prepare_legacy_request_headers(method, url, params, body, body_ts)
-
         path_with_query = self._normalized_path_with_query(url, params)
         return self._generate_hmac_headers(method, path_with_query, body, fixed_timestamp=body_ts)
-
-    def _prepare_legacy_request_headers(
-        self,
-        method: str,
-        url: str,
-        params: dict[str, Any] | None,
-        body: bytes,
-        body_ts: str | None,
-    ) -> dict[str, str]:
-        """
-        Backward-compatible fallback for older platform deployments that still verify
-        the legacy canonical format with pipe separators.
-        """
-        nonce = secrets.token_urlsafe(32)
-        timestamp = body_ts or str(int(time.time()))
-        body_hash = base64.b64encode(hashlib.sha256(body).digest()).decode("ascii")
-        path_with_query = self._normalized_path_with_query(url, params)
-        body_text = body.decode("utf-8")
-        canonical = f"{method}|{path_with_query}|{body_text}|{self.portal_id}|{nonce}|{timestamp}"
-        secret = self.portal_secret or ""
-        signature = hmac.new(
-            secret.encode(),
-            canonical.encode(),
-            hashlib.sha256,
-        ).hexdigest()
-        return {
-            "X-Portal-Id": self.portal_id,
-            "X-Nonce": nonce,
-            "X-Timestamp": timestamp,
-            "X-Body-Hash": body_hash,
-            "X-Signature": signature,
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        }
 
     def _normalize_endpoint(self, endpoint: str) -> str:
         normalized = "/" + endpoint.strip().lstrip("/")
@@ -362,12 +355,48 @@ class PlatformAPIClient:
         chosen_delay = max(retry_after_seconds or 0, jitter)
         return min(chosen_delay, self.max_retry_wait_seconds)
 
+    def _raise_if_signature_rejected(self, response: requests.Response, endpoint: str) -> None:
+        """Raise an outage when Platform refused this request's authentication.
+
+        Exact text only: a credential rejection on the login endpoint is also a 401, and must
+        keep meaning "wrong password". The status is checked first, so a successful binary
+        body is never parsed.
+        """
+        if response.status_code != HTTPStatus.UNAUTHORIZED:
+            return
+        try:
+            error_data = response.json()
+        except ValueError:
+            return
+        if not isinstance(error_data, dict) or error_data.get("error") != PLATFORM_SIGNATURE_REJECTED:
+            return
+        if _signature_rejection_log_gate.should_log():
+            logger.critical(
+                "🔥 [API Client] Platform refused the authentication of a request to %s. Platform's log names the "
+                "reason on its '[HMAC Auth] Authentication failed from <ip>: <reason>' line. Usual causes: "
+                "the portal's signing secret (PLATFORM_API_SECRET) differs from Platform's; the portal clock is more than "
+                "%ss behind or %ss ahead of Platform's; a proxy altered the request body or path. "
+                "Customers see the service-unavailable notice until it is fixed (logged once per %ss).",
+                endpoint,
+                PLATFORM_MAX_CLOCK_BEHIND_SECONDS,
+                PLATFORM_MAX_CLOCK_AHEAD_SECONDS,
+                int(SIGNATURE_REJECTION_LOG_INTERVAL_SECONDS),
+            )
+        raise PlatformAPIError(
+            message="Platform refused the portal's request authentication",
+            status_code=response.status_code,
+            response_data=error_data,
+            is_unavailable=True,
+        )
+
     def _handle_api_response(self, response: requests.Response, endpoint: str) -> dict[str, Any]:
         if HTTP_OK <= response.status_code < HTTP_MULTIPLE_CHOICES:
             try:
                 return cast(dict[str, Any], response.json())
             except ValueError:
                 return {"success": True}
+
+        self._raise_if_signature_rejected(response, endpoint)
 
         try:
             error_data = response.json()
@@ -387,7 +416,7 @@ class PlatformAPIClient:
             is_rate_limited=response.status_code == HTTPStatus.TOO_MANY_REQUESTS,
         )
 
-    def _make_request(  # noqa: C901, PLR0912, PLR0913, PLR0915
+    def _make_request(  # noqa: C901, PLR0913
         self,
         method: str,
         endpoint: str,
@@ -409,15 +438,10 @@ class PlatformAPIClient:
         retry_statuses = retry_on_status or ({503} if auto_retry else set())
         if auto_retry and max_retries == 0:
             max_retries = self.max_read_retry_attempts
-        use_legacy_canonical = False
-        legacy_retry_attempted = False
 
         try:
             for attempt in range(max_retries + 1):
-                if use_legacy_canonical:
-                    headers = self._prepare_legacy_request_headers(method, url, params, body_bytes, body_ts)
-                else:
-                    headers = self._prepare_request_headers(method, url, params, body_bytes, body_ts)
+                headers = self._prepare_request_headers(method, url, params, body_bytes, body_ts)
                 self._thread_local.last_request_headers = dict(headers)
 
                 response = portal_request(
@@ -456,21 +480,8 @@ class PlatformAPIClient:
                     time.sleep(backoff)
                     continue
 
-                if (
-                    not legacy_retry_attempted
-                    and response.status_code == HTTPStatus.UNAUTHORIZED
-                    and urllib.parse.urlsplit(url).scheme.lower() == "https"
-                    and not use_legacy_canonical
-                ):
-                    try:
-                        error_data = response.json()
-                    except ValueError:
-                        error_data = {}
-                    error_text = str(error_data.get("error", "")).lower()
-                    if "hmac" in error_text:
-                        use_legacy_canonical = True
-                        legacy_retry_attempted = True
-                        continue
+                # Before the login branches below, which read any 401 as a credential answer.
+                self._raise_if_signature_rejected(response, endpoint)
 
                 # Authentication endpoint: 429 is a throttle, not an auth failure — raise it.
                 if endpoint == "/users/login/" and response.status_code == HTTP_TOO_MANY_REQUESTS:
@@ -517,11 +528,16 @@ class PlatformAPIClient:
             logger.error(f"🔥 [API Client] Request error: {e}")
             raise PlatformAPIError(f"Request failed: {e!s}") from e
 
+        # Unreachable: the loop's only `continue` requires `attempt < max_retries`, so the last
+        # iteration always returns or raises. Kept so a future edit to the loop fails loudly
+        # instead of returning None to callers that expect a dict.
         raise PlatformAPIError("Request failed: no response after retries", is_unavailable=True)
 
     def _handle_binary_response(self, response: requests.Response, endpoint: str) -> bytes:
         if HTTP_OK <= response.status_code < HTTP_MULTIPLE_CHOICES:
             return response.content
+
+        self._raise_if_signature_rejected(response, endpoint)
 
         try:
             error_data = response.json()
@@ -665,7 +681,7 @@ class PlatformAPIClient:
             # reported bug surviving for one status code. Inverting it is the right shape: only an
             # actual credential rejection may become None, and everything else is a failure to ASK
             # rather than an answer. A `status_code` of None (transport failure) also raises.
-            if e.is_rate_limited or e.status_code not in {400, 401, 403}:
+            if e.is_rate_limited or e.is_unavailable or e.status_code not in {400, 401, 403}:
                 raise  # Throttles and outages are the caller's to report, not a wrong password
             logger.warning(f"⚠️ [API Client] Customer authentication failed for {email}: {e}")
             return None

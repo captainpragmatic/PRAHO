@@ -19,6 +19,7 @@ from typing import Any, Dict
 import requests
 from django.test import SimpleTestCase, override_settings
 
+from apps.api_client import services as api_services
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 
 
@@ -93,8 +94,8 @@ class CrossServiceHMACIntegrationTestCase(SimpleTestCase):
         PORTAL_ID="portal-integration-test",
         PLATFORM_API_BASE_URL="http://localhost:8000"
     )
-    def test_platform_hmac_rejection_with_wrong_secret(self):
-        """🔐 Test Platform properly rejects Portal requests with wrong HMAC secret"""
+    def test_platform_rejecting_a_wrong_secret_surfaces_as_an_outage(self):
+        """🔐 A Portal with the wrong secret reports an outage, not a wrong password"""
         # Create client with wrong secret
         with patch('django.conf.settings.PLATFORM_API_SECRET', 'wrong-secret-key'):
             client = PlatformAPIClient()
@@ -109,10 +110,12 @@ class CrossServiceHMACIntegrationTestCase(SimpleTestCase):
             mock_request.return_value = mock_response
 
             # Attempt authentication with wrong secret
-            result = client.authenticate_customer('test@example.com', 'password123')
+            with self.assertRaises(PlatformAPIError) as raised:
+                client.authenticate_customer('test@example.com', 'password123')
 
-            # Should fail authentication
-            self.assertIsNone(result)
+            # Every customer would otherwise be told their password is wrong
+            self.assertTrue(raised.exception.is_unavailable)
+            self.assertEqual(raised.exception.status_code, 401)
 
             # Verify request was made (but rejected by Platform)
             mock_request.assert_called_once()
@@ -440,21 +443,27 @@ class CrossServiceHMACFailureRecoveryTestCase(SimpleTestCase):
         PLATFORM_API_SECRET="failure-recovery-hmac-test-key",
         PORTAL_ID="portal-failure-recovery-test"
     )
-    def test_hmac_graceful_degradation_on_persistent_failures(self):
-        """🔐 Test Portal graceful degradation when Platform HMAC consistently fails"""
+    def test_persistent_signature_rejection_degrades_to_an_outage(self):
+        """🔐 Platform refusing every signature is an outage: each login says so, one critical log"""
         client = PlatformAPIClient()
+        api_services._signature_rejection_log_gate.last_logged_at = None
 
-        with patch('apps.common.outbound_http._session.request') as mock_request:
-            # All requests return 401 (HMAC authentication failed)
+        with (
+            patch('apps.common.outbound_http._session.request') as mock_request,
+            self.assertLogs('apps.api_client.services', level='CRITICAL') as logs,
+        ):
+            # All requests return Platform's uniform HMAC rejection
             mock_response = Mock()
             mock_response.status_code = 401
             mock_response.json.return_value = {'error': 'HMAC authentication failed'}
             mock_request.return_value = mock_response
 
-            # Multiple authentication attempts should all fail gracefully
             for i in range(5):
-                result = client.authenticate_customer(f'user{i}@example.com', 'password123')
-                self.assertIsNone(result, f"Authentication attempt {i+1} should fail gracefully")
+                with self.assertRaises(PlatformAPIError) as raised:
+                    client.authenticate_customer(f'user{i}@example.com', 'password123')
+                self.assertTrue(raised.exception.is_unavailable, f"attempt {i + 1} must read as an outage")
+
+        self.assertEqual(len(logs.records), 1)  # rate-limited, not one per customer
 
     def test_hmac_nonce_cache_cleanup_on_restart(self):
         """🔐 Test nonce cache cleanup doesn't break HMAC authentication"""

@@ -170,20 +170,28 @@ class HMACAuthenticationTestCase(unittest.TestCase):
         self.assertEqual(result['customer_id'], 123)
 
     @patch('apps.common.outbound_http._session.request')
-    def test_authentication_failure_401_response(self, mock_request):
-        """Test handling of 401 authentication failure from platform"""
-        # Mock 401 response (invalid HMAC)
+    def test_platform_refusing_the_signature_is_an_outage_not_bad_credentials(self, mock_request):
+        """Platform's HMAC rejection must not read as a wrong password."""
         mock_response = Mock()
         mock_response.status_code = 401
-        mock_response.json.return_value = {
-            'error': 'HMAC authentication failed: HMAC signature verification failed'
-        }
+        mock_response.json.return_value = {'error': 'HMAC authentication failed'}  # Platform's exact body
         mock_request.return_value = mock_response
 
-        # This should return None for authentication failure
-        result = self.client.authenticate_customer('test@example.com', 'wrongpassword')
+        with self.assertRaises(PlatformAPIError) as raised:
+            self.client.authenticate_customer('test@example.com', 'correct-password')
 
-        self.assertIsNone(result)
+        self.assertTrue(raised.exception.is_unavailable)
+        self.assertEqual(raised.exception.status_code, 401)
+
+    @patch('apps.common.outbound_http._session.request')
+    def test_wrong_password_401_returns_none(self, mock_request):
+        """A credential rejection is still an answer: invalid credentials."""
+        mock_response = Mock()
+        mock_response.status_code = 401
+        mock_response.json.return_value = {'success': False, 'error': 'Invalid email or password'}
+        mock_request.return_value = mock_response
+
+        self.assertIsNone(self.client.authenticate_customer('test@example.com', 'wrongpassword'))
 
     @patch('apps.common.outbound_http._session.request')
     def test_connection_error_handling(self, mock_request):
