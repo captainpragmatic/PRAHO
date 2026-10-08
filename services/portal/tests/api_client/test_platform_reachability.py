@@ -46,17 +46,24 @@ class PlatformReachabilityTests(SimpleTestCase):
             self.assertFalse(raised.exception.is_unavailable)
             self.assertFalse(raised.exception.is_degraded)
 
-    def test_exhausted_hmac_fallback_without_a_response_is_unavailable(self) -> None:
-        response = requests.Response()
-        response.status_code = 401
-        response._content = b'{"error": "HMAC validation failed"}'
-        response.headers["Content-Type"] = "application/json"
-        with (
-            patch("apps.common.outbound_http._session.request", return_value=response),
-            self.assertRaises(PlatformAPIError) as raised,
+    def test_only_platforms_exact_hmac_rejection_is_unavailable(self) -> None:
+        # One request, one answer: there is no re-signing fallback any more.
+        for body, unavailable in (
+            (b'{"error": "HMAC authentication failed"}', True),
+            (b'{"error": "HMAC validation failed"}', False),
         ):
-            PlatformAPIClient()._make_request("POST", "/test/", max_retries=0)
-        self.assertTrue(raised.exception.is_unavailable)
-        self.assertTrue(raised.exception.is_degraded)
-        self.assertFalse(raised.exception.is_maintenance)
-        self.assertEqual(str(raised.exception), "Request failed: no response after retries")
+            response = requests.Response()
+            response.status_code = 401
+            response._content = body
+            response.headers["Content-Type"] = "application/json"
+            with (
+                self.subTest(body=body),
+                patch("apps.common.outbound_http._session.request", return_value=response) as transport,
+                self.assertRaises(PlatformAPIError) as raised,
+            ):
+                PlatformAPIClient()._make_request("POST", "/test/", max_retries=0)
+            self.assertEqual(transport.call_count, 1)
+            self.assertEqual(raised.exception.status_code, 401)
+            self.assertEqual(raised.exception.is_unavailable, unavailable)
+            self.assertEqual(raised.exception.is_degraded, unavailable)
+            self.assertFalse(raised.exception.is_maintenance)

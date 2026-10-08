@@ -9,10 +9,17 @@ PRAHO Platform API supports multiple authentication methods for different use ca
 - Method: HMAC-SHA256 over a canonical string; identity and context in a signed JSON body
 - Required headers: `X-Portal-Id`, `X-Nonce`, `X-Timestamp`, `X-Body-Hash`, `X-Signature`
 
-Canonical string (each on its own line):
+Canonical string (each on its own line, joined with `\n`). This is the only format Platform
+accepts; there is no other or "legacy" format:
 
 1) METHOD (uppercased)
-2) PATH?QUERY with query params percent-encoded and sorted by key, then value
+2) PATH?QUERY exactly as Platform computes it from `request.get_full_path()`: the path in its
+   percent-escaped form (a space is signed as `%20`, `ă` as `%C4%83`, `;` as `%3B`), then the
+   query params percent-encoded and sorted by key, then value. The Portal derives this from the
+   request as it goes on the wire (after `requests` drops `None` params and re-quotes, and urllib3
+   removes dot segments), decoded the way the WSGI server and Django decode it. Signing the URL
+   as written instead is how signatures drift. Values that end up inside a path segment, such as
+   document numbers, must be quoted with `quote_path_segment()`, which refuses `.`, `..` and `/`.
 3) content-type lowercased, no parameters (e.g., application/json)
 4) body-hash as base64(SHA-256(raw body bytes))
 5) X-Portal-Id value
@@ -21,7 +28,8 @@ Canonical string (each on its own line):
 
 Signed JSON body must include:
 - user_id: the acting user identity (required)
-- timestamp: unix timestamp (5-minute freshness window)
+- timestamp: unix timestamp. Platform accepts an `X-Timestamp` at most 300 seconds old and at most
+  2 seconds in the future, so a Portal clock that drifts past either bound is refused.
 - Domain fields (e.g., customer_id, action, etc.)
 
 Notes:
@@ -207,6 +215,15 @@ curl -H "Authorization: Bearer YOUR_TOKEN_HERE" /api/users/token/me/
 
 A 401 with `{"error": "HMAC authentication failed"}` means the route is not one a bare
 token can reach; only the token lifecycle routes are.
+
+From the Portal, that same body is Platform's single answer to every request-authentication
+failure: a signing secret that does not match (the Portal signs with `PORTAL_HMAC_SECRET`, else
+`PLATFORM_API_SECRET`; Platform verifies with `PLATFORM_API_SECRET` or the portal's
+`PORTAL_HMAC_CREDENTIALS` entry), a timestamp outside the window, a replayed nonce, a body or path
+altered in transit, or a fault inside the validator. It never says which. Platform logs the
+reason on a `[HMAC Auth] Authentication failed from <ip>: <reason>` line. The Portal treats the body
+as an outage: customers see the service-unavailable notice (not "invalid password", and no login
+attempt is counted), and the Portal logs one critical line per minute naming the usual causes.
 
 #### **403 Forbidden**
 - User doesn't have access to requested resource

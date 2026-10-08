@@ -13,16 +13,19 @@ These tests ensure HMAC authentication remains secure under concurrent
 load and sophisticated coordinated attacks.
 """
 
+import base64
 import concurrent.futures
 import contextlib
 import hashlib
 import hmac
 import threading
 import time
+import urllib.parse
 from typing import Any
 from unittest.mock import Mock, patch
 
 from django.test import SimpleTestCase, override_settings
+from django.utils.encoding import escape_uri_path
 
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 
@@ -46,101 +49,99 @@ class HMACConcurrentAttackTestCase(SimpleTestCase):
         with self.result_lock:
             self.attack_results.append(result)
 
+    def _is_genuine(self, request: dict[str, Any]) -> bool:
+        """Verify a request the way Platform's middleware does (newline-joined canonical)."""
+        headers = request.get('headers', {})
+        body = request.get('data') or b''
+        if isinstance(body, str):
+            body = body.encode()
+        parsed = urllib.parse.urlsplit(request.get('url', ''))
+        body_hash = base64.b64encode(hashlib.sha256(body).digest()).decode('ascii')
+        canonical = "\n".join(
+            [
+                request.get('method', ''),
+                escape_uri_path(urllib.parse.unquote(parsed.path)),
+                'application/json',
+                body_hash,
+                headers.get('X-Portal-Id', ''),
+                headers.get('X-Nonce', ''),
+                headers.get('X-Timestamp', ''),
+            ]
+        )
+        expected = hmac.new(self.test_secret.encode(), canonical.encode(), hashlib.sha256).hexdigest()
+        return headers.get('X-Body-Hash') == body_hash and hmac.compare_digest(headers.get('X-Signature', ''), expected)
+
     def test_concurrent_brute_force_signature_attack(self):
-        """🔐 Test resistance to concurrent brute force signature attacks"""
-        # Shared, lock-protected attempt counter. The global-state context managers
-        # (override_settings + the _session.request patch) are entered ONCE around the whole
-        # concurrent section below — never per-thread — so no worker's teardown can strip
-        # another worker's patch/settings mid-flight (that was the flake). Per-client
-        # _generate_hmac_headers patching stays inside the worker (instance-scoped, safe).
-        attempts_lock = threading.Lock()
-        attempts_state = {'count': 0}
+        """🔐 Forged signatures are all refused under concurrency; genuine ones still pass.
 
-        def mock_brute_force_validation(*args, **kwargs):
-            with attempts_lock:
-                attempts_state['count'] += 1
+        The fake Platform verifies the same newline-joined canonical the real middleware checks
+        (method, path, content type, body hash, portal id, nonce, timestamp). Attackers sign real
+        requests with the real client and corrupt one hex digit of the result; a control worker
+        does not. Exact counts on both sides keep the test from passing vacuously: a fake that
+        accepted everything, or rejected everything, fails it.
+        """
+        counts_lock = threading.Lock()
+        counts = {'requests': 0, 'accepted': 0, 'rejected': 0}
 
-            headers = kwargs.get('headers', {})
-            signature = headers.get('X-Signature', '')
-
-            # Only the correct-secret signature is accepted; all corrupted ones fail (401).
-            method = kwargs.get('method', 'POST')
-            url = kwargs.get('url', '')
-            path = url.replace('http://localhost:8000', '') if url else '/api/test/'
-            body = kwargs.get('data', b'{}')
-            if isinstance(body, str):
-                body = body.encode()
-
-            portal_id = headers.get('X-Portal-Id', '')
-            nonce = headers.get('X-Nonce', '')
-            timestamp = headers.get('X-Timestamp', '')
-            canonical = f"{method}|{path}|{body.decode()}|{portal_id}|{nonce}|{timestamp}"
-            expected_signature = hmac.new(
-                self.test_secret.encode(), canonical.encode(), hashlib.sha256
-            ).hexdigest()
-
+        def verifying_platform(*args, **kwargs):
+            genuine = self._is_genuine(kwargs)
+            with counts_lock:
+                counts['requests'] += 1
+                counts['accepted' if genuine else 'rejected'] += 1
             mock_response = Mock()
-            if signature == expected_signature:
+            if genuine:
                 mock_response.status_code = 200
-                mock_response.json.return_value = {'success': True, 'authenticated': True}
+                mock_response.json.return_value = {'success': True, 'user': {'id': 7, 'customer_id': 3}}
             else:
-                # Always 401: this test asserts nothing about rate limiting, and a 429 on
-                # /users/login/ would raise PlatformAPIError through the (unguarded) worker.
                 mock_response.status_code = 401
                 mock_response.json.return_value = {'error': 'HMAC authentication failed'}
             return mock_response
 
-        def brute_force_worker(worker_id: int, signature_prefix: str) -> dict[str, Any]:
-            """Worker thread for brute force attack (own client; global patch already active)."""
+        def worker(worker_id: int, corrupt_at: int | None) -> dict[str, int]:
             client = PlatformAPIClient()
-            successful_auths = 0
-            for _i in range(10):
-                # Per-client header patch (instance-scoped — not a shared-global race).
-                with patch.object(client, '_generate_hmac_headers') as mock_headers:
-                    headers = client._generate_hmac_headers('POST', '/api/test/', b'{}')
-                    headers['X-Signature'] = signature_prefix + headers['X-Signature'][len(signature_prefix):]
-                    mock_headers.return_value = headers
+            sign = client._generate_hmac_headers
 
-                    result = client.authenticate_customer(f'attacker{worker_id}@example.com', 'password123')
-                    if result:
-                        successful_auths += 1
+            def forged(*args: Any, **kwargs: Any) -> dict[str, str]:
+                headers = sign(*args, **kwargs)
+                if corrupt_at is not None:
+                    signature = headers['X-Signature']
+                    flipped = format(int(signature[corrupt_at], 16) ^ 0x1, 'x')
+                    headers['X-Signature'] = signature[:corrupt_at] + flipped + signature[corrupt_at + 1:]
+                return headers
 
-            return {
-                'worker_id': worker_id,
-                'successful_auths': successful_auths,
-                'signature_prefix': signature_prefix,
-            }
+            outcome = {'authenticated': 0, 'refused': 0}
+            with patch.object(client, '_generate_hmac_headers', side_effect=forged):
+                for _i in range(10):
+                    try:
+                        result = client.authenticate_customer(f'attacker{worker_id}@example.com', 'password123')
+                    except PlatformAPIError as error:
+                        # Platform's signature refusal is an outage to the Portal, never a login.
+                        self.assertTrue(error.is_unavailable)
+                        outcome['refused'] += 1
+                    else:
+                        self.assertIsNotNone(result)
+                        outcome['authenticated'] += 1
+            return outcome
 
-        signature_prefixes = ['aaaa', 'bbbb', 'cccc', 'dddd', 'eeee']
-
-        # Global-state managers entered ONCE (reverse-order exit joins the executor BEFORE the
-        # patch/settings are restored); new=fn (not side_effect=) avoids a MagicMock whose call
-        # history would itself be mutated by every thread.
+        attackers = {0: 0, 1: 17, 2: 31, 3: 48, 4: 63}  # worker -> hex position corrupted
         with (
             override_settings(
                 PLATFORM_API_SECRET=self.test_secret,
                 PORTAL_ID=self.portal_id,
-                PLATFORM_API_BASE_URL="http://localhost:8000",
+                PLATFORM_API_BASE_URL="http://localhost:8000/api",
             ),
-            patch('apps.common.outbound_http._session.request', new=mock_brute_force_validation),
-            concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor,
+            patch('apps.common.outbound_http._session.request', new=verifying_platform),
+            concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor,
         ):
-            futures = [
-                executor.submit(brute_force_worker, i, prefix)
-                for i, prefix in enumerate(signature_prefixes)
-            ]
-            results = [future.result() for future in concurrent.futures.as_completed(futures)]
+            attack = [executor.submit(worker, i, position) for i, position in attackers.items()]
+            control = executor.submit(worker, 99, None)
+            attack_results = [future.result() for future in attack]
+            control_result = control.result()
 
-        # Read the shared counter after all workers have joined (lock-free, deterministic).
-        total_attempts = attempts_state['count']
-        total_successes = sum(r['successful_auths'] for r in results)
-
-        # No brute force attempts should succeed
-        self.assertEqual(total_successes, 0,
-                        f"Brute force attack succeeded {total_successes}/{total_attempts} times")
-
-        # Should have attempted reasonable number of brute force tries (5 workers x 10 iterations)
-        self.assertGreaterEqual(total_attempts, 45, "Should have attempted multiple brute force tries")
+        self.assertEqual(sum(r['authenticated'] for r in attack_results), 0)
+        self.assertEqual(sum(r['refused'] for r in attack_results), 50)
+        self.assertEqual(control_result, {'authenticated': 10, 'refused': 0})
+        self.assertEqual(counts, {'requests': 60, 'accepted': 10, 'rejected': 50})
 
     def test_nonce_exhaustion_attack(self):
         """🔐 Test resistance to nonce exhaustion attacks"""

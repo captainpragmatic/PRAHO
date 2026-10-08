@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- A portal on its own host could not log anyone in. With an HTTPS platform URL and `DEBUG` off (the
+  `docker-compose.portal-only.yml` setup), the portal signed every platform request in a
+  pipe-separated format that no platform release has ever accepted, so the platform refused them all.
+  Login reported "invalid email or password" and spent one of the customer's attempts, other pages
+  showed the outage notice, and downloads failed. The portal now signs one way, the way the
+  platform verifies, and a cross-service test replays the real portal's requests through the real
+  platform check. Same-host deployments that reach the platform over internal `http://` were not
+  affected.
+- Invoice and proforma links whose number needs URL encoding (a space, a Romanian diacritic, `;`)
+  were refused on every deployment, because the portal signed the path as written while the platform
+  checks its escaped form. The portal now signs the request exactly as it goes on the wire. A query
+  parameter with no value is also no longer signed, since it is never sent. Document numbers are
+  quoted as a single path segment, so a number such as `x%2Fpdf` can no longer reach a different
+  platform route, and `.`, `..` or a `/` are refused as not found.
+- When the platform refuses the portal's request authentication (a secret mismatch, clock drift past
+  300 seconds behind or 2 seconds ahead, a body altered in transit), customers now see the
+  service-unavailable notice instead of "invalid email or password", login attempts are not counted
+  against them, and the portal logs a critical line (at most once a minute) pointing at the
+  platform's `[HMAC Auth] Authentication failed` log line for the exact reason. The same applies to
+  the re-authentication step on the backup-codes and disable-2FA pages, which counted an outage as a
+  wrong password (five tries locked the customer out for 15 minutes), and a service-request form now
+  keeps what the customer typed during such an outage.
+  **Known limitation:** on a split host, card payments still fail, because the portal's payment
+  endpoints sit outside `/api/` and the platform's Caddy configuration does not publish them. A
+  follow-up change moves them.
+
 - A separate portal host no longer has to hold the platform's secrets. `deploy.sh portal-only`
   accepted a full `.env.prod`, so a portal host stored the platform's database password, encryption
   keys, payment and mail credentials and its Django secret key, even though its containers never used

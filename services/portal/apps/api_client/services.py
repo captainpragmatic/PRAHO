@@ -34,6 +34,8 @@ from typing import Any, cast
 import requests
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
+from django.utils.encoding import escape_uri_path, repercent_broken_unicode
+from urllib3.util import parse_url
 
 from apps.common.outbound_http import OutboundSecurityError, portal_request
 from apps.common.retry_after import coerce_retry_after_seconds
@@ -44,6 +46,56 @@ HTTP_MULTIPLE_CHOICES = 300
 HTTP_TOO_MANY_REQUESTS = 429
 
 logger = logging.getLogger(__name__)
+
+# Platform's one answer to every request-authentication failure (`PortalServiceHMACMiddleware`):
+# a wrong signature, a stale or future timestamp, a replayed nonce, an altered body or a fault in
+# its own validator. It never says which, so the Portal cannot either - it can only say where the
+# reason is logged. Pinned against the real middleware by tests/integration/test_cross_service_parity.py.
+PLATFORM_SIGNATURE_REJECTED = "HMAC authentication failed"
+SIGNATURE_REJECTION_LOG_INTERVAL_SECONDS = 60.0
+# Platform's accepted clock window (`HMAC_TIMESTAMP_WINDOW_SECONDS` / `HMAC_NTP_SKEW_SECONDS` in its
+# middleware), quoted in the log so an operator can rule skew in or out. Pinned by the parity test.
+PLATFORM_MAX_CLOCK_BEHIND_SECONDS = 300
+PLATFORM_MAX_CLOCK_AHEAD_SECONDS = 2
+# Platform's `HMAC_MAX_BODY_BYTES`: a bigger body gets the same uniform 401 as a forged one, so it
+# is refused here instead of reaching Platform and reading as a signing outage. Parity-tested.
+PLATFORM_MAX_BODY_BYTES = 10 * 1024 * 1024
+
+
+class _SignatureRejectionLogGate:
+    """One critical log per window per process: every request fails the same way during an outage."""
+
+    def __init__(self) -> None:
+        self.last_logged_at: float | None = None
+        self._lock = threading.Lock()
+
+    def should_log(self) -> bool:
+        with self._lock:
+            now = time.monotonic()
+            if self.last_logged_at is not None and now - self.last_logged_at < SIGNATURE_REJECTION_LOG_INTERVAL_SECONDS:
+                return False
+            self.last_logged_at = now
+            return True
+
+
+_signature_rejection_log_gate = _SignatureRejectionLogGate()
+
+
+def quote_path_segment(value: object) -> str:
+    """Quote a caller-supplied value as exactly one path segment of a Platform URL.
+
+    Invoice, proforma and ticket numbers come from the customer's URL. Unquoted, `x%2Fpdf`
+    reaches Platform as `x/pdf` (another route) and `..` is removed by urllib3, so the request
+    lands on a different endpoint than the one the code named. Every character outside the
+    unreserved set is escaped. A value that cannot survive as one segment is refused rather
+    than escaped: `requests` turns `%2E` back into `.`, and Django decodes `%2F` to `/` before
+    routing, so no spelling of `..` or `a/b` keeps its meaning on Platform.
+    """
+    text = str(value)
+    if text in {"", ".", ".."} or "/" in text:
+        raise ValueError(f"Not a single path segment: {text!r}")
+    return urllib.parse.quote(text, safe="")
+
 
 HMAC_TIMING_THRESHOLD = 0.002
 
@@ -104,7 +156,8 @@ class PlatformAPIError(Exception):
         # outage from either, so a maintenance window rendered as "you have nothing yet".
         #
         # Two flags rather than one, because the customer messages are not interchangeable.
-        # `is_unavailable` is "the platform is not answering right now" and covers 502/503/504 - all
+        # `is_unavailable` is "the platform is not answering right now" and covers 502/503/504 (and,
+        # set explicitly, Platform refusing the portal's request authentication: a 401) - all
         # three must be surfaced rather than rendered as an empty list, and the first version of this
         # change covered only 503.
         self.is_unavailable = bool(
@@ -185,7 +238,8 @@ class PlatformAPIClient:
         # Normalize content type (lowercase, no parameters)
         content_type = "application/json"
 
-        # Normalize path+query to match platform canonicalization
+        # `path` is already Platform's spelling (see `_normalized_path_with_query`); only the
+        # query order is normalised here, which is idempotent for that input.
         parsed = urllib.parse.urlsplit(path)
         query_pairs = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
         query_pairs.sort(key=lambda kv: (kv[0], kv[1]))
@@ -230,6 +284,13 @@ class PlatformAPIClient:
         logger.debug(f"🔍 [API Client] Building URL: base='{self.base_url}' endpoint='{endpoint}' -> '{built_url}'")
         return built_url
 
+    def _refuse_oversized_body(self, body: bytes, endpoint: str) -> None:
+        if len(body) > PLATFORM_MAX_BODY_BYTES:
+            raise PlatformAPIError(
+                f"Request to {endpoint!r} is {len(body)} bytes; Platform accepts at most {PLATFORM_MAX_BODY_BYTES}",
+                status_code=HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+            )
+
     def _prepare_json_body(self, data: dict[str, Any] | None, user_id: int | None) -> tuple[bytes, dict[str, Any]]:
         payload: dict[str, Any] = {} if data is None else dict(data)
         if user_id is not None and "user_id" not in payload:
@@ -246,68 +307,30 @@ class PlatformAPIClient:
         return body_bytes, serialized_payload
 
     def _normalized_path_with_query(self, url: str, params: dict[str, Any] | None) -> str:
-        parsed_url = urllib.parse.urlsplit(url)
-        pairs = urllib.parse.parse_qsl(parsed_url.query, keep_blank_values=True)
-        if params:
-            for k, v in params.items():
-                if isinstance(v, list | tuple):
-                    for item in v:
-                        pairs.append((str(k), str(item)))
-                else:
-                    pairs.append((str(k), str(v)))
+        """The path and query Platform will verify, derived from what actually goes on the wire.
+
+        Platform signs `request.get_full_path()`. Signing the URL as written drifts from that
+        whenever the HTTP stack rewrites it: `requests` drops None-valued params and re-quotes a
+        malformed `%`, urllib3 removes `.`/`..` segments, and Django re-percents invalid UTF-8.
+        So the request is prepared exactly as `portal_request` will send it, the target is taken
+        as urllib3 encodes it, and the path is decoded the way the WSGI server and Django do.
+        """
+        prepared = requests.Request("GET", url, params=params).prepare()
+        path_url = prepared.path_url or "/"
+        if path_url.startswith("//"):  # as HTTPAdapter.request_url does, "don't confuse urllib3"
+            path_url = f"/{path_url.lstrip('/')}"
+        target = urllib.parse.urlsplit(parse_url(path_url).url)
+        decoded_path = repercent_broken_unicode(urllib.parse.unquote_to_bytes(target.path or "/")).decode()
+        pairs = urllib.parse.parse_qsl(target.query, keep_blank_values=True)
         pairs.sort(key=lambda kv: (kv[0], kv[1]))
         normalized_query = urllib.parse.urlencode(pairs, doseq=True)
-        return parsed_url.path + ("?" + normalized_query if normalized_query else "")
-
-    def _should_use_legacy_canonical(self, url: str) -> bool:
-        """
-        Use legacy canonical format in production HTTPS mode for backward compatibility
-        with older Platform signature validators.
-        """
-        return urllib.parse.urlsplit(url).scheme.lower() == "https" and not settings.DEBUG
+        return escape_uri_path(decoded_path) + ("?" + normalized_query if normalized_query else "")
 
     def _prepare_request_headers(
         self, method: str, url: str, params: dict[str, Any] | None, body: bytes, body_ts: str | None
     ) -> dict[str, str]:
-        if self._should_use_legacy_canonical(url):
-            return self._prepare_legacy_request_headers(method, url, params, body, body_ts)
-
         path_with_query = self._normalized_path_with_query(url, params)
         return self._generate_hmac_headers(method, path_with_query, body, fixed_timestamp=body_ts)
-
-    def _prepare_legacy_request_headers(
-        self,
-        method: str,
-        url: str,
-        params: dict[str, Any] | None,
-        body: bytes,
-        body_ts: str | None,
-    ) -> dict[str, str]:
-        """
-        Backward-compatible fallback for older platform deployments that still verify
-        the legacy canonical format with pipe separators.
-        """
-        nonce = secrets.token_urlsafe(32)
-        timestamp = body_ts or str(int(time.time()))
-        body_hash = base64.b64encode(hashlib.sha256(body).digest()).decode("ascii")
-        path_with_query = self._normalized_path_with_query(url, params)
-        body_text = body.decode("utf-8")
-        canonical = f"{method}|{path_with_query}|{body_text}|{self.portal_id}|{nonce}|{timestamp}"
-        secret = self.portal_secret or ""
-        signature = hmac.new(
-            secret.encode(),
-            canonical.encode(),
-            hashlib.sha256,
-        ).hexdigest()
-        return {
-            "X-Portal-Id": self.portal_id,
-            "X-Nonce": nonce,
-            "X-Timestamp": timestamp,
-            "X-Body-Hash": body_hash,
-            "X-Signature": signature,
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        }
 
     def _normalize_endpoint(self, endpoint: str) -> str:
         normalized = "/" + endpoint.strip().lstrip("/")
@@ -362,12 +385,50 @@ class PlatformAPIClient:
         chosen_delay = max(retry_after_seconds or 0, jitter)
         return min(chosen_delay, self.max_retry_wait_seconds)
 
+    def _raise_if_signature_rejected(self, response: requests.Response, endpoint: str) -> None:
+        """Raise an outage when Platform refused this request's authentication.
+
+        Exact text only: a credential rejection on the login endpoint is also a 401, and must
+        keep meaning "wrong password". The status is checked first, so a successful binary
+        body is never parsed.
+        """
+        if response.status_code != HTTPStatus.UNAUTHORIZED:
+            return
+        try:
+            error_data = response.json()
+        except ValueError:
+            return
+        if not isinstance(error_data, dict) or error_data.get("error") != PLATFORM_SIGNATURE_REJECTED:
+            return
+        if _signature_rejection_log_gate.should_log():
+            logger.critical(
+                "🔥 [API Client] Platform refused the authentication of a request to %r. Platform's log names the "
+                "reason on its '[HMAC Auth] Authentication failed from <ip>: <reason>' line. Usual causes: "
+                "the portal's signing secret (PORTAL_HMAC_SECRET, else PLATFORM_API_SECRET) does not match what Platform "
+                "verifies for this PORTAL_ID (PLATFORM_API_SECRET, or its PORTAL_HMAC_CREDENTIALS entry); the portal "
+                "clock is more than "
+                "%ss behind or %ss ahead of Platform's; a proxy altered the request body or path. "
+                "Customers see the service-unavailable notice until it is fixed (logged once per %ss).",
+                endpoint,
+                PLATFORM_MAX_CLOCK_BEHIND_SECONDS,
+                PLATFORM_MAX_CLOCK_AHEAD_SECONDS,
+                int(SIGNATURE_REJECTION_LOG_INTERVAL_SECONDS),
+            )
+        raise PlatformAPIError(
+            message="Platform refused the portal's request authentication",
+            status_code=response.status_code,
+            response_data=error_data,
+            is_unavailable=True,
+        )
+
     def _handle_api_response(self, response: requests.Response, endpoint: str) -> dict[str, Any]:
         if HTTP_OK <= response.status_code < HTTP_MULTIPLE_CHOICES:
             try:
                 return cast(dict[str, Any], response.json())
             except ValueError:
                 return {"success": True}
+
+        self._raise_if_signature_rejected(response, endpoint)
 
         try:
             error_data = response.json()
@@ -387,7 +448,7 @@ class PlatformAPIClient:
             is_rate_limited=response.status_code == HTTPStatus.TOO_MANY_REQUESTS,
         )
 
-    def _make_request(  # noqa: C901, PLR0912, PLR0913, PLR0915
+    def _make_request(  # noqa: C901, PLR0913
         self,
         method: str,
         endpoint: str,
@@ -404,20 +465,16 @@ class PlatformAPIClient:
         # Prepare JSON body and headers
         body_bytes, payload = self._prepare_json_body(data, user_id)
         body_ts = str(payload.get("timestamp")) if "timestamp" in payload else None
+        self._refuse_oversized_body(body_bytes, endpoint)
 
         auto_retry = self._is_read_retry_candidate(method, endpoint, idempotent=idempotent)
         retry_statuses = retry_on_status or ({503} if auto_retry else set())
         if auto_retry and max_retries == 0:
             max_retries = self.max_read_retry_attempts
-        use_legacy_canonical = False
-        legacy_retry_attempted = False
 
         try:
             for attempt in range(max_retries + 1):
-                if use_legacy_canonical:
-                    headers = self._prepare_legacy_request_headers(method, url, params, body_bytes, body_ts)
-                else:
-                    headers = self._prepare_request_headers(method, url, params, body_bytes, body_ts)
+                headers = self._prepare_request_headers(method, url, params, body_bytes, body_ts)
                 self._thread_local.last_request_headers = dict(headers)
 
                 response = portal_request(
@@ -456,21 +513,8 @@ class PlatformAPIClient:
                     time.sleep(backoff)
                     continue
 
-                if (
-                    not legacy_retry_attempted
-                    and response.status_code == HTTPStatus.UNAUTHORIZED
-                    and urllib.parse.urlsplit(url).scheme.lower() == "https"
-                    and not use_legacy_canonical
-                ):
-                    try:
-                        error_data = response.json()
-                    except ValueError:
-                        error_data = {}
-                    error_text = str(error_data.get("error", "")).lower()
-                    if "hmac" in error_text:
-                        use_legacy_canonical = True
-                        legacy_retry_attempted = True
-                        continue
+                # Before the login branches below, which read any 401 as a credential answer.
+                self._raise_if_signature_rejected(response, endpoint)
 
                 # Authentication endpoint: 429 is a throttle, not an auth failure — raise it.
                 if endpoint == "/users/login/" and response.status_code == HTTP_TOO_MANY_REQUESTS:
@@ -517,11 +561,16 @@ class PlatformAPIClient:
             logger.error(f"🔥 [API Client] Request error: {e}")
             raise PlatformAPIError(f"Request failed: {e!s}") from e
 
+        # Unreachable: the loop's only `continue` requires `attempt < max_retries`, so the last
+        # iteration always returns or raises. Kept so a future edit to the loop fails loudly
+        # instead of returning None to callers that expect a dict.
         raise PlatformAPIError("Request failed: no response after retries", is_unavailable=True)
 
     def _handle_binary_response(self, response: requests.Response, endpoint: str) -> bytes:
         if HTTP_OK <= response.status_code < HTTP_MULTIPLE_CHOICES:
             return response.content
+
+        self._raise_if_signature_rejected(response, endpoint)
 
         try:
             error_data = response.json()
@@ -549,6 +598,7 @@ class PlatformAPIClient:
         # Prepare body and headers using shared helpers
         body_bytes, payload = self._prepare_json_body(data, user_id=None)
         body_ts = str(payload.get("timestamp")) if "timestamp" in payload else None
+        self._refuse_oversized_body(body_bytes, endpoint)
         headers = self._prepare_request_headers(method, url, params, body_bytes, body_ts)
 
         try:
@@ -585,6 +635,7 @@ class PlatformAPIClient:
 
         body_bytes, payload = self._prepare_json_body(data, user_id=None)
         body_ts = str(payload.get("timestamp")) if "timestamp" in payload else None
+        self._refuse_oversized_body(body_bytes, endpoint)
         headers = self._prepare_request_headers(method, url, params, body_bytes, body_ts)
 
         try:
@@ -665,7 +716,7 @@ class PlatformAPIClient:
             # reported bug surviving for one status code. Inverting it is the right shape: only an
             # actual credential rejection may become None, and everything else is a failure to ASK
             # rather than an answer. A `status_code` of None (transport failure) also raises.
-            if e.is_rate_limited or e.status_code not in {400, 401, 403}:
+            if e.is_rate_limited or e.is_unavailable or e.status_code not in {400, 401, 403}:
                 raise  # Throttles and outages are the caller's to report, not a wrong password
             logger.warning(f"⚠️ [API Client] Customer authentication failed for {email}: {e}")
             return None
@@ -1050,7 +1101,7 @@ class PlatformAPIClient:
             "timestamp": time.time(),
         }
         return self._make_request(
-            "POST", f"/api/billing/invoices/{invoice_number}/", data=request_data, idempotent=True
+            "POST", f"/api/billing/invoices/{quote_path_segment(invoice_number)}/", data=request_data, idempotent=True
         )
 
     def get_proforma_detail_secure(self, customer_id: int, proforma_number: str) -> dict[str, Any]:
@@ -1062,7 +1113,7 @@ class PlatformAPIClient:
             "timestamp": time.time(),
         }
         return self._make_request(
-            "POST", f"/api/billing/proformas/{proforma_number}/", data=request_data, idempotent=True
+            "POST", f"/api/billing/proformas/{quote_path_segment(proforma_number)}/", data=request_data, idempotent=True
         )
 
     # ===============================================================================
@@ -1082,7 +1133,9 @@ class PlatformAPIClient:
             "action": "get_ticket_detail",
             "timestamp": time.time(),
         }
-        return self._make_request("POST", f"/api/tickets/{ticket_number}/", data=request_data, idempotent=True)
+        return self._make_request(
+            "POST", f"/api/tickets/{quote_path_segment(ticket_number)}/", data=request_data, idempotent=True
+        )
 
     def create_ticket_secure(self, customer_id: int, ticket_data: dict[str, Any]) -> dict[str, Any]:
         """🔒 Create ticket - SECURE HMAC BODY"""
@@ -1098,7 +1151,7 @@ class PlatformAPIClient:
             "action": "reply_to_ticket",
             "timestamp": time.time(),
         }
-        return self._make_request("POST", f"/api/tickets/{ticket_number}/reply/", data=request_data)
+        return self._make_request("POST", f"/api/tickets/{quote_path_segment(ticket_number)}/reply/", data=request_data)
 
     # ===============================================================================
     # SECURE SERVICES API ENDPOINTS 📦

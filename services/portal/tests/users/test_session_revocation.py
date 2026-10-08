@@ -100,8 +100,14 @@ class SessionRevocationTests(TransactionTestCase):
                 session_key = request.session.session_key
                 validated_at = request.session["validated_at"]
                 fault = self.transport_response(status_code, {"error": message})
-                with patch("apps.api_client.services.portal_request", return_value=fault):
+                with (
+                    patch("apps.api_client.services.portal_request", return_value=fault),
+                    self.assertLogs("apps.users.middleware", level="ERROR") as logs,
+                ):
                     response = PortalAuthenticationMiddleware(lambda request: HttpResponse("allowed"))(request)
+                # The status and body survive classification, so the 401 still reaches the
+                # authentication-fault branch rather than the generic API-error one.
+                self.assertIn("Platform authentication fault during validation", " ".join(logs.output))
                 self.assertEqual(response.content, b"allowed")
                 self.assertEqual(request.session.session_key, session_key)
                 self.assertEqual(request.session["user_id"], 42)

@@ -6,6 +6,8 @@ stay in sync. These files are duplicated because Portal cannot import
 from Platform (service isolation), but they must remain identical.
 """
 
+import json
+import re
 from pathlib import Path
 from unittest import TestCase
 
@@ -158,3 +160,47 @@ class TestCounterStoreParity(TestCase):
             (PLATFORM_COMMON / relative_path).read_bytes(),
             (PORTAL_COMMON / relative_path).read_bytes(),
         )
+
+
+class TestSignatureRejectionParity(TestCase):
+    """The Portal recognises Platform's HMAC refusal by its exact text, so the two must not drift.
+
+    If Platform rewords the body, the Portal stops seeing an outage and the login page goes back
+    to telling every customer their password is wrong. The Portal also quotes Platform's clock
+    window in its critical log, which must stay true.
+    """
+
+    PORTAL_CLIENT = REPO_ROOT / "services/portal/apps/api_client/services.py"
+
+    def _portal_constant(self, name: str) -> str:
+        match = re.search(rf"^{name} = (.+)$", self.PORTAL_CLIENT.read_text(), flags=re.MULTILINE)
+        self.assertIsNotNone(match, f"{name} not found in {self.PORTAL_CLIENT}")
+        assert match is not None
+        return match.group(1).strip()
+
+    def test_the_portal_marker_is_platforms_rejection_body(self) -> None:
+        from django.http import HttpResponse  # noqa: PLC0415 - Django is configured by pytest-django
+        from django.test import RequestFactory, override_settings  # noqa: PLC0415
+
+        from apps.common.middleware import PortalServiceHMACMiddleware  # noqa: PLC0415
+
+        cache = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache", "LOCATION": "parity"}}
+        with override_settings(RATE_LIMITING_ENABLED=False, CACHES=cache):
+            response = PortalServiceHMACMiddleware(lambda request: HttpResponse("view reached"))(
+                RequestFactory().post("/api/test/", data=b"{}", content_type="application/json")
+            )
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(json.loads(self._portal_constant("PLATFORM_SIGNATURE_REJECTED")), json.loads(response.content)["error"])
+
+    def test_the_portal_quotes_platforms_clock_window(self) -> None:
+        from apps.common.constants import HMAC_NTP_SKEW_SECONDS, HMAC_TIMESTAMP_WINDOW_SECONDS  # noqa: PLC0415
+
+        self.assertEqual(int(self._portal_constant("PLATFORM_MAX_CLOCK_BEHIND_SECONDS")), HMAC_TIMESTAMP_WINDOW_SECONDS)
+        self.assertEqual(int(self._portal_constant("PLATFORM_MAX_CLOCK_AHEAD_SECONDS")), HMAC_NTP_SKEW_SECONDS)
+
+    def test_the_portal_refuses_bodies_above_platforms_limit(self) -> None:
+        from apps.common.constants import HMAC_MAX_BODY_BYTES  # noqa: PLC0415
+
+        expression = self._portal_constant("PLATFORM_MAX_BODY_BYTES")
+        self.assertRegex(expression, r"^[0-9 *]+$")
+        self.assertEqual(eval(expression, {"__builtins__": {}}), HMAC_MAX_BODY_BYTES)  # noqa: S307 - digits and "*" only

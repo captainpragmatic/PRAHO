@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from apps.api_client.services import PlatformAPIClient, PlatformAPIError
+from apps.api_client.services import PlatformAPIClient, PlatformAPIError, quote_path_segment
 
 from .schemas import BillingDocumentPage, Currency, Invoice, Proforma
 from .serializers import (
@@ -188,7 +188,7 @@ class InvoiceViewService:
             # Debug logging reduced after stabilization
             # Call Platform API directly
             response = self.api_client.post(
-                f"/billing/invoices/{invoice_number}/",
+                f"/billing/invoices/{quote_path_segment(invoice_number)}/",
                 data={"customer_id": customer_id, "user_id": user_id, "action": "get_invoice_detail"},
             )
 
@@ -311,7 +311,7 @@ class InvoiceViewService:
         try:
             # Call Platform API directly
             response = self.api_client.post(
-                f"/billing/proformas/{proforma_number}/",
+                f"/billing/proformas/{quote_path_segment(proforma_number)}/",
                 data={"customer_id": customer_id, "user_id": user_id, "action": "get_proforma_detail"},
             )
 
@@ -372,7 +372,7 @@ class InvoiceViewService:
             # Use binary request to get raw PDF data
             pdf_data = self.api_client._make_binary_request(
                 "POST",
-                f"/billing/invoices/{invoice_number}/pdf/",
+                f"/billing/invoices/{quote_path_segment(invoice_number)}/pdf/",
                 data={"customer_id": customer_id, "user_id": user_id},
             )
 
@@ -389,7 +389,7 @@ class InvoiceViewService:
             # Use binary request to get raw PDF data
             pdf_data = self.api_client._make_binary_request(
                 "POST",
-                f"/billing/proformas/{proforma_number}/pdf/",
+                f"/billing/proformas/{quote_path_segment(proforma_number)}/pdf/",
                 data={"customer_id": customer_id, "user_id": user_id},
             )
 
