@@ -327,7 +327,7 @@ document.addEventListener("alpine:init", function () {
         const data = this.$root.dataset;
         this.$dispatch("confirm-dangerous-action", {
           title: data.protectionTitle,
-          message: escapeHtml(data.domain + ": " + data.defaultMessage),
+          message: escapeHtml(data.domain + ": " + data.protectionMessage),
           confirmText: data.defaultConfirmText,
           action: function () {
             htmx.ajax("POST", data.toggleProtectionUrl, {
@@ -342,7 +342,7 @@ document.addEventListener("alpine:init", function () {
         const data = this.$root.dataset;
         this.$dispatch("confirm-dangerous-action", {
           title: data.deleteTitle,
-          message: escapeHtml(data.domain + ": " + data.defaultMessage),
+          message: escapeHtml(data.domain + ": " + data.deleteMessage),
           confirmText: data.defaultConfirmText,
           action: function () {
             htmx.ajax("DELETE", data.deleteUrl, { target: "body" });

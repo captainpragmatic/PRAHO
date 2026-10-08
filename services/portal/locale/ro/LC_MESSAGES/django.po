@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-08 10:05+0300\n"
+"POT-Creation-Date: 2026-10-08 10:38+0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -466,7 +466,7 @@ msgstr "Stocarea contoarelor Portalului este indisponibilă."
 msgid "Run migrate sessions --noinput and migrate common --noinput on the Portal database."
 msgstr "Executați migrate sessions --noinput și migrate common --noinput pe baza de date Portal."
 
-#: apps/common/context_processors.py:46 apps/users/views.py:668
+#: apps/common/context_processors.py:46 apps/users/views.py:679
 #: templates/users/profile.html:5 templates/users/profile.html:9
 msgid "Account Settings"
 msgstr "Setări Cont"
@@ -476,7 +476,7 @@ msgstr "Setări Cont"
 msgid "Security"
 msgstr "Securitate"
 
-#: apps/common/context_processors.py:49 apps/users/views.py:1226
+#: apps/common/context_processors.py:49 apps/users/views.py:1237
 #: templates/components/mobile_header.html:127
 #: templates/users/company_profile.html:5
 #: templates/users/company_profile.html:11
@@ -643,7 +643,7 @@ msgid "Too many cart updates. Please slow down."
 msgstr "Prea multe actualizări ale coșului. Vă rugăm să reduceți ritmul."
 
 #: apps/common/store_unavailable.py:49 apps/orders/security.py:68
-#: apps/orders/views.py:337 apps/users/views.py:912
+#: apps/orders/views.py:337 apps/users/views.py:923
 msgid "Service temporarily unavailable. Please try again later."
 msgstr "Serviciul este temporar indisponibil. Vă rugăm să încercați din nou mai târziu."
 
@@ -1523,13 +1523,13 @@ msgstr "În curs de revizuire"
 msgid "Loading..."
 msgstr "Se încarcă..."
 
-#: apps/users/forms.py:53 apps/users/forms.py:102 apps/users/forms.py:582
+#: apps/users/forms.py:53 apps/users/forms.py:102 apps/users/forms.py:583
 #: templates/customers/team_invite.html:31 templates/users/profile.html:40
 #: templates/users/profile.html:42
 msgid "Email Address"
 msgstr "Adresa de email"
 
-#: apps/users/forms.py:57 apps/users/forms.py:107 apps/users/forms.py:586
+#: apps/users/forms.py:57 apps/users/forms.py:107 apps/users/forms.py:587
 #: templates/users/login.html:48
 msgid "your@company.com"
 msgstr "your@company.com"
@@ -1542,11 +1542,11 @@ msgstr "Parolă"
 msgid "Your password"
 msgstr "Parola dvs."
 
-#: apps/users/forms.py:75 apps/users/forms.py:629
+#: apps/users/forms.py:75 apps/users/forms.py:630
 msgid "Authenticator or recovery code"
 msgstr "Cod de autentificare sau cod de recuperare"
 
-#: apps/users/forms.py:78 apps/users/forms.py:632
+#: apps/users/forms.py:78 apps/users/forms.py:633
 msgid "Required only when two-factor authentication is enabled."
 msgstr "Necesar doar atunci când autentificarea cu doi factori este activată."
 
@@ -1558,7 +1558,7 @@ msgstr "Păstrați-mă conectat timp de 30 de zile"
 msgid "This will be used for authentication and billing notifications."
 msgstr "Aceasta va fi folosită pentru autentificare și notificări de facturare."
 
-#: apps/users/forms.py:113 apps/users/forms.py:447
+#: apps/users/forms.py:113 apps/users/forms.py:448
 #: templates/customers/team_invite.html:37
 msgid "First Name"
 msgstr "Prenume"
@@ -1567,7 +1567,7 @@ msgstr "Prenume"
 msgid "Ion"
 msgstr "Ion"
 
-#: apps/users/forms.py:124 apps/users/forms.py:457
+#: apps/users/forms.py:124 apps/users/forms.py:458
 #: templates/customers/team_invite.html:43
 msgid "Last Name"
 msgstr "Nume"
@@ -1576,7 +1576,7 @@ msgstr "Nume"
 msgid "Popescu"
 msgstr "Popescu"
 
-#: apps/users/forms.py:135 apps/users/forms.py:467
+#: apps/users/forms.py:135 apps/users/forms.py:468
 msgid "Phone Number"
 msgstr "Număr de telefon"
 
@@ -1665,7 +1665,7 @@ msgstr "Adresa de stradă a companiei dumneavoastră."
 msgid "Str. Example Nr. 123"
 msgstr "Str. Example Nr. 123"
 
-#: apps/users/forms.py:248 apps/users/forms.py:861
+#: apps/users/forms.py:248 apps/users/forms.py:862
 #: templates/customers/address_form.html:61
 #: templates/users/company_profile.html:109
 msgid "City"
@@ -1681,13 +1681,13 @@ msgstr "București"
 msgid "County"
 msgstr "Județ"
 
-#: apps/users/forms.py:270 apps/users/forms.py:886
+#: apps/users/forms.py:270 apps/users/forms.py:887
 #: templates/customers/address_form.html:73
 #: templates/users/company_profile.html:133
 msgid "Postal Code"
 msgstr "Cod poștal"
 
-#: apps/users/forms.py:280 apps/users/forms.py:899
+#: apps/users/forms.py:280 apps/users/forms.py:900
 #: templates/customers/address_form.html:77
 #: templates/users/company_profile.html:145
 msgid "Country"
@@ -1721,11 +1721,11 @@ msgstr "Obligatoriu: Acordul cu termenii serviciului."
 msgid "The two password fields didn't match."
 msgstr "Cele două câmpuri de parolă nu se potrivesc."
 
-#: apps/users/forms.py:326 apps/users/forms.py:620 apps/users/forms.py:684
+#: apps/users/forms.py:326 apps/users/forms.py:621 apps/users/forms.py:685
 msgid "Password must be at least 12 characters long."
 msgstr "Parola trebuie să conțină cel puțin 12 caractere."
 
-#: apps/users/forms.py:335 apps/users/forms.py:521 apps/users/forms.py:785
+#: apps/users/forms.py:335 apps/users/forms.py:522 apps/users/forms.py:786
 msgid "Invalid phone number format. Use Romanian format: +40.XX.XXX.XXXX"
 msgstr "Format de număr de telefon invalid. Utilizați formatul românesc: +40.XX.XXX.XXXX"
 
@@ -1745,320 +1745,320 @@ msgstr "Format CNP invalid."
 msgid "CNP is required for individuals."
 msgstr "CNP este obligatoriu pentru persoane fizice."
 
-#: apps/users/forms.py:478
+#: apps/users/forms.py:479
 msgid "Preferred Language"
 msgstr "Limba Preferată"
 
-#: apps/users/forms.py:483
+#: apps/users/forms.py:484
 msgid "Timezone"
 msgstr "Fus orar"
 
-#: apps/users/forms.py:488
+#: apps/users/forms.py:489
 msgid "Date format"
 msgstr "Format dată"
 
-#: apps/users/forms.py:494
+#: apps/users/forms.py:495
 msgid "Email notifications"
 msgstr "Notificări prin email"
 
-#: apps/users/forms.py:502
+#: apps/users/forms.py:503
 msgid "SMS notifications"
 msgstr "Notificări SMS"
 
-#: apps/users/forms.py:510
+#: apps/users/forms.py:511
 msgid "Marketing emails"
 msgstr "Emailuri de marketing"
 
-#: apps/users/forms.py:529
+#: apps/users/forms.py:530
 msgid "Verification Code"
 msgstr "Cod de verificare"
 
-#: apps/users/forms.py:541
+#: apps/users/forms.py:542
 msgid "Enter the code from the authenticator app"
 msgstr "Introduceți codul din aplicația autentificator"
 
-#: apps/users/forms.py:547 apps/users/forms.py:574
+#: apps/users/forms.py:548 apps/users/forms.py:575
 msgid "The code must contain only digits."
 msgstr "Codul trebuie să conțină doar cifre."
 
-#: apps/users/forms.py:555
+#: apps/users/forms.py:556
 msgid "2FA Code"
 msgstr "Cod 2FA"
 
-#: apps/users/forms.py:568
+#: apps/users/forms.py:569
 msgid "Enter the code from the authenticator app or backup code"
 msgstr "Introduceți codul din aplicația autentificator sau codul de rezervă"
 
-#: apps/users/forms.py:590
+#: apps/users/forms.py:591
 msgid "Enter the email associated with your account."
 msgstr "Introduceți emailul asociat contului dumneavoastră."
 
-#: apps/users/forms.py:598 apps/users/forms.py:650
+#: apps/users/forms.py:599 apps/users/forms.py:651
 msgid "New Password"
 msgstr "Parolă nouă"
 
-#: apps/users/forms.py:601 apps/users/forms.py:659
+#: apps/users/forms.py:602 apps/users/forms.py:660
 msgid "Choose a strong password with at least 12 characters."
 msgstr "Alegeți o parolă puternică cu cel puțin 12 caractere."
 
-#: apps/users/forms.py:604 apps/users/forms.py:663
+#: apps/users/forms.py:605 apps/users/forms.py:664
 msgid "Confirm New Password"
 msgstr "Confirmați Parola Nouă"
 
-#: apps/users/forms.py:607 apps/users/forms.py:672
+#: apps/users/forms.py:608 apps/users/forms.py:673
 msgid "Re-enter your new password to confirm."
 msgstr "Reintroduceți parola nouă pentru a confirma."
 
-#: apps/users/forms.py:616 apps/users/forms.py:681
+#: apps/users/forms.py:617 apps/users/forms.py:682
 msgid "New password and confirmation don't match."
 msgstr "Parola nouă și confirmarea nu se potrivesc."
 
-#: apps/users/forms.py:637
+#: apps/users/forms.py:638
 msgid "Current Password"
 msgstr "Parola Actuală"
 
-#: apps/users/forms.py:642
+#: apps/users/forms.py:643
 msgid "Enter your current password"
 msgstr "Introduceți parola actuală"
 
-#: apps/users/forms.py:646
+#: apps/users/forms.py:647
 msgid "Enter your current password to verify identity."
 msgstr "Introduceți parola dvs. actuală pentru a verifica identitatea."
 
-#: apps/users/forms.py:655
+#: apps/users/forms.py:656
 msgid "Enter your new password"
 msgstr "Introduceți parola nouă"
 
-#: apps/users/forms.py:668
+#: apps/users/forms.py:669
 msgid "Confirm your new password"
 msgstr "Confirmați parola nouă"
 
-#: apps/users/forms.py:696 apps/users/forms.py:797
+#: apps/users/forms.py:697 apps/users/forms.py:798
 #: templates/users/company_profile.html:41
 msgid "Company Name"
 msgstr "Denumirea companiei"
 
-#: apps/users/forms.py:701
+#: apps/users/forms.py:702
 msgid "e.g. Test Company SRL"
 msgstr "de ex. Test Company SRL"
 
-#: apps/users/forms.py:704
+#: apps/users/forms.py:705
 msgid "Official company name as registered"
 msgstr "Denumire oficială a companiei"
 
-#: apps/users/forms.py:713 templates/users/company_profile.html:165
+#: apps/users/forms.py:714 templates/users/company_profile.html:165
 msgid "Primary Email"
 msgstr "Email Principal"
 
-#: apps/users/forms.py:717
+#: apps/users/forms.py:718
 msgid "contact@company.ro"
 msgstr "contact@company.ro"
 
-#: apps/users/forms.py:720 apps/users/forms.py:918
+#: apps/users/forms.py:721 apps/users/forms.py:919
 msgid "Main business email address"
 msgstr "Adresa de email principală a companiei"
 
-#: apps/users/forms.py:724 templates/users/company_profile.html:179
+#: apps/users/forms.py:725 templates/users/company_profile.html:179
 msgid "Primary Phone"
 msgstr "Telefon Principal"
 
-#: apps/users/forms.py:730
+#: apps/users/forms.py:731
 msgid "+40.21.123.4567"
 msgstr "+40.21.123.4567"
 
-#: apps/users/forms.py:733
+#: apps/users/forms.py:734
 msgid "Primary business phone number"
 msgstr "Numărul de telefon principal al companiei"
 
-#: apps/users/forms.py:737 templates/users/company_profile.html:193
+#: apps/users/forms.py:738 templates/users/company_profile.html:193
 msgid "Website"
 msgstr "Site Web"
 
-#: apps/users/forms.py:742
+#: apps/users/forms.py:743
 msgid "https://company.ro"
 msgstr "https://company.ro"
 
-#: apps/users/forms.py:745
+#: apps/users/forms.py:746
 msgid "Company website (optional)"
 msgstr "Site-ul web al companiei (opțional)"
 
-#: apps/users/forms.py:749 apps/users/forms.py:835
+#: apps/users/forms.py:750 apps/users/forms.py:836
 #: templates/users/company_profile.html:77
 msgid "Industry"
 msgstr "Sector de activitate"
 
-#: apps/users/forms.py:755
+#: apps/users/forms.py:756
 msgid "Technology, Retail, Manufacturing, etc."
 msgstr "Tehnologie, Comerț, Producție, etc."
 
-#: apps/users/forms.py:758
+#: apps/users/forms.py:759
 msgid "Business industry (optional)"
 msgstr "Sector de activitate (opțional)"
 
-#: apps/users/forms.py:766
+#: apps/users/forms.py:767
 msgid "VAT number / CUI is required"
 msgstr "Numărul TVA / CUI este obligatoriu"
 
-#: apps/users/forms.py:773
+#: apps/users/forms.py:774
 msgid "VAT number must contain only digits (optionally prefixed with RO)"
 msgstr "Numărul TVA trebuie să conțină doar cifre (opțional prefixat cu RO)"
 
-#: apps/users/forms.py:776
+#: apps/users/forms.py:777
 msgid "VAT number must have at least 6 digits"
 msgstr "Numărul TVA trebuie să conțină cel puțin 6 cifre"
 
-#: apps/users/forms.py:802
+#: apps/users/forms.py:803
 msgid "e.g. Innovative Solutions SRL"
 msgstr "ex. Soluții Inovatoare SRL"
 
-#: apps/users/forms.py:805
+#: apps/users/forms.py:806
 msgid "Official company name as registered with ONRC"
 msgstr "Denumirea oficială a companiei înregistrată la ONRC"
 
-#: apps/users/forms.py:809 templates/users/company_profile.html:53
+#: apps/users/forms.py:810 templates/users/company_profile.html:53
 msgid "VAT Number / CUI"
 msgstr "Număr TVA / CUI"
 
-#: apps/users/forms.py:815
+#: apps/users/forms.py:816
 msgid "e.g. RO12345678"
 msgstr "ex. RO12345678"
 
-#: apps/users/forms.py:818
+#: apps/users/forms.py:819
 msgid "Romanian VAT number (CUI) - required for invoicing"
 msgstr "Numărul de TVA din România (CUI) - necesar pentru facturare"
 
-#: apps/users/forms.py:822 templates/customers/tax_profile.html:45
+#: apps/users/forms.py:823 templates/customers/tax_profile.html:45
 #: templates/customers/tax_profile.html:88
 #: templates/users/company_profile.html:65
 msgid "Trade Registry Number"
 msgstr "Numărul Registrului Comerțului"
 
-#: apps/users/forms.py:828
+#: apps/users/forms.py:829
 msgid "e.g. J40/1234/2023"
 msgstr "ex. J40/1234/2023"
 
-#: apps/users/forms.py:831
+#: apps/users/forms.py:832
 msgid "Trade registry number from ONRC"
 msgstr "Numărul din Registrul Comerțului de la ONRC"
 
-#: apps/users/forms.py:841
+#: apps/users/forms.py:842
 msgid "e.g. Information Technology"
 msgstr "ex. Tehnologia Informației"
 
-#: apps/users/forms.py:844
+#: apps/users/forms.py:845
 msgid "Primary business industry"
 msgstr "Sector de activitate principal"
 
-#: apps/users/forms.py:849 templates/customers/address_form.html:48
+#: apps/users/forms.py:850 templates/customers/address_form.html:48
 #: templates/users/company_profile.html:97
 msgid "Street Address"
 msgstr "Adresă stradală"
 
-#: apps/users/forms.py:854
+#: apps/users/forms.py:855
 msgid "e.g. Strada Victoriei nr. 123, sector 1"
 msgstr "ex. Strada Victoriei nr. 123, sector 1"
 
-#: apps/users/forms.py:857
+#: apps/users/forms.py:858
 msgid "Complete street address with number"
 msgstr "Adresă de stradă completă cu număr"
 
-#: apps/users/forms.py:866 apps/users/forms.py:879
+#: apps/users/forms.py:867 apps/users/forms.py:880
 msgid "e.g. București"
 msgstr "ex. București"
 
-#: apps/users/forms.py:869
+#: apps/users/forms.py:870
 msgid "City name"
 msgstr "Numele orașului"
 
-#: apps/users/forms.py:873
+#: apps/users/forms.py:874
 msgid "County / State"
 msgstr "Județ / Stat"
 
-#: apps/users/forms.py:882
+#: apps/users/forms.py:883
 msgid "County or state"
 msgstr "Județ"
 
-#: apps/users/forms.py:892
+#: apps/users/forms.py:893
 msgid "e.g. 010001"
 msgstr "ex. 010001"
 
-#: apps/users/forms.py:895
+#: apps/users/forms.py:896
 msgid "Romanian postal code"
 msgstr "Cod poștal din România"
 
-#: apps/users/forms.py:906
+#: apps/users/forms.py:907
 msgid "Country name"
 msgstr "Numele țării"
 
-#: apps/users/forms.py:911
+#: apps/users/forms.py:912
 msgid "Primary Business Email"
 msgstr "Email principal de contact"
 
-#: apps/users/forms.py:915
+#: apps/users/forms.py:916
 msgid "contact@company.com"
 msgstr "contact@company.com"
 
-#: apps/users/forms.py:922
+#: apps/users/forms.py:923
 msgid "Primary Phone Number"
 msgstr "Număr de telefon principal"
 
-#: apps/users/forms.py:928
+#: apps/users/forms.py:929
 msgid "+40 21 XXX XXXX"
 msgstr "+40 21 XXX XXXX"
 
-#: apps/users/forms.py:931
+#: apps/users/forms.py:932
 msgid "Business phone number with country code"
 msgstr "Numărul de telefon al companiei cu indicativul țării"
 
-#: apps/users/forms.py:935
+#: apps/users/forms.py:936
 msgid "Company Website"
 msgstr "Site web al companiei"
 
-#: apps/users/forms.py:940
+#: apps/users/forms.py:941
 msgid "https://www.company.com"
 msgstr "https://www.company.com"
 
-#: apps/users/forms.py:943
+#: apps/users/forms.py:944
 msgid "Company website URL"
 msgstr "Adresa URL a site-ului companiei"
 
-#: apps/users/forms.py:948
+#: apps/users/forms.py:949
 msgid "I agree to the Terms of Service and Privacy Policy"
 msgstr "Sunt de acord cu Termenii de Serviciu și Politica de Confidențialitate"
 
-#: apps/users/forms.py:954
+#: apps/users/forms.py:955
 msgid "You must agree to create a company profile"
 msgstr "Trebuie să acceptați pentru a crea un profil de companie"
 
-#: apps/users/forms.py:962
+#: apps/users/forms.py:963
 msgid "Company name is required"
 msgstr "Denumirea companiei este obligatorie"
 
-#: apps/users/forms.py:965
+#: apps/users/forms.py:966
 msgid "Company name must be at least 3 characters long"
 msgstr "Denumirea companiei trebuie să conțină cel puțin 3 caractere"
 
-#: apps/users/forms.py:990
+#: apps/users/forms.py:991
 msgid "VAT number must contain only numbers (after RO prefix)"
 msgstr "Numărul de TVA trebuie să conțină doar cifre (după prefixul RO)"
 
-#: apps/users/forms.py:993
+#: apps/users/forms.py:994
 msgid "Romanian VAT number must be between 2-10 digits"
 msgstr "Numărul de TVA din România trebuie să aibă între 2-10 cifre"
 
-#: apps/users/forms.py:1021
+#: apps/users/forms.py:1022
 msgid "Please enter a valid Romanian phone number"
 msgstr "Vă rugăm să introduceți un număr de telefon românesc valid"
 
-#: apps/users/forms.py:1026
+#: apps/users/forms.py:1027
 msgid "Phone number must start with a valid Romanian prefix"
 msgstr "Numărul de telefon trebuie să înceapă cu un prefix românesc valid"
 
-#: apps/users/forms.py:1040
+#: apps/users/forms.py:1041
 msgid "Trade registry number is recommended when VAT number is provided"
 msgstr "Numărul din registrul comerțului este recomandat atunci când este furnizat numărul de TVA"
 
-#: apps/users/forms.py:1049
+#: apps/users/forms.py:1050
 msgid "Current password"
 msgstr "Parola actuală"
 
@@ -2126,247 +2126,251 @@ msgstr "Autentificare client"
 msgid "You have been logged out successfully."
 msgstr "Ați fost deconectat cu succes."
 
-#: apps/users/views.py:483
-msgid "Registration successful! You can now login with your credentials."
-msgstr "Înregistrare realizată cu succes! Puteți acum să vă conectați cu datele dvs."
-
-#: apps/users/views.py:486
-msgid "Registration failed. Please check your information and try again."
-msgstr "Înregistrarea a eșuat. Vă rugăm să verificați informațiile și să încercați din nou."
-
-#: apps/users/views.py:491
-#| msgid "Too many authentication attempts. Please try again in 15 minutes."
+#: apps/users/views.py:462
 msgid "Too many registration attempts. Please try again later."
 msgstr "Prea multe încercări de înregistrare. Vă rugăm să încercați din nou mai târziu."
 
-#: apps/users/views.py:499 apps/users/views.py:502
+#: apps/users/views.py:465
+#| msgid "This information is temporarily unavailable. Please try again in %(seconds)s seconds."
+msgid "Registration is temporarily unavailable. Please try again in a few minutes."
+msgstr "Înregistrarea este temporar indisponibilă. Vă rugăm să încercați din nou peste câteva minute."
+
+#: apps/users/views.py:500
+msgid "Registration successful! You can now login with your credentials."
+msgstr "Înregistrare realizată cu succes! Puteți acum să vă conectați cu datele dvs."
+
+#: apps/users/views.py:503
+msgid "Registration failed. Please check your information and try again."
+msgstr "Înregistrarea a eșuat. Vă rugăm să verificați informațiile și să încercați din nou."
+
+#: apps/users/views.py:510 apps/users/views.py:513
 msgid "An unexpected error occurred during registration. Please try again."
 msgstr "A apărut o eroare neașteptată în timpul înregistrării. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:506
+#: apps/users/views.py:517
 msgid "Customer Registration"
 msgstr "Înregistrare client"
 
-#: apps/users/views.py:540
+#: apps/users/views.py:551
 msgid "Error loading profile data."
 msgstr "Eroare la încărcarea datelor profilului."
 
-#: apps/users/views.py:571
+#: apps/users/views.py:582
 msgid "Profile updated successfully!"
 msgstr "Profil actualizat cu succes!"
 
-#: apps/users/views.py:576 apps/users/views.py:580
+#: apps/users/views.py:587 apps/users/views.py:591
 msgid "Error updating profile. Please try again."
 msgstr "Eroare la actualizarea profilului. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:701
+#: apps/users/views.py:712
 msgid "If an eligible account exists and email delivery is available, you will receive password reset instructions."
 msgstr "Dacă există un cont eligibil și livrarea e-mailului este disponibilă, veți primi instrucțiuni de resetare a parolei."
 
-#: apps/users/views.py:715 apps/users/views.py:789
+#: apps/users/views.py:726 apps/users/views.py:800
 msgid "Password recovery is temporarily unavailable. Please try again later."
 msgstr "Recuperarea parolei nu este disponibilă temporar. Încercați din nou mai târziu."
 
-#: apps/users/views.py:732
+#: apps/users/views.py:743
 msgid "Please check your new password and try again."
 msgstr "Verificați noua parolă și încercați din nou."
 
-#: apps/users/views.py:769
+#: apps/users/views.py:780
 msgid "Password reset successfully. Please sign in with your new password."
 msgstr "Parola a fost resetată cu succes. Autentificați-vă cu noua parolă."
 
-#: apps/users/views.py:826
+#: apps/users/views.py:837
 msgid "Password changed successfully!"
 msgstr "Parola a fost schimbată cu succes!"
 
-#: apps/users/views.py:828
+#: apps/users/views.py:839
 msgid "Password change failed. Check your current password and authentication code."
 msgstr "Schimbarea parolei a eșuat. Verificați parola actuală și codul de autentificare."
 
-#: apps/users/views.py:833
+#: apps/users/views.py:844
 #, python-format
 msgid "Too many attempts. Please try again in %(seconds)s seconds."
 msgstr "Prea multe încercări. Încercați din nou în %(seconds)s secunde."
 
-#: apps/users/views.py:837
+#: apps/users/views.py:848
 msgid "Password change failed. Please try again."
 msgstr "Schimbarea parolei a eșuat. Încercați din nou."
 
-#: apps/users/views.py:867 templates/users/privacy_dashboard.html:5
+#: apps/users/views.py:878 templates/users/privacy_dashboard.html:5
 #: templates/users/privacy_dashboard.html:9 templates/users/profile.html:255
 msgid "Privacy Dashboard"
 msgstr "Panoul de confidențialitate"
 
-#: apps/users/views.py:893
+#: apps/users/views.py:904
 msgid "Authentication required."
 msgstr "Autentificare obligatorie."
 
-#: apps/users/views.py:902
+#: apps/users/views.py:913
 msgid "Data export request submitted successfully. You will receive an email with download instructions within 48 hours."
 msgstr "Cererea de export de date a fost trimisă cu succes. Veți primi un e-mail cu instrucțiuni de descărcare în termen de 48 de ore."
 
-#: apps/users/views.py:906
+#: apps/users/views.py:917
 msgid "Failed to create export request. Please try again."
 msgstr "Nu s-a putut crea cererea de export. Vă rugăm să încercați din nou."
 
 #  Duplicate merged with apps/common/rate_limiting.py entry above
 #  msgid "Service temporarily unavailable. Please try again later."
-#: apps/users/views.py:915
+#: apps/users/views.py:926
 msgid "Error processing your data export request. Please try again."
 msgstr "Eroare la procesarea cererii dvs. de export de date. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:935 templates/users/data_export.html:5
+#: apps/users/views.py:946 templates/users/data_export.html:5
 #: templates/users/data_export.html:9 templates/users/privacy_dashboard.html:64
 #: templates/users/profile.html:268
 msgid "Export My Data"
 msgstr "Exportă datele mele"
 
-#: apps/users/views.py:985 templates/users/consent_history.html:5
+#: apps/users/views.py:996 templates/users/consent_history.html:5
 #: templates/users/consent_history.html:9
 #: templates/users/privacy_dashboard.html:77 templates/users/profile.html:281
 msgid "Consent History"
 msgstr "Istoricul consimțămintelor"
 
-#: apps/users/views.py:1022
+#: apps/users/views.py:1033
 msgid "Multi-Factor Authentication"
 msgstr "Autentificare multifactor"
 
-#: apps/users/views.py:1073
+#: apps/users/views.py:1084
 msgid "You need to enable 2FA first before accessing backup codes."
 msgstr "Trebuie să activați mai întâi autentificarea cu doi factori înainte de a accesa codurile de backup."
 
-#: apps/users/views.py:1086
+#: apps/users/views.py:1097
 msgid "Could not regenerate codes. Check your password and authentication code."
 msgstr "Nu s-au putut regenera codurile. Verificați parola și codul de autentificare."
 
-#: apps/users/views.py:1115
+#: apps/users/views.py:1126
 msgid "Two-factor authentication has been disabled."
 msgstr "Autentificarea cu doi factori a fost dezactivată."
 
-#: apps/users/views.py:1118 apps/users/views.py:1121
+#: apps/users/views.py:1129 apps/users/views.py:1132
 msgid "Could not disable MFA. Check your password and authentication code."
 msgstr "Nu s-a putut dezactiva MFA. Verificați parola și codul de autentificare."
 
-#: apps/users/views.py:1140
+#: apps/users/views.py:1151
 msgid "Please select a customer to view profile."
 msgstr "Selectați un client pentru a vizualiza profilul."
 
-#: apps/users/views.py:1210
+#: apps/users/views.py:1221
 msgid "Unable to load company profile data."
 msgstr "Nu s-au putut încărca datele profilului companiei."
 
-#: apps/users/views.py:1218
+#: apps/users/views.py:1229
 msgid "Error loading company profile. Please try again."
 msgstr "Eroare la încărcarea profilului companiei. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:1221
+#: apps/users/views.py:1232
 msgid "An unexpected error occurred."
 msgstr "A apărut o eroare neașteptată."
 
-#: apps/users/views.py:1251
+#: apps/users/views.py:1262
 msgid "Please select a customer to edit profile."
 msgstr "Selectați un client pentru a edita profilul."
 
-#: apps/users/views.py:1263
+#: apps/users/views.py:1274
 #, python-brace-format
 msgid "You don't have permission to edit this company profile. Your role: {role}"
 msgstr "Nu aveți permisiune să editați profilul acestei companii. Rolul dvs.: {role}"
 
-#: apps/users/views.py:1307
+#: apps/users/views.py:1318
 msgid "Unable to load current company data."
 msgstr "Nu s-au putut încărca datele curente ale companiei."
 
-#: apps/users/views.py:1311
+#: apps/users/views.py:1322
 msgid "Error loading company data. Please try again."
 msgstr "Eroare la încărcarea datelor companiei. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:1336
+#: apps/users/views.py:1347
 msgid "Company profile updated successfully!"
 msgstr "Profilul companiei a fost actualizat cu succes!"
 
-#: apps/users/views.py:1356
+#: apps/users/views.py:1367
 #, python-brace-format
 msgid "Failed to update profile: {}"
 msgstr "Actualizarea profilului a eșuat: {}"
 
-#: apps/users/views.py:1362
+#: apps/users/views.py:1373
 msgid "Error updating company profile. Please try again."
 msgstr "Eroare la actualizarea profilului companiei. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:1365
+#: apps/users/views.py:1376
 msgid "An unexpected error occurred while updating profile."
 msgstr "A apărut o eroare neașteptată la actualizarea profilului."
 
-#: apps/users/views.py:1367
+#: apps/users/views.py:1378
 msgid "Please correct the errors below."
 msgstr "Vă rugăm să corectați erorile de mai jos."
 
-#: apps/users/views.py:1372 templates/users/company_profile.html:25
+#: apps/users/views.py:1383 templates/users/company_profile.html:25
 #: templates/users/company_profile_edit.html:5
 #: templates/users/company_profile_edit.html:11
 msgid "Edit Company Profile"
 msgstr "Editare profil companie"
 
-#: apps/users/views.py:1402
+#: apps/users/views.py:1413
 msgid "Please select a valid customer."
 msgstr "Selectați un client valid."
 
-#: apps/users/views.py:1426
+#: apps/users/views.py:1437
 msgid "Customer access verification failed. Please try again."
 msgstr "Verificarea accesului clientului a eșuat. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:1435
+#: apps/users/views.py:1446
 msgid "You don't have access to this customer."
 msgstr "Nu aveți acces la acest client."
 
-#: apps/users/views.py:1450
+#: apps/users/views.py:1461
 msgid "Unable to verify customer access. Please try again."
 msgstr "Nu s-a putut verifica accesul clientului. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:1491 templates/components/customer_selector.html:21
+#: apps/users/views.py:1502 templates/components/customer_selector.html:21
 #: templates/components/customer_selector.html:72
 #: templates/customers/team.html:73 templates/customers/team_invite.html:57
 msgid "Owner"
 msgstr "Proprietar"
 
-#: apps/users/views.py:1492
+#: apps/users/views.py:1503
 msgid "Administrator"
 msgstr "Administrator"
 
-#: apps/users/views.py:1493
+#: apps/users/views.py:1504
 msgid "Billing Manager"
 msgstr "Manager facturare"
 
-#: apps/users/views.py:1494
+#: apps/users/views.py:1505
 msgid "Technical Manager"
 msgstr "Manager tehnic"
 
-#: apps/users/views.py:1495 templates/components/customer_selector.html:24
+#: apps/users/views.py:1506 templates/components/customer_selector.html:24
 #: templates/components/customer_selector.html:75
 #: templates/customers/team.html:70 templates/customers/team_invite.html:54
 msgid "Viewer"
 msgstr "Vizualizator"
 
-#: apps/users/views.py:1499
+#: apps/users/views.py:1510
 #, python-brace-format
 msgid "Switched to {customer} ({role})"
 msgstr "Comutat la {customer} ({role})"
 
-#: apps/users/views.py:1570
+#: apps/users/views.py:1581
 #, python-brace-format
 msgid "Company '{}' created successfully! You are now the owner."
 msgstr "Compania '{}' a fost creată cu succes! Sunteți acum proprietarul."
 
-#: apps/users/views.py:1593
+#: apps/users/views.py:1604
 #, python-brace-format
 msgid "Failed to create company: {}"
 msgstr "Crearea companiei a eșuat: {}"
 
-#: apps/users/views.py:1599
+#: apps/users/views.py:1610
 msgid "Error creating company. Please try again."
 msgstr "Eroare la crearea companiei. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:1603 templates/users/create_company.html:5
+#: apps/users/views.py:1614 templates/users/create_company.html:5
 #: templates/users/create_company.html:273 templates/users/profile.html:200
 msgid "Create Company"
 msgstr "Creați compania"

@@ -12,6 +12,7 @@ from django.test import Client, SimpleTestCase, override_settings
 from django.utils import timezone
 
 MESSAGE = "Too many registration attempts. Please try again later."
+UNAVAILABLE = "Registration is temporarily unavailable. Please try again in a few minutes."
 
 
 @override_settings(
@@ -42,6 +43,12 @@ class RegistrationRateLimitViewTests(SimpleTestCase):
         session.save()
 
     def test_platform_429_shows_signup_message_and_preserves_only_non_password_values(self) -> None:
+        self.assert_refusal_keeps_the_form(429, MESSAGE)
+
+    def test_platform_503_shows_temporarily_unavailable_not_check_your_information(self) -> None:
+        self.assert_refusal_keeps_the_form(503, UNAVAILABLE)
+
+    def assert_refusal_keeps_the_form(self, status: int, expected: str) -> None:
         data = {
             "email": "signup@example.test",
             "first_name": "Ana",
@@ -63,8 +70,8 @@ class RegistrationRateLimitViewTests(SimpleTestCase):
 
         def platform_response(method: str, url: str, **_kwargs: object) -> requests.Response:
             response = requests.Response()
-            response.status_code = 429 if url.rstrip("/").endswith("/customers/register") else 200
-            payload: dict[str, object] = {"success": False, "error": MESSAGE} if response.status_code == 429 else {}
+            response.status_code = status if url.rstrip("/").endswith("/customers/register") else 200
+            payload: dict[str, object] = {"success": False, "error": expected} if response.status_code == status else {}
             response._content = json.dumps(payload).encode()
             response.headers["Content-Type"] = "application/json"
             if response.status_code == 429:
@@ -74,7 +81,7 @@ class RegistrationRateLimitViewTests(SimpleTestCase):
         with patch("apps.common.outbound_http._session.request", side_effect=platform_response):
             response = self.client.post("/register/", data)
 
-        self.assertContains(response, MESSAGE)
+        self.assertContains(response, expected)
         self.assertNotContains(response, "An unexpected error occurred during registration.")
         self.assertNotContains(response, "Registration failed. Please check your information")
         self.assertNotIn("Location", response)

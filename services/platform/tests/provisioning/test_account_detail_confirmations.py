@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from inspect import unwrap
 from pathlib import Path
-from typing import cast
+from typing import ClassVar, cast
 from unittest.mock import patch
 
 from django.contrib.auth.models import AnonymousUser
@@ -144,10 +144,17 @@ class AccountDetailConfirmationTests(SimpleTestCase):
             },
         )
 
+    # Only deletion is irreversible; a protection toggle says which way it changes protection
+    MESSAGES: ClassVar[dict[str, str]] = {
+        "Disable Protection": "Deletion protection will be turned off for this account.",
+        "Enable Protection": "Deletion protection will be turned on for this account.",
+        "Delete Account": "This action cannot be undone.",
+    }
+
     def confirmation(self, title: str, domain: str, requests_before: int) -> dict[str, object]:
         return {
             "title": translation.gettext(title),
-            "message": str(escape(domain + ": " + translation.gettext("This action cannot be undone."))),
+            "message": str(escape(domain + ": " + translation.gettext(self.MESSAGES[title]))),
             "phrase": translation.gettext("I really am sure I want to do this!"),
             "requestsBeforeConfirmation": requests_before,
             "closed": True,

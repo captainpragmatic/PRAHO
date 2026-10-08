@@ -453,6 +453,23 @@ def check_authentication(request: HttpRequest) -> dict | None:
     }
 
 
+def _redisplay_after_registration_refusal(
+    request: HttpRequest, form: CustomerRegistrationForm, error: PlatformAPIError
+) -> None:
+    """Explain a refusal the customer cannot fix by editing, and keep what they typed except passwords."""
+    if error.is_rate_limited:
+        logger.warning("⚠️ [Portal Registration] Registration rate limit exceeded")
+        messages.error(request, _("Too many registration attempts. Please try again later."))
+    else:
+        logger.warning(f"⚠️ [Portal Registration] Platform unavailable: {error}")
+        messages.error(request, _("Registration is temporarily unavailable. Please try again in a few minutes."))
+    redisplay_data = request.POST.copy()
+    for password_field in ("password1", "password2"):
+        redisplay_data.pop(password_field, None)
+        form.cleaned_data.pop(password_field, None)
+    form.data = redisplay_data
+
+
 @never_cache
 @csrf_protect
 @require_http_methods(["GET", "POST"])
@@ -486,14 +503,8 @@ def register_view(request: HttpRequest) -> HttpResponse:
                     messages.error(request, _("Registration failed. Please check your information and try again."))
 
             except PlatformAPIError as e:
-                if e.is_rate_limited:
-                    logger.warning("⚠️ [Portal Registration] Registration rate limit exceeded")
-                    messages.error(request, _("Too many registration attempts. Please try again later."))
-                    redisplay_data = request.POST.copy()
-                    for password_field in ("password1", "password2"):
-                        redisplay_data.pop(password_field, None)
-                        form.cleaned_data.pop(password_field, None)
-                    form.data = redisplay_data
+                if e.is_rate_limited or e.is_unavailable:
+                    _redisplay_after_registration_refusal(request, form, e)
                 else:
                     logger.error(f"🔥 [Portal Registration] Platform API error: {e}")
                     messages.error(request, _("An unexpected error occurred during registration. Please try again."))

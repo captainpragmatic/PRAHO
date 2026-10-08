@@ -428,7 +428,8 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
             return response
 
         except PlatformAPIError as e:
-            if e.is_rate_limited:
+            # Refusals the customer cannot fix by editing the form go back to the view
+            if e.is_rate_limited or e.is_unavailable:
                 raise
             logger.error(f"🔥 [Portal Registration] Platform API error: {e}")
             return None

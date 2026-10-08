@@ -10,7 +10,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-08 10:05+0300\n"
+"POT-Creation-Date: 2026-10-08 10:37+0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -63,7 +63,6 @@ msgid "Data processing consent is required."
 msgstr "Consimțământul pentru prelucrarea datelor este obligatoriu."
 
 #: apps/api/customers/serializers.py:209
-#| msgid "Registration Details"
 msgid "Registration failed"
 msgstr "Înregistrarea a eșuat"
 
@@ -4371,7 +4370,6 @@ msgstr "❌ Acces refuzat. Vă rugăm contactați suportul pentru acces la cont.
 
 #: apps/common/e2e_fixtures.py:201
 #, python-format
-#| msgid "Registration failed: %(error)s"
 msgid "E2E registration limit could not be seeded: %(error)s"
 msgstr "Limita de înregistrare E2E nu a putut fi configurată: %(error)s"
 
@@ -4476,7 +4474,6 @@ msgid "Operation in progress, please try again"
 msgstr "Operație în curs de desfășurare, vă rugăm să reîncercați"
 
 #: apps/common/security_decorators.py:389
-#| msgid "Too many requests. Please try again later."
 msgid "Too many registration attempts. Please try again later."
 msgstr "Prea multe încercări de înregistrare. Vă rugăm să încercați din nou mai târziu."
 
@@ -16099,7 +16096,7 @@ msgstr "Ultima actualizare:"
 #: templates/domains/domain_detail.html:239
 #: templates/products/product_detail.html:292
 #: templates/provisioning/virtualmin/account_detail.html:199
-#: templates/provisioning/virtualmin/partials/quick_actions.html:13
+#: templates/provisioning/virtualmin/partials/quick_actions.html:14
 msgid "Quick Actions"
 msgstr "Acțiuni Rapide"
 
@@ -16113,8 +16110,8 @@ msgstr "Exportă Datele Mele"
 #: templates/provisioning/virtualmin/account_detail.html:237
 #: templates/provisioning/virtualmin/account_detail.html:242
 #: templates/provisioning/virtualmin/partials/quick_actions.html:7
-#: templates/provisioning/virtualmin/partials/quick_actions.html:39
-#: templates/provisioning/virtualmin/partials/quick_actions.html:44
+#: templates/provisioning/virtualmin/partials/quick_actions.html:40
+#: templates/provisioning/virtualmin/partials/quick_actions.html:45
 msgid "Delete Account"
 msgstr "Ștergeți contul"
 
@@ -20022,7 +20019,7 @@ msgstr "Nesetat"
 #: templates/domains/domain_detail.html:125
 #: templates/domains/domain_renew.html:95
 #: templates/provisioning/virtualmin/account_detail.html:242
-#: templates/provisioning/virtualmin/partials/quick_actions.html:44
+#: templates/provisioning/virtualmin/partials/quick_actions.html:45
 msgid "Protected"
 msgstr "Protejat"
 
@@ -25174,62 +25171,66 @@ msgid "Username"
 msgstr "Nume de utilizator"
 
 #: templates/provisioning/virtualmin/account_detail.html:201
-#: templates/provisioning/virtualmin/partials/quick_actions.html:15
+#: templates/provisioning/virtualmin/partials/quick_actions.html:16
 msgid "Access Control Panel"
 msgstr "Accesați Panoul de Control"
 
 #: templates/provisioning/virtualmin/account_detail.html:202
-#: templates/provisioning/virtualmin/partials/quick_actions.html:16
+#: templates/provisioning/virtualmin/partials/quick_actions.html:17
 #: templates/users/password_reset.html:5
 msgid "Reset Password"
 msgstr "Resetare Parolă"
 
 #: templates/provisioning/virtualmin/account_detail.html:203
-#: templates/provisioning/virtualmin/partials/quick_actions.html:17
+#: templates/provisioning/virtualmin/partials/quick_actions.html:18
 msgid "Change Plan"
 msgstr "Schimbați Planul"
 
 #: templates/provisioning/virtualmin/account_detail.html:204
-#: templates/provisioning/virtualmin/partials/quick_actions.html:18
+#: templates/provisioning/virtualmin/partials/quick_actions.html:19
 msgid "Transfer Account"
 msgstr "Transferați Contul"
 
 #: templates/provisioning/virtualmin/account_detail.html:206
-#: templates/provisioning/virtualmin/partials/quick_actions.html:20
+#: templates/provisioning/virtualmin/partials/quick_actions.html:21
 msgid "Disable Account"
 msgstr "Dezactivați Contul"
 
 #: templates/provisioning/virtualmin/account_detail.html:208
-#: templates/provisioning/virtualmin/partials/quick_actions.html:22
+#: templates/provisioning/virtualmin/partials/quick_actions.html:23
 msgid "Enable Account"
 msgstr "Activați Contul"
 
 #: templates/provisioning/virtualmin/account_detail.html:217
 #: templates/provisioning/virtualmin/account_detail.html:222
 #: templates/provisioning/virtualmin/partials/quick_actions.html:6
-#: templates/provisioning/virtualmin/partials/quick_actions.html:29
+#: templates/provisioning/virtualmin/partials/quick_actions.html:30
 msgid "Disable Protection"
 msgstr "Dezactivați Protecția"
 
 #: templates/provisioning/virtualmin/account_detail.html:218
-#: templates/provisioning/virtualmin/account_detail.html:234
 #: templates/provisioning/virtualmin/partials/quick_actions.html:8
-#: tests/provisioning/test_account_detail_confirmations.py:150
-msgid "This action cannot be undone."
-msgstr "Această acțiune nu poate fi anulată."
+#| msgid "Virtualmin features enabled for this account"
+msgid "Deletion protection will be turned off for this account."
+msgstr "Protecția la ștergere va fi dezactivată pentru acest cont."
 
 #: templates/provisioning/virtualmin/account_detail.html:219
 #: templates/provisioning/virtualmin/account_detail.html:235
-#: templates/provisioning/virtualmin/partials/quick_actions.html:9
-#: tests/provisioning/test_account_detail_confirmations.py:151
+#: templates/provisioning/virtualmin/partials/quick_actions.html:10
+#: tests/provisioning/test_account_detail_confirmations.py:158
 msgid "I really am sure I want to do this!"
 msgstr "Sunt sigur că vreau să fac acest lucru!"
 
 #: templates/provisioning/virtualmin/account_detail.html:224
 #: templates/provisioning/virtualmin/partials/quick_actions.html:6
-#: templates/provisioning/virtualmin/partials/quick_actions.html:31
+#: templates/provisioning/virtualmin/partials/quick_actions.html:32
 msgid "Enable Protection"
 msgstr "Activați Protecția"
+
+#: templates/provisioning/virtualmin/account_detail.html:234
+#: templates/provisioning/virtualmin/partials/quick_actions.html:9
+msgid "This action cannot be undone."
+msgstr "Această acțiune nu poate fi anulată."
 
 #: templates/provisioning/virtualmin/account_detail.html:254
 msgid "Backup History"
@@ -25826,6 +25827,11 @@ msgstr "Progres"
 #: templates/provisioning/virtualmin/partials/job_status.html:116
 msgid "Operation Logs"
 msgstr "Jurnale operații"
+
+#: templates/provisioning/virtualmin/partials/quick_actions.html:8
+#| msgid "Virtualmin features enabled for this account"
+msgid "Deletion protection will be turned on for this account."
+msgstr "Protecția la ștergere va fi activată pentru acest cont."
 
 #: templates/provisioning/virtualmin/restore_form.html:5
 msgid "Restore Backup"

@@ -215,7 +215,7 @@
                                     data-domain="{{ account.domain }}"
                                     data-protection-operation="{% if account.protected_from_deletion %}disable{% else %}enable{% endif %}"
                                     data-confirm-title="{% trans 'Disable Protection' %}"
-                                    data-confirm-message="{% trans 'This action cannot be undone.' %}"
+                                    data-confirm-message="{% trans 'Deletion protection will be turned off for this account.' %}"
                                     data-confirm-text="{% trans 'I really am sure I want to do this!' %}"
                                     data-action="invoke" data-invoke="confirmProtectionToggleAction">
                                 {% if account.protected_from_deletion %}
