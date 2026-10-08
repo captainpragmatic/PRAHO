@@ -30,7 +30,12 @@ from django.utils import timezone
 from django.utils.translation import gettext as _
 
 from apps.common import counters, portal_hmac
-from apps.common.constants import HMAC_NTP_SKEW_SECONDS, HMAC_TIMESTAMP_WINDOW_SECONDS, HTTP_CLIENT_ERROR_THRESHOLD
+from apps.common.constants import (
+    HMAC_MAX_BODY_BYTES,
+    HMAC_NTP_SKEW_SECONDS,
+    HMAC_TIMESTAMP_WINDOW_SECONDS,
+    HTTP_CLIENT_ERROR_THRESHOLD,
+)
 from apps.common.logging import clear_request_id, set_request_id
 from apps.common.request_ip import get_safe_client_ip
 
@@ -544,7 +549,7 @@ class PortalServiceHMACMiddleware:
 
             # Enforce body size limit before reading into memory (DoS prevention)
             if not error_msg:
-                max_body_size = 10 * 1024 * 1024  # 10 MB
+                max_body_size = HMAC_MAX_BODY_BYTES
                 content_length = int(request.META.get("CONTENT_LENGTH") or 0)
                 if content_length > max_body_size:
                     error_msg = "Request body too large"

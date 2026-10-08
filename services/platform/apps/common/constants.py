@@ -83,6 +83,10 @@ HMAC_TIMESTAMP_WINDOW_SECONDS: int = 300
 # A small positive value allows requests whose timestamp is slightly in the future.
 HMAC_NTP_SKEW_SECONDS: int = 2
 
+# Largest signed request body the HMAC middleware accepts. The Portal refuses bigger bodies before
+# sending, since Platform's refusal is the same uniform 401 as a bad signature (parity-tested).
+HMAC_MAX_BODY_BYTES: int = 10 * 1024 * 1024
+
 # Account lockout policies
 # DEPRECATED: Lockout is now progressive (5->15->30->60->120->240 min) in User.increment_failed_login_attempts().
 # Threshold is configurable via settings.ACCOUNT_LOCKOUT_THRESHOLD (default=1).

@@ -190,3 +190,39 @@ class SignatureRejectionLoginViewTests(_ResetLogGate, TestCase):
             "Too many authentication attempts",
             " ".join(str(message) for message in get_messages(last.wsgi_request)),
         )
+
+
+@override_settings(PLATFORM_API_BASE_URL="https://platform.example.test/api", PLATFORM_API_SECRET=SECRET)
+class RequestsPlatformWouldRefuseAnywayTests(SimpleTestCase):
+    """Requests Platform answers with its uniform 401 for reasons other than a bad signature."""
+
+    def test_a_body_over_platforms_limit_is_refused_before_sending(self) -> None:
+        with (
+            patch.object(services, "PLATFORM_MAX_BODY_BYTES", 200),
+            patch("apps.api_client.services.portal_request") as transport,
+        ):
+            calls: tuple[Callable[[PlatformAPIClient], object], ...] = (
+                lambda client: client._make_request("POST", "/test/", data={"note": "x" * 300}),
+                lambda client: client._make_binary_request("POST", "/test/pdf/", data={"note": "x" * 300}),
+                lambda client: client._make_binary_request_with_headers("POST", "/test/file/", data={"note": "x" * 300}),
+            )
+            for call in calls:
+                with self.subTest(call=call), self.assertRaises(PlatformAPIError) as raised:
+                    call(PlatformAPIClient())
+                self.assertEqual(raised.exception.status_code, 413)
+                self.assertFalse(raised.exception.is_unavailable)
+            transport.assert_not_called()
+
+    def test_a_body_at_the_limit_is_sent(self) -> None:
+        with (
+            patch.object(services, "PLATFORM_MAX_BODY_BYTES", 10_000),
+            patch("apps.api_client.services.portal_request", return_value=_response(200, b"{}")) as transport,
+        ):
+            PlatformAPIClient()._make_request("POST", "/test/", data={"note": "x" * 300})
+        transport.assert_called_once()
+
+    def test_a_doubled_slash_is_signed_the_way_requests_sends_it(self) -> None:
+        url = "https://platform.example.test//api/customers/search/"
+        prepared = requests.Request("GET", url, params={"a": "1"}).prepare()
+        sent = requests.adapters.HTTPAdapter().request_url(prepared, {})
+        self.assertEqual(PlatformAPIClient()._normalized_path_with_query(url, {"a": "1"}), sent)

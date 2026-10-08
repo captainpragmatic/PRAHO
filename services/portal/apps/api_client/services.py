@@ -57,6 +57,9 @@ SIGNATURE_REJECTION_LOG_INTERVAL_SECONDS = 60.0
 # middleware), quoted in the log so an operator can rule skew in or out. Pinned by the parity test.
 PLATFORM_MAX_CLOCK_BEHIND_SECONDS = 300
 PLATFORM_MAX_CLOCK_AHEAD_SECONDS = 2
+# Platform's `HMAC_MAX_BODY_BYTES`: a bigger body gets the same uniform 401 as a forged one, so it
+# is refused here instead of reaching Platform and reading as a signing outage. Parity-tested.
+PLATFORM_MAX_BODY_BYTES = 10 * 1024 * 1024
 
 
 class _SignatureRejectionLogGate:
@@ -281,6 +284,13 @@ class PlatformAPIClient:
         logger.debug(f"🔍 [API Client] Building URL: base='{self.base_url}' endpoint='{endpoint}' -> '{built_url}'")
         return built_url
 
+    def _refuse_oversized_body(self, body: bytes, endpoint: str) -> None:
+        if len(body) > PLATFORM_MAX_BODY_BYTES:
+            raise PlatformAPIError(
+                f"Request to {endpoint!r} is {len(body)} bytes; Platform accepts at most {PLATFORM_MAX_BODY_BYTES}",
+                status_code=HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+            )
+
     def _prepare_json_body(self, data: dict[str, Any] | None, user_id: int | None) -> tuple[bytes, dict[str, Any]]:
         payload: dict[str, Any] = {} if data is None else dict(data)
         if user_id is not None and "user_id" not in payload:
@@ -306,7 +316,10 @@ class PlatformAPIClient:
         as urllib3 encodes it, and the path is decoded the way the WSGI server and Django do.
         """
         prepared = requests.Request("GET", url, params=params).prepare()
-        target = urllib.parse.urlsplit(parse_url(prepared.path_url or "/").url)
+        path_url = prepared.path_url or "/"
+        if path_url.startswith("//"):  # as HTTPAdapter.request_url does, "don't confuse urllib3"
+            path_url = f"/{path_url.lstrip('/')}"
+        target = urllib.parse.urlsplit(parse_url(path_url).url)
         decoded_path = repercent_broken_unicode(urllib.parse.unquote_to_bytes(target.path or "/")).decode()
         pairs = urllib.parse.parse_qsl(target.query, keep_blank_values=True)
         pairs.sort(key=lambda kv: (kv[0], kv[1]))
@@ -452,6 +465,7 @@ class PlatformAPIClient:
         # Prepare JSON body and headers
         body_bytes, payload = self._prepare_json_body(data, user_id)
         body_ts = str(payload.get("timestamp")) if "timestamp" in payload else None
+        self._refuse_oversized_body(body_bytes, endpoint)
 
         auto_retry = self._is_read_retry_candidate(method, endpoint, idempotent=idempotent)
         retry_statuses = retry_on_status or ({503} if auto_retry else set())
@@ -584,6 +598,7 @@ class PlatformAPIClient:
         # Prepare body and headers using shared helpers
         body_bytes, payload = self._prepare_json_body(data, user_id=None)
         body_ts = str(payload.get("timestamp")) if "timestamp" in payload else None
+        self._refuse_oversized_body(body_bytes, endpoint)
         headers = self._prepare_request_headers(method, url, params, body_bytes, body_ts)
 
         try:
@@ -620,6 +635,7 @@ class PlatformAPIClient:
 
         body_bytes, payload = self._prepare_json_body(data, user_id=None)
         body_ts = str(payload.get("timestamp")) if "timestamp" in payload else None
+        self._refuse_oversized_body(body_bytes, endpoint)
         headers = self._prepare_request_headers(method, url, params, body_bytes, body_ts)
 
         try:

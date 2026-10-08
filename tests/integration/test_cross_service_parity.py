@@ -197,3 +197,10 @@ class TestSignatureRejectionParity(TestCase):
 
         self.assertEqual(int(self._portal_constant("PLATFORM_MAX_CLOCK_BEHIND_SECONDS")), HMAC_TIMESTAMP_WINDOW_SECONDS)
         self.assertEqual(int(self._portal_constant("PLATFORM_MAX_CLOCK_AHEAD_SECONDS")), HMAC_NTP_SKEW_SECONDS)
+
+    def test_the_portal_refuses_bodies_above_platforms_limit(self) -> None:
+        from apps.common.constants import HMAC_MAX_BODY_BYTES  # noqa: PLC0415
+
+        expression = self._portal_constant("PLATFORM_MAX_BODY_BYTES")
+        self.assertRegex(expression, r"^[0-9 *]+$")
+        self.assertEqual(eval(expression, {"__builtins__": {}}), HMAC_MAX_BODY_BYTES)  # noqa: S307 - digits and "*" only
