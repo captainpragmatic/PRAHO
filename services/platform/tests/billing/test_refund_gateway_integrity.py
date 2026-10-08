@@ -1509,11 +1509,20 @@ class RefundGatewayIntegrityTests(TestCase):
         )
         self.client.force_login(staff)
         with patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway") as factory:
-            for amount in ("", "0", "-5", "abc", "NaN"):
+            # "10.999" and "100.009" used to be truncated to 10.99 and 100.00, the latter slipping
+            # past a 100.00 limit; out-of-range exponents escaped as decimal.Overflow.
+            for amount in ("", "0", "-5", "abc", "NaN", "10.999", "100.009", "0.001", "1E+999999"):
                 with self.subTest(amount=amount):
                     response = self.client.post(
                         reverse("orders:order_refund", kwargs={"pk": order.pk}),
                         {"refund_type": "partial", "refund_amount": amount, "refund_reason": "customer_request"},
+                    )
+                    self.assertEqual(response.status_code, 400, response.content)
+            for amount_cents in ("abc", "0", "-5", "12.5", str(2**63), "²", "9" * 5000):
+                with self.subTest(amount_cents=amount_cents):
+                    response = self.client.post(
+                        reverse("orders:order_refund", kwargs={"pk": order.pk}),
+                        {"refund_type": "partial", "amount_cents": amount_cents, "refund_reason": "customer_request"},
                     )
                     self.assertEqual(response.status_code, 400, response.content)
             factory.assert_not_called()

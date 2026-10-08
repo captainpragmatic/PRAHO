@@ -57,6 +57,7 @@ from apps.common.decorators import (
     can_manage_financial_data,
     staff_rate_limit,
 )
+from apps.common.financial_arithmetic import parse_major_units_to_cents
 from apps.common.mixins import get_search_context
 from apps.common.pagination import pagination_query
 from apps.common.tax_service import TaxService
@@ -2100,15 +2101,12 @@ def invoice_refund(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:  # noqa
         if not refund_type_str or not refund_reason_str or not refund_notes:
             return json_error("All fields are required")
 
-        # Validate refund amount for partial refunds
+        # Partial amounts are exact cents or refused; truncating "10.999" refunded 10.99.
         if refund_type_str == "partial":
             try:
-                refund_amount = Decimal(refund_amount_str)
-                valid = refund_amount > 0
-            except (ValueError, TypeError):
-                valid = False
-            if not valid:
-                return json_error("Invalid or non-positive refund amount")
+                partial_amount_cents = parse_major_units_to_cents(refund_amount_str)
+            except ValueError:
+                return json_error("Enter a positive refund amount with at most two decimal places")
 
         from apps.billing.refund_service import (  # noqa: PLC0415  # Deferred: avoids circular import
             RefundData,
@@ -2116,7 +2114,7 @@ def invoice_refund(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:  # noqa
         )
 
         # Build refund data for RefundService
-        amount_cents = int(Decimal(refund_amount_str) * 100) if refund_type_str == "partial" else invoice.total_cents
+        amount_cents = partial_amount_cents if refund_type_str == "partial" else invoice.total_cents
         refund_data: RefundData = {
             "refund_type": refund_type_str,
             "idempotency_key": request.POST.get("idempotency_key", ""),

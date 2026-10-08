@@ -133,8 +133,8 @@ class RefundAuthorizationGuardrailTests(SimpleTestCase):
             [],
             msg=(
                 "A refund entry point lost its authorization mechanism. Refunds are a financial "
-                "operation (ADR-0024): they require admin/billing/manager staff, or an "
-                "owner/billing customer principal on the portal API. See #104 [M11]."
+                "operation (ADR-0024): they require admin/billing/manager staff. There is no "
+                "customer or portal refund path. See #104 [M11]."
             ),
         )
 

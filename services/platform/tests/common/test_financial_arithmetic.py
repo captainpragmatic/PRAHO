@@ -9,10 +9,12 @@ from decimal import Decimal
 from django.test import SimpleTestCase
 
 from apps.common.financial_arithmetic import (
+    MAX_AMOUNT_CENTS,
     DocumentTotals,
     LineTotals,
     calculate_document_totals,
     calculate_line_totals,
+    parse_major_units_to_cents,
 )
 
 
@@ -142,3 +144,24 @@ class _FakeItem:
     @property
     def tax_rate(self) -> Decimal:
         return self._tax_rate
+
+
+class ParseMajorUnitsToCentsTests(SimpleTestCase):
+    """Operator-typed refund amounts become exact cents or are refused, never rounded."""
+
+    def test_exact_amounts_convert_exactly(self):
+        cases = {"60.50": 6050, "10": 1000, "0.01": 1, " 10.5 ": 1050, "1e2": 10000, "100.00": 10000, "10.500": 1050}
+        for text, cents in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(parse_major_units_to_cents(text), cents)
+
+    def test_unusable_amounts_are_refused(self):
+        refused = ("", " ", "abc", "0", "0.00", "-5", "10.999", "100.009", "0.001", "NaN", "sNaN", "Infinity",
+                   "1E+999999", "1e17", "1,50")
+        for text in refused:
+            with self.subTest(text=text), self.assertRaises(ValueError):
+                parse_major_units_to_cents(text)
+
+    def test_the_largest_storable_amount_is_the_ceiling(self):
+        largest = MAX_AMOUNT_CENTS // 100
+        self.assertEqual(parse_major_units_to_cents(f"{largest}.07"), largest * 100 + 7)

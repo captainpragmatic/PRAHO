@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from decimal import ROUND_HALF_EVEN, Decimal
+from decimal import ROUND_HALF_EVEN, Decimal, InvalidOperation
 from typing import Protocol
 
 
@@ -103,3 +103,35 @@ def calculate_document_totals(
         tax_cents=tax_cents,
         total_cents=total_cents,
     )
+
+
+# Largest amount a refund form may name: a signed 64-bit integer of cents, the column's ceiling.
+MAX_AMOUNT_CENTS = 2**63 - 1
+_MAX_MAJOR_UNIT_DIGITS = 17  # 10**17 major units = 10**19 cents, already past MAX_AMOUNT_CENTS
+_CENT_DECIMAL_PLACES = 2
+_ONE_CENT = Decimal("0.01")
+
+
+def parse_major_units_to_cents(text: str) -> int:
+    """Parse an operator-typed amount such as ``"60.50"`` into exact, positive cents.
+
+    Refuses rather than rounds: more than two decimal places, a non-positive or non-finite value,
+    and anything out of range all raise ``ValueError``. ``int(Decimal(text) * 100)`` truncated
+    ``"10.999"`` to 1,099 cents and let ``"100.009"`` pass a 100.00 limit as exactly 10,000.
+    """
+    try:
+        value = Decimal(text.strip())
+    except InvalidOperation as error:
+        raise ValueError(f"Not an amount: {text!r}") from error
+    if not value.is_finite() or value <= 0:
+        raise ValueError(f"Not a positive amount: {text!r}")
+    # Range first: quantize/scaleb on an exponent like 1E+999999 is slow or overflows.
+    if value.adjusted() >= _MAX_MAJOR_UNIT_DIGITS:
+        raise ValueError(f"Amount out of range: {text!r}")
+    # "10.500" names an exact cent amount; "10.505" does not.
+    if value != value.quantize(_ONE_CENT):
+        raise ValueError(f"Not a whole number of cents: {text!r}")
+    cents = int(value.scaleb(_CENT_DECIMAL_PLACES))
+    if cents > MAX_AMOUNT_CENTS:
+        raise ValueError(f"Amount out of range: {text!r}")
+    return cents

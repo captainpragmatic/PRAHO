@@ -47,5 +47,4 @@ urlpatterns = [
         views.subscription_auto_payment,
         name="subscription_auto_payment",
     ),
-    # Refund request
 ]

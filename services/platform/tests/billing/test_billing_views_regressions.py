@@ -1462,6 +1462,26 @@ class InvoiceRefundViewTest(BillingViewsTestBase):
         gateway.refund_payment.assert_called_once()
         self.assertEqual(Refund.objects.get(invoice=invoice).amount_cents, 5000)
 
+    def test_refund_partial_amount_is_exact_or_refused(self):
+        """"10.999" used to be truncated to 1,099 cents and refunded; it is refused instead."""
+        invoice, _payment = self._paid_card_invoice()
+        for amount in ("10.999", "100.009", "0.001", "1E+999999", "1,50"):
+            with self.subTest(amount=amount):
+                response, gateway = self._refund_through_the_view(
+                    invoice,
+                    0,
+                    {
+                        "refund_type": "partial",
+                        "refund_reason": "service_failure",
+                        "refund_notes": "Precision",
+                        "refund_amount": amount,
+                        "idempotency_key": f"staff-precision-{amount}",
+                    },
+                )
+                self.assertEqual(response.status_code, 400, response.content)
+                gateway.refund_payment.assert_not_called()
+        self.assertFalse(Refund.objects.filter(invoice=invoice).exists())
+
     def test_the_refund_dialog_offers_no_gateway_opt_out(self):
         """No view reads `process_payment_refund`; a box promising a record-only refund would lie."""
         invoice, _payment = self._paid_card_invoice()
