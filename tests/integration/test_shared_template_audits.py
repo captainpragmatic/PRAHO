@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
 from pathlib import Path
 from typing import Protocol, cast
@@ -49,3 +50,16 @@ class SharedTemplateAuditTests(SimpleTestCase):
         audit = _load_audit("audit_dark_mode")
         findings = audit.check_file(ROOT / "shared/ui/templates/components/card.html")
         self.assertEqual([finding.code for finding in findings if finding.severity == "blocker"], [])
+
+    def test_shared_card_pairs_every_light_colour_with_a_dark_one(self) -> None:
+        """A dark card body with light-only header text or footer would put dark text on dark."""
+        markup = (ROOT / "shared/ui/templates/components/card.html").read_text(encoding="utf-8")
+        light = re.compile(r"^(text|bg|border)-(white|slate-(?:50|[1-9]00))$")
+        unpaired = []
+        for classes in re.findall(r'class="([^"{]*)"', markup):
+            tokens = classes.split()
+            for token in tokens:
+                match = light.match(token)
+                if match and not any(other.startswith(f"dark:{match.group(1)}-") for other in tokens):
+                    unpaired.append(token)
+        self.assertEqual(unpaired, [])

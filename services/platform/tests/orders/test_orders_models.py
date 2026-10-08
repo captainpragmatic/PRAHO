@@ -575,7 +575,8 @@ class OrderSaveTransactionTestCase(TestCase):
             callers.append(inspect.stack()[1].filename)
             return contextlib.nullcontext()
 
-        with patch("apps.orders.models.transaction.atomic", side_effect=record_caller):
+        # new=, not side_effect=: through a Mock, frame 1 would be unittest.mock, never the caller
+        with patch("apps.orders.models.transaction.atomic", new=record_caller):
             order.save(update_fields=["status"])
 
         self.assertFalse([c for c in callers if c.endswith("apps/orders/models.py")], callers)
