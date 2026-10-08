@@ -47,7 +47,11 @@ class SharedTranslationRenderingTests(SimpleTestCase):
 
     def test_shared_precedence_preserves_service_owned_copy(self) -> None:
         self.assertEqual(settings.LOCALE_PATHS[0], settings.REPO_ROOT / "shared" / "ui" / "locale")
-        for language, close in (("ro", "Închide notificarea"), ("en", "Close notification")):
+        # The plans page's "Save" means savings; the shared form-action "Save" must not replace it
+        for language, close, savings in (
+            ("ro", "Închide notificarea", "Economisiți"),
+            ("en", "Close notification", "Save"),
+        ):
             with self.subTest(language=language), override(language):
                 html = render_to_string("orders/partials/error_message.html", {"error": "Test"})
                 self.assertIn(f'aria-label="{close}"', html)
@@ -59,5 +63,5 @@ class SharedTranslationRenderingTests(SimpleTestCase):
                         ]
                     },
                 )
-                self.assertIn(">Save ", plans)
+                self.assertIn(f">{savings} ", plans)
                 self.assertNotIn("Salvează", plans)

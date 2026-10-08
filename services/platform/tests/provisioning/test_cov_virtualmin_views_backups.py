@@ -199,7 +199,7 @@ class VirtualminBackupPageCoverageTests(VirtualminViewsFixture):
             self.assertContains(response, "Copie de Siguranță Completă")
             self.assertContains(response, "Copie de Siguranță Incrementală")
             self.assertContains(response, "Doar Configurare")
-            self.assertContains(response, "Finalizate")
+            self.assertContains(response, "Finalizată")
             for raw in ("full", "incremental", "config_only"):
                 self.assertContains(response, f'value="{raw}"')
                 self.assertNotContains(response, f"<td>{raw}</td>")

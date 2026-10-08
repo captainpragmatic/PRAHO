@@ -704,7 +704,7 @@ Translation rules:
 4. Do NOT add any prefix like "Translation:", "Romanian:", or explanatory text
 5. Match the register and tone of the source string
 6. For technical terms without standard Romanian equivalents, keep the English term
-7. Romanian uses diacritics: ă, â, î, ș, ț (with cedilla: ș ț, not comma below)
+7. Romanian uses diacritics ă, â, î, ș, ț with comma below (U+0219, U+021B), never the cedilla forms ş ţ
 
 Respond ONLY with a JSON object where keys are the original English strings and values are the Romanian translations:
 {"original string": "traducere română", ...}

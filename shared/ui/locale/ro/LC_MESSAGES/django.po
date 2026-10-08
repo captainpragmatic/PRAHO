@@ -2,6 +2,8 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: PRAHO shared UI\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-10-08 01:38+0300\n"
 "PO-Revision-Date: 2026-10-06 00:00+0300\n"
 "Last-Translator: PRAHO contributors\n"
 "Language-Team: Romanian\n"
@@ -11,7 +13,68 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=3; plural=(n == 1 ? 0 : (n == 0 || (n % 100 > 0 && n % 100 < 20)) ? 1 : 2);\n"
 
-#: templates/components/pagination.html
+#: templates/components/badge.html:50 templates/components/modal.html:36
+msgid "Close"
+msgstr "Închideți"
+
+#: templates/components/breadcrumb.html:8
+msgid "Breadcrumb"
+msgstr "Cale de navigare"
+
+#: templates/components/dangerous_action_modal.html:23
+#: templates/components/dangerous_action_modal.html:59
+msgid "Dangerous Action"
+msgstr "Acțiune periculoasă"
+
+#: templates/components/dangerous_action_modal.html:24
+#: templates/components/dangerous_action_modal.html:68
+msgid "This action cannot be undone."
+msgstr "Această acțiune nu poate fi anulată."
+
+#: templates/components/dangerous_action_modal.html:25
+#: templates/components/dangerous_action_modal.html:77
+msgid "I really am sure I want to do this!"
+msgstr "Sunt sigur că vreau să fac acest lucru!"
+
+#: templates/components/dangerous_action_modal.html:38
+msgid "Close dialog"
+msgstr "Închideți fereastra"
+
+#: templates/components/dangerous_action_modal.html:74
+msgid "Type the following to confirm:"
+msgstr "Introduceți textul următor pentru a confirma:"
+
+#: templates/components/dangerous_action_modal.html:84
+msgid "Type confirmation text here..."
+msgstr "Introduceți aici textul de confirmare..."
+
+#: templates/components/dangerous_action_modal.html:95
+#: templates/components/form_actions.html:24
+#: templates/components/form_actions.html:25 templates/components/modal.html:70
+msgid "Cancel"
+msgstr "Anulează"
+
+#: templates/components/dangerous_action_modal.html:102
+#: templates/components/modal.html:79
+msgid "Confirm"
+msgstr "Confirmă"
+
+#: templates/components/form_actions.html:42
+msgctxt "form action"
+msgid "Save"
+msgstr "Salvează"
+
+#: templates/components/list_page_filters.html:46
+#: templates/components/list_page_filters.html:59
+msgid "Filters"
+msgstr "Filtre"
+
+#: templates/components/list_page_filters.html:76
+#: templates/components/list_page_filters.html:100
+msgid "Search"
+msgstr "Căutare"
+
+#: templates/components/pagination.html:49
 #, python-format
 msgid ""
 "\n"
@@ -22,112 +85,91 @@ msgstr ""
 "            %(start_index)s–%(end_index)s din %(count)s rezultate\n"
 "          "
 
-msgid "(current step)"
-msgstr "(etapa curentă)"
-
-msgid "Actions"
-msgstr "Acțiuni"
-
-msgid "Back"
-msgstr "Înapoi"
-
-msgid "Breadcrumb"
-msgstr "Cale de navigare"
-
-msgid "Cancel"
-msgstr "Anulează"
-
-msgid "Close"
-msgstr "Închideți"
-
-msgid "Close notification"
-msgstr "Închide notificarea"
-
-msgid "Confirm"
-msgstr "Confirmă"
-
-msgid "Filters"
-msgstr "Filtre"
-
-msgid "Go to next page"
-msgstr "Mergeți la pagina următoare"
-
-msgid "Go to previous page"
-msgstr "Mergeți la pagina anterioară"
-
-msgid "More pages"
-msgstr "Mai multe pagini"
-
-msgid "Next"
-msgstr "Următorul"
-
-msgid "Next page (unavailable)"
-msgstr "Pagina următoare (indisponibilă)"
-
-msgid "No data available"
-msgstr "Nu există date disponibile"
-
-msgid "No records have been added yet."
-msgstr "Nu au fost adăugate înregistrări încă."
-
+#: templates/components/pagination.html:58
 msgid "Pagination"
 msgstr "Paginare"
 
+#: templates/components/pagination.html:66
+msgid "Go to previous page"
+msgstr "Mergeți la pagina anterioară"
+
+#: templates/components/pagination.html:78
+#: templates/components/pagination.html:85 templates/components/table.html:150
 msgid "Previous"
 msgstr "Anterior"
 
+#: templates/components/pagination.html:83
 msgid "Previous page (unavailable)"
 msgstr "Pagina anterioară (indisponibilă)"
 
-msgid "Progress steps"
-msgstr "Etapele procesului"
+#: templates/components/pagination.html:116
+#: templates/components/pagination.html:160
+msgid "More pages"
+msgstr "Mai multe pagini"
 
-msgid "Search"
-msgstr "Căutare"
+#: templates/components/pagination.html:190
+msgid "Go to next page"
+msgstr "Mergeți la pagina următoare"
 
-msgid "Showing"
-msgstr "Se afișează"
+#: templates/components/pagination.html:201
+#: templates/components/pagination.html:208 templates/components/table.html:158
+msgid "Next"
+msgstr "Următorul"
 
+#: templates/components/pagination.html:207
+msgid "Next page (unavailable)"
+msgstr "Pagina următoare (indisponibilă)"
+
+#: templates/components/section_card.html:12
 msgid "Toggle section"
 msgstr "Comută secțiunea"
 
+#: templates/components/step_progress.html:31
+msgid "Progress steps"
+msgstr "Etapele procesului"
+
+#: templates/components/step_progress.html:72
+#: templates/components/step_progress.html:151
+#: templates/components/step_progress.html:191
+msgid "(current step)"
+msgstr "(etapa curentă)"
+
+#: templates/components/step_progress.html:231
+#: templates/components/step_progress.html:237
+msgid "Back"
+msgstr "Înapoi"
+
+#: templates/components/table.html:47
+msgid "Actions"
+msgstr "Acțiuni"
+
+#: templates/components/table.html:117
+msgid "No data available"
+msgstr "Nu există date disponibile"
+
+#: templates/components/table.html:118
+msgid "No records have been added yet."
+msgstr "Nu au fost adăugate înregistrări încă."
+
+#: templates/components/table.html:167
+msgid "Showing"
+msgstr "Se afișează"
+
+#: templates/components/table.html:169
+msgid "to"
+msgstr "până la"
+
+#: templates/components/table.html:171
 msgid "of"
 msgstr "din"
 
+#: templates/components/table.html:173
 msgid "results"
 msgstr "rezultate"
 
-msgid "to"
-msgstr "Până la"
-
-#: templates/components/form_actions.html
-msgctxt "form action"
-msgid "Save"
-msgstr "Salvează"
-
-#: templates/components/dangerous_action_modal.html
-msgid "Close dialog"
-msgstr "Închideți fereastra"
-
-#: templates/components/dangerous_action_modal.html
-msgid "Dangerous Action"
-msgstr "Acțiune periculoasă"
-
-#: templates/components/dangerous_action_modal.html
-msgid "I really am sure I want to do this!"
-msgstr "Sunt sigur că vreau să fac acest lucru!"
-
-#: templates/components/dangerous_action_modal.html
-msgid "This action cannot be undone."
-msgstr "Această acțiune nu poate fi anulată."
-
-#: templates/components/dangerous_action_modal.html
-msgid "Type confirmation text here..."
-msgstr "Introduceți aici textul de confirmare..."
-
-#: templates/components/dangerous_action_modal.html
-msgid "Type the following to confirm:"
-msgstr "Introduceți textul următor pentru a confirma:"
+#: templates/components/toast.html:51
+msgid "Close notification"
+msgstr "Închide notificarea"
 
 #~ msgid "Label"
 #~ msgstr "Etichetă"
