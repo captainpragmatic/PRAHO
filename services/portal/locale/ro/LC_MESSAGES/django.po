@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-08 09:42+0300\n"
+"POT-Creation-Date: 2026-10-08 10:05+0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -466,7 +466,7 @@ msgstr "Stocarea contoarelor Portalului este indisponibilă."
 msgid "Run migrate sessions --noinput and migrate common --noinput on the Portal database."
 msgstr "Executați migrate sessions --noinput și migrate common --noinput pe baza de date Portal."
 
-#: apps/common/context_processors.py:46 apps/users/views.py:656
+#: apps/common/context_processors.py:46 apps/users/views.py:668
 #: templates/users/profile.html:5 templates/users/profile.html:9
 msgid "Account Settings"
 msgstr "Setări Cont"
@@ -476,7 +476,7 @@ msgstr "Setări Cont"
 msgid "Security"
 msgstr "Securitate"
 
-#: apps/common/context_processors.py:49 apps/users/views.py:1214
+#: apps/common/context_processors.py:49 apps/users/views.py:1226
 #: templates/components/mobile_header.html:127
 #: templates/users/company_profile.html:5
 #: templates/users/company_profile.html:11
@@ -643,7 +643,7 @@ msgid "Too many cart updates. Please slow down."
 msgstr "Prea multe actualizări ale coșului. Vă rugăm să reduceți ritmul."
 
 #: apps/common/store_unavailable.py:49 apps/orders/security.py:68
-#: apps/orders/views.py:337 apps/users/views.py:900
+#: apps/orders/views.py:337 apps/users/views.py:912
 msgid "Service temporarily unavailable. Please try again later."
 msgstr "Serviciul este temporar indisponibil. Vă rugăm să încercați din nou mai târziu."
 
@@ -2134,234 +2134,239 @@ msgstr "Înregistrare realizată cu succes! Puteți acum să vă conectați cu d
 msgid "Registration failed. Please check your information and try again."
 msgstr "Înregistrarea a eșuat. Vă rugăm să verificați informațiile și să încercați din nou."
 
-#: apps/users/views.py:490
+#: apps/users/views.py:491
+#| msgid "Too many authentication attempts. Please try again in 15 minutes."
+msgid "Too many registration attempts. Please try again later."
+msgstr "Prea multe încercări de înregistrare. Vă rugăm să încercați din nou mai târziu."
+
+#: apps/users/views.py:499 apps/users/views.py:502
 msgid "An unexpected error occurred during registration. Please try again."
 msgstr "A apărut o eroare neașteptată în timpul înregistrării. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:494
+#: apps/users/views.py:506
 msgid "Customer Registration"
 msgstr "Înregistrare client"
 
-#: apps/users/views.py:528
+#: apps/users/views.py:540
 msgid "Error loading profile data."
 msgstr "Eroare la încărcarea datelor profilului."
 
-#: apps/users/views.py:559
+#: apps/users/views.py:571
 msgid "Profile updated successfully!"
 msgstr "Profil actualizat cu succes!"
 
-#: apps/users/views.py:564 apps/users/views.py:568
+#: apps/users/views.py:576 apps/users/views.py:580
 msgid "Error updating profile. Please try again."
 msgstr "Eroare la actualizarea profilului. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:689
+#: apps/users/views.py:701
 msgid "If an eligible account exists and email delivery is available, you will receive password reset instructions."
 msgstr "Dacă există un cont eligibil și livrarea e-mailului este disponibilă, veți primi instrucțiuni de resetare a parolei."
 
-#: apps/users/views.py:703 apps/users/views.py:777
+#: apps/users/views.py:715 apps/users/views.py:789
 msgid "Password recovery is temporarily unavailable. Please try again later."
 msgstr "Recuperarea parolei nu este disponibilă temporar. Încercați din nou mai târziu."
 
-#: apps/users/views.py:720
+#: apps/users/views.py:732
 msgid "Please check your new password and try again."
 msgstr "Verificați noua parolă și încercați din nou."
 
-#: apps/users/views.py:757
+#: apps/users/views.py:769
 msgid "Password reset successfully. Please sign in with your new password."
 msgstr "Parola a fost resetată cu succes. Autentificați-vă cu noua parolă."
 
-#: apps/users/views.py:814
+#: apps/users/views.py:826
 msgid "Password changed successfully!"
 msgstr "Parola a fost schimbată cu succes!"
 
-#: apps/users/views.py:816
+#: apps/users/views.py:828
 msgid "Password change failed. Check your current password and authentication code."
 msgstr "Schimbarea parolei a eșuat. Verificați parola actuală și codul de autentificare."
 
-#: apps/users/views.py:821
+#: apps/users/views.py:833
 #, python-format
 msgid "Too many attempts. Please try again in %(seconds)s seconds."
 msgstr "Prea multe încercări. Încercați din nou în %(seconds)s secunde."
 
-#: apps/users/views.py:825
+#: apps/users/views.py:837
 msgid "Password change failed. Please try again."
 msgstr "Schimbarea parolei a eșuat. Încercați din nou."
 
-#: apps/users/views.py:855 templates/users/privacy_dashboard.html:5
+#: apps/users/views.py:867 templates/users/privacy_dashboard.html:5
 #: templates/users/privacy_dashboard.html:9 templates/users/profile.html:255
 msgid "Privacy Dashboard"
 msgstr "Panoul de confidențialitate"
 
-#: apps/users/views.py:881
+#: apps/users/views.py:893
 msgid "Authentication required."
 msgstr "Autentificare obligatorie."
 
-#: apps/users/views.py:890
+#: apps/users/views.py:902
 msgid "Data export request submitted successfully. You will receive an email with download instructions within 48 hours."
 msgstr "Cererea de export de date a fost trimisă cu succes. Veți primi un e-mail cu instrucțiuni de descărcare în termen de 48 de ore."
 
-#: apps/users/views.py:894
+#: apps/users/views.py:906
 msgid "Failed to create export request. Please try again."
 msgstr "Nu s-a putut crea cererea de export. Vă rugăm să încercați din nou."
 
 #  Duplicate merged with apps/common/rate_limiting.py entry above
 #  msgid "Service temporarily unavailable. Please try again later."
-#: apps/users/views.py:903
+#: apps/users/views.py:915
 msgid "Error processing your data export request. Please try again."
 msgstr "Eroare la procesarea cererii dvs. de export de date. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:923 templates/users/data_export.html:5
+#: apps/users/views.py:935 templates/users/data_export.html:5
 #: templates/users/data_export.html:9 templates/users/privacy_dashboard.html:64
 #: templates/users/profile.html:268
 msgid "Export My Data"
 msgstr "Exportă datele mele"
 
-#: apps/users/views.py:973 templates/users/consent_history.html:5
+#: apps/users/views.py:985 templates/users/consent_history.html:5
 #: templates/users/consent_history.html:9
 #: templates/users/privacy_dashboard.html:77 templates/users/profile.html:281
 msgid "Consent History"
 msgstr "Istoricul consimțămintelor"
 
-#: apps/users/views.py:1010
+#: apps/users/views.py:1022
 msgid "Multi-Factor Authentication"
 msgstr "Autentificare multifactor"
 
-#: apps/users/views.py:1061
+#: apps/users/views.py:1073
 msgid "You need to enable 2FA first before accessing backup codes."
 msgstr "Trebuie să activați mai întâi autentificarea cu doi factori înainte de a accesa codurile de backup."
 
-#: apps/users/views.py:1074
+#: apps/users/views.py:1086
 msgid "Could not regenerate codes. Check your password and authentication code."
 msgstr "Nu s-au putut regenera codurile. Verificați parola și codul de autentificare."
 
-#: apps/users/views.py:1103
+#: apps/users/views.py:1115
 msgid "Two-factor authentication has been disabled."
 msgstr "Autentificarea cu doi factori a fost dezactivată."
 
-#: apps/users/views.py:1106 apps/users/views.py:1109
+#: apps/users/views.py:1118 apps/users/views.py:1121
 msgid "Could not disable MFA. Check your password and authentication code."
 msgstr "Nu s-a putut dezactiva MFA. Verificați parola și codul de autentificare."
 
-#: apps/users/views.py:1128
+#: apps/users/views.py:1140
 msgid "Please select a customer to view profile."
 msgstr "Selectați un client pentru a vizualiza profilul."
 
-#: apps/users/views.py:1198
+#: apps/users/views.py:1210
 msgid "Unable to load company profile data."
 msgstr "Nu s-au putut încărca datele profilului companiei."
 
-#: apps/users/views.py:1206
+#: apps/users/views.py:1218
 msgid "Error loading company profile. Please try again."
 msgstr "Eroare la încărcarea profilului companiei. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:1209
+#: apps/users/views.py:1221
 msgid "An unexpected error occurred."
 msgstr "A apărut o eroare neașteptată."
 
-#: apps/users/views.py:1239
+#: apps/users/views.py:1251
 msgid "Please select a customer to edit profile."
 msgstr "Selectați un client pentru a edita profilul."
 
-#: apps/users/views.py:1251
+#: apps/users/views.py:1263
 #, python-brace-format
 msgid "You don't have permission to edit this company profile. Your role: {role}"
 msgstr "Nu aveți permisiune să editați profilul acestei companii. Rolul dvs.: {role}"
 
-#: apps/users/views.py:1295
+#: apps/users/views.py:1307
 msgid "Unable to load current company data."
 msgstr "Nu s-au putut încărca datele curente ale companiei."
 
-#: apps/users/views.py:1299
+#: apps/users/views.py:1311
 msgid "Error loading company data. Please try again."
 msgstr "Eroare la încărcarea datelor companiei. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:1324
+#: apps/users/views.py:1336
 msgid "Company profile updated successfully!"
 msgstr "Profilul companiei a fost actualizat cu succes!"
 
-#: apps/users/views.py:1344
+#: apps/users/views.py:1356
 #, python-brace-format
 msgid "Failed to update profile: {}"
 msgstr "Actualizarea profilului a eșuat: {}"
 
-#: apps/users/views.py:1350
+#: apps/users/views.py:1362
 msgid "Error updating company profile. Please try again."
 msgstr "Eroare la actualizarea profilului companiei. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:1353
+#: apps/users/views.py:1365
 msgid "An unexpected error occurred while updating profile."
 msgstr "A apărut o eroare neașteptată la actualizarea profilului."
 
-#: apps/users/views.py:1355
+#: apps/users/views.py:1367
 msgid "Please correct the errors below."
 msgstr "Vă rugăm să corectați erorile de mai jos."
 
-#: apps/users/views.py:1360 templates/users/company_profile.html:25
+#: apps/users/views.py:1372 templates/users/company_profile.html:25
 #: templates/users/company_profile_edit.html:5
 #: templates/users/company_profile_edit.html:11
 msgid "Edit Company Profile"
 msgstr "Editare profil companie"
 
-#: apps/users/views.py:1390
+#: apps/users/views.py:1402
 msgid "Please select a valid customer."
 msgstr "Selectați un client valid."
 
-#: apps/users/views.py:1414
+#: apps/users/views.py:1426
 msgid "Customer access verification failed. Please try again."
 msgstr "Verificarea accesului clientului a eșuat. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:1423
+#: apps/users/views.py:1435
 msgid "You don't have access to this customer."
 msgstr "Nu aveți acces la acest client."
 
-#: apps/users/views.py:1438
+#: apps/users/views.py:1450
 msgid "Unable to verify customer access. Please try again."
 msgstr "Nu s-a putut verifica accesul clientului. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:1479 templates/components/customer_selector.html:21
+#: apps/users/views.py:1491 templates/components/customer_selector.html:21
 #: templates/components/customer_selector.html:72
 #: templates/customers/team.html:73 templates/customers/team_invite.html:57
 msgid "Owner"
 msgstr "Proprietar"
 
-#: apps/users/views.py:1480
+#: apps/users/views.py:1492
 msgid "Administrator"
 msgstr "Administrator"
 
-#: apps/users/views.py:1481
+#: apps/users/views.py:1493
 msgid "Billing Manager"
 msgstr "Manager facturare"
 
-#: apps/users/views.py:1482
+#: apps/users/views.py:1494
 msgid "Technical Manager"
 msgstr "Manager tehnic"
 
-#: apps/users/views.py:1483 templates/components/customer_selector.html:24
+#: apps/users/views.py:1495 templates/components/customer_selector.html:24
 #: templates/components/customer_selector.html:75
 #: templates/customers/team.html:70 templates/customers/team_invite.html:54
 msgid "Viewer"
 msgstr "Vizualizator"
 
-#: apps/users/views.py:1487
+#: apps/users/views.py:1499
 #, python-brace-format
 msgid "Switched to {customer} ({role})"
 msgstr "Comutat la {customer} ({role})"
 
-#: apps/users/views.py:1558
+#: apps/users/views.py:1570
 #, python-brace-format
 msgid "Company '{}' created successfully! You are now the owner."
 msgstr "Compania '{}' a fost creată cu succes! Sunteți acum proprietarul."
 
-#: apps/users/views.py:1581
+#: apps/users/views.py:1593
 #, python-brace-format
 msgid "Failed to create company: {}"
 msgstr "Crearea companiei a eșuat: {}"
 
-#: apps/users/views.py:1587
+#: apps/users/views.py:1599
 msgid "Error creating company. Please try again."
 msgstr "Eroare la crearea companiei. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:1591 templates/users/create_company.html:5
+#: apps/users/views.py:1603 templates/users/create_company.html:5
 #: templates/users/create_company.html:273 templates/users/profile.html:200
 msgid "Create Company"
 msgstr "Creați compania"

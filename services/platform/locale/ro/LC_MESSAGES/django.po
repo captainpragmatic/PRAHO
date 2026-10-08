@@ -10,7 +10,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-08 09:42+0300\n"
+"POT-Creation-Date: 2026-10-08 10:05+0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -42,39 +42,44 @@ msgstr "Codul este disponibil după verificarea plății, cât timp cardul are v
 msgid "Gift-card delivery is available after verified payment while the card has usable value."
 msgstr "Livrarea cardului cadou este disponibilă după verificarea plății, cât timp cardul are valoare disponibilă."
 
-#: apps/api/customers/serializers.py:83
+#: apps/api/customers/serializers.py:84
 msgid "A user with this email already exists."
 msgstr "Un utilizator cu această adresă de e-mail există deja."
 
-#: apps/api/customers/serializers.py:90 apps/api/users/serializers.py:416
+#: apps/api/customers/serializers.py:91 apps/api/users/serializers.py:416
 msgid "Invalid Romanian phone number format."
 msgstr "Format invalid al numărului de telefon românesc."
 
-#: apps/api/customers/serializers.py:116
+#: apps/api/customers/serializers.py:117
 msgid "A company with this name already exists."
 msgstr "O companie cu acest nume există deja."
 
-#: apps/api/customers/serializers.py:127 apps/api/customers/serializers.py:131
+#: apps/api/customers/serializers.py:128 apps/api/customers/serializers.py:132
 msgid "VAT number must start with RO followed by digits."
 msgstr "Numărul de TVA trebuie să înceapă cu RO urmat de cifre."
 
-#: apps/api/customers/serializers.py:137
+#: apps/api/customers/serializers.py:138
 msgid "Data processing consent is required."
 msgstr "Consimțământul pentru prelucrarea datelor este obligatoriu."
 
-#: apps/api/customers/serializers.py:253
+#: apps/api/customers/serializers.py:209
+#| msgid "Registration Details"
+msgid "Registration failed"
+msgstr "Înregistrarea a eșuat"
+
+#: apps/api/customers/serializers.py:262
 msgid "Invalid VAT number format"
 msgstr "Format invalid al numărului de TVA"
 
-#: apps/api/customers/serializers.py:446
+#: apps/api/customers/serializers.py:455
 msgid "Postal code must be 6 digits for Romanian addresses"
 msgstr "Codul poștal trebuie să aibă 6 cifre pentru adresele din România"
 
-#: apps/api/customers/serializers.py:452
+#: apps/api/customers/serializers.py:461
 msgid "Invalid Romanian CUI format"
 msgstr "Format invalid al CUI românesc"
 
-#: apps/api/customers/views.py:807 apps/api/customers/views.py:1401
+#: apps/api/customers/views.py:817 apps/api/customers/views.py:1411
 #, python-format
 msgid "Invalid VAT number: %(error)s"
 msgstr "Număr de TVA invalid: %(error)s"
@@ -2972,13 +2977,11 @@ msgid "Payment Collection Runs"
 msgstr "Rulări de Colectare a Plăților"
 
 #: apps/billing/pdf_generators.py:194
-#| msgid "Applied"
 msgid "Supplier:"
 msgstr "Furnizor:"
 
 #: apps/billing/pdf_generators.py:208
 #, python-brace-format
-#| msgid "CUI/CIF"
 msgid "CUI/CIF: {cui}"
 msgstr "CUI/CIF: {cui}"
 
@@ -2989,7 +2992,6 @@ msgstr "Nr. Reg. Com.: {reg}"
 
 #: apps/billing/pdf_generators.py:219 apps/billing/pdf_generators.py:303
 #, python-brace-format
-#| msgid "Email Template"
 msgid "Email: {email}"
 msgstr "Email: {email}"
 
@@ -3105,7 +3107,6 @@ msgstr "Perioada: {start} - {end}"
 
 #: apps/billing/pdf_generators.py:386
 #, python-brace-format
-#| msgid "No products found"
 msgid "Cod produs: {code}"
 msgstr "Cod produs: {code}"
 
@@ -3116,19 +3117,16 @@ msgstr "TVA {rate}%: {tax} {currency} (baza: {base} {currency})"
 
 #: apps/billing/pdf_generators.py:532
 #, python-brace-format
-#| msgid "Total creditat / Total credited: {amount} {currency}"
 msgid "Subtotal: {amount} {currency}"
 msgstr "Subtotal: {amount} {currency}"
 
 #: apps/billing/pdf_generators.py:542
 #, python-brace-format
-#| msgid "Total discount amount in cents"
 msgid "Discount: {amount} {currency}"
 msgstr "Reducere: {amount} {currency}"
 
 #: apps/billing/pdf_generators.py:554
 #, python-brace-format
-#| msgid "Total creditat / Total credited: {amount} {currency}"
 msgid "Total TVA: {amount} {currency}"
 msgstr "Total TVA: {amount} {currency}"
 
@@ -3176,19 +3174,16 @@ msgstr "TOTAL DE PLATĂ: {amount} {currency}"
 
 #: apps/billing/pdf_generators.py:659 apps/billing/pdf_generators.py:747
 #, python-brace-format
-#| msgid "Next number"
 msgid "Number: {number}"
 msgstr "Număr: {number}"
 
 #: apps/billing/pdf_generators.py:666
 #, python-brace-format
-#| msgid "Issue date"
 msgid "Issue date: {date}"
 msgstr "Data emiterii: {date}"
 
 #: apps/billing/pdf_generators.py:673
 #, python-brace-format
-#| msgid "Due Date:"
 msgid "Due date: {date}"
 msgstr "Data scadenței: {date}"
 
@@ -3199,7 +3194,6 @@ msgstr "Storno la factura {number} din {date}"
 
 #: apps/billing/pdf_generators.py:692
 #, python-brace-format
-#| msgid "Status Mismatch"
 msgid "Status: {status}"
 msgstr "Stare: {status}"
 
@@ -3214,7 +3208,6 @@ msgstr "Factură neplătită - Scadență: {date}"
 
 #: apps/billing/pdf_generators.py:720
 #, python-brace-format
-#| msgid "Invoice payment terms"
 msgid "Invoice paid on: {date}"
 msgstr "Factură plătită la: {date}"
 
@@ -3228,13 +3221,11 @@ msgstr "Factura proforma nu constituie document fiscal. Nu dă drept de deducere
 
 #: apps/billing/pdf_generators.py:752
 #, python-brace-format
-#| msgid "Date Range"
 msgid "Date: {date}"
 msgstr "Data: {date}"
 
 #: apps/billing/pdf_generators.py:757
 #, python-brace-format
-#| msgid "Valid until:"
 msgid "Valid until: {date}"
 msgstr "Valabilă până la: {date}"
 
@@ -3304,7 +3295,6 @@ msgstr "Data valabilității proformei trebuie să fie în viitor"
 
 #: apps/billing/proforma_service.py:86
 #, python-format
-#| msgid "Proforma Invoices"
 msgid "Proforma Invoice %(number)s"
 msgstr "Factură proforma %(number)s"
 
@@ -3315,13 +3305,11 @@ msgstr "Găsiți atașată factura proforma %(number)s."
 
 #: apps/billing/proforma_service.py:372
 #, python-format
-#| msgid "Account %(domain)s is not %(expected)s (current status: %(status)s)"
 msgid "Proforma %(number)s cannot accept payment (status: %(status)s)"
 msgstr "Proforma %(number)s nu poate accepta plata (stare: %(status)s)"
 
 #: apps/billing/proforma_service.py:377
 #, python-format
-#| msgid "✅ Proforma #{number} has been created!"
 msgid "Proforma %(number)s has expired"
 msgstr "Proforma %(number)s a expirat"
 
@@ -4381,6 +4369,12 @@ msgstr "❌ Acces refuzat. Sunt necesare privilegii de personal pentru suport."
 msgid "❌ Access denied. Please contact support for account access."
 msgstr "❌ Acces refuzat. Vă rugăm contactați suportul pentru acces la cont."
 
+#: apps/common/e2e_fixtures.py:201
+#, python-format
+#| msgid "Registration failed: %(error)s"
+msgid "E2E registration limit could not be seeded: %(error)s"
+msgstr "Limita de înregistrare E2E nu a putut fi configurată: %(error)s"
+
 #: apps/common/localisation.py:21
 msgid "DD.MM.YYYY — 23.11.2026"
 msgstr "DD.MM.YYYY — 23.11.2026"
@@ -4468,7 +4462,7 @@ msgstr "Întreținere programată"
 msgid "The platform is temporarily unavailable. Please try again in a few minutes."
 msgstr "Platforma nu este disponibilă temporar. Vă rugăm să încercați din nou în câteva minute."
 
-#: apps/common/rate_limiting.py:203 apps/common/security_decorators.py:385
+#: apps/common/rate_limiting.py:203 apps/common/security_decorators.py:391
 #: apps/notifications/services.py:619
 msgid "Rate limit exceeded"
 msgstr "Limita de cereri depășită"
@@ -4477,11 +4471,16 @@ msgstr "Limita de cereri depășită"
 msgid "Service temporarily unavailable"
 msgstr "Serviciul este indisponibil temporar"
 
-#: apps/common/security_decorators.py:261
+#: apps/common/security_decorators.py:262
 msgid "Operation in progress, please try again"
 msgstr "Operație în curs de desfășurare, vă rugăm să reîncercați"
 
-#: apps/common/security_decorators.py:399
+#: apps/common/security_decorators.py:389
+#| msgid "Too many requests. Please try again later."
+msgid "Too many registration attempts. Please try again later."
+msgstr "Prea multe încercări de înregistrare. Vă rugăm să încercați din nou mai târziu."
+
+#: apps/common/security_decorators.py:408
 msgid "Service temporarily unavailable. Please try again later."
 msgstr "Serviciu temporar indisponibil. Vă rugăm să încercați mai târziu."
 
@@ -27569,9 +27568,6 @@ msgstr "Mergeți la pagina următoare"
 #, python-brace-format
 #~ msgid "✅ Proforma #{proforma_number} converted to Invoice #{invoice_number}!"
 #~ msgstr "✅ Proformă #{proforma_number} convertită la Factura #{invoice_number}!"
-
-#~ msgid "Too many requests. Please try again later."
-#~ msgstr "Prea multe cereri. Vă rugăm să reîncercați mai târziu."
 
 #~ msgid "Only HTTP and HTTPS URLs are allowed"
 #~ msgstr "Sunt permise doar adrese URL HTTP și HTTPS"
