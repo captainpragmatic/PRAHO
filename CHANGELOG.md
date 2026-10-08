@@ -89,6 +89,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- New hosting accounts no longer fail at random during provisioning. About 1 generated account
+  password in 350 contained two adjacent dashes, which the Virtualmin API parameter check reads
+  as an SQL comment, and the job failed permanently. Passwords that would be rejected are now
+  regenerated.
 - `make ansible-single-server` now requires `ENV=staging|prod` and runs `make deploy-staging` or
   `make deploy-prod`. It called the deploy playbook without loading `.env.<env>`, so the inventory had
   no server address.
