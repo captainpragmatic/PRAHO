@@ -188,6 +188,8 @@ class TestNativeMakeTargets:
 
 class TestNativeBackupScript:
     PG_DUMP_WRITES = '#!/bin/sh\nwhile [ "$#" -gt 0 ]; do [ "$1" = -f ] && echo dump > "$2"; shift; done\n'
+    # Like pg_dump on a refused connection: the output file exists, empty, and the exit status is 1.
+    PG_DUMP_FAILS = '#!/bin/sh\nwhile [ "$#" -gt 0 ]; do [ "$1" = -f ] && : > "$2"; shift; done\nexit 1\n'
 
     @staticmethod
     def _render(backups: Path) -> str:
@@ -241,9 +243,13 @@ class TestNativeBackupScript:
         assert list(backups.glob("*.partial")) == []
 
     @pytest.mark.integration
-    def test_retention_removes_an_abandoned_partial_but_not_one_being_written(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("dump_fails", [False, True])
+    def test_every_run_removes_an_abandoned_partial_but_not_one_being_written(
+        self, tmp_path: Path, dump_fails: bool
+    ) -> None:
         # A killed backup skips its EXIT trap, and the partial matched neither retention pattern.
-        script, env = self._script(tmp_path, self.PG_DUMP_WRITES)
+        # The cleanup runs before the dump, so a string of failing runs cannot pile them up either.
+        script, env = self._script(tmp_path, self.PG_DUMP_FAILS if dump_fails else self.PG_DUMP_WRITES)
         backups = tmp_path / "backups"
         backups.mkdir()
         abandoned = backups / "praho_backup_20261001_020000_111.dump.partial"
@@ -254,7 +260,7 @@ class TestNativeBackupScript:
         for partial, age in ((abandoned, 2 * 86400), (being_written, 600)):
             os.utime(partial, (time.time() - age, time.time() - age))
         result = self._run(script, env)
-        assert result.returncode == 0, result.stdout + result.stderr
+        assert (result.returncode != 0) == dump_fails, result.stdout + result.stderr
         assert not abandoned.exists()
         assert being_written.exists()
 
@@ -262,9 +268,7 @@ class TestNativeBackupScript:
     def test_a_failed_dump_leaves_nothing_a_restore_could_pick(self, tmp_path: Path) -> None:
         # pg_dump creates its output file before it connects, so a refused connection left an empty
         # dump behind, and restore --latest drops the database before pg_restore rejects that file.
-        script, env = self._script(
-            tmp_path, '#!/bin/sh\nwhile [ "$#" -gt 0 ]; do [ "$1" = -f ] && : > "$2"; shift; done\nexit 1\n'
-        )
+        script, env = self._script(tmp_path, self.PG_DUMP_FAILS)
         result = self._run(script, env)
         assert result.returncode != 0
         assert list((tmp_path / "backups").glob("praho_backup_*")) == []

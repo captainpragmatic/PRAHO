@@ -22,6 +22,11 @@ echo "[$(date)] Starting native PostgreSQL backup..."
 
 mkdir -p "${BACKUP_DIR}"
 
+# A killed backup skips its EXIT trap. A partial untouched for a day (1440 minutes) is abandoned; one
+# being written changes as the dump streams in. Before the dump, so a string of interrupted runs
+# cannot pile them up either.
+find "${BACKUP_DIR}" -name "praho_backup_*.partial" -mmin +1440 -delete
+
 # Direct pg_dump (no Docker)
 PGPASSWORD="{{ deployed_env.DB_PASSWORD }}" pg_dump \
     -h localhost \
@@ -43,9 +48,6 @@ fi
 # Cleanup old backups
 echo "[$(date)] Cleaning up backups older than ${RETENTION_DAYS} days..."
 find "${BACKUP_DIR}" -name "praho_backup_*.dump" -mtime +${RETENTION_DAYS} -delete
-# A killed backup skips its EXIT trap. A partial untouched for a day (1440 minutes) is abandoned; one
-# being written changes as the dump streams in.
-find "${BACKUP_DIR}" -name "praho_backup_*.partial" -mmin +1440 -delete
 
 echo "[$(date)] Current backups:"
 ls -lh "${BACKUP_DIR}"/praho_backup_*.dump 2>/dev/null || echo "No backups found"

@@ -41,13 +41,16 @@ list_backups() {
     fi
 }
 
+# A killed backup skips its EXIT trap. A partial untouched for a day (1440 minutes) is abandoned;
+# one being written changes as the dump streams in.
+remove_abandoned_partials() {
+    find "${BACKUP_DIR}" -name "praho_backup_*.partial" -mmin +1440 -delete
+}
+
 cleanup_backups() {
     local DAYS=${1:-$RETENTION_DAYS}
     log_info "Removing backups older than ${DAYS} days..."
-
-    # A killed backup skips its EXIT trap. A partial untouched for a day (1440 minutes) is
-    # abandoned; one being written changes as the dump streams in.
-    find "${BACKUP_DIR}" -name "praho_backup_*.partial" -mmin +1440 -delete
+    remove_abandoned_partials
 
     local COUNT=$(find "${BACKUP_DIR}" -name "praho_backup_*.sql.gz" -mtime +${DAYS} | wc -l)
 
@@ -66,6 +69,8 @@ create_backup() {
     # praho_backup_*.sql.gz, which restore --latest picks from. Global: the EXIT trap reads it.
     PARTIAL_FILE="${BACKUP_FILE}.partial"
     trap 'rm -f "${PARTIAL_FILE}"' EXIT
+    # Before the dump, so a string of interrupted runs cannot pile partials up either.
+    remove_abandoned_partials
 
     log_info "Creating database backup..."
     log_info "Backup file: ${BACKUP_FILE}"

@@ -732,7 +732,8 @@ Docker backups are stored in `./backups/` as `praho_backup_YYYYMMDD_HHMMSS_<pid>
 in `/opt/praho/backups/` as `praho_backup_YYYYMMDD_HHMMSS_<pid>.dump` (`pg_dump` custom format). The
 process id keeps two backups started in the same second apart. Both scripts write the dump under a
 `.partial` name and rename it once it is complete, so a failed backup never becomes the one
-`restore --latest` picks; a partial left by a killed backup is removed once untouched for a day. A downloaded dump gets mode `0600` in a `0700` directory, and git ignores
+`restore --latest` picks; each backup first removes a partial a killed run left once it has been
+untouched for a day. A downloaded dump gets mode `0600` in a `0700` directory, and git ignores
 `praho_backup_*` anywhere in the checkout.
 
 ### Restoring from Backup

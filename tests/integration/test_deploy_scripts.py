@@ -384,8 +384,12 @@ class TestBackupFiles:
         assert list((project.root / "backups").glob("praho_backup_*")) == []
 
     @pytest.mark.integration
-    def test_retention_removes_an_abandoned_partial_but_not_one_being_written(self, project: Project) -> None:
+    @pytest.mark.parametrize("dump_fails", [False, True])
+    def test_every_run_removes_an_abandoned_partial_but_not_one_being_written(
+        self, project: Project, dump_fails: bool
+    ) -> None:
         # A killed backup skips its EXIT trap, and the partial matched neither retention pattern.
+        # The cleanup runs before the dump, so a string of failing runs cannot pile them up either.
         backups = project.root / "backups"
         backups.mkdir()
         abandoned = backups / "praho_backup_20261001_020000_111.sql.gz.partial"
@@ -395,8 +399,8 @@ class TestBackupFiles:
         # A slow dump may not have written for some minutes; only a day of silence means abandoned.
         for partial, age in ((abandoned, 2 * 86400), (being_written, 600)):
             os.utime(partial, (time.time() - age, time.time() - age))
-        result = project.run("backup.sh")
-        assert result.returncode == 0, result.stdout + result.stderr
+        result = project.run("backup.sh", **({"DOCKER_EXEC_FAILS": "1"} if dump_fails else {}))
+        assert (result.returncode != 0) == dump_fails, result.stdout + result.stderr
         assert not abandoned.exists()
         assert being_written.exists()
 
