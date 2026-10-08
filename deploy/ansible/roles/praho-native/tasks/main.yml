@@ -153,7 +153,7 @@
     - /var/log/praho/portal
 
 - name: Deploy code via rsync
-  synchronize:
+  ansible.posix.synchronize:
     src: "{{ playbook_dir }}/../../../"
     dest: "{{ project_root }}/src/"
     delete: yes
@@ -169,6 +169,9 @@
       - "--exclude=.env.*"
       - "--exclude=.envrc"
       - "--exclude=db.sqlite3"
+      # Database dumps: the checkout's backups/ (deploy/scripts/backup.sh) and any stray one.
+      - "--exclude=/backups/"
+      - "--exclude=praho_backup_*"
       - "--exclude=.mypy_cache"
       - "--exclude=.pytest_cache"
       - "--exclude=htmlcov"

@@ -315,7 +315,7 @@ Deploy PRAHO directly on the host with PostgreSQL + Gunicorn + systemd + Caddy. 
 ```bash
 # Install Ansible and required collections
 pip install ansible
-ansible-galaxy collection install community.postgresql community.general ansible.posix
+ansible-galaxy collection install -r deploy/ansible/requirements.yml
 ```
 
 #### Deploy
@@ -718,11 +718,17 @@ make backup
 # List existing backups
 ./deploy/scripts/backup.sh --list
 
-# Native deployment
+# Native deployment (on the server)
 /opt/praho/scripts/backup.sh
+
+# Native deployment, from your machine: back up, then download that dump to ~/praho-backups
+cd deploy/ansible && ansible-playbook -i inventory/native-single-server.yml playbooks/backup.yml \
+  -e fetch_backup=true    # -e backup_fetch_dir=PATH to choose another directory
 ```
 
-Backups are stored in `./backups/` with format: `praho_backup_YYYYMMDD_HHMMSS.sql.gz`
+Docker backups are stored in `./backups/` as `praho_backup_YYYYMMDD_HHMMSS.sql.gz`; native ones in
+`/opt/praho/backups/` as `praho_backup_YYYYMMDD_HHMMSS.dump` (`pg_dump` custom format). A downloaded dump
+gets mode `0600` in a `0700` directory, and git ignores `praho_backup_*` anywhere in the checkout.
 
 ### Restoring from Backup
 

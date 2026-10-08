@@ -81,6 +81,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `make ansible-backup` can download the dump it makes. With `-e fetch_backup=true` the playbook
+  searched the local machine for `.sql.gz` files while native backups are `.dump` files on the server,
+  so it downloaded nothing and still reported success; `fetch_backup=false` also counted as true, since
+  `-e` passes a string. It now downloads the exact dump that run reported to `~/praho-backups`
+  (`backup_fetch_dir` to change it), readable only by you, and targets the `praho` group the
+  inventories define. Git now ignores `praho_backup_*` anywhere, and the native rsync no longer copies
+  a dump left in the checkout to the server.
+- Terraform provisions Ubuntu 24.04, which the native playbook requires; its default was 22.04, so a
+  server it created failed the playbook's first check. **Upgrading:** the image change makes Terraform
+  replace a server created from the old default on its next apply; set
+  `server_image = "ubuntu-22.04"` in that environment's tfvars to keep it.
+- `deploy/ansible/requirements.yml` now lists `ansible.posix`, which the native role's file sync needs,
+  and the deployment guide installs collections from that file instead of a list of its own.
 - The portal-only Docker stack pins its network to `10.200.250.0/24` (`PRAHO_WEB_SUBNET`), so
   `PORTAL_TRUSTED_PROXY_CIDRS` has a known value before the first start. Docker used to choose the
   subnet, and unless the operator found and set it, the portal attributed every request to its own

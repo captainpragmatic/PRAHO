@@ -59,29 +59,29 @@
   when: firewall_enabled | default(true) | bool
   block:
     - name: Reset UFW
-      ufw:
+      community.general.ufw:
         state: reset
 
     - name: Allow SSH
-      ufw:
+      community.general.ufw:
         rule: allow
         port: "22"
         proto: tcp
 
     - name: Allow HTTP
-      ufw:
+      community.general.ufw:
         rule: allow
         port: "80"
         proto: tcp
 
     - name: Allow HTTPS
-      ufw:
+      community.general.ufw:
         rule: allow
         port: "443"
         proto: tcp
 
     - name: Enable UFW
-      ufw:
+      community.general.ufw:
         state: enabled
         policy: deny
         direction: incoming
@@ -94,5 +94,5 @@
   notify: restart fail2ban
 
 - name: Set timezone
-  timezone:
+  community.general.timezone:
     name: UTC
