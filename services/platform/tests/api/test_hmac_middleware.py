@@ -246,9 +246,9 @@ class PortalHMACTests(TestCase):
         self.assertEqual(payload["status"], 429)
         self.assertEqual(payload["retry_after"], retry_after)
 
-    @override_settings(PLATFORM_API_SECRET='unit-test-secret', HMAC_RATE_LIMIT_WINDOW=60, HMAC_RATE_LIMIT_MAX_CALLS=2)
+    @override_settings(PLATFORM_API_SECRET="unit-test-secret", HMAC_RATE_LIMIT_WINDOW=60, HMAC_RATE_LIMIT_MAX_CALLS=2)
     def test_rate_limit_returns_remaining_window_seconds(self):
-        middleware = PortalServiceHMACMiddleware(lambda req: HttpResponse('ok', status=200))
+        middleware = PortalServiceHMACMiddleware(lambda req: HttpResponse("ok", status=200))
 
         with patch("apps.common.middleware.time.time", return_value=1000.0):
             is_limited, retry_after = middleware._rate_limited("portal-rl", "127.0.0.1")
@@ -395,19 +395,23 @@ class HMACRejectionUniformityTests(TestCase):
         self.view_calls += 1
         return HttpResponse("ok", status=200)
 
-    def _headers(self, *, timestamp: str, nonce: str | None = None, **overrides: str) -> dict[str, str]:
+    def _headers(
+        self, *, timestamp: str, nonce: str | None = None, signed_body: bytes | None = None, **overrides: str
+    ) -> dict[str, str]:
+        """Headers signing ``signed_body`` (default: the body that is sent), so they can disagree."""
         nonce = nonce or f"nonce-{uuid.uuid4().hex}"
+        signed_body = self.body if signed_body is None else signed_body
         headers = {
             "HTTP_X_PORTAL_ID": self.portal_id,
             "HTTP_X_NONCE": nonce,
             "HTTP_X_TIMESTAMP": timestamp,
-            "HTTP_X_BODY_HASH": base64.b64encode(hashlib.sha256(self.body).digest()).decode("ascii"),
+            "HTTP_X_BODY_HASH": base64.b64encode(hashlib.sha256(signed_body).digest()).decode("ascii"),
         }
         headers.update({key: value for key, value in overrides.items() if key != "HTTP_X_SIGNATURE"})
         headers["HTTP_X_SIGNATURE"] = overrides.get(
             "HTTP_X_SIGNATURE",
             sign_request(
-                "POST", self.path, self.body, headers["HTTP_X_PORTAL_ID"], headers["HTTP_X_NONCE"], timestamp
+                "POST", self.path, signed_body, headers["HTTP_X_PORTAL_ID"], headers["HTTP_X_NONCE"], timestamp
             ),
         )
         return headers
@@ -438,15 +442,25 @@ class HMACRejectionUniformityTests(TestCase):
         now = str(_FROZEN_NOW)
         valid = self._headers(timestamp=now)
         wrong_signature = valid["HTTP_X_SIGNATURE"][:-1] + ("0" if valid["HTTP_X_SIGNATURE"][-1] != "0" else "1")
-        other_body_hash = base64.b64encode(hashlib.sha256(b"{}").digest()).decode("ascii")
         replayed = self._headers(timestamp=now)
         self.assertEqual(self._send(replayed).status_code, 200)
         cases = {
-            "missing signature": (self._headers(timestamp=now), "HTTP_X_SIGNATURE"),
+            **{
+                f"missing {header}": (self._headers(timestamp=now), header)
+                for header in (
+                    "HTTP_X_PORTAL_ID",
+                    "HTTP_X_NONCE",
+                    "HTTP_X_TIMESTAMP",
+                    "HTTP_X_BODY_HASH",
+                    "HTTP_X_SIGNATURE",
+                )
+            },
+            "empty timestamp": (self._headers(timestamp=""), ""),
             "bad portal id": (self._headers(timestamp=now, HTTP_X_PORTAL_ID="bad portal!"), ""),
             "bad nonce format": (self._headers(timestamp=now, nonce="short"), ""),
             "bad signature format": (self._headers(timestamp=now, HTTP_X_SIGNATURE="XYZ"), ""),
-            "body hash mismatch": (self._headers(timestamp=now, HTTP_X_BODY_HASH=other_body_hash), ""),
+            # Validly signed, but for a different body than the one sent
+            "body hash mismatch": (self._headers(timestamp=now, signed_body=b"{}"), ""),
             "wrong signature": (self._headers(timestamp=now, HTTP_X_SIGNATURE=wrong_signature), ""),
             "stale timestamp": (self._headers(timestamp=str(_FROZEN_NOW - 301)), ""),
             "future timestamp": (self._headers(timestamp=str(_FROZEN_NOW + 3)), ""),
@@ -470,11 +484,17 @@ class HMACRejectionUniformityTests(TestCase):
 
     def test_the_signature_is_compared_in_constant_time(self) -> None:
         # Constant time cannot be observed deterministically; prove the constant-time primitive
-        # is the one that decides, by checking it receives the submitted signature.
+        # compares the submitted signature with the expected one, and that its answer decides.
         headers = self._headers(timestamp=str(_FROZEN_NOW))
         with patch("apps.common.middleware.hmac.compare_digest", wraps=hmac.compare_digest) as compare:
             self.assertEqual(self._send(headers).status_code, 200)
-        self.assertIn(headers["HTTP_X_SIGNATURE"], [call.args[0] for call in compare.call_args_list])
+        expected = sign_request("POST", self.path, self.body, self.portal_id, headers["HTTP_X_NONCE"], str(_FROZEN_NOW))
+        self.assertIn((headers["HTTP_X_SIGNATURE"], expected), [call.args for call in compare.call_args_list])
+
+        refused = self._headers(timestamp=str(_FROZEN_NOW))
+        with patch("apps.common.middleware.hmac.compare_digest", return_value=False):
+            self.assertEqual(self._shape(self._send(refused)), _UNIFORM_REJECTION)
+        self.assertEqual(self.view_calls, 1)
 
     def test_a_rejected_request_does_not_use_up_its_nonce(self) -> None:
         for reason, overrides in (
