@@ -1,26 +1,27 @@
 %% PRAHO Platform - Docker Deployment Architecture
-%% Generated: 2026-02-21
+%% Updated: 2026-10-06 to match deploy/docker-compose.single-server.yml (Caddy edge)
 %% Shows network isolation and container layout
 
 graph TB
     subgraph "Docker Host"
-        subgraph "platform-network<br/>(Internal Only)"
-            Platform[Platform Service<br/>:8700]
+        subgraph "internal<br/>(Database network)"
             PostgreSQL[(PostgreSQL<br/>:5432)]
-            Platform <-->|Full Access| PostgreSQL
         end
 
-        subgraph "api-network<br/>(Public Facing)"
+        subgraph "web<br/>(Edge network)"
+            Caddy[Caddy<br/>:80/:443<br/>automatic HTTPS]
             Portal[Portal Service<br/>:8701]
-            Nginx[Nginx<br/>:80/:443]
-            Nginx -->|Proxy /portal/*| Portal
-            Nginx -->|Proxy /platform/*| Platform
         end
 
+        Platform[Platform Service<br/>:8700<br/>joins web and internal]
+
+        Caddy -->|portal domain| Portal
+        Caddy -->|platform domain<br/>staff UI: staff CIDRs only<br/>public: /api, webhooks,<br/>unsubscribe, health| Platform
+        Platform <-->|Full Access| PostgreSQL
         Portal -.->|HTTP API<br/>HMAC Auth| Platform
     end
 
-    Internet([Internet]) -->|HTTPS| Nginx
+    Internet([Internet]) -->|HTTPS| Caddy
 
     subgraph "External Services"
         Virtualmin[Virtualmin]
@@ -37,6 +38,6 @@ graph TB
     classDef db fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
     classDef external fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
 
-    class Platform,Portal,Nginx service
+    class Platform,Portal,Caddy service
     class PostgreSQL db
     class Virtualmin,Stripe,ANAF external

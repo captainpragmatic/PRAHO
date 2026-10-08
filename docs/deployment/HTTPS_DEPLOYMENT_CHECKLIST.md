@@ -21,27 +21,34 @@ Nothing in this table is an operator decision. It tells you what to expect when 
 | Concern | Where it lives | What ships |
 |---|---|---|
 | TLS termination and certificates | Caddy: `deploy/caddy/Caddyfile` (Docker), `deploy/ansible/roles/praho-native/templates/Caddyfile.native.j2` (native) | Automatic ACME certificates per hostname, contact address `ACME_EMAIL` |
-| HTTP → HTTPS redirect | Caddy | Django's own redirect stays **off**: every shipped compose file and the Ansible env template set `DJANGO_SECURE_SSL_REDIRECT=false`. Set it to `true` only if Django faces the internet directly |
+| HTTP → HTTPS redirect | Caddy | Django's own redirect stays **off**: every shipped compose file and both env examples set `DJANGO_SECURE_SSL_REDIRECT=false`, and the native role defaults it to `false`. Set it to `true` only if Django faces the internet directly |
 | Scheme Django sees | `SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")` in both services' `config/settings/prod.py` | Caddy sends `X-Forwarded-Proto` |
-| HSTS | Both services' `prod.py`, and a `Strict-Transport-Security` header in both Caddy configs | One year with `includeSubDomains`. Hardcoded, with no environment variable to lower it |
+| HSTS | **Behind Caddy, the edge owns it**: every Caddy config sends `HSTS_POLICY`, and replaces the header Django sends. Without an edge, Django's `SECURE_HSTS_*` settings apply | Production: unset, so `max-age=31536000; includeSubDomains`. Staging: `HSTS_POLICY=max-age=3600` (`.env.example.staging`; the native role falls back to it on staging). Nothing preloads |
 | Secure cookies | `SESSION_COOKIE_SECURE` and `CSRF_COOKIE_SECURE` are `True` in both `prod.py` files | Not configurable |
 | Allowed hosts and CSRF origins | `ALLOWED_HOSTS` environment variable (comma-separated) | `CSRF_TRUSTED_ORIGINS` is derived as `https://<host>` for each host. Startup fails if `ALLOWED_HOSTS` is unset or contains `*`. The platform also refuses to start without `PORTAL_DOMAIN` and `PLATFORM_DOMAIN` |
 | Staff UI exposure | Caddy's `@staff` matcher | The platform's staff UI is served only to `PLATFORM_ALLOWED_CIDRS` (native: `platform_allowed_ips`); everyone else gets `403 Access denied`. `/api/*`, the webhook endpoints and unsubscribe links stay public |
 | Content Security Policy | `apps/common/middleware.py` in each service | `default-src 'self'`, with no third-party hosts: every script, style and font is self-hosted. The portal sends `Content-Security-Policy-Report-Only` instead when `CSP_REPORT_ONLY=true`; production should enforce |
 
-> **HSTS is permanent for a year.** There is no short-HSTS stage, and no setting that lowers the
-> header once it ships. A browser that has seen it refuses plain HTTP to that host for a year.
-> Confirm HTTPS works on **both** hostnames before the first deploy that serves them publicly.
+> **Production HSTS is permanent for a year.** A browser that has seen the header refuses plain
+> HTTP to that host for a year, and lowering `HSTS_POLICY` later only takes effect on each
+> browser's next visit. Confirm HTTPS works on **both** hostnames before the first deploy that
+> serves them publicly. Staging uses one hour precisely so a broken rollout can be undone.
 
-> **Known divergence, unresolved.** The two services and Caddy disagree on two HSTS details.
-> - **Preload:** platform `prod.py` has `SECURE_HSTS_PRELOAD = False`, while portal `prod.py` and
->   both Caddy configs send `preload`.
-> - **Staging:** staging settings use a one-hour HSTS with no `includeSubDomains`, but Caddy sends
->   the one-year header with `preload` on every host. A staging server behind these Caddy configs
->   therefore gets the production header, not the staging one.
+> **How `HSTS_POLICY` reaches Caddy.**
+> - Each site sets it twice: in the deferred `header` block, which replaces Django's header, and
+>   on an immediate `header` line, which covers responses Caddy generates itself (a 502 with the
+>   upstream down).
+> - **Set but empty would send an empty header, which turns HSTS off.** So every compose file and
+>   the native role repeat the non-empty default.
+> - **Quote a value that contains `;`** (for example, adding `; preload`). `source .env`, Docker
+>   Compose and the native template all strip the double quotes.
+> - **Upgrading an existing staging deployment:** Compose falls back to the one-year default when
+>   `HSTS_POLICY` is missing, so add `HSTS_POLICY=max-age=3600` to the staging `.env`. Native
+>   deploys fall back to one hour on their own when `praho_env` is `staging`.
 >
-> Run the header check below to see which value a browser actually receives. Do this before
-> submitting a domain to the HSTS preload list.
+> A staging host under a parent domain that sends `includeSubDomains` still inherits the parent's
+> longer policy. To preload a domain, submit it at hstspreload.org and add `; preload` to its
+> production policy; nothing preloads by default.
 
 ---
 
@@ -97,8 +104,8 @@ curl -sI "https://$PORTAL_HOST/login/" | grep -iE \
 Repeat with `https://$PLATFORM_HOST/auth/login/` from an address in `PLATFORM_ALLOWED_CIDRS`. From
 anywhere else, that request correctly returns 403.
 
-- [ ] `Strict-Transport-Security` has `max-age=31536000; includeSubDomains`. Note whether `preload`
-      is present, per the known divergence above.
+- [ ] `Strict-Transport-Security` is exactly the environment's policy, sent once: production
+      `max-age=31536000; includeSubDomains`, staging `max-age=3600`.
 - [ ] `Content-Security-Policy` starts `default-src 'self'` and names no third-party host. If only
       `Content-Security-Policy-Report-Only` appears, `CSP_REPORT_ONLY` is on and the policy is not
       being enforced.

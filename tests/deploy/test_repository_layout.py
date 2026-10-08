@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
+import re
 import shlex
 from pathlib import Path, PurePosixPath
 from typing import cast
 
 import yaml
 from django.test import SimpleTestCase
-from jinja2 import Environment, StrictUndefined
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -27,6 +27,12 @@ def _runtime_instructions(service: str) -> list[tuple[str, str]]:
         else:
             instructions.append((keyword.upper(), argument))
     return instructions
+
+
+def _dev_stage(service: str) -> str:
+    """The Dockerfile's dev target, from its FROM line to the next stage."""
+    stages = re.split(r"^FROM ", (ROOT / "deploy" / service / "Dockerfile").read_text(encoding="utf-8"), flags=re.M)
+    return next(stage for stage in stages if stage.split("\n", 1)[0].rstrip().endswith(" AS dev"))
 
 
 class DockerRepositoryLayoutTests(SimpleTestCase):
@@ -109,7 +115,6 @@ class DockerRepositoryLayoutTests(SimpleTestCase):
             "docker-compose.container-service.yml",
             "docker-compose.dev.yml",
             "docker-compose.portal-only.yml",
-            "docker-compose.services.yml",
             "docker-compose.single-server.yml",
         }
         checked: set[str] = set()
@@ -156,14 +161,6 @@ class DockerRepositoryLayoutTests(SimpleTestCase):
             "docker-compose.portal-only.yml": {
                 "portal": ["portal_static:/app/staticfiles", "portal_logs:/app/logs", "portal_sessions:/app/data"],
             },
-            "docker-compose.services.yml": {
-                "platform": ["static_volume:/app/staticfiles", "media_volume:/app/media", "logs_volume:/app/logs"],
-                "portal": [
-                    "portal_static_volume:/app/staticfiles",
-                    "portal_logs_volume:/app/logs",
-                    "portal_sessions_volume:/app/data",
-                ],
-            },
             "docker-compose.single-server.yml": {
                 "platform": ["static_files:/app/staticfiles", "media_files:/app/media", "logs:/app/logs"],
                 "portal": ["portal_static:/app/staticfiles", "portal_logs:/app/logs", "portal_sessions:/app/data"],
@@ -186,76 +183,18 @@ class DockerRepositoryLayoutTests(SimpleTestCase):
                     volumes = config.get("volumes", [])
                     self.assertIsInstance(volumes, list)
                     if path.name == "docker-compose.dev.yml":
-                        self.assertEqual(config.get("working_dir"), f"/app/services/{service}")
+                        # The dev image sets the working directory; the mounts must land where it points
+                        build = cast(dict[str, str], config["build"])
+                        self.assertEqual(build.get("target"), "dev")
+                        self.assertIn(f"WORKDIR /app/services/{service}", _dev_stage(service))
+                        self.assertNotIn("working_dir", config)
                         self.assertIn(f"../services/{service}:/app/services/{service}:delegated", volumes)
-                        self.assertIn("../shared:/app/shared:delegated", volumes)
-                        self.assertEqual(
-                            config["command"],
-                            [
-                                "python",
-                                f"/app/services/{service}/manage.py",
-                                "runserver",
-                                f"0.0.0.0:{8700 if service == 'platform' else 8701}",
-                            ],
-                        )
+                        self.assertIn("../shared:/app/shared:ro", volumes)
+                        port = 8700 if service == "platform" else 8701
+                        self.assertIn(f"python manage.py runserver 0.0.0.0:{port}", str(config["command"]))
                     else:
                         self.assertNotIn("working_dir", config)
                         self.assertEqual(volumes, expected_volumes[path.name][service])
                         self.assertNotIn("entrypoint", config)
                         self.assertNotIn("command", config)
-        self.assertEqual(checked, 10)
-
-    def test_ansible_compose_keeps_the_same_runtime_config_for_old_and_new_images(self) -> None:
-        source = (ROOT / "deploy/ansible/roles/praho/templates/docker-compose.yml.j2").read_text(encoding="utf-8")
-        environment = Environment(undefined=StrictUndefined, autoescape=False)  # noqa: S701  # YAML, not HTML.
-        template = environment.from_string(source)
-        for platform, portal in ((True, True), (True, False), (False, True)):
-            rendered = template.render(
-                ansible_date_time={"iso8601": "2026-10-06"},
-                deploy_database=True,
-                deploy_platform=platform,
-                deploy_portal=portal,
-                deploy_caddy=True,
-                build_from_source=False,
-                db_name="praho",
-                db_user="praho",
-                backup_directory="/backups",
-                platform_domain="platform.example.com",
-                portal_domain="portal.example.com",
-                platform_port=8700,
-                portal_port=8701,
-            )
-            configurations: list[dict[str, dict[str, object]]] = []
-            for version in ("pre-layout", "repository-layout"):
-                compose = cast(
-                    dict[str, dict[str, dict[str, object]]],
-                    yaml.safe_load(rendered.replace("${VERSION:-latest}", version)),
-                )
-                services = compose["services"]
-                expected = {name for name, enabled in (("platform", platform), ("portal", portal)) if enabled}
-                self.assertEqual(set(services) & {"platform", "portal"}, expected)
-                runtime: dict[str, dict[str, object]] = {}
-                for service in sorted(expected):
-                    config = services[service]
-                    with self.subTest(platform=platform, portal=portal, version=version, service=service):
-                        self.assertNotIn("working_dir", config)
-                        self.assertNotIn("entrypoint", config)
-                        self.assertNotIn("command", config)
-                        self.assertEqual(config["image"], f"${{REGISTRY:-}}praho-{service}:{version}")
-                        self.assertEqual(
-                            config["volumes"],
-                            ["static_files:/app/staticfiles", "media_files:/app/media", "logs:/app/logs"]
-                            if service == "platform"
-                            else ["portal_static:/app/staticfiles", "portal_logs:/app/logs"],
-                        )
-                    runtime[service] = {key: value for key, value in config.items() if key != "image"}
-                configurations.append(runtime)
-            self.assertEqual(configurations[0], configurations[1])
-
-    def test_ansible_environment_keeps_legacy_static_and_media_paths(self) -> None:
-        source = (ROOT / "deploy/ansible/roles/praho/templates/env.j2").read_text(encoding="utf-8")
-        values = dict(
-            line.split("=", 1) for line in source.splitlines() if line.startswith(("STATIC_ROOT=", "MEDIA_ROOT="))
-        )
-        self.assertEqual(values.get("STATIC_ROOT"), "/app/staticfiles")
-        self.assertEqual(values.get("MEDIA_ROOT"), "/app/media")
+        self.assertEqual(checked, 8)

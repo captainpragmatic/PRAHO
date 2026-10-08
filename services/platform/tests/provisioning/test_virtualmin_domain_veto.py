@@ -1,10 +1,10 @@
-"""A domain-driven suspension must not be reversed by Service-only paths (#566).
+"""A bound domain's hold on hosting is never reversed by a Service-only path (#566).
 
-``reconcile_virtualmin_service_state`` converges on ``Service.status`` alone, so an
-account the domain path disabled for an expired domain was re-enabled on the next
-reconcile, by the 15-minute divergence sweep, or by a retried unsuspend job. Until
-ADR-0051 settles single ownership, those paths defer to a bound domain in a
-hosting-disabling status. The reconciler does NOT newly suspend for domain reasons.
+``reconcile_virtualmin_service_state`` used to converge on ``Service.status`` alone, so an
+account disabled for an expired domain was re-enabled on the next reconcile, by the
+15-minute divergence sweep, or by a retried unsuspend job. Under ADR-0051 the reconciler
+is the single writer and applies the domain hold in both directions: it keeps a held
+account off, and it now also suspends an active account for it.
 """
 
 from __future__ import annotations
@@ -101,16 +101,16 @@ class ReconcilerDomainVetoTests(_DomainVetoBase):
 
         self.assertEqual(self._reconcile(gateway)["action"], "unsuspended")
 
-    def test_active_account_with_disabling_domain_is_not_newly_suspended(self) -> None:
-        # Only the reversal is vetoed; who suspends for domain reasons is ADR-0051's call.
+    def test_active_account_with_disabling_domain_is_suspended(self) -> None:
+        # ADR-0051 settled it: the reconciler is the one writer, so it suspends for the domain.
         self.account.status = "active"
         self.account.save(update_fields=["status"])
         self._domain("expired", service=self.service)
         gateway = MockVirtualminGateway()
         gateway.seed_domain(self.account.domain)
 
-        self.assertEqual(self._reconcile(gateway)["action"], "noop")
-        self.assertEqual(gateway.get_calls("disable-domain"), [])
+        self.assertEqual(self._reconcile(gateway)["action"], "domain_suspended")
+        self.assertEqual(len(gateway.get_calls("disable-domain")), 1)
 
 
 class UnsuspendRetryDomainVetoTests(_DomainVetoBase):

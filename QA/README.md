@@ -47,6 +47,11 @@ workflow ran from, not the branch each matrix leg checked out. The claim needs t
 `nightly-e2e (master)` and `nightly (master)` concluding `success`, with the branch you are claiming
 in the job name.
 
+To prove a branch before merge, dispatch the workflow from it:
+`gh workflow run nightly.yml --ref <branch>`, then read `nightly-e2e (<branch>)`. A failed
+*scheduled* run opens, or comments on, the `nightly-failure` issue; close it once a scheduled run
+is green for every branch it tested.
+
 Then:
 
 ```bash
@@ -58,3 +63,7 @@ make test-e2e-coverage   # browser suite, both services live, server-side covera
 make coverage-portal-union
 make coverage-platform-packages
 ```
+
+One manual instrument, run against `make dev`: `make qa-settings-sweep`. It changes every setting
+through the real save endpoints, checks that each change is persisted, delivered and audited, then
+restores it. It writes to the dev database's settings, so it is not part of `make test`.

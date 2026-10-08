@@ -43,7 +43,7 @@ class SessionIndexWriteSkipTests(TestCase):
 
     def authenticated_key(self) -> str:
         request = self.request()
-        login(request, self.user, backend="django.contrib.auth.backends.ModelBackend")
+        login(request, self.user, backend=settings.AUTHENTICATION_BACKENDS[0])
         return self.persist(request)
 
     def index_query_count(self, captured: CaptureQueriesContext) -> int:
@@ -80,7 +80,7 @@ class SessionIndexWriteSkipTests(TestCase):
         self.assertFalse(UserSession.objects.filter(session_key=old_key).exists())
         request = self.request(old_key)
 
-        login(request, self.user, backend="django.contrib.auth.backends.ModelBackend")
+        login(request, self.user, backend=settings.AUTHENTICATION_BACKENDS[0])
         with CaptureQueriesContext(connection) as captured:
             key = self.persist(request)
 

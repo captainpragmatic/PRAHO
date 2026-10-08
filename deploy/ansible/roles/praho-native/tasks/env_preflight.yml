@@ -1,0 +1,14 @@
+# A comment after a value becomes part of the value for systemd (EnvironmentFile=) and for the
+# deploy's own parsing, though bash and dotenv drop it. `DJANGO_SETTINGS_MODULE=config.settings.staging
+# # note` then names a module that does not exist. Refuse such lines before anything reads the file.
+# The playbook includes this right after its existence check, and the role's main.yml includes it too.
+# The checker prints line numbers and keys only, never values: the file holds secrets.
+- name: Run the .env inline-comment check
+  command:
+    argv:
+      - "{{ ansible_playbook_python }}"
+      - "{{ role_path }}/files/check_env_inline_comments.py"
+      - "{{ env_file_path }}"
+  delegate_to: localhost
+  become: false
+  changed_when: false

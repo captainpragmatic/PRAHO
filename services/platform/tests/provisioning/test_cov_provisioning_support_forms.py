@@ -7,6 +7,7 @@ from typing import cast
 from django import forms
 from django.test import SimpleTestCase
 
+from apps.provisioning.models import Service
 from apps.provisioning.virtualmin_forms import (
     VirtualminAccountForm,
     VirtualminBackupForm,
@@ -14,7 +15,7 @@ from apps.provisioning.virtualmin_forms import (
     VirtualminRestoreForm,
     VirtualminServerForm,
 )
-from apps.provisioning.virtualmin_models import VirtualminServer
+from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminServer
 from tests.provisioning.test_cov_virtualmin_views_servers import VirtualminViewsFixture
 
 
@@ -63,18 +64,6 @@ class VirtualminOperationFormTests(SimpleTestCase):
         self.assertIn("backup_id", form.errors)
         self.assertEqual(list(cast(forms.ChoiceField, form.fields["backup_id"]).choices), [])
 
-    def test_bulk_action_parses_ids_and_requires_backup_type(self) -> None:
-        selected = VirtualminBulkActionForm(
-            {"action": "suspend", "selected_accounts": " first, , second ", "confirm_bulk_action": "on"}
-        )
-        self.assertTrue(selected.is_valid(), selected.errors)
-        self.assertEqual(selected.cleaned_data["selected_accounts"], ["first", "second"])
-        backup = VirtualminBulkActionForm(
-            {"action": "backup", "selected_accounts": "first", "confirm_bulk_action": "on"}
-        )
-        self.assertFalse(backup.is_valid())
-        self.assertIn("Backup type is required", str(backup.non_field_errors()))
-
     def test_bulk_action_refuses_empty_selection_and_missing_confirmation(self) -> None:
         for selection in ("", " , , "):
             form = VirtualminBulkActionForm(
@@ -89,6 +78,53 @@ class VirtualminOperationFormTests(SimpleTestCase):
 
 
 class VirtualminModelFormTests(VirtualminViewsFixture):
+    def test_bulk_action_accepts_account_lists_and_requires_backup_type(self) -> None:
+        service = Service.objects.create(
+            customer=self.customer,
+            service_plan=self.plan,
+            currency=self.currency,
+            service_name="second.example.com",
+            domain="second.example.com",
+            username="second",
+            price=self.service.price,
+            billing_cycle="monthly",
+            status="active",
+        )
+        second = VirtualminAccount.objects.create(
+            server=self.server, service=service, domain=service.domain, virtualmin_username="second", status="active"
+        )
+        ids = [str(self.account.pk), str(second.pk)]
+        accounts = VirtualminAccount.objects.filter(pk__in=ids)
+        selected = VirtualminBulkActionForm(
+            {"action": "suspend", "selected_accounts": ids, "confirm_bulk_action": "on"}, accounts=accounts
+        )
+        self.assertTrue(selected.is_valid(), selected.errors)
+        self.assertEqual(
+            set(selected.cleaned_data["selected_accounts"].values_list("pk", flat=True)),
+            {self.account.pk, second.pk},
+        )
+        self.assertIsInstance(selected.fields["selected_accounts"].widget, forms.CheckboxSelectMultiple)
+        comma_separated = VirtualminBulkActionForm(
+            {"action": "suspend", "selected_accounts": ",".join(ids), "confirm_bulk_action": "on"}, accounts=accounts
+        )
+        self.assertFalse(comma_separated.is_valid())
+        self.assertIn("selected_accounts", comma_separated.errors)
+        backup = VirtualminBulkActionForm(
+            {"action": "backup", "selected_accounts": ids, "confirm_bulk_action": "on"}, accounts=accounts
+        )
+        self.assertFalse(backup.is_valid())
+        self.assertIn("Backup type is required", str(backup.non_field_errors()))
+        complete_backup = VirtualminBulkActionForm(
+            {"action": "backup", "selected_accounts": ids, "confirm_bulk_action": "on", "backup_type": "full"},
+            accounts=accounts,
+        )
+        self.assertTrue(complete_backup.is_valid(), complete_backup.errors)
+        self.assertEqual(complete_backup.cleaned_data["backup_type"], "full")
+        self.assertEqual(
+            set(complete_backup.cleaned_data["selected_accounts"].values_list("pk", flat=True)),
+            {self.account.pk, second.pk},
+        )
+
     def test_server_form_reports_invalid_hostname_username_and_password(self) -> None:
         cases = (
             ("hostname", "bad/host", "Invalid hostname format"),

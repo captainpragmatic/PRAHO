@@ -73,6 +73,26 @@ def _clear_idempotency_key(idempotency_key: str | None, *, operation: str, domai
         )
 
 
+def _job_matches_service_state(operation: str, service_status: str, account: VirtualminAccount) -> bool:
+    """Whether a lifecycle job still matches what the account should be (ADR-0051).
+
+    The one predicate for both checks in ``_execute_lifecycle_operation``: before the gateway
+    call (a stale job is discarded) and after it (a moved Service is re-reconciled). It mirrors
+    the reconciler's predicate in both directions (#566):
+    - a suspend is also current for an active Service whose bound domain holds hosting off,
+      because the reconciler issues exactly that suspend and its retry must not be discarded;
+    - an unsuspend is current only while no bound domain holds hosting off, so a domain that
+      expires while the retry's gateway call runs is re-reconciled by the check after it.
+    """
+    if operation == "suspend_domain":
+        return service_status in ("suspended", "terminated", "expired") or (
+            service_status == "active" and domain_disables_hosting(account)
+        )
+    if operation == "unsuspend_domain":
+        return service_status == "active" and not domain_disables_hosting(account)
+    return service_status == "terminated"
+
+
 def get_max_username_uniqueness_attempts() -> int:
     """Get max username uniqueness attempts from SettingsService (runtime)."""
     from apps.settings.services import (  # Deferred: avoids circular import  # noqa: PLC0415  # Circular
@@ -1269,16 +1289,19 @@ class VirtualminProvisioningService:
         }
         program, target_status = operations[job.operation]
 
+        # Same veto as the reconciler (#566): an unsuspend retry must not re-enable an
+        # account its bound domain is holding off. Terminal — retrying cannot change it.
+        # Checked first so this, not the generic stale-state message below, explains it.
+        if job.operation == "unsuspend_domain" and domain_disables_hosting(account):
+            job.mark_failed("Superseded: a bound domain disables hosting")
+            VirtualminProvisioningJob.terminalize(job.pk)
+            return Err("Job superseded: a bound domain disables hosting")
+
         # Stale-intent guard: a job minted under an older Service state must
         # not replay against the current desired state (e.g. an old unsuspend
         # re-enabling hosting for a since-suspended customer).
-        desired = {
-            "suspend_domain": ("suspended", "terminated", "expired"),
-            "unsuspend_domain": ("active",),
-            "delete_domain": ("terminated",),
-        }[job.operation]
         service_status = account.service.status if account.service_id else None
-        if service_status is not None and service_status not in desired:
+        if service_status is not None and not _job_matches_service_state(job.operation, service_status, account):
             job.mark_failed(f"Superseded by current service state '{service_status}'")
             VirtualminProvisioningJob.terminalize(job.pk)
             from apps.provisioning.virtualmin_tasks import (  # Deferred: avoids circular import  # noqa: PLC0415  # Circular
@@ -1287,13 +1310,6 @@ class VirtualminProvisioningService:
 
             reconcile_virtualmin_service_state_async(str(account.service_id))
             return Err(f"Job superseded by current service state '{service_status}'")
-
-        # Same veto as the reconciler (#566): an unsuspend retry must not re-enable an
-        # account its bound domain is holding off. Terminal — retrying cannot change it.
-        if job.operation == "unsuspend_domain" and domain_disables_hosting(account):
-            job.mark_failed("Superseded: a bound domain disables hosting")
-            VirtualminProvisioningJob.terminalize(job.pk)
-            return Err("Job superseded: a bound domain disables hosting")
 
         if job.operation == "delete_domain" and account.protected_from_deletion:
             job.mark_failed("Account is protected from deletion")
@@ -1342,12 +1358,7 @@ class VirtualminProvisioningService:
             current = (
                 account.service.__class__.objects.filter(pk=account.service_id).values_list("status", flat=True).first()
             )
-            desired_after = {
-                "suspend_domain": ("suspended", "terminated", "expired"),
-                "unsuspend_domain": ("active",),
-                "delete_domain": ("terminated",),
-            }[job.operation]
-            if current is not None and current not in desired_after:
+            if current is not None and not _job_matches_service_state(job.operation, current, account):
                 from apps.provisioning.virtualmin_tasks import (  # Deferred: avoids circular import  # noqa: PLC0415  # Circular
                     reconcile_virtualmin_service_state_async,  # Circular: cross-app
                 )

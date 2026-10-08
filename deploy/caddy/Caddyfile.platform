@@ -5,11 +5,15 @@
 {$PLATFORM_DOMAIN} {
     tls {$ACME_EMAIL:admin@example.com}
 
+    # HSTS_POLICY sets this per environment (staging: max-age=3600). It is set twice on purpose:
+    # the deferred block below replaces the header Django sends, and this immediate line covers
+    # responses Caddy generates itself (a 502 when the upstream is down), which skip deferred headers.
+    header Strict-Transport-Security "{$HSTS_POLICY:max-age=31536000; includeSubDomains}"
     header {
         X-Frame-Options "DENY"
         X-Content-Type-Options "nosniff"
         Referrer-Policy "strict-origin-when-cross-origin"
-        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        Strict-Transport-Security "{$HSTS_POLICY:max-age=31536000; includeSubDomains}"
         Permissions-Policy "camera=(), microphone=(), geolocation=()"
         -Server
     }

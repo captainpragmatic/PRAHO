@@ -75,7 +75,7 @@ def dismiss_cookie_consent(page: Page) -> None:
     """
     try:
         banner = page.locator('#cookie-consent-banner, .cookie-consent, [data-cookie-consent]')
-        if banner.is_visible(timeout=2000):
+        if banner.is_visible():
             accept_btn = banner.locator('button', has_text='Accept All')
             accept_btn.click()
             banner.wait_for(state='hidden', timeout=3000)
@@ -234,7 +234,7 @@ def navigate_to_platform_page(page: Page, path: str, expected_url_fragment: str 
 # ===============================================================================
 
 @pytest.fixture(autouse=True)
-def setup_console_monitoring(page: Page) -> Generator[Page, None, None]:
+def setup_console_monitoring(page: Page) -> Generator[Page]:
     """
     Automatically monitor console errors for all E2E tests.
 

@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- A separate portal host no longer has to hold the platform's secrets. `deploy.sh portal-only`
+  accepted a full `.env.prod`, so a portal host stored the platform's database password, encryption
+  keys, payment and mail credentials and its Django secret key, even though its containers never used
+  them. It now refuses any key the portal-only stack does not use, naming the keys (never the values),
+  and a new `deploy/scripts/portal-env.sh` writes the portal's file from the full one (mode 600, only
+  those variables). The portal also gets its own `PORTAL_DJANGO_SECRET_KEY`: the shared key is the root
+  the platform derives its MFA, audit-chain and unsubscribe keys from. Compose portal-only requires it;
+  single-server and container-service use it when set.
+  **Upgrading a Compose portal-only host:** add `PORTAL_DJANGO_SECRET_KEY` to the full file, run
+  `portal-env.sh`, replace the portal host's env file with the output, then redeploy (`--stop` and
+  `--logs` keep working before that). A new portal key signs customers out and invalidates in-flight
+  cart price seals.
+- The platform-only and portal-only Docker stacks publish the application port on `127.0.0.1` only.
+  They published 8700 and 8701 on every interface, so anyone who could reach the host bypassed Caddy:
+  its TLS and HSTS and, for the platform, the `PLATFORM_ALLOWED_CIDRS` staff allowlist. Their Caddy
+  uses the Docker network, and a proxy on the same host uses the loopback port; set `PLATFORM_BIND` /
+  `PORTAL_BIND` only for an external load balancer.
+- HSTS now follows the environment. Every Caddy configuration hardcoded a one-year header with
+  `preload` and replaced whatever Django sent, so staging's one-hour policy never reached a
+  browser, and `preload` went out for a domain never submitted to the preload list. The edge now
+  sends `HSTS_POLICY`: unset in production (one year with `includeSubDomains`), and
+  `max-age=3600` on staging, which the native role falls back to on its own. Caddy's own
+  502s now carry it too. Where no edge fronts the portal, its `SECURE_HSTS_*` settings now take
+  effect; a hardcoded header in its middleware had blocked them. Nothing preloads by default.
+  **Upgrading a Docker Compose staging deployment:** add `HSTS_POLICY=max-age=3600` to its
+  `.env.staging`, or it keeps the one-year production default. Native staging deploys fall back to one hour on their own.
 - Staff with two-factor authentication enrolled are now asked for their code at the web
   login. The password alone used to sign them in, because the step that hands a login over
   to the code page was never wired (#590). The code page now uses the same check as the API
@@ -43,8 +69,112 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   owner loses access as soon as Platform answers with an empty membership list.
 - A form on the server pages could inject markup through an unescaped value. It is escaped now.
 
+### Removed
+
+- The Ansible Docker role (`deploy/ansible/roles/praho` and `roles/docker`), its playbooks
+  (`single-server.yml`, `two-servers.yml`, and `rollback.yml`, which only worked with it),
+  `inventory/two-servers.yml`, and the `make deploy-dev` and `make ansible-two-servers` targets. It
+  copied the Docker Compose stack behind a second set of variables, so every fix had to land twice.
+  Servers deploy with the native role (`make deploy-prod`, `deploy-staging`, `deploy-dev-native`) and
+  Docker hosts with `deploy/scripts/deploy.sh`; a two-server layout runs the Compose platform-only and
+  portal-only stacks (ADR-0054).
+- The legacy nginx edge and the local nginx stack. Every supported deployment, Docker or native, runs
+  Caddy, which obtains and renews its own certificates. `deploy/nginx/`, the certbot kit in
+  `deploy/ssl/` and `deploy/docker-compose.services.yml` are gone, with the `make docker-prod`,
+  `docker-test`, `docker-logs-platform` and `docker-logs-portal` targets. That stack could not start:
+  it ran `config.settings.dev` in the production images, which fails on import there. The security
+  guide, architecture doc and diagrams now describe the Caddy edge. Its tests now check the production
+  Compose files and every Caddyfile: no Redis anywhere, a portal with no database settings and no
+  network shared with the database, and no edge-set Content-Security-Policy.
+
 ### Fixed
 
+- The portal-only Docker stack pins its network to `10.200.250.0/24` (`PRAHO_WEB_SUBNET`), so
+  `PORTAL_TRUSTED_PROXY_CIDRS` has a known value before the first start. Docker used to choose the
+  subnet, and unless the operator found and set it, the portal attributed every request to its own
+  Caddy, which merged all customers into one rate-limit bucket and one audit address.
+  **Upgrading a host that already ran it:** run `deploy.sh portal-only --stop` once before deploying;
+  Compose keeps an existing network's old subnet on `up`.
+- `make docker-dev` starts again. Since March it built the production images and mounted the source
+  over `/app`, hiding their venv and entrypoint, and the production venv lacks the debug toolbar and
+  colorlog that the dev settings import. The Dockerfiles now have `dev` targets that install the dev
+  dependencies outside the mount, and the dev stack uses them. The platform now uses the stack's
+  PostgreSQL, the portal reaches the platform by its container name and keeps its session database out
+  of the checkout, and the dev settings no longer look for a `.env` four directories up inside the
+  container. The stack passed `DEBUG=1`, which the portal's settings read as false, so it derived
+  production values: secure-only session cookies that a browser never returns over plain HTTP, and an
+  https redirect. It now passes `DEBUG=true`, and the portal's dev settings turn both off whatever
+  `DEBUG` says, as the platform's do. Images built without a target are unchanged.
+- The Docker deploy scripts now use the operator's env file. The Compose files live in `deploy/`, so
+  Compose looked for `deploy/.env`, which no step creates, and every required variable failed before
+  a container started. `deploy.sh`, `rollback.sh`, `restore.sh` and the `make deploy-*`, `rollback`
+  and `restore` targets now pass `.env.prod`, or `.env.staging` with `--env staging`
+  (`DEPLOY_ENV=staging` for make), to every Compose call, and the platform receives the whole file.
+  They refuse the development `.env`, a settings module the images do not run, and a production
+  platform deployment without the encryption keys (a portal-only host never needs them). A developer's exported `DJANGO_SETTINGS_MODULE` no longer overrides the
+  file. The single-server stack's own database and proxy settings no longer come from that file,
+  which describes a native host, and neither do the platform-only bundled database's. Health is read
+  from the containers (`up --wait`), not from host ports the stacks never published. A rollback pins
+  its tag for that run, pulls only the application images, and no longer edits a file Compose never
+  read. `make deploy-stop` and `make deploy-logs` act on one deployment, `DEPLOY_TYPE=single-server`
+  by default.
+- The Docker production images and the standalone Compose files can start a working deployment.
+  Booting them showed five failures in a row:
+  - Gunicorn could not start (exit 127): the venv was built at `/build/.venv` and copied to `/app/.venv`,
+    so its scripts pointed at an interpreter that wasn't there. It is now built where it runs.
+  - Pages using shared components failed: `shared/ui` was not in the images. It is now copied in.
+  - The platform received neither `DJANGO_ENCRYPTION_KEY` nor `CREDENTIAL_VAULT_MASTER_KEY`, which
+    production requires; the Compose files now pass both, and the deploy script refuses a production
+    env file without them (`container-service` also requires the two domains).
+  - It could not reach the bundled database: production defaults to `sslmode=require`, which that
+    Postgres doesn't offer. `DB_SSLMODE` is now passed, `disable` for the bundled database and
+    `require` for an external one.
+  - The portal refused to start without trusted proxy CIDRs. Single-server pins the `web` network's
+    subnet and trusts it; portal-only and container-service require the value.
+  A first boot also outlasted the platform healthcheck, so the portal never started; the start period
+  now covers it. The native path gets the keys too: `.env.example.prod` lists them, and the production
+  preflight requires them.
+- Removing a product on the cart review page now updates the Order Summary. The totals kept the
+  removed item's price, so an empty cart still showed a total to pay. Two things stopped the refresh.
+  The Remove button sits inside the list its own response replaces, so by the time htmx reported the
+  request finished, the button was gone and its "cart updated" action was never read; the action is
+  now recorded when the request starts. And the `cartUpdated` event did not bubble, so the page's
+  totals listener never heard it. The mini-cart's Remove button had the same first problem.
+- Native deployments no longer read a `.env` comment as part of a value. The env examples put comments
+  after values (`DJANGO_SETTINGS_MODULE=config.settings.staging  # note`) on 80 lines. systemd's
+  `EnvironmentFile=` and the native role's own parsing keep that comment in the value. A deploy from a
+  copied example therefore named a settings module that does not exist, and failed at its first
+  migration. Every comment in the examples now sits on its own line, with every value unchanged. The
+  native deploy refuses a `.env` with an inline comment before anything reads it, naming each line
+  and key but never a value. The check follows the shell's comment rule, honouring quotes and
+  escapes. It also catches a comment after a closing quote, and a value continued onto the next
+  line with a trailing backslash, both of which systemd keeps.
+- A hosting account is turned on or off by one writer, the provisioning reconciler (#566,
+  ADR-0051 accepted). Hosting is on exactly when the service is active and no bound domain
+  is expired, suspended or cancelled. A domain status change now queues a reconcile instead
+  of calling Virtualmin, and the reconciler also suspends an account a domain holds off.
+- Suspending an account from the Virtualmin account page now lasts. The button suspended
+  the panel but left the service active, so the 15-minute sweep switched it back on. Suspend
+  and Activate now act on the service; Activate lifts only a suspension made there, and
+  refuses while the customer is suspended or the subscription is unpaid. A staff suspension
+  now also shows as suspended in the customer's portal. No email is sent and billing is
+  unchanged.
+- The Virtualmin bulk-actions page works for the first time. It had returned an error since
+  it was added, because its template never existed. It now lists accounts by server and
+  status with a "select all", and its Suspend and Activate use the same rules as the account
+  page. The unused `provisioning.bulk_operation_threshold` setting is removed.
+- An API token can check and revoke itself (#569). `GET /api/users/token/me/` and
+  `DELETE /api/users/token/revoke/` answer a bare token; every other API route still needs
+  the Portal's signature. ADR-0031 records what a bare token can reach.
+- Authenticated requests no longer write an audit row each, and load the session user in one
+  query instead of two (#553). The session timeout is audited only when it changes. Existing
+  sessions are signed out once by the new authentication backend.
+- Docker staging deployments now run the staging Django settings. The standalone Compose files pinned
+  `DJANGO_SETTINGS_MODULE=config.settings.prod`, so staging ran production settings, and every
+  staging-only setting was ignored. Compose now takes the module from the env file
+  (`.env.example.staging` already sets `config.settings.staging`) and defaults to production when it is
+  unset. Platform containers also set `STATIC_ROOT=/app/staticfiles`, because the staging default is the native
+  layout's `/opt/praho/static`, which the container's non-root user cannot create.
 - The nightly browser job no longer fails before it starts. The job added on 2026-09-28 failed
   at its Node setup step on every one of its first seven nights, before a browser was installed,
   because the `package-lock.json` it installs from was gitignored and existed on no CI runner. The

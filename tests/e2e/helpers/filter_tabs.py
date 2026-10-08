@@ -88,7 +88,18 @@ def assert_panel_labelled_by_active_tab(page: Page, content_id: str) -> None:
 
 
 def text_color(locator: Locator) -> str:
-    return locator.evaluate("el => getComputedStyle(el).color")
+    """The element's text color once its CSS transitions have finished.
+
+    Tabs carry `transition-colors`, so straight after an activation or a hover the computed color
+    is an interpolated in-between value. `getAnimations()` flushes pending style changes, so it
+    also catches a transition that the hover has only just started.
+    """
+    return locator.evaluate(
+        """async (el) => {
+            await Promise.all(el.getAnimations().map((animation) => animation.finished.catch(() => {})));
+            return getComputedStyle(el).color;
+        }"""
+    )
 
 
 def hover_neutral(page: Page) -> None:

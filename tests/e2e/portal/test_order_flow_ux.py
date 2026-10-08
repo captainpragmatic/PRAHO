@@ -18,6 +18,7 @@ from tests.e2e.helpers import (
     ensure_fresh_session,
     login_user,
 )
+from tests.e2e.helpers.htmx import wait_for_htmx_settle
 from tests.e2e.helpers.orders import add_product
 
 # ===============================================================================
@@ -137,22 +138,24 @@ def test_ux4_add_to_cart_updates_badge(page: Page) -> None:
         print("  SKIP: No products in catalog")
         pytest.fail("Required E2E step unavailable: add_buttons.count() == 0")
 
-    # Record badge state before adding
+    # Record badge state before adding. The cart widget loads with its own request
+    # (hx-trigger="load"), so read it only once that has landed.
+    wait_for_htmx_settle(page)
     badge_before = page.locator("#cart-count")
     count_before = int(badge_before.inner_text()) if badge_before.is_visible() else 0
     print(f"    Cart count before add: {count_before}")
 
-    # Click Add to Cart and wait for HTMX swap
+    # Click Add to Cart and wait for the HTMX swap
     add_buttons.first.click()
-    page.wait_for_load_state("networkidle")
-    page.wait_for_timeout(1000)  # Allow HTMX swap to complete
+    wait_for_htmx_settle(page)
 
     # Check badge after add
     badge_after = page.locator("#cart-count")
-    assert badge_after.is_visible(timeout=5000), (
+    expect(
+        badge_after,
         "UX-4 FAIL: Cart count badge (#cart-count) is not visible after adding a product. "
-        "HTMX swap may not be targeting #cart-widget correctly."
-    )
+        "HTMX swap may not be targeting #cart-widget correctly.",
+    ).to_be_visible()
 
     count_after = int(badge_after.inner_text())
     assert count_after > count_before, (

@@ -1,3 +1,0 @@
-# Staff access uses the immediate peer IP; override with staff/VPN CIDRs at upgrade.
-# An empty list also falls back to loopback; it never enables unrestricted access.
-platform_allowed_ips: ["127.0.0.1/32", "::1/128"]

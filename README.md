@@ -101,7 +101,7 @@ make install
 # 3. Configure environment
 cp .env.example.dev .env
 # Edit .env — generate the encryption keys noted in the file
-# For production config, see .env.example
+# Deployments use .env.prod / .env.staging (from .env.example.prod / .staging), never .env
 
 # 4. Set up database and load sample data
 make migrate
@@ -118,6 +118,8 @@ Visit:
 **Test credentials**: `admin@pragmatichost.com` / `admin123`
 
 > **Using PostgreSQL instead of SQLite?** Run `make docker-dev` to start Platform + Portal + PostgreSQL in Docker containers with hot reload.
+> Its database starts empty; for the sample data and the test credentials above, run
+> `docker compose -f deploy/docker-compose.dev.yml exec platform python manage.py generate_sample_data`.
 
 ## Development Commands
 
@@ -165,12 +167,12 @@ services/{platform,portal}/config/settings/
 
 ### Environment Variables
 
-Copy `.env.example` to `.env` and configure. Key variables:
+Copy `.env.example.dev` to `.env` and configure. Key variables:
 
 ```bash
 # Core
 DJANGO_SETTINGS_MODULE=config.settings.dev
-SECRET_KEY=your-secret-key
+DJANGO_SECRET_KEY=your-secret-key
 DEBUG=True
 
 # Database (PostgreSQL for production, SQLite for dev)
@@ -190,7 +192,7 @@ STRIPE_SECRET_KEY=sk_test_...
 STRIPE_WEBHOOK_SECRET=whsec_...
 ```
 
-See `.env.example` for the complete list with documentation.
+See `.env.example.dev` for the complete list with documentation, and `.env.example.prod` for production.
 
 ## Production Deployment
 

@@ -22,7 +22,6 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from apps.billing.models import Currency, Invoice
-from apps.common.types import Ok
 from apps.customers.models import Customer
 from apps.domains.models import TLD, Domain, Registrar
 from apps.domains.signals import sync_domain_to_virtualmin
@@ -224,27 +223,22 @@ class DomainsProvisioningIntegrationTest(TestCase):
         # Create ServiceDomain relationship so domain sync can find the service
         ServiceDomain.objects.create(service=self.service, domain=self.domain, domain_type="primary")
 
+    @patch("apps.provisioning.virtualmin_tasks.reconcile_virtualmin_service_state_async")
     @patch("apps.provisioning.virtualmin_service.VirtualminProvisioningService.suspend_account")
-    def test_domain_status_change_suspends_virtualmin_account(self, mock_suspend):
-        """Test that domain status change suspends Virtualmin account via post_save signal"""
-        mock_suspend.return_value = Ok(True)
-
-        # Change domain status via FSM — post_save defers the sync to post-commit, so a
-        # rollback cannot leave the panel disabled while the database says active.
-        # The guarantee under test is unchanged; only its timing moved.
+    def test_domain_status_change_queues_a_hosting_reconcile(self, mock_suspend, mock_enqueue):
+        """A domain suspension reaches hosting through the reconciler, not a direct call (ADR-0051)."""
+        # post_save defers to post-commit, so a rolled-back change is never reconciled.
         with self.captureOnCommitCallbacks(execute=True):
             self.domain.suspend()
             self.domain.save()
 
-        # Verify suspension was called (by the signal, not manually)
-        mock_suspend.assert_called_once_with(self.virtualmin_account, reason="Domain status changed to suspended")
+        mock_enqueue.assert_called_once_with(str(self.service.id))
+        mock_suspend.assert_not_called()
 
+    @patch("apps.provisioning.virtualmin_tasks.reconcile_virtualmin_service_state_async")
     @patch("apps.provisioning.virtualmin_service.VirtualminProvisioningService.unsuspend_account")
-    def test_domain_reactivation_unsuspends_virtualmin_account(self, mock_unsuspend):
-        """Test that domain reactivation unsuspends Virtualmin account via post_save signal"""
-        mock_unsuspend.return_value = Ok(True)
-
-        # Set account as suspended
+    def test_domain_reactivation_queues_a_hosting_reconcile(self, mock_unsuspend, mock_enqueue):
+        """A reactivated domain also goes through the reconciler (ADR-0051)."""
         self.virtualmin_account.status = "suspended"
         self.virtualmin_account.save()
 
@@ -252,14 +246,12 @@ class DomainsProvisioningIntegrationTest(TestCase):
         force_status(self.domain, "suspended")
         self.domain.refresh_from_db()
 
-        # Change domain status back to active via FSM — the sync is deferred to
-        # post-commit, so the callbacks must be drained for it to run.
         with self.captureOnCommitCallbacks(execute=True):
             self.domain.activate()
             self.domain.save()
 
-        # Verify unsuspension was called (by the signal, not manually)
-        mock_unsuspend.assert_called_once_with(self.virtualmin_account)
+        mock_enqueue.assert_called_once_with(str(self.service.id))
+        mock_unsuspend.assert_not_called()
 
     def test_domain_sync_handles_missing_virtualmin_account(self):
         """Test that domain sync handles missing Virtualmin account gracefully"""
@@ -585,13 +577,18 @@ class CrossAppIntegrationPerformanceTest(TestCase):
         # Link domain to service
         ServiceDomain.objects.create(service=service, domain=domain, domain_type="primary")
 
-        # Test query efficiency: one lookup per model, no N+1. Each optional read runs in its
-        # own savepoint so a failed query cannot abort the caller's transaction; those
-        # SAVEPOINT/RELEASE statements are not data queries.
+        # One data query for the bindings, then one queued reconcile per bound service (ADR-0051).
+        # The queue is patched: with the ORM broker its INSERT would also count as a query. The
+        # lookup runs in its own savepoint, and SAVEPOINT/RELEASE statements are not data queries.
         from django.db import connection  # noqa: PLC0415
         from django.test.utils import CaptureQueriesContext  # noqa: PLC0415
 
-        with CaptureQueriesContext(connection) as captured:
+        with (
+            patch("apps.provisioning.virtualmin_tasks.reconcile_virtualmin_service_state_async") as enqueue,
+            CaptureQueriesContext(connection) as captured,
+        ):
             sync_domain_to_virtualmin(domain)
+
         data_queries = [q["sql"] for q in captured.captured_queries if "SAVEPOINT" not in q["sql"]]
-        self.assertEqual(len(data_queries), 2, data_queries)
+        self.assertEqual(len(data_queries), 1, data_queries)
+        enqueue.assert_called_once_with(str(service.id))

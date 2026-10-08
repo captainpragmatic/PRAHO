@@ -397,7 +397,7 @@ def customer_register_api(request: HttpRequest) -> Response:
     }
 
     Security Features:
-    - Rate limiting (5 requests per minute)
+    - Rate limiting (AuthThrottle, the `auth` scope: 10 requests per minute per client)
     - Romanian business validation
     - GDPR compliance checks
     - Input sanitization

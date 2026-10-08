@@ -3,15 +3,22 @@
 from __future__ import annotations
 
 from typing import cast
+from unittest.mock import patch
 from uuid import uuid4
 
+from django.http import HttpResponse
 from django.urls import reverse
 from django_q.models import OrmQ
 from django_q.signing import SignedPackage
 
+from apps.customers.models import Customer
+from apps.provisioning.models import Service
+from apps.provisioning.services import STAFF_ACCOUNT_SUSPENSION_REASON
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
 from tests.factories.core_factories import create_staff_user
 from tests.provisioning.test_cov_virtualmin_views_servers import VirtualminViewsFixture
+
+ENQUEUE = "apps.provisioning.virtualmin_tasks.reconcile_virtualmin_service_state_async"
 
 
 class VirtualminAccountCoverageTests(VirtualminViewsFixture):
@@ -129,66 +136,92 @@ class VirtualminAccountCoverageTests(VirtualminViewsFixture):
         self.assertEqual(VirtualminAccount.objects.count(), 1)
         self.assertEqual(self.requests, [])
 
-    def test_suspend_persists_state_job_and_domain_payload(self) -> None:
-        response = self.client.post(reverse("provisioning:virtualmin_account_suspend", args=[self.account.pk]))
+    def test_suspend_changes_service_and_queues_reconcile_without_calling_gateway(self) -> None:
+        with patch(ENQUEUE) as enqueue, self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(reverse("provisioning:virtualmin_account_suspend", args=[self.account.pk]))
+            self.assertEqual(enqueue.call_args_list, [])
         self.assertRedirects(response, reverse("provisioning:virtualmin_accounts"), fetch_redirect_response=False)
+        self.service.refresh_from_db()
         self.account.refresh_from_db()
-        self.assertEqual(self.account.status, "suspended")
-        job = VirtualminProvisioningJob.objects.get(account=self.account, operation="suspend_domain")
-        self.assertEqual(job.status, "completed")
-        self.assertEqual(self.requests[0]["domain"], self.account.domain)
-        self.assertEqual(self.requests[0]["program"], "disable-domain")
-        self.assertIn("has been suspended", self.messages(response))
+        self.assertEqual(
+            (self.service.status, self.service.suspension_reason), ("suspended", STAFF_ACCOUNT_SUSPENSION_REASON)
+        )
+        self.assertEqual(self.account.status, "active")
+        self.assertEqual([call.args for call in enqueue.call_args_list], [(str(self.service.pk),)])
+        self.assertEqual(self.requests, [])
+        self.assertFalse(VirtualminProvisioningJob.objects.filter(account=self.account).exists())
+        self.assertIn(
+            "Suspension of testexample is queued; its service is suspended.",
+            self.messages(cast(HttpResponse, response)),
+        )
 
-    def test_activate_returns_updated_htmx_table_and_completed_job(self) -> None:
+    def test_activate_resumes_service_and_returns_htmx_table_with_reconcile_queued(self) -> None:
+        Service.objects.filter(pk=self.service.pk).update(
+            status="suspended", suspension_reason=STAFF_ACCOUNT_SUSPENSION_REASON
+        )
         self.account.status = "suspended"
         self.account.save(update_fields=["status"])
-        response = self.client.post(
-            reverse("provisioning:virtualmin_account_activate", args=[self.account.pk]), HTTP_HX_REQUEST="true"
-        )
+        with patch(ENQUEUE) as enqueue, self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                reverse("provisioning:virtualmin_account_activate", args=[self.account.pk]), HTTP_HX_REQUEST="true"
+            )
+            self.assertEqual(enqueue.call_args_list, [])
         self.assertContains(response, self.account.domain)
+        self.assertTemplateUsed(response, "provisioning/virtualmin/partials/accounts_table.html")
+        self.service.refresh_from_db()
         self.account.refresh_from_db()
-        self.assertEqual(self.account.status, "active")
-        job = VirtualminProvisioningJob.objects.get(account=self.account, operation="unsuspend_domain")
-        self.assertEqual(job.status, "completed")
-        self.assertEqual(self.requests[0]["program"], "enable-domain")
-        self.assertIn("has been activated", self.messages(response))
+        self.assertEqual((self.service.status, self.service.suspension_reason), ("active", ""))
+        self.assertEqual(self.account.status, "suspended")
+        self.assertEqual([call.args for call in enqueue.call_args_list], [(str(self.service.pk),)])
+        self.assertEqual(self.requests, [])
+        self.assertFalse(VirtualminProvisioningJob.objects.filter(account=self.account).exists())
+        self.assertIn("Activation of testexample is queued.", self.messages(cast(HttpResponse, response)))
 
-    def test_detail_origin_htmx_suspend_and_activate_redirect_to_account(self) -> None:
+    def test_detail_origin_htmx_lifecycle_redirects_and_queues_service_reconciliation(self) -> None:
         detail = reverse("provisioning:virtualmin_account_detail", args=[self.account.pk])
-        for name, expected in (
-            ("virtualmin_account_suspend", "suspended"),
-            ("virtualmin_account_activate", "active"),
+        for name, expected, reason in (
+            ("virtualmin_account_suspend", "suspended", STAFF_ACCOUNT_SUSPENSION_REASON),
+            ("virtualmin_account_activate", "active", ""),
         ):
             with self.subTest(name=name):
-                response = self.client.post(
-                    reverse(f"provisioning:{name}", args=[self.account.pk]),
-                    HTTP_HX_REQUEST="true",
-                    HTTP_HX_CURRENT_URL=f"https://testserver{detail}",
-                )
+                with patch(ENQUEUE) as enqueue, self.captureOnCommitCallbacks(execute=True):
+                    response = self.client.post(
+                        reverse(f"provisioning:{name}", args=[self.account.pk]),
+                        HTTP_HX_REQUEST="true",
+                        HTTP_HX_CURRENT_URL=f"https://testserver{detail}",
+                    )
+                    self.assertEqual(enqueue.call_args_list, [])
                 self.assertRedirects(response, detail, fetch_redirect_response=False)
+                self.service.refresh_from_db()
                 self.account.refresh_from_db()
-                self.assertEqual(self.account.status, expected)
+                self.assertEqual((self.service.status, self.service.suspension_reason), (expected, reason))
+                self.assertEqual(self.account.status, "active")
+                self.assertEqual([call.args for call in enqueue.call_args_list], [(str(self.service.pk),)])
+                self.assertEqual(self.requests, [])
+                self.assertFalse(VirtualminProvisioningJob.objects.filter(account=self.account).exists())
 
-    def test_lifecycle_gateway_denial_keeps_status_and_records_failed_job(self) -> None:
-        self.http_status = 403
-        for name, operation, original in (
-            ("virtualmin_account_suspend", "suspend_domain", "active"),
-            ("virtualmin_account_activate", "unsuspend_domain", "suspended"),
-        ):
-            with self.subTest(name=name):
-                self.account.status = original
-                self.account.save(update_fields=["status"])
-                response = self.client.post(reverse(f"provisioning:{name}", args=[self.account.pk]))
-                self.assertRedirects(
-                    response, reverse("provisioning:virtualmin_accounts"), fetch_redirect_response=False
-                )
-                self.account.refresh_from_db()
-                self.assertEqual(self.account.status, original)
-                job = VirtualminProvisioningJob.objects.get(account=self.account, operation=operation)
-                self.assertEqual(job.status, "failed")
-                self.assertIn("Access forbidden", job.status_message)
-                self.assertIn("Failed to", self.messages(response))
+    def test_activate_refuses_suspended_customer_without_changing_state_or_queueing(self) -> None:
+        Service.objects.filter(pk=self.service.pk).update(
+            status="suspended", suspension_reason=STAFF_ACCOUNT_SUSPENSION_REASON
+        )
+        self.account.status = "suspended"
+        self.account.save(update_fields=["status"])
+        Customer.objects.filter(pk=self.customer.pk).update(status="suspended")
+        with patch(ENQUEUE) as enqueue, self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(reverse("provisioning:virtualmin_account_activate", args=[self.account.pk]))
+        self.assertRedirects(response, reverse("provisioning:virtualmin_accounts"), fetch_redirect_response=False)
+        self.service.refresh_from_db()
+        self.account.refresh_from_db()
+        self.assertEqual(
+            (self.service.status, self.service.suspension_reason), ("suspended", STAFF_ACCOUNT_SUSPENSION_REASON)
+        )
+        self.assertEqual(self.account.status, "suspended")
+        self.assertEqual(enqueue.call_args_list, [])
+        self.assertEqual(self.requests, [])
+        self.assertFalse(VirtualminProvisioningJob.objects.filter(account=self.account).exists())
+        self.assertIn(
+            "The customer is suspended; reactivate the customer first.", self.messages(cast(HttpResponse, response))
+        )
 
     def test_protection_toggle_persists_both_directions_and_returns_quick_actions(self) -> None:
         url = reverse("provisioning:virtualmin_account_toggle_protection", args=[self.account.pk])
@@ -243,34 +276,72 @@ class VirtualminAccountCoverageTests(VirtualminViewsFixture):
                 self.assertTrue(VirtualminAccount.objects.filter(pk=self.account.pk).exists())
         self.assertEqual(self.requests, [])
 
-    def test_bulk_lifecycle_confirms_remote_state_and_reports_ineligible_accounts(self) -> None:
+    def test_bulk_lifecycle_changes_service_queues_reconcile_and_reports_refusals(self) -> None:
         url = reverse("provisioning:virtualmin_bulk_actions")
         for action, initial, expected in (
             ("suspend", "active", "suspended"),
             ("activate", "suspended", "active"),
         ):
             with self.subTest(action=action):
+                Service.objects.filter(pk=self.service.pk).update(
+                    status=initial,
+                    suspension_reason=STAFF_ACCOUNT_SUSPENSION_REASON if initial == "suspended" else "",
+                )
                 self.account.status = initial
                 self.account.save(update_fields=["status"])
-                response = self.client.post(
-                    url,
-                    {"action": action, "selected_accounts": str(self.account.pk), "confirm_bulk_action": "on"},
-                )
+                with patch(ENQUEUE) as enqueue, self.captureOnCommitCallbacks(execute=True):
+                    response = self.client.post(
+                        url,
+                        {"action": action, "selected_accounts": [str(self.account.pk)], "confirm_bulk_action": "on"},
+                    )
+                    self.assertEqual(enqueue.call_args_list, [])
                 self.assertRedirects(
                     response, reverse("provisioning:virtualmin_accounts"), fetch_redirect_response=False
                 )
+                self.service.refresh_from_db()
                 self.account.refresh_from_db()
-                self.assertEqual(self.account.status, expected)
-                self.assertIn("1/1 accounts", self.messages(response))
-                response = self.client.post(
-                    url,
-                    {"action": action, "selected_accounts": str(self.account.pk), "confirm_bulk_action": "on"},
+                self.assertEqual(self.service.status, expected)
+                self.assertEqual(
+                    self.service.suspension_reason, STAFF_ACCOUNT_SUSPENSION_REASON if action == "suspend" else ""
                 )
-                self.assertEqual(response.status_code, 302)
+                self.assertEqual(self.account.status, initial)
+                self.assertEqual([call.args for call in enqueue.call_args_list], [(str(self.service.pk),)])
+                self.assertEqual(self.requests, [])
+                self.assertFalse(VirtualminProvisioningJob.objects.filter(account=self.account).exists())
+                self.assertIn(
+                    "Queued 1 of 1 accounts; the reconciler applies each change.",
+                    self.messages(cast(HttpResponse, response)),
+                )
+
+                refused_status = "pending" if action == "suspend" else "suspended"
+                Service.objects.filter(pk=self.service.pk).update(
+                    status=refused_status, suspension_reason="payment_overdue"
+                )
+                with patch(ENQUEUE) as enqueue, self.captureOnCommitCallbacks(execute=True):
+                    response = self.client.post(
+                        url,
+                        {"action": action, "selected_accounts": [str(self.account.pk)], "confirm_bulk_action": "on"},
+                    )
+                self.assertRedirects(
+                    response, reverse("provisioning:virtualmin_accounts"), fetch_redirect_response=False
+                )
+                self.service.refresh_from_db()
                 self.account.refresh_from_db()
-                self.assertEqual(self.account.status, expected)
-                self.assertIn("0/1 accounts", self.messages(response))
-                self.assertIn("could not be", self.messages(response))
+                self.assertEqual(
+                    (self.service.status, self.service.suspension_reason), (refused_status, "payment_overdue")
+                )
+                self.assertEqual(self.account.status, initial)
+                self.assertEqual(enqueue.call_args_list, [])
+                self.assertEqual(self.requests, [])
+                self.assertFalse(VirtualminProvisioningJob.objects.filter(account=self.account).exists())
+                self.assertIn("Queued 0 of 1 accounts", self.messages(cast(HttpResponse, response)))
+                self.assertIn("1 refused:", self.messages(cast(HttpResponse, response)))
+                self.assertIn(
+                    "manage it from the service page"
+                    if action == "suspend"
+                    else "by another process (payment_overdue)",
+                    self.messages(cast(HttpResponse, response)),
+                )
 
     def test_bulk_backup_persists_job_and_signed_queue_payload(self) -> None:
         response = self.client.post(
@@ -295,15 +366,26 @@ class VirtualminAccountCoverageTests(VirtualminViewsFixture):
         self.assertEqual(task["timeout"], job.parameters["task_budget_seconds"])
         self.assertIn("1/1 accounts", self.messages(response))
 
-    def test_bulk_missing_accounts_redirects_with_error(self) -> None:
-        response = self.client.post(
-            reverse("provisioning:virtualmin_bulk_actions"),
-            {"action": "suspend", "selected_accounts": str(uuid4()), "confirm_bulk_action": "on"},
-        )
-        self.assertRedirects(response, reverse("provisioning:virtualmin_accounts"), fetch_redirect_response=False)
-        self.assertIn("No valid accounts found", self.messages(response))
+    def test_bulk_unknown_account_rerenders_selection_errors_without_side_effects(self) -> None:
+        missing_id = str(uuid4())
+        with patch(ENQUEUE) as enqueue, self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                reverse("provisioning:virtualmin_bulk_actions"),
+                {"action": "suspend", "selected_accounts": [missing_id], "confirm_bulk_action": "on"},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "provisioning/virtualmin/bulk_actions.html")
+        self.assertIn("selected_accounts", response.context["form"].errors)
+        self.assertContains(response, "Select a valid choice.")
+        self.assertEqual(response.context["selected_ids"], [missing_id])
+        self.assertContains(response, self.account.domain)
+        self.service.refresh_from_db()
         self.account.refresh_from_db()
+        self.assertEqual(self.service.status, "active")
         self.assertEqual(self.account.status, "active")
+        self.assertEqual(enqueue.call_args_list, [])
+        self.assertEqual(self.requests, [])
+        self.assertFalse(VirtualminProvisioningJob.objects.filter(account=self.account).exists())
 
     def test_bulk_health_reports_invalid_account_status_without_changing_it(self) -> None:
         self.account.status = "error"

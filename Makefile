@@ -3,7 +3,7 @@
 # ===============================================================================
 # Enhanced for Platform/Portal separation with scoped PYTHONPATH security
 
-.PHONY: help install lock-upgrade check-env check-venv-platform dev dev-e2e dev-e2e-bg dev-e2e-csp dev-platform dev-portal dev-all test test-fast test-file test-platform test-platform-fast test-ci test-ci-focused test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-file test-e2e-csp test-e2e-orm test-security test-cache show-test-deps install-frontend build-css watch-css check-css-tooling migrate check-migrations fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-imports lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict lint-error-handling lint-assertion-quality
+.PHONY: help install lock-upgrade check-env check-venv-platform dev dev-e2e dev-e2e-bg dev-e2e-csp dev-platform dev-portal dev-all test test-fast test-file test-platform test-platform-fast test-ci test-ci-focused test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-file test-e2e-csp test-e2e-orm test-security test-cache show-test-deps install-frontend build-css watch-css check-css-tooling migrate check-migrations fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-imports lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict lint-error-handling lint-assertion-quality
 
 # ===============================================================================
 # SCOPED PYTHON ENVIRONMENTS 🔒
@@ -63,6 +63,7 @@ help:
 	@echo "  make test-e2e-orm      - ORM E2E subset (requires the healthy owned stack)"
 	@echo "  make test-security     - Validate service isolation"
 	@echo "  make show-test-deps    - Print the test dependency graph"
+	@echo "  make qa-settings-sweep - Change, verify, audit and restore every setting (needs make dev)"
 	@echo ""
 	@echo "🔧 DATABASE & ASSETS:"
 	@echo "  make migrate         - Run platform database migrations"
@@ -92,19 +93,17 @@ help:
 	@echo "🐳 DOCKER (Dev):"
 	@echo "  make docker-build    - Build platform + portal Docker images"
 	@echo "  make docker-dev      - Start development services with hot reload"
-	@echo "  make docker-prod     - Start production services with nginx"
 	@echo "  make docker-stop     - Stop all Docker services"
-	@echo "  make docker-test     - Test Docker services health"
 	@echo "  make docker-clean    - Clean up Docker containers and images"
 	@echo ""
-	@echo "🚀 PRODUCTION DEPLOYMENT:"
+	@echo "🚀 PRODUCTION DEPLOYMENT (reads .env.prod; DEPLOY_ENV=staging reads .env.staging):"
 	@echo "  make deploy-single-server  - Deploy all services on single server"
 	@echo "  make deploy-platform       - Deploy platform service only"
 	@echo "  make deploy-portal         - Deploy portal service only"
 	@echo "  make deploy-container-service - Build for DigitalOcean/AWS"
-	@echo "  make deploy-stop           - Stop all deployment services"
+	@echo "  make deploy-stop           - Stop a deployment (DEPLOY_TYPE=single-server by default)"
 	@echo "  make deploy-status         - Show deployment status"
-	@echo "  make deploy-logs           - Show service logs"
+	@echo "  make deploy-logs           - Follow a deployment's logs (DEPLOY_TYPE as above)"
 	@echo ""
 	@echo "💾 BACKUP & RESTORE:"
 	@echo "  make backup          - Create database backup"
@@ -126,7 +125,6 @@ help:
 	@echo "  make infra-destroy-dev     - Destroy dev server"
 	@echo ""
 	@echo "🚀 ENVIRONMENT DEPLOYMENT (Ansible):"
-	@echo "  make deploy-dev            - Deploy PRAHO to dev (Docker)"
 	@echo "  make deploy-dev-native     - Deploy PRAHO to dev (native, no Docker)"
 	@echo "  make deploy-staging                - Deploy to staging (git HEAD of DEPLOY_BRANCH, or rsync)"
 	@echo "  make deploy-prod                   - Deploy to production (git tag from PRAHO_VERSION)"
@@ -134,7 +132,6 @@ help:
 	@echo ""
 	@echo "📜 ANSIBLE (generic):"
 	@echo "  make ansible-single-server - Deploy via Ansible (single server)"
-	@echo "  make ansible-two-servers   - Deploy via Ansible (distributed)"
 	@echo "  make ansible-backup        - Remote backup via Ansible"
 	@echo ""
 	@echo "⚙️  SETUP & MAINTENANCE:"
@@ -532,6 +529,13 @@ test-with-e2e: test-e2e
 #
 # E2E_PATHS scopes it, e.g. make test-e2e-coverage E2E_PATHS=tests/e2e/portal/
 E2E_PATHS ?=
+
+# Drives every setting in the catalog through the real save endpoints of a running dev platform
+# (make dev), checks it is persisted, delivered and audited, then restores it. Writes and restores
+# the dev database's settings, so it is a manual QA instrument, never part of make test.
+.PHONY: qa-settings-sweep
+qa-settings-sweep: check-venv-platform
+	@$(PYTHON_SHARED) scripts/qa_settings_sweep.py
 
 .PHONY: test-e2e-coverage
 test-e2e-coverage: check-venv-platform build-css
@@ -1168,49 +1172,16 @@ docker-build:
 docker-dev:
 	@echo "🚀 [Docker] Starting development services (no Redis)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@docker-compose -f deploy/docker-compose.dev.yml up --build
-
-docker-prod:
-	@echo "🌐 [Docker] Starting production services (no Redis)..."
-	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@docker-compose -f deploy/docker-compose.services.yml up -d
+	@docker compose -f deploy/docker-compose.dev.yml up --build
 
 docker-stop:
 	@echo "🛑 [Docker] Stopping all services..."
-	@docker-compose -f deploy/docker-compose.dev.yml down || true
-	@docker-compose -f deploy/docker-compose.services.yml down || true
-
-docker-logs-platform:
-	@echo "📋 [Docker] Platform service logs..."
-	@docker-compose -f deploy/docker-compose.services.yml logs -f platform
-
-docker-logs-portal:
-	@echo "📋 [Docker] Portal service logs..."
-	@docker-compose -f deploy/docker-compose.services.yml logs -f portal
+	@docker compose -f deploy/docker-compose.dev.yml down || true
 
 docker-clean:
 	@echo "🧹 [Docker] Cleaning up containers and images..."
-	@docker-compose -f deploy/docker-compose.dev.yml down --volumes --rmi all || true
-	@docker-compose -f deploy/docker-compose.services.yml down --volumes --rmi all || true
+	@docker compose -f deploy/docker-compose.dev.yml down --volumes --rmi all || true
 	@docker system prune -f
-
-docker-test:
-	@echo "🧪 [Docker] Testing services isolation (no Redis)..."
-	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo "🚀 Building and starting services..."
-	@docker-compose -f deploy/docker-compose.services.yml up -d --build
-	@echo "⏳ Waiting for services to be healthy..."
-	@sleep 30
-	@echo "🧪 Testing platform service..."
-	@curl -f http://localhost:8700/users/login/ || (echo "❌ Platform health check failed" && exit 1)
-	@echo "✅ Platform service healthy!"
-	@echo "🧪 Testing portal service..."
-	@curl -f http://localhost:8701/ || (echo "❌ Portal health check failed" && exit 1)
-	@echo "✅ Portal service healthy!"
-	@echo "🧪 Testing nginx proxy..."
-	@curl -f http://localhost/ || (echo "❌ Nginx proxy failed" && exit 1)
-	@echo "✅ All services are healthy!"
-	@docker-compose -f deploy/docker-compose.services.yml down
 
 clean-cache:
 	@echo "🧹 Cleaning build artifacts across services..."
@@ -1266,31 +1237,33 @@ clean-nuke:
 
 .PHONY: deploy-single-server deploy-platform deploy-portal deploy-stop deploy-status deploy-logs backup restore rollback rollback-db health-check
 
+# The standalone Compose deployments read .env.prod or .env.staging (never the development .env).
+DEPLOY_ENV ?= prod
+DEPLOY_TYPE ?= single-server
+
 deploy-single-server:
 	@echo "🚀 [Deploy] Single server deployment (all services)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@./deploy/scripts/deploy.sh single-server --build --migrate
+	@./deploy/scripts/deploy.sh single-server --env $(DEPLOY_ENV) --build --migrate
 
 deploy-platform:
 	@echo "🚀 [Deploy] Platform service only..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@./deploy/scripts/deploy.sh platform-only --build
+	@./deploy/scripts/deploy.sh platform-only --env $(DEPLOY_ENV) --build
 
 deploy-portal:
 	@echo "🚀 [Deploy] Portal service only..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@./deploy/scripts/deploy.sh portal-only --build
+	@./deploy/scripts/deploy.sh portal-only --env $(DEPLOY_ENV) --build
 
 deploy-container-service:
 	@echo "🚀 [Deploy] Building for container service..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@./deploy/scripts/deploy.sh container-service --build
+	@./deploy/scripts/deploy.sh container-service --env $(DEPLOY_ENV) --build
 
 deploy-stop:
-	@echo "🛑 [Deploy] Stopping deployment services..."
-	@docker compose -f deploy/docker-compose.single-server.yml down 2>/dev/null || true
-	@docker compose -f deploy/docker-compose.platform-only.yml down 2>/dev/null || true
-	@docker compose -f deploy/docker-compose.portal-only.yml down 2>/dev/null || true
+	@echo "🛑 [Deploy] Stopping the $(DEPLOY_TYPE) deployment ($(DEPLOY_ENV))..."
+	@./deploy/scripts/deploy.sh $(DEPLOY_TYPE) --env $(DEPLOY_ENV) --stop
 
 deploy-status:
 	@echo "📊 [Deploy] Service status..."
@@ -1298,9 +1271,8 @@ deploy-status:
 	@docker ps --filter "name=praho" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 
 deploy-logs:
-	@echo "📋 [Deploy] Service logs..."
-	@docker compose -f deploy/docker-compose.single-server.yml logs -f 2>/dev/null || \
-		docker compose -f deploy/docker-compose.services.yml logs -f
+	@echo "📋 [Deploy] Service logs ($(DEPLOY_TYPE), $(DEPLOY_ENV))..."
+	@./deploy/scripts/deploy.sh $(DEPLOY_TYPE) --env $(DEPLOY_ENV) --logs
 
 # ===============================================================================
 # DATABASE BACKUP & RESTORE 💾
@@ -1318,12 +1290,12 @@ backup-list:
 restore:
 	@echo "🔄 [Restore] Interactive database restore..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@./deploy/scripts/restore.sh
+	@./deploy/scripts/restore.sh --env $(DEPLOY_ENV)
 
 restore-latest:
 	@echo "🔄 [Restore] Restoring latest backup..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@./deploy/scripts/restore.sh --latest
+	@./deploy/scripts/restore.sh --latest --env $(DEPLOY_ENV)
 
 # ===============================================================================
 # ROLLBACK PROCEDURES ⏪
@@ -1336,12 +1308,12 @@ ifndef VERSION
 endif
 	@echo "⏪ [Rollback] Rolling back to version $(VERSION)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@./deploy/scripts/rollback.sh version $(VERSION)
+	@./deploy/scripts/rollback.sh version $(VERSION) --env $(DEPLOY_ENV)
 
 rollback-db:
 	@echo "⏪ [Rollback] Restoring database from latest backup..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@./deploy/scripts/rollback.sh database
+	@./deploy/scripts/rollback.sh database --env $(DEPLOY_ENV)
 
 # ===============================================================================
 # HEALTH & MONITORING 🏥
@@ -1401,12 +1373,7 @@ infra-destroy-dev:
 # ENVIRONMENT DEPLOYMENT (Ansible) 🚀
 # ===============================================================================
 
-.PHONY: deploy-dev deploy-dev-native deploy-staging deploy-prod
-
-deploy-dev:
-	@echo "🚀 [Deploy] Deploying PRAHO to dev (Docker)..."
-	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@cd deploy/ansible && ansible-playbook -i inventory/dev.yml playbooks/single-server.yml
+.PHONY: deploy-dev-native deploy-staging deploy-prod
 
 deploy-dev-native:
 	@echo "🚀 [Deploy] Deploying PRAHO to dev (native)..."
@@ -1441,11 +1408,6 @@ ansible-single-server:
 	@echo "📜 [Ansible] Native single server deployment..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@cd deploy/ansible && ansible-playbook -i inventory/native-single-server.yml playbooks/native-single-server.yml -e praho_env=$(ENV)
-
-ansible-two-servers:
-	@echo "📜 [Ansible] Two server deployment..."
-	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@cd deploy/ansible && ansible-playbook -i inventory/two-servers.yml playbooks/two-servers.yml
 
 ansible-backup:
 	@echo "📜 [Ansible] Remote backup..."

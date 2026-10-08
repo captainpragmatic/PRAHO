@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-08 10:38+0300\n"
+"POT-Creation-Date: 2026-10-08 11:02+0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -2131,7 +2131,6 @@ msgid "Too many registration attempts. Please try again later."
 msgstr "Prea multe încercări de înregistrare. Vă rugăm să încercați din nou mai târziu."
 
 #: apps/users/views.py:465
-#| msgid "This information is temporarily unavailable. Please try again in %(seconds)s seconds."
 msgid "Registration is temporarily unavailable. Please try again in a few minutes."
 msgstr "Înregistrarea este temporar indisponibilă. Vă rugăm să încercați din nou peste câteva minute."
 

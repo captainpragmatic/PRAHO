@@ -101,16 +101,10 @@ Beyond the two AES-256-GCM encryption keys, PRAHO derives **domain-specific keys
 | Preferred TLS | TLS 1.3 | Modern security |
 | SSL Redirect | Enabled (default) | Configurable via `DJANGO_SECURE_SSL_REDIRECT`. Set `false` behind TLS proxy. |
 
-### Cipher Suites (TLS 1.2)
+### Cipher Suites
 
-```
-ECDHE-ECDSA-AES128-GCM-SHA256
-ECDHE-RSA-AES128-GCM-SHA256
-ECDHE-ECDSA-AES256-GCM-SHA384
-ECDHE-RSA-AES256-GCM-SHA384
-ECDHE-ECDSA-CHACHA20-POLY1305
-ECDHE-RSA-CHACHA20-POLY1305
-```
+Neither Caddy config sets `protocols` or `ciphers`, so Caddy's defaults apply. Check what a live
+host offers with `nmap --script ssl-enum-ciphers -p 443 <domain>`.
 
 ### HSTS Configuration
 
@@ -121,28 +115,18 @@ Strict-Transport-Security: max-age=31536000; includeSubDomains
 Django settings (`config/settings/prod.py`):
 - `SECURE_HSTS_SECONDS = 31536000` (1 year)
 - `SECURE_HSTS_INCLUDE_SUBDOMAINS = True`
-- `SECURE_HSTS_PRELOAD = False` (nginx template enables preload independently — coordinate before enabling in Django)
+- `SECURE_HSTS_PRELOAD = False` in both services
 
-### Nginx SSL Setup
+Behind Caddy, the edge owns the header: every Caddy config sends `HSTS_POLICY` and replaces
+Django's. Production leaves it unset (the value above); staging sets `max-age=3600`. The Django
+settings apply only where no edge fronts the service. See `docs/deployment/HTTPS_DEPLOYMENT_CHECKLIST.md`.
 
-```bash
-cp deploy/nginx/nginx-ssl.conf /etc/nginx/nginx.conf
-nginx -t && nginx -s reload
-```
+### Certificates
 
-### Certificate Automation (Let's Encrypt)
-
-```bash
-# Initial certificate
-./deploy/ssl/certbot-init.sh $DOMAIN production
-
-# Docker with SSL
-docker-compose -f docker-compose.yml -f deploy/ssl/docker-compose.ssl.yml up -d
-
-# Systemd renewal timer
-sudo cp deploy/ssl/systemd/certbot-renew.* /etc/systemd/system/
-sudo systemctl enable --now certbot-renew.timer
-```
+Caddy obtains and renews the certificates for `PORTAL_DOMAIN` and `PLATFORM_DOMAIN` itself, over
+ACME (Let's Encrypt by default), with `ACME_EMAIL` as the account contact. Both edge configs do
+this: Docker's `deploy/caddy/Caddyfile` and the native role's `Caddyfile.native.j2`. There is no
+certbot step and no renewal timer to install.
 
 > For full TLS rollout procedures, see [HTTPS Deployment Checklist](../deployment/HTTPS_DEPLOYMENT_CHECKLIST.md).
 
@@ -183,7 +167,7 @@ Caddy does not replace these application authentication rules.
   Replace/add the actual staff or VPN networks before deploying.
   `PORTAL_TRUSTED_PROXY_CIDRS` is a separate, comma-separated Django setting.
 - Existing Ansible installations must set `platform_allowed_ips` in inventory
-  host_vars/group_vars at upgrade. Both roles now default to
+  host_vars/group_vars at upgrade. The native role defaults to
   `["127.0.0.1/32", "::1/128"]`; an empty list also falls back to loopback.
   The standalone Compose environment variable does not configure Ansible.
 - `DOMAIN` remains a legacy fallback for the Portal in combined/Portal-only
@@ -262,14 +246,23 @@ form-action 'self';
 
 **Trade-off**: `'unsafe-inline'` and `'unsafe-eval'` are required for Tailwind CSS CDN and Alpine.js/HTMX inline scripts. Replacing with nonces is tracked as a production hardening gap (see [Security Compliance Assessment](SECURITY_COMPLIANCE_ASSESSMENT.md) gap analysis).
 
-### Nginx-Level Headers
+### Edge Headers (Caddy)
 
-Source: `deploy/nginx/nginx-ssl.conf`
+Source: `deploy/caddy/Caddyfile` (Docker) and
+`deploy/ansible/roles/praho-native/templates/Caddyfile.native.j2` (native). Both sites in both
+configs set the same headers:
 
 | Header | Value |
 |--------|-------|
-| `Permissions-Policy` | `geolocation=(), microphone=(), camera=(), payment=(self)` |
-| `Cross-Origin-Resource-Policy` | `same-origin` |
+| `Strict-Transport-Security` | `HSTS_POLICY` (see [HSTS Configuration](#hsts-configuration)) |
+| `X-Frame-Options` | `DENY` |
+| `X-Content-Type-Options` | `nosniff` |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` |
+| `Permissions-Policy` | `camera=(), microphone=(), geolocation=()` |
+| `Server` | removed |
+
+The edge sets no `Content-Security-Policy`: each service's middleware owns CSP, and
+`tests/integration/test_security_hardening.py::TestProxyCSPOwnership` keeps it that way.
 
 ### Production Cookie Security
 
@@ -335,8 +328,7 @@ The deployment check reports `portal.E001` outside DEBUG and `portal.W001` in DE
 For native Caddy on the same host, use `127.0.0.1/32,::1/128`. For Docker,
 use the Compose network subnet containing the proxy; `172.16.0.0/12` is an
 example range and should be narrowed to the actual project subnet. Managed
-container deployments must use their ingress proxy's CIDRs. Docker Ansible
-deployments supply the `portal_trusted_proxy_cidrs` variable; native deployments
+container deployments must use their ingress proxy's CIDRs. Native deployments
 copy the operator env file documented by the root `.env.example.*` files.
 
 If custom settings run outside DEBUG without proxy trust, Portal authentication
@@ -508,44 +500,9 @@ python manage.py check --deploy
 
 ---
 
-## 9. SSL Certificate Automation (Let's Encrypt)
+## 9. TLS Certificates
 
-### Initial Certificate Setup
-
-```bash
-# Set your domain
-export DOMAIN="yourdomain.com"
-export CERTBOT_EMAIL="admin@yourdomain.com"
-
-# Obtain initial certificate (use staging for testing)
-./deploy/ssl/certbot-init.sh $DOMAIN staging
-
-# For production certificate
-./deploy/ssl/certbot-init.sh $DOMAIN production
-```
-
-### Docker Deployment with SSL
-
-```bash
-# Start with SSL support
-docker-compose -f docker-compose.yml -f deploy/ssl/docker-compose.ssl.yml up -d
-```
-
-### Automated Renewal
-
-Certificates auto-renew via:
-
-1. **Docker container**: Certbot runs every 12 hours
-2. **Systemd timer** (alternative):
-
-```bash
-# Install systemd timer
-sudo cp deploy/ssl/systemd/certbot-renew.* /etc/systemd/system/
-sudo systemctl enable --now certbot-renew.timer
-
-# Check timer status
-sudo systemctl list-timers certbot-renew.timer
-```
+Caddy issues and renews the certificates automatically; see [Certificates](#certificates).
 
 ### Certificate Verification
 
@@ -605,7 +562,7 @@ Platform responses standardize `429` handling with parseable error payloads and 
 - [ ] Set `DJANGO_ENCRYPTION_KEY` and `CREDENTIAL_VAULT_MASTER_KEY`
 - [ ] Configure distinct `PORTAL_DOMAIN` and `PLATFORM_DOMAIN`, pass both to both services, and include each public hostname in its service's `ALLOWED_HOSTS` (no wildcards)
 - [ ] Set staff/VPN CIDRs before upgrade: space-separated `PLATFORM_ALLOWED_CIDRS` for Compose or `platform_allowed_ips` for Ansible; empty Ansible lists no longer allow public staff access
-- [ ] Validate all five Caddy configurations and confirm comma-separated staff CIDRs fail validation
+- [ ] Validate all four Caddy configurations and confirm comma-separated staff CIDRs fail validation
 - [ ] Record non-loopback peer addresses through Docker's published port and verify spoofed forwarding headers cannot grant staff access
 - [ ] Verify real Portal login/form submission and allowed staff login through local Caddy with `DEBUG=False`
 - [ ] Restrict direct Django ports and update monitors/bookmarks for the two hostnames and actual health URLs

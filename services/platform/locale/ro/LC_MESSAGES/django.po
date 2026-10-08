@@ -10,7 +10,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-08 10:37+0300\n"
+"POT-Creation-Date: 2026-10-08 11:02+0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -299,7 +299,7 @@ msgstr "Critic"
 #: templates/provisioning/service_detail.html:301
 #: templates/provisioning/service_list.html:37
 #: templates/provisioning/virtualmin/account_detail.html:24
-#: templates/provisioning/virtualmin/accounts_list.html:55
+#: templates/provisioning/virtualmin/accounts_list.html:56
 #: templates/provisioning/virtualmin/partials/accounts_table.html:72
 #: templates/provisioning/virtualmin/restore_form.html:201
 #: templates/users/profile.html:121 templates/users/profile.html:308
@@ -1594,6 +1594,7 @@ msgstr "Facturile emise nu pot fi șterse."
 #: apps/provisioning/service_models.py:406
 #: apps/provisioning/service_models.py:595 templates/customers/detail.html:506
 #: templates/provisioning/virtualmin/account_form.html:73
+#: templates/provisioning/virtualmin/bulk_actions.html:65
 msgid "Service"
 msgstr "Serviciu"
 
@@ -2305,7 +2306,7 @@ msgstr "Restant"
 #: apps/provisioning/virtualmin_migration_models.py:125
 #: apps/provisioning/virtualmin_models.py:47
 #: apps/provisioning/virtualmin_models.py:482
-#: apps/provisioning/virtualmin_views.py:1034
+#: apps/provisioning/virtualmin_views.py:1047
 #: templates/audit/gdpr_dashboard.html:164
 #: templates/audit/gdpr_management_dashboard.html:76
 #: templates/audit/gdpr_management_dashboard.html:122
@@ -2941,7 +2942,7 @@ msgstr "Se execută"
 #: apps/provisioning/virtualmin_migration_models.py:31
 #: apps/provisioning/virtualmin_migration_models.py:123
 #: apps/provisioning/virtualmin_models.py:481
-#: apps/provisioning/virtualmin_views.py:1033
+#: apps/provisioning/virtualmin_views.py:1046
 #: templates/audit/gdpr_dashboard.html:205
 #: templates/audit/gdpr_management_dashboard.html:63
 #: templates/audit/gdpr_management_dashboard.html:121
@@ -4882,7 +4883,7 @@ msgstr "Inactiv"
 #: templates/provisioning/service_detail.html:302
 #: templates/provisioning/service_list.html:42
 #: templates/provisioning/virtualmin/account_detail.html:26
-#: templates/provisioning/virtualmin/accounts_list.html:57
+#: templates/provisioning/virtualmin/accounts_list.html:58
 #: templates/provisioning/virtualmin/partials/accounts_table.html:74
 msgid "Suspended"
 msgstr "Suspendat"
@@ -4946,6 +4947,7 @@ msgstr "Tip client"
 #: templates/provisioning/server_list.html:50
 #: templates/provisioning/virtualmin/account_form.html:137
 #: templates/provisioning/virtualmin/backups_list.html:46
+#: templates/provisioning/virtualmin/bulk_actions.html:27
 #: templates/provisioning/virtualmin/job_logs.html:13
 #: templates/provisioning/virtualmin/job_status.html:46
 #: templates/provisioning/virtualmin/partials/accounts_table.html:26
@@ -7163,7 +7165,7 @@ msgid "Pending Approval"
 msgstr "În Așteptarea Aprobării"
 
 #: apps/infrastructure/models.py:990 apps/orders/models.py:660
-#: apps/provisioning/virtualmin_views.py:1035 apps/tickets/models.py:66
+#: apps/provisioning/virtualmin_views.py:1048 apps/tickets/models.py:66
 #: apps/tickets/views.py:55 templates/dashboard.html:259
 #: templates/infrastructure/dashboard.html:55
 #: templates/provisioning/virtualmin/account_detail.html:281
@@ -11102,6 +11104,7 @@ msgstr "Găzduire Cloud"
 #: templates/provisioning/virtualmin/backup_status.html:57
 #: templates/provisioning/virtualmin/backups_list.html:11
 #: templates/provisioning/virtualmin/backups_list.html:43
+#: templates/provisioning/virtualmin/bulk_actions.html:62
 #: templates/provisioning/virtualmin/restore_form.html:190
 #: templates/provisioning/virtualmin/server_detail.html:326
 #: templates/provisioning/virtualmin/server_detail.html:384
@@ -11354,6 +11357,8 @@ msgstr "Următoarea Întreținere"
 #: templates/provisioning/virtualmin/account_detail.html:179
 #: templates/provisioning/virtualmin/account_form.html:60
 #: templates/provisioning/virtualmin/backup_status.html:61
+#: templates/provisioning/virtualmin/bulk_actions.html:23
+#: templates/provisioning/virtualmin/bulk_actions.html:63
 #: templates/provisioning/virtualmin/job_status.html:72
 #: templates/provisioning/virtualmin/restore_form.html:194
 msgid "Server"
@@ -11665,6 +11670,50 @@ msgstr "❌ Serviciul {domain} nu poate fi activat din starea '{status}'."
 msgid "▶️ Service {domain} has been activated!"
 msgstr "▶️ Serviciul {domain} a fost activat!"
 
+#: apps/provisioning/services.py:221
+#| msgid "This customer has not purchased any hosting services yet."
+msgid "The customer has been deleted; hosting stays off."
+msgstr "Clientul a fost șters; găzduirea rămâne oprită."
+
+#: apps/provisioning/services.py:223
+#, python-brace-format
+msgid "The customer is {status}; reactivate the customer first."
+msgstr "Clientul este {status}; reactivați mai întâi clientul."
+
+#: apps/provisioning/services.py:225
+msgid "The service's subscription is not paid up; settle it in billing first."
+msgstr "Abonamentul serviciului nu este plătit la zi; reglați-l mai întâi în facturare."
+
+#: apps/provisioning/services.py:243
+#, python-brace-format
+msgid "Account {name} is being migrated; try again when the migration finishes."
+msgstr "Contul {name} este în curs de migrare; încercați din nou după ce migrarea se încheie."
+
+#: apps/provisioning/services.py:248
+#| msgid "The active series changed. Reload and try again."
+msgid "The service's owner changed while this was checked; try again."
+msgstr "Proprietarul serviciului s-a schimbat în timpul verificării; încercați din nou."
+
+#: apps/provisioning/services.py:258
+#, python-brace-format
+msgid "A domain bound to service {name} is expired, suspended or cancelled, so its hosting stays off."
+msgstr "Un domeniu asociat serviciului {name} este expirat, suspendat sau anulat, așa că găzduirea rămâne oprită."
+
+#: apps/provisioning/services.py:273
+#, python-brace-format
+msgid "Service {name} is {status} by another process ({reason}); lift it from the service page, billing or the customer."
+msgstr "Serviciul {name} este {status} de un alt proces ({reason}); ridicați suspendarea din pagina serviciului, din facturare sau din client."
+
+#: apps/provisioning/services.py:305 apps/provisioning/services.py:339
+#| msgid "This document cannot be retried."
+msgid "This account has no service."
+msgstr "Acest cont nu are niciun serviciu."
+
+#: apps/provisioning/services.py:311
+#, python-brace-format
+msgid "Service {name} is {status}; manage it from the service page."
+msgstr "Serviciul {name} este {status}; gestionați-l din pagina serviciului."
+
 #: apps/provisioning/virtualmin_backup_service.py:663
 #, python-format
 msgid "Backup %(backup_id)s deletion incomplete: %(errors)s"
@@ -11697,243 +11746,246 @@ msgstr "Acțiune de drenare invalidă."
 msgid "Drain request accepted. Refresh this page for progress."
 msgstr "Cererea de drenaj a fost acceptată. Reîncărcați această pagină pentru a vedea progresul."
 
-#: apps/provisioning/virtualmin_forms.py:36
+#: apps/provisioning/virtualmin_forms.py:37
 msgid "API password for Virtualmin authentication"
 msgstr "Parola API pentru autentificarea Virtualmin"
 
-#: apps/provisioning/virtualmin_forms.py:79
+#: apps/provisioning/virtualmin_forms.py:80
 #, python-format
 msgid "Invalid hostname format: %(error)s"
 msgstr "Format hostname invalid: %(error)s"
 
-#: apps/provisioning/virtualmin_forms.py:91
+#: apps/provisioning/virtualmin_forms.py:92
 #, python-format
 msgid "Invalid username format: %(error)s"
 msgstr "Format nume de utilizator invalid: %(error)s"
 
-#: apps/provisioning/virtualmin_forms.py:101
+#: apps/provisioning/virtualmin_forms.py:102
 msgid "API password is required for new servers"
 msgstr "Parola API este necesară pentru servere noi"
 
-#: apps/provisioning/virtualmin_forms.py:108
+#: apps/provisioning/virtualmin_forms.py:109
 #, python-format
 msgid "Password validation failed: %(error)s"
 msgstr "Validarea parolei a eșuat: %(error)s"
 
-#: apps/provisioning/virtualmin_forms.py:120
+#: apps/provisioning/virtualmin_forms.py:121
 msgid "Virtualmin API connections require HTTPS."
 msgstr "Conexiunile API Virtualmin necesită HTTPS."
 
-#: apps/provisioning/virtualmin_forms.py:125
+#: apps/provisioning/virtualmin_forms.py:126
 msgid "A SHA-256 certificate fingerprint is required when CA verification is disabled."
 msgstr "Este necesară o amprentă SHA-256 a certificatului atunci când verificarea CA este dezactivată."
 
-#: apps/provisioning/virtualmin_forms.py:157
+#: apps/provisioning/virtualmin_forms.py:158
 msgid "Full Backup - Complete domain backup with all data"
 msgstr "Copie de siguranță completă - Copie completă a domeniului cu toate datele"
 
-#: apps/provisioning/virtualmin_forms.py:158
+#: apps/provisioning/virtualmin_forms.py:159
 msgid "Configuration Only - Settings and structure only"
 msgstr "Doar configurare - numai setări și structură"
 
-#: apps/provisioning/virtualmin_forms.py:162
+#: apps/provisioning/virtualmin_forms.py:163
 msgid "Type of backup to create"
 msgstr "Tip de backup de creat"
 
-#: apps/provisioning/virtualmin_forms.py:169
+#: apps/provisioning/virtualmin_forms.py:170
 msgid "Include Email Data"
 msgstr "Includeți datele de e-mail"
 
-#: apps/provisioning/virtualmin_forms.py:170
+#: apps/provisioning/virtualmin_forms.py:171
 msgid "Backup email accounts, messages, and mail settings"
 msgstr "Faceți backup conturilor de e-mail, mesajelor și setărilor de poștă"
 
-#: apps/provisioning/virtualmin_forms.py:177
+#: apps/provisioning/virtualmin_forms.py:178
 msgid "Include Databases"
 msgstr "Includeți bazele de date"
 
-#: apps/provisioning/virtualmin_forms.py:178
+#: apps/provisioning/virtualmin_forms.py:179
 msgid "Backup MySQL and PostgreSQL databases"
 msgstr "Faceți backup bazelor de date MySQL și PostgreSQL"
 
-#: apps/provisioning/virtualmin_forms.py:185
+#: apps/provisioning/virtualmin_forms.py:186
 msgid "Include Web Files"
 msgstr "Includeți fișierele web"
 
-#: apps/provisioning/virtualmin_forms.py:186
+#: apps/provisioning/virtualmin_forms.py:187
 msgid "Backup website files and uploads"
 msgstr "Faceți backup fișierelor site-ului și încărcărilor"
 
-#: apps/provisioning/virtualmin_forms.py:193
+#: apps/provisioning/virtualmin_forms.py:194
 msgid "Include SSL Certificates"
 msgstr "Includeți certificatele SSL"
 
-#: apps/provisioning/virtualmin_forms.py:194
+#: apps/provisioning/virtualmin_forms.py:195
 msgid "Backup SSL certificates and private keys"
 msgstr "Faceți backup certificatelor SSL și cheilor private"
 
-#: apps/provisioning/virtualmin_forms.py:209
+#: apps/provisioning/virtualmin_forms.py:210
 msgid "At least one feature must be included in the backup"
 msgstr "Cel puțin o funcție trebuie inclusă în backup"
 
-#: apps/provisioning/virtualmin_forms.py:220
+#: apps/provisioning/virtualmin_forms.py:221
 msgid "Select backup to restore from"
 msgstr "Selectați backupul din care se face restaurarea"
 
-#: apps/provisioning/virtualmin_forms.py:226
+#: apps/provisioning/virtualmin_forms.py:227
 msgid "Restore Email Data"
 msgstr "Restabiliți datele de e-mail"
 
-#: apps/provisioning/virtualmin_forms.py:227
+#: apps/provisioning/virtualmin_forms.py:228
 msgid "Restore email accounts, messages, and mail settings"
 msgstr "Restabiliți conturile de e-mail, mesajele și setările de poștă"
 
-#: apps/provisioning/virtualmin_forms.py:234
+#: apps/provisioning/virtualmin_forms.py:235
 msgid "Restore Databases"
 msgstr "Restabiliți bazele de date"
 
-#: apps/provisioning/virtualmin_forms.py:235
+#: apps/provisioning/virtualmin_forms.py:236
 msgid "Restore MySQL and PostgreSQL databases"
 msgstr "Restabiliți bazele de date MySQL și PostgreSQL"
 
-#: apps/provisioning/virtualmin_forms.py:242
+#: apps/provisioning/virtualmin_forms.py:243
 msgid "Restore Web Files"
 msgstr "Restabiliți fișierele web"
 
-#: apps/provisioning/virtualmin_forms.py:243
+#: apps/provisioning/virtualmin_forms.py:244
 msgid "Restore website files and uploads"
 msgstr "Restabiliți fișierele site-ului și încărcările"
 
-#: apps/provisioning/virtualmin_forms.py:250
+#: apps/provisioning/virtualmin_forms.py:251
 msgid "Restore SSL Certificates"
 msgstr "Restabiliți certificatele SSL"
 
-#: apps/provisioning/virtualmin_forms.py:251
+#: apps/provisioning/virtualmin_forms.py:252
 msgid "Restore SSL certificates and private keys"
 msgstr "Restabiliți certificatele SSL și cheile private"
 
-#: apps/provisioning/virtualmin_forms.py:257
+#: apps/provisioning/virtualmin_forms.py:258
 msgid "Force restore over the live domain"
 msgstr "Forțați restaurarea peste domeniul activ"
 
-#: apps/provisioning/virtualmin_forms.py:259
+#: apps/provisioning/virtualmin_forms.py:260
 msgid "Required when the domain currently exists: the restore overwrites its data. A safety backup of the current state is taken first."
 msgstr "Obligatoriu când domeniul există deja: restaurarea îi suprascrie datele. Mai întâi se creează o copie de rezervă de siguranță a stării curente."
 
-#: apps/provisioning/virtualmin_forms.py:267
+#: apps/provisioning/virtualmin_forms.py:268
 msgid "Confirm Restore Operation"
 msgstr "Confirmați operația de restabilire"
 
-#: apps/provisioning/virtualmin_forms.py:268
+#: apps/provisioning/virtualmin_forms.py:269
 msgid "I understand this will overwrite existing data"
 msgstr "Înțeleg că aceasta va suprascrie datele existente"
 
-#: apps/provisioning/virtualmin_forms.py:289
+#: apps/provisioning/virtualmin_forms.py:290
 msgid "Please select a backup to restore from"
 msgstr "Selectați un backup din care să se facă restaurarea"
 
-#: apps/provisioning/virtualmin_forms.py:306
+#: apps/provisioning/virtualmin_forms.py:307
 msgid "At least one feature must be selected for restore"
 msgstr "Cel puțin o funcție trebuie selectată pentru restabilire"
 
-#: apps/provisioning/virtualmin_forms.py:321
+#: apps/provisioning/virtualmin_forms.py:322
 msgid "Check API Connectivity"
 msgstr "Verificați conectivitatea API"
 
-#: apps/provisioning/virtualmin_forms.py:322
+#: apps/provisioning/virtualmin_forms.py:323
 msgid "Test basic API connection and authentication"
 msgstr "Testați conexiunea API de bază și autentificarea"
 
-#: apps/provisioning/virtualmin_forms.py:329
+#: apps/provisioning/virtualmin_forms.py:330
 msgid "Check Disk Space"
 msgstr "Verificați spațiul pe disc"
 
-#: apps/provisioning/virtualmin_forms.py:330
+#: apps/provisioning/virtualmin_forms.py:331
 msgid "Verify available disk space on server"
 msgstr "Verificați spațiul disponibil pe disc pe server"
 
-#: apps/provisioning/virtualmin_forms.py:337
+#: apps/provisioning/virtualmin_forms.py:338
 msgid "Update Domain Count"
 msgstr "Actualizați numărul de domenii"
 
-#: apps/provisioning/virtualmin_forms.py:338
+#: apps/provisioning/virtualmin_forms.py:339
 msgid "Refresh count of hosted domains"
 msgstr "Reîmprospătați numărul de domenii găzduite"
 
-#: apps/provisioning/virtualmin_forms.py:345
+#: apps/provisioning/virtualmin_forms.py:346
 msgid "Force Check"
 msgstr "Verificare forțată"
 
-#: apps/provisioning/virtualmin_forms.py:346
+#: apps/provisioning/virtualmin_forms.py:347
 msgid "Ignore cache and perform fresh health check"
 msgstr "Ignorați memoria cache și efectuați o nouă verificare a stării"
 
-#: apps/provisioning/virtualmin_forms.py:357
+#: apps/provisioning/virtualmin_forms.py:358
 msgid "Create Backups"
 msgstr "Creați backup-uri"
 
-#: apps/provisioning/virtualmin_forms.py:358
+#: apps/provisioning/virtualmin_forms.py:359
 msgid "Suspend Accounts"
 msgstr "Suspendați conturile"
 
-#: apps/provisioning/virtualmin_forms.py:359
+#: apps/provisioning/virtualmin_forms.py:360
 msgid "Activate Accounts"
 msgstr "Activați conturile"
 
-#: apps/provisioning/virtualmin_forms.py:360
+#: apps/provisioning/virtualmin_forms.py:361
 #: templates/provisioning/virtualmin/server_detail.html:28
 msgid "Health Check"
 msgstr "Verificarea stării"
 
-#: apps/provisioning/virtualmin_forms.py:364
+#: apps/provisioning/virtualmin_forms.py:365
 msgid "Select action to perform on selected accounts"
 msgstr "Selectați acțiunea de efectuat asupra conturilor selectate"
 
-#: apps/provisioning/virtualmin_forms.py:367
-msgid "Comma-separated list of account IDs"
-msgstr "Lista de ID-uri de cont, separate prin virgulă"
-
-#: apps/provisioning/virtualmin_forms.py:372
-msgid "Confirm Bulk Action"
-msgstr "Confirmați Acțiunea în Masă"
-
 #: apps/provisioning/virtualmin_forms.py:373
-msgid "I understand this action will affect multiple accounts"
-msgstr "Înțeleg că această acțiune va afecta mai multe conturi"
-
-#: apps/provisioning/virtualmin_forms.py:382
-msgid "Backup type for bulk backup operation"
-msgstr "Tip de backup pentru operația de backup în masă"
-
-#: apps/provisioning/virtualmin_forms.py:390
 msgid "No accounts selected for bulk action"
 msgstr "Nu au fost selectate conturi pentru acțiunea în masă"
 
-#: apps/provisioning/virtualmin_forms.py:396
-msgid "No valid account IDs provided"
-msgstr "Nu au fost furnizate ID-uri de cont valide"
+#: apps/provisioning/virtualmin_forms.py:379
+msgid "Confirm Bulk Action"
+msgstr "Confirmați Acțiunea în Masă"
 
-#: apps/provisioning/virtualmin_forms.py:401
-msgid "Invalid account ID format"
-msgstr "Format de ID de cont nevalid"
+#: apps/provisioning/virtualmin_forms.py:380
+msgid "I understand this action will affect multiple accounts"
+msgstr "Înțeleg că această acțiune va afecta mai multe conturi"
 
-#: apps/provisioning/virtualmin_forms.py:411
+#: apps/provisioning/virtualmin_forms.py:389
+msgid "Backup type for bulk backup operation"
+msgstr "Tip de backup pentru operația de backup în masă"
+
+#: apps/provisioning/virtualmin_forms.py:413
 msgid "Backup type is required for backup action"
 msgstr "Tipul de backup este necesar pentru acțiunea de backup"
 
-#: apps/provisioning/virtualmin_forms.py:466
+#: apps/provisioning/virtualmin_forms.py:426
+#, python-brace-format
+msgid "Health checks run on at most {limit} accounts at a time."
+msgstr "Verificările de sănătate rulează pe cel mult {limit} conturi odată."
+
+#: apps/provisioning/virtualmin_forms.py:442
+#| msgid "All severities"
+msgid "All servers"
+msgstr "Toate serverele"
+
+#: apps/provisioning/virtualmin_forms.py:446
+#: templates/promotions/admin/list.html:13
+msgid "All statuses"
+msgstr "Toate statusurile"
+
+#: apps/provisioning/virtualmin_forms.py:520
 msgid "Domain is required"
 msgstr "Domeniul este obligatoriu"
 
-#: apps/provisioning/virtualmin_forms.py:474
+#: apps/provisioning/virtualmin_forms.py:528
 msgid "An account with this domain already exists"
 msgstr "Există deja un cont cu acest domeniu"
 
-#: apps/provisioning/virtualmin_forms.py:483
+#: apps/provisioning/virtualmin_forms.py:537
 msgid "Target server"
 msgstr "Server țintă"
 
-#: apps/provisioning/virtualmin_forms.py:487
+#: apps/provisioning/virtualmin_forms.py:541
 msgid "I understand the downtime, retained-copy, and manual routing/DNS requirements."
 msgstr "Înțeleg cerințele privind timpul de nefuncționare, copia reținută și rutarea/DNS manuală."
 
@@ -12012,7 +12064,7 @@ msgstr "Declanșator automat de verificare a stării de sănătate"
 #: templates/domains/staff/registrar_list.html:78
 #: templates/domains/staff/registrar_list.html:97
 #: templates/provisioning/virtualmin/account_detail.html:28
-#: templates/provisioning/virtualmin/accounts_list.html:56
+#: templates/provisioning/virtualmin/accounts_list.html:57
 #: templates/provisioning/virtualmin/partials/accounts_table.html:76
 #: templates/users/profile.html:160 templates/users/profile.html:223
 msgid "Disabled"
@@ -12156,6 +12208,7 @@ msgstr "Cont Virtualmin"
 
 #: apps/provisioning/virtualmin_models.py:340
 #: templates/provisioning/virtualmin/accounts_list.html:5
+#: templates/provisioning/virtualmin/bulk_actions.html:5
 msgid "Virtualmin Accounts"
 msgstr "Conturi Virtualmin"
 
@@ -12292,20 +12345,20 @@ msgstr "Înregistrare Drift Virtualmin"
 msgid "Virtualmin Drift Records"
 msgstr "Înregistrări Drift Virtualmin"
 
-#: apps/provisioning/virtualmin_service.py:134
+#: apps/provisioning/virtualmin_service.py:154
 msgid "No server specified for gateway"
 msgstr "Niciun server specificat pentru gateway"
 
-#: apps/provisioning/virtualmin_service.py:515
+#: apps/provisioning/virtualmin_service.py:535
 #, python-format
 msgid "Insufficient disk space: %(available)sMB available, %(requested)sMB requested"
 msgstr "Spațiu pe disc insuficient: %(available)sMB disponibil, %(requested)sMB solicitat"
 
-#: apps/provisioning/virtualmin_service.py:729
+#: apps/provisioning/virtualmin_service.py:749
 msgid "Provisioning failed - rollback executed"
 msgstr "Aprovizionare eșuată - rollback executat"
 
-#: apps/provisioning/virtualmin_service.py:1375
+#: apps/provisioning/virtualmin_service.py:1386
 msgid "No available servers can host new domains"
 msgstr "Niciun server disponibil nu poate găzdui domenii noi"
 
@@ -12463,136 +12516,148 @@ msgstr "Nume de parametru invalid"
 msgid "Parameter '%(key)s' value too long"
 msgstr "Valoarea parametrului '%(key)s' este prea lungă"
 
-#: apps/provisioning/virtualmin_views.py:484
+#: apps/provisioning/virtualmin_views.py:497
 msgid "Migration queued. Follow its status before changing routing/DNS."
 msgstr "Migrare pusă în coadă. Urmăriți starea acesteia înainte de a modifica rutarea/DNS."
 
-#: apps/provisioning/virtualmin_views.py:491
+#: apps/provisioning/virtualmin_views.py:504
 msgid "Migrate Virtualmin account"
 msgstr "Migrare cont Virtualmin"
 
-#: apps/provisioning/virtualmin_views.py:517
+#: apps/provisioning/virtualmin_views.py:530
 msgid "That migration is no longer awaiting review; re-check the current status."
 msgstr "Acea migrare nu mai așteaptă revizuirea; verificați din nou starea curentă."
 
-#: apps/provisioning/virtualmin_views.py:521
+#: apps/provisioning/virtualmin_views.py:534
 msgid "Migration marked resolved. The account is unlocked."
 msgstr "Migrarea a fost marcată ca rezolvată. Contul este deblocat."
 
-#: apps/provisioning/virtualmin_views.py:534
+#: apps/provisioning/virtualmin_views.py:547
 msgid "operator confirmed remote state"
 msgstr "operatorul a confirmat starea la distanță"
 
-#: apps/provisioning/virtualmin_views.py:550
+#: apps/provisioning/virtualmin_views.py:563
 msgid "Job marked resolved. The account is unlocked."
 msgstr "Sarcina a fost marcată ca rezolvată. Contul este deblocat."
 
-#: apps/provisioning/virtualmin_views.py:552
+#: apps/provisioning/virtualmin_views.py:565
 msgid "Only a job awaiting attention can be resolved."
 msgstr "Doar o sarcină care necesită atenție poate fi rezolvată."
 
-#: apps/provisioning/virtualmin_views.py:627
+#: apps/provisioning/virtualmin_views.py:640
 msgid "No backups available for this account."
 msgstr "Nu sunt disponibile backup-uri pentru acest cont."
 
-#: apps/provisioning/virtualmin_views.py:927
+#: apps/provisioning/virtualmin_views.py:940
 msgid "Test Failed"
 msgstr "Test eșuat"
 
-#: apps/provisioning/virtualmin_views.py:930
+#: apps/provisioning/virtualmin_views.py:943
 #, python-format
 msgid "An error occurred during connection test: %(error)s"
 msgstr "A apărut o eroare la testarea conexiunii: %(error)s"
 
-#: apps/provisioning/virtualmin_views.py:989
+#: apps/provisioning/virtualmin_views.py:1002
 msgid "No active Virtualmin servers found"
 msgstr "Nu s-au găsit servere Virtualmin active"
 
-#: apps/provisioning/virtualmin_views.py:1003
+#: apps/provisioning/virtualmin_views.py:1016
 msgid "Maximum backup age must be a positive integer."
 msgstr "Vârsta maximă a copiei de siguranță trebuie să fie un număr întreg pozitiv."
 
-#: apps/provisioning/virtualmin_views.py:1028
+#: apps/provisioning/virtualmin_views.py:1041
 #: templates/provisioning/virtualmin/backup_form.html:161
 msgid "Full Backup"
 msgstr "Copie de Siguranță Completă"
 
-#: apps/provisioning/virtualmin_views.py:1029
+#: apps/provisioning/virtualmin_views.py:1042
 #: templates/provisioning/virtualmin/backup_form.html:167
 msgid "Incremental Backup"
 msgstr "Copie de Siguranță Incrementală"
 
-#: apps/provisioning/virtualmin_views.py:1030
+#: apps/provisioning/virtualmin_views.py:1043
 #: templates/provisioning/virtualmin/backup_form.html:173
 msgid "Configuration Only"
 msgstr "Doar Configurare"
 
-#: apps/provisioning/virtualmin_views.py:1038
-#: apps/provisioning/virtualmin_views.py:1039
+#: apps/provisioning/virtualmin_views.py:1051
+#: apps/provisioning/virtualmin_views.py:1052
 msgid "Unknown"
 msgstr "Necunoscut"
 
-#: apps/provisioning/virtualmin_views.py:1121
-msgid "No valid accounts found for bulk action"
-msgstr "Nu s-au găsit conturi valide pentru acțiunea în masă"
+#: apps/provisioning/virtualmin_views.py:1128
+#| msgid "Invalid size selected."
+msgid "Invalid filter."
+msgstr "Filtru invalid."
 
-#: apps/provisioning/virtualmin_views.py:1185
+#: apps/provisioning/virtualmin_views.py:1157
+#: templates/provisioning/virtualmin/accounts_list.html:38
+msgid "Bulk Actions"
+msgstr "Acțiuni în masă"
+
+#: apps/provisioning/virtualmin_views.py:1212
 #, python-format
 msgid "Backup operation failed and was rolled back. Errors: %(errors)s%(omission)s"
 msgstr "Operația de copiere de siguranță a eșuat și a fost anulată. Erori: %(errors)s%(omission)s"
 
-#: apps/provisioning/virtualmin_views.py:1405
-#, python-format
-msgid "Account %(domain)s is not %(expected)s (current status: %(status)s)"
-msgstr "Contul %(domain)s nu este %(expected)s (starea curentă: %(status)s)"
+#: apps/provisioning/virtualmin_views.py:1232
+#, python-brace-format
+msgid "Queued {done} of {total} accounts; the reconciler applies each change."
+msgstr "Au fost puse în coadă {done} din {total} conturi; reconcilierea aplică fiecare modificare."
 
-#: apps/provisioning/virtualmin_views.py:1417
-#, python-format
-msgid "Failed to activate %(domain)s: %(error)s"
-msgstr "Activarea %(domain)s a eșuat: %(error)s"
+#: apps/provisioning/virtualmin_views.py:1242
+#, python-brace-format
+msgid "{count} refused: {reasons}{more}"
+msgstr "{count} refuzate: {reasons}{more}"
 
-#: apps/provisioning/virtualmin_views.py:1422
-#, python-format
-msgid "Failed to suspend %(domain)s: %(error)s"
-msgstr "Suspendarea %(domain)s a eșuat: %(error)s"
-
-#: apps/provisioning/virtualmin_views.py:1481
+#: apps/provisioning/virtualmin_views.py:1447
 msgid "Invalid disk usage data"
 msgstr "Date de utilizare a spațiului pe disc invalide"
 
-#: apps/provisioning/virtualmin_views.py:1496
-#: apps/provisioning/virtualmin_views.py:1499
-#: apps/provisioning/virtualmin_views.py:1544
+#: apps/provisioning/virtualmin_views.py:1462
+#: apps/provisioning/virtualmin_views.py:1465
+#: apps/provisioning/virtualmin_views.py:1516
 msgid "Health check timed out"
 msgstr "Verificarea stării de sănătate a depășit timpul de așteptare"
 
-#: apps/provisioning/virtualmin_views.py:1502
+#: apps/provisioning/virtualmin_views.py:1468
 msgid "Virtualmin server connectivity failed"
 msgstr "Conexiunea la serverul Virtualmin a eșuat"
 
-#: apps/provisioning/virtualmin_views.py:1619
+#: apps/provisioning/virtualmin_views.py:1591
 #, python-format
 msgid "Health check failed for %(domain)s: %(error)s"
 msgstr "Verificarea stării de sănătate a eșuat pentru %(domain)s: %(error)s"
 
-#: apps/provisioning/virtualmin_views.py:1625
+#: apps/provisioning/virtualmin_views.py:1597
 #, python-format
 msgid "Health check error for %(domain)s: %(error)s"
 msgstr "Eroare la verificarea stării de sănătate pentru %(domain)s: %(error)s"
 
-#: apps/provisioning/virtualmin_views.py:1634
+#: apps/provisioning/virtualmin_views.py:1606
 #, python-format
 msgid "Health check timed out for %(domain)s"
 msgstr "Verificarea stării de sănătate pentru %(domain)s a depășit timpul de așteptare"
 
-#: apps/provisioning/virtualmin_views.py:1698
+#: apps/provisioning/virtualmin_views.py:1670
 msgid "No active Virtualmin servers found to sync from"
 msgstr "Nu s-au găsit servere Virtualmin active de pe care să se sincronizeze"
 
-#: apps/provisioning/virtualmin_views.py:1824
+#: apps/provisioning/virtualmin_views.py:1796
 #, python-format
 msgid "No active monthly price for plan %(plan)s in %(currency)s."
 msgstr "Nu există preț lunar activ pentru planul %(plan)s în %(currency)s."
+
+#: apps/provisioning/virtualmin_views.py:1968
+#, python-brace-format
+msgid "Suspension of {account} is queued; its service is suspended."
+msgstr "Suspendarea contului {account} este în coadă; serviciul său este suspendat."
+
+#: apps/provisioning/virtualmin_views.py:2014
+#, python-brace-format
+#| msgid "Duration of account + 2 years"
+msgid "Activation of {account} is queued."
+msgstr "Activarea contului {account} este în coadă."
 
 #: apps/settings/apps.py:19
 msgid "⚙️ System Settings"
@@ -16301,7 +16366,6 @@ msgstr "Solicitați exportul"
 #: templates/provisioning/virtualmin/account_detail.html:465
 #: templates/provisioning/virtualmin/account_form.html:150
 #: templates/provisioning/virtualmin/backup_form.html:148
-#: templates/provisioning/virtualmin/bulk_actions.html:22
 #: templates/provisioning/virtualmin/migrate_form.html:34
 #: templates/provisioning/virtualmin/restore_form.html:21
 #: templates/provisioning/virtualmin/restore_form.html:171
@@ -16714,6 +16778,7 @@ msgstr "în urmă"
 #: templates/billing/operator_controls.html:26
 #: templates/billing/provider_reconciliation_queue.html:35
 #: templates/billing/provider_reconciliation_queue.html:87
+#: templates/provisioning/virtualmin/bulk_actions.html:45
 msgid "Action"
 msgstr "Acțiune"
 
@@ -17264,7 +17329,9 @@ msgstr "Doar Facturi"
 #: templates/domains/staff/registrar_list.html:101
 #: templates/domains/staff/tld_list.html:93
 #: templates/infrastructure/deployment_list.html:67
-#: templates/products/product_list.html:132 templates/users/user_list.html:22
+#: templates/products/product_list.html:132
+#: templates/provisioning/virtualmin/bulk_actions.html:31
+#: templates/users/user_list.html:22
 msgid "Filter"
 msgstr "Filtrează"
 
@@ -24256,7 +24323,7 @@ msgid "Active Status"
 msgstr "Status Activ"
 
 #: templates/products/product_list.html:112
-#: templates/provisioning/virtualmin/accounts_list.html:54
+#: templates/provisioning/virtualmin/accounts_list.html:55
 msgid "All Status"
 msgstr "Toate Statusurile"
 
@@ -24737,10 +24804,6 @@ msgstr "Cardul rămâne în așteptare, fără sold utilizabil, până la verifi
 msgid "Generate batch"
 msgstr "Generați lot"
 
-#: templates/promotions/admin/list.html:13
-msgid "All statuses"
-msgstr "Toate statusurile"
-
 #: templates/promotions/admin/list.html:14
 msgid "Campaign type"
 msgstr "Tip campanie"
@@ -25210,7 +25273,6 @@ msgstr "Dezactivați Protecția"
 
 #: templates/provisioning/virtualmin/account_detail.html:218
 #: templates/provisioning/virtualmin/partials/quick_actions.html:8
-#| msgid "Virtualmin features enabled for this account"
 msgid "Deletion protection will be turned off for this account."
 msgstr "Protecția la ștergere va fi dezactivată pentru acest cont."
 
@@ -25351,27 +25413,27 @@ msgstr "Reîmprospătați conturile"
 msgid "Syncing..."
 msgstr "Se sincronizează..."
 
-#: templates/provisioning/virtualmin/accounts_list.html:38
+#: templates/provisioning/virtualmin/accounts_list.html:39
 msgid "New Account"
 msgstr "Cont nou"
 
-#: templates/provisioning/virtualmin/accounts_list.html:48
+#: templates/provisioning/virtualmin/accounts_list.html:49
 msgid "Search accounts"
 msgstr "Căutare conturi"
 
-#: templates/provisioning/virtualmin/accounts_list.html:49
+#: templates/provisioning/virtualmin/accounts_list.html:50
 msgid "Search accounts by domain..."
 msgstr "Caută conturi după domeniu..."
 
-#: templates/provisioning/virtualmin/accounts_list.html:53
+#: templates/provisioning/virtualmin/accounts_list.html:54
 msgid "Account status"
 msgstr "Stare cont"
 
-#: templates/provisioning/virtualmin/accounts_list.html:61
+#: templates/provisioning/virtualmin/accounts_list.html:62
 msgid "Hosting plan"
 msgstr "Plan de găzduire"
 
-#: templates/provisioning/virtualmin/accounts_list.html:62
+#: templates/provisioning/virtualmin/accounts_list.html:63
 msgid "All Plans"
 msgstr "Toate Planurile"
 
@@ -25565,22 +25627,51 @@ msgstr "ID backup"
 msgid "No backups found."
 msgstr "Nu au fost găsite copii de rezervă."
 
-#: templates/provisioning/virtualmin/bulk_actions.html:4
-#: templates/provisioning/virtualmin/bulk_actions.html:8
-msgid "Bulk Actions"
-msgstr "Acțiuni în masă"
+#: templates/provisioning/virtualmin/bulk_actions.html:13
+msgid "Suspend and Activate change each account's service; the reconciler applies them to Virtualmin."
+msgstr "Suspendarea și activarea modifică serviciul fiecărui cont; reconcilierea le aplică în Virtualmin."
 
-#: templates/provisioning/virtualmin/bulk_actions.html:9
-msgid "Apply this action to all selected accounts?"
-msgstr "Aplicați această acțiune tuturor conturilor selectate?"
+#: templates/provisioning/virtualmin/bulk_actions.html:17
+#| msgid "Back to Account"
+msgid "Back to accounts"
+msgstr "Înapoi la conturi"
 
-#: templates/provisioning/virtualmin/bulk_actions.html:15
-msgid "Account IDs, separated by commas"
-msgstr "ID-uri de cont, separate prin virgulă"
+#: templates/provisioning/virtualmin/bulk_actions.html:32
+#| msgid "Select a customer"
+msgid "Select all listed"
+msgstr "Selectează toate conturile listate"
 
-#: templates/provisioning/virtualmin/bulk_actions.html:24
-msgid "Apply action"
-msgstr "Aplicați acțiunea"
+#: templates/provisioning/virtualmin/bulk_actions.html:50
+#| msgid "Backup type for bulk backup operation"
+msgid "Backup type (backup only)"
+msgstr "Tip de backup (doar pentru backup)"
+
+#: templates/provisioning/virtualmin/bulk_actions.html:64
+#: templates/provisioning/virtualmin/job_logs.html:14
+#: templates/provisioning/virtualmin/job_status.html:60
+#: templates/provisioning/virtualmin/partials/accounts_table.html:23
+msgid "Account"
+msgstr "Cont"
+
+#: templates/provisioning/virtualmin/bulk_actions.html:88
+#, python-format
+msgid "%(count)s accounts match this filter. Narrow it to %(limit)s or fewer to act on them."
+msgstr "%(count)s conturi corespund acestui filtru. Restrângeți-l la cel mult %(limit)s pentru a acționa asupra lor."
+
+#: templates/provisioning/virtualmin/bulk_actions.html:90
+#| msgid "No flagged events match these filters."
+msgid "No accounts match this filter."
+msgstr "Niciun cont nu corespunde acestui filtru."
+
+#: templates/provisioning/virtualmin/bulk_actions.html:100
+#| msgid "I understand this action will affect multiple accounts"
+msgid "I understand this action will affect every selected account"
+msgstr "Înțeleg că această acțiune va afecta fiecare cont selectat"
+
+#: templates/provisioning/virtualmin/bulk_actions.html:102
+#| msgid "Run Validation"
+msgid "Run action"
+msgstr "Rulează acțiunea"
 
 #: templates/provisioning/virtualmin/drain.html:5
 #: templates/provisioning/virtualmin/server_detail.html:25
@@ -25635,12 +25726,6 @@ msgstr "Porniți evacuarea"
 #: templates/provisioning/virtualmin/job_logs.html:8
 msgid "Virtualmin Job Logs"
 msgstr "Jurnale de job-uri Virtualmin"
-
-#: templates/provisioning/virtualmin/job_logs.html:14
-#: templates/provisioning/virtualmin/job_status.html:60
-#: templates/provisioning/virtualmin/partials/accounts_table.html:23
-msgid "Account"
-msgstr "Cont"
 
 #: templates/provisioning/virtualmin/job_logs.html:16
 msgid "Status message"
@@ -25829,7 +25914,6 @@ msgid "Operation Logs"
 msgstr "Jurnale operații"
 
 #: templates/provisioning/virtualmin/partials/quick_actions.html:8
-#| msgid "Virtualmin features enabled for this account"
 msgid "Deletion protection will be turned on for this account."
 msgstr "Protecția la ștergere va fi activată pentru acest cont."
 
@@ -27512,6 +27596,39 @@ msgstr "Pagini utilizator"
 #: tests/common/pagination_assertions.py:20
 msgid "Go to next page"
 msgstr "Mergeți la pagina următoare"
+
+#~ msgid "Comma-separated list of account IDs"
+#~ msgstr "Lista de ID-uri de cont, separate prin virgulă"
+
+#~ msgid "No valid account IDs provided"
+#~ msgstr "Nu au fost furnizate ID-uri de cont valide"
+
+#~ msgid "Invalid account ID format"
+#~ msgstr "Format de ID de cont nevalid"
+
+#~ msgid "No valid accounts found for bulk action"
+#~ msgstr "Nu s-au găsit conturi valide pentru acțiunea în masă"
+
+#, python-format
+#~ msgid "Account %(domain)s is not %(expected)s (current status: %(status)s)"
+#~ msgstr "Contul %(domain)s nu este %(expected)s (starea curentă: %(status)s)"
+
+#, python-format
+#~ msgid "Failed to activate %(domain)s: %(error)s"
+#~ msgstr "Activarea %(domain)s a eșuat: %(error)s"
+
+#, python-format
+#~ msgid "Failed to suspend %(domain)s: %(error)s"
+#~ msgstr "Suspendarea %(domain)s a eșuat: %(error)s"
+
+#~ msgid "Apply this action to all selected accounts?"
+#~ msgstr "Aplicați această acțiune tuturor conturilor selectate?"
+
+#~ msgid "Account IDs, separated by commas"
+#~ msgstr "ID-uri de cont, separate prin virgulă"
+
+#~ msgid "Apply action"
+#~ msgstr "Aplicați acțiunea"
 
 #~ msgid "ANAF-signed PDF visualization"
 #~ msgstr "Vizualizare PDF semnat de ANAF"

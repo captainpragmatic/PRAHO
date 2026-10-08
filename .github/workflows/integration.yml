@@ -61,7 +61,7 @@ jobs:
         uv python install
         uv sync --all-groups
 
-    - name: Lint all services (make lint — 8 phases)
+    - name: Lint all services (every make lint phase)
       run: make lint
 
     - name: Check migration state
@@ -191,6 +191,7 @@ jobs:
           tests.orders.test_order_payment_recovery_isolation.OrderAuditPostgresIsolationTests \
           tests.audit.test_membership_signal_postgres_isolation \
           tests.common.test_transactions \
+          tests.provisioning.test_hosting_account_staff_actions_concurrency \
           --settings=config.settings.ci --verbosity=2
 
     - name: Service isolation security tests (make test-security)

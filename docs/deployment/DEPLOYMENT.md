@@ -12,7 +12,7 @@ This guide covers all deployment scenarios for PRAHO, from native single-server 
   - [Option 3: Container Service](#option-3-container-service)
   - [Option 4: Docker Platform Only](#option-4-docker-platform-only)
   - [Option 5: Docker Portal Only](#option-5-docker-portal-only)
-  - [Option 6: Two Servers (Distributed)](#option-6-two-servers-distributed)
+  - [Option 6: Two Servers (Docker Compose split)](#option-6-two-servers-docker-compose-split)
 - [Database Operations](#database-operations)
 - [Rollback Procedures](#rollback-procedures)
 - [Makefile Commands](#makefile-commands)
@@ -360,7 +360,7 @@ The Ansible infrastructure is fully unified — one inventory, one playbook, one
 Staging settings exist to prevent real-world side effects during testing:
 - **Email**: console backend (prevents sending real emails)
 - **e-Factura**: test mode (prevents submitting invoices to Romanian ANAF)
-- **HSTS**: 1 hour instead of 1 year (allows rolling back to HTTP)
+- **HSTS**: 1 hour instead of 1 year (allows rolling back to HTTP), via `HSTS_POLICY=max-age=3600` at the Caddy edge
 - **Sessions**: longer lifetime, no browser-close expiry (more lenient for testing)
 - **Logging**: DEBUG level with smaller log files
 
@@ -376,7 +376,9 @@ These are the `[REQUIRED]` variables in the `.env.example.*` files — PRAHO won
 | `PORTAL_DOMAIN` | Customer-facing FQDN | `portal.pragmatichost.com` |
 | `PLATFORM_DOMAIN` | Staff/admin FQDN | `platform.pragmatichost.com` |
 | `ACME_EMAIL` | Let's Encrypt notification email | `admin@pragmatichost.com` |
-| `SECRET_KEY` | Django secret key | `openssl rand -base64 50` |
+| `DJANGO_SECRET_KEY` | Django secret key | `openssl rand -base64 50` |
+| `DJANGO_ENCRYPTION_KEY` | AES-256-GCM key for 2FA secrets and sensitive fields; production refuses to start without it | `python -c "import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"` |
+| `CREDENTIAL_VAULT_MASTER_KEY` | Credential vault key; production refuses to start without it | same command, a different key |
 | `DB_PASSWORD` | PostgreSQL password | `openssl rand -base64 32` |
 | `HMAC_SECRET` | Portal-to-Platform auth secret | `openssl rand -base64 32` |
 | `PLATFORM_TO_PORTAL_WEBHOOK_SECRET` | Platform→Portal webhook HMAC secret | `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
@@ -392,7 +394,7 @@ The `.env.example.*` files also list `[RECOMMENDED]` variables (email, Stripe, e
 Before deploying, the playbook checks:
 1. `praho_env` is defined and one of `dev`, `staging`, `prod`
 2. Ubuntu >= 24.04
-3. The `.env.{praho_env}` file exists and contains all required variables (`SECRET_KEY`, `DB_PASSWORD`, `HMAC_SECRET`, `PLATFORM_TO_PORTAL_WEBHOOK_SECRET`, `PORTAL_DOMAIN`, `PLATFORM_DOMAIN`)
+3. The `.env.{praho_env}` file exists and contains all required variables (`DJANGO_SECRET_KEY`, `DB_PASSWORD`, `HMAC_SECRET`, `PORTAL_DOMAIN`, `PLATFORM_DOMAIN`, and for `prod` also `PLATFORM_TO_PORTAL_WEBHOOK_SECRET`, `DJANGO_ENCRYPTION_KEY` and `CREDENTIAL_VAULT_MASTER_KEY`)
 4. Both FQDNs resolve to the server IP (DNS pre-flight)
 
 #### Post-Deploy
@@ -408,7 +410,7 @@ The database starts empty — no users exist. Create a superuser on the server:
 ssh root@<server-ip>
 cd /opt/praho/src
 sudo -u praho bash -c 'set -a && source /opt/praho/.env && set +a && \
-  source /opt/praho/.venv/bin/activate && \
+  source /opt/praho/.venv-linux/bin/activate && \
   python services/platform/manage.py createsuperuser --email admin@pragmatichost.com'
 ```
 
@@ -537,21 +539,30 @@ Deploy Platform, Portal, PostgreSQL, and Caddy in Docker containers on a single 
 └─────────────────────────────────────────────┘
 ```
 
-**Using Docker Compose:**
+**Using the deploy script:**
+
+The Docker deployments read the same env files as the native one: `.env.prod`, or `.env.staging` with `--env staging`. Never the repo-root `.env`, which is the development file; the script refuses it.
+
 ```bash
-# Set environment variables
-export PRAHO_PORTAL_DOMAIN=portal.pragmatichost.com
-export PRAHO_PLATFORM_DOMAIN=platform.pragmatichost.com
-export DB_PASSWORD=your-secure-password
-export SECRET_KEY=your-django-secret-key
-export ACME_EMAIL=admin@example.com
+cp .env.example.prod .env.prod
+# Fill in every [REQUIRED] value: DJANGO_SECRET_KEY, DB_PASSWORD, HMAC_SECRET and
+# PLATFORM_API_SECRET (same value), PLATFORM_TO_PORTAL_WEBHOOK_SECRET, DJANGO_ENCRYPTION_KEY,
+# CREDENTIAL_VAULT_MASTER_KEY, PORTAL_DOMAIN, PLATFORM_DOMAIN, ACME_EMAIL
 
-# Deploy
-docker compose -f deploy/docker-compose.single-server.yml up -d
-
-# Or use the deploy script
-./deploy/scripts/deploy.sh single-server --build --migrate
+./deploy/scripts/deploy.sh single-server --build      # or: make deploy-single-server
+./deploy/scripts/deploy.sh single-server --env staging --build   # reads .env.staging
+./deploy/scripts/deploy.sh single-server --stop       # or: make deploy-stop
 ```
+
+The script passes the file to every Compose call and waits until the platform, portal and database report healthy and Caddy, which has no healthcheck, is running (`up --wait`; Docker Compose v2 is required). A first boot migrates a fresh database before the platform reports healthy, which can take a few minutes. Health is read from the containers: the stack publishes only Caddy's ports 80 and 443.
+
+To run Compose directly, pass the file twice: `--env-file` for `${VAR}` substitution, and `PRAHO_ENV_FILE` for the platform, which receives the whole file:
+
+```bash
+PRAHO_ENV_FILE=$PWD/.env.prod docker compose --env-file .env.prod -f deploy/docker-compose.single-server.yml up -d --wait
+```
+
+Export nothing else in that shell: a shell variable beats the env file in Compose's substitution.
 
 > **Note:** Both native and Docker deployments use a two-domain architecture. Platform is never exposed on the portal domain.
 
@@ -568,23 +579,21 @@ For managed container platforms like DigitalOcean App Platform, AWS ECS, or Goog
 
 **Build and Push:**
 ```bash
-# Set registry
-export REGISTRY=registry.digitalocean.com/your-registry/
-export VERSION=v1.0.0
+# REGISTRY and VERSION name the images; set them in .env.prod (or export them)
+./deploy/scripts/deploy.sh container-service --build
 
-# Build images
-docker compose -f deploy/docker-compose.container-service.yml build
-
-# Push to registry
 docker push ${REGISTRY}praho-platform:${VERSION}
 docker push ${REGISTRY}praho-portal:${VERSION}
 ```
 
-**Environment Variables for Container Service:**
+**Environment Variables for Container Service** (set them in the provider's settings; `deploy/docker-compose.container-service.yml` lists the same set):
 ```
-DATABASE_URL=postgresql://user:pass@db-host:5432/praho
-SECRET_KEY=your-secret-key
-DOMAIN=praho.example.com
+DB_HOST, DB_NAME, DB_USER, DB_PASSWORD     # managed PostgreSQL
+DJANGO_SECRET_KEY
+PLATFORM_API_SECRET, PLATFORM_TO_PORTAL_WEBHOOK_SECRET
+DJANGO_ENCRYPTION_KEY, CREDENTIAL_VAULT_MASTER_KEY   # platform, production settings
+PLATFORM_DOMAIN, PORTAL_DOMAIN
+PORTAL_TRUSTED_PROXY_CIDRS                 # the provider's load balancer range
 PLATFORM_API_BASE_URL=https://platform.praho.example.com/api
 ```
 
@@ -600,16 +609,22 @@ Deploy just the Platform service (admin, API, business logic).
 - Development/staging environments
 
 ```bash
-# With local database
-docker compose -f deploy/docker-compose.platform-only.yml --profile with-db up -d
+# With the bundled database (the script sets DB_HOST=db and DB_SSLMODE=disable for it)
+./deploy/scripts/deploy.sh platform-only --with-db --build
 
-# With external database
-export DATABASE_URL=postgresql://user:pass@db-host:5432/praho
-docker compose -f deploy/docker-compose.platform-only.yml up -d
+# With an external database: set DB_HOST, DB_NAME, DB_USER and DB_PASSWORD in .env.prod
+# (DB_SSLMODE defaults to require)
+./deploy/scripts/deploy.sh platform-only --build
 
 # Full stack (DB + Caddy)
-docker compose -f deploy/docker-compose.platform-only.yml --profile full up -d
+./deploy/scripts/deploy.sh platform-only --full --build
 ```
+
+The platform-only and portal-only stacks publish the application port (8700, 8701) on `127.0.0.1` only.
+Their Caddy reaches the app over the Docker network, and a proxy on the same host can use the loopback
+port; publishing it wider would bypass Caddy's TLS and, for the platform, the `PLATFORM_ALLOWED_CIDRS`
+allowlist. For an external load balancer, set `PLATFORM_BIND` / `PORTAL_BIND` (e.g. to a private
+interface's address) in the env file.
 
 ---
 
@@ -618,27 +633,35 @@ docker compose -f deploy/docker-compose.platform-only.yml --profile full up -d
 Deploy just the Portal service (customer-facing).
 
 **Prerequisites:**
-- Platform must be running and accessible
-- PLATFORM_API_BASE_URL must be set
+- Platform must be running and reachable at its public URL
+- A portal host holds only what the portal stack uses. Never copy the full `.env.prod` there: it holds the
+  platform's database password, encryption keys, payment and mail credentials and its Django secret key.
+  `deploy.sh portal-only` refuses a file with anything else, naming the extra keys (never their values).
 
 ```bash
-# Set Platform API URL
-export PLATFORM_API_BASE_URL=https://platform.praho.example.com/api
-export SECRET_KEY=your-secret-key
-export DOMAIN=portal.praho.example.com
+# On the machine that holds the full .env.prod: set the portal's own key and its public settings
+#   PORTAL_DJANGO_SECRET_KEY=...   (openssl rand -base64 50; must differ from DJANGO_SECRET_KEY)
+#   PLATFORM_API_BASE_URL=https://platform.praho.example.com/api
+#   PORTAL_DOMAIN, PLATFORM_DOMAIN
+#   PORTAL_TRUSTED_PROXY_CIDRS=10.200.250.0/24 (the stack's own network, where its Caddy or a proxy on
+#   the host reaches the portal; PRAHO_WEB_SUBNET changes it, an external load balancer adds its range)
+# then write the portal's file (mode 600; only the variables the portal stack uses)
+./deploy/scripts/portal-env.sh --env prod          # writes .env.prod.portal
+scp -p .env.prod.portal portal-host:/opt/praho/.env.prod
 
-# Deploy
-docker compose -f deploy/docker-compose.portal-only.yml up -d
-
-# With Caddy
-docker compose -f deploy/docker-compose.portal-only.yml --profile with-caddy up -d
+# On the portal host (one that already ran the portal stack: run --stop once first, so Compose
+# recreates its network with the pinned subnet)
+./deploy/scripts/deploy.sh portal-only --build
+./deploy/scripts/deploy.sh portal-only --with-caddy --build   # with Caddy
 ```
 
 ---
 
-### Option 6: Two Servers (Distributed)
+### Option 6: Two Servers (Docker Compose split)
 
-Platform + DB on primary server, Portal on secondary server.
+Platform + DB on primary server, Portal on secondary server. This is the layout Terraform provisions for
+staging and production. Until the native role deploys two hosts, it is deployed by hand with the Compose
+stacks of Options 4 and 5 (ADR-0054).
 
 **Architecture:**
 ```
@@ -661,20 +684,23 @@ Platform + DB on primary server, Portal on secondary server.
 └─────────────────────────┘     └─────────────────────────┘
 ```
 
-**Using Ansible:**
+**Deploying it:**
 ```bash
-# Set environment variables
-export PRAHO_PLATFORM_IP=10.0.0.1
-export PRAHO_PORTAL_IP=10.0.0.2
-export PRAHO_PORTAL_DOMAIN=portal.pragmatichost.com
-export PRAHO_PLATFORM_DOMAIN=platform.pragmatichost.com
-export PRAHO_DB_PASSWORD=secure-password
-export PRAHO_SECRET_KEY=django-secret-key
+# Where the full .env.prod lives, with PORTAL_DJANGO_SECRET_KEY, PORTAL_DOMAIN, PLATFORM_DOMAIN,
+# PLATFORM_API_BASE_URL=https://<platform domain>/api and PORTAL_TRUSTED_PROXY_CIDRS=10.200.250.0/24
+# (the portal stack's own network, where its Caddy runs; PRAHO_WEB_SUBNET changes it) set:
+./deploy/scripts/portal-env.sh --env prod        # writes .env.prod.portal: only what the portal uses
 
-# Deploy
-cd deploy/ansible
-ansible-playbook -i inventory/two-servers.yml playbooks/two-servers.yml
+# Platform server: the full file (its checkout's .env.prod), then
+./deploy/scripts/deploy.sh platform-only --full --build
+
+# Portal server: only .env.prod.portal, copied as its checkout's .env.prod, then
+./deploy/scripts/deploy.sh portal-only --with-caddy --build
 ```
+
+The portal reaches the platform at `https://<platform domain>/api` through the platform server's Caddy,
+where `/api/*` is public and Django's HMAC check guards it. `rollback.sh` and `restore.sh` assume the
+single-server stack: on a split deployment, roll back by redeploying an earlier `VERSION` on each server.
 
 ---
 
@@ -710,7 +736,10 @@ Backups are stored in `./backups/` with format: `praho_backup_YYYYMMDD_HHMMSS.sq
 # Restore latest backup
 ./deploy/scripts/restore.sh --latest
 
-# Using make
+# Docker staging: the scripts read .env.prod unless told otherwise
+./deploy/scripts/restore.sh --latest --env staging
+
+# Using make (DEPLOY_ENV=staging for staging)
 make restore
 
 # Native deployment
@@ -741,10 +770,10 @@ Ansible automatically sets up a cron job for daily backups at 2:00 AM. Manual se
 
 ### Version Rollback
 
-Roll back to a specific image version:
+Roll back to a specific image version. The tag applies to that run only (the env file is not edited), so a later `deploy.sh` run goes back to the `VERSION` in the env file:
 
 ```bash
-# Using script
+# Using script (add --env staging for a staging host)
 ./deploy/scripts/rollback.sh version v1.2.3
 
 # Using make
@@ -771,14 +800,14 @@ Roll back both version and database:
 ./deploy/scripts/rollback.sh full v1.2.3
 ```
 
-### Rollback via Ansible
+### Rollback on a native server
 
 ```bash
-# Rollback to version
-ansible-playbook -i inventory/native-single-server.yml playbooks/rollback.yml -e version=v1.2.3
+# Redeploy an earlier tag
+make deploy-prod VERSION=v1.2.3
 
-# Restore database
-ansible-playbook -i inventory/native-single-server.yml playbooks/rollback.yml -e restore_backup=true
+# Restore the latest database backup (on the server)
+/opt/praho/scripts/restore.sh --latest
 ```
 
 ---
@@ -790,9 +819,10 @@ ansible-playbook -i inventory/native-single-server.yml playbooks/rollback.yml -e
 | `make deploy-staging` | Deploy to staging (reads `.env.staging`) |
 | `make deploy-prod` | Deploy to production (reads `.env.prod`) |
 | `make deploy-dev-native` | Deploy to dev (native) |
-| `make deploy-stop` | Stop all deployment services |
+| `make deploy-single-server` | Docker single server (reads `.env.prod`; `DEPLOY_ENV=staging` reads `.env.staging`) |
+| `make deploy-stop` | Stop a Docker deployment (`DEPLOY_TYPE=single-server` by default) |
 | `make deploy-status` | Show deployment status |
-| `make deploy-logs` | Show service logs |
+| `make deploy-logs` | Follow a Docker deployment's logs (`DEPLOY_TYPE`, `DEPLOY_ENV` as above) |
 | `make backup` | Create database backup |
 | `make restore` | Restore from backup (interactive) |
 | `make rollback VERSION=X` | Roll back to version X |
@@ -812,27 +842,36 @@ All variables live in your `.env.{env}` file. See `.env.example.prod` for the fu
 | `PRAHO_SERVER_IP` | Server public IP | `203.0.113.10` |
 | `PORTAL_DOMAIN` | Customer-facing FQDN | `portal.pragmatichost.com` |
 | `PLATFORM_DOMAIN` | Staff/admin FQDN | `platform.pragmatichost.com` |
-| `SECRET_KEY` | Django secret key | `openssl rand -base64 50` |
+| `DJANGO_SECRET_KEY` | Django secret key | `openssl rand -base64 50` |
+| `DJANGO_ENCRYPTION_KEY` | AES-256-GCM key for 2FA secrets and sensitive fields; production refuses to start without it | `python -c "import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"` |
+| `CREDENTIAL_VAULT_MASTER_KEY` | Credential vault key; production refuses to start without it | same command, a different key |
 | `DB_PASSWORD` | PostgreSQL password | `openssl rand -base64 32` |
 | `HMAC_SECRET` | Portal ↔ Platform HMAC auth | `openssl rand -base64 32` |
 | `PLATFORM_TO_PORTAL_WEBHOOK_SECRET` | Platform→Portal webhook HMAC | `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
 | `ACME_EMAIL` | Let's Encrypt email | `admin@pragmatichost.com` |
 
-### Docker Deployment
+### Docker Deployment (Compose)
+
+The same `.env.prod` / `.env.staging` file, passed by `deploy/scripts/deploy.sh`. Each compose file's header lists every variable it requires; for `single-server`:
 
 | Variable | Required | Description | Example |
 |----------|----------|-------------|---------|
-| `PRAHO_PORTAL_DOMAIN` | Yes | Customer-facing domain | `portal.pragmatichost.com` |
-| `PRAHO_PLATFORM_DOMAIN` | Yes | Staff/admin domain | `platform.pragmatichost.com` |
-| `DB_PASSWORD` | Yes | PostgreSQL password | `secure-password` |
-| `SECRET_KEY` | Yes | Django secret key | `django-insecure-...` |
+| `PORTAL_DOMAIN` | Yes | Customer-facing domain | `portal.pragmatichost.com` |
+| `PLATFORM_DOMAIN` | Yes | Staff/admin domain | `platform.pragmatichost.com` |
+| `DB_PASSWORD` | Yes | PostgreSQL password | `openssl rand -base64 32` |
+| `DJANGO_SECRET_KEY` | Yes | Django secret key | `openssl rand -base64 50` |
+| `PLATFORM_API_SECRET` | Yes | Portal ↔ Platform HMAC (same value as `HMAC_SECRET`) | `openssl rand -base64 32` |
+| `PLATFORM_TO_PORTAL_WEBHOOK_SECRET` | Yes | Platform→Portal webhook HMAC | `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
+| `PORTAL_DJANGO_SECRET_KEY` | portal-only | The portal's own Django key (single-server uses it when set, else `DJANGO_SECRET_KEY`) | `openssl rand -base64 50` |
+| `DJANGO_ENCRYPTION_KEY`, `CREDENTIAL_VAULT_MASTER_KEY` | Production | Checked by `deploy.sh` before Compose runs | see the native table |
 | `ACME_EMAIL` | Yes | Let's Encrypt email | `admin@example.com` |
+| `VERSION` | No | Image tag (default `latest`) | `v1.2.3` |
 
 ### Security Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `platform_allowed_ips` | IP whitelist for Platform access (Ansible extra-var) | `[]` (unrestricted) |
+| `platform_allowed_ips` | IP whitelist for Platform access (Ansible extra-var) | loopback only; an empty list also means loopback only, never unrestricted |
 | `HMAC_SECRET` | HMAC shared secret for Portal ↔ Platform auth | (required in `.env`) |
 | `PLATFORM_TO_PORTAL_WEBHOOK_SECRET` | HMAC secret for Platform→Portal webhooks | (required in `.env`) |
 
@@ -859,11 +898,14 @@ These are set in the `.env` file and used by the Portal service:
 # Using make
 make health-check
 
-# Manual checks
-curl http://localhost:8700/api/users/health/
-curl http://localhost:8701/
+# Docker: single-server publishes only Caddy's 80/443, and the split stacks publish the app on
+# 127.0.0.1 only, so read container health or probe the public routes
+docker inspect --format '{{.State.Health.Status}}' praho_platform praho_portal
+PLATFORM_URL=https://platform.example.com PORTAL_URL=https://portal.example.com ./deploy/scripts/health-check.sh
 
 # Native deployment
+curl http://localhost:8700/api/users/health/
+curl http://localhost:8701/
 /opt/praho/scripts/health-check.sh
 systemctl status praho-platform praho-portal praho-qcluster
 ```
@@ -871,8 +913,8 @@ systemctl status praho-platform praho-portal praho-qcluster
 ### View Logs
 
 ```bash
-# Docker: all services
-docker compose -f deploy/docker-compose.single-server.yml logs -f
+# Docker: all services (add --env staging for a staging host)
+./deploy/scripts/deploy.sh single-server --logs
 
 # Docker: specific service
 docker logs praho_platform -f
@@ -900,7 +942,7 @@ docker logs praho_db
 systemctl status postgresql
 journalctl -u postgresql -n 50
 
-# Verify DATABASE_URL is correct
+# Verify DB_HOST, DB_NAME, DB_USER and DB_PASSWORD in the env file
 ```
 
 **2. SSL/HTTPS not working**
@@ -964,8 +1006,8 @@ make rollback VERSION=v1.0.0        # Docker
 
 **Complete reset (Docker):**
 ```bash
-# Stop and remove all containers
-docker compose -f deploy/docker-compose.single-server.yml down -v
+# Stop and remove all containers and volumes (the database too)
+PRAHO_ENV_FILE=$PWD/.env.prod docker compose --env-file .env.prod -f deploy/docker-compose.single-server.yml down -v
 
 # Redeploy fresh
 make deploy-single-server
@@ -989,7 +1031,6 @@ deploy/
 ├── docker-compose.platform-only.yml   # Platform service only
 ├── docker-compose.portal-only.yml     # Portal service only
 ├── docker-compose.dev.yml             # Development environment
-├── docker-compose.services.yml        # Legacy production config
 ├── caddy/
 │   ├── Caddyfile                      # Full stack configuration
 │   ├── Caddyfile.platform             # Platform-only config
@@ -1003,24 +1044,20 @@ deploy/
 │   ├── backup.sh                      # Database backup
 │   ├── restore.sh                     # Database restore
 │   ├── rollback.sh                    # Version/DB rollback
-│   └── health-check.sh               # Health check script
+│   ├── health-check.sh               # Health check script
+│   ├── portal-env.sh                  # Writes a portal host's env file from the full one
+│   └── lib/compose.sh                 # Passes the env file to every Compose call
 └── ansible/
     ├── inventory/
     │   ├── native-single-server.yml   # Unified native inventory (staging + prod)
-    │   ├── dev.yml                    # Dev environment inventory
-    │   └── two-servers.yml            # Multi-server hosts (Docker)
+    │   └── dev.yml                    # Remote dev box (make deploy-dev-native)
     ├── group_vars/
     │   └── all.yml                    # Ansible-only vars (ports, paths, tuning)
     ├── playbooks/
     │   ├── native-single-server.yml   # Native deploy (no Docker) — the main playbook
-    │   ├── single-server.yml          # Docker single server deploy
-    │   ├── two-servers.yml            # Multi-server deploy (Docker)
-    │   ├── backup.yml                 # Backup playbook
-    │   └── rollback.yml               # Rollback playbook
+    │   └── backup.yml                 # Backup playbook
     └── roles/
         ├── common/                    # Base server setup (UFW, swap, users)
-        ├── docker/                    # Docker installation
-        ├── praho/                     # Docker-based deployment
         └── praho-native/              # Native deployment (systemd + Gunicorn)
             ├── defaults/main.yml      # Tunable variables
             ├── handlers/main.yml      # Service restart handlers

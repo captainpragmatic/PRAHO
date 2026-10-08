@@ -154,10 +154,23 @@ class VirtualminQAViewsTests(VirtualminQATestBase):
     def test_bulk_actions_page_renders_usable_form(self) -> None:
         response = self.client.get(reverse("provisioning:virtualmin_bulk_actions"))
         self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "provisioning/virtualmin/bulk_actions.html")
         self.assertContains(response, "Bulk Actions")
         self.assertContains(response, 'name="action"')
         self.assertContains(response, 'name="selected_accounts"')
-        self.assertContains(response, "hx-confirm=")
+        self.assertContains(response, f'value="{self.account.pk}"')
+        self.assertContains(response, 'name="confirm_bulk_action"')
+        self.assertContains(response, 'type="checkbox"')
+        self.assertContains(response, "<table")
+        self.assertContains(response, self.account.domain)
+        self.assertContains(response, self.server.name)
+        self.assertContains(response, 'method="get"')
+        self.assertContains(response, 'name="server"')
+        self.assertContains(response, 'name="status"')
+        self.assertContains(response, "Select all listed")
+        self.assertContains(response, "the reconciler applies them to Virtualmin")
+        self.assertEqual([account.pk for account in response.context["accounts"]], [self.account.pk])
+        self.assertNotContains(response, "hx-confirm=")
 
     def test_job_logs_page_renders_job_details_and_escaped_error(self) -> None:
         job = VirtualminProvisioningJob.objects.create(

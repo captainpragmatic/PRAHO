@@ -34,6 +34,7 @@
     "^TestCanBeDestroyedIncludesStopped\\.test_",
     "^TestGDPRCompliantCartSession(Mocked)?\\.test_create_empty_cart$",
     "^TestProdLoggingConfiguration\\.test_",
+    "^TestRepoDotenvPath\\.test_",
     "^TestStagingLoggingConfiguration\\.test_",
     "^TicketPaginationQueryTests\\.test_",
     "^UnknownArgumentTests\\.test_"

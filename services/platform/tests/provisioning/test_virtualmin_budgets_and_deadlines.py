@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from datetime import timedelta
 from decimal import Decimal
 from threading import Event
+from types import SimpleNamespace
 from typing import ClassVar, cast
 from unittest.mock import patch
 
@@ -47,9 +48,7 @@ from apps.provisioning.virtualmin_tasks import (
     unsuspend_virtualmin_account_async,
 )
 from apps.provisioning.virtualmin_views import (
-    _execute_bulk_activate,
     _execute_bulk_health_check,
-    _execute_bulk_suspend,
     _health_check_until_deadline,
 )
 from apps.settings.models import SystemSetting
@@ -275,13 +274,22 @@ class ProvisioningDeepReviewTests(TestCase):
                 if connection.vendor == "postgresql":
                     cursor.execute("DROP FUNCTION review_reject_completion()")
 
-    def compensated_retry(self, *, activate: bool) -> None:  # noqa: PLR0915  # Complete retry and failure trajectories
+    def compensated_retry(self, *, activate: bool) -> None:  # Complete retry and failure trajectories
         previous_status = "suspended" if activate else "active"
         target_status = "active" if activate else "suspended"
         self.account.status = previous_status
         self.account.status_message = "Previous lifecycle message"
         self.account.save(update_fields=["status", "status_message"])
-        operation = _execute_bulk_activate if activate else _execute_bulk_suspend
+        service = VirtualminProvisioningService()
+
+        def operation(accounts: list[VirtualminAccount]) -> SimpleNamespace:
+            # The reconciler applies staff suspend/activate through these service calls (ADR-0051)
+            outcomes = [
+                (service.unsuspend_account(account) if activate else service.suspend_account(account)).is_ok()
+                for account in accounts
+            ]
+            return SimpleNamespace(successful_count=sum(outcomes), failed_count=outcomes.count(False))
+
         compensation = "disable-domain" if activate else "enable-domain"
 
         def successful_compensation(method: str, url: str, **kwargs: object) -> Response:
@@ -315,7 +323,7 @@ class ProvisioningDeepReviewTests(TestCase):
         self.assertEqual(self.account.status, target_status)
         self.assertEqual(VirtualminProvisioningJob.objects.filter(account=self.account, status="completed").count(), 1)
 
-        # An unresolved compensation still blocks bulk retry.
+        # An unresolved compensation leaves the account in error.
         self.account.status = previous_status
         self.account.save(update_fields=["status"])
         cache.clear()
@@ -339,16 +347,11 @@ class ProvisioningDeepReviewTests(TestCase):
         latest = VirtualminProvisioningJob.objects.filter(account=self.account).first()
         assert latest is not None
         self.assertEqual((latest.status, latest.rollback_status), ("failed", "failed"))
-        self.sent.clear()
-        with patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=self.http):
-            blocked = operation([self.account])
-        self.assertEqual(blocked.failed_count, 1)
-        self.assertEqual(self.sent, [])
 
-    def test_compensated_suspend_can_be_retried_in_bulk(self) -> None:
+    def test_compensated_suspend_can_be_retried(self) -> None:
         self.compensated_retry(activate=False)
 
-    def test_compensated_activate_can_be_retried_in_bulk(self) -> None:
+    def test_compensated_activate_can_be_retried(self) -> None:
         self.compensated_retry(activate=True)
 
 

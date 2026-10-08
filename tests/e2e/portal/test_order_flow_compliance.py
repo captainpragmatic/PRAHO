@@ -15,7 +15,7 @@ All tests are independent and perform a fresh customer login. No database access
 import re
 
 import pytest
-from playwright.sync_api import Page
+from playwright.sync_api import Page, expect
 
 from tests.e2e.helpers import (
     BASE_URL,
@@ -86,19 +86,13 @@ def test_vat_rate_displayed_correctly(page: Page) -> None:
         print(f"  SKIP: Redirected from cart to {page.url}")
         pytest.fail("Required E2E step unavailable: '/order/cart/' not in page.url")
 
-    # Wait for HTMX cart totals to load (they load asynchronously via hx-post)
-    page.wait_for_timeout(2000)
-
-    # The cart_totals.html template explicitly shows "VAT (21%)"
-    vat_label = page.locator('text="VAT (21%)"')
-    if vat_label.count() == 0:
-        # Accept alternate Romanian text or percentage-only formats
-        vat_label = page.locator("text=/TVA.*21|21.*TVA|TVA.*21%|VAT.*21%/")
-
-    assert vat_label.count() > 0 or page.locator("text=/21%/").count() > 0, (
+    # The totals load with their own request (hx-trigger="load"); wait for the rendered rate.
+    # cart_totals.html shows "VAT (21%)"; any "21%" form in the Order Summary satisfies the rule.
+    expect(
+        page.locator("#cart-totals"),
         "COMPLIANCE FAIL: VAT rate '21%' not displayed in cart summary. "
-        "Romanian legislation requires VAT rate to be clearly shown on all order summaries."
-    )
+        "Romanian legislation requires VAT rate to be clearly shown on all order summaries.",
+    ).to_contain_text(re.compile(r"21\s?%"))
 
     print("  VAT (21%) correctly displayed — compliance test passes")
 

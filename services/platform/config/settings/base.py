@@ -244,6 +244,10 @@ CACHES = {
 # Deploy: migrate, drain old workers, then run reconcile_session_index before trusting revocation.
 SESSION_ENGINE = "apps.users.session_backend"
 
+# Joins the credential version into the per-request session-user lookup (#553). Sessions
+# store this dotted path, so changing it signs every existing session out once.
+AUTHENTICATION_BACKENDS = ["apps.users.backends.CredentialVersionModelBackend"]
+
 SESSION_COOKIE_AGE = 86400  # 24 hours
 SESSION_COOKIE_HTTPONLY = True
 SESSION_SAVE_EVERY_REQUEST = True

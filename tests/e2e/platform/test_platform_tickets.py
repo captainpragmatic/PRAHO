@@ -21,16 +21,11 @@ from tests.e2e.helpers import (
     run_responsive_breakpoints_test,
 )
 from tests.e2e.helpers.filter_tabs import assert_selection_state, visible_tablist
+from tests.e2e.helpers.htmx import wait_for_htmx_settle
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _wait_for_htmx(page: Page, timeout: int = 8000) -> None:
-    """Wait for HTMX swap to complete after a form submission."""
-    page.wait_for_load_state("networkidle", timeout=timeout)
-    page.wait_for_timeout(300)
 
 
 def _get_status_text(page: Page) -> str:
@@ -47,7 +42,7 @@ def _get_status_text(page: Page) -> str:
         "Închis",
     ):
         badge = status_area.get_by_text(status, exact=True).first
-        if badge.is_visible(timeout=500):
+        if badge.is_visible():
             return status
     raw = status_area.locator("div:has(> p:has-text('Status'))").first.inner_text()
     return raw
@@ -78,7 +73,8 @@ def _submit_reply(
         page.select_option("select[name='resolution_code']", resolution)
 
     page.locator("#reply-form button[type='submit']").click()
-    _wait_for_htmx(page)
+    # The status and comment checks after a reply read the page once, so the swap must have landed.
+    wait_for_htmx_settle(page)
 
 
 def _create_ticket(page: Page, subject: str, customer_id: int, priority: str = "high") -> str:
@@ -120,9 +116,9 @@ def _verify_badge_in_list(page: Page, ticket_url: str, expected_text: str) -> No
     # Desktop table row: #284 migrated the row from onclick="...tickets/ID/..." to the
     # delegated data-action="navigate" dispatcher, so match data-href, not onclick.
     row = page.locator(f"tr[data-action='navigate'][data-href*='/tickets/{ticket_id}/']").first
-    if row.is_visible(timeout=2000):
+    if row.is_visible():
         badge = row.get_by_text(expected_text, exact=True).first
-        assert badge.is_visible(timeout=2000), f"Expected '{expected_text}' badge in list row for ticket {ticket_id}"
+        expect(badge, f"Expected '{expected_text}' badge in list row for ticket {ticket_id}").to_be_visible()
     else:
         # Mobile card fallback — also a delegated data-action element now, not an <a>.
         card = page.locator(f"[data-action='navigate'][data-href*='/tickets/{ticket_id}/']").first
@@ -141,10 +137,10 @@ def _verify_detail_after_create(page: Page, ticket_url: str) -> None:
 
     # Priority badge
     priority_badge = page.locator("#ticket-status-and-comments").get_by_text("High", exact=True).first
-    if not priority_badge.is_visible(timeout=1000):
+    if not priority_badge.is_visible():
         # Try Romanian
         priority_badge = page.locator("#ticket-status-and-comments").get_by_text("Ridicat", exact=False).first
-    assert priority_badge.is_visible(timeout=1000), "Priority badge 'High' should be visible"
+    expect(priority_badge, "Priority badge 'High' should be visible").to_be_visible()
 
     # Customer link
     customer_link = page.locator("#ticket-status-and-comments a[href*='/customers/']").first
@@ -169,7 +165,7 @@ def _reply_transitions(page: Page) -> None:
 
     # Support role badge on the reply
     support_badge = comments.locator("span.bg-blue-100").first
-    assert support_badge.is_visible(timeout=2000), "Support comment should have blue badge"
+    expect(support_badge, "Support comment should have blue badge").to_be_visible()
 
     # Reply & wait -> Waiting on Customer
     _submit_reply(page, "Please provide your server access credentials.", "reply_and_wait")
@@ -200,10 +196,6 @@ def _close_and_verify(page: Page, ticket_url: str) -> None:
     )
     _assert_status(page, "Closed", "Închis", msg="Should be Closed after resolution")
 
-    # Resolution badge
-    resolution_badge = page.locator("#ticket-status-and-comments").get_by_text("Fixed", exact=False).first
-    if not resolution_badge.is_visible(timeout=1000):
-        resolution_badge = page.locator("#ticket-status-and-comments").get_by_text("Rezolvat", exact=False).first
     # Resolution may appear as text rather than badge — check loosely
     status_area_text = page.locator("#ticket-status-and-comments").inner_text()
     assert any(t in status_area_text.lower() for t in ("fixed", "rezolvat", "closed", "închis")), (
@@ -329,8 +321,8 @@ def test_ticket_mobile_responsiveness(monitored_staff_page: Page) -> None:
         heading = pg.locator('h1:has-text("Support Tickets"), h1:has-text("Tichete de suport")').first
         new_btn = pg.locator('a:has-text("New Ticket"), a:has-text("Tichet nou"), a[href*="/tickets/create/"]').first
         return {
-            "heading_visible": heading.is_visible(timeout=3000),
-            "new_ticket_visible": new_btn.is_visible(timeout=2000),
+            "heading_visible": heading.is_visible(),
+            "new_ticket_visible": new_btn.is_visible(),
         }
 
     results = run_responsive_breakpoints_test(monitored_staff_page, _check_tickets_page)

@@ -10,10 +10,17 @@
 #   - with-caddy: Platform + Caddy reverse proxy
 #   - full: Platform + PostgreSQL + Caddy
 #
-# Usage:
-#   docker-compose -f docker-compose.platform-only.yml up -d              # Platform only
-#   docker-compose -f docker-compose.platform-only.yml --profile with-db up -d  # With DB
-#   docker-compose -f docker-compose.platform-only.yml --profile full up -d     # Full stack
+# deploy.sh platform-only [--with-db] [--with-caddy] [--full] selects the profiles and, for the
+# bundled database, DB_HOST=db and DB_SSLMODE=disable. Directly, add --profile NAME before `up`
+# (and those two variables for the bundled database):
+#   PRAHO_ENV_FILE=$PWD/.env.prod docker compose --env-file .env.prod -f deploy/docker-compose.platform-only.yml --profile with-db up -d
+#
+# Required (deploy.sh sets PRAHO_ENV_FILE; the rest belong in the env file):
+#   - PRAHO_ENV_FILE: the env file's own path
+#   - DB_PASSWORD, DJANGO_SECRET_KEY
+#   - PLATFORM_API_SECRET (same value as HMAC_SECRET), PLATFORM_TO_PORTAL_WEBHOOK_SECRET
+#   - DJANGO_ENCRYPTION_KEY, CREDENTIAL_VAULT_MASTER_KEY (production settings; deploy.sh checks them)
+#   - DB_HOST without the with-db/full profiles
 
 services:
   # ===========================================================================
@@ -58,8 +65,14 @@ services:
       context: ..
       dockerfile: deploy/platform/Dockerfile
     container_name: praho_platform
+    # Loopback only: Caddy (--with-caddy/--full) reaches the platform over the Docker network, and a
+    # proxy on this host can use 127.0.0.1. Publishing it wider would bypass Caddy's TLS and the
+    # PLATFORM_ALLOWED_CIDRS staff allowlist; set PLATFORM_BIND only for an external load balancer.
     ports:
-      - "${PLATFORM_PORT:-8700}:8700"
+      - "${PLATFORM_BIND:-127.0.0.1}:${PLATFORM_PORT:-8700}:8700"
+    env_file:
+      # The operator's whole env file (deploy.sh exports its path); `environment:` below still wins.
+      - "${PRAHO_ENV_FILE:?run deploy/scripts/deploy.sh, or set PRAHO_ENV_FILE to the file passed with --env-file}"
     environment:
       - DEBUG=0
       - DB_HOST=${DB_HOST:-db}
@@ -67,13 +80,22 @@ services:
       - DB_NAME=${DB_NAME:-praho}
       - DB_USER=${DB_USER:-praho}
       - DB_PASSWORD=${DB_PASSWORD:?DB_PASSWORD required}
+      # Production defaults to sslmode=require, right for an external database. The bundled database
+      # (with-db/full profiles) has no TLS: set DB_SSLMODE=disable, which deploy.sh does for those profiles.
+      - DB_SSLMODE=${DB_SSLMODE:-require}
       - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY required}
-      - DJANGO_SETTINGS_MODULE=config.settings.prod
+      - DJANGO_SETTINGS_MODULE=${DJANGO_SETTINGS_MODULE:-config.settings.prod}
+      - STATIC_ROOT=/app/staticfiles
       - HMAC_SECRET=${PLATFORM_API_SECRET:?PLATFORM_API_SECRET required}
       # Per-portal HMAC registry (#277). Unset => legacy shared-secret behavior (safe default).
       - PORTAL_HMAC_MODE=${PORTAL_HMAC_MODE:-legacy}
       - PORTAL_HMAC_CREDENTIALS=${PORTAL_HMAC_CREDENTIALS:-}
       - PLATFORM_TO_PORTAL_WEBHOOK_SECRET=${PLATFORM_TO_PORTAL_WEBHOOK_SECRET:?PLATFORM_TO_PORTAL_WEBHOOK_SECRET required}
+      # Production settings refuse to start without these two and name the missing one; staging doesn't
+      # need them, so Compose doesn't require them. The portal never gets them.
+      - DJANGO_ENCRYPTION_KEY=${DJANGO_ENCRYPTION_KEY:-}
+      - DJANGO_ENCRYPTION_KEY_PREVIOUS=${DJANGO_ENCRYPTION_KEY_PREVIOUS:-}
+      - CREDENTIAL_VAULT_MASTER_KEY=${CREDENTIAL_VAULT_MASTER_KEY:-}
       - PLATFORM_DOMAIN=${PLATFORM_DOMAIN:-${DOMAIN:-platform.localhost}}
       - PORTAL_DOMAIN=${PORTAL_DOMAIN:-${DOMAIN:-localhost}}
       - ALLOWED_HOSTS=${PLATFORM_DOMAIN:-${DOMAIN:-platform.localhost}},localhost,platform
@@ -90,7 +112,9 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      # A first boot runs every migration before Gunicorn listens (124 s measured on a fast machine);
+      # failures during the start period don't count, and a passing check ends it early.
+      start_period: 600s
     deploy:
       resources:
         limits:
@@ -118,6 +142,8 @@ services:
       # Space-separated CIDRs, never commas. Applies only to the Platform staff site.
       - PLATFORM_ALLOWED_CIDRS=${PLATFORM_ALLOWED_CIDRS:-127.0.0.1/32 ::1/128}
       - ACME_EMAIL=${ACME_EMAIL:-admin@example.com}
+      # Set but empty would make Caddy send an empty header (HSTS off), so the default is repeated here.
+      - HSTS_POLICY=${HSTS_POLICY:-max-age=31536000; includeSubDomains}
     volumes:
       - ./caddy/Caddyfile.platform:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

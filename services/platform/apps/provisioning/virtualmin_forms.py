@@ -4,6 +4,7 @@ Django forms for Virtualmin server and account management with Romanian complian
 """
 
 from typing import Any, ClassVar, cast
+from urllib.parse import urlencode
 
 from django import forms
 from django.core.exceptions import ValidationError
@@ -364,7 +365,13 @@ class VirtualminBulkActionForm(forms.Form):
         choices=ACTION_CHOICES, widget=PRAHOSelectWidget(), help_text=_("Select action to perform on selected accounts")
     )
 
-    selected_accounts = forms.CharField(widget=forms.HiddenInput(), help_text=_("Comma-separated list of account IDs"))
+    # Validated against the page's filtered list, passed in as ``accounts``: Django rejects an
+    # unknown or malformed id, and an id outside the filter the page was rendered with.
+    selected_accounts = forms.ModelMultipleChoiceField(
+        queryset=VirtualminAccount.objects.none(),
+        widget=forms.CheckboxSelectMultiple,
+        error_messages={"required": _("No accounts selected for bulk action")},
+    )
 
     confirm_bulk_action = forms.BooleanField(
         required=True,
@@ -382,23 +389,18 @@ class VirtualminBulkActionForm(forms.Form):
         help_text=_("Backup type for bulk backup operation"),
     )
 
-    def clean_selected_accounts(self) -> list[str]:
-        """Parse and validate selected account IDs."""
-        accounts_str = self.cleaned_data.get("selected_accounts", "")
-
-        if not accounts_str.strip():
-            raise ValidationError(_("No accounts selected for bulk action"))
-
-        try:
-            account_ids = [aid.strip() for aid in accounts_str.split(",") if aid.strip()]
-
-            if not account_ids:
-                raise ValidationError(_("No valid account IDs provided"))
-
-            return account_ids
-
-        except Exception as e:
-            raise ValidationError(_("Invalid account ID format")) from e
+    def __init__(
+        self,
+        *args: Any,
+        accounts: models.QuerySet[VirtualminAccount] | None = None,
+        max_health_checks: int | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        if accounts is not None:
+            field = cast("forms.ModelMultipleChoiceField[VirtualminAccount]", self.fields["selected_accounts"])
+            field.queryset = accounts
+        self.max_health_checks = max_health_checks
 
     def clean(self) -> dict[str, Any]:
         """Validate form based on selected action."""
@@ -410,7 +412,59 @@ class VirtualminBulkActionForm(forms.Form):
         if action == "backup" and not cleaned_data.get("backup_type"):
             raise ValidationError(_("Backup type is required for backup action"))
 
+        # Health checks run synchronously in one parallel wave. More than one wave would
+        # queue work behind the running checks, and leaving the pool waits for all of it.
+        selected = cleaned_data.get("selected_accounts")
+        if (
+            action == "health_check"
+            and self.max_health_checks is not None
+            and selected is not None
+            and len(selected) > self.max_health_checks
+        ):
+            self.add_error(
+                "selected_accounts",
+                _("Health checks run on at most {limit} accounts at a time.").format(limit=self.max_health_checks),
+            )
+
         return cleaned_data
+
+
+class VirtualminBulkFilterForm(forms.Form):
+    """Which accounts the bulk-actions page lists, and so which it accepts on POST.
+
+    The same ``server`` and ``status`` parameters as the accounts list. A malformed value
+    is invalid rather than a database error, so the page can answer 400.
+    """
+
+    server = forms.ModelChoiceField(
+        queryset=VirtualminServer.objects.order_by("name"),
+        required=False,
+        empty_label=_("All servers"),
+        widget=PRAHOSelectWidget(),
+    )
+    status = forms.ChoiceField(
+        choices=[("", _("All statuses")), *VirtualminAccount.STATUS_CHOICES],
+        required=False,
+        widget=PRAHOSelectWidget(),
+    )
+
+    def accounts(self) -> models.QuerySet[VirtualminAccount]:
+        """The listed accounts. Call only after ``is_valid()``."""
+        accounts = VirtualminAccount.objects.select_related("server", "service").order_by("domain")
+        if self.cleaned_data.get("server") is not None:
+            accounts = accounts.filter(server=self.cleaned_data["server"])
+        if self.cleaned_data.get("status"):
+            accounts = accounts.filter(status=self.cleaned_data["status"])
+        return accounts
+
+    def query_string(self) -> str:
+        """The validated filters as a query string, so a POST keeps the rendered filter."""
+        params = {}
+        if self.cleaned_data.get("server") is not None:
+            params["server"] = str(self.cleaned_data["server"].pk)
+        if self.cleaned_data.get("status"):
+            params["status"] = self.cleaned_data["status"]
+        return urlencode(params)
 
 
 class VirtualminAccountForm(forms.ModelForm):  # type: ignore[type-arg]

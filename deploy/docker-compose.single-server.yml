@@ -2,14 +2,17 @@
 # PRAHO - SINGLE SERVER DEPLOYMENT (All Services)
 # =============================================================================
 # Deploy Platform + Portal + PostgreSQL + Caddy on a single server
-# Usage: docker-compose -f deploy/docker-compose.single-server.yml up -d
+# Run through deploy/scripts/deploy.sh, which passes the env file (.env.prod, or .env.staging with
+# --env staging) to every Compose call. Directly:
+#   PRAHO_ENV_FILE=$PWD/.env.prod docker compose --env-file .env.prod -f deploy/docker-compose.single-server.yml up -d
 #
-# Required environment variables in .env:
-#   - PORTAL_DOMAIN and PLATFORM_DOMAIN (distinct hostnames)
+# Required (deploy.sh sets PRAHO_ENV_FILE; the rest belong in the env file):
+#   - PRAHO_ENV_FILE: the env file's own path
+#   - DB_PASSWORD, DJANGO_SECRET_KEY
+#   - PLATFORM_API_SECRET (same value as HMAC_SECRET), PLATFORM_TO_PORTAL_WEBHOOK_SECRET
+#   - DJANGO_ENCRYPTION_KEY, CREDENTIAL_VAULT_MASTER_KEY (production settings; deploy.sh checks them)
+#   - PORTAL_DOMAIN and PLATFORM_DOMAIN (distinct hostnames), ACME_EMAIL (for Let's Encrypt)
 #   - PLATFORM_ALLOWED_CIDRS (space-separated staff/VPN CIDRs; default: loopback only)
-#   - DB_PASSWORD
-#   - DJANGO_SECRET_KEY
-#   - ACME_EMAIL (for Let's Encrypt)
 
 services:
   # ===========================================================================
@@ -51,6 +54,9 @@ services:
       context: ..
       dockerfile: deploy/platform/Dockerfile
     container_name: praho_platform
+    env_file:
+      # The operator's whole env file (deploy.sh exports its path); `environment:` below still wins.
+      - "${PRAHO_ENV_FILE:?run deploy/scripts/deploy.sh, or set PRAHO_ENV_FILE to the file passed with --env-file}"
     environment:
       - DEBUG=0
       - DB_HOST=db
@@ -58,13 +64,22 @@ services:
       - DB_NAME=praho
       - DB_USER=praho
       - DB_PASSWORD=${DB_PASSWORD:?DB_PASSWORD required}
+      # Fixed, like DB_HOST: this stack's own Postgres has no TLS and is reachable only on `internal`.
+      # The env file's DB_SSLMODE describes a native or external database.
+      - DB_SSLMODE=disable
       - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY required}
       - HMAC_SECRET=${PLATFORM_API_SECRET:?PLATFORM_API_SECRET required}
       # Per-portal HMAC registry (#277). Unset => legacy shared-secret behavior (safe default).
       - PORTAL_HMAC_MODE=${PORTAL_HMAC_MODE:-legacy}
       - PORTAL_HMAC_CREDENTIALS=${PORTAL_HMAC_CREDENTIALS:-}
       - PLATFORM_TO_PORTAL_WEBHOOK_SECRET=${PLATFORM_TO_PORTAL_WEBHOOK_SECRET:?PLATFORM_TO_PORTAL_WEBHOOK_SECRET required}
-      - DJANGO_SETTINGS_MODULE=config.settings.prod
+      # Production settings refuse to start without these two and name the missing one; staging doesn't
+      # need them, so Compose doesn't require them. The portal never gets them.
+      - DJANGO_ENCRYPTION_KEY=${DJANGO_ENCRYPTION_KEY:-}
+      - DJANGO_ENCRYPTION_KEY_PREVIOUS=${DJANGO_ENCRYPTION_KEY_PREVIOUS:-}
+      - CREDENTIAL_VAULT_MASTER_KEY=${CREDENTIAL_VAULT_MASTER_KEY:-}
+      - DJANGO_SETTINGS_MODULE=${DJANGO_SETTINGS_MODULE:-config.settings.prod}
+      - STATIC_ROOT=/app/staticfiles
       - PLATFORM_DOMAIN=${PLATFORM_DOMAIN:-platform.localhost}
       - PORTAL_DOMAIN=${PORTAL_DOMAIN:-${DOMAIN:-localhost}}
       - ALLOWED_HOSTS=${PLATFORM_DOMAIN:-platform.localhost},localhost,platform
@@ -84,7 +99,9 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      # A first boot runs every migration before Gunicorn listens (124 s measured on a fast machine);
+      # failures during the start period don't count, and a passing check ends it early.
+      start_period: 600s
     deploy:
       resources:
         limits:
@@ -112,14 +129,16 @@ services:
       - PLATFORM_API_SECRET=${PLATFORM_API_SECRET:?PLATFORM_API_SECRET required}
       # Per-portal signing secret (#277). Unset/empty => sign with PLATFORM_API_SECRET.
       - PORTAL_HMAC_SECRET=${PORTAL_HMAC_SECRET:-}
-      # Set to this project's proxy network subnet, e.g. 172.16.0.0/12; narrow to the actual subnet.
-      - PORTAL_TRUSTED_PROXY_CIDRS=${PORTAL_TRUSTED_PROXY_CIDRS:-}
+      # Production refuses to start without it. This stack's Caddy reaches the portal over `web`, so
+      # trust that subnet; the env file's PORTAL_TRUSTED_PROXY_CIDRS describes a native Caddy.
+      - PORTAL_TRUSTED_PROXY_CIDRS=${PRAHO_WEB_SUBNET:-10.200.250.0/24}
       - PLATFORM_API_ALLOW_INSECURE_HTTP=${PLATFORM_API_ALLOW_INSECURE_HTTP:-true}
       - PLATFORM_TO_PORTAL_WEBHOOK_SECRET=${PLATFORM_TO_PORTAL_WEBHOOK_SECRET:?PLATFORM_TO_PORTAL_WEBHOOK_SECRET required}
       - PLATFORM_DOMAIN=${PLATFORM_DOMAIN:-platform.localhost}
       - PORTAL_DOMAIN=${PORTAL_DOMAIN:-${DOMAIN:-localhost}}
-      - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY required}
-      - DJANGO_SETTINGS_MODULE=config.settings.prod
+      # PORTAL_DJANGO_SECRET_KEY gives the portal its own key; without it, it shares the platform's.
+      - DJANGO_SECRET_KEY=${PORTAL_DJANGO_SECRET_KEY:-${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY required}}
+      - DJANGO_SETTINGS_MODULE=${DJANGO_SETTINGS_MODULE:-config.settings.prod}
       - ALLOWED_HOSTS=${PORTAL_DOMAIN:-${DOMAIN:-localhost}},localhost,portal
       - CSRF_TRUSTED_ORIGINS=https://${PORTAL_DOMAIN:-${DOMAIN:-localhost}}
       - DJANGO_SECURE_SSL_REDIRECT=false
@@ -166,6 +185,8 @@ services:
       # Space-separated CIDRs, never commas. Applies only to the Platform staff site.
       - PLATFORM_ALLOWED_CIDRS=${PLATFORM_ALLOWED_CIDRS:-127.0.0.1/32 ::1/128}
       - ACME_EMAIL=${ACME_EMAIL:-admin@example.com}
+      # Set but empty would make Caddy send an empty header (HSTS off), so the default is repeated here.
+      - HSTS_POLICY=${HSTS_POLICY:-max-age=31536000; includeSubDomains}
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
@@ -185,6 +206,11 @@ networks:
     driver: bridge
   web:
     driver: bridge
+    # A known subnet, so the portal can trust its proxy (Caddy) by default. Override PRAHO_WEB_SUBNET
+    # if it collides with a network on the host.
+    ipam:
+      config:
+        - subnet: ${PRAHO_WEB_SUBNET:-10.200.250.0/24}
 
 volumes:
   postgres_data:

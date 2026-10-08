@@ -1,7 +1,8 @@
 # ===============================================================================
 # PRAHO SERVICES - DEVELOPMENT DOCKER COMPOSE 🛠️
 # ===============================================================================
-# Development environment with hot reload and debug settings (no Redis)
+# Development environment with hot reload and debug settings (no Redis). `make docker-dev` runs it.
+# The images are the Dockerfiles' `dev` targets: dependencies only, with the source mounted over /app.
 
 services:
   # ===============================================================================
@@ -19,7 +20,8 @@ services:
       - postgres_dev_data:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U praho"]
+      # -d: without it pg_isready probes a database named after the user, which does not exist here
+      test: ["CMD-SHELL", "pg_isready -U praho -d praho_dev"]
       interval: 15s
       timeout: 3s
       retries: 3
@@ -31,17 +33,20 @@ services:
     build:
       context: ..
       dockerfile: deploy/platform/Dockerfile
-    working_dir: /app/services/platform
+      target: dev
     ports:
       - "8700:8700"
     volumes:
-      # Hot reload - mount source code without hiding the venv or entrypoint
+      # Hot reload - the repository layout the settings expect: REPO_ROOT is /app (ADR-0035)
       - ../services/platform:/app/services/platform:delegated
-      - ../shared:/app/shared:delegated
+      - ../shared:/app/shared:ro
       - dev_static_volume:/app/services/platform/staticfiles
       - dev_media_volume:/app/services/platform/media
     environment:
-      - DEBUG=1
+      # `true`, not 1: the settings read DEBUG as .lower() == "true"
+      - DEBUG=true
+      # config.settings.dev uses SQLite unless told otherwise
+      - USE_POSTGRES=true
       - DB_HOST=db
       - DB_PORT=5432
       - DB_NAME=praho_dev
@@ -57,7 +62,10 @@ services:
       db:
         condition: service_healthy
     restart: unless-stopped
-    command: ["python", "/app/services/platform/manage.py", "runserver", "0.0.0.0:8700"]
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+             python manage.py setup_initial_data &&
+             python manage.py runserver 0.0.0.0:8700"
 
   # ===============================================================================
   # PORTAL SERVICE - DEVELOPMENT HOT RELOAD 🌐
@@ -66,16 +74,20 @@ services:
     build:
       context: ..
       dockerfile: deploy/portal/Dockerfile
-    working_dir: /app/services/portal
+      target: dev
     ports:
       - "8701:8701"
     volumes:
-      # Hot reload - mount source code without hiding the venv or entrypoint
+      # Hot reload - the repository layout the settings expect: REPO_ROOT is /app (ADR-0035)
       - ../services/portal:/app/services/portal:delegated
-      - ../shared:/app/shared:delegated
+      - ../shared:/app/shared:ro
       - dev_portal_static_volume:/app/services/portal/staticfiles
+      # Session store, kept out of the mounted checkout
+      - dev_portal_data:/data
     environment:
-      - DEBUG=1
+      # `true`, not 1: the settings read DEBUG as .lower() == "true"
+      - DEBUG=true
+      - SESSION_DB_PATH=/data/portal.sqlite3
       - PLATFORM_API_BASE_URL=http://platform:8700/api
       - PLATFORM_API_SECRET=dev-shared-secret-change-in-production
       # Debug-toolbar allowlist for non-loopback dev clients (empty = localhost only)
@@ -88,11 +100,12 @@ services:
       - DJANGO_SECRET_KEY=dev-secret-key-for-development-only
       - DJANGO_SETTINGS_MODULE=config.settings.dev
       - SERVICE_NAME=portal
-      - SESSION_DB_PATH=/app/services/portal/portal.sqlite3
     depends_on:
       - platform
     restart: unless-stopped
-    command: ["python", "/app/services/portal/manage.py", "runserver", "0.0.0.0:8701"]
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+             python manage.py runserver 0.0.0.0:8701"
 
 # ===============================================================================
 # DEVELOPMENT VOLUMES 💾
@@ -106,3 +119,5 @@ volumes:
     name: praho_dev_media_volume
   dev_portal_static_volume:
     name: praho_dev_portal_static_volume
+  dev_portal_data:
+    name: praho_dev_portal_data

@@ -4,11 +4,12 @@
 # Tests Docker containerized services work correctly together
 # Validates network isolation, health checks, and service communication
 
-import pytest
-import requests
 import subprocess
-import time
+from pathlib import Path
 from unittest.mock import patch
+
+import pytest
+import yaml
 
 
 class TestDockerServicesIntegration:
@@ -78,76 +79,38 @@ class TestDockerServicesIntegration:
             assert result.returncode == 1
 
     @pytest.mark.integration
-    def test_docker_compose_services_configuration(self):
+    @pytest.mark.parametrize("name", ["single-server", "platform-only", "portal-only", "container-service"])
+    def test_docker_compose_services_configuration(self, name):
         """
-        Test that Docker Compose configuration is correct (no Redis).
+        Test that each production Compose file keeps Redis out and the portal off the database.
         """
-        import yaml
-        import os
+        compose_path = Path(__file__).resolve().parents[2] / "deploy" / f"docker-compose.{name}.yml"
+        text = compose_path.read_text()
+        compose_config = yaml.safe_load(text)
+        services = compose_config["services"]
 
-        # Read docker-compose configuration using relative path from project root
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        compose_path = os.path.join(project_root, 'deploy', 'docker-compose.services.yml')
-
-        with open(compose_path, 'r') as f:
-            compose_config = yaml.safe_load(f)
-
-        services = compose_config['services']
-
-        # Verify Redis is NOT in services
-        assert 'redis' not in services, "Redis should be removed from services"
-
-        # Verify platform service configuration
-        platform = services['platform']
-        platform_env = platform['environment']
-
-        # Platform should NOT have Redis URL
-        redis_env_vars = [env for env in platform_env if 'REDIS_URL' in str(env)]
-        assert len(redis_env_vars) == 0, "Platform should not have REDIS_URL environment variable"
-
-        # Verify database connection is configured (individual DB_* vars, not DATABASE_URL)
-        assert 'DB_HOST' in str(platform_env), "Platform should have DB_HOST"
-        assert 'DB_NAME' in str(platform_env), "Platform should have DB_NAME"
-
-        # Verify portal service configuration
-        portal = services['portal']
-        portal_env = portal['environment']
-
-        # Portal should NOT have database URL (API-only)
-        db_env_vars = [env for env in portal_env if 'DATABASE_URL' in str(env)]
-        assert len(db_env_vars) == 0, "Portal should not have DATABASE_URL"
-
-        # Verify networks configuration
-        networks = compose_config['networks']
-        assert 'platform-network' in networks, "Platform network should exist"
-        assert 'api-network' in networks, "API network should exist"
-
-        # Verify volumes configuration (no Redis volumes)
-        volumes = compose_config['volumes']
-        redis_volumes = [vol for vol in volumes if 'redis' in vol.lower()]
+        # No Redis anywhere: the platform uses Django's database cache (ADR-0020)
+        assert "redis" not in services, "Redis should not be a service"
+        assert "REDIS_URL" not in text, "No service should get a REDIS_URL"
+        redis_volumes = [vol for vol in (compose_config.get("volumes") or {}) if "redis" in vol.lower()]
         assert len(redis_volumes) == 0, "No Redis volumes should exist"
 
-    @pytest.mark.integration
-    def test_nginx_reverse_proxy_routing(self):
-        """
-        Test that nginx correctly routes traffic between platform and portal.
-        """
-        # Mock nginx configuration test
-        nginx_config = """
-        location /admin/ {
-            proxy_pass http://platform:8700;
-        }
+        # Platform connects with individual DB_* vars, not DATABASE_URL
+        if "platform" in services:
+            platform_env = str(services["platform"]["environment"])
+            assert "DB_HOST" in platform_env, "Platform should have DB_HOST"
+            assert "DB_NAME" in platform_env, "Platform should have DB_NAME"
 
-        location /portal/ {
-            proxy_pass http://portal:8701;
-        }
-        """
-
-        # Verify nginx routing configuration
-        assert 'proxy_pass http://platform:8700' in nginx_config
-        assert 'proxy_pass http://portal:8701' in nginx_config
-        assert '/admin/' in nginx_config  # Admin goes to platform
-        assert '/portal/' in nginx_config  # Portal routes to portal service
+        # Portal has no business database: no connection settings, and no network shared with the db
+        if "portal" in services:
+            portal_env = str(services["portal"].get("environment", []))
+            for var in ("DATABASE_URL", "DB_HOST", "DB_NAME", "DB_PASSWORD"):
+                assert var not in portal_env, f"Portal should not have {var}"
+            if "db" in services:
+                db_networks = set(services["db"].get("networks") or [])
+                portal_networks = set(services["portal"].get("networks") or [])
+                assert db_networks, "The db should sit on an explicit network"
+                assert not db_networks & portal_networks, "The portal must share no network with the database"
 
     @pytest.mark.integration
     @pytest.mark.slow

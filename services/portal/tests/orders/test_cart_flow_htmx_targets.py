@@ -223,7 +223,9 @@ class TestCartFlowFixes(TestCase):
         guarded_dispatch = (
             'case "cart-updated": {\n'
             "        if (event.detail.successful) {\n"
-            '          document.body.dispatchEvent(new CustomEvent("cartUpdated"));'
+            "          // Bubbles, so listeners above body hear it too: the cart review page refreshes its\n"
+            "          // totals from a document listener, which a body-only event never reached.\n"
+            '          document.body.dispatchEvent(new CustomEvent("cartUpdated", { bubbles: true }));'
         )
         self.assertEqual(csp_actions.count(guarded_dispatch), 1)
 

@@ -13,7 +13,7 @@ providing a historical record of why the system is built the way it is.
 ## How to Create a New ADR
 
 1. Create a new file: `ADR-XXXX-short-descriptive-title.md`
-2. Use the next available number (currently: **ADR-0053**)
+2. Use the next available number, listed under **Next available** in the Statistics section below
 3. Follow the standard format: Status, Date, Authors, Context, Decision, Consequences
 4. Set status to **Proposed** initially, then update to **Accepted** after team review
 
@@ -61,6 +61,7 @@ providing a historical record of why the system is built the way it is.
 | [ADR-0029](ADR-0029-config-drift-detection.md) | Config Drift Detection & Remediation | Proposed | 2026-03-03 |
 | [ADR-0030](ADR-0030-rate-limiting-architecture.md) | Rate Limiting Architecture and Single Source of Truth | Accepted | 2026-03-05 |
 | [ADR-0031](ADR-0031-api-token-authentication-strategy.md) | API Token Authentication Strategy | Accepted | 2026-03-06 |
+| [ADR-0032](ADR-0032-dual-hmac-inter-service-authentication.md) | Dual HMAC Inter-Service Authentication | Accepted | 2026-03-06 |
 | [ADR-0033](ADR-0033-encryption-architecture-consolidation.md) | Encryption Architecture Consolidation (4→2 Systems) | Accepted | 2026-03-06 |
 | [ADR-0034](ADR-0034-django-fsm2-state-machines.md) | Adopt django-fsm-2 for State Machines | Active | 2026-03-10 |
 | [ADR-0035](ADR-0035-unified-design-system.md) | Unified Design System Architecture | Active | 2026-03-17 |
@@ -79,9 +80,10 @@ providing a historical record of why the system is built the way it is.
 | [ADR-0048](ADR-0048-external-invoice-issuer.md) | External Invoice Issuer (SmartBill) | Accepted | 2026-09-22 |
 | [ADR-0049](ADR-0049-reverse-charge-requires-vies-evidence.md) | Reverse Charge Requires VIES Evidence | Accepted | 2026-09-27 |
 | [ADR-0050](ADR-0050-portal-infrastructure-tables.md) | Portal Infrastructure Tables | Accepted | 2026-09-28 |
-| [ADR-0051](ADR-0051-hosting-account-enabled-state-ownership.md) | Hosting Account Enabled-State Ownership | Proposed | 2026-10-01 |
+| [ADR-0051](ADR-0051-hosting-account-enabled-state-ownership.md) | Hosting Account Enabled-State Ownership | Accepted | 2026-10-01 |
 | [ADR-0052](ADR-0052-disposable-databases-and-migration-reset.md) | All Databases Are Disposable Until the First One That Must Be Preserved | Accepted | 2026-10-02 |
 | [ADR-0053](ADR-0053-every-settled-refund-issues-a-storno.md) | Every Settled Refund Issues a Storno Credit Note | Accepted | 2026-10-03 |
+| [ADR-0054](ADR-0054-supported-deployment-paths.md) | Two Supported Deployment Paths, Native Ansible and Docker Compose | Accepted | 2026-10-07 |
 
 ### 🟡 Partially Superseded
 
@@ -185,6 +187,9 @@ Billing Ownership
 - [ADR-0037](ADR-0037-psycopg-v3-migration.md) — psycopg v3 PostgreSQL adapter
 - [ADR-0052](ADR-0052-disposable-databases-and-migration-reset.md) — Disposable databases, migration reset, append-only history afterwards
 
+### 🚀 Deployment
+- [ADR-0054](ADR-0054-supported-deployment-paths.md) — native Ansible for servers, Docker Compose for Docker hosts, one operator env file; the Ansible Docker role is retired
+
 ### 💰 Business & Domain
 - [ADR-0019](ADR-0019-virtualmin-automatic-provisioning.md) — VirtualMin provisioning
 - [ADR-0020](ADR-0020-async-task-processing-architecture.md) — Django-Q2 async tasks
@@ -200,8 +205,8 @@ Billing Ownership
 
 ## Statistics
 
-- **Total ADRs**: 53 (ADR-0001 through ADR-0053)
-- **Active**: 41 (Accepted + Implemented)
+- **Total ADRs**: 54 (ADR-0001 through ADR-0054)
+- **Active**: 48 (in the Active Decisions table: Accepted, Active, Implemented or Proposed)
 - **Partially Superseded**: 1
 - **Superseded / Historical**: 5
-- **Next available**: ADR-0054
+- **Next available**: ADR-0055

@@ -51,11 +51,12 @@ PRAHO/                          # 🚀 Romanian Hosting Provider PRAHO Platform
 │     │  ├─ tickets/           # Support API proxy
 │     │  └─ ... (9 total)      # See ls services/portal/apps/
 │     ├─ config/               # Minimal Django configuration
-├─ deploy/                      # 🐳 Docker deployment configuration
-│  ├─ platform/                # Platform service Dockerfile
-│  ├─ portal/                  # Portal service Dockerfile
-│  ├─ nginx/                   # Reverse proxy configuration
-│  ├─ docker-compose.services.yml  # Production services
+├─ deploy/                      # 🐳 Deployment: images, Compose, Caddy edge, Ansible
+│  ├─ platform/                # Platform service Dockerfile + entrypoint
+│  ├─ portal/                  # Portal service Dockerfile + entrypoint
+│  ├─ caddy/                   # Caddy edge: automatic HTTPS, hostname routing, edge headers
+│  ├─ ansible/                 # Native (systemd) deployment role
+│  ├─ docker-compose.single-server.yml  # Production: both services + PostgreSQL + Caddy
 │  └─ docker-compose.dev.yml   # Development services
 ├─ shared/                      # 🎨 Cross-service shared assets (ADR-0035)
 │  ├─ ui/                      # Shared design system
@@ -215,63 +216,31 @@ def test_portal_isolation():
 ## 🚀 Deployment Architecture
 
 ### Docker Services
-```yaml
-# deploy/docker-compose.services.yml
-version: '3.8'
-services:
-  platform:
-    build:
-      context: .
-      dockerfile: deploy/platform/Dockerfile
-    environment:
-      - DATABASE_URL=postgres://user:pass@db:5432/praho
-      - DJANGO_SETTINGS_MODULE=config.settings.prod
-    networks:
-      - platform-network
 
-  portal:
-    build:
-      context: .
-      dockerfile: deploy/portal/Dockerfile
-    environment:
-      - PLATFORM_API_URL=http://platform:8700
-      - PLATFORM_API_KEY=secret-api-key
-    networks:
-      - api-network
+`deploy/docker-compose.single-server.yml` runs the whole stack on one host:
 
-  nginx:
-    image: nginx:alpine
-    volumes:
-      - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf
-    ports:
-      - "80:80"
-      - "443:443"
-    networks:
-      - api-network
+| Service | Role | Networks |
+|---|---|---|
+| `caddy` | Edge: automatic HTTPS, routing by hostname, edge headers | `web` |
+| `platform` | Staff app and API (Gunicorn, :8700); see the routing note below | `web`, `internal` |
+| `portal` | Customer app (Gunicorn, :8701) | `web` |
+| `db` | PostgreSQL | `internal` |
 
-  db:
-    image: postgres:16
-    environment:
-      - POSTGRES_DB=praho
-      - POSTGRES_USER=praho_user
-      - POSTGRES_PASSWORD=secure_password
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    networks:
-      - platform-network
+On the platform domain, Caddy routes these paths to anyone: `/api/*` (the portal's HMAC-signed calls
+and API tokens), `/api/users/health/*`, `/integrations/webhooks/*`, `/notifications/webhooks/*` and
+`/notifications/unsubscribe/*`. Everything else, meaning the staff UI, `/static/` and `/media/`, is
+served only to `PLATFORM_ALLOWED_CIDRS` and answers 403 elsewhere. Both Caddy configs route the same
+way.
 
-networks:
-  platform-network:  # Database + Platform
-  api-network:       # Portal + Nginx
-
-volumes:
-  postgres_data:
-```
+`docker-compose.platform-only.yml`, `docker-compose.portal-only.yml` and
+`docker-compose.container-service.yml` split the same services across hosts or a managed container
+platform. Native deployments (the `praho-native` Ansible role) run the same Caddy edge under systemd.
 
 ### Network Isolation
-- **platform-network**: Platform service + Database only
-- **api-network**: Portal service + Nginx proxy
-- **No direct connection**: Portal cannot reach database
+- **internal**: Platform service + Database only
+- **web**: Caddy, Platform and Portal
+- **No direct connection**: the Portal shares no network with the database
+  (`tests/integration/test_docker_services.py` checks every production Compose file)
 
 ---
 

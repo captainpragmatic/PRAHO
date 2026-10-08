@@ -35,7 +35,6 @@ CONFIGS = {
     "platform": "deploy/caddy/Caddyfile.platform",
     "portal": "deploy/caddy/Caddyfile.portal",
     "native": "deploy/ansible/roles/praho-native/templates/Caddyfile.native.j2",
-    "docker": "deploy/ansible/roles/praho/templates/Caddyfile.j2",
 }
 # Public API paths the edge must route to the right upstream, with and without a
 # trailing slash. This is a CADDY ROUTING contract only. It used to double as the
@@ -47,7 +46,8 @@ PUBLIC_ROUTED_PATHS = {"/api/users/health", "/api/orders/products"}
 # Views carrying @public_api_endpoint. The middleware no longer keeps a parallel path
 # list; it resolves the request and reads this marker, so this set IS the contract for
 # what bypasses HMAC authentication. The previous hardcoded path list named only two of
-# these eight, which is why the other six answered 401 while being documented as public.
+# the eight public views of the time, which is why the other six answered 401 while being
+# documented as public. revoke_token and token_info joined for bare-token callers (#569).
 PUBLIC_API_VIEWS = {
     "available_service_plans_api",
     "currencies_api",
@@ -56,7 +56,9 @@ PUBLIC_API_VIEWS = {
     "obtain_token",
     "product_detail",
     "product_list",
+    "revoke_token",
     "support_categories_api",
+    "token_info",
 }
 STAFF_SESSION_PREFIXES = ["/api/customers/"]
 # Equal to Django's DATA_UPLOAD_MAX_MEMORY_SIZE (10485760). That limit excludes file uploads,
@@ -78,15 +80,20 @@ def _read(path: str) -> str:
     return (ROOT / path).read_text()
 
 
-def _config(name: str, allowed: list[str] | None = None) -> str:
+def _config(
+    name: str, allowed: list[str] | None = None, hsts_policy: str | None = None, praho_env: str = "prod"
+) -> str:
     source = _read(CONFIGS[name])
-    if name in {"native", "docker"}:
+    if name == "native":
         context: dict[str, object] = {
             "deployed_env": {
                 "PORTAL_DOMAIN": PORTAL_HOST,
                 "PLATFORM_DOMAIN": PLATFORM_HOST,
                 "ACME_EMAIL": "admin@example.test",
+                **({} if hsts_policy is None else {"HSTS_POLICY": hsts_policy}),
             },
+            "hsts_policy": hsts_policy or "max-age=31536000; includeSubDomains",
+            "praho_env": praho_env,
             "portal_domain": PORTAL_HOST,
             "platform_domain": PLATFORM_HOST,
             "acme_email": "admin@example.test",
@@ -247,13 +254,13 @@ def test_route_ownership_and_public_exemptions(name: str) -> None:
     assert ast.literal_eval(prefixes) == STAFF_SESSION_PREFIXES
 
 
-@pytest.mark.parametrize("name", ["native", "docker"])
+@pytest.mark.parametrize("name", ["native"])
 @pytest.mark.parametrize("allowed", [[], ["198.51.100.10/32", "2001:db8:1234::/64"]])
 def test_template_empty_list_stays_restricted_and_custom_list_is_preserved(name: str, allowed: list[str]) -> None:
     _assert_contract(name, _config(name, allowed), allowed or LOOPBACK)
 
 
-@pytest.mark.parametrize("role", ["praho", "praho-native"])
+@pytest.mark.parametrize("role", ["praho-native"])
 def test_role_defaults_restrict_staff(role: str) -> None:
     values = yaml.safe_load(_read(f"deploy/ansible/roles/{role}/defaults/main.yml"))
     assert values["platform_allowed_ips"] == LOOPBACK
@@ -297,6 +304,22 @@ def test_compose_forwards_domains_hosts_and_staff_cidrs(topology: str) -> None:
             host = platform if service == "platform" else portal
             assert env["ALLOWED_HOSTS"] == f"{host},localhost,{service}"
             assert env["CSRF_TRUSTED_ORIGINS"] == f"https://{host}"
+
+
+@pytest.mark.parametrize(
+    ("deployed", "praho_env", "expected"),
+    [
+        (None, "prod", "max-age=31536000; includeSubDomains"),
+        ("", "prod", "max-age=31536000; includeSubDomains"),  # empty must not become an empty header
+        ("max-age=3600", "prod", "max-age=3600"),
+        (None, "staging", "max-age=3600"),  # an upgraded staging .env without the key
+        ('"max-age=31536000; includeSubDomains; preload"', "prod", "max-age=31536000; includeSubDomains; preload"),
+    ],
+)
+def test_native_template_renders_the_deployed_hsts_policy(deployed: str | None, praho_env: str, expected: str) -> None:
+    rendered = _config("native", hsts_policy=deployed, praho_env=praho_env)
+    values = re.findall(r'Strict-Transport-Security "([^"]*)"', rendered)
+    assert values and set(values) == {expected}
 
 
 def _docker(*args: str, source: str | None = None) -> subprocess.CompletedProcess[str]:
@@ -346,7 +369,7 @@ def test_official_caddy_validates_each_config(name: str, docker_daemon: None) ->
 
 
 @pytest.mark.docker
-@pytest.mark.parametrize("name", ["combined", "platform", "native", "docker"])
+@pytest.mark.parametrize("name", ["combined", "platform", "native"])
 def test_comma_separated_staff_cidrs_fail_validation(name: str, docker_daemon: None) -> None:
     source = _config(name)
     _assert_contract(name, source)

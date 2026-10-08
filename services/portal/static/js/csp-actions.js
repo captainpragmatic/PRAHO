@@ -193,16 +193,35 @@
     }
   });
 
-  document.addEventListener("htmx:afterRequest", function (event) {
+  // Each request's data-htmx-after action, recorded when the request starts. By htmx:afterRequest,
+  // an element that its own swap replaced (a cart row's Remove button swaps #cart-items) is
+  // detached: htmx re-fires the event from the nearest surviving ancestor and points detail.elt
+  // at that ancestor, so reading the attribute then finds nothing.
+  var afterActions = new WeakMap();
+
+  document.addEventListener("htmx:beforeRequest", function (event) {
     var el = event.detail && event.detail.elt;
-    if (!el || !el.hasAttribute("data-htmx-after")) {
+    var xhr = event.detail && event.detail.xhr;
+    if (el && xhr && el.hasAttribute && el.hasAttribute("data-htmx-after")) {
+      afterActions.set(xhr, { el: el, action: el.getAttribute("data-htmx-after") });
+    }
+  });
+
+  document.addEventListener("htmx:afterRequest", function (event) {
+    var xhr = event.detail && event.detail.xhr;
+    var pending = xhr && afterActions.get(xhr);
+    if (!pending) {
       return;
     }
+    afterActions.delete(xhr); // act once per request
+    var el = pending.el;
 
-    switch (el.getAttribute("data-htmx-after")) {
+    switch (pending.action) {
       case "cart-updated": {
         if (event.detail.successful) {
-          document.body.dispatchEvent(new CustomEvent("cartUpdated"));
+          // Bubbles, so listeners above body hear it too: the cart review page refreshes its
+          // totals from a document listener, which a body-only event never reached.
+          document.body.dispatchEvent(new CustomEvent("cartUpdated", { bubbles: true }));
         }
         break;
       }

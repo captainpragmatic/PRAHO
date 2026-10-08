@@ -257,20 +257,15 @@ class ProvisioningSettingsQueryTests(SimpleTestCase):
                     VirtualminAccount(domain=f"query{number}.example.test", status="provisioning")
                     for number in range(size)
                 ]
-                for operation in (views._execute_bulk_suspend, views._execute_bulk_activate):
-                    with self.subTest(operation=operation.__name__, size=size):
-                        with CaptureQueriesContext(connection) as queries:
-                            result = operation(accounts)
-                        # Bulk suspend and activate read no settings since the threshold was retired.
-                        self.assertEqual(self.setting_reads(queries), 0)
-                        self.assertEqual((result.successful_count, result.failed_count), (0, size))
                 with self.subTest(operation="health", size=size):
                     with (
                         patch.object(views, "_perform_single_health_check", side_effect=healthy_check),
                         CaptureQueriesContext(connection) as queries,
                     ):
                         result = views._execute_bulk_health_check(accounts)
-                    self.assertEqual(self.setting_reads(queries), 2)
+                    # Each of the two health settings is read once: from the database inside a
+                    # transaction (the cache is bypassed there), and not at all from a warm cache.
+                    self.assertEqual(self.setting_reads(queries), 2 if atomic else 0)
                     self.assertEqual((result.successful_count, result.failed_count, result.errors), (size, 0, []))
             with CaptureQueriesContext(connection) as queries:
                 username = VirtualminProvisioningService()._generate_username_from_domain("queryunused.example.test")

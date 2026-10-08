@@ -216,3 +216,50 @@ class TestDotenvGuardParity(TestCase):
             self._guard_source("portal"),
             "the duplicated dotenv guard has diverged between platform and portal",
         )
+
+
+class TestRepoDotenvPath(TestCase):
+    """dev.py loads the repo-root .env only when it runs from the repo layout.
+
+    In the Docker dev image the settings live at /app/config/settings/, four parents deep, and
+    `Path(__file__).parents[4]` raised IndexError before PRAHO_SKIP_DOTENV was even checked.
+    """
+
+    def _settings_file(self, root: Path, *parts: str) -> Path:
+        path = root.joinpath(*parts, "config", "settings", "dev.py")
+        path.parent.mkdir(parents=True)
+        path.write_text("")
+        return path
+
+    def test_the_repo_layout_finds_the_root_env(self) -> None:
+        from config.dotenv_path import repo_dotenv_path  # noqa: PLC0415
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()  # macOS: /var is /private/var
+            (root / ".env").write_text("KEY=value\n")
+            settings_file = self._settings_file(root, "services", "platform")
+            self.assertEqual(repo_dotenv_path(settings_file), root / ".env")
+
+    def test_a_missing_env_gives_no_path(self) -> None:
+        from config.dotenv_path import repo_dotenv_path  # noqa: PLC0415
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertIsNone(repo_dotenv_path(self._settings_file(Path(tmp), "services", "platform")))
+
+    def test_the_container_layout_gives_no_path(self) -> None:
+        from config.dotenv_path import repo_dotenv_path  # noqa: PLC0415
+
+        self.assertIsNone(repo_dotenv_path(Path("/app/config/settings/dev.py")))
+
+    def test_a_deep_path_outside_the_repo_layout_gives_no_path(self) -> None:
+        from config.dotenv_path import repo_dotenv_path  # noqa: PLC0415
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()  # macOS: /var is /private/var
+            (root / ".env").write_text("KEY=value\n")
+            self.assertIsNone(repo_dotenv_path(self._settings_file(root, "x", "app")))
+
+    def test_platform_and_portal_helpers_are_identical(self) -> None:
+        platform = (_REPO_ROOT / "services/platform/config/dotenv_path.py").read_text()
+        portal = (_REPO_ROOT / "services/portal/config/dotenv_path.py").read_text()
+        self.assertEqual(platform, portal, "the duplicated .env path helper has diverged between platform and portal")
