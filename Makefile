@@ -131,7 +131,7 @@ help:
 	@echo "  make deploy-prod VERSION=v0.14.0   - Deploy specific version to production"
 	@echo ""
 	@echo "📜 ANSIBLE (generic):"
-	@echo "  make ansible-single-server - Deploy via Ansible (single server)"
+	@echo "  make ansible-single-server - Same as deploy-staging / deploy-prod (ENV=staging|prod)"
 	@echo "  make ansible-backup        - Remote backup via Ansible (ENV=staging|prod, FETCH=true downloads it)"
 	@echo ""
 	@echo "⚙️  SETUP & MAINTENANCE:"
@@ -1388,10 +1388,10 @@ deploy-prod:
 # ANSIBLE DEPLOYMENT 📜
 # ===============================================================================
 
+# The deploy targets own the recipe: they load .env.<env>, which the inventory needs for the host.
 ansible-single-server:
-	@echo "📜 [Ansible] Native single server deployment..."
-	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@cd deploy/ansible && ansible-playbook -i inventory/native-single-server.yml playbooks/native-single-server.yml -e praho_env=$(ENV)
+	@case "$(ENV)" in staging|prod) ;; *) echo "❌ Usage: make ansible-single-server ENV=staging|prod (runs make deploy-staging / deploy-prod)"; exit 1 ;; esac
+	@$(MAKE) --no-print-directory deploy-$(ENV)
 
 ansible-backup:
 	@case "$(ENV)" in staging|prod) ;; *) echo "❌ Usage: make ansible-backup ENV=staging|prod [FETCH=true]"; exit 1 ;; esac

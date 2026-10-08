@@ -12,6 +12,11 @@ TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 # The process id keeps a manual run started in the same second as the cron run from writing into
 # the same file. No two running processes share one.
 BACKUP_FILE="${BACKUP_DIR}/praho_backup_${TIMESTAMP}_$$.dump"
+# pg_dump creates its output file before it connects, so it writes under another name and the dump
+# is renamed once complete: a failed one never matches praho_backup_*.dump, which restore --latest
+# picks from.
+PARTIAL_FILE="${BACKUP_FILE}.partial"
+trap 'rm -f "${PARTIAL_FILE}"' EXIT
 
 echo "[$(date)] Starting native PostgreSQL backup..."
 
@@ -24,9 +29,10 @@ PGPASSWORD="{{ deployed_env.DB_PASSWORD }}" pg_dump \
     -d {{ deployed_env.DB_NAME | default('praho') }} \
     --format=custom \
     --compress=9 \
-    -f "${BACKUP_FILE}"
+    -f "${PARTIAL_FILE}"
 
-if [ -f "${BACKUP_FILE}" ] && [ -s "${BACKUP_FILE}" ]; then
+if [ -s "${PARTIAL_FILE}" ]; then
+    mv "${PARTIAL_FILE}" "${BACKUP_FILE}"
     echo "[$(date)] Backup created: ${BACKUP_FILE}"
     echo "[$(date)] Size: $(du -h "${BACKUP_FILE}" | cut -f1)"
 else

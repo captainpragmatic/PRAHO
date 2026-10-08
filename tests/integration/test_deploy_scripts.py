@@ -58,7 +58,11 @@ elif argv[:1] == ["inspect"]:
     print(os.environ.get("DOCKER_HEALTH_" + argv[-1], os.environ.get("DOCKER_HEALTH", "healthy")))
 elif argv[:1] == ["start"] and os.environ.get("DOCKER_START_FAILS"):
     sys.exit(1)
+elif argv[:1] == ["exec"] and os.environ.get("DOCKER_EXEC_FAILS"):
+    sys.exit(1)
 """
+# A gzip stream of no data, which the restore pipes into psql.
+EMPTY_GZIP = b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03\x03\x00\x00\x00\x00\x00\x00\x00\x00\x00"
 
 
 class Project:
@@ -353,6 +357,43 @@ class TestRollbackAndRestore:
         result = project.run("health-check.sh")
         assert result.returncode == 0, result.stdout
         assert "curl" not in project.log.read_text()
+
+
+class TestBackupFiles:
+    @pytest.mark.integration
+    def test_two_backups_in_the_same_second_write_different_files(self, project: Project) -> None:
+        # The name had one-second resolution, so a manual backup started in the same second as a
+        # scheduled one (ADR-0054 has operators schedule this script) wrote into the same file.
+        date = project.root / "bin/date"
+        date.write_text("#!/bin/sh\necho 20261008_020000\n")
+        date.chmod(0o755)
+        for _ in range(2):
+            result = project.run("backup.sh")
+            assert result.returncode == 0, result.stdout + result.stderr
+        backups = project.root / "backups"
+        assert len(list(backups.glob("praho_backup_*.sql.gz"))) == 2
+        assert list(backups.glob("*.partial")) == []
+
+    @pytest.mark.integration
+    def test_a_failed_dump_leaves_nothing_a_restore_could_pick(self, project: Project) -> None:
+        # pipefail stops the script after gzip has already written an empty stream; restore --latest
+        # then took that file as the newest backup.
+        result = project.run("backup.sh", DOCKER_EXEC_FAILS="1")
+        assert result.returncode != 0
+        assert list((project.root / "backups").glob("praho_backup_*")) == []
+
+    @pytest.mark.integration
+    def test_the_interactive_restore_restores_the_backup_chosen_from_the_list(self, project: Project) -> None:
+        # The listing went to stdout inside $(...), so it reached the restore as part of the file
+        # name: no operator saw it, and every interactive restore ended in "Backup file not found".
+        project.write_env(".env.staging", STAGING_ENV)
+        backups = project.root / "backups"
+        backups.mkdir()
+        (backups / "praho_backup_20261008_020000_4242.sql.gz").write_bytes(EMPTY_GZIP)
+        result = project.run("restore.sh", "--env", "staging", stdin="1\nyes\n")
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "1) 20261008_020000 (" in result.stderr
+        assert any(c["argv"][:4] == ["exec", "-i", "praho_db", "psql"] for c in project.calls())
 
 
 class TestEveryComposeCallUsesTheHelper:

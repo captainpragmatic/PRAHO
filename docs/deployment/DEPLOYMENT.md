@@ -728,10 +728,12 @@ cd deploy/ansible && ansible-playbook -i inventory/native-single-server.yml play
   -e fetch_backup=true    # -e backup_fetch_dir=PATH to choose another directory
 ```
 
-Docker backups are stored in `./backups/` as `praho_backup_YYYYMMDD_HHMMSS.sql.gz`; native ones in
-`/opt/praho/backups/` as `praho_backup_YYYYMMDD_HHMMSS_<pid>.dump` (`pg_dump` custom format; the
-process id keeps two backups started in the same second apart). A downloaded dump gets mode `0600` in
-a `0700` directory, and git ignores `praho_backup_*` anywhere in the checkout.
+Docker backups are stored in `./backups/` as `praho_backup_YYYYMMDD_HHMMSS_<pid>.sql.gz`; native ones
+in `/opt/praho/backups/` as `praho_backup_YYYYMMDD_HHMMSS_<pid>.dump` (`pg_dump` custom format). The
+process id keeps two backups started in the same second apart. Both scripts write the dump under a
+`.partial` name and rename it once it is complete, so a failed backup never becomes the one
+`restore --latest` picks. A downloaded dump gets mode `0600` in a `0700` directory, and git ignores
+`praho_backup_*` anywhere in the checkout.
 
 ### Restoring from Backup
 
@@ -740,7 +742,7 @@ a `0700` directory, and git ignores `praho_backup_*` anywhere in the checkout.
 ./deploy/scripts/restore.sh
 
 # Restore specific file
-./deploy/scripts/restore.sh ./backups/praho_backup_20240115_120000.sql.gz
+./deploy/scripts/restore.sh ./backups/praho_backup_20240115_120000_4242.sql.gz
 
 # Restore latest backup
 ./deploy/scripts/restore.sh --latest

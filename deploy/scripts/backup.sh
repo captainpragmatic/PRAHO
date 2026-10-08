@@ -56,7 +56,12 @@ cleanup_backups() {
 }
 
 create_backup() {
-    local BACKUP_FILE="${BACKUP_DIR}/praho_backup_${TIMESTAMP}.sql.gz"
+    # The process id keeps two backups started in the same second apart: no two running processes share one.
+    local BACKUP_FILE="${BACKUP_DIR}/praho_backup_${TIMESTAMP}_$$.sql.gz"
+    # Written under another name and renamed once complete, so a failed dump never matches
+    # praho_backup_*.sql.gz, which restore --latest picks from. Global: the EXIT trap reads it.
+    PARTIAL_FILE="${BACKUP_FILE}.partial"
+    trap 'rm -f "${PARTIAL_FILE}"' EXIT
 
     log_info "Creating database backup..."
     log_info "Backup file: ${BACKUP_FILE}"
@@ -68,10 +73,11 @@ create_backup() {
     fi
 
     # Create backup
-    docker exec praho_db pg_dump -U praho praho | gzip > "${BACKUP_FILE}"
+    docker exec praho_db pg_dump -U praho praho | gzip > "${PARTIAL_FILE}"
 
     # Verify backup
-    if [ -f "${BACKUP_FILE}" ] && [ -s "${BACKUP_FILE}" ]; then
+    if [ -s "${PARTIAL_FILE}" ]; then
+        mv "${PARTIAL_FILE}" "${BACKUP_FILE}"
         local SIZE=$(du -h "${BACKUP_FILE}" | cut -f1)
         log_success "Backup created successfully"
         log_info "Size: ${SIZE}"
@@ -80,7 +86,6 @@ create_backup() {
         cleanup_backups
     else
         log_error "Backup failed - file is empty or missing"
-        rm -f "${BACKUP_FILE}"
         exit 1
     fi
 }
