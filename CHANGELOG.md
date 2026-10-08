@@ -81,14 +81,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `make ansible-backup FETCH=true` downloads the dump it makes. The target had no way to ask for the
-  download, and the playbook could not do it anyway: with `-e fetch_backup=true` it searched the local
-  machine for `.sql.gz` files while native backups are `.dump` files on the server, so it downloaded
-  nothing and still reported success; `fetch_backup=false` also counted as true, since `-e` passes a
-  string. It now downloads the exact dump that run reported to `~/praho-backups`
-  (`backup_fetch_dir` to change it), readable only by you, and targets the `praho` group the
-  inventories define. Git now ignores `praho_backup_*` anywhere, and the native rsync no longer copies
-  a dump left in the checkout to the server.
+- `make ansible-backup ENV=prod FETCH=true` downloads the dump it makes. `ENV` (`staging` or `prod`) is
+  now required: the target never loaded `.env.<env>`, so Ansible connected to an empty host unless the
+  connection variables were exported by hand. It also had no way to ask for the download, and the
+  playbook could not do it anyway: with `-e fetch_backup=true` it searched the local machine for
+  `.sql.gz` files while native backups are `.dump` files on the server, so it downloaded nothing and
+  still reported success; `fetch_backup=false` also counted as true, since `-e` passes a string. It
+  now downloads the exact dump that run reported to `~/praho-backups` (`backup_fetch_dir` to change
+  it), readable only by you, and targets the `praho` group the inventories define. Native dump names now end in the backup script's process id
+  (`praho_backup_<timestamp>_<pid>.dump`), so a manual backup started in the same second as the
+  nightly one no longer writes into the same file. Git now ignores `praho_backup_*` anywhere, and the
+  native rsync no longer copies a dump left in the checkout to the server.
 - Terraform provisions Ubuntu 24.04, which the native playbook requires; its default was 22.04, so a
   server it created failed the playbook's first check. **Upgrading:** the image change makes Terraform
   replace a server created from the old default on its next apply; set

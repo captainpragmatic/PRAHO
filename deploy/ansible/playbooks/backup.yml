@@ -7,6 +7,8 @@
 #   ansible-playbook -i inventory/native-single-server.yml playbooks/backup.yml
 #   ansible-playbook -i inventory/native-single-server.yml playbooks/backup.yml \
 #     -e fetch_backup=true [-e backup_fetch_dir=PATH]    # default: ~/praho-backups on this machine
+# The inventory reads the connection settings (PRAHO_SERVER_IP, ...) from the environment. From the
+# repository root, `make ansible-backup ENV=staging|prod [FETCH=true]` loads them from .env.<env>.
 #
 # The download runs as the SSH user (root by default), which must be able to read backup_directory:
 # with become, fetch would read the whole dump into memory on both machines.

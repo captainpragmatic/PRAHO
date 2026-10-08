@@ -107,17 +107,26 @@ class TestBackupMakeTarget:
     # Resolved rather than spelled "make", as in test_e2e_stack: the recipe is what is under test.
     MAKE = shutil.which("make") or "make"
 
-    def _dry_run(self, *variables: str) -> str:
-        # This suite runs under make itself; its MAKEFLAGS would leak into the inner call.
+    def _make(self, *args: str, path_prefix: Path | None = None) -> subprocess.CompletedProcess[str]:
+        # This suite runs under make itself; its MAKEFLAGS would leak into the inner call. The recipe
+        # resolves the env file through $(PWD), the environment variable, which `cwd` leaves alone.
         env = {key: value for key, value in os.environ.items() if key not in {"MAKELEVEL", "MAKEFLAGS", "MFLAGS"}}
+        env["PWD"] = str(PROJECT_ROOT)
+        if path_prefix:
+            env["PATH"] = f"{path_prefix}{os.pathsep}{env['PATH']}"
         return subprocess.run(  # noqa: S603 -- a fixed make target with fixed variables
-            [self.MAKE, "-n", "ansible-backup", *variables],
+            [self.MAKE, "ansible-backup", *args],
             cwd=PROJECT_ROOT,
             env=env,
             capture_output=True,
             text=True,
-            check=True,
-        ).stdout
+            check=False,
+        )
+
+    def _dry_run(self, *variables: str) -> str:
+        result = self._make("-n", "ENV=staging", *variables)
+        assert result.returncode == 0, result.stderr
+        return result.stdout
 
     @pytest.mark.integration
     def test_fetch_true_asks_the_playbook_to_download(self) -> None:
@@ -126,6 +135,69 @@ class TestBackupMakeTarget:
     @pytest.mark.integration
     def test_without_fetch_it_only_backs_up(self) -> None:
         assert "fetch_backup" not in self._dry_run()
+
+    @pytest.mark.integration
+    def test_it_loads_the_environments_connection_settings(self) -> None:
+        # The inventory reads PRAHO_SERVER_IP and the SSH settings from the environment; without the
+        # file, Ansible connects to an empty host.
+        assert "/.env.staging && set +a" in self._dry_run()
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("variables", [[], ["ENV=dev"]])
+    def test_it_refuses_to_run_without_a_deployment_environment(self, tmp_path: Path, variables: list[str]) -> None:
+        marker = tmp_path / "ran"
+        stub = tmp_path / "ansible-playbook"
+        stub.write_text(f'#!/bin/sh\ntouch "{marker}"\n')
+        stub.chmod(0o755)
+        result = self._make(*variables, path_prefix=tmp_path)
+        assert result.returncode != 0
+        assert not marker.exists()
+        assert "ENV=staging|prod" in result.stdout + result.stderr
+
+
+class TestNativeBackupScript:
+    @staticmethod
+    def _render(backups: Path) -> str:
+        """The template with its placeholders filled; a new placeholder fails here, not silently."""
+        values = {"backup_directory": str(backups), "backup_retention_days": "7"}
+
+        def fill(match: re.Match[str]) -> str:
+            expression = match.group(1)
+            # Database name, user and credential: the stub pg_dump ignores them.
+            return "praho" if expression.startswith("deployed_env.") else values[expression]
+
+        return re.sub(r"\{\{\s*(.+?)\s*\}\}", fill, NATIVE_BACKUP_SCRIPT.read_text())
+
+    @pytest.mark.integration
+    def test_two_runs_in_the_same_second_write_different_files(self, tmp_path: Path) -> None:
+        # A manual backup started in the same second as the nightly cron run used to get the same
+        # name, so two pg_dump processes wrote one file and the download could copy either.
+        backups, stubs = tmp_path / "backups", tmp_path / "bin"
+        stubs.mkdir()
+        (stubs / "date").write_text("#!/bin/sh\necho 20261008_020000\n")
+        (stubs / "pg_dump").write_text(
+            '#!/bin/sh\nwhile [ "$#" -gt 0 ]; do [ "$1" = -f ] && echo dump > "$2"; shift; done\n'
+        )
+        for stub in stubs.iterdir():
+            stub.chmod(0o755)
+        script = tmp_path / "backup.sh"
+        script.write_text(self._render(backups))
+        env = {**os.environ, "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}"}
+
+        created = []
+        for _ in range(2):
+            result = subprocess.run(  # noqa: S603 -- the rendered script in this test's tmp_path
+                ["bash", str(script)],  # noqa: S607
+                env=env,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            created += re.findall(r"Backup created: (\S+)", result.stdout)
+
+        assert len(created) == 2
+        assert created[0] != created[1], created
+        assert len(list(backups.glob("praho_backup_*.dump"))) == 2
 
 
 class TestDumpsStayOutOfTheCheckout:
