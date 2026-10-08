@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from django.db import DatabaseError, transaction
 from django.utils import timezone
-from django.utils.translation import gettext as _t
+from django.utils.translation import gettext
 
 from apps.billing.efactura.settings import ro_local_date
 from apps.billing.tax_evidence import capture_vat_evidence, derive_tax_category
@@ -83,8 +83,8 @@ def send_proforma_email(
         pdf_bytes = generate_proforma_pdf(proforma)
         email_result = EmailService.send_email(
             to=email,
-            subject=_t("Proforma Invoice %(number)s") % {"number": proforma.number},
-            body_text=_t("Please find attached proforma invoice %(number)s.") % {"number": proforma.number},
+            subject=gettext("Proforma Invoice %(number)s") % {"number": proforma.number},
+            body_text=gettext("Please find attached proforma invoice %(number)s.") % {"number": proforma.number},
             attachments=[(f"proforma_{proforma.number}.pdf", pdf_bytes, "application/pdf")],
         )
         if not email_result.success:
@@ -369,14 +369,14 @@ class ProformaPaymentService:
         from apps.billing.payment_models import Payment  # noqa: PLC0415
 
         if proforma.status not in ("draft", "sent", "accepted"):
-            return _t("Proforma %(number)s cannot accept payment (status: %(status)s)") % {
+            return gettext("Proforma %(number)s cannot accept payment (status: %(status)s)") % {
                 "number": proforma.number,
                 "status": proforma.status,
             }
         if proforma.is_expired:
-            return _t("Proforma %(number)s has expired") % {"number": proforma.number}
+            return gettext("Proforma %(number)s has expired") % {"number": proforma.number}
         if manual and Payment.objects.filter(proforma=proforma, payment_method="stripe", status="pending").exists():
-            return _t("Proforma has an unresolved automatic card payment")
+            return gettext("Proforma has an unresolved automatic card payment")
         return None
 
     @staticmethod

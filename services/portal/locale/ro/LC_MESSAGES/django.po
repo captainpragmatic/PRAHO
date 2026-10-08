@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-08 01:38+0300\n"
+"POT-Creation-Date: 2026-10-08 09:42+0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -18,28 +18,22 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=3; plural=(n==1?0:(((n%100>19)||((n%100==0)&&(n!=0)))?2:1));\n"
 
-#. AI-generated
 #: apps/billing/forms.py:18 templates/orders/checkout.html:240
 msgid "Gift-card code"
 msgstr "Cod de card cadou"
 
 #: apps/billing/forms.py:26
-#| msgid "Account"
 msgid "Amount"
 msgstr "Sumă"
 
-#. AI-generated
 #: apps/billing/forms.py:27
-#| msgid "Payment Method"
 msgid "Payment method"
 msgstr "Metoda de plată"
 
-#. AI-generated
 #: apps/billing/forms.py:29
 msgid "Who is it for?"
 msgstr "Pentru cine este?"
 
-#. AI-generated
 #: apps/billing/forms.py:29 templates/billing/gift_cards.html:60
 msgid "For me"
 msgstr "Pentru mine"
@@ -48,57 +42,42 @@ msgstr "Pentru mine"
 msgid "Send as a gift"
 msgstr "Trimite ca cadou"
 
-#. AI-generated
 #: apps/billing/forms.py:31
 msgid "Recipient email"
 msgstr "Email-ul destinatarului"
 
-#. AI-generated
 #: apps/billing/forms.py:32
-#| msgid "City name"
 msgid "Recipient name"
 msgstr "Numele destinatarului"
 
-#. AI-generated
 #: apps/billing/forms.py:34
-#| msgid "Company website (optional)"
 msgid "Message (optional)"
 msgstr "Mesaj (opțional)"
 
-#. AI-generated
 #: apps/billing/forms.py:51
 msgid "Card"
 msgstr "Card"
 
-#. AI-generated
 #: apps/billing/forms.py:51 templates/billing/gift_card_detail.html:43
-#| msgid "Bank Transfer"
 msgid "Bank transfer"
 msgstr "Transfer bancar"
 
-#. AI-generated
 #: apps/billing/forms.py:62
 msgid "The offer changed. Reload gift cards and review the amount before buying."
 msgstr "Oferta s-a schimbat. Reîncărcați cărțile cadou și verificați suma înainte de a cumpăra."
 
-#. AI-generated
 #: apps/billing/forms.py:64
-#| msgid "Enter your email address and we\\"
 msgid "Enter the recipient's email address."
 msgstr "Introduceți adresa de email a destinatarului."
 
-#. AI-generated
 #: apps/billing/gift_card_views.py:76
-#| msgid "Authentication service is temporarily unavailable. Please try again later."
 msgid "Your gift card history is temporarily unavailable. Try again shortly."
 msgstr "Istoricul cărților dvs. cadou este temporar indisponibil. Încercați din nou în curând."
 
 #: apps/billing/gift_card_views.py:89
-#| msgid "Service temporarily unavailable. Please try again later."
 msgid "Gift card purchases are temporarily unavailable. Try again shortly."
 msgstr "Achiziția cărților cadou este temporar indisponibilă. Încercați din nou în curând."
 
-#. AI-generated
 #: apps/billing/gift_card_views.py:110
 msgid "The selling currency or prices changed. Review the new amount and submit again to continue."
 msgstr "Valuta de vânzare sau prețurile s-au schimbat. Verificați noua sumă și trimiteți din nou pentru a continua."
@@ -111,12 +90,10 @@ msgstr "Nu am putut confirma această achiziție. Retrimiteți același formular
 msgid "The purchase was not accepted. Review its details or start a new purchase with the current offer."
 msgstr "Achiziția nu a fost acceptată. Verificați detaliile acesteia sau inițiați o nouă achiziție cu oferta actuală."
 
-#. AI-generated
 #: apps/billing/gift_card_views.py:122
 msgid "Too many requests. Wait briefly, then retry this same purchase."
 msgstr "Prea multe cereri. Așteptați un moment, apoi reîncercați aceeași cumpărare."
 
-#. AI-generated
 #: apps/billing/gift_card_views.py:134
 msgid "This purchase was already submitted with different details. Start a new purchase to change it."
 msgstr "Această cumpărare a fost deja trimisă cu alte detalii. Inițiați o nouă cumpărare pentru a o modifica."
@@ -126,17 +103,13 @@ msgid "Review the current offer before buying a gift card."
 msgstr "Verificați oferta actuală înainte de a cumpăra un card cadou."
 
 #: apps/billing/gift_card_views.py:188 apps/billing/gift_card_views.py:213
-#| msgid "Product not found."
 msgid "Gift card purchase not found."
 msgstr "Achiziția cardului cadou nu a fost găsită."
 
-#. AI-generated
 #: apps/billing/gift_card_views.py:189
-#| msgid "Service temporarily unavailable. Please try again later."
 msgid "This purchase is temporarily unavailable. Try again shortly."
 msgstr "Această cumpărare este temporar indisponibilă. Încercați din nou în curând."
 
-#. AI-generated
 #: apps/billing/gift_card_views.py:214
 msgid "This action could not be confirmed. Check the purchase status before trying again."
 msgstr "Această acțiune nu a putut fi confirmată. Verificați starea cumpărării înainte de a încerca din nou."
@@ -145,12 +118,10 @@ msgstr "Această acțiune nu a putut fi confirmată. Verificați starea cumpăr�
 msgid "Wait a few minutes before sending again, and check that this gift card is still available."
 msgstr "Așteptați câteva minute înainte de a trimite din nou și verificați dacă acest card cadou este încă disponibil."
 
-#. AI-generated
 #: apps/billing/gift_card_views.py:221
 msgid "This action is unavailable. Review the purchase status below before trying again."
 msgstr "Această acțiune este indisponibilă. Verificați starea cumpărării mai jos înainte de a încerca din nou."
 
-#. AI-generated
 #: apps/billing/gift_card_views.py:225
 msgid "Too many requests. Wait briefly, then try again."
 msgstr "Prea multe cereri. Așteptați un moment, apoi încercați din nou."
@@ -159,7 +130,6 @@ msgstr "Prea multe cereri. Așteptați un moment, apoi încercați din nou."
 msgid "Delivery requested. The same gift card code will be sent again."
 msgstr "Livrare solicitată. Același cod al cardului cadou va fi trimis din nou."
 
-#. AI-generated
 #: apps/billing/gift_card_views.py:254
 #: templates/billing/gift_card_detail.html:38
 msgid "Payment is processing. Check its status shortly."
@@ -200,7 +170,6 @@ msgstr "Restantă"
 msgid "Cancelled"
 msgstr "Anulată"
 
-#. AI-generated
 #: apps/billing/schemas.py:113
 msgid "Partially Paid"
 msgstr "Parțial plătit"
@@ -225,11 +194,9 @@ msgstr "Acceptată"
 msgid "Expired"
 msgstr "Expirată"
 
-#. AI-generated
 #: apps/billing/schemas.py:253 apps/billing/views.py:131
 #: templates/billing/partials/invoices_table.html:66
 #: templates/billing/partials/invoices_table.html:124
-#| msgid "Conversation"
 msgid "Converted"
 msgstr "Convertit"
 
@@ -283,7 +250,6 @@ msgid "Invoices"
 msgstr "Facturi"
 
 #: apps/billing/views.py:103 apps/billing/views.py:171
-#| msgid "Proforma"
 msgid "Proformas"
 msgstr "Proforme"
 
@@ -300,10 +266,8 @@ msgstr "Anulată"
 msgid "Refunded"
 msgstr "Rambursată"
 
-#. AI-generated
 #: apps/billing/views.py:130 templates/billing/partials/invoices_table.html:84
 #: templates/billing/partials/invoices_table.html:142
-#| msgid "Refunded"
 msgid "Partially Refunded"
 msgstr "Parțial rambursat"
 
@@ -326,12 +290,10 @@ msgstr "Facturare"
 msgid "View your invoices and proformas"
 msgstr "Vizualizați facturile și proformele dvs."
 
-#. AI-generated
 #: apps/billing/views.py:168
 msgid "Search by type, number, amount, status, date, services…"
 msgstr "Căutare după tip, număr, sumă, stare, dată, servicii…"
 
-#. AI-generated
 #: apps/billing/views.py:172
 msgid "Unpaid"
 msgstr "Neplătit"
@@ -362,10 +324,8 @@ msgstr "Factura nu a fost găsită sau accesul este interzis."
 msgid "Unable to load invoice details. Please try again."
 msgstr "Nu s-au putut încărca detaliile facturii. Vă rugăm să încercați din nou."
 
-#. AI-generated
 #: apps/billing/views.py:428
 #: templates/billing/partials/currency_balances.html:30
-#| msgid "Payment processing is temporarily unavailable."
 msgid "Billing balances are temporarily unavailable."
 msgstr "Soldurile de facturare sunt temporar indisponibile."
 
@@ -389,17 +349,14 @@ msgstr "Nu s-au putut încărca detaliile proformei. Vă rugăm să încercați 
 msgid "Enter a valid gift-card code and billing document."
 msgstr "Introduceți un cod valid de card cadou și un document de facturare."
 
-#. AI-generated
 #: apps/billing/views.py:718
 msgid "Gift-card balance applied. Your billing document shows the remaining amount."
 msgstr "Soldul cardului cadou a fost aplicat. Documentul dvs. de facturare arată suma rămasă."
 
-#. AI-generated
 #: apps/billing/views.py:720
 msgid "The gift card could not be applied. Check its balance, currency, and expiry."
 msgstr "Cardul cadou nu a putut fi aplicat. Verificați soldul, moneda și data de expirare."
 
-#. AI-generated
 #: apps/billing/views.py:722
 msgid "The payment could not be confirmed. Refresh this document before trying again."
 msgstr "Plata nu a putut fi confirmată. Reîmprospătați acest document înainte de a încerca din nou."
@@ -409,41 +366,32 @@ msgstr "Plata nu a putut fi confirmată. Reîmprospătați acest document înain
 msgid "Card ending %(last_four)s"
 msgstr "Card cu terminația %(last_four)s"
 
-#. AI-generated
 #: apps/billing/views.py:779
 msgid "Automatic payment off"
 msgstr "Plata automată dezactivată"
 
-#. AI-generated
 #: apps/billing/views.py:783
 #, python-format
 msgid "Pay automatically with %(card)s"
 msgstr "Plătiți automat cu %(card)s"
 
-#. AI-generated
 #: apps/billing/views.py:806 templates/billing/partials/header_action.html:4
 #: templates/billing/partials/section_tabs.html:3
 #: templates/billing/recurring_payments.html:5
 #: templates/billing/recurring_payments.html:11
-#| msgid "Invoices & payments"
 msgid "Automatic payments"
 msgstr "Plăți automate"
 
-#. AI-generated
 #: apps/billing/views.py:924
-#| msgid "Reply added successfully."
 msgid "Refund request submitted successfully."
 msgstr "Cererea de rambursare a fost trimisă cu succes."
 
-#. AI-generated
 #: apps/billing/views.py:929
 msgid "Unable to process refund request."
 msgstr "Nu se poate procesa cererea de rambursare."
 
-#. AI-generated
 #: apps/billing/views.py:946 templates/billing/invoice_detail.html:366
 #: templates/billing/invoice_detail.html:372
-#| msgid "Unable to submit service request. Please try again later."
 msgid "Unable to process refund request. Please try again."
 msgstr "Nu se poate procesa cererea de rambursare. Vă rugăm să încercați din nou."
 
@@ -511,11 +459,9 @@ msgstr[1] "și %(count)d alte probleme."
 msgstr[2] "și %(count)d de alte probleme."
 
 #: apps/common/checks.py:27
-#| msgid "No consent history available"
 msgid "The Portal counter store is unavailable."
 msgstr "Stocarea contoarelor Portalului este indisponibilă."
 
-#. AI-generated
 #: apps/common/checks.py:28
 msgid "Run migrate sessions --noinput and migrate common --noinput on the Portal database."
 msgstr "Executați migrate sessions --noinput și migrate common --noinput pe baza de date Portal."
@@ -525,10 +471,8 @@ msgstr "Executați migrate sessions --noinput și migrate common --noinput pe ba
 msgid "Account Settings"
 msgstr "Setări Cont"
 
-#. AI-generated
 #: apps/common/context_processors.py:47
 #: templates/components/mobile_header.html:197
-#| msgid "Security Level"
 msgid "Security"
 msgstr "Securitate"
 
@@ -545,30 +489,23 @@ msgstr "Profilul companiei"
 msgid "Team Members"
 msgstr "Membrii echipei"
 
-#. AI-generated
 #: apps/common/context_processors.py:51 apps/customers/views.py:354
 #: templates/components/mobile_header.html:155
 #: templates/customers/addresses.html:5 templates/customers/addresses.html:11
 #: templates/users/company_profile.html:240
 #: templates/users/company_profile_edit.html:105
-#| msgid "Address"
 msgid "Addresses"
 msgstr "Adrese"
 
-#. AI-generated
 #: apps/common/context_processors.py:53
-#| msgid "Privacy Consents"
 msgid "Privacy"
 msgstr "Confidențialitate"
 
-#. AI-generated
 #: apps/common/counters.py:155
 msgid "Claim tokens must contain at most 255 characters."
 msgstr "Jetoanele de revendicare trebuie să conțină cel mult 255 de caractere."
 
-#. AI-generated
 #: apps/common/counters.py:175
-#| msgid "Password must be at least 12 characters long."
 msgid "Claim results must contain at most 255 characters."
 msgstr "Rezultatele revendicării trebuie să conțină cel mult 255 de caractere."
 
@@ -576,7 +513,6 @@ msgstr "Rezultatele revendicării trebuie să conțină cel mult 255 de caracter
 msgid "The counter store requires SQLite 3.35 or newer."
 msgstr "Stocarea contoarelor necesită SQLite 3.35 sau o versiune mai nouă."
 
-#. AI-generated
 #: apps/common/counters.py:206
 msgid "Upgrade the SQLite library used by Python."
 msgstr "Actualizați biblioteca SQLite folosită de Python."
@@ -605,9 +541,7 @@ msgstr "Permisiuni insuficiente"
 msgid "Server Error"
 msgstr "Eroare de server"
 
-#. AI-generated
 #: apps/common/error_views.py:35
-#| msgid "Contact Support to Enable"
 msgid "Contact Support"
 msgstr "Contactați suportul"
 
@@ -643,62 +577,47 @@ msgstr "Folosește valoarea implicită a sistemului"
 msgid "Select a valid timezone."
 msgstr "Selectați un fus orar valid."
 
-#. AI-generated
 #: apps/common/localisation_forms.py:25
-#| msgid "Romanian postal code must be exactly 6 digits"
 msgid "Romanian postal codes must be 6 digits"
 msgstr "Codurile poștale românești trebuie să aibă 6 cifre"
 
-#. AI-generated
 #: apps/common/rate_limit_feedback.py:44
 #, python-format
 msgid "We're carrying out scheduled maintenance. Your data is safe - please try again in %(seconds)s seconds."
 msgstr "Efectuăm o întreținere programată. Datele dvs. sunt în siguranță - vă rugăm să încercați din nou în %(seconds)s secunde."
 
-#. AI-generated
 #: apps/common/rate_limit_feedback.py:46
 msgid "We're carrying out scheduled maintenance. Your data is safe - please try again shortly."
 msgstr "Efectuăm o întreținere programată. Datele dvs. sunt în siguranță - vă rugăm să încercați din nou în scurt timp."
 
-#. AI-generated
 #: apps/common/rate_limit_feedback.py:57
 #, python-format
-#| msgid "Authentication service is temporarily unavailable. Please try again later."
 msgid "This information is temporarily unavailable. Please try again in %(seconds)s seconds."
 msgstr "Aceste informații sunt temporar indisponibile. Vă rugăm să încercați din nou în %(seconds)s secunde."
 
-#. AI-generated
 #: apps/common/rate_limit_feedback.py:60
-#| msgid "Authentication service is temporarily unavailable. Please try again later."
 msgid "This information is temporarily unavailable. Please try again shortly."
 msgstr "Aceste informații sunt temporar indisponibile. Vă rugăm să încercați din nou în scurt timp."
 
-#. AI-generated
 #: apps/common/rate_limit_feedback.py:91
 msgid "Scheduled maintenance"
 msgstr "Întreținere programată"
 
-#. AI-generated
 #: apps/common/rate_limit_feedback.py:91
 #: templates/components/maintenance_inline_alert.html:18
-#| msgid "Next page (unavailable)"
 msgid "Temporarily unavailable"
 msgstr "Temporar indisponibil"
 
-#. AI-generated
 #: apps/common/rate_limit_feedback.py:101
 #, python-format
 msgid "We're receiving many requests right now. Please try again in %(seconds)s seconds."
 msgstr "Primim în acest moment multe solicitări. Vă rugăm să încercați din nou în %(seconds)s secunde."
 
-#. AI-generated
 #: apps/common/rate_limit_feedback.py:104
 msgid "We're receiving many requests right now. Please try again shortly."
 msgstr "Primim în acest moment multe solicitări. Vă rugăm să încercați din nou în curând."
 
-#. AI-generated
 #: apps/common/rate_limiting.py:173
-#| msgid "Error processing password reset request. Please try again."
 msgid "Too many password reset requests. Please try again later."
 msgstr "Prea multe solicitări de resetare a parolei. Vă rugăm să încercați mai târziu."
 
@@ -720,52 +639,43 @@ msgid "Rate limit exceeded. Please try again in 1 minute."
 msgstr "Limită de cereri depășită. Vă rugăm să încercați din nou în 1 minut."
 
 #: apps/common/rate_limiting.py:578
-#| msgid "Too many operations. Please slow down."
 msgid "Too many cart updates. Please slow down."
 msgstr "Prea multe actualizări ale coșului. Vă rugăm să reduceți ritmul."
 
 #: apps/common/store_unavailable.py:49 apps/orders/security.py:68
-#: apps/orders/views.py:338 apps/users/views.py:900
+#: apps/orders/views.py:337 apps/users/views.py:900
 msgid "Service temporarily unavailable. Please try again later."
 msgstr "Serviciul este temporar indisponibil. Vă rugăm să încercați din nou mai târziu."
 
 #: apps/customers/views.py:79 apps/customers/views.py:191
-#| msgid "Invalid price seal"
 msgid "Invalid role selected."
 msgstr "Rol selectat nevalid."
 
 #: apps/customers/views.py:81
-#| msgid "Company name is required"
 msgid "Email address is required."
 msgstr "Adresa de e-mail este obligatorie."
 
 #: apps/customers/views.py:85
-#| msgid "Enter your email address and we\\"
 msgid "Enter a valid email address."
 msgstr "Introduceți o adresă de email validă."
 
-#. AI-generated
 #: apps/customers/views.py:100 apps/customers/views.py:136
 #: apps/customers/views.py:182 apps/customers/views.py:222
 #: apps/customers/views.py:257 apps/customers/views.py:330
 #: apps/customers/views.py:365 apps/customers/views.py:419
-#| msgid "No customer selected"
 msgid "No customer selected."
 msgstr "Niciun client selectat."
 
-#. AI-generated
 #: apps/customers/views.py:116 apps/customers/views.py:166
 #: apps/customers/views.py:208 apps/customers/views.py:238
 #: apps/customers/views.py:283 apps/customers/views.py:306
 #: apps/customers/views.py:346 apps/customers/views.py:403
 #: apps/customers/views.py:435 apps/customers/views.py:464
 #: apps/customers/views.py:493
-#| msgid "Error loading products. Please try again."
 msgid "Too many requests. Please wait and try again."
 msgstr "Prea multe solicitări. Vă rugăm să așteptați și să încercați din nou."
 
 #: apps/customers/views.py:119
-#| msgid "Could not load account information. Please try again later."
 msgid "Could not load team members. Please try again."
 msgstr "Membrii echipei nu au putut fi încărcați. Încercați din nou."
 
@@ -775,102 +685,78 @@ msgstr "Membrii echipei nu au putut fi încărcați. Încercați din nou."
 msgid "Invite Team Member"
 msgstr "Invitați un membru al echipei"
 
-#. AI-generated
 #: apps/customers/views.py:160
-#| msgid "Reply added successfully."
 msgid "Team member invited successfully."
 msgstr "Membrul echipei a fost invitat cu succes."
 
 #: apps/customers/views.py:163 apps/customers/views.py:169
-#| msgid "Failed to initialize MFA setup. Please try again."
 msgid "Could not invite team member. Please try again."
 msgstr "Membrul echipei nu a putut fi invitat. Încercați din nou."
 
 #: apps/customers/views.py:187
-#| msgid "Reply text is required."
 msgid "Role is required."
 msgstr "Rolul este obligatoriu."
 
 #: apps/customers/views.py:202
-#| msgid "Profile updated successfully!"
 msgid "Role updated successfully."
 msgstr "Rolul a fost actualizat cu succes."
 
 #: apps/customers/views.py:205 apps/customers/views.py:211
-#| msgid "Error updating profile. Please try again."
 msgid "Could not update role. Please try again."
 msgstr "Rolul nu a putut fi actualizat. Încercați din nou."
 
-#. AI-generated
 #: apps/customers/views.py:232
-#| msgid "Order confirmed successfully!"
 msgid "Team member removed successfully."
 msgstr "Membrul echipei a fost eliminat cu succes."
 
 #: apps/customers/views.py:235 apps/customers/views.py:241
-#| msgid "Failed to create export request. Please try again."
 msgid "Could not remove team member. Please try again."
 msgstr "Membrul echipei nu a putut fi eliminat. Încercați din nou."
 
-#. AI-generated
 #: apps/customers/views.py:277
-#| msgid "Profile updated successfully!"
 msgid "Tax profile updated successfully."
 msgstr "Profilul fiscal a fost actualizat cu succes."
 
 #: apps/customers/views.py:280 apps/customers/views.py:286
-#| msgid "Error updating profile. Please try again."
 msgid "Could not update tax profile. Please try again."
 msgstr "Profilul fiscal nu a putut fi actualizat. Încercați din nou."
 
 #: apps/customers/views.py:309
-#| msgid "Error loading company profile. Please try again."
 msgid "Could not load tax profile. Please try again."
 msgstr "Profilul fiscal nu a putut fi încărcat. Încercați din nou."
 
-#. AI-generated
 #: apps/customers/views.py:314 templates/customers/tax_profile.html:5
 #: templates/customers/tax_profile.html:11
 #: templates/users/company_profile.html:229
-#| msgid "Profile"
 msgid "Tax Profile"
 msgstr "Profil Fiscal"
 
 #: apps/customers/views.py:349
-#| msgid "Could not load account information. Please try again later."
 msgid "Could not load addresses. Please try again."
 msgstr "Adresele nu au putut fi încărcate. Încercați din nou."
 
 #: apps/customers/views.py:370 templates/customers/address_form.html:5
 #: templates/customers/address_form.html:11
 #: templates/customers/addresses.html:25 templates/customers/addresses.html:104
-#| msgid "Address"
 msgid "Add Address"
 msgstr "Adăugați adresă"
 
-#. AI-generated
 #: apps/customers/views.py:397
-#| msgid "Reply added successfully."
 msgid "Address added successfully."
 msgstr "Adresa a fost adăugată cu succes."
 
 #: apps/customers/views.py:400 apps/customers/views.py:406
-#| msgid "Unable to add reply. Please try again later."
 msgid "Could not add address. Please try again."
 msgstr "Adresa nu a putut fi adăugată. Încercați din nou."
 
-#. AI-generated
 #: apps/customers/views.py:429
-#| msgid "Reply added successfully."
 msgid "Address deleted successfully."
 msgstr "Adresa a fost ștearsă cu succes."
 
 #: apps/customers/views.py:432 apps/customers/views.py:438
-#| msgid "Failed to generate QR code. Please try again."
 msgid "Could not delete address. Please try again."
 msgstr "Adresa nu a putut fi ștearsă. Încercați din nou."
 
-#. AI-generated
 #: apps/customers/views.py:458
 msgid "Address set as primary."
 msgstr "Adresa a fost setată ca principală."
@@ -880,7 +766,6 @@ msgstr "Adresa a fost setată ca principală."
 msgid "Could not update address."
 msgstr "Adresa nu a putut fi actualizată."
 
-#. AI-generated
 #: apps/customers/views.py:487
 msgid "Address set as billing."
 msgstr "Adresa a fost setată ca adresă de facturare."
@@ -940,7 +825,7 @@ msgstr "Firmă din România fără număr de TVA - verificați profilul fiscal"
 msgid "VAT evidence missing for reverse charge; this order cannot be confirmed until the customer's VAT number is confirmed in VIES"
 msgstr "Lipsesc dovezile privind TVA pentru taxare inversă. Comanda nu poate fi confirmată până când codul de TVA al clientului nu este confirmat în VIES"
 
-#: apps/orders/security.py:98 apps/orders/views.py:344
+#: apps/orders/security.py:98 apps/orders/views.py:343
 msgid "Request is too large."
 msgstr "Cererea este prea mare."
 
@@ -956,14 +841,11 @@ msgstr "Cererea conține prea multe câmpuri."
 msgid "A field in the request is too long."
 msgstr "Un câmp din cerere este prea lung."
 
-#. AI-generated
 #: apps/orders/services.py:38 apps/orders/services.py:366
-#: apps/orders/services.py:660 apps/orders/views.py:676
-#| msgid "Service temporarily unavailable. Please try again later."
+#: apps/orders/services.py:660 apps/orders/views.py:675
 msgid "Current prices are unavailable. Please try again later."
 msgstr "Prețurile curente sunt indisponibile. Vă rugăm să încercați mai târziu."
 
-#. AI-generated
 #: apps/orders/services.py:43
 msgid "Your cart prices changed. Review and confirm the updated total. Reapply any coupon or gift-card codes."
 msgstr "Prețurile din coșul dvs. s-au schimbat. Verificați și confirmați totalul actualizat. Aplicați din nou orice coduri de cupon sau card cadou."
@@ -976,7 +858,6 @@ msgstr "Produsul nu este disponibil"
 msgid "This product requires a domain name"
 msgstr "Acest produs necesită un nume de domeniu"
 
-#. AI-generated
 #: apps/orders/services.py:404
 #, python-format
 msgid "Cart cannot contain more than %(max)s items"
@@ -991,7 +872,6 @@ msgstr "Produsul nu a fost găsit în coș"
 msgid "Error calculating totals"
 msgstr "Eroare la calcularea totalurilor"
 
-#. AI-generated
 #: apps/orders/services.py:739
 msgid "The order response is incomplete. Retry to check the original purchase."
 msgstr "Răspunsul comenzii este incomplet. Reîncercați pentru a verifica achiziția inițială."
@@ -1016,7 +896,6 @@ msgstr "Adresa de facturare completă"
 msgid "Contact email and phone number"
 msgstr "Adresa de email și numărul de telefon de contact"
 
-#. AI-generated
 #: apps/orders/services.py:949
 msgid "An offer changed. Review and confirm the updated checkout total."
 msgstr "O ofertă s-a schimbat. Verificați și confirmați totalul actualizat al plății."
@@ -1029,10 +908,8 @@ msgstr "Eroare la crearea comenzii"
 msgid "Quantity must be at least 1"
 msgstr "Cantitatea trebuie să fie cel puțin 1"
 
-#. AI-generated
 #: apps/orders/validators.py:71
 #, python-format
-#| msgid "Quantity cannot exceed 50"
 msgid "Quantity cannot exceed %(max)s"
 msgstr "Cantitatea nu poate depăși %(max)s"
 
@@ -1073,269 +950,251 @@ msgstr "Identificator produs prea lung"
 msgid "Notes cannot exceed 500 characters"
 msgstr "Notele nu pot depăși 500 de caractere"
 
-#. AI-generated
 #: apps/orders/validators.py:181
 msgid "Notes cannot contain HTML markup."
 msgstr "Notele nu pot conține marcaje HTML."
 
-#. AI-generated
 #: apps/orders/validators.py:185
-#| msgid "Notes contain invalid content"
 msgid "Notes contain invalid content."
 msgstr "Notele conțin conținut nevalid."
 
-#: apps/orders/views.py:79
+#: apps/orders/views.py:55
+msgid "Product Selection"
+msgstr "Selectarea produsului"
+
+#: apps/orders/views.py:56 templates/orders/cart_review.html:4
+#: templates/orders/cart_review.html:14
+msgid "Cart Review"
+msgstr "Revizuire coș"
+
+#: apps/orders/views.py:57 templates/orders/checkout.html:4
+#: templates/orders/checkout.html:14
+msgid "Checkout"
+msgstr "Plată"
+
+#: apps/orders/views.py:58 templates/services/service_request_action.html:287
+msgid "Confirmation"
+msgstr "Confirmare"
+
+#: apps/orders/views.py:78
 msgid "Request blocked by security policy."
 msgstr "Cererea a fost blocată de politica de securitate."
 
-#. AI-generated
-#: apps/orders/views.py:97 templates/orders/cart_review.html:38
+#: apps/orders/views.py:96 templates/orders/cart_review.html:38
 #: templates/orders/partials/cart_updated.html:27
 #: templates/orders/product_catalog.html:43
-#| msgid "Error creating order. Please try again."
 msgid "Something went wrong. Please try again."
 msgstr "Ceva nu a funcționat corect. Vă rugăm să încercați din nou."
 
-#: apps/orders/views.py:122 apps/orders/views.py:262
+#: apps/orders/views.py:121 apps/orders/views.py:261
 msgid "To place an order, you must be authenticated."
 msgstr "Pentru a plasa o comandă, trebuie să fiți autentificat."
 
-#: apps/orders/views.py:216
+#: apps/orders/views.py:215
 msgid "Cart version mismatch. Please refresh and try again."
 msgstr "Versiune coș incompatibilă. Vă rugăm reîncărcați și încercați din nou."
 
-#. AI-generated
-#: apps/orders/views.py:217
-#| msgid "Cart was modified. Please review and try again."
+#: apps/orders/views.py:216
 msgid "Your cart was updated. Please review and try again."
 msgstr "Coșul dvs. a fost actualizat. Vă rugăm să verificați și să încercați din nou."
 
-#. AI-generated
-#: apps/orders/views.py:254
-#| msgid "Your order has been registered and will be processed soon."
+#: apps/orders/views.py:253
 msgid "Your order is being processed."
 msgstr "Comanda dvs. se procesează."
 
-#: apps/orders/views.py:258
+#: apps/orders/views.py:257
 msgid "Cannot create order with empty cart."
 msgstr "Nu se poate crea o comandă cu un coș gol."
 
-#: apps/orders/views.py:275
-#| msgid "Invalid action requested."
+#: apps/orders/views.py:274
 msgid "Invalid payment method selected."
 msgstr "Metodă de plată selectată nevalidă."
 
-#: apps/orders/views.py:281
+#: apps/orders/views.py:280
 msgid "You must agree to the terms and conditions."
 msgstr "Trebuie să acceptați termenii și condițiile."
 
-#: apps/orders/views.py:350
-#| msgid "Invalid action requested."
+#: apps/orders/views.py:349
 msgid "Invalid request."
 msgstr "Cerere nevalidă."
 
-#. AI-generated
-#: apps/orders/views.py:379 apps/orders/views.py:469
-#| msgid "Order validation failed. Please check your information."
+#: apps/orders/views.py:378 apps/orders/views.py:468
 msgid "Your order is being processed. Please check your orders list."
 msgstr "Comanda dvs. se procesează. Vă rugăm să verificați lista comenzilor."
 
-#. AI-generated
-#: apps/orders/views.py:382
-#| msgid "Error loading products. Please try again."
+#: apps/orders/views.py:381
 msgid "Your order is being processed. Please wait a moment."
 msgstr "Comanda dvs. se procesează. Vă rugăm să așteptați un moment."
 
-#: apps/orders/views.py:409 apps/orders/views.py:1109
+#: apps/orders/views.py:408 apps/orders/views.py:1108
 msgid "We need more information to complete your order."
 msgstr "Avem nevoie de mai multe informații pentru a finaliza comanda dvs."
 
-#. AI-generated
-#: apps/orders/views.py:416
+#: apps/orders/views.py:415
 #, python-format
-#| msgid "Order validation failed: {}"
 msgid "Order validation failed: %s"
 msgstr "Validarea comenzii a eșuat: %s"
 
-#. AI-generated
-#: apps/orders/views.py:478
+#: apps/orders/views.py:477
 msgid "The order currency is unavailable. Please contact support."
 msgstr "Moneda comenzii nu este disponibilă. Contactați echipa de suport."
 
-#. AI-generated
-#: apps/orders/views.py:488
-#| msgid "Unable to submit service request. Please try again later."
+#: apps/orders/views.py:487
 msgid "Unable to process payment. Please contact support."
 msgstr "Nu am putut procesa plata. Contactați echipa de suport."
 
-#. AI-generated
-#: apps/orders/views.py:527
+#: apps/orders/views.py:526
 #, python-format
-#| msgid "Order #{} was created successfully and is ready for payment!"
 msgid "Order #%s was created successfully. Please complete bank transfer to activate it."
 msgstr "Comanda #%s a fost creată cu succes. Finalizați transferul bancar pentru a o activa."
 
-#: apps/orders/views.py:531
+#: apps/orders/views.py:530
 msgid "Please complete your payment to activate your order."
 msgstr "Vă rugăm completați plata pentru a activa comanda dumneavoastră."
 
-#. AI-generated
-#: apps/orders/views.py:535
+#: apps/orders/views.py:534
 #, python-format
-#| msgid "Order #{} was created successfully, but payment processing is temporarily unavailable."
 msgid "Order #%s was created successfully, but payment processing is temporarily unavailable."
 msgstr "Comanda #%s a fost creată cu succes, dar procesarea plății este temporar indisponibilă."
 
-#. AI-generated
-#: apps/orders/views.py:541
+#: apps/orders/views.py:540
 #, python-format
-#| msgid "Order #{} was created successfully! You can view it in your orders list."
 msgid "Order #%s was created successfully! You can view it in your orders list."
 msgstr "Comanda #%s a fost creată cu succes! O puteți vizualiza în lista de comenzi."
 
-#: apps/orders/views.py:561
+#: apps/orders/views.py:560
 msgid "Error creating order. Please try again."
 msgstr "Eroare la crearea comenzii. Vă rugăm încercați din nou."
 
-#: apps/orders/views.py:613
+#: apps/orders/views.py:612
 msgid "All Products"
 msgstr "Toate Produsele"
 
-#: apps/orders/views.py:614 apps/services/views.py:618
+#: apps/orders/views.py:613 apps/services/views.py:618
 msgid "Shared Hosting"
 msgstr "Găzduire partajată"
 
-#: apps/orders/views.py:615 apps/services/views.py:619
+#: apps/orders/views.py:614 apps/services/views.py:619
 msgid "VPS Hosting"
 msgstr "Găzduire VPS"
 
-#: apps/orders/views.py:616
+#: apps/orders/views.py:615
 msgid "Dedicated Server"
 msgstr "Server dedicat"
 
-#: apps/orders/views.py:617 templates/components/service_detail_tabs.html:28
+#: apps/orders/views.py:616 templates/components/service_detail_tabs.html:28
 msgid "Domains"
 msgstr "Domenii"
 
-#: apps/orders/views.py:618
+#: apps/orders/views.py:617
 msgid "SSL Certificates"
 msgstr "Certificate SSL"
 
-#: apps/orders/views.py:619
+#: apps/orders/views.py:618
 msgid "Email Hosting"
 msgstr "Găzduire Email"
 
-#: apps/orders/views.py:643
+#: apps/orders/views.py:642
 msgid "Error loading products. Please try again."
 msgstr "Eroare la încărcarea produselor. Vă rugăm încercați din nou."
 
-#: apps/orders/views.py:668 apps/orders/views.py:713
+#: apps/orders/views.py:667 apps/orders/views.py:712
 msgid "Product not found."
 msgstr "Produsul nu a fost găsit."
 
-#: apps/orders/views.py:682 templates/orders/product_catalog.html:92
+#: apps/orders/views.py:681 templates/orders/product_catalog.html:92
 #: templates/services/plans_list.html:111
 #: templates/services/service_detail.html:115
 #: templates/services/service_detail.html:118
 msgid "Monthly"
 msgstr "Lunar"
 
-#. AI-generated
-#: apps/orders/views.py:683
-#| msgid "per month"
+#: apps/orders/views.py:682
 msgid "Every six months"
 msgstr "La fiecare șase luni"
 
-#. AI-generated
-#: apps/orders/views.py:684 templates/orders/product_catalog.html:99
+#: apps/orders/views.py:683 templates/orders/product_catalog.html:99
 #: templates/services/plans_list.html:132
 msgid "Annual"
 msgstr "Anual"
 
-#: apps/orders/views.py:752 apps/orders/views.py:756
+#: apps/orders/views.py:751 apps/orders/views.py:755
 msgid "Invalid price seal"
 msgstr "Sigiliu de preț nevalid"
 
-#: apps/orders/views.py:806
+#: apps/orders/views.py:805
 msgid "Product added to cart successfully!"
 msgstr "Produs adăugat în coș cu succes!"
 
-#: apps/orders/views.py:818
+#: apps/orders/views.py:817
 msgid "Product is currently not available for purchase."
 msgstr "Produsul nu este disponibil momentan pentru achiziție."
 
-#: apps/orders/views.py:836
+#: apps/orders/views.py:835
 msgid "Error adding to cart. Please try again."
 msgstr "Eroare la adăugarea în coș. Vă rugăm încercați din nou."
 
-#: apps/orders/views.py:891
-#| msgid "Invalid quantity"
+#: apps/orders/views.py:890
 msgid "Invalid quantity value."
 msgstr "Valoare nevalidă pentru cantitate."
 
-#: apps/orders/views.py:894
+#: apps/orders/views.py:893
 msgid "Error updating cart."
 msgstr "Eroare la actualizarea coșului."
 
-#: apps/orders/views.py:941
+#: apps/orders/views.py:940
 msgid "Product removed from cart!"
 msgstr "Produs eliminat din coș!"
 
-#: apps/orders/views.py:950
+#: apps/orders/views.py:949
 msgid "Error removing from cart."
 msgstr "Eroare la eliminarea din coș."
 
-#: apps/orders/views.py:963
+#: apps/orders/views.py:962
 msgid "Your cart is empty."
 msgstr "Coșul dumneavoastră este gol."
 
-#: apps/orders/views.py:1070
+#: apps/orders/views.py:1069
 msgid "Cannot proceed with empty cart."
 msgstr "Nu se poate continua cu un coș gol."
 
-#: apps/orders/views.py:1112
+#: apps/orders/views.py:1111
 msgid "Error calculating order totals."
 msgstr "Eroare la calcularea totalurilor comenzii."
 
-#. AI-generated
-#: apps/orders/views.py:1150
+#: apps/orders/views.py:1149
 msgid "Enter at most five coupon codes, separated by commas."
 msgstr "Introduceți cel mult cinci coduri de cupon, separate prin virgule."
 
-#: apps/orders/views.py:1157
+#: apps/orders/views.py:1156
 msgid "Enter a valid gift-card code."
 msgstr "Introduceți un cod valid de card cadou."
 
-#. AI-generated
-#: apps/orders/views.py:1170
+#: apps/orders/views.py:1169
 msgid "The coupon or gift card could not be applied. Check its eligibility and try again."
 msgstr "Cuponul sau cardul cadou nu a putut fi aplicat. Verificați eligibilitatea și încercați din nou."
 
-#. AI-generated
-#: apps/orders/views.py:1172
+#: apps/orders/views.py:1171
 msgid "Review the updated total before placing your order."
 msgstr "Verificați totalul actualizat înainte de a plasa comanda."
 
-#: apps/orders/views.py:1225
-#| msgid "Invalid product identifier"
+#: apps/orders/views.py:1224
 msgid "Invalid order identifier."
 msgstr "Identificator de comandă nevalid."
 
-#: apps/orders/views.py:1244
+#: apps/orders/views.py:1243
 msgid "Order not found."
 msgstr "Comanda nu a fost găsită."
 
-#: apps/orders/views.py:1295
+#: apps/orders/views.py:1294
 msgid "Error loading order details."
 msgstr "Eroare la încărcarea detaliilor comenzii."
 
-#. AI-generated
-#: apps/orders/views.py:1405
+#: apps/orders/views.py:1404
 msgid "Unauthorized"
 msgstr "Neautorizat"
 
-#. AI-generated
-#: apps/orders/views.py:1431
+#: apps/orders/views.py:1430
 msgid "Webhook processing failed"
 msgstr "Procesarea webhook-ului a eșuat"
 
@@ -1383,14 +1242,11 @@ msgstr "Provizionare"
 msgid "Suspended"
 msgstr "Suspendat"
 
-#. AI-generated
 #: apps/services/views.py:81
 msgid "Failed"
 msgstr "Eșuat"
 
-#. AI-generated
 #: apps/services/views.py:87
-#| msgid "Generated:"
 msgid "Terminated"
 msgstr "Terminat"
 
@@ -1409,7 +1265,6 @@ msgstr "Servicii"
 msgid "Manage your hosting services and resources"
 msgstr "Gestionați serviciile de găzduire și resursele dvs."
 
-#. AI-generated
 #: apps/services/views.py:185
 msgid "Search by name, domain, plan, status, price, IP, server…"
 msgstr "Căutați după nume, domeniu, plan, status, preț, IP, server…"
@@ -1434,7 +1289,6 @@ msgstr "Ultimele 90 de zile"
 msgid "Service not found or access denied."
 msgstr "Serviciu negăsit sau acces refuzat."
 
-#. AI-generated
 #: apps/services/views.py:414
 msgid "This request form has expired. Review the details and submit this form again."
 msgstr "Acest formular de cerere a expirat. Verificați detaliile și trimiteți formularul din nou."
@@ -1447,7 +1301,6 @@ msgstr "Acțiune solicitată nevalidă."
 msgid "Reason is required for this request."
 msgstr "Motivul este obligatoriu pentru această cerere."
 
-#. AI-generated
 #: apps/services/views.py:420
 msgid "The reason must contain no more than 4,000 characters."
 msgstr "Motivul trebuie să conțină cel mult 4.000 de caractere."
@@ -1465,18 +1318,14 @@ msgstr "Nu s-a putut trimite cererea de serviciu. Vă rugăm să încercați din
 msgid "Service request submitted. Ticket #%(number)s."
 msgstr "Cererea de serviciu a fost trimisă. Biletul #%(number)s."
 
-#. AI-generated
 #: apps/services/views.py:491
-#| msgid "Hosting & services"
 msgid "Hosting service"
 msgstr "Serviciu de găzduire"
 
-#. AI-generated
 #: apps/services/views.py:541
 msgid "You do not have permission to request service changes."
 msgstr "Nu aveți permisiunea să cereți modificări ale serviciului."
 
-#. AI-generated
 #: apps/services/views.py:557
 msgid "Requests are available for active or suspended services."
 msgstr "Cererile sunt disponibile pentru serviciile active sau suspendate."
@@ -1580,7 +1429,6 @@ msgstr "Critic"
 #: apps/tickets/views.py:189 apps/tickets/views.py:190
 #: apps/tickets/views.py:218 apps/tickets/views.py:219
 #: templates/tickets/ticket_list.html:5
-#| msgid "Ticket"
 msgid "Tickets"
 msgstr "Bilete"
 
@@ -1588,7 +1436,6 @@ msgstr "Bilete"
 msgid "Get help with your hosting services"
 msgstr "Obțineți ajutor cu serviciile dvs. de găzduire"
 
-#. AI-generated
 #: apps/tickets/views.py:192 apps/tickets/views.py:221
 msgid "Search by ticket number, subject, description, or status…"
 msgstr "Căutați după numărul biletului, subiect, descriere sau status…"
@@ -1626,9 +1473,7 @@ msgstr "Tichetul a fost creat, dar nu am putut să vă redirecționez la detalii
 msgid "Unable to create support ticket. Please try again later."
 msgstr "Nu s-a putut crea tichetul de suport. Vă rugăm să încercați din nou mai târziu."
 
-#. AI-generated
 #: apps/tickets/views.py:407
-#| msgid "Payment processing is temporarily unavailable."
 msgid "Attachment temporarily unavailable."
 msgstr "Atașamentul este temporar indisponibil."
 
@@ -1636,7 +1481,6 @@ msgstr "Atașamentul este temporar indisponibil."
 msgid "Reply text is required."
 msgstr "Textul răspunsului este obligatoriu."
 
-#. AI-generated
 #: apps/tickets/views.py:441
 msgid "Attach at most 5 files, totaling at most 1 MiB."
 msgstr "Atașați cel mult 5 fișiere, în total cel mult 1 MiB."
@@ -1664,18 +1508,14 @@ msgstr "Nu există date disponibile."
 
 #: apps/ui/templatetags/ui_components.py:877
 #: apps/ui/templatetags/ui_components.py:878
-#| msgid "Not specified"
 msgid "Not Consented"
 msgstr "Fără consimțământ"
 
-#. AI-generated
 #: apps/ui/templatetags/ui_components.py:880
-#| msgid "Continue to Payment"
 msgid "Awaiting Payment"
 msgstr "În așteptarea plății"
 
 #: apps/ui/templatetags/ui_components.py:881
-#| msgid "Cart Review"
 msgid "Under Review"
 msgstr "În curs de revizuire"
 
@@ -1702,14 +1542,11 @@ msgstr "Parolă"
 msgid "Your password"
 msgstr "Parola dvs."
 
-#. AI-generated
 #: apps/users/forms.py:75 apps/users/forms.py:629
-#| msgid "Authentication required"
 msgid "Authenticator or recovery code"
 msgstr "Cod de autentificare sau cod de recuperare"
 
 #: apps/users/forms.py:78 apps/users/forms.py:632
-#| msgid "Two-factor authentication has been disabled."
 msgid "Required only when two-factor authentication is enabled."
 msgstr "Necesar doar atunci când autentificarea cu doi factori este activată."
 
@@ -1916,9 +1753,7 @@ msgstr "Limba Preferată"
 msgid "Timezone"
 msgstr "Fus orar"
 
-#. AI-generated
 #: apps/users/forms.py:488
-#| msgid "Staff date format"
 msgid "Date format"
 msgstr "Format dată"
 
@@ -2223,9 +2058,7 @@ msgstr "Numărul de telefon trebuie să înceapă cu un prefix românesc valid"
 msgid "Trade registry number is recommended when VAT number is provided"
 msgstr "Numărul din registrul comerțului este recomandat atunci când este furnizat numărul de TVA"
 
-#. AI-generated
 #: apps/users/forms.py:1049
-#| msgid "Current Password"
 msgid "Current password"
 msgstr "Parola actuală"
 
@@ -2247,7 +2080,6 @@ msgstr "A apărut o eroare. Vă rugăm să încercați din nou."
 msgid "Please enter the verification code."
 msgstr "Vă rugăm să introduceți codul de verificare."
 
-#. AI-generated
 #: apps/users/views.py:188
 msgid "Finish setup with the 6-digit code."
 msgstr "Finalizați configurarea cu codul de 6 cifre."
@@ -2277,10 +2109,8 @@ msgstr "Adresă de email sau parolă invalidă. Vă rugăm să încercați din n
 msgid "Authentication service is temporarily unavailable. Please try again later."
 msgstr "Serviciul de autentificare este temporar indisponibil. Vă rugăm să încercați mai târziu."
 
-#. AI-generated
 #: apps/users/views.py:390
 #, python-format
-#| msgid "Too many authentication attempts. Please try again in 15 minutes."
 msgid "Too many login attempts. Please try again in %(seconds)s seconds."
 msgstr "Prea multe încercări de autentificare. Încercați din nou în %(seconds)s secunde."
 
@@ -2324,20 +2154,15 @@ msgstr "Profil actualizat cu succes!"
 msgid "Error updating profile. Please try again."
 msgstr "Eroare la actualizarea profilului. Vă rugăm să încercați din nou."
 
-#. AI-generated
 #: apps/users/views.py:689
-#| msgid "If an account with that email exists, you will receive password reset instructions."
 msgid "If an eligible account exists and email delivery is available, you will receive password reset instructions."
 msgstr "Dacă există un cont eligibil și livrarea e-mailului este disponibilă, veți primi instrucțiuni de resetare a parolei."
 
-#. AI-generated
 #: apps/users/views.py:703 apps/users/views.py:777
-#| msgid "Service temporarily unavailable. Please try again later."
 msgid "Password recovery is temporarily unavailable. Please try again later."
 msgstr "Recuperarea parolei nu este disponibilă temporar. Încercați din nou mai târziu."
 
 #: apps/users/views.py:720
-#| msgid "Registration failed. Please check your information and try again."
 msgid "Please check your new password and try again."
 msgstr "Verificați noua parolă și încercați din nou."
 
@@ -2349,21 +2174,16 @@ msgstr "Parola a fost resetată cu succes. Autentificați-vă cu noua parolă."
 msgid "Password changed successfully!"
 msgstr "Parola a fost schimbată cu succes!"
 
-#. AI-generated
 #: apps/users/views.py:816
 msgid "Password change failed. Check your current password and authentication code."
 msgstr "Schimbarea parolei a eșuat. Verificați parola actuală și codul de autentificare."
 
-#. AI-generated
 #: apps/users/views.py:821
 #, python-format
-#| msgid "Too many authentication attempts. Please try again in 15 minutes."
 msgid "Too many attempts. Please try again in %(seconds)s seconds."
 msgstr "Prea multe încercări. Încercați din nou în %(seconds)s secunde."
 
-#. AI-generated
 #: apps/users/views.py:825
-#| msgid "Search failed. Please try again."
 msgid "Password change failed. Please try again."
 msgstr "Schimbarea parolei a eșuat. Încercați din nou."
 
@@ -2566,9 +2386,7 @@ msgstr "Dvs. nu\\"
 msgid "Sign In"
 msgstr "Conectare"
 
-#. AI-generated
 #: templates/403.html:83 templates/404.html:62 templates/500.html:82
-#| msgid "🏠 Go to Dashboard"
 msgid "Go to Dashboard"
 msgstr "Accesați Panoul de control"
 
@@ -2604,9 +2422,7 @@ msgstr "Oops! Serverul nostru are o zi grea și are nevoie de o pauză de cafea.
 msgid "Something went wrong on our end, but don\\"
 msgstr "Ceva nu a funcționat la noi, dar nu\\"
 
-#. AI-generated
 #: templates/500.html:81
-#| msgid "Try again"
 msgid "Try Again"
 msgstr "Încercați din nou"
 
@@ -2629,9 +2445,7 @@ msgstr "Panou de control"
 msgid "My Tickets"
 msgstr "Biletele mele"
 
-#. AI-generated
 #: templates/base.html:101
-#| msgid "Account"
 msgid "My Account"
 msgstr "Contul meu"
 
@@ -2662,21 +2476,16 @@ msgstr "Politica de cookie-uri"
 msgid "Cookie Preferences"
 msgstr "Preferințe cookie-uri"
 
-#. AI-generated
 #: templates/billing/gift_card_detail.html:4
 #: templates/billing/gift_card_detail.html:8
 msgid "Gift card purchase"
 msgstr "Achiziție de card cadou"
 
-#. AI-generated
 #: templates/billing/gift_card_detail.html:16
-#| msgid "Payment Date"
 msgid "Payment status"
 msgstr "Starea plății"
 
-#. AI-generated
 #: templates/billing/gift_card_detail.html:16
-#| msgid "Overview"
 msgid "Needs review"
 msgstr "Necesită revizuire"
 
@@ -2685,18 +2494,14 @@ msgstr "Necesită revizuire"
 msgid "Processing"
 msgstr "Se procesează"
 
-#. AI-generated
 #: templates/billing/gift_card_detail.html:17
-#| msgid "Overview & status"
 msgid "Delivery status"
 msgstr "Starea livrării"
 
-#. AI-generated
 #: templates/billing/gift_card_detail.html:18
 msgid "Recipient"
 msgstr "Destinatar"
 
-#. AI-generated
 #: templates/billing/gift_card_detail.html:19
 msgid "Purchased"
 msgstr "Achiziționat"
@@ -2705,46 +2510,35 @@ msgstr "Achiziționat"
 msgid "Spending is frozen while the funding payment is reviewed."
 msgstr "Cheltuirea este blocată cât timp plata de finanțare este în curs de verificare."
 
-#. AI-generated
 #: templates/billing/gift_card_detail.html:25
-#| msgid "Available Plans"
 msgid "Available balance"
 msgstr "Sold disponibil"
 
-#. AI-generated
 #: templates/billing/gift_card_detail.html:26
 msgid "Recorded balance"
 msgstr "Sold înregistrat"
 
-#. AI-generated
 #: templates/billing/gift_card_detail.html:27
 msgid "Held for refunds"
 msgstr "Reținut pentru rambursări"
 
-#. AI-generated
 #: templates/billing/gift_card_detail.html:28
-#| msgid "Required for service"
 msgid "Reserved for orders"
 msgstr "Rezervat pentru comenzi"
 
-#. AI-generated
 #: templates/billing/gift_card_detail.html:30
 msgid "The gift card becomes usable after payment is confirmed."
 msgstr "Cardul cadou devine utilizabil după confirmarea plății."
 
-#. AI-generated
 #: templates/billing/gift_card_detail.html:33
-#| msgid "This ticket is closed. No new replies can be added."
 msgid "This payment is closed. This purchase cannot be paid again."
 msgstr "Această plată este închisă. Această achiziție nu poate fi plătită din nou."
 
-#. AI-generated
 #: templates/billing/gift_card_detail.html:34
 #: templates/billing/gift_cards.html:42
 msgid "Start a new purchase"
 msgstr "Începeți o nouă achiziție"
 
-#. AI-generated
 #: templates/billing/gift_card_detail.html:36
 msgid "This payment needs review. Contact support before attempting another charge."
 msgstr "Această plată necesită revizuire. Contactați suportul înainte de a încerca o altă plată."
@@ -2754,20 +2548,15 @@ msgstr "Această plată necesită revizuire. Contactați suportul înainte de a 
 msgid "IBAN"
 msgstr "IBAN"
 
-#. AI-generated
 #: templates/billing/gift_card_detail.html:48
 msgid "SWIFT"
 msgstr "SWIFT"
 
-#. AI-generated
 #: templates/billing/gift_card_detail.html:49
-#| msgid "Base Amount"
 msgid "Transfer amount"
 msgstr "Suma transferului"
 
-#. AI-generated
 #: templates/billing/gift_card_detail.html:50
-#| msgid "Save Preferences"
 msgid "Payment reference"
 msgstr "Referință plată"
 
@@ -2775,7 +2564,6 @@ msgstr "Referință plată"
 msgid "Bank instructions for this currency are unavailable. Contact support before transferring funds."
 msgstr "Instrucțiunile bancare pentru această valută nu sunt disponibile. Contactați suportul înainte de a transfera fonduri."
 
-#. AI-generated
 #: templates/billing/gift_card_detail.html:58
 msgid "Pay by card"
 msgstr "Plătiți cu cardul"
@@ -2785,48 +2573,38 @@ msgstr "Plătiți cu cardul"
 msgid "Payment could not be confirmed. Check the purchase status before trying again."
 msgstr "Plata nu a putut fi confirmată. Verificați starea achiziției înainte de a încerca din nou."
 
-#. AI-generated
 #: templates/billing/gift_card_detail.html:71
-#| msgid "Confirmation"
 msgid "Confirm payment"
 msgstr "Confirmați plata"
 
-#. AI-generated
 #: templates/billing/gift_card_detail.html:78
 msgid "Check payment status"
 msgstr "Verificați starea plății"
 
-#. AI-generated
 #: templates/billing/gift_card_detail.html:83
 msgid "Delivery is queued. It can take a few minutes."
 msgstr "Livrarea este în coadă. Poate dura câteva minute."
 
-#. AI-generated
 #: templates/billing/gift_card_detail.html:85
 msgid "Sending again is available after"
 msgstr "Retrimiterea este disponibilă după"
 
-#. AI-generated
 #: templates/billing/gift_card_detail.html:91
 msgid "Voucher"
 msgstr "Voucher"
 
-#. AI-generated
 #: templates/billing/gift_card_detail.html:91
 msgid "Buyer receipt"
 msgstr "Chitanța cumpărătorului"
 
-#. AI-generated
 #: templates/billing/gift_card_detail.html:93
 msgid "Another delivery attempt is scheduled."
 msgstr "O altă încercare de livrare este programată."
 
-#. AI-generated
 #: templates/billing/gift_card_detail.html:94
 msgid "Contact support if delivery is still unavailable after trying again."
 msgstr "Contactați suportul dacă livrarea nu este disponibilă nici după o nouă încercare."
 
-#. AI-generated
 #: templates/billing/gift_card_detail.html:102
 msgid "Gift card code"
 msgstr "Cod card cadou"
@@ -2836,7 +2614,6 @@ msgstr "Cod card cadou"
 msgid "Anyone with the code can use its balance. Keep it private and share it only with your recipient."
 msgstr "Oricine are codul poate folosi soldul acestuia. Păstrați-l privat și transmiteți-l doar destinatarului dvs."
 
-#. AI-generated
 #: templates/billing/gift_card_detail.html:109
 msgid "Reveal code"
 msgstr "Afișați codul"
@@ -2845,30 +2622,24 @@ msgstr "Afișați codul"
 msgid "Send code again"
 msgstr "Trimiteți din nou codul"
 
-#. AI-generated
 #: templates/billing/gift_card_detail.html:121
 msgid "Sending again uses the same code. Email delivery can take a few minutes."
 msgstr "Retrimiterea folosește același cod. Livrarea prin e-mail poate dura câteva minute."
 
-#. AI-generated
 #: templates/billing/gift_card_detail.html:125
-#| msgid "Back to cart"
 msgid "Back to gift cards"
 msgstr "Înapoi la carduri cadou"
 
-#. AI-generated
 #: templates/billing/gift_cards.html:4 templates/billing/gift_cards.html:9
 #: templates/billing/partials/section_tabs.html:4
 #: templates/orders/product_catalog.html:62
 msgid "Gift cards"
 msgstr "Carduri cadou"
 
-#. AI-generated
 #: templates/billing/gift_cards.html:10
 msgid "Buy hosting credit for yourself or send it as a gift."
 msgstr "Cumpărați credit de găzduire pentru dvs. sau trimiteți-l ca cadou."
 
-#. AI-generated
 #: templates/billing/gift_cards.html:19
 msgid "Buy a gift card"
 msgstr "Cumpărați un card cadou"
@@ -2881,9 +2652,7 @@ msgstr "Plătiți cu cardul sau prin transfer bancar. Cupoanele și soldurile ca
 msgid "For personal use, we send the code to your account email after payment is confirmed."
 msgstr "Pentru uz personal, vă trimitem codul la adresa de e-mail a contului dvs. după confirmarea plății."
 
-#. AI-generated
 #: templates/billing/gift_cards.html:40
-#| msgid "Continue to Payment"
 msgid "Continue to payment"
 msgstr "Continuați la plată"
 
@@ -2891,18 +2660,14 @@ msgstr "Continuați la plată"
 msgid "New gift card purchases are currently unavailable. Your existing purchases remain accessible below."
 msgstr "Achizițiile de carduri cadou noi sunt indisponibile momentan. Achizițiile dvs. existente rămân accesibile mai jos."
 
-#. AI-generated
 #: templates/billing/gift_cards.html:50
-#| msgid "Your password"
 msgid "Your purchases"
 msgstr "Achizițiile dvs."
 
-#. AI-generated
 #: templates/billing/gift_cards.html:60
 msgid "Gift for"
 msgstr "Cadou pentru"
 
-#. AI-generated
 #: templates/billing/gift_cards.html:61
 msgid "Delivery"
 msgstr "Livrare"
@@ -2911,7 +2676,6 @@ msgstr "Livrare"
 msgid "You have no gift card purchases yet."
 msgstr "Nu aveți încă nicio achiziție de card cadou."
 
-#. AI-generated
 #: templates/billing/gift_cards.html:67
 msgid "Purchase history pages"
 msgstr "Pagini cu istoricul achizițiilor"
@@ -2990,9 +2754,7 @@ msgstr "Data plății"
 msgid "Not paid"
 msgstr "Neplătită"
 
-#. AI-generated
 #: templates/billing/invoice_detail.html:104
-#| msgid "Proforma"
 msgid "From Proforma"
 msgstr "Din Proformă"
 
@@ -3090,9 +2852,7 @@ msgstr "Includeți detalii cum ar fi ce s-a întâmplat, când s-a produs proble
 msgid "What happens next?"
 msgstr "Ce se întâmplă mai departe?"
 
-#. AI-generated
 #: templates/billing/invoice_detail.html:304
-#| msgid "We will create a support ticket for your refund request and our billing team will review it within 1-2 business days."
 msgid "Your refund request will be submitted for processing. Our billing team will review and confirm within 1-2 business days."
 msgstr "Cererea dvs. de rambursare va fi înregistrată pentru procesare. Echipa noastră de facturare o va revizui și confirma în 1-2 zile de lucru."
 
@@ -3120,9 +2880,7 @@ msgstr "Trimiteți cererea"
 msgid "Please fill in all required fields."
 msgstr "Completați toate câmpurile obligatorii."
 
-#. AI-generated
 #: templates/billing/invoice_detail.html:333
-#| msgid "Submit a refund request for this invoice. Our billing team will review your request and contact you."
 msgid "Submit refund request? Our billing team will review your request."
 msgstr "Trimiteți cererea de rambursare? Echipa noastră de facturare va revizui cererea dvs."
 
@@ -3131,7 +2889,6 @@ msgid "Submitting..."
 msgstr "Se trimite..."
 
 #: templates/billing/invoice_detail.html:362
-#| msgid "Data export request submitted successfully. You will receive an email with download instructions within 48 hours."
 msgid "Refund request submitted successfully! Our billing team will review it shortly."
 msgstr "Cererea de rambursare a fost trimisă cu succes! Echipa noastră de facturare o va revizui în curând."
 
@@ -3163,69 +2920,53 @@ msgstr "Factura solicitată nu a putut fi găsită sau nu aveți\\"
 msgid "An error occurred while loading the invoice. Please try again or contact support if the problem persists."
 msgstr "A apărut o eroare la încărcarea facturii. Încercați din nou sau contactați asistența dacă problema persistă."
 
-#. AI-generated
 #: templates/billing/invoices_list.html:23
 #: templates/services/service_list.html:22
 #: templates/tickets/ticket_list.html:23
 msgid "Filtered results"
 msgstr "Rezultate filtrate"
 
-#. AI-generated
 #: templates/billing/partials/currency_balances.html:5
-#| msgid "Hosting Services"
 msgid "Outstanding invoices"
 msgstr "Facturi restante"
 
-#. AI-generated
 #: templates/billing/partials/currency_balances.html:9
 msgid "No outstanding invoice balance."
 msgstr "Nu aveți sold de factură restant."
 
-#. AI-generated
 #: templates/billing/partials/currency_balances.html:14
 msgid "Recorded credit"
 msgstr "Credit înregistrat"
 
-#. AI-generated
 #: templates/billing/partials/currency_balances.html:15
-#| msgid "Available Plans"
 msgid "Available credit"
 msgstr "Credit disponibil"
 
-#. AI-generated
 #: templates/billing/partials/currency_balances.html:20
 msgid "Historical credit requires review"
 msgstr "Creditul istoric necesită revizuire"
 
-#. AI-generated
 #: templates/billing/partials/currency_balances.html:22
-#| msgid "Country"
 msgid "Entry"
 msgstr "Înregistrare"
 
-#. AI-generated
 #: templates/billing/partials/currency_balances.html:22
-#| msgid "Product Unavailable"
 msgid "Currency unavailable"
 msgstr "Monedă indisponibilă"
 
-#. AI-generated
 #: templates/billing/partials/currency_balances.html:25
 msgid "Credit spending is on hold until these entries are reviewed."
 msgstr "Cheltuirea creditului este suspendată până la revizuirea acestor înregistrări."
 
-#. AI-generated
 #: templates/billing/partials/gift_card_payment.html:5
 msgid "Reserved gift-card payment"
 msgstr "Plată cu card cadou rezervată"
 
-#. AI-generated
 #: templates/billing/partials/gift_card_payment.html:6
 #: templates/orders/checkout.html:278
 msgid "Remaining to pay"
 msgstr "Rămas de plată"
 
-#. AI-generated
 #: templates/billing/partials/gift_card_payment.html:12
 msgid "Pay with a gift card"
 msgstr "Plătiți cu un card cadou"
@@ -3238,7 +2979,6 @@ msgstr "Folosiți soldul disponibil pentru acest document. Orice sumă rămasă 
 msgid "Apply gift-card balance"
 msgstr "Aplicați soldul cardului cadou"
 
-#. AI-generated
 #: templates/billing/partials/header_action.html:7
 msgid "Sync"
 msgstr "Sincronizare"
@@ -3267,14 +3007,11 @@ msgstr "Nu s-au găsit documente"
 msgid "No billing documents available for your account."
 msgstr "Nu sunt disponibile documente de facturare pentru contul dvs."
 
-#. AI-generated
 #: templates/billing/partials/invoices_table.html:172
 msgid "Browse Hosting Plans"
 msgstr "Răsfoiți planurile de găzduire"
 
-#. AI-generated
 #: templates/billing/partials/section_tabs.html:8
-#| msgid "Billing Questions"
 msgid "Billing sections"
 msgstr "Secțiuni de facturare"
 
@@ -3282,18 +3019,15 @@ msgstr "Secțiuni de facturare"
 msgid "Created on"
 msgstr "Creat la"
 
-#. AI-generated
 #: templates/billing/proforma_detail.html:45
 msgid "Converted to Invoice"
 msgstr "Convertit în factură"
 
-#. AI-generated
 #: templates/billing/proforma_detail.html:46
 msgid "This proforma has been paid and converted to an invoice."
 msgstr "Această proformă a fost plătită și convertită într-o factură."
 
 #: templates/billing/proforma_detail.html:51
-#| msgid "View Invoices"
 msgid "View Invoice"
 msgstr "Vizualizați factura"
 
@@ -3301,10 +3035,8 @@ msgstr "Vizualizați factura"
 msgid "Proforma Expired"
 msgstr "Proforma expirată"
 
-#. AI-generated
 #: templates/billing/proforma_detail.html:61
 #, python-format
-#| msgid "It can no longer be processed."
 msgid "This proforma expired on %(date)s. It can no longer be processed."
 msgstr "Această proformă a expirat pe %(date)s. Nu mai poate fi procesată."
 
@@ -3314,7 +3046,6 @@ msgstr "Proforma validă"
 
 #: templates/billing/proforma_detail.html:66
 #, python-format
-#| msgid "Please contact us to proceed with this quote."
 msgid "Valid until %(date)s. Please contact us to proceed with this quote."
 msgstr "Valabilă până la %(date)s. Vă rugăm să ne contactați pentru a continua cu această ofertă."
 
@@ -3442,13 +3173,10 @@ msgstr "A apărut o eroare la încărcarea proformei. Încercați din nou sau co
 msgid "Authorize a card once, then choose which subscriptions PRAHO may collect automatically."
 msgstr "Autorizați un card o singură dată, apoi alegeți ce abonamente poate încasa PRAHO automat."
 
-#. AI-generated
 #: templates/billing/recurring_payments.html:18
-#| msgid "Payment processing is temporarily unavailable."
 msgid "Automatic-payment settings are temporarily unavailable."
 msgstr "Setările de plată automată sunt temporar indisponibile."
 
-#. AI-generated
 #: templates/billing/recurring_payments.html:23
 msgid "Saved cards and authorization"
 msgstr "Carduri salvate și autorizare"
@@ -3458,7 +3186,6 @@ msgid "A card authorization is separate from each hosting subscription. You will
 msgstr "Autorizarea unui card este separată de fiecare abonament de găzduire. Nu va trebui să autorizați fiecare serviciu individual."
 
 #: templates/billing/recurring_payments.html:35
-#| msgid "Pending"
 msgid "Card ending"
 msgstr "Card terminat în"
 
@@ -3478,40 +3205,31 @@ msgstr "Autorizați acest card"
 msgid "No saved Stripe cards are available. Add a card during checkout first."
 msgstr "Nu sunt disponibile carduri Stripe salvate. Mai întâi, adăugați un card la finalizarea comenzii."
 
-#. AI-generated
 #: templates/billing/recurring_payments.html:58
-#| msgid "Version"
 msgid "Terms version"
 msgstr "Versiunea condițiilor"
 
-#. AI-generated
 #: templates/billing/recurring_payments.html:60
 msgid "I accept these recurring-payment terms"
 msgstr "Accept aceste condiții de plată recurentă"
 
-#. AI-generated
 #: templates/billing/recurring_payments.html:69
 msgid "Subscription enrollment"
 msgstr "Înscrierea la abonament"
 
-#. AI-generated
 #: templates/billing/recurring_payments.html:71
 msgid "Turning automatic payment off does not cancel the service. Service cancellation remains an independent action."
 msgstr "Dezactivarea plății automate nu anulează serviciul. Anularea serviciului rămâne o acțiune independentă."
 
-#. AI-generated
 #: templates/billing/recurring_payments.html:83
 msgid "Automatic payment authorization"
 msgstr "Autorizație de plată automată"
 
 #: templates/billing/recurring_payments.html:87
-#| msgid "No marketing cookies are currently in use."
 msgid "No recurring subscriptions are available."
 msgstr "Nu există abonamente recurente disponibile."
 
-#. AI-generated
 #: templates/billing/recurring_payments.html:95
-#| msgid "Request Refund"
 msgid "Request failed"
 msgstr "Solicitarea a eșuat"
 
@@ -3523,7 +3241,6 @@ msgstr "Vă rugăm să acceptați mai întâi condițiile de plată recurentă."
 msgid "Withdraw this card authorization and stop future automatic collection for all subscriptions using it?"
 msgstr "Retrageți autorizația acestui card și opriți încasarea automată viitoare pentru toate abonamentele care îl utilizează?"
 
-#. AI-generated
 #: templates/common/rate_limited.html:4
 #: templates/components/rate_limit_inline_alert.html:10
 msgid "Temporarily rate limited"
@@ -3734,25 +3451,20 @@ msgstr "Ajutor și suport"
 #: templates/components/mobile_header.html:117
 #: templates/dashboard/account_overview.html:34
 #: templates/users/profile.html:142 templates/users/profile.html:153
-#| msgid "Company:"
 msgid "Company"
 msgstr "Companie"
 
-#. AI-generated
 #: templates/components/mobile_header.html:128
 msgid "Business details & info"
 msgstr "Detalii și informații despre afacere"
 
-#. AI-generated
 #: templates/components/mobile_header.html:142
 #: templates/users/company_profile.html:219
 msgid "Manage access & roles"
 msgstr "Gestionați accesul și rolurile"
 
-#. AI-generated
 #: templates/components/mobile_header.html:156
 #: templates/users/company_profile.html:241
-#| msgid "Billing Question"
 msgid "Billing & shipping"
 msgstr "Facturare și livrare"
 
@@ -3764,9 +3476,7 @@ msgstr "Setări"
 msgid "Profile & preferences"
 msgstr "Profil și preferințe"
 
-#. AI-generated
 #: templates/components/mobile_header.html:198
-#| msgid "Your password"
 msgid "MFA & password"
 msgstr "MFA și parolă"
 
@@ -3783,7 +3493,6 @@ msgid "Pay"
 msgstr "Plătiți"
 
 #: templates/components/permission_denied_partial.html:10
-#| msgid "You don't have access to this customer."
 msgid "You do not have permission to perform this action."
 msgstr "Nu aveți permisiunea de a efectua această acțiune."
 
@@ -3799,87 +3508,64 @@ msgstr "Utilizare și performanță"
 msgid "Add a new billing or shipping address"
 msgstr "Adăugați o nouă adresă de facturare sau de livrare"
 
-#. AI-generated
 #: templates/customers/address_form.html:20
-#| msgid "Back to Services"
 msgid "Back to Addresses"
 msgstr "Înapoi la Adrese"
 
 #: templates/customers/address_form.html:24
-#| msgid "Access Details"
 msgid "Address Details"
 msgstr "Detalii adresă"
 
-#. AI-generated
 #: templates/customers/address_form.html:31
-#| msgid "Address"
 msgid "Address Role"
 msgstr "Rolul adresei"
 
 #: templates/customers/address_form.html:33
-#| msgid "Primary Email"
 msgid "Primary address"
 msgstr "Adresă principală"
 
 #: templates/customers/address_form.html:35
-#| msgid "Billing Address"
 msgid "Billing address"
 msgstr "Adresă de facturare"
 
-#. AI-generated
 #: templates/customers/address_form.html:42
-#| msgid "Company website (optional)"
 msgid "Label (optional)"
 msgstr "Etichetă (opțional)"
 
-#. AI-generated
 #: templates/customers/address_form.html:42
 msgid "e.g. Home, Office, Warehouse"
 msgstr "ex. Casă, Birou, Depozit"
 
-#. AI-generated
 #: templates/customers/address_form.html:48
-#| msgid "Strada Exemple nr. 123"
 msgid "Str. Exemplu nr. 1"
 msgstr "Str. Exemplu nr. 1"
 
-#. AI-generated
 #: templates/customers/address_form.html:54
-#| msgid "Address"
 msgid "Address Line 2"
 msgstr "Linia adresei 2"
 
 #: templates/customers/address_form.html:54
-#| msgid "Company website (optional)"
 msgid "Apartment, suite, floor (optional)"
 msgstr "Apartament, scară, etaj (opțional)"
 
-#. AI-generated
 #: templates/customers/address_form.html:88
-#| msgid "Street Address"
 msgid "Save Address"
 msgstr "Salvați adresa"
 
-#. AI-generated
 #: templates/customers/addresses.html:11
-#| msgid "View and manage your company information and billing details"
 msgid "Manage your company billing and shipping addresses"
 msgstr "Gestionați adresele de facturare și livrare ale companiei dvs."
 
-#. AI-generated
 #: templates/customers/addresses.html:20
 #: templates/customers/tax_profile.html:20 templates/customers/team.html:20
-#| msgid "Back to Company Profile"
 msgid "Back to Company"
 msgstr "Înapoi la companie"
 
 #: templates/customers/addresses.html:43
-#| msgid "Primary Email"
 msgid "Primary / Billing"
 msgstr "Principală / Facturare"
 
 #: templates/customers/addresses.html:44
-#| msgid "Primary Email"
 msgid "Primary"
 msgstr "Principală"
 
@@ -3892,7 +3578,6 @@ msgid "Make Primary"
 msgstr "Setați ca principală"
 
 #: templates/customers/addresses.html:78
-#| msgid "Next Billing"
 msgid "Make Billing"
 msgstr "Setați ca adresă de facturare"
 
@@ -3904,9 +3589,7 @@ msgstr "Sigur doriți să ștergeți această adresă?"
 msgid "Delete"
 msgstr "Ștergeți"
 
-#. AI-generated
 #: templates/customers/addresses.html:100
-#| msgid "No services yet"
 msgid "No addresses yet"
 msgstr "Nicio adresă încă"
 
@@ -3915,28 +3598,22 @@ msgid "Add billing or shipping addresses for your company."
 msgstr "Adăugați adrese de facturare sau livrare pentru compania dvs."
 
 #: templates/customers/tax_profile.html:11
-#| msgid "Manage your account settings and personal information"
 msgid "Manage your company tax and VAT information"
 msgstr "Gestionați informațiile fiscale și TVA ale companiei dvs."
 
 #: templates/customers/tax_profile.html:24
-#| msgid "Romanian VAT Details"
 msgid "Tax & VAT Details"
 msgstr "Detalii fiscale și TVA"
 
-#. AI-generated
 #: templates/customers/tax_profile.html:33
 msgid "CUI (Romanian Company ID)"
 msgstr "CUI (Cod Unic de Înregistrare)"
 
-#. AI-generated
 #: templates/customers/tax_profile.html:51
 #: templates/customers/tax_profile.html:94
-#| msgid "VAT Rate"
 msgid "VAT Payer"
 msgstr "Plătitor TVA"
 
-#. AI-generated
 #: templates/customers/tax_profile.html:52
 msgid "Check if your company is registered for VAT"
 msgstr "Verificați dacă compania dvs. este înregistrată pentru TVA"
@@ -3952,7 +3629,6 @@ msgid "Reverse charge requires VIES confirmation of the VAT number being invoice
 msgstr "Taxarea inversă necesită confirmarea VIES a numărului de TVA facturat."
 
 #: templates/customers/tax_profile.html:67
-#| msgid "Back to Profile"
 msgid "Save Tax Profile"
 msgstr "Salvați profilul fiscal"
 
@@ -3979,17 +3655,14 @@ msgid "Not specified"
 msgstr "Nespecificat"
 
 #: templates/customers/tax_profile.html:97
-#| msgid "ies"
 msgid "Yes"
 msgstr "Da"
 
 #: templates/customers/tax_profile.html:99
-#| msgid "None"
 msgid "No"
 msgstr "Nu"
 
 #: templates/customers/team.html:11
-#| msgid "Manage your hosting services and resources"
 msgid "Manage your team members and their roles"
 msgstr "Gestionați membrii echipei dvs. și rolurile acestora"
 
@@ -4010,7 +3683,6 @@ msgid "Role"
 msgstr "Rol"
 
 #: templates/customers/team.html:75
-#| msgid "Update now"
 msgid "Update"
 msgstr "Actualizați"
 
@@ -4023,7 +3695,6 @@ msgstr "Sigur doriți să eliminați acest membru al echipei?"
 msgid "Remove"
 msgstr "Eliminați"
 
-#. AI-generated
 #: templates/customers/team.html:96
 msgid "No team members yet"
 msgstr "Niciun membru al echipei încă"
@@ -4036,9 +3707,7 @@ msgstr "Invitați colegi să colaboreze la acest cont."
 msgid "Add a new member to your team"
 msgstr "Adăugați un membru nou în echipa dvs."
 
-#. AI-generated
 #: templates/customers/team_invite.html:20
-#| msgid "Back to cart"
 msgid "Back to Team"
 msgstr "Înapoi la Echipă"
 
@@ -4046,52 +3715,40 @@ msgstr "Înapoi la Echipă"
 msgid "New Team Member Details"
 msgstr "Detalii despre noul membru al echipei"
 
-#. AI-generated
 #: templates/customers/team_invite.html:31
-#| msgid "your@company.com"
 msgid "colleague@company.com"
 msgstr "colleague@company.com"
 
 #: templates/customers/team_invite.html:37
-#| msgid "First Name"
 msgid "First name"
 msgstr "Prenume"
 
 #: templates/customers/team_invite.html:43
-#| msgid "Last Name"
 msgid "Last name"
 msgstr "Nume de familie"
 
-#. AI-generated
 #: templates/customers/team_invite.html:54
 msgid "Read-only access"
 msgstr "Acces doar pentru citire"
 
-#. AI-generated
 #: templates/customers/team_invite.html:55
-#| msgid "Service Name"
 msgid "Service management"
 msgstr "Gestionarea serviciilor"
 
-#. AI-generated
 #: templates/customers/team_invite.html:56
-#| msgid "Billing Documents"
 msgid "Billing and invoices"
 msgstr "Facturare și facturi"
 
-#. AI-generated
 #: templates/customers/team_invite.html:57
 msgid "Full access"
 msgstr "Acces complet"
 
 #: templates/customers/team_invite.html:67
-#| msgid "Service activation"
 msgid "Send Invitation"
 msgstr "Trimiteți invitația"
 
 #: templates/dashboard/account_overview.html:5
 #: templates/dashboard/account_overview.html:16
-#| msgid "Account Security"
 msgid "Account Overview"
 msgstr "Prezentare generală a contului"
 
@@ -4100,25 +3757,19 @@ msgstr "Prezentare generală a contului"
 msgid "Platform service temporarily unavailable. Some features may be limited."
 msgstr "Serviciul platformei este temporar indisponibil. Unele funcții pot fi limitate."
 
-#. AI-generated
 #: templates/dashboard/account_overview.html:17
-#| msgid "Manage your account settings and personal information"
 msgid "View your account and customer information."
 msgstr "Vizualizați informațiile contului și clientului dvs."
 
 #: templates/dashboard/account_overview.html:22
-#| msgid "Account Settings"
 msgid "Account Details"
 msgstr "Detalii cont"
 
 #: templates/dashboard/account_overview.html:25
-#| msgid "Email:"
 msgid "Email"
 msgstr "Email"
 
-#. AI-generated
 #: templates/dashboard/account_overview.html:29
-#| msgid "Customer ID:"
 msgid "Customer ID"
 msgstr "ID Client"
 
@@ -4126,14 +3777,11 @@ msgstr "ID Client"
 msgid "Tax ID"
 msgstr "CUI"
 
-#. AI-generated
 #: templates/dashboard/account_overview.html:49
-#| msgid "Quick Actions"
 msgid "Quick Links"
 msgstr "Linkuri Rapide"
 
 #: templates/dashboard/account_overview.html:52
-#| msgid "Edit Company Profile"
 msgid "Edit Profile"
 msgstr "Editați profilul"
 
@@ -4145,13 +3793,11 @@ msgid "Change Password"
 msgstr "Schimbați parola"
 
 #: templates/dashboard/account_overview.html:58
-#| msgid "🏠 Back to dashboard"
 msgid "Back to Dashboard"
 msgstr "Înapoi la Panoul de control"
 
 #: templates/dashboard/dashboard.html:42
 #, python-format
-#| msgid "👋 Welcome %(name)s"
 msgid "Welcome %(name)s"
 msgstr "Bine ați venit, %(name)s"
 
@@ -4172,10 +3818,8 @@ msgstr "Tichetele mele deschise"
 msgid "Account Status"
 msgstr "Starea contului"
 
-#. AI-generated
 #: templates/dashboard/dashboard.html:62
 #: templates/services/service_detail.html:203
-#| msgid "Product Unavailable"
 msgid "Unavailable"
 msgstr "Indisponibil"
 
@@ -4193,12 +3837,10 @@ msgid "My Recent Invoices & Proformas"
 msgstr "Facturile și Proformele Mele Recente"
 
 #: templates/dashboard/dashboard.html:111
-#| msgid "Authentication service is temporarily unavailable. Please try again later."
 msgid "Billing data is temporarily rate limited. Please try again shortly."
 msgstr "Datele de facturare sunt limitate temporar din cauza numărului mare de solicitări. Vă rugăm să încercați din nou în curând."
 
 #: templates/dashboard/dashboard.html:114
-#| msgid "Payment processing is temporarily unavailable."
 msgid "Billing data is temporarily unavailable."
 msgstr "Datele de facturare sunt temporar indisponibile."
 
@@ -4216,12 +3858,10 @@ msgid "My Recent Tickets"
 msgstr "Tichetele mele recente"
 
 #: templates/dashboard/dashboard.html:168
-#| msgid "Service temporarily unavailable. Please try again later."
 msgid "Ticket data is temporarily rate limited. Please try again shortly."
 msgstr "Datele biletelor de suport sunt limitate temporar din cauza numărului mare de solicitări. Vă rugăm să reîncercați în scurt timp."
 
 #: templates/dashboard/dashboard.html:171
-#| msgid "Payment processing is temporarily unavailable."
 msgid "Ticket data is temporarily unavailable."
 msgstr "Datele biletelor de suport sunt temporar indisponibile."
 
@@ -4260,7 +3900,6 @@ msgstr "Număr TVA (CNP pentru persoane fizice)"
 msgid "Customer Since"
 msgstr "Client din"
 
-#. AI-generated
 #: templates/e2e/csp_violation_positive_control.html:5
 #: templates/e2e/csp_violation_positive_control.html:8
 msgid "CSP violation positive control"
@@ -4303,7 +3942,7 @@ msgstr ""
 
 #: templates/legal/cookie_policy.html:48
 msgid "Always Active"
-msgstr "Întotdeauna activ"
+msgstr "Întotdeauna active"
 
 #: templates/legal/cookie_policy.html:52
 msgid ""
@@ -4376,7 +4015,7 @@ msgstr "Identificator de urmărire a consimțământului anonim"
 #: templates/legal/cookie_policy.html:155
 #: templates/legal/cookie_policy.html:197
 msgid "Optional"
-msgstr "Opțional"
+msgstr "Opționale"
 
 #: templates/legal/cookie_policy.html:111
 msgid ""
@@ -4489,10 +4128,6 @@ msgstr ""
 "          Pentru orice întrebări cu privire la utilizarea modulelor cookie, vă rugăm să contactați Ofițerul nostru pentru protecția datelor la %(privacy_email)s.\n"
 "          "
 
-#: templates/orders/cart_review.html:4 templates/orders/cart_review.html:14
-msgid "Cart Review"
-msgstr "Revizuire coș"
-
 #: templates/orders/cart_review.html:15
 msgid "Review selected products and proceed to checkout"
 msgstr "Revizuiți produsele selectate și continuați la plată"
@@ -4509,10 +4144,6 @@ msgstr "Rezumatul comenzii"
 #: templates/orders/cart_review.html:56
 msgid "Price updated"
 msgstr "Preț actualizat"
-
-#: templates/orders/checkout.html:4 templates/orders/checkout.html:14
-msgid "Checkout"
-msgstr "Plată"
 
 #: templates/orders/checkout.html:15
 msgid "Final step - validate and create order ready for payment"
@@ -4612,7 +4243,6 @@ msgstr "Maxim 500 de caractere"
 msgid "Ordered products"
 msgstr "Produse comandate"
 
-#. AI-generated
 #: templates/orders/checkout.html:150
 msgid "excl. VAT"
 msgstr "excl. TVA"
@@ -4633,7 +4263,6 @@ msgstr "Prin continuare, confirmați că acceptați"
 msgid "terms and conditions"
 msgstr "termenii și condițiile"
 
-#. AI-generated
 #: templates/orders/checkout.html:180
 msgid "and"
 msgstr "și"
@@ -4650,7 +4279,6 @@ msgstr "serviciilor noastre de hosting."
 msgid "By requesting immediate service activation, you acknowledge and agree to waive the 14-day right of withdrawal once your service is provisioned, in accordance with EU Directive 2011/83/EU."
 msgstr "Prin solicitarea activării imediate a serviciului, recunoașteți și sunteți de acord să renunțați la dreptul de retragere de 14 zile odată ce serviciul este activat, în conformitate cu Directiva UE 2011/83/UE."
 
-#. AI-generated
 #: templates/orders/checkout.html:196
 msgid "Your order data will be retained for the duration required by Romanian fiscal law (minimum 10 years). For details, see our"
 msgstr "Datele comenzii dvs. vor fi reținute pentru durata prevăzută de legislația fiscală română (minim 10 ani). Pentru detalii, consultați"
@@ -4675,9 +4303,7 @@ msgstr "Creează comanda"
 msgid "Final summary"
 msgstr "Rezumat final"
 
-#. AI-generated
 #: templates/orders/checkout.html:239
-#| msgid "Copy code"
 msgid "Coupon codes"
 msgstr "Coduri cupon"
 
@@ -4690,7 +4316,6 @@ msgid "Use an existing balance toward this order. Clear the field to remove it."
 msgstr "Utilizați un sold existent pentru această comandă. Ștergeți conținutul câmpului pentru a-l elimina."
 
 #: templates/orders/checkout.html:241
-#| msgid "Update now"
 msgid "Update offers"
 msgstr "Actualizați ofertele"
 
@@ -4706,78 +4331,57 @@ msgid "Subtotal"
 msgstr "Subtotal"
 
 #: templates/orders/checkout.html:257
-#| msgid "Account"
 msgid "Discount"
 msgstr "Reducere"
 
-#. AI-generated
 #: templates/orders/checkout.html:277
 msgid "Gift-card payment"
 msgstr "Plată cu cardul cadou"
 
 #: templates/orders/checkout.html:306
-#| msgid "Error loading order details."
 msgid "Enter card details"
 msgstr "Introduceți datele cardului"
 
-#. AI-generated
 #: templates/orders/checkout.html:307
-#| msgid "Secure Payment"
 msgid "Secure Stripe payment form"
 msgstr "Formular de plată Stripe securizat"
 
-#. AI-generated
 #: templates/orders/checkout.html:321
-#| msgid "Confirmation"
 msgid "Instant confirmation"
 msgstr "Confirmare instantanee"
 
-#. AI-generated
 #: templates/orders/checkout.html:322
 msgid "Payment verified in seconds"
 msgstr "Plată verificată în secunde"
 
-#. AI-generated
 #: templates/orders/checkout.html:335
-#| msgid "Service Activated"
 msgid "Service activated immediately"
 msgstr "Serviciu activat imediat"
 
-#. AI-generated
 #: templates/orders/checkout.html:336
-#| msgid "Access Details"
 msgid "Access details sent by email"
 msgstr "Detaliile de acces trimise prin email"
 
-#. AI-generated
 #: templates/orders/checkout.html:363
-#| msgid "Order Confirmed"
 msgid "Order confirmed"
 msgstr "Comandă confirmată"
 
-#. AI-generated
 #: templates/orders/checkout.html:364
 msgid "Bank details sent to your email"
 msgstr "Coordonate bancare trimise la email-ul dvs."
 
-#. AI-generated
 #: templates/orders/checkout.html:378
-#| msgid "Secure Payment"
 msgid "Transfer payment"
 msgstr "Plată prin transfer"
 
-#. AI-generated
 #: templates/orders/checkout.html:379
 msgid "Use the reference number provided"
 msgstr "Utilizați numărul de referință furnizat"
 
-#. AI-generated
 #: templates/orders/checkout.html:392
-#| msgid "Service activation"
 msgid "Service activated within 24h"
 msgstr "Serviciu activat în 24 de ore"
 
-#. AI-generated
 #: templates/orders/checkout.html:393
 msgid "After payment is received"
 msgstr "După primirea plății"
@@ -4798,14 +4402,12 @@ msgstr "Vă rugăm completați informațiile profilului companiei dvs. înainte 
 msgid "Please select a payment method"
 msgstr "Vă rugăm selectați o metodă de plată"
 
-#. AI-generated
 #: templates/orders/checkout_recovery.html:4
 #: templates/orders/checkout_recovery.html:9
 #: templates/orders/checkout_recovery.html:18
 msgid "Check previous order"
 msgstr "Verificați comanda anterioară"
 
-#. AI-generated
 #: templates/orders/checkout_recovery.html:11
 msgid "Your previous order may have been accepted. Check it before placing another order."
 msgstr "Comanda dvs. anterioară ar putea fi deja acceptată. Verificați-o înainte de a plasa o altă comandă."
@@ -4824,7 +4426,6 @@ msgid "Awaiting your bank transfer"
 msgstr "În așteptarea transferului dvs. bancar"
 
 #: templates/orders/order_confirmation.html:20
-#| msgid "Please complete your payment to activate your order."
 msgid "Your order has been registered. Please complete your bank transfer to activate your services."
 msgstr "Comanda dvs. a fost înregistrată. Vă rugăm să efectuați transferul bancar pentru a activa serviciile."
 
@@ -4886,9 +4487,7 @@ msgstr "Conform PCI DSS"
 msgid "Romanian VAT compliance"
 msgstr "Conformitate cu legislația TVA din România"
 
-#. AI-generated
 #: templates/orders/order_confirmation.html:227
-#| msgid "Bank Transfer"
 msgid "Bank Transfer Instructions"
 msgstr "Instrucțiuni de transfer bancar"
 
@@ -4896,51 +4495,40 @@ msgstr "Instrucțiuni de transfer bancar"
 msgid "Use the details below to complete your bank transfer"
 msgstr "Utilizați detaliile de mai jos pentru a efectua transferul bancar"
 
-#. AI-generated
 #: templates/orders/order_confirmation.html:236
 msgid "Bank instructions are currently unavailable. Please contact support before making a transfer."
 msgstr "Instrucțiunile bancare nu sunt disponibile în acest moment. Vă rugăm să contactați suportul înainte de a efectua un transfer."
 
-#. AI-generated
 #: templates/orders/order_confirmation.html:243
 #: templates/orders/order_confirmation.html:263
 #: templates/users/mfa_setup_totp.html:110
 msgid "Copied!"
 msgstr "Copiat!"
 
-#. AI-generated
 #: templates/orders/order_confirmation.html:243
 msgid "Copy IBAN to clipboard"
 msgstr "Copiați IBAN în clipboard"
 
-#. AI-generated
 #: templates/orders/order_confirmation.html:251
 msgid "Bank"
 msgstr "Bancă"
 
-#. AI-generated
 #: templates/orders/order_confirmation.html:256
 msgid "Beneficiary"
 msgstr "Beneficiar"
 
-#. AI-generated
 #: templates/orders/order_confirmation.html:262
-#| msgid "Save Preferences"
 msgid "Payment Reference"
 msgstr "Referință de plată"
 
-#. AI-generated
 #: templates/orders/order_confirmation.html:263
 msgid "Copy reference to clipboard"
 msgstr "Copiați referința în clipboard"
 
-#. AI-generated
 #: templates/orders/order_confirmation.html:269
-#| msgid "Bank Transfer"
 msgid "Amount to Transfer"
 msgstr "Sumă de transferat"
 
-#. AI-generated
 #: templates/orders/order_confirmation.html:278
 msgid "Please include the payment reference in your bank transfer description. Your services will be activated within 24 hours of payment confirmation."
 msgstr "Vă rugăm să includeți referința de plată în descrierea transferului bancar. Serviciile dvs. vor fi activate în termen de 24 de ore de la confirmarea plății."
@@ -4993,14 +4581,11 @@ msgstr "Chat live pe site"
 msgid "Ticketing system in portal"
 msgstr "Sistemul de bilete în portal"
 
-#. AI-generated
 #: templates/orders/order_confirmation.html:359
-#| msgid "📦 Order other products"
 msgid "Order other products"
 msgstr "Comandați alte produse"
 
 #: templates/orders/order_confirmation.html:360
-#| msgid "🏠 Back to dashboard"
 msgid "Back to dashboard"
 msgstr "Înapoi la panoul de control"
 
@@ -5014,26 +4599,16 @@ msgstr "Un email de confirmare a fost trimis la"
 msgid "Your cart is empty"
 msgstr "Coșul dvs. este gol"
 
-#. AI-generated
 #: templates/orders/partials/cart_empty.html:12
 msgid "Add products to your cart to see the order summary."
 msgstr "Adăugați produse în coș pentru a vedea rezumatul comenzii."
 
 #: templates/orders/partials/cart_empty.html:15
-#| msgid "Explore Products"
 msgid "Browse Products"
 msgstr "Explorați produsele"
 
 #: templates/orders/partials/cart_items.html:8
 #, python-format
-#| msgid ""
-#| "\n"
-#| "        %(counter)s product\n"
-#| "      "
-#| msgid_plural ""
-#| "\n"
-#| "        %(counter)s products\n"
-#| "      "
 msgid ""
 "\n"
 "        %(counter)s product in cart\n"
@@ -5130,9 +4705,7 @@ msgstr[2] ""
 "        %(counter)s de produse\n"
 "      "
 
-#. AI-generated
 #: templates/orders/partials/mini_cart_content.html:50
-#| msgid "Explore products"
 msgid "... and more products"
 msgstr "... și mai multe produse"
 
@@ -5140,9 +4713,7 @@ msgstr "... și mai multe produse"
 msgid "View full cart"
 msgstr "Vizualizați coșul complet"
 
-#. AI-generated
 #: templates/orders/partials/mini_cart_content.html:62
-#| msgid "Checkout"
 msgid "Checkout now"
 msgstr "Finalizați comanda acum"
 
@@ -5183,19 +4754,15 @@ msgstr "Alegeți din gama noastră completă de servicii de găzduire"
 msgid "Shopping Cart"
 msgstr "Coșul de cumpărături"
 
-#. AI-generated
 #: templates/orders/product_catalog.html:63
 msgid "Hosting credit for yourself or someone else. View gift cards in Billing."
 msgstr "Credit de găzduire pentru dvs. sau pentru altcineva. Vizualizați cardurile cadou în Facturare."
 
-#. AI-generated
 #: templates/orders/product_catalog.html:100
 msgid "Save 20%"
 msgstr "Economisiți 20%"
 
-#. AI-generated
 #: templates/orders/product_catalog.html:113
-#| msgid "Most secure"
 msgid "Most Popular"
 msgstr "Cel mai popular"
 
@@ -5210,15 +4777,11 @@ msgstr "pe lună"
 msgid "setup fee"
 msgstr "taxă de configurare"
 
-#. AI-generated
 #: templates/orders/product_catalog.html:153
-#| msgid "12 Months"
 msgid "for 12 months"
 msgstr "pentru 12 luni"
 
-#. AI-generated
 #: templates/orders/product_catalog.html:186
-#| msgid "More pages"
 msgid "more features"
 msgstr "mai multe funcții"
 
@@ -5280,7 +4843,6 @@ msgstr[2] ""
 msgid "Review cart"
 msgstr "Revizuiți coșul"
 
-#. AI-generated
 #: templates/orders/product_detail.html:23
 msgid "Features"
 msgstr "Funcții"
@@ -5289,21 +4851,15 @@ msgstr "Funcții"
 msgid "mo"
 msgstr "lună"
 
-#. AI-generated
 #: templates/orders/product_detail.html:52
-#| msgid "Billing Records"
 msgid "Billing period"
 msgstr "Perioada de facturare"
 
-#. AI-generated
 #: templates/orders/product_detail.html:78
-#| msgid "Back to cart"
 msgid "Back to catalog"
 msgstr "Înapoi la catalog"
 
-#. AI-generated
 #: templates/services/partials/dashboard_widget.html:21
-#| msgid "Unable to load hosting services. Please try again later."
 msgid "Unable to load your services right now."
 msgstr "Nu se pot încărca serviciile dvs. în acest moment."
 
@@ -5312,7 +4868,6 @@ msgid "No services yet"
 msgstr "Niciun serviciu deocamdată"
 
 #: templates/services/partials/header_action.html:3
-#| msgid "🛒 Order Service"
 msgid "Order Service"
 msgstr "Comandați un serviciu"
 
@@ -5331,13 +4886,10 @@ msgstr "Plan"
 msgid "Price"
 msgstr "Preț"
 
-#. AI-generated
 #: templates/services/partials/services_table.html:109
-#| msgid "Hosting & services"
 msgid "No matching services"
 msgstr "Niciun serviciu nu se potrivește"
 
-#. AI-generated
 #: templates/services/partials/services_table.html:111
 #, python-format
 msgid "No services match \"%(query)s\"."
@@ -5345,40 +4897,31 @@ msgstr "Niciun serviciu nu se potrivește cu \"%(query)s\"."
 
 #: templates/services/partials/services_table.html:112
 #: templates/services/partials/services_table.html:118
-#| msgid "View Services"
 msgid "View all services"
 msgstr "Vedeți toate serviciile"
 
-#. AI-generated
 #: templates/services/partials/services_table.html:115
 #, python-format
-#| msgid "for hosting services."
 msgid "No %(status)s services"
 msgstr "Niciun serviciu %(status)s"
 
-#. AI-generated
 #: templates/services/partials/services_table.html:117
 msgid "You have no services with this status."
 msgstr "Nu aveți servicii cu acest statut."
 
 #: templates/services/partials/services_table.html:121
-#| msgid "No items found"
 msgid "No services found"
 msgstr "Nu s-au găsit servicii"
 
-#. AI-generated
 #: templates/services/partials/services_table.html:123
 msgid "Browse our hosting plans"
 msgstr "Răsfoiți planurile noastre de găzduire"
 
-#. AI-generated
 #: templates/services/partials/services_table.html:124
 msgid "to get started, or"
 msgstr "pentru a începe, sau"
 
-#. AI-generated
 #: templates/services/partials/services_table.html:125
-#| msgid "Get help from our support team"
 msgid "contact our support team"
 msgstr "contactați echipa noastră de suport"
 
@@ -5471,9 +5014,7 @@ msgstr "timp de activitate pentru"
 msgid "uptime"
 msgstr "timp de activitate"
 
-#. AI-generated
 #: templates/services/plans_list.html:4
-#| msgid "Service Plan"
 msgid "Service Plans"
 msgstr "Planuri de servicii"
 
@@ -5486,33 +5027,26 @@ msgstr "Planuri Disponibile"
 msgid "Upgrade or downgrade your hosting plan"
 msgstr "Faceți upgrade sau downgrade la planul dvs. de găzduire"
 
-#. AI-generated
 #: templates/services/plans_list.html:64
-#| msgid "Disk Space"
 msgid "disk space"
 msgstr "spațiu pe disc"
 
 #: templates/services/plans_list.html:71
-#| msgid "Bandwidth"
 msgid "bandwidth"
 msgstr "lățime de bandă"
 
 #: templates/services/plans_list.html:78
-#| msgid "Email Accounts"
 msgid "email accounts"
 msgstr "conturi de email"
 
-#. AI-generated
 #: templates/services/plans_list.html:92
 msgid "CPU cores"
 msgstr "nuclee CPU"
 
-#. AI-generated
 #: templates/services/plans_list.html:99
 msgid "RAM"
 msgstr "RAM"
 
-#. AI-generated
 #: templates/services/plans_list.html:120
 msgid "Quarterly"
 msgstr "Trimestrial"
@@ -5522,30 +5056,23 @@ msgstr "Trimestrial"
 msgid "Save"
 msgstr "Economisiți"
 
-#. AI-generated
 #: templates/services/plans_list.html:145
-#| msgid "setup fee"
 msgid "Setup fee:"
 msgstr "Taxă de configurare:"
 
 #: templates/services/plans_list.html:153
-#| msgid "Change Plan"
 msgid "Upgrade Plan"
 msgstr "Actualizare plan"
 
-#. AI-generated
 #: templates/services/plans_list.html:163
-#| msgid "No items available."
 msgid "No Plans Available"
 msgstr "Niciun plan disponibil"
 
 #: templates/services/plans_list.html:166
-#| msgid "No services found for the selected filter"
 msgid "No plans found for the selected type."
 msgstr "Nu a fost găsit niciun plan pentru tipul selectat."
 
 #: templates/services/plans_list.html:168
-#| msgid "No marketing cookies are currently in use."
 msgid "No hosting plans are currently available."
 msgstr "Momentan nu sunt disponibile planuri de găzduire."
 
@@ -5591,9 +5118,7 @@ msgstr "N/A"
 msgid "Next Bill"
 msgstr "Următoarea facturare"
 
-#. AI-generated
 #: templates/services/service_detail.html:129
-#| msgid "Not specified"
 msgid "Not scheduled"
 msgstr "Neprogramat"
 
@@ -5727,9 +5252,7 @@ msgstr "email-uri"
 msgid "Service Plan"
 msgstr "Plan de servicii"
 
-#. AI-generated
 #: templates/services/service_detail.html:353
-#| msgid "VPS Hosting"
 msgid "Web Hosting"
 msgstr "Găzduire web"
 
@@ -5790,9 +5313,7 @@ msgstr "Spațiu pe disc"
 msgid "Usage History"
 msgstr "Istoric utilizare"
 
-#. AI-generated
 #: templates/services/service_detail.html:555
-#| msgid "Usage History"
 msgid "Usage history period"
 msgstr "Perioada istoricului de utilizare"
 
@@ -5876,7 +5397,6 @@ msgstr "Detalii TVA România"
 msgid "VAT Rate"
 msgstr "Rata TVA"
 
-#. AI-generated
 #: templates/services/service_detail.html:787
 msgid "Shown on each invoice"
 msgstr "Afișat pe fiecare factură"
@@ -5926,7 +5446,6 @@ msgid "Select Action Type"
 msgstr "Selectați tipul acțiunii"
 
 #: templates/services/service_request_action.html:48
-#| msgid "View my tickets"
 msgid "View your tickets"
 msgstr "Vizualizați biletele dvs. de suport"
 
@@ -5958,7 +5477,6 @@ msgstr "Poate implica costuri suplimentare"
 msgid "Reason required"
 msgstr "Motiv necesar"
 
-#. AI-generated
 #: templates/services/service_request_action.html:131
 msgid "Include your preferred plan in the reason. Our team will confirm availability and pricing with you."
 msgstr "Includeți planul dvs. preferat în motiv. Echipa noastră va confirma disponibilitatea și prețurile cu dvs."
@@ -5993,9 +5511,7 @@ msgstr "Aceste informații ajută echipa noastră să proceseze mai rapid solici
 msgid "Current Service"
 msgstr "Serviciul curent"
 
-#. AI-generated
 #: templates/services/service_request_action.html:208
-#| msgid "Payment processing is temporarily unavailable."
 msgid "Service details are temporarily unavailable."
 msgstr "Detaliile serviciului sunt temporar indisponibile."
 
@@ -6027,13 +5543,7 @@ msgstr "Echipa noastră revizuiește solicitarea dvs."
 msgid "Changes are applied to your service"
 msgstr "Modificările sunt aplicate serviciului dvs."
 
-#: templates/services/service_request_action.html:287
-msgid "Confirmation"
-msgstr "Confirmare"
-
-#. AI-generated
 #: templates/services/service_request_action.html:288
-#| msgid "Open a support ticket"
 msgid "Follow updates in your support ticket"
 msgstr "Urmăriți actualizările din biletul dvs. de suport"
 
@@ -6057,14 +5567,11 @@ msgstr "Vă rugăm să selectați un tip de acțiune."
 msgid "Please provide a reason for this request."
 msgstr "Vă rugăm să furnizați un motiv pentru această solicitare."
 
-#. AI-generated
 #: templates/tickets/partials/dashboard_widget.html:21
-#| msgid "Unable to load support tickets. Please try again later."
 msgid "Unable to load your tickets right now."
 msgstr "Nu se pot încărca biletele dvs. în acest moment."
 
 #: templates/tickets/partials/dashboard_widget.html:49
-#| msgid "No Support Tickets Yet"
 msgid "No support tickets yet"
 msgstr "Încă niciun bilet de suport"
 
@@ -6106,9 +5613,7 @@ msgstr "Scrieți răspunsul dvs..."
 msgid "Up to 5 attachments, totaling at most 1 MiB."
 msgstr "Până la 5 atașamente, cu o dimensiune totală de cel mult 1 MiB."
 
-#. AI-generated
 #: templates/tickets/partials/status_and_comments.html:153
-#| msgid "Attach file"
 msgid "Attach files"
 msgstr "Atașați fișiere"
 
@@ -6194,7 +5699,6 @@ msgid "Related Service"
 msgstr "Serviciu asociat"
 
 #: templates/tickets/ticket_create.html:60
-#| msgid "View Services"
 msgid "View Service"
 msgstr "Vizualizați serviciul"
 
@@ -6371,9 +5875,7 @@ msgstr "Județ"
 msgid "Business Contact"
 msgstr "Contact de afaceri"
 
-#. AI-generated
 #: templates/users/company_profile.html:230
-#| msgid "Romanian VAT compliance"
 msgid "CUI, VAT & compliance"
 msgstr "CUI, TVA și conformitate"
 
@@ -6425,15 +5927,12 @@ msgstr "Taxe și TVA"
 msgid "CUI, VAT number, reverse charge"
 msgstr "CUI, număr TVA, taxare inversă"
 
-#. AI-generated
 #: templates/users/company_profile_edit.html:98
 #: templates/users/company_profile_edit.html:108
 msgid "Manage"
 msgstr "Gestionați"
 
-#. AI-generated
 #: templates/users/company_profile_edit.html:106
-#| msgid "Billing Address"
 msgid "Billing & primary addresses"
 msgstr "Facturare și adrese principale"
 
@@ -6737,14 +6236,11 @@ msgstr "Autentificare Portal PRAHO"
 msgid "Customer Portal Access"
 msgstr "Acces Portal Client"
 
-#. AI-generated
 #: templates/users/login.html:33
 msgid "Reload login page"
 msgstr "Reîncărcați pagina de autentificare"
 
-#. AI-generated
 #: templates/users/login.html:52
-#| msgid "Enter your new password"
 msgid "Enter your password"
 msgstr "Introduceți parola"
 
@@ -6752,9 +6248,7 @@ msgstr "Introduceți parola"
 msgid "Forgot password?"
 msgstr "Ați uitat parola?"
 
-#. AI-generated
 #: templates/users/login.html:77
-#| msgid "Already have an account?"
 msgid "Don't have an account?"
 msgstr "Nu aveți cont?"
 
@@ -6776,13 +6270,10 @@ msgstr "Conformitatea GDPR"
 msgid "Backup Codes"
 msgstr "Coduri de rezervă"
 
-#. AI-generated
 #: templates/users/mfa_backup_codes.html:8
-#| msgid "Store these codes safely. Each can only be used once."
 msgid "Save these codes now. They are shown only once. Each code can be used once."
 msgstr "Salvați aceste coduri acum. Acestea sunt afișate doar o dată. Fiecare cod poate fi folosit o singură dată."
 
-#. AI-generated
 #: templates/users/mfa_backup_codes.html:13
 msgid "Previously issued codes cannot be displayed again."
 msgstr "Codurile emise anterior nu pot fi afișate din nou."
@@ -6956,9 +6447,7 @@ msgstr "Sunteți sigur că doriți să dezactivați autentificarea cu doi factor
 msgid "Need Help with MFA?"
 msgstr "Aveți nevoie de ajutor cu MFA?"
 
-#. AI-generated
 #: templates/users/mfa_management.html:213
-#| msgid "Contact our support team to enable, disable, or manage your two-factor authentication settings. We\\"
 msgid "Contact our support team to enable, disable, or manage your two-factor authentication settings. We'll help you secure your account safely."
 msgstr "Contactați echipa noastră de suport pentru a activa, dezactiva sau gestiona setările de autentificare cu doi factori. Vă vom ajuta să asigurați contul dvs. în siguranță."
 
@@ -7054,27 +6543,21 @@ msgstr "Înapoi la autentificare"
 #: templates/users/password_reset_confirm.html:5
 #: templates/users/password_reset_confirm.html:10
 #: templates/users/password_reset_confirm.html:24
-#| msgid "Reset Your Password"
 msgid "Reset Password"
 msgstr "Resetare parolă"
 
 #: templates/users/password_reset_confirm.html:11
-#| msgid "Use a unique password for this account"
 msgid "Choose a new password for your account"
 msgstr "Alegeți o parolă nouă pentru contul dvs."
 
-#. AI-generated
 #: templates/users/password_reset_confirm.html:22
-#| msgid "Back to login"
 msgid "Back to Login"
 msgstr "Înapoi la Autentificare"
 
-#. AI-generated
 #: templates/users/password_reset_confirm.html:29
 msgid "This reset link is invalid or has expired. Request a new password reset email."
 msgstr "Acest link de resetare este invalid sau a expirat. Solicitați un nou e-mail de resetare a parolei."
 
-#. AI-generated
 #: templates/users/password_reset_confirm.html:30
 msgid "Request another reset link"
 msgstr "Solicitați un alt link de resetare"
@@ -7200,35 +6683,26 @@ msgid "Preferences"
 msgstr "Preferințe"
 
 #: templates/users/profile.html:66
-#| msgid "SMS notifications"
 msgid "Notifications"
 msgstr "Notificări"
 
-#. AI-generated
 #: templates/users/profile.html:70
-#| msgid "Email notifications"
 msgid "Email Notifications"
 msgstr "Notificări E-mail"
 
-#. AI-generated
 #: templates/users/profile.html:70
 msgid "Receive important account and billing notifications via email"
 msgstr "Primiți notificări importante referitoare la cont și facturare prin e-mail"
 
-#. AI-generated
 #: templates/users/profile.html:72
-#| msgid "SMS notifications"
 msgid "SMS Notifications"
 msgstr "Notificări SMS"
 
-#. AI-generated
 #: templates/users/profile.html:72
 msgid "Receive alerts via SMS"
 msgstr "Primiți alerte prin SMS"
 
-#. AI-generated
 #: templates/users/profile.html:74
-#| msgid "Receive newsletters and promotional content"
 msgid "Receive newsletters, product updates, and promotional offers"
 msgstr "Primiți newsletter, actualizări de produs și oferte promoționale"
 
@@ -7237,13 +6711,10 @@ msgid "Member Since"
 msgstr "Membru din"
 
 #: templates/users/profile.html:116
-#| msgid "Manage MFA Settings"
 msgid "Manage MFA"
 msgstr "Gestionați MFA"
 
-#. AI-generated
 #: templates/users/profile.html:122
-#| msgid "Enable MFA Now"
 msgid "Enable MFA"
 msgstr "Activați MFA"
 
@@ -7251,9 +6722,7 @@ msgstr "Activați MFA"
 msgid "Password Security"
 msgstr "Securitatea parolei"
 
-#. AI-generated
 #: templates/users/profile.html:149
-#| msgid "company"
 msgid "companies"
 msgstr "companii"
 
@@ -7266,7 +6735,6 @@ msgid "Edit"
 msgstr "Editați"
 
 #: templates/users/profile.html:194
-#| msgid "No company profiles found"
 msgid "No company profile yet"
 msgstr "Încă nu există un profil de companie"
 
@@ -7278,9 +6746,7 @@ msgstr "Numărul de TVA (CUI) și adresa legală sunt obligatorii pentru factura
 msgid "Privacy & Data Protection"
 msgstr "Confidențialitate și protecția datelor"
 
-#. AI-generated
 #: templates/users/profile.html:238
-#| msgid "We Value Your Privacy"
 msgid "Your Privacy"
 msgstr "Confidențialitatea dvs."
 
@@ -7289,7 +6755,6 @@ msgid "Manage your data processing consent, marketing preferences, and privacy s
 msgstr "Gestionați consimțământul pentru prelucrarea datelor, preferințele de marketing și setările de confidențialitate din Panoul de control al confidențialității."
 
 #: templates/users/profile.html:242
-#| msgid "Privacy Dashboard"
 msgid "Open Privacy Dashboard"
 msgstr "Deschideți Panoul de control al confidențialității"
 
@@ -7559,9 +7024,6 @@ msgstr "Mergeți la pagina următoare"
 
 #~ msgid "Order process steps"
 #~ msgstr "Etapele procesului de comandă"
-
-#~ msgid "Product Selection"
-#~ msgstr "Selectarea produsului"
 
 #~ msgid "(current step)"
 #~ msgstr "(etapa curentă)"

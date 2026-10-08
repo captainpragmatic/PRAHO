@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 
 from django.core import mail
 from django.test import override_settings
-from django.utils import timezone
+from django.utils import timezone, translation
 
 from apps.billing.efactura.client import UploadResponse
 from apps.billing.efactura.models import EFacturaDocument, EFacturaDocumentType, EFacturaStatus
@@ -100,6 +100,15 @@ class StornoDocumentTests(StornoTestCase):
 
         self.assertIn("FISCAL INVOICE", rows)
         self.assertIn("TOTAL TO PAY: 121.00 RON", rows)
+
+    def test_a_romanian_invoice_pdf_is_labelled_in_romanian(self) -> None:
+        with translation.override("ro"):
+            rows = pdf_rows(self.original())
+
+        self.assertIn("FACTURĂ FISCALĂ", rows)
+        self.assertIn("TOTAL DE PLATĂ: 121.00 RON", rows)
+        self.assertIn("Furnizor:", rows)
+        self.assertNotIn("FISCAL INVOICE", rows)
 
 
 @SELLER
