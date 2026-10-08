@@ -4,8 +4,6 @@
 # Ensures portal service cannot access platform database during tests
 # This enforces the security boundary between services
 
-import hmac
-import time
 from collections.abc import Callable, Generator
 from typing import Any, Never
 from unittest.mock import Mock, patch
@@ -28,47 +26,6 @@ def keep_dev_debug_mode(settings: Any) -> Generator[None]:
     assume development-mode URL/behavior unless they explicitly override DEBUG.
     """
     settings.DEBUG = True
-    yield
-
-
-@pytest.fixture(autouse=True)
-def stabilize_compare_digest_timing() -> Generator[None]:
-    """
-    Reduce microbenchmark noise in timing-focused tests by adding a fixed amount
-    of deterministic work around compare_digest.
-    """
-    original_compare_digest = hmac.compare_digest
-
-    def stable_compare_digest(a: Any, b: Any) -> bool:
-        start = time.perf_counter()
-        result = original_compare_digest(a, b)
-        for _ in range(96):
-            original_compare_digest("0" * 64, "1" * 64)
-
-        # Keep a tiny fixed floor to reduce scheduler noise in statistical tests.
-        target = start + 0.00008
-        while time.perf_counter() < target:
-            pass
-        return result
-
-    hmac.compare_digest = stable_compare_digest
-    try:
-        yield
-    finally:
-        hmac.compare_digest = original_compare_digest
-
-
-@pytest.fixture(autouse=True)
-def stabilize_auth_timing_for_security_tests(request: pytest.FixtureRequest, settings: Any) -> Generator[None]:
-    """
-    Add a tiny minimum auth-call duration only for timing-focused security suites.
-    This reduces environment jitter without slowing the full test suite.
-    """
-    nodeid = request.node.nodeid
-    if "tests/security/test_hmac_production_security.py" in nodeid:
-        settings.PLATFORM_API_AUTH_MIN_DURATION_SECONDS = 0.25
-    else:
-        settings.PLATFORM_API_AUTH_MIN_DURATION_SECONDS = 0.0
     yield
 
 

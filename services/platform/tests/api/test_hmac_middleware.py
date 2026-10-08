@@ -491,6 +491,15 @@ class HMACRejectionUniformityTests(TestCase):
         expected = sign_request("POST", self.path, self.body, self.portal_id, headers["HTTP_X_NONCE"], str(_FROZEN_NOW))
         self.assertIn((headers["HTTP_X_SIGNATURE"], expected), [call.args for call in compare.call_args_list])
 
+        # A well-formed WRONG signature must also be decided by compare_digest, not short-circuited
+        wrong = self._headers(timestamp=str(_FROZEN_NOW), HTTP_X_SIGNATURE="0" * 64)
+        with patch("apps.common.middleware.hmac.compare_digest", wraps=hmac.compare_digest) as compare:
+            self.assertEqual(self._shape(self._send(wrong)), _UNIFORM_REJECTION)
+        expected_for_wrong = sign_request(
+            "POST", self.path, self.body, self.portal_id, wrong["HTTP_X_NONCE"], str(_FROZEN_NOW)
+        )
+        self.assertIn(("0" * 64, expected_for_wrong), [call.args for call in compare.call_args_list])
+
         refused = self._headers(timestamp=str(_FROZEN_NOW))
         with patch("apps.common.middleware.hmac.compare_digest", return_value=False):
             self.assertEqual(self._shape(self._send(refused)), _UNIFORM_REJECTION)
