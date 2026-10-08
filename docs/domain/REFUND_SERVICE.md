@@ -275,6 +275,27 @@ New refund calculations use Refund rows.
 
 ## Security & Compliance
 
+### Who Can Issue a Refund
+Refunds are staff-only. The only entry points are the two staff dialogs on Platform:
+
+| Entry point | Gate |
+|---|---|
+| `apps/billing/views.py:invoice_refund` | `@billing_staff_api_required` (admin, billing or manager role) |
+| `apps/orders/views.py:order_refund` | `@billing_staff_api_required` |
+
+Both pass the staff user as `actor=` to `RefundService`. There is no customer or portal path:
+the portal's "Request Refund" button and Platform's HMAC endpoint `api_process_refund` were
+removed, because that endpoint executed the refund with the customer as actor while the portal
+described it as a request for review. Customers ask for a refund through an ordinary support
+ticket. `tests/billing/test_refund_authorization_guardrail.py` scans for every direct
+`RefundService.refund_invoice`/`refund_order` caller and fails until a new one is declared with
+its gate.
+
+Both dialogs post the amount in major units as `refund_amount`; the views convert it to cents
+and refuse a missing, zero, negative or non-numeric partial amount before any gateway call.
+Every staff refund goes through the payment gateway; a refund made directly in the provider's
+dashboard is reconciled by its webhook.
+
 ### Audit Logging
 All refund operations generate security events:
 

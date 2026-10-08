@@ -64,7 +64,6 @@ class PlatformUnreachableViewTests(SimpleTestCase):
         Caller("/billing/proformas/PRO-1/pdf/", 503),
         Caller("/billing/dashboard-widget/", 503, json_response=True),
         Caller("/billing/sync/", 503, post=True, json_response=True),
-        Caller("/billing/invoices/INV-1/refund/", 503, post=True, json_response=True),
         Caller("/tickets/"),
         Caller("/tickets/search/"),
         Caller("/tickets/widget/"),

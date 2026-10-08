@@ -615,7 +615,6 @@ class PortalServiceHMACMiddleware:
         "/billing/create-payment-intent/",
         "/billing/confirm-payment/",
         "/billing/stripe-config/",
-        "/billing/process-refund/",
     )
 
     def __call__(self, request: HttpRequest) -> HttpResponse:

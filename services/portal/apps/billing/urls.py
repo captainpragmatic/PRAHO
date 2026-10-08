@@ -48,5 +48,4 @@ urlpatterns = [
         name="subscription_auto_payment",
     ),
     # Refund request
-    path("invoices/<str:invoice_number>/refund/", views.request_refund_view, name="request_refund"),
 ]

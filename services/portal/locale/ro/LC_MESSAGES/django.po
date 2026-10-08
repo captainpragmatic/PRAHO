@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-08 11:02+0300\n"
+"POT-Creation-Date: 2026-10-09 00:30+0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -136,7 +136,7 @@ msgid "Payment is processing. Check its status shortly."
 msgstr "Plata se procesează. Verificați starea acesteia în curând."
 
 #: apps/billing/schemas.py:108 apps/billing/schemas.py:249
-#: apps/billing/views.py:121 templates/billing/partials/invoices_table.html:58
+#: apps/billing/views.py:103 templates/billing/partials/invoices_table.html:58
 #: templates/billing/partials/invoices_table.html:86
 #: templates/billing/partials/invoices_table.html:116
 #: templates/billing/partials/invoices_table.html:144
@@ -144,11 +144,11 @@ msgstr "Plata se procesează. Verificați starea acesteia în curând."
 msgid "Draft"
 msgstr "Ciornă"
 
-#: apps/billing/schemas.py:109 apps/billing/views.py:122
+#: apps/billing/schemas.py:109 apps/billing/views.py:104
 msgid "Issued"
 msgstr "Emisă"
 
-#: apps/billing/schemas.py:110 apps/billing/views.py:125
+#: apps/billing/schemas.py:110 apps/billing/views.py:107
 #: templates/billing/partials/invoices_table.html:72
 #: templates/billing/partials/invoices_table.html:130
 #: templates/dashboard/dashboard.html:88
@@ -156,7 +156,7 @@ msgstr "Emisă"
 msgid "Paid"
 msgstr "Plătită"
 
-#: apps/billing/schemas.py:111 apps/billing/views.py:126
+#: apps/billing/schemas.py:111 apps/billing/views.py:108
 #: templates/billing/partials/invoices_table.html:74
 #: templates/billing/partials/invoices_table.html:132
 #: templates/dashboard/dashboard.html:90
@@ -174,7 +174,7 @@ msgstr "Anulată"
 msgid "Partially Paid"
 msgstr "Parțial plătit"
 
-#: apps/billing/schemas.py:250 apps/billing/views.py:123
+#: apps/billing/schemas.py:250 apps/billing/views.py:105
 #: templates/billing/partials/invoices_table.html:60
 #: templates/billing/partials/invoices_table.html:76
 #: templates/billing/partials/invoices_table.html:118
@@ -182,100 +182,60 @@ msgstr "Parțial plătit"
 msgid "Sent"
 msgstr "Trimisă"
 
-#: apps/billing/schemas.py:251 apps/billing/views.py:124
+#: apps/billing/schemas.py:251 apps/billing/views.py:106
 #: templates/billing/partials/invoices_table.html:62
 #: templates/billing/partials/invoices_table.html:120
 msgid "Accepted"
 msgstr "Acceptată"
 
-#: apps/billing/schemas.py:252 apps/billing/views.py:127
+#: apps/billing/schemas.py:252 apps/billing/views.py:109
 #: apps/services/views.py:93 templates/billing/partials/invoices_table.html:64
 #: templates/billing/partials/invoices_table.html:122
 msgid "Expired"
 msgstr "Expirată"
 
-#: apps/billing/schemas.py:253 apps/billing/views.py:131
+#: apps/billing/schemas.py:253 apps/billing/views.py:113
 #: templates/billing/partials/invoices_table.html:66
 #: templates/billing/partials/invoices_table.html:124
 msgid "Converted"
 msgstr "Convertit"
 
-#: apps/billing/views.py:64
-msgid "General Customer Request"
-msgstr "Solicitare generală a clientului"
-
-#: apps/billing/views.py:65
-msgid "Service Not Working"
-msgstr "Serviciul nu funcționează"
-
-#: apps/billing/views.py:66
-msgid "Quality Not As Expected"
-msgstr "Calitatea nu corespunde așteptărilor"
-
-#: apps/billing/views.py:67
-msgid "Technical Problems"
-msgstr "Probleme tehnice"
-
-#: apps/billing/views.py:68
-msgid "Want to Cancel Service"
-msgstr "Doresc să anulez serviciul"
-
-#: apps/billing/views.py:69
-msgid "Duplicate Invoice"
-msgstr "Factură duplicată"
-
-#: apps/billing/views.py:70
-msgid "Billing Error"
-msgstr "Eroare de facturare"
-
-#: apps/billing/views.py:71
-msgid "Service Policy Issue"
-msgstr "Problemă cu politica serviciului"
-
-#: apps/billing/views.py:72
-msgid "Not Satisfied with Service"
-msgstr "Nu sunt mulțumit de serviciu"
-
 #: apps/billing/views.py:73
-msgid "Other Reason"
-msgstr "Alt motiv"
-
-#: apps/billing/views.py:91
 msgid "All Documents"
 msgstr "Toate documentele"
 
-#: apps/billing/views.py:97 apps/billing/views.py:170
+#: apps/billing/views.py:79 apps/billing/views.py:152
 #: templates/billing/partials/section_tabs.html:2
 msgid "Invoices"
 msgstr "Facturi"
 
-#: apps/billing/views.py:103 apps/billing/views.py:171
+#: apps/billing/views.py:85 apps/billing/views.py:153
 msgid "Proformas"
 msgstr "Proforme"
 
-#: apps/billing/views.py:120
+#: apps/billing/views.py:102
 msgid "All Statuses"
 msgstr "Toate stările"
 
-#: apps/billing/views.py:128
+#: apps/billing/views.py:110
 msgid "Void"
 msgstr "Anulată"
 
-#: apps/billing/views.py:129 templates/billing/partials/invoices_table.html:82
+#: apps/billing/views.py:111 templates/billing/partials/invoices_table.html:82
 #: templates/billing/partials/invoices_table.html:140
 msgid "Refunded"
 msgstr "Rambursată"
 
-#: apps/billing/views.py:130 templates/billing/partials/invoices_table.html:84
+#: apps/billing/views.py:112 templates/billing/partials/invoices_table.html:84
 #: templates/billing/partials/invoices_table.html:142
 msgid "Partially Refunded"
 msgstr "Parțial rambursat"
 
-#: apps/billing/views.py:165
+#: apps/billing/views.py:147
 msgid "My Billing Documents"
 msgstr "Documentele mele de facturare"
 
-#: apps/billing/views.py:166 templates/base.html:80
+#: apps/billing/views.py:148 templates/base.html:80
 #: templates/billing/invoices_list.html:5
 #: templates/components/customer_selector.html:22
 #: templates/components/customer_selector.html:73
@@ -286,20 +246,20 @@ msgstr "Documentele mele de facturare"
 msgid "Billing"
 msgstr "Facturare"
 
-#: apps/billing/views.py:167
+#: apps/billing/views.py:149
 msgid "View your invoices and proformas"
 msgstr "Vizualizați facturile și proformele dvs."
 
-#: apps/billing/views.py:168
+#: apps/billing/views.py:150
 msgid "Search by type, number, amount, status, date, services…"
 msgstr "Căutare după tip, număr, sumă, stare, dată, servicii…"
 
-#: apps/billing/views.py:172
+#: apps/billing/views.py:154
 msgid "Unpaid"
 msgstr "Neplătit"
 
-#: apps/billing/views.py:173 apps/services/views.py:188
-#: templates/billing/invoice_detail.html:140
+#: apps/billing/views.py:155 apps/services/views.py:188
+#: templates/billing/invoice_detail.html:134
 #: templates/billing/partials/invoices_table.html:27
 #: templates/billing/proforma_detail.html:146
 #: templates/orders/checkout.html:267
@@ -312,88 +272,75 @@ msgstr "Neplătit"
 msgid "Total"
 msgstr "Total"
 
-#: apps/billing/views.py:250
+#: apps/billing/views.py:232
 msgid "Unable to load invoices. Please try again."
 msgstr "Nu s-au putut încărca facturile. Vă rugăm să încercați din nou."
 
-#: apps/billing/views.py:375
+#: apps/billing/views.py:357
 msgid "Invoice not found or access denied."
 msgstr "Factura nu a fost găsită sau accesul este interzis."
 
-#: apps/billing/views.py:395
+#: apps/billing/views.py:376
 msgid "Unable to load invoice details. Please try again."
 msgstr "Nu s-au putut încărca detaliile facturii. Vă rugăm să încercați din nou."
 
-#: apps/billing/views.py:428
+#: apps/billing/views.py:409
 #: templates/billing/partials/currency_balances.html:30
 msgid "Billing balances are temporarily unavailable."
 msgstr "Soldurile de facturare sunt temporar indisponibile."
 
-#: apps/billing/views.py:520
+#: apps/billing/views.py:501
 msgid "Unable to sync invoices. Please try again."
 msgstr "Nu s-au putut sincroniza facturile. Vă rugăm să încercați din nou."
 
-#: apps/billing/views.py:562 apps/billing/views.py:598
+#: apps/billing/views.py:543 apps/billing/views.py:579
 msgid "Unable to generate PDF. Please try again."
 msgstr "Nu s-a putut genera PDF-ul. Vă rugăm să încercați din nou."
 
-#: apps/billing/views.py:634
+#: apps/billing/views.py:615
 msgid "Proforma not found or access denied."
 msgstr "Proforma nu a fost găsită sau accesul este interzis."
 
-#: apps/billing/views.py:658
+#: apps/billing/views.py:639
 msgid "Unable to load proforma details. Please try again."
 msgstr "Nu s-au putut încărca detaliile proformei. Vă rugăm să încercați din nou."
 
-#: apps/billing/views.py:698
+#: apps/billing/views.py:679
 msgid "Enter a valid gift-card code and billing document."
 msgstr "Introduceți un cod valid de card cadou și un document de facturare."
 
-#: apps/billing/views.py:718
+#: apps/billing/views.py:699
 msgid "Gift-card balance applied. Your billing document shows the remaining amount."
 msgstr "Soldul cardului cadou a fost aplicat. Documentul dvs. de facturare arată suma rămasă."
 
-#: apps/billing/views.py:720
+#: apps/billing/views.py:701
 msgid "The gift card could not be applied. Check its balance, currency, and expiry."
 msgstr "Cardul cadou nu a putut fi aplicat. Verificați soldul, moneda și data de expirare."
 
-#: apps/billing/views.py:722
+#: apps/billing/views.py:703
 msgid "The payment could not be confirmed. Refresh this document before trying again."
 msgstr "Plata nu a putut fi confirmată. Reîmprospătați acest document înainte de a încerca din nou."
 
-#: apps/billing/views.py:763
+#: apps/billing/views.py:744
 #, python-format
 msgid "Card ending %(last_four)s"
 msgstr "Card cu terminația %(last_four)s"
 
-#: apps/billing/views.py:779
+#: apps/billing/views.py:760
 msgid "Automatic payment off"
 msgstr "Plata automată dezactivată"
 
-#: apps/billing/views.py:783
+#: apps/billing/views.py:764
 #, python-format
 msgid "Pay automatically with %(card)s"
 msgstr "Plătiți automat cu %(card)s"
 
-#: apps/billing/views.py:806 templates/billing/partials/header_action.html:4
+#: apps/billing/views.py:787 templates/billing/partials/header_action.html:4
 #: templates/billing/partials/section_tabs.html:3
 #: templates/billing/recurring_payments.html:5
 #: templates/billing/recurring_payments.html:11
 msgid "Automatic payments"
 msgstr "Plăți automate"
-
-#: apps/billing/views.py:924
-msgid "Refund request submitted successfully."
-msgstr "Cererea de rambursare a fost trimisă cu succes."
-
-#: apps/billing/views.py:929
-msgid "Unable to process refund request."
-msgstr "Nu se poate procesa cererea de rambursare."
-
-#: apps/billing/views.py:946 templates/billing/invoice_detail.html:366
-#: templates/billing/invoice_detail.html:372
-msgid "Unable to process refund request. Please try again."
-msgstr "Nu se poate procesa cererea de rambursare. Vă rugăm să încercați din nou."
 
 #: apps/common/account_health.py:80
 #, python-format
@@ -476,7 +423,7 @@ msgstr "Setări Cont"
 msgid "Security"
 msgstr "Securitate"
 
-#: apps/common/context_processors.py:49 apps/users/views.py:1237
+#: apps/common/context_processors.py:49 apps/users/views.py:1245
 #: templates/components/mobile_header.html:127
 #: templates/users/company_profile.html:5
 #: templates/users/company_profile.html:11
@@ -1070,11 +1017,11 @@ msgstr "Eroare la crearea comenzii. Vă rugăm încercați din nou."
 msgid "All Products"
 msgstr "Toate Produsele"
 
-#: apps/orders/views.py:613 apps/services/views.py:618
+#: apps/orders/views.py:613 apps/services/views.py:620
 msgid "Shared Hosting"
 msgstr "Găzduire partajată"
 
-#: apps/orders/views.py:614 apps/services/views.py:619
+#: apps/orders/views.py:614 apps/services/views.py:621
 msgid "VPS Hosting"
 msgstr "Găzduire VPS"
 
@@ -1285,7 +1232,7 @@ msgstr "Ultimele 30 de zile"
 msgid "Last 90 days"
 msgstr "Ultimele 90 de zile"
 
-#: apps/services/views.py:348 apps/services/views.py:509
+#: apps/services/views.py:348 apps/services/views.py:511
 msgid "Service not found or access denied."
 msgstr "Serviciu negăsit sau acces refuzat."
 
@@ -1318,35 +1265,35 @@ msgstr "Nu s-a putut trimite cererea de serviciu. Vă rugăm să încercați din
 msgid "Service request submitted. Ticket #%(number)s."
 msgstr "Cererea de serviciu a fost trimisă. Biletul #%(number)s."
 
-#: apps/services/views.py:491
+#: apps/services/views.py:493
 msgid "Hosting service"
 msgstr "Serviciu de găzduire"
 
-#: apps/services/views.py:541
+#: apps/services/views.py:543
 msgid "You do not have permission to request service changes."
 msgstr "Nu aveți permisiunea să cereți modificări ale serviciului."
 
-#: apps/services/views.py:557
+#: apps/services/views.py:559
 msgid "Requests are available for active or suspended services."
 msgstr "Cererile sunt disponibile pentru serviciile active sau suspendate."
 
-#: apps/services/views.py:617
+#: apps/services/views.py:619
 msgid "All Plan Types"
 msgstr "Toate tipurile de planuri"
 
-#: apps/services/views.py:620
+#: apps/services/views.py:622
 msgid "Dedicated Servers"
 msgstr "Servere dedicate"
 
-#: apps/services/views.py:621
+#: apps/services/views.py:623
 msgid "Cloud Hosting"
 msgstr "Găzduire în cloud"
 
-#: apps/services/views.py:622
+#: apps/services/views.py:624
 msgid "Email Services"
 msgstr "Servicii de email"
 
-#: apps/services/views.py:632 templates/services/plans_list.html:38
+#: apps/services/views.py:634 templates/services/plans_list.html:38
 msgid "Unable to load hosting plans. Please try again later."
 msgstr "Nu s-au putut încărca planurile de găzduire. Vă rugăm să încercați din nou mai târziu."
 
@@ -2238,138 +2185,138 @@ msgstr "Autentificare multifactor"
 msgid "You need to enable 2FA first before accessing backup codes."
 msgstr "Trebuie să activați mai întâi autentificarea cu doi factori înainte de a accesa codurile de backup."
 
-#: apps/users/views.py:1097
+#: apps/users/views.py:1101
 msgid "Could not regenerate codes. Check your password and authentication code."
 msgstr "Nu s-au putut regenera codurile. Verificați parola și codul de autentificare."
 
-#: apps/users/views.py:1126
+#: apps/users/views.py:1130
 msgid "Two-factor authentication has been disabled."
 msgstr "Autentificarea cu doi factori a fost dezactivată."
 
-#: apps/users/views.py:1129 apps/users/views.py:1132
+#: apps/users/views.py:1133 apps/users/views.py:1140
 msgid "Could not disable MFA. Check your password and authentication code."
 msgstr "Nu s-a putut dezactiva MFA. Verificați parola și codul de autentificare."
 
-#: apps/users/views.py:1151
+#: apps/users/views.py:1159
 msgid "Please select a customer to view profile."
 msgstr "Selectați un client pentru a vizualiza profilul."
 
-#: apps/users/views.py:1221
+#: apps/users/views.py:1229
 msgid "Unable to load company profile data."
 msgstr "Nu s-au putut încărca datele profilului companiei."
 
-#: apps/users/views.py:1229
+#: apps/users/views.py:1237
 msgid "Error loading company profile. Please try again."
 msgstr "Eroare la încărcarea profilului companiei. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:1232
+#: apps/users/views.py:1240
 msgid "An unexpected error occurred."
 msgstr "A apărut o eroare neașteptată."
 
-#: apps/users/views.py:1262
+#: apps/users/views.py:1270
 msgid "Please select a customer to edit profile."
 msgstr "Selectați un client pentru a edita profilul."
 
-#: apps/users/views.py:1274
+#: apps/users/views.py:1282
 #, python-brace-format
 msgid "You don't have permission to edit this company profile. Your role: {role}"
 msgstr "Nu aveți permisiune să editați profilul acestei companii. Rolul dvs.: {role}"
 
-#: apps/users/views.py:1318
+#: apps/users/views.py:1326
 msgid "Unable to load current company data."
 msgstr "Nu s-au putut încărca datele curente ale companiei."
 
-#: apps/users/views.py:1322
+#: apps/users/views.py:1330
 msgid "Error loading company data. Please try again."
 msgstr "Eroare la încărcarea datelor companiei. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:1347
+#: apps/users/views.py:1355
 msgid "Company profile updated successfully!"
 msgstr "Profilul companiei a fost actualizat cu succes!"
 
-#: apps/users/views.py:1367
+#: apps/users/views.py:1375
 #, python-brace-format
 msgid "Failed to update profile: {}"
 msgstr "Actualizarea profilului a eșuat: {}"
 
-#: apps/users/views.py:1373
+#: apps/users/views.py:1381
 msgid "Error updating company profile. Please try again."
 msgstr "Eroare la actualizarea profilului companiei. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:1376
+#: apps/users/views.py:1384
 msgid "An unexpected error occurred while updating profile."
 msgstr "A apărut o eroare neașteptată la actualizarea profilului."
 
-#: apps/users/views.py:1378
+#: apps/users/views.py:1386
 msgid "Please correct the errors below."
 msgstr "Vă rugăm să corectați erorile de mai jos."
 
-#: apps/users/views.py:1383 templates/users/company_profile.html:25
+#: apps/users/views.py:1391 templates/users/company_profile.html:25
 #: templates/users/company_profile_edit.html:5
 #: templates/users/company_profile_edit.html:11
 msgid "Edit Company Profile"
 msgstr "Editare profil companie"
 
-#: apps/users/views.py:1413
+#: apps/users/views.py:1421
 msgid "Please select a valid customer."
 msgstr "Selectați un client valid."
 
-#: apps/users/views.py:1437
+#: apps/users/views.py:1445
 msgid "Customer access verification failed. Please try again."
 msgstr "Verificarea accesului clientului a eșuat. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:1446
+#: apps/users/views.py:1454
 msgid "You don't have access to this customer."
 msgstr "Nu aveți acces la acest client."
 
-#: apps/users/views.py:1461
+#: apps/users/views.py:1469
 msgid "Unable to verify customer access. Please try again."
 msgstr "Nu s-a putut verifica accesul clientului. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:1502 templates/components/customer_selector.html:21
+#: apps/users/views.py:1510 templates/components/customer_selector.html:21
 #: templates/components/customer_selector.html:72
 #: templates/customers/team.html:73 templates/customers/team_invite.html:57
 msgid "Owner"
 msgstr "Proprietar"
 
-#: apps/users/views.py:1503
+#: apps/users/views.py:1511
 msgid "Administrator"
 msgstr "Administrator"
 
-#: apps/users/views.py:1504
+#: apps/users/views.py:1512
 msgid "Billing Manager"
 msgstr "Manager facturare"
 
-#: apps/users/views.py:1505
+#: apps/users/views.py:1513
 msgid "Technical Manager"
 msgstr "Manager tehnic"
 
-#: apps/users/views.py:1506 templates/components/customer_selector.html:24
+#: apps/users/views.py:1514 templates/components/customer_selector.html:24
 #: templates/components/customer_selector.html:75
 #: templates/customers/team.html:70 templates/customers/team_invite.html:54
 msgid "Viewer"
 msgstr "Vizualizator"
 
-#: apps/users/views.py:1510
+#: apps/users/views.py:1518
 #, python-brace-format
 msgid "Switched to {customer} ({role})"
 msgstr "Comutat la {customer} ({role})"
 
-#: apps/users/views.py:1581
+#: apps/users/views.py:1589
 #, python-brace-format
 msgid "Company '{}' created successfully! You are now the owner."
 msgstr "Compania '{}' a fost creată cu succes! Sunteți acum proprietarul."
 
-#: apps/users/views.py:1604
+#: apps/users/views.py:1612
 #, python-brace-format
 msgid "Failed to create company: {}"
 msgstr "Crearea companiei a eșuat: {}"
 
-#: apps/users/views.py:1610
+#: apps/users/views.py:1618
 msgid "Error creating company. Please try again."
 msgstr "Eroare la crearea companiei. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:1614 templates/users/create_company.html:5
+#: apps/users/views.py:1622 templates/users/create_company.html:5
 #: templates/users/create_company.html:273 templates/users/profile.html:200
 msgid "Create Company"
 msgstr "Creați compania"
@@ -2714,21 +2661,17 @@ msgid "Download PDF"
 msgstr "Descarcă PDF"
 
 #: templates/billing/invoice_detail.html:31
-msgid "Request Refund"
-msgstr "Solicită rambursare"
-
-#: templates/billing/invoice_detail.html:37
 #: templates/billing/invoice_not_found.html:44
 #: templates/billing/proforma_detail.html:31
 #: templates/billing/proforma_not_found.html:44
 msgid "Back to Billing"
 msgstr "Înapoi la facturare"
 
-#: templates/billing/invoice_detail.html:51
+#: templates/billing/invoice_detail.html:45
 msgid "Customer"
 msgstr "Client"
 
-#: templates/billing/invoice_detail.html:59
+#: templates/billing/invoice_detail.html:53
 #: templates/billing/partials/invoice_extra_filters.html:2
 #: templates/billing/partials/invoices_table.html:30
 #: templates/services/partials/services_table.html:29
@@ -2741,164 +2684,91 @@ msgstr "Client"
 msgid "Status"
 msgstr "Stare"
 
-#: templates/billing/invoice_detail.html:67
+#: templates/billing/invoice_detail.html:61
 #: templates/services/service_detail.html:812
 msgid "Total Amount"
 msgstr "Suma totală"
 
-#: templates/billing/invoice_detail.html:75
+#: templates/billing/invoice_detail.html:69
 msgid "Issue Date"
 msgstr "Data emiterii"
 
-#: templates/billing/invoice_detail.html:83
+#: templates/billing/invoice_detail.html:77
 msgid "Due Date"
 msgstr "Data scadenței"
 
-#: templates/billing/invoice_detail.html:91
+#: templates/billing/invoice_detail.html:85
 msgid "Payment Date"
 msgstr "Data plății"
 
-#: templates/billing/invoice_detail.html:96
+#: templates/billing/invoice_detail.html:90
 msgid "Not paid"
 msgstr "Neplătită"
 
-#: templates/billing/invoice_detail.html:104
+#: templates/billing/invoice_detail.html:98
 msgid "From Proforma"
 msgstr "Din Proformă"
 
-#: templates/billing/invoice_detail.html:119
+#: templates/billing/invoice_detail.html:113
 msgid "Invoice Lines"
 msgstr "Pozițiile facturii"
 
-#: templates/billing/invoice_detail.html:128
+#: templates/billing/invoice_detail.html:122
 #: templates/billing/proforma_detail.html:134
 #: templates/tickets/partials/status_and_comments.html:81
 #: templates/tickets/ticket_create.html:69
 msgid "Description"
 msgstr "Descriere"
 
-#: templates/billing/invoice_detail.html:131
+#: templates/billing/invoice_detail.html:125
 #: templates/billing/partials/invoices_table.html:21
 msgid "Type"
 msgstr "Tip"
 
-#: templates/billing/invoice_detail.html:134
+#: templates/billing/invoice_detail.html:128
 #: templates/orders/product_detail.html:61
 #: templates/orders/product_detail.html:62
 msgid "Quantity"
 msgstr "Cantitate"
 
-#: templates/billing/invoice_detail.html:137
+#: templates/billing/invoice_detail.html:131
 #: templates/billing/proforma_detail.html:140
 msgid "Unit Price"
 msgstr "Preț unitar"
 
-#: templates/billing/invoice_detail.html:175
-#: templates/billing/invoice_detail.html:243
+#: templates/billing/invoice_detail.html:169
+#: templates/billing/invoice_detail.html:237
 msgid "No invoice lines found"
 msgstr "Nu s-au găsit poziții de factură"
 
-#: templates/billing/invoice_detail.html:183
-#: templates/billing/invoice_detail.html:250
+#: templates/billing/invoice_detail.html:177
+#: templates/billing/invoice_detail.html:244
 #: templates/billing/proforma_detail.html:255
 msgid "Subtotal:"
 msgstr "Subtotal:"
 
-#: templates/billing/invoice_detail.html:191
-#: templates/billing/invoice_detail.html:256
+#: templates/billing/invoice_detail.html:185
+#: templates/billing/invoice_detail.html:250
 #: templates/billing/proforma_detail.html:212
 #: templates/billing/proforma_detail.html:260
 msgid "VAT:"
 msgstr "TVA:"
 
-#: templates/billing/invoice_detail.html:199
-#: templates/billing/invoice_detail.html:262
+#: templates/billing/invoice_detail.html:193
+#: templates/billing/invoice_detail.html:256
 #: templates/billing/proforma_detail.html:266
 msgid "Total:"
 msgstr "Total:"
 
-#: templates/billing/invoice_detail.html:237
+#: templates/billing/invoice_detail.html:231
 #: templates/billing/proforma_detail.html:210
 msgid "Qty:"
 msgstr "Cant.:"
 
-#: templates/billing/invoice_detail.html:238
+#: templates/billing/invoice_detail.html:232
 #: templates/billing/proforma_detail.html:211
 msgid "Unit:"
 msgstr "Unitate:"
-
-#: templates/billing/invoice_detail.html:283
-msgid "Request Invoice Refund"
-msgstr "Solicitați rambursarea facturii"
-
-#: templates/billing/invoice_detail.html:285
-msgid "Submit a refund request for this invoice. Our billing team will review your request and contact you."
-msgstr "Trimiteți o cerere de rambursare pentru această factură. Echipa noastră de facturare va revizui solicitarea dvs. și vă va contacta."
-
-#: templates/billing/invoice_detail.html:289
-msgid "Refund Reason"
-msgstr "Motiv rambursare"
-
-#: templates/billing/invoice_detail.html:290
-msgid "Please select a reason..."
-msgstr "Selectați un motiv..."
-
-#: templates/billing/invoice_detail.html:295
-msgid "Details"
-msgstr "Detalii"
-
-#: templates/billing/invoice_detail.html:296
-msgid "Please provide details about your refund request. The more information you provide, the faster we can process your request."
-msgstr "Furnizați detalii despre cererea dvs. de rambursare. Cu cât oferiți mai multe informații, cu atât mai repede vă putem procesa cererea."
-
-#: templates/billing/invoice_detail.html:299
-msgid "Include details like what went wrong, when the issue occurred, or any relevant information."
-msgstr "Includeți detalii cum ar fi ce s-a întâmplat, când s-a produs problema sau orice alte informații relevante."
-
-#: templates/billing/invoice_detail.html:303 templates/orders/checkout.html:293
-#: templates/orders/checkout.html:350
-msgid "What happens next?"
-msgstr "Ce se întâmplă mai departe?"
-
-#: templates/billing/invoice_detail.html:304
-msgid "Your refund request will be submitted for processing. Our billing team will review and confirm within 1-2 business days."
-msgstr "Cererea dvs. de rambursare va fi înregistrată pentru procesare. Echipa noastră de facturare o va revizui și confirma în 1-2 zile de lucru."
-
-#: templates/billing/invoice_detail.html:309
-#: templates/customers/address_form.html:86
-#: templates/customers/team_invite.html:65
-#: templates/services/service_request_action.html:194
-#: templates/tickets/partials/status_and_comments.html:163
-#: templates/tickets/ticket_create.html:117
-#: templates/users/company_profile_edit.html:189
-#: templates/users/create_company.html:270
-#: templates/users/mfa_setup_totp.html:153
-msgid "Cancel"
-msgstr "Anulează"
-
-#: templates/billing/invoice_detail.html:311
-#: templates/billing/invoice_detail.html:368
-#: templates/billing/invoice_detail.html:374
-#: templates/services/service_request_action.html:186
-#: templates/services/service_request_action.html:257
-msgid "Submit Request"
-msgstr "Trimiteți cererea"
-
-#: templates/billing/invoice_detail.html:328
-msgid "Please fill in all required fields."
-msgstr "Completați toate câmpurile obligatorii."
-
-#: templates/billing/invoice_detail.html:333
-msgid "Submit refund request? Our billing team will review your request."
-msgstr "Trimiteți cererea de rambursare? Echipa noastră de facturare va revizui cererea dvs."
-
-#: templates/billing/invoice_detail.html:340
-msgid "Submitting..."
-msgstr "Se trimite..."
-
-#: templates/billing/invoice_detail.html:362
-msgid "Refund request submitted successfully! Our billing team will review it shortly."
-msgstr "Cererea de rambursare a fost trimisă cu succes! Echipa noastră de facturare o va revizui în curând."
 
 #: templates/billing/invoice_not_found.html:5
 #: templates/billing/invoice_not_found.html:13
@@ -3555,6 +3425,17 @@ msgstr "Linia adresei 2"
 #: templates/customers/address_form.html:54
 msgid "Apartment, suite, floor (optional)"
 msgstr "Apartament, scară, etaj (opțional)"
+
+#: templates/customers/address_form.html:86
+#: templates/customers/team_invite.html:65
+#: templates/services/service_request_action.html:194
+#: templates/tickets/partials/status_and_comments.html:163
+#: templates/tickets/ticket_create.html:117
+#: templates/users/company_profile_edit.html:189
+#: templates/users/create_company.html:270
+#: templates/users/mfa_setup_totp.html:153
+msgid "Cancel"
+msgstr "Anulează"
 
 #: templates/customers/address_form.html:88
 msgid "Save Address"
@@ -4345,6 +4226,10 @@ msgstr "Reducere"
 #: templates/orders/checkout.html:277
 msgid "Gift-card payment"
 msgstr "Plată cu cardul cadou"
+
+#: templates/orders/checkout.html:293 templates/orders/checkout.html:350
+msgid "What happens next?"
+msgstr "Ce se întâmplă mai departe?"
 
 #: templates/orders/checkout.html:306
 msgid "Enter card details"
@@ -5514,6 +5399,11 @@ msgstr "Vă rugăm să furnizați un motiv detaliat pentru această solicitare..
 #: templates/services/service_request_action.html:180
 msgid "This information helps our team process your request faster"
 msgstr "Aceste informații ajută echipa noastră să proceseze mai rapid solicitarea dvs."
+
+#: templates/services/service_request_action.html:186
+#: templates/services/service_request_action.html:257
+msgid "Submit Request"
+msgstr "Trimiteți cererea"
 
 #: templates/services/service_request_action.html:204
 msgid "Current Service"
@@ -6825,6 +6715,84 @@ msgstr "Conectați-vă aici"
 #: tests/common/pagination_assertions.py:20
 msgid "Go to next page"
 msgstr "Mergeți la pagina următoare"
+
+#~ msgid "General Customer Request"
+#~ msgstr "Solicitare generală a clientului"
+
+#~ msgid "Service Not Working"
+#~ msgstr "Serviciul nu funcționează"
+
+#~ msgid "Quality Not As Expected"
+#~ msgstr "Calitatea nu corespunde așteptărilor"
+
+#~ msgid "Technical Problems"
+#~ msgstr "Probleme tehnice"
+
+#~ msgid "Want to Cancel Service"
+#~ msgstr "Doresc să anulez serviciul"
+
+#~ msgid "Duplicate Invoice"
+#~ msgstr "Factură duplicată"
+
+#~ msgid "Billing Error"
+#~ msgstr "Eroare de facturare"
+
+#~ msgid "Service Policy Issue"
+#~ msgstr "Problemă cu politica serviciului"
+
+#~ msgid "Not Satisfied with Service"
+#~ msgstr "Nu sunt mulțumit de serviciu"
+
+#~ msgid "Other Reason"
+#~ msgstr "Alt motiv"
+
+#~ msgid "Refund request submitted successfully."
+#~ msgstr "Cererea de rambursare a fost trimisă cu succes."
+
+#~ msgid "Unable to process refund request."
+#~ msgstr "Nu se poate procesa cererea de rambursare."
+
+#~ msgid "Unable to process refund request. Please try again."
+#~ msgstr "Nu se poate procesa cererea de rambursare. Vă rugăm să încercați din nou."
+
+#~ msgid "Request Refund"
+#~ msgstr "Solicită rambursare"
+
+#~ msgid "Request Invoice Refund"
+#~ msgstr "Solicitați rambursarea facturii"
+
+#~ msgid "Submit a refund request for this invoice. Our billing team will review your request and contact you."
+#~ msgstr "Trimiteți o cerere de rambursare pentru această factură. Echipa noastră de facturare va revizui solicitarea dvs. și vă va contacta."
+
+#~ msgid "Refund Reason"
+#~ msgstr "Motiv rambursare"
+
+#~ msgid "Please select a reason..."
+#~ msgstr "Selectați un motiv..."
+
+#~ msgid "Details"
+#~ msgstr "Detalii"
+
+#~ msgid "Please provide details about your refund request. The more information you provide, the faster we can process your request."
+#~ msgstr "Furnizați detalii despre cererea dvs. de rambursare. Cu cât oferiți mai multe informații, cu atât mai repede vă putem procesa cererea."
+
+#~ msgid "Include details like what went wrong, when the issue occurred, or any relevant information."
+#~ msgstr "Includeți detalii cum ar fi ce s-a întâmplat, când s-a produs problema sau orice alte informații relevante."
+
+#~ msgid "Your refund request will be submitted for processing. Our billing team will review and confirm within 1-2 business days."
+#~ msgstr "Cererea dvs. de rambursare va fi înregistrată pentru procesare. Echipa noastră de facturare o va revizui și confirma în 1-2 zile de lucru."
+
+#~ msgid "Please fill in all required fields."
+#~ msgstr "Completați toate câmpurile obligatorii."
+
+#~ msgid "Submit refund request? Our billing team will review your request."
+#~ msgstr "Trimiteți cererea de rambursare? Echipa noastră de facturare va revizui cererea dvs."
+
+#~ msgid "Submitting..."
+#~ msgstr "Se trimite..."
+
+#~ msgid "Refund request submitted successfully! Our billing team will review it shortly."
+#~ msgstr "Cererea de rambursare a fost trimisă cu succes! Echipa noastră de facturare o va revizui în curând."
 
 #~ msgid "Successfully synced {len(synced_invoices)} invoices."
 #~ msgstr "S-au sincronizat cu succes {len(synced_invoices)} facturi."

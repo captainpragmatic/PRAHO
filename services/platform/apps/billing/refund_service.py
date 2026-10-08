@@ -87,9 +87,9 @@ def _choice_value(
     dance that had already drifted into three different treatments of one value.
     """
     if raw is None or raw == "":
-        # An absent key and an empty one mean the same thing. The portal's refund client
-        # declares `reason: str = ""`, so without this an empty string reaches a choices
-        # column as a value nothing can display — the case the old history's migration 0048 repaired.
+        # An absent key and an empty one mean the same thing. A caller that defaults a field to
+        # `""` would otherwise put an empty string into a choices column as a value nothing can
+        # display — the case the old history's migration 0048 repaired.
         return default
     if isinstance(raw, enum_type):
         return str(raw.value)
@@ -101,9 +101,10 @@ def _choice_value(
         return default
     value = str(raw)
     if allowed is not None and value not in allowed:
-        # Only passed for closed sets. `reason` deliberately omits it: the portal forwards
-        # customer free text, and collapsing that to a default would destroy what the
-        # customer actually said.
+        # Only passed for closed sets. `reason` deliberately omits it: collapsing an
+        # unrecognised reason to a default would destroy what the caller actually wrote.
+        # Refunds are staff-only now (the portal path was removed), so closing the set is
+        # possible but a separate decision.
         logger.warning("⚠️ [Billing] Ignored unknown %s value %r", enum_type.__name__, value)
         return default
     return value

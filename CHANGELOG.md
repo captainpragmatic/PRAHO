@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Refunds are now staff-only. The portal's "Request Refund" button promised that the billing team
+  would review the request, but it was wired to a platform endpoint that refunded immediately with
+  the customer as the actor; it never paid out only because the portal sent an invoice where the
+  endpoint expected a payment. The button, its page and the platform endpoint are removed, and a
+  guardrail test rejects any new refund entry point that is not declared with its gate. Customers
+  ask for a refund through a support ticket.
+- A staff partial refund on an order refunded the whole order. The order dialog sends the amount
+  as `refund_amount`, which the view ignored in favour of the order total; an empty, zero,
+  negative or non-numeric amount did the same. The amount the operator typed is now refunded, and
+  unusable amounts are refused before the gateway is called.
+- Both staff refund dialogs offered a "Process payment gateway refund" checkbox that nothing read,
+  so unticking it still refunded through the gateway and could double a refund already made in
+  the provider's dashboard. It is removed.
+
 - A portal on its own host could not log anyone in. With an HTTPS platform URL and `DEBUG` off (the
   `docker-compose.portal-only.yml` setup), the portal signed every platform request in a
   pipe-separated format that no platform release has ever accepted, so the platform refused them all.

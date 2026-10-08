@@ -45,7 +45,7 @@ from django.views.decorators.http import require_http_methods, require_POST
 from django_fsm import TransitionNotAllowed
 from rest_framework.response import Response
 
-from apps.api.secure_auth import BILLING_ROLES, _uniform_error_response, get_authenticated_customer
+from apps.api.secure_auth import BILLING_ROLES, get_authenticated_customer
 from apps.billing.efactura.settings import ROMANIA_TIMEZONE, ro_local_date
 from apps.billing.pdf_generators import RomanianProformaPDFGenerator
 from apps.common.constants import DEFAULT_PAGE_SIZE
@@ -115,54 +115,6 @@ def _get_max_payment_amount_cents() -> int:
     from apps.settings.services import SettingsService  # noqa: PLC0415  # Deferred: avoids circular import
 
     return SettingsService.get_integer_setting("billing.max_payment_amount_cents", _DEFAULT_MAX_PAYMENT_AMOUNT_CENTS)
-
-
-# #104 [M11]: customer-side roles permitted to initiate a refund through the portal API.
-# "tech" and "viewer" are deliberately excluded (CustomerMembership.CUSTOMER_ROLE_CHOICES).
-REFUND_CUSTOMER_ROLES = frozenset({"owner", "billing"})
-
-# Widest signed integer any supported backend will accept as a primary key.
-_MAX_DB_INTEGER = 2**63 - 1
-
-
-def _resolve_authorized_refund_actor(raw_user_id: object, customer: Customer) -> User | None:
-    """The signed body's actor, if they may initiate a refund for this customer, else None.
-
-    Returns the resolved user rather than a bare bool so the caller can record *who* issued
-    the refund. The authorization decision is unchanged — membership plus role, nothing else.
-
-    #104 [M11]: membership alone is not authority to move money. The shared
-    `_validate_user_membership` gate filters on user/customer/is_active and never on role,
-    so a read-only "viewer" or a "tech" member reached RefundService.
-    """
-    from apps.users.models import CustomerMembership  # noqa: PLC0415  # Deferred: avoids circular import
-
-    try:
-        actor_user_id = int(raw_user_id)  # type: ignore[call-overload]  # coercion IS the validation
-        if not 0 < actor_user_id <= _MAX_DB_INTEGER:
-            # Outside the primary-key domain. An unbounded value coerces cleanly here and
-            # then overflows inside the ORM, which the broad handler below turns into a 500.
-            raise ValueError(actor_user_id)
-    except (TypeError, ValueError):
-        # A malformed actor id is a denial, not a server error: an uncoerced value reaches
-        # the ORM as an invalid lookup and surfaces as a 500.
-        logger.warning("⚠️ [API] Refused refund for customer %s — unusable actor id %r", customer.id, raw_user_id)
-        return None
-
-    membership = (
-        CustomerMembership.objects.filter(user_id=actor_user_id, customer=customer, is_active=True)
-        .select_related("user")
-        .first()
-    )
-    if membership is None or membership.role not in REFUND_CUSTOMER_ROLES:
-        logger.warning(
-            "⚠️ [API] Refused refund for customer %s — actor %r role %r lacks financial standing",
-            customer.id,
-            actor_user_id,
-            getattr(membership, "role", None),
-        )
-        return None
-    return membership.user
 
 
 def _require_customer_auth_for_portal_api(
@@ -2465,97 +2417,6 @@ def api_confirm_payment(  # noqa: PLR0911  # Complexity: multi-step business log
         return JsonResponse({"success": False, "error": "Invalid JSON payload"}, status=400)
     except Exception as e:
         logger.error(f"🔥 API: Unexpected error confirming payment: {e}")
-        return JsonResponse({"success": False, "error": "Internal server error"}, status=500)
-
-
-@csrf_exempt  # nosemgrep: no-csrf-exempt — HMAC-authenticated inter-service endpoint
-@require_http_methods(["POST"])
-def api_process_refund(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911  # Complexity: multi-step refund workflow
-    """
-    🔐 API: Process payment refund
-
-    Expected payload:
-    {
-        "payment_id": "uuid-string",
-        "amount_cents": 2999,
-        "reason": "Customer request"
-    }
-    """
-    logger = logging.getLogger(__name__)
-    customer, auth_error = _require_customer_auth_for_portal_api(request)
-    if auth_error is not None:
-        return auth_error
-    assert customer is not None
-    try:
-        # Parse request data
-        data = json.loads(request.body)
-        payment_id = data.get("payment_id")
-        customer_id = data.get("customer_id")
-
-        # Validate required fields
-        if not payment_id:
-            return JsonResponse({"success": False, "error": "payment_id is required"}, status=400)
-        try:
-            customer_id_int = int(customer_id) if customer_id is not None else customer.id
-        except (TypeError, ValueError):
-            return JsonResponse({"success": False, "error": "customer_id must be a valid integer"}, status=400)
-        if customer_id_int != customer.id:
-            return JsonResponse({"success": False, "error": "customer_id mismatch"}, status=403)
-
-        actor = _resolve_authorized_refund_actor(data.get("user_id"), customer)
-        if actor is None:
-            return _json_denial(_uniform_error_response())
-
-        # Look up payment and validate it has a linked invoice
-        try:
-            payment = Payment.objects.filter(id=payment_id).select_related("invoice").first()
-        except (ValueError, TypeError):
-            payment = None
-        lookup_error = None if payment is not None else f"Payment {payment_id} not found"
-        if lookup_error or not getattr(payment, "invoice", None):
-            msg = lookup_error or "Payment has no linked invoice"
-            return JsonResponse({"success": False, "error": msg}, status=400)
-        assert payment is not None
-        if payment.customer_id != customer_id_int:
-            return JsonResponse({"success": False, "error": "Payment does not belong to this customer"}, status=403)
-
-        amount_cents = data.get("amount_cents")
-        # "API refund request" was never a REASON_CHOICES value, so every API refund that
-        # omitted a reason persisted an invalid one (the old history's migration 0048 repaired them).
-        reason = data.get("reason", "customer_request")
-
-        payment_invoice = payment.invoice
-        assert payment_invoice is not None  # narrowing: guaranteed by linked-invoice check above
-        from apps.billing.refund_service import (  # noqa: PLC0415  # Deferred: avoids circular import
-            RefundData,
-            RefundService,
-        )
-
-        refund_data: RefundData = {
-            "refund_type": "partial" if amount_cents else "full",
-            "idempotency_key": data.get("idempotency_key", ""),
-            "amount_cents": amount_cents or payment.amount_cents,
-            "reason": reason,
-            "notes": f"API refund for payment {payment_id}",
-        }
-
-        result = RefundService.refund_invoice(payment_invoice.id, refund_data, actor=actor)
-        if result.is_ok():
-            refund_result = result.unwrap()
-            logger.info(f"✅ API: Refund processed for payment {payment_id}")
-            refund_id = refund_result.get("refund_id")
-            outcome = refund_result.get("refund_status", "completed")
-            return JsonResponse(
-                {"success": outcome != "failed", "refund_id": str(refund_id), "status": outcome},
-                status=409 if outcome == "failed" else 202 if outcome != "completed" else 200,
-            )
-        logger.warning(f"⚠️ API: Refund failed for payment {payment_id}: {result.unwrap_err()}")
-        return JsonResponse({"success": False, "error": result.unwrap_err()}, status=400)
-
-    except json.JSONDecodeError:
-        return JsonResponse({"success": False, "error": "Invalid JSON payload"}, status=400)
-    except Exception as e:
-        logger.error(f"🔥 API: Unexpected error processing refund: {e}")
         return JsonResponse({"success": False, "error": "Internal server error"}, status=500)
 
 

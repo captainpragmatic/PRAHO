@@ -37,7 +37,7 @@ from apps.billing.tasks import (
     submit_efactura,
     validate_vat_number,
 )
-from apps.billing.views import api_process_refund, generate_e_factura, invoice_refund
+from apps.billing.views import generate_e_factura, invoice_refund
 from apps.users.models import User
 from tests.factories.billing_factories import CustomerFactory
 
@@ -370,50 +370,6 @@ class InvoiceRefundViewTests(TestCase):
             mock_get.return_value = mock_inv
             response = invoice_refund(request, pk=uuid.UUID("12345678-1234-5678-1234-567812345678"))
 
-        data = json.loads(response.content)
-        self.assertTrue(data["success"])
-
-
-class ApiRefundViewTests(TestCase):
-    """D5: API refund processing"""
-
-    @patch("apps.users.models.CustomerMembership")
-    @patch("apps.billing.refund_service.RefundService.refund_invoice")
-    @patch("apps.billing.views.Payment")
-    @patch("apps.billing.views._require_customer_auth_for_portal_api")
-    def test_processes_refund(
-        self,
-        mock_auth: MagicMock,
-        mock_pay_cls: MagicMock,
-        mock_refund: MagicMock,
-        mock_membership_cls: MagicMock,
-    ) -> None:
-        mock_customer = MagicMock(id=1)
-        mock_auth.return_value = (mock_customer, None)
-
-        # #104 [M11]: refunds require an owner/billing customer principal, not bare membership.
-        # The gate now resolves the membership's user too, so the refund can record who issued
-        # it — hence select_related("user") in the chain being mocked here.
-        membership = MagicMock(role="owner")
-        mock_membership_cls.objects.filter.return_value.select_related.return_value.first.return_value = membership
-
-        mock_payment = MagicMock(id="p1", amount_cents=5000, customer_id=1, invoice=MagicMock(id="i1"))
-        mock_pay_cls.objects.filter.return_value.select_related.return_value.first.return_value = mock_payment
-
-        mock_result = MagicMock()
-        mock_result.is_ok.return_value = True
-        mock_result.unwrap.return_value = {"refund_id": "ref-1"}
-        mock_refund.return_value = mock_result
-
-        factory = RequestFactory()
-        request = factory.post(
-            "/billing/api/refund/",
-            json.dumps({"payment_id": "p1", "reason": "Test", "user_id": 1}),
-            content_type="application/json",
-        )
-        request.user = MagicMock()
-
-        response = api_process_refund(request)
         data = json.loads(response.content)
         self.assertTrue(data["success"])
 

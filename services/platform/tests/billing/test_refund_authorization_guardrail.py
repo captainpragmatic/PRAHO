@@ -31,16 +31,16 @@ REFUND_METHODS = frozenset({"refund_invoice", "refund_order"})
 
 # The complete inventory of direct RefundService callers, each mapped to the mechanism that
 # authorizes it. `billing_staff_api_required` denies in JSON (these endpoints return
-# JsonResponse to clients that parse unconditionally). The portal API endpoint is reached by
-# an authenticated *customer* over HMAC, so its gate is an in-view membership-role check.
+# JsonResponse to clients that parse unconditionally). Refunds are staff-only: the portal's
+# customer endpoint (`api_process_refund`) was removed, and a new entry point of any kind
+# fails this test until it is declared here with the gate that authorizes it.
 EXPECTED_REFUND_ENTRY_POINTS: dict[str, str] = {
     "apps/billing/views.py:invoice_refund": "billing_staff_api_required",
     "apps/orders/views.py:order_refund": "billing_staff_api_required",
-    "apps/billing/views.py:api_process_refund": "_resolve_authorized_refund_actor",
 }
 
-# Canary: the most recently classified entry point. A scan that drifts off it is broken.
-NEWEST_KNOWN_ENTRY_POINT = "apps/billing/views.py:api_process_refund"
+# Canary: a known entry point the scan must find. A scan that drifts off it is broken.
+NEWEST_KNOWN_ENTRY_POINT = "apps/orders/views.py:order_refund"
 
 
 @dataclass(frozen=True)

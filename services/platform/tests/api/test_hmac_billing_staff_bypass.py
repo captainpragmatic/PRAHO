@@ -100,9 +100,14 @@ class BillingStaffSessionBypassTests(TestCase):
         response = self._make_staff_request("/billing/stripe-config/")
         self.assertEqual(response.status_code, 401)
 
-    def test_staff_cannot_access_process_refund_without_hmac(self) -> None:
+    def test_the_removed_customer_refund_path_is_no_longer_hmac_gated(self) -> None:
+        """Refunds are staff-only; `/billing/process-refund/` is now just an unrouted path.
+
+        The middleware passes it through like any staff URL. That it then reaches no view
+        (404) is proven through the real urlconf in tests/billing/test_customer_refund_path_removed.py.
+        """
         response = self._make_staff_request("/billing/process-refund/")
-        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.status_code, 200)
 
     # ── Anonymous users ──
 

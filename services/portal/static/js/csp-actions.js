@@ -16,8 +16,6 @@
  *   remove-file — remove the uploaded file at data-index
  *   submit-form — submit the enclosing form
  *   cookie-prefs — open the guarded global cookie-preferences dialog
- *   modal-open   — show the modal matched by data-modal-target
- *   modal-close  — hide the modal matched by data-modal-target
  *   modal-open-by-id — open the {% modal %}-shell modal whose DOM id is in data-modal-id via window.openModal (focus-trap + scroll-lock)
  *   print-codes — print MFA backup codes via the guarded global helper
  *   regenerate-codes — regenerate MFA backup codes via the guarded global helper
@@ -115,22 +113,6 @@
       case "cookie-prefs": {
         if (typeof window.showCookiePreferences === "function") {
           window.showCookiePreferences();
-        }
-        break;
-      }
-      case "modal-open": {
-        var openTarget = el.dataset.modalTarget;
-        var openNode = openTarget && document.querySelector(openTarget);
-        if (openNode) {
-          openNode.classList.remove("hidden");
-        }
-        break;
-      }
-      case "modal-close": {
-        var closeTarget = el.dataset.modalTarget;
-        var closeNode = closeTarget && document.querySelector(closeTarget);
-        if (closeNode) {
-          closeNode.classList.add("hidden");
         }
         break;
       }

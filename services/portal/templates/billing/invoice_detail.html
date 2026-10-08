@@ -26,12 +26,6 @@
           {% icon "download" size="sm" css_class="text-white" %} {% trans "Download PDF" %}
         </a>
 
-        <!-- Customer Refund Request Button -->
-        {% if invoice.status == "paid" %}
-          {% trans "Request Refund" as refund_request_btn_label %}
-          {% button refund_request_btn_label data_action="modal-open" attrs='data-modal-target="#invoiceRefundRequestModal"' icon="receipt" variant="info" %}
-        {% endif %}
-
         <a href="{% url 'billing:invoices_list' %}"
            class="inline-flex items-center justify-center rounded-md border border-transparent bg-slate-600 px-3 sm:px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-slate-700">
           ← {% trans "Back to Billing" %}
@@ -269,112 +263,5 @@
     </div>
   </div>
 </div>
-
-<!-- Invoice Refund Request Modal (for customers) -->
-{% if invoice.status == "paid" %}
-<div id="invoiceRefundRequestModal" class="hidden fixed inset-0 z-50 overflow-y-auto">
-  <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-    <div class="fixed inset-0 bg-slate-900 opacity-75" aria-hidden="true" data-action="modal-close" data-modal-target="#invoiceRefundRequestModal"></div>
-
-    <div class="relative z-10 inline-block align-bottom bg-slate-800 rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
-      <form id="invoiceRefundRequestForm" method="post">
-        {% csrf_token %}
-        <div class="px-6 pt-6 pb-4">
-          <h3 class="text-lg font-medium text-white mb-4">{% icon "receipt" size="md" css_class="text-white" %} {% trans "Request Invoice Refund" %}</h3>
-          <p class="text-sm text-slate-400 mb-4">
-            {% trans "Submit a refund request for this invoice. Our billing team will review your request and contact you." %}
-          </p>
-
-          <div class="mb-4">
-            {% trans "Refund Reason" as refund_reason_label %}
-            {% trans "Please select a reason..." as refund_reason_placeholder %}
-            {% input_field "refund_reason" input_type="select" label=refund_reason_label required=True html_id="invoice_refund_request_reason" placeholder=refund_reason_placeholder options=refund_reason_choices %}
-          </div>
-
-          <div class="mb-4">
-            {% trans "Details" as refund_notes_label %}
-            {% trans "Please provide details about your refund request. The more information you provide, the faster we can process your request." as refund_notes_placeholder %}
-            {% input_field "refund_notes" input_type="textarea" label=refund_notes_label required=True rows=4 html_id="invoice_refund_request_notes" placeholder=refund_notes_placeholder %}
-            <p class="text-xs text-slate-500 mt-1">
-              {% trans "Include details like what went wrong, when the issue occurred, or any relevant information." %}
-            </p>
-          </div>
-
-          {% trans "What happens next?" as refund_next_title %}
-          {% trans "Your refund request will be submitted for processing. Our billing team will review and confirm within 1-2 business days." as refund_next_message %}
-          {% alert refund_next_message title=refund_next_title variant="info" css_class="mb-4" %}
-        </div>
-
-        <div class="px-6 py-4 bg-slate-900 flex justify-end space-x-3">
-          {% trans "Cancel" as refund_cancel_btn_label %}
-          {% button refund_cancel_btn_label data_action="modal-close" attrs='data-modal-target="#invoiceRefundRequestModal"' variant="secondary" %}
-          {% trans "Submit Request" as refund_submit_btn_label %}
-          {% button refund_submit_btn_label type="submit" icon="receipt" variant="info" %}
-        </div>
-      </form>
-    </div>
-  </div>
-</div>
-
-<script nonce="{{ csp_nonce }}">
-// Handle invoice refund request form submission
-document.getElementById('invoiceRefundRequestForm').addEventListener('submit', function(e) {
-    e.preventDefault();
-
-    const formData = new FormData(this);
-
-    // Basic validation
-    if (!formData.get('refund_reason') || !formData.get('refund_notes').trim()) {
-        alert('{% trans "Please fill in all required fields." %}');
-        return;
-    }
-
-    // Show confirmation
-    if (!confirm('{% trans "Submit refund request? Our billing team will review your request." %}')) {
-        return;
-    }
-
-    // Disable submit button
-    const submitBtn = this.querySelector('button[type="submit"]');
-    submitBtn.disabled = true;
-    submitBtn.innerHTML = '{% trans "Submitting..." %}';
-
-    // Get CSRF token
-    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value
-        || document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '';
-
-    // Submit refund request to the API
-    fetch('{% url "billing:request_refund" invoice.number %}', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRFToken': csrfToken,
-        },
-        body: JSON.stringify({
-            refund_reason: formData.get('refund_reason'),
-            refund_notes: formData.get('refund_notes'),
-        }),
-    })
-    .then(function(response) { return response.json(); })
-    .then(function(data) {
-        if (data.success) {
-            alert('{% trans "Refund request submitted successfully! Our billing team will review it shortly." %}');
-            document.querySelector('#invoiceRefundRequestModal')?.classList.add('hidden');
-            window.location.reload();
-        } else {
-            alert(data.error || '{% trans "Unable to process refund request. Please try again." %}');
-            submitBtn.disabled = false;
-            submitBtn.innerHTML = '{% trans "Submit Request" %}';
-        }
-    })
-    .catch(function() {
-        alert('{% trans "Unable to process refund request. Please try again." %}');
-        submitBtn.disabled = false;
-        submitBtn.innerHTML = '{% trans "Submit Request" %}';
-    });
-});
-</script>
-{% endif %}
 
 {% endblock %}

@@ -76,7 +76,8 @@ def test_customer_payment_status_and_history(monitored_customer_page: Page, e2e_
     expect(page.get_by_role("button", name="Request Refund")).to_have_count(0)
     _detail(page, e2e_baseline, paid=True)
     expect(payment_date).to_have_text(re.compile(r"\d{1,2} \w+\.? \d{4}, \d{2}:\d{2}"))
-    expect(page.get_by_role("button", name="Request Refund")).to_be_visible()
+    # Refunds are staff-only: not even a paid invoice offers the customer a refund control.
+    expect(page.get_by_role("button", name="Request Refund")).to_have_count(0)
     page.reload()
     expect(payment_date).not_to_contain_text("Not paid")
 

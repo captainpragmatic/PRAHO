@@ -72,6 +72,4 @@ urlpatterns = [
     path("confirm-payment/", views.api_confirm_payment, name="api_confirm_payment"),
     # Payment Methods & Configuration
     path("stripe-config/", views.api_stripe_config, name="api_stripe_config"),
-    # Refund Processing
-    path("process-refund/", views.api_process_refund, name="api_process_refund"),
 ]

@@ -48,13 +48,13 @@ EXPECTED_SUPPRESSIONS: dict[str, int] = {
     "billing/metering_tasks.py": 2,
     "billing/refund_service.py": 2,
     "billing/tax_models.py": 1,
-    "billing/views.py": 6,
+    "billing/views.py": 5,
 }
 
-# Canary: the most recently added suppression, on the actor-id coercion in the refund API
-# gate (#104). A scan that drifts off it — wrong root, wrong file filter, silently matching
-# nothing — fails here rather than passing vacuously.
-NEWEST_KNOWN_SUPPRESSION = ("billing/views.py", "call-overload")
+# Canary: a known registered suppression. A scan that drifts off it — wrong root, wrong file
+# filter, silently matching nothing — fails here rather than passing vacuously. (It was the
+# actor-id coercion in the customer refund API, removed when refunds became staff-only.)
+NEWEST_KNOWN_SUPPRESSION = ("billing/views.py", "dict-item")
 
 
 def _iter_production_sources() -> list[Path]:

@@ -78,16 +78,6 @@ class InvoiceViewServiceRateLimitTests(SimpleTestCase):
         result = self.service.get_proforma_detail("PF-001", 1, 1)
         self.assertIsNone(result)
 
-    def test_request_refund_reraises_rate_limited(self) -> None:
-        self.service.api_client.post.side_effect = _rate_limited_error()
-        with self.assertRaises(PlatformAPIError):
-            self.service.request_refund("INV-001", 1, 1)
-
-    def test_request_refund_returns_error_on_server_error(self) -> None:
-        self.service.api_client.post.side_effect = _server_error()
-        result = self.service.request_refund("INV-001", 1, 1)
-        self.assertFalse(result["success"])
-
 
 @override_settings(
     PLATFORM_API_BASE_URL="http://localhost:8700/api",
