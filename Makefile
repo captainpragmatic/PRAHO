@@ -132,7 +132,7 @@ help:
 	@echo ""
 	@echo "📜 ANSIBLE (generic):"
 	@echo "  make ansible-single-server - Deploy via Ansible (single server)"
-	@echo "  make ansible-backup        - Remote backup via Ansible"
+	@echo "  make ansible-backup        - Remote backup via Ansible (ENV=staging|prod, FETCH=true downloads it)"
 	@echo ""
 	@echo "⚙️  SETUP & MAINTENANCE:"
 	@echo "  make install         - Set up development environment"
@@ -1394,5 +1394,9 @@ ansible-single-server:
 	@cd deploy/ansible && ansible-playbook -i inventory/native-single-server.yml playbooks/native-single-server.yml -e praho_env=$(ENV)
 
 ansible-backup:
-	@echo "📜 [Ansible] Remote backup..."
-	@cd deploy/ansible && ansible-playbook -i inventory/native-single-server.yml playbooks/backup.yml
+	@case "$(ENV)" in staging|prod) ;; *) echo "❌ Usage: make ansible-backup ENV=staging|prod [FETCH=true]"; exit 1 ;; esac
+	@test -f .env.$(ENV) || (echo "❌ Missing .env.$(ENV) — run: cp .env.example.$(ENV) .env.$(ENV)"; exit 1)
+	@echo "📜 [Ansible] Remote backup ($(ENV))..."
+	@set -a && . $(PWD)/.env.$(ENV) && set +a && \
+		cd deploy/ansible && ansible-playbook -i inventory/native-single-server.yml playbooks/backup.yml \
+		$(if $(FETCH),-e fetch_backup=$(FETCH),)

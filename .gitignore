@@ -1,6 +1,10 @@
 # Secrets
 .envrc
 
+# Database dumps: deploy/scripts/backup.sh writes them to backups/, and a downloaded native backup
+# may be dropped anywhere. Never commit one.
+praho_backup_*
+
 # Python
 __pycache__/
 *.py[cod]

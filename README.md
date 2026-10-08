@@ -200,7 +200,7 @@ PRAHO supports three deployment methods. Choose based on your infrastructure:
 
 | Method | Stack | Best For | Requirements |
 |--------|-------|----------|--------------|
-| **[Native](docs/deployment/DEPLOYMENT.md#option-1-native-single-server)** | Gunicorn + systemd + Caddy | Small VPS (4 GB+), lowest overhead | Ubuntu 22.04+, Ansible |
+| **[Native](docs/deployment/DEPLOYMENT.md#option-1-native-single-server)** | Gunicorn + systemd + Caddy | Small VPS (4 GB+), lowest overhead | Ubuntu 24.04+, Ansible |
 | **[Docker](docs/deployment/DEPLOYMENT.md#option-2-docker-single-server)** | Docker Compose + Caddy | Standard deployments, reproducible builds | Docker, Docker Compose |
 | **[Container Service](docs/deployment/DEPLOYMENT.md#option-3-container-service)** | Managed platform (ECS, Cloud Run) | Scalable cloud deployments | Container registry, managed DB |
 
