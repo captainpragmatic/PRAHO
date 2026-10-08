@@ -419,8 +419,9 @@ coverage-portal-unit:
 # (no database, platform unimportable, most files mocked) and the browser suite (a live portal
 # against a live platform over real HMAC). Measured 2026-09-26: units 63%, browser 57.31%,
 # union 72.02% - so neither dataset alone is the answer, and reporting either as "portal
-# coverage" understates it by ~9 to ~15 points.
-PORTAL_COVERAGE_FLOOR ?= 70
+# coverage" understates it by ~9 to ~15 points. Measured 2026-10-08: units 79%, browser 55.77%,
+# union 81.26%; the floor is the union rounded down.
+PORTAL_COVERAGE_FLOOR ?= 81
 # Each half of the union must have measured SOMETHING. `coverage report` exits 0 on a dataset whose
 # files are all at 0%, so "the dataset is readable" was never evidence that the suite ran under the
 # tracer: a browser half that measured nothing passed, and the union silently became the unit half

@@ -140,6 +140,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   addressed customers informally now use the formal register.
 - Template, accessibility and dark-mode findings are fixed across both services: missing
   labels, unlabeled controls and pages that stayed light in dark mode.
+- A customer who hits the registration limit is told "Too many registration attempts" and keeps
+  what they typed, except the passwords. Platform used to answer with a server error, so the
+  portal asked them to check information that was correct. When registration is briefly
+  unavailable the portal now says so as well.
+- Invoice and proforma PDFs, proforma emails and payment refusals are translated. Their strings
+  were never extracted, so Romanian customers got "FISCAL INVOICE", "TOTAL TO PAY" and
+  "Supplier:" in English. The checkout progress step "Product Selection" is translated again.
 
 
 ### Added
@@ -257,8 +264,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dropped rather than squashed. Delete and recreate every local development and E2E database:
   an old database would look up to date to Django while its tables differ. A fresh install now
   names the RON currency "Romanian Leu" instead of leaving it blank.
-
----
 - 40 settings that were stored and editable but never read now take effect. Where a setting's
   catalog default differed from what the code enforced, the default is now the enforced value.
   A stored row equal to the old default is updated, and any other stored value is kept and
@@ -274,6 +279,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `setup_default_settings` run. They never had any effect.
 - The unused `romanian_business_context` context processor, which ran two lookups on every
   render and failed for currencies other than RON, EUR and USD.
+
+---
 
 ## [0.30.0] - 2026-09-28
 
