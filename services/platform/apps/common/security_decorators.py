@@ -25,6 +25,7 @@ from apps.common.constants import (
     INVITER_ARG_POSITION,
     USER_DATA_ARG_POSITION,
 )
+from apps.common.security_errors import RateLimitFailure, RateLimitValidationError
 from apps.common.types import Err, Ok, Result
 
 from .validators import (
@@ -337,6 +338,8 @@ def _handle_validation_error(
             request_ip,
         )
 
+    if isinstance(e, RateLimitValidationError):
+        return Err(e.failure)
     return Err(SecureErrorHandler.safe_error_response(e, config.validation_type))
 
 
@@ -382,7 +385,12 @@ def _check_rate_limit(key_prefix: str, limit: int, request_ip: str, user: Any = 
                 except Exception as e:
                     # Log the logging error but don't fail rate limiting
                     logger.warning(f"⚠️ [Security] Failed to log rate limit event: {e}")  # nosec B110 - Intentional exception handling with logging
-                raise ValidationError(_("Rate limit exceeded"))
+                message = (
+                    _("Too many registration attempts. Please try again later.")
+                    if key_prefix == "registration"
+                    else _("Rate limit exceeded")
+                )
+                raise RateLimitValidationError(RateLimitFailure(str(message), status_code=429, retry_after=3600))
 
             if key_prefix != "registration":
                 # Preserve the existing cache policy for unrelated security decorators.
@@ -396,7 +404,9 @@ def _check_rate_limit(key_prefix: str, limit: int, request_ip: str, user: Any = 
             raise
         except Exception as e:
             logger.critical("🔥 [Security] Rate limiting store unreachable — failing closed: %s", e)
-            raise ValidationError(_("Service temporarily unavailable. Please try again later.")) from e
+            raise RateLimitValidationError(
+                RateLimitFailure(str(_("Service temporarily unavailable. Please try again later.")), status_code=503)
+            ) from e
 
 
 def _validate_user_registration_input(args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:

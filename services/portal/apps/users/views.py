@@ -485,6 +485,18 @@ def register_view(request: HttpRequest) -> HttpResponse:
                 else:
                     messages.error(request, _("Registration failed. Please check your information and try again."))
 
+            except PlatformAPIError as e:
+                if e.is_rate_limited:
+                    logger.warning("⚠️ [Portal Registration] Registration rate limit exceeded")
+                    messages.error(request, _("Too many registration attempts. Please try again later."))
+                    redisplay_data = request.POST.copy()
+                    for password_field in ("password1", "password2"):
+                        redisplay_data.pop(password_field, None)
+                        form.cleaned_data.pop(password_field, None)
+                    form.data = redisplay_data
+                else:
+                    logger.error(f"🔥 [Portal Registration] Platform API error: {e}")
+                    messages.error(request, _("An unexpected error occurred during registration. Please try again."))
             except Exception as e:
                 logger.error(f"🔥 [Portal Registration] Unexpected error: {e}")
                 messages.error(request, _("An unexpected error occurred during registration. Please try again."))

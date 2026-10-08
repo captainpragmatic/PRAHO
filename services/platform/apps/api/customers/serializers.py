@@ -18,6 +18,7 @@ from apps.api.users.serializers import ProfileUpdateSerializer
 from apps.common.localisation import country_name, normalize_country_code, resolve_display
 from apps.common.localisation_services import get_localisation_defaults, user_localisation_preferences
 from apps.common.request_ip import get_safe_client_ip
+from apps.common.security_errors import RateLimitFailure
 from apps.common.types import Err, Ok
 from apps.customers.models import Customer, CustomerAddress, CustomerTaxProfile
 from apps.users.models import CustomerMembership
@@ -138,6 +139,14 @@ class CustomerRegistrationDataSerializer(serializers.Serializer):
         return value
 
 
+class RegistrationRateLimitError(serializers.ValidationError):
+    """Retain typed rate-limit metadata without changing serializer validation contracts."""
+
+    def __init__(self, failure: RateLimitFailure) -> None:
+        self.failure = failure
+        super().__init__({"non_field_errors": [str(failure)]})
+
+
 class CustomerRegistrationSerializer(serializers.Serializer):
     """
     Main serializer for customer registration requests.
@@ -197,10 +206,10 @@ class CustomerRegistrationSerializer(serializers.Serializer):
                     },
                 }
             else:
-                # Result is Err — extract the message via unwrap_err(); Err has no .value,
-                # so the previous `result.value` raised AttributeError and every registration
-                # failure surfaced as the opaque "temporarily unavailable" catch-all below.
-                error_msg = str(result.unwrap_err()) if isinstance(result, Err) else "Registration failed"
+                error = result.unwrap_err() if isinstance(result, Err) else _("Registration failed")
+                if isinstance(error, RateLimitFailure):
+                    raise RegistrationRateLimitError(error)
+                error_msg = str(error)
                 logger.error(f"🔥 [API Registration] Service error: {error_msg}")
                 raise serializers.ValidationError({"non_field_errors": [error_msg]})
 

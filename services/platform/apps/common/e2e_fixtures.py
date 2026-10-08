@@ -18,6 +18,7 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import connection, transaction
 from django.utils import timezone
+from django.utils.translation import gettext
 
 from apps.common.management.commands.generate_sample_data import Command as DemoCommand
 from apps.orders.services import BillingAddressData, OrderCreateData, OrderService, StatusChangeData
@@ -181,6 +182,7 @@ def seed_baseline() -> dict[str, Any]:
     from apps.products.models import Product, ProductPrice  # noqa: PLC0415 -- cross-domain fixture orchestration
     from apps.provisioning.models import Service, ServicePlan  # noqa: PLC0415 -- cross-domain fixture orchestration
     from apps.settings.models import SystemSetting  # noqa: PLC0415 -- cross-domain fixture orchestration
+    from apps.settings.services import SettingsService  # noqa: PLC0415 -- cross-domain fixture orchestration
     from apps.tickets.models import (  # noqa: PLC0415 -- cross-domain fixture orchestration
         SupportCategory,
         Ticket,
@@ -192,6 +194,13 @@ def seed_baseline() -> dict[str, Any]:
         call_command(command, stdout=StringIO())
     SystemSetting.objects.filter(key="node_deployment.dns_default_zone").update(value="nodes.e2e.example")
     SystemSetting.objects.filter(key="portal.public_base_url").update(value="http://localhost:8701")
+    # Browser signups share localhost; keep enforcement active with a finite suite-sized allowance.
+    registration_limit = SettingsService.update_setting("security.registration_rate_limit_per_ip", 10000)
+    if registration_limit.is_err():
+        raise CommandError(
+            gettext("E2E registration limit could not be seeded: %(error)s")
+            % {"error": registration_limit.unwrap_err()}
+        )
     demo = DemoCommand(stdout=StringIO())
     demo.create_service_plans()
     demo.create_support_categories()
