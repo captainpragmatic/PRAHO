@@ -722,6 +722,8 @@ make backup
 /opt/praho/scripts/backup.sh
 
 # Native deployment, from your machine: back up, then download that dump to ~/praho-backups
+make ansible-backup FETCH=true
+# or, directly
 cd deploy/ansible && ansible-playbook -i inventory/native-single-server.yml playbooks/backup.yml \
   -e fetch_backup=true    # -e backup_fetch_dir=PATH to choose another directory
 ```

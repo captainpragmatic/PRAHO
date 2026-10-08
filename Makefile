@@ -132,7 +132,7 @@ help:
 	@echo ""
 	@echo "📜 ANSIBLE (generic):"
 	@echo "  make ansible-single-server - Deploy via Ansible (single server)"
-	@echo "  make ansible-backup        - Remote backup via Ansible"
+	@echo "  make ansible-backup        - Remote backup via Ansible (FETCH=true downloads it)"
 	@echo ""
 	@echo "⚙️  SETUP & MAINTENANCE:"
 	@echo "  make install         - Set up development environment"
@@ -1395,4 +1395,5 @@ ansible-single-server:
 
 ansible-backup:
 	@echo "📜 [Ansible] Remote backup..."
-	@cd deploy/ansible && ansible-playbook -i inventory/native-single-server.yml playbooks/backup.yml
+	@cd deploy/ansible && ansible-playbook -i inventory/native-single-server.yml playbooks/backup.yml \
+		$(if $(FETCH),-e fetch_backup=$(FETCH),)

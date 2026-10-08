@@ -15,6 +15,7 @@ A database dump must also never be committable from the checkout or copied to a 
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -100,6 +101,31 @@ class TestBackupPlaybook:
         assert fetch.get("become") is False
         modes = {str((task.get("file") or task.get("ansible.builtin.file") or {}).get("mode")) for task in tasks}
         assert {"0700", "0600"} <= modes, modes
+
+
+class TestBackupMakeTarget:
+    # Resolved rather than spelled "make", as in test_e2e_stack: the recipe is what is under test.
+    MAKE = shutil.which("make") or "make"
+
+    def _dry_run(self, *variables: str) -> str:
+        # This suite runs under make itself; its MAKEFLAGS would leak into the inner call.
+        env = {key: value for key, value in os.environ.items() if key not in {"MAKELEVEL", "MAKEFLAGS", "MFLAGS"}}
+        return subprocess.run(  # noqa: S603 -- a fixed make target with fixed variables
+            [self.MAKE, "-n", "ansible-backup", *variables],
+            cwd=PROJECT_ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+
+    @pytest.mark.integration
+    def test_fetch_true_asks_the_playbook_to_download(self) -> None:
+        assert "-e fetch_backup=true" in self._dry_run("FETCH=true")
+
+    @pytest.mark.integration
+    def test_without_fetch_it_only_backs_up(self) -> None:
+        assert "fetch_backup" not in self._dry_run()
 
 
 class TestDumpsStayOutOfTheCheckout:

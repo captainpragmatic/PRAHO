@@ -81,10 +81,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `make ansible-backup` can download the dump it makes. With `-e fetch_backup=true` the playbook
-  searched the local machine for `.sql.gz` files while native backups are `.dump` files on the server,
-  so it downloaded nothing and still reported success; `fetch_backup=false` also counted as true, since
-  `-e` passes a string. It now downloads the exact dump that run reported to `~/praho-backups`
+- `make ansible-backup FETCH=true` downloads the dump it makes. The target had no way to ask for the
+  download, and the playbook could not do it anyway: with `-e fetch_backup=true` it searched the local
+  machine for `.sql.gz` files while native backups are `.dump` files on the server, so it downloaded
+  nothing and still reported success; `fetch_backup=false` also counted as true, since `-e` passes a
+  string. It now downloads the exact dump that run reported to `~/praho-backups`
   (`backup_fetch_dir` to change it), readable only by you, and targets the `praho` group the
   inventories define. Git now ignores `praho_backup_*` anywhere, and the native rsync no longer copies
   a dump left in the checkout to the server.
