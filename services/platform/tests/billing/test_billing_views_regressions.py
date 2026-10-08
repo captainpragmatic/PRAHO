@@ -30,6 +30,7 @@ from apps.billing.models import (
     ProformaInvoice,
     ProformaLine,
     ProformaSequence,
+    Refund,
 )
 from apps.common.types import Ok
 from apps.customers.models import Customer
@@ -1402,36 +1403,72 @@ class InvoiceRefundViewTest(BillingViewsTestBase):
         data = response.json()
         self.assertFalse(data["success"])
 
-    def test_refund_full(self):
-        invoice = self._create_invoice()
-        self.client.force_login(self.admin_user)
-        response = self.client.post(
-            f"/billing/invoices/{invoice.id}/refund/",
-            {
-                "refund_type": "full",
-                "refund_reason": "customer_request",
-                "refund_notes": "Customer wants refund",
-            },
+    def _paid_card_invoice(self) -> tuple[Invoice, Payment]:
+        invoice = self._create_invoice(status="paid", paid_at=timezone.now())
+        payment = Payment.objects.create(
+            customer=invoice.customer,
+            invoice=invoice,
+            currency=invoice.currency,
+            amount_cents=invoice.total_cents,
+            payment_method="stripe",
+            gateway_txn_id="pi_staff_refund",
+            status="succeeded",
         )
-        self.assertEqual(response.status_code, 400)
-        data = response.json()
-        # Refund service not implemented yet
-        self.assertFalse(data["success"])
+        return invoice, payment
+
+    def _refund_through_the_view(self, invoice: Invoice, amount_cents: int, form: dict[str, str]):
+        gateway = MagicMock()
+        gateway.refund_payment.return_value = {
+            "success": True,
+            "refund_id": "re_staff",
+            "status": "succeeded",
+            "amount_refunded_cents": amount_cents,
+        }
+        self.client.force_login(self.admin_user)
+        with patch("apps.billing.refund_service.PaymentGatewayFactory.create_gateway", return_value=gateway):
+            response = self.client.post(f"/billing/invoices/{invoice.id}/refund/", form)
+        return response, gateway
+
+    def test_refund_full(self):
+        """A staff full refund reaches the gateway and records the whole amount."""
+        invoice, payment = self._paid_card_invoice()
+        response, gateway = self._refund_through_the_view(
+            invoice,
+            invoice.total_cents,
+            {"refund_type": "full", "refund_reason": "customer_request", "refund_notes": "Customer wants refund"},
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(response.json()["success"])
+        gateway.refund_payment.assert_called_once()
+        refund = Refund.objects.get(invoice=invoice)
+        self.assertEqual(refund.amount_cents, invoice.total_cents)
+        self.assertEqual(refund.payment, payment)
 
     def test_refund_partial_valid(self):
-        invoice = self._create_invoice()
-        self.client.force_login(self.admin_user)
-        response = self.client.post(
-            f"/billing/invoices/{invoice.id}/refund/",
+        """A staff partial refund moves exactly the typed amount, in cents."""
+        invoice, _payment = self._paid_card_invoice()
+        response, gateway = self._refund_through_the_view(
+            invoice,
+            5000,
             {
                 "refund_type": "partial",
-                "refund_reason": "quality_issue",
+                "refund_reason": "service_failure",
                 "refund_notes": "Partial refund",
                 "refund_amount": "50.00",
+                "idempotency_key": "staff-partial-1",
             },
         )
-        # Returns 400 because RefundService not yet implemented
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 200, response.content)
+        gateway.refund_payment.assert_called_once()
+        self.assertEqual(Refund.objects.get(invoice=invoice).amount_cents, 5000)
+
+    def test_the_refund_dialog_offers_no_gateway_opt_out(self):
+        """No view reads `process_payment_refund`; a box promising a record-only refund would lie."""
+        invoice, _payment = self._paid_card_invoice()
+        self.client.force_login(self.admin_user)
+        response = self.client.get(f"/billing/invoices/{invoice.id}/")
+        self.assertContains(response, 'name="refund_notes"')  # the refund dialog rendered
+        self.assertNotContains(response, "process_payment_refund")
 
     def test_refund_partial_zero_amount(self):
         invoice = self._create_invoice()

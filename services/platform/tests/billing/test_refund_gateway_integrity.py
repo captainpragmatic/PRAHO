@@ -8,8 +8,10 @@ from typing import Any
 from unittest import mock
 from unittest.mock import MagicMock, patch
 
+from django.contrib.auth import get_user_model
 from django.db import IntegrityError, OperationalError, transaction
 from django.test import TestCase, override_settings
+from django.urls import reverse
 from django.utils import timezone
 
 from apps.billing.models import Currency, Invoice, Payment, ProformaInvoice, Refund, RefundStatusHistory
@@ -1459,6 +1461,63 @@ class RefundGatewayIntegrityTests(TestCase):
         refund = Refund.objects.get(order=order)
         self.assertEqual(refund.amount_cents, 2_500)
         self.assertEqual(refund.payment_id, payment.id)
+
+    def test_the_staff_order_dialog_refunds_the_amount_the_operator_typed(self) -> None:
+        """The order refund dialog posts `refund_amount` in lei; the view must not refund the total.
+
+        `order_refund` read only `amount_cents`, which the dialog never sends, and fell back to
+        the order total, so typing 10.00 for a partial refund returned the whole order.
+        """
+        invoice = self._make_invoice()
+        order = self._make_order(invoice)
+        self._make_payment(invoice, transaction_id="pi_staff_order_partial")
+        staff = get_user_model().objects.create_user(
+            email="order-refund-billing@example.test", is_staff=True, staff_role="billing"
+        )
+        self.client.force_login(staff)
+        gateway = MagicMock()
+        gateway.refund_payment.return_value = {
+            "success": True,
+            "refund_id": "re_staff_order_partial",
+            "amount_refunded_cents": 1_000,
+            "status": "succeeded",
+            "error": None,
+        }
+        form = {
+            "refund_type": "partial",
+            "refund_amount": "10.00",
+            "refund_reason": "customer_request",
+            "refund_notes": "Partial goodwill refund",
+            "idempotency_key": "staff-order-partial-1",
+        }
+
+        with patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=gateway):
+            response = self.client.post(reverse("orders:order_refund", kwargs={"pk": order.pk}), form)
+
+        self.assertEqual(response.status_code, 200, response.content)
+        gateway.refund_payment.assert_called_once_with(
+            gateway_txn_id="pi_staff_order_partial", amount_cents=1_000, idempotency_key=mock.ANY
+        )
+        self.assertEqual(Refund.objects.get(order=order).amount_cents, 1_000)
+
+    def test_the_staff_order_dialog_refuses_an_unusable_amount(self) -> None:
+        invoice = self._make_invoice()
+        order = self._make_order(invoice)
+        self._make_payment(invoice, transaction_id="pi_staff_order_bad_amount")
+        staff = get_user_model().objects.create_user(
+            email="order-refund-billing-2@example.test", is_staff=True, staff_role="billing"
+        )
+        self.client.force_login(staff)
+        with patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway") as factory:
+            for amount in ("", "0", "-5", "abc", "NaN"):
+                with self.subTest(amount=amount):
+                    response = self.client.post(
+                        reverse("orders:order_refund", kwargs={"pk": order.pk}),
+                        {"refund_type": "partial", "refund_amount": amount, "refund_reason": "customer_request"},
+                    )
+                    self.assertEqual(response.status_code, 400, response.content)
+            factory.assert_not_called()
+        self.assertFalse(Refund.objects.filter(order=order).exists())
 
     def test_sequential_partial_refunds_complete_payment_and_invoice(self) -> None:
         invoice = self._make_invoice()

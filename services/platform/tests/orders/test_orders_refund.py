@@ -75,3 +75,10 @@ class OrderRefundViewTests(TestCase):
         """order_refund no longer returns 'temporarily disabled'"""
         source = inspect.getsource(order_refund)
         self.assertNotIn("temporarily disabled", source)
+
+    def test_the_refund_dialog_offers_no_gateway_opt_out(self):
+        """No view reads `process_payment_refund`; a box promising a record-only refund would lie."""
+        self.client.force_login(self.user)
+        response = self.client.get(f"/orders/{self.order.id}/")
+        self.assertContains(response, 'name="refund_notes"')  # the refund dialog rendered
+        self.assertNotContains(response, "process_payment_refund")

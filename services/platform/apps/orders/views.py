@@ -8,7 +8,7 @@ import json
 import logging
 import re
 import uuid
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -1182,9 +1182,20 @@ def order_refund(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
         # `reason` stays accepted for non-form callers.
         "reason": (request.POST.get("refund_reason") or request.POST.get("reason") or "").strip(),
     }
+    # The staff dialog posts `refund_amount` in major units (templates/orders/order_detail.html).
+    # Reading only `amount_cents`, which the dialog never sends, fell back to the order total, so a
+    # typed partial refund returned the whole order. `amount_cents` stays accepted for other callers.
     amount_cents = request.POST.get("amount_cents")
     if amount_cents:
         refund_data["amount_cents"] = int(amount_cents)
+    elif refund_data["refund_type"] == "partial":
+        try:
+            refund_amount = Decimal((request.POST.get("refund_amount") or "").strip())
+        except InvalidOperation:
+            return json_error("Invalid or non-positive refund amount")
+        if not refund_amount.is_finite() or refund_amount <= 0:
+            return json_error("Invalid or non-positive refund amount")
+        refund_data["amount_cents"] = int(refund_amount * 100)
     else:
         refund_data["amount_cents"] = order.total_cents
 
