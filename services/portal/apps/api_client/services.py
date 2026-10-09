@@ -158,9 +158,12 @@ BODY_CHUNK_BYTES = 64 * 1024
 def _read_body_within(response: requests.Response, deadline: _CallDeadline) -> None:
     """Read a streamed Platform response body, giving up when the call's time budget runs out.
 
-    The read timeout only bounds each wait for the next bytes, so a body that keeps trickling in
-    could otherwise hold a thread past the budget. The deadline is checked between chunks: the
-    call can overrun it by at most one wait, which the attempt's read timeout bounds.
+    The read timeout only bounds each wait for the next bytes, so a large body arriving slowly
+    could otherwise hold a thread well past the budget. The deadline is checked between chunks
+    of up to BODY_CHUNK_BYTES. Within one chunk the HTTP stack may read the socket many times,
+    so a peer that deliberately trickles bytes inside the read timeout can still overrun the
+    budget; Platform is an HMAC-authenticated internal peer, and that residual is accepted
+    (ADR-0055).
 
     Only a body still on the wire is read here (requests keeps `_content` False until then); a
     response already in memory, as test doubles are, is left as it is.

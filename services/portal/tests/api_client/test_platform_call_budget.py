@@ -116,8 +116,9 @@ class PlatformCallBudgetTests(SimpleTestCase):
             self.assertTrue(raised.exception.is_unavailable)
             self.assertIsNone(raised.exception.status_code)
 
-    def test_a_body_that_keeps_trickling_in_stops_at_the_budget(self) -> None:
-        # Each chunk arrives within the read timeout, so only the deadline can stop it.
+    def test_a_slow_body_stops_at_the_budget_between_chunks(self) -> None:
+        # Each chunk arrives within the read timeout, so only the deadline can stop it. This models
+        # chunk arrival; within one chunk the HTTP stack's own reads are not interrupted.
         clock = self.clock
 
         class TricklingResponse:

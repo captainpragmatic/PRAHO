@@ -272,9 +272,10 @@ class PortalAuthenticationMiddleware:
                     cache.delete(lock_key)
 
     def _validation_lease_seconds(self) -> int:
-        """Outlast a whole validation call, so a slow one cannot let a second start beside it.
+        """Outlast a validation call, so a slow one does not let a second start beside it.
 
-        A Platform call ends within its time budget plus at most one read wait (PLATFORM_API_TIMEOUT).
+        Sized to the call's time budget plus one read wait. A call that overruns that (a peer
+        trickling bytes) only lets a duplicate validation of the same session start.
         """
         longest_call = platform_call_budget_seconds() + platform_call_timeout_seconds()
         return math.ceil(longest_call) + self.VALIDATION_LEASE_MARGIN_SECONDS
