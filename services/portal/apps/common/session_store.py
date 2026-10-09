@@ -29,6 +29,7 @@ signing salt is derived from the class name, so existing sessions keep decoding.
 from __future__ import annotations
 
 import copy
+import json
 import logging
 import random
 import time
@@ -65,6 +66,29 @@ MERGE_BACKOFF_SECONDS = 0.002
 
 _MISSING = object()
 
+
+class SessionSaveContended(Exception):  # noqa: N818  # reads as what happened, like UpdateError
+    """Other requests kept saving the same session; this save gave up rather than overwrite them.
+
+    Deliberately not UpdateError: the session middleware reports that as "session deleted", which
+    would be false here.
+    """
+
+
+def _same(before: Any, after: Any) -> bool:
+    """Equal as stored: compared by JSON form, so True and 1, or 1 and 1.0, differ."""
+    if before is _MISSING or after is _MISSING:
+        return before is after
+    return json.dumps(before, sort_keys=True, default=str) == json.dumps(after, sort_keys=True, default=str)
+
+
+def _as_record_map(value: Any) -> dict[str, Any] | None:
+    """A record map's records; an absent map counts as empty, any other value is not a map."""
+    if value is _MISSING:
+        return {}
+    return value if isinstance(value, dict) else None
+
+
 # One change to apply onto the latest stored dict: (operation, key, entry, value).
 Change = tuple[str, str, Any, Any]
 
@@ -75,7 +99,7 @@ def _record_changes(key: str, before: dict[str, Any], after: dict[str, Any]) -> 
     for entry in after.keys() | before.keys():
         if entry not in after:
             changes.append(("delete_entry", key, entry, None))
-        elif before.get(entry, _MISSING) != after[entry]:
+        elif not _same(before.get(entry, _MISSING), after[entry]):
             changes.append(("set_entry", key, entry, copy.deepcopy(after[entry])))
     return changes
 
@@ -86,11 +110,12 @@ def _changes(baseline: dict[str, Any], mine: dict[str, Any]) -> list[Change]:
     touched: set[str] = set()
     for key in mine.keys() | baseline.keys():
         before, after = baseline.get(key, _MISSING), mine.get(key, _MISSING)
-        if before == after:
+        if _same(before, after):
             continue
         touched.add(key)
-        if key in RECORD_MAPS and isinstance(before, dict) and isinstance(after, dict):
-            changes.extend(_record_changes(key, before, after))
+        before_map, after_map = _as_record_map(before), _as_record_map(after)
+        if key in RECORD_MAPS and before_map is not None and after_map is not None:
+            changes.extend(_record_changes(key, before_map, after_map))
         elif after is _MISSING:
             changes.append(("delete", key, None, None))
         else:
@@ -215,17 +240,17 @@ class SessionStore(db.SessionStore):
                 return
             expected_text = latest = None  # another request saved first: merge onto its row
             _back_off(_attempt)
-        logger.warning("⚠️ [Session] Gave up merging a session save after %d attempts", MAX_MERGE_ATTEMPTS)
-        raise UpdateError
+        logger.error("🔥 [Session] Gave up merging a session save after %d contended attempts", MAX_MERGE_ATTEMPTS)
+        raise SessionSaveContended(f"Session save still contended after {MAX_MERGE_ATTEMPTS} attempts")
 
     # ---- rotation and removal ------------------------------------------------------------------
 
     def cycle_key(self) -> None:
+        mine = dict(self.items())  # load first: whether the session is authenticated decides the path
         old_key, baseline = self.session_key, self._baseline
         if old_key is None or baseline is None or baseline.get("user_id") is None:
             super().cycle_key()  # not authenticated when loaded: rotate exactly as Django does
             return
-        mine = dict(self.items())
         changes = _changes(baseline, mine)
         expected_text: str | None = self._baseline_text
         latest: dict[str, Any] | None = copy.deepcopy(baseline)
@@ -247,7 +272,8 @@ class SessionStore(db.SessionStore):
             expected_text = latest = None
             _back_off(_attempt)
         else:
-            raise SessionInterrupted("The session kept changing while its key was being rotated.")
+            logger.error("🔥 [Session] Gave up rotating a session key after %d contended attempts", MAX_MERGE_ATTEMPTS)
+            raise SessionSaveContended(f"Session key rotation still contended after {MAX_MERGE_ATTEMPTS} attempts")
         self._session_cache = merged
         self._forget_baseline()
         self.create()  # inserts the merged data under a new key, and publishes it as the baseline

@@ -13,7 +13,9 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+from datetime import timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 from django.conf import settings
 from django.contrib.sessions.backends import db as stock_db
@@ -21,8 +23,9 @@ from django.contrib.sessions.backends.base import UpdateError
 from django.contrib.sessions.exceptions import SessionInterrupted
 from django.contrib.sessions.models import Session
 from django.test import TestCase
+from django.utils import timezone
 
-from apps.common.session_store import SessionStore
+from apps.common.session_store import SessionSaveContended, SessionStore
 
 PORTAL_ROOT = Path(__file__).resolve().parents[2]
 
@@ -106,6 +109,71 @@ class MergingSessionStoreTests(TestCase):
             _stored(key)["order_checkout_attempts"], {"cart-a": {"key": "idem-a"}, "cart-b": {"key": "idem-b"}}
         )
 
+    def test_two_tabs_creating_the_first_purchase_both_keep_theirs(self) -> None:
+        key = self._session(user_id=7)  # no record map yet
+        tab_a, tab_b = self._load(key), self._load(key)
+        tab_a["gift_purchase_forms"] = {"form-a": {"amount": 50}}
+        tab_a.save()
+        tab_b["gift_purchase_forms"] = {"form-b": {"amount": 70}}
+        tab_b.save()
+        self.assertEqual(
+            _stored(key)["gift_purchase_forms"], {"form-a": {"amount": 50}, "form-b": {"amount": 70}}
+        )
+
+    def test_removing_ones_last_record_keeps_anothers(self) -> None:
+        key = self._session(user_id=7, order_checkout_attempts={"cart-a": {"key": "idem-a"}})
+        finishing, starting = self._load(key), self._load(key)
+        starting["order_checkout_attempts"] = {"cart-a": {"key": "idem-a"}, "cart-b": {"key": "idem-b"}}
+        starting.save()
+        del finishing["order_checkout_attempts"]  # done with its only purchase
+        finishing.save()
+        self.assertEqual(_stored(key)["order_checkout_attempts"], {"cart-b": {"key": "idem-b"}})
+
+    def test_a_change_of_json_type_is_saved(self) -> None:
+        key = self._session(user_id=7, flag=1)
+        store = self._load(key)
+        store["flag"] = True  # equal to 1 in Python, different as stored
+        store.save()
+        self.assertIs(_stored(key)["flag"], True)
+
+    def test_a_previously_saved_key_is_not_written_again_by_a_later_save(self) -> None:
+        key = self._session(user_id=7, step=0)
+        store, other = self._load(key), self._load(key)
+        store["step"] = 1
+        store.save()  # published as this request's new baseline
+        other["step"] = 5  # another request changes it afterwards
+        other.save()
+        store["unrelated"] = True
+        store.save()  # must not write step=1 again
+        stored = _stored(key)
+        self.assertEqual((stored["step"], stored["unrelated"]), (5, True))
+
+    def test_rotating_an_unloaded_session_cannot_outlive_a_logout_after_its_load(self) -> None:
+        key = self._session(user_id=7)
+        unloaded = SessionStore(session_key=key)  # rotation is its first touch of the session
+        load = SessionStore.load
+
+        def load_then_logout(store: SessionStore) -> dict[str, object]:
+            data = load(store)
+            Session.objects.filter(session_key=key).delete()  # a logout lands right after the load
+            return data
+
+        with patch.object(SessionStore, "load", load_then_logout), self.assertRaises(SessionInterrupted):
+            unloaded.cycle_key()
+        self.assertEqual(Session.objects.count(), 0)  # no new authenticated session was minted
+
+    def test_endless_contention_is_not_reported_as_a_deleted_session(self) -> None:
+        key = self._session(user_id=7)
+        store = self._load(key)
+        store["x"] = 1
+        with (
+            patch("django.db.models.query.QuerySet.update", return_value=0),
+            patch("apps.common.session_store._back_off"),
+            self.assertRaises(SessionSaveContended),
+        ):
+            store.save()
+        self.assertTrue(Session.objects.filter(session_key=key).exists())
+
     def test_repeated_saves_in_one_request_apply_cumulatively(self) -> None:
         key = self._session(user_id=7)
         store, other = self._load(key), self._load(key)
@@ -161,11 +229,14 @@ class MergingSessionStoreTests(TestCase):
 
     def test_a_merged_expiry_sets_the_stored_expiry(self) -> None:
         key = self._session(user_id=7)
-        store = self._load(key)
+        store, other = self._load(key), self._load(key)
+        other["unrelated"] = 1
+        other.save()  # forces the expiring save onto a merged row
         store.set_expiry(60)
+        before = timezone.now()
         store.save()
-        row = Session.objects.get(session_key=key)
-        self.assertLess((row.expire_date - store.get_expiry_date(expiry=60)).total_seconds(), 5)
+        expire_date = Session.objects.get(session_key=key).expire_date
+        self.assertLessEqual(abs((expire_date - (before + timedelta(seconds=60))).total_seconds()), 5)
 
     def test_sessions_written_by_the_stock_store_still_decode_and_the_reverse(self) -> None:
         stock = stock_db.SessionStore()
