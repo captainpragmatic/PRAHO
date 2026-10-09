@@ -556,8 +556,9 @@ def _create_and_process_order(request: HttpRequest, ctx: CheckoutContext) -> Htt
                 except DatabaseError:
                     logger.exception("🔥 [Orders] Failed to release idempotency claim: %s", idem_cache_key)
 
-    except Exception as e:
-        logger.error("🔥 [Orders] Unexpected error creating order: %s", e)
+    except Exception:
+        # With the traceback: a session save failing here (UpdateError) has no message of its own.
+        logger.exception("🔥 [Orders] Unexpected error creating order")
         messages.error(request, _("Error creating order. Please try again."))
         return redirect("orders:checkout")
 

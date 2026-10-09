@@ -45,7 +45,7 @@ INSTALLED_APPS: list[str] = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
 MIDDLEWARE: list[str] = [
     "django.middleware.security.SecurityMiddleware",
-    "django.contrib.sessions.middleware.SessionMiddleware",  # DB-backed sessions
+    "apps.common.session_store.SessionMiddleware",  # DB-backed sessions; contended saves answer 503
     # 🔒 SECURITY: API rate limiting after sessions (cart limits need session key)
     "apps.common.rate_limiting.APIRateLimitMiddleware",  # API + cart session rate limiting
     "django.middleware.locale.LocaleMiddleware",  # After sessions

@@ -162,6 +162,53 @@ class MergingSessionStoreTests(TestCase):
             unloaded.cycle_key()
         self.assertEqual(Session.objects.count(), 0)  # no new authenticated session was minted
 
+    def test_a_rotation_that_gives_up_fails_closed(self) -> None:
+        # A password change rotates the key; if the rotation fails, the new session_auth_hash must
+        # never be saved under the old key, which the old cookie could keep using.
+        key = self._session(user_id=7, session_auth_hash="old")
+        password_change, other = self._load(key), self._load(key)
+        other["unrelated"] = 1
+        other.save()  # the row changes under the rotation, which then cannot delete what it read
+        password_change["session_auth_hash"] = "new"
+        with (
+            patch("apps.common.session_store.MAX_MERGE_ATTEMPTS", 1),
+            self.assertRaises(SessionSaveContended),
+        ):
+            password_change.cycle_key()
+        self.assertFalse(Session.objects.filter(session_key=key).exists())
+        self.assertIsNone(password_change.session_key)
+        self.assertEqual(dict(password_change.items()), {})
+
+    def test_a_rotation_interrupted_by_logout_leaves_nothing_to_save(self) -> None:
+        key = self._session(user_id=7, session_auth_hash="old")
+        stale = self._load(key)
+        Session.objects.filter(session_key=key).delete()
+        stale["session_auth_hash"] = "new"
+        with self.assertRaises(SessionInterrupted):
+            stale.cycle_key()
+        self.assertIsNone(stale.session_key)
+        self.assertEqual(dict(stale.items()), {})
+
+    def test_a_contended_save_is_answered_as_a_temporary_outage(self) -> None:
+        from django.http import HttpResponse  # noqa: PLC0415
+        from django.test import RequestFactory  # noqa: PLC0415
+
+        from apps.common.session_store import SessionMiddleware  # noqa: PLC0415
+
+        key = self._session(user_id=7)
+        request = RequestFactory().post("/cart/", HTTP_ACCEPT="application/json")
+        request.COOKIES[settings.SESSION_COOKIE_NAME] = key
+        middleware = SessionMiddleware(lambda request: HttpResponse("ok"))
+        middleware.process_request(request)
+        request.session["cart"] = {"items": [1]}
+        with (
+            patch("django.db.models.query.QuerySet.update", return_value=0),
+            patch("apps.common.session_store._back_off"),
+        ):
+            response = middleware.process_response(request, HttpResponse("ok"))
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("Retry-After", response)
+
     def test_endless_contention_is_not_reported_as_a_deleted_session(self) -> None:
         key = self._session(user_id=7)
         store = self._load(key)

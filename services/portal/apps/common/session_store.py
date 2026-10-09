@@ -29,6 +29,7 @@ signing salt is derived from the class name, so existing sessions keep decoding.
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import logging
 import random
@@ -36,11 +37,21 @@ import time
 from typing import Any
 
 from asgiref.sync import sync_to_async
+from django.contrib.sessions import middleware
 from django.contrib.sessions.backends import db
 from django.contrib.sessions.backends.base import UpdateError
 from django.contrib.sessions.exceptions import SessionInterrupted
-from django.db import router
+from django.db import DatabaseError, router
+from django.http import HttpRequest, HttpResponse
 from django.utils import timezone
+
+from apps.common.store_unavailable import (
+    STORE_UNAVAILABLE_RETRY_AFTER_SECONDS,
+    STORE_UNAVAILABLE_STATUS,
+    store_unavailable_json,
+    store_unavailable_message,
+    wants_json,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +160,15 @@ def _apply(changes: list[Change], latest: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
+def _fingerprint(session_key: str | None) -> str:
+    """A short, non-reversible session identifier for logs."""
+    return hashlib.sha256((session_key or "").encode()).hexdigest()[:8]
+
+
+def _changed_keys(changes: list[Change]) -> str:
+    return ", ".join(sorted({key for _operation, key, _entry, _value in changes})) or "-"
+
+
 def _back_off(attempt: int) -> None:
     time.sleep(random.uniform(0, MERGE_BACKOFF_SECONDS * (attempt + 1)))  # noqa: S311  # jitter, not security
 
@@ -224,7 +244,7 @@ class SessionStore(db.SessionStore):
             if expected_text is None or latest is None:
                 expected_text = self._stored_text(using)
                 if expected_text is None:
-                    raise UpdateError  # the row is gone; never recreate it
+                    raise UpdateError("The session row is gone; it is never recreated")
                 latest = self.decode(expected_text)
             merged = _apply(changes, latest) if changes is not None else copy.deepcopy(mine)
             text = self.encode(merged)
@@ -240,7 +260,12 @@ class SessionStore(db.SessionStore):
                 return
             expected_text = latest = None  # another request saved first: merge onto its row
             _back_off(_attempt)
-        logger.error("🔥 [Session] Gave up merging a session save after %d contended attempts", MAX_MERGE_ATTEMPTS)
+        logger.error(
+            "🔥 [Session] Gave up saving session %s after %d contended attempts (changed: %s)",
+            _fingerprint(self.session_key),
+            MAX_MERGE_ATTEMPTS,
+            _changed_keys(changes) if changes is not None else "all",
+        )
         raise SessionSaveContended(f"Session save still contended after {MAX_MERGE_ATTEMPTS} attempts")
 
     # ---- rotation and removal ------------------------------------------------------------------
@@ -251,6 +276,22 @@ class SessionStore(db.SessionStore):
         if old_key is None or baseline is None or baseline.get("user_id") is None:
             super().cycle_key()  # not authenticated when loaded: rotate exactly as Django does
             return
+        try:
+            self._rotate_authenticated(old_key, baseline, mine)
+        except BaseException:
+            # Fail closed. This request's data (a new session_auth_hash, say) must never be saved
+            # under the old key, which anyone holding the old cookie could keep using: forget the
+            # session here and make sure the old row is gone, so the request ends signed out.
+            self._session_cache = {}
+            self._session_key = None
+            self._forget_baseline()
+            try:
+                self.model.objects.filter(session_key=old_key).delete()
+            except DatabaseError:
+                logger.exception("🔥 [Session] Could not delete the old session after a failed key rotation")
+            raise
+
+    def _rotate_authenticated(self, old_key: str, baseline: dict[str, Any], mine: dict[str, Any]) -> None:
         changes = _changes(baseline, mine)
         expected_text: str | None = self._baseline_text
         latest: dict[str, Any] | None = copy.deepcopy(baseline)
@@ -272,7 +313,12 @@ class SessionStore(db.SessionStore):
             expected_text = latest = None
             _back_off(_attempt)
         else:
-            logger.error("🔥 [Session] Gave up rotating a session key after %d contended attempts", MAX_MERGE_ATTEMPTS)
+            logger.error(
+                "🔥 [Session] Gave up rotating session %s after %d contended attempts (changed: %s)",
+                _fingerprint(old_key),
+                MAX_MERGE_ATTEMPTS,
+                _changed_keys(changes),
+            )
             raise SessionSaveContended(f"Session key rotation still contended after {MAX_MERGE_ATTEMPTS} attempts")
         self._session_cache = merged
         self._forget_baseline()
@@ -288,3 +334,21 @@ class SessionStore(db.SessionStore):
 
     async def aflush(self) -> None:
         await sync_to_async(self.flush)()
+
+
+class SessionMiddleware(middleware.SessionMiddleware):
+    """Django's session middleware, answering a contended save as a temporary outage.
+
+    Without this, SessionSaveContended would surface as a server error. It is the portal's
+    usual 503 with Retry-After instead: the session still exists, only this save gave up.
+    """
+
+    def process_response(self, request: HttpRequest, response: HttpResponse) -> HttpResponse:
+        try:
+            return super().process_response(request, response)
+        except SessionSaveContended:
+            if wants_json(request):
+                return store_unavailable_json()
+            unavailable = HttpResponse(store_unavailable_message(), status=STORE_UNAVAILABLE_STATUS)
+            unavailable["Retry-After"] = str(STORE_UNAVAILABLE_RETRY_AFTER_SECONDS)
+            return unavailable
