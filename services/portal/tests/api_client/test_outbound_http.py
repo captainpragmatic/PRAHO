@@ -187,18 +187,15 @@ class PortalRequestCookieIsolationTest(SimpleTestCase):
 
     @override_settings(DEBUG=True)
     @patch("apps.common.outbound_http._send")
-    def test_clears_session_cookies_after_call(self, mock_request):
-        """The call's session cookie jar is cleared after every call so a Set-Cookie from one
-        response cannot ride on the next portal_request() call."""
-        # Simulate a previously-set cookie (e.g., from a prior Set-Cookie response).
+    def test_the_session_jar_holds_nothing_before_or_after_a_call(self, mock_request):
+        """A cookie offered to the jar is refused, so nothing can ride on the next call."""
         _get_session().cookies.set("leak", "yes")
-        self.assertEqual(_get_session().cookies.get("leak"), "yes")
+        self.assertIsNone(_get_session().cookies.get("leak"))
 
         mock_request.return_value = MagicMock(status_code=200)
         portal_request("GET", "http://localhost:8700/api/test/")
 
         self.assertEqual(len(_get_session().cookies), 0)
-        self.assertIsNone(_get_session().cookies.get("leak"))
 
     @override_settings(DEBUG=True)
     @patch("apps.common.outbound_http._send")

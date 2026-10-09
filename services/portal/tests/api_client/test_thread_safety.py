@@ -3,8 +3,10 @@ Thread safety tests for PlatformAPIClient.
 
 Concurrent calls from one shared client, through the real ``portal_request``, to a local
 server that verifies every HMAC signature the way Platform does. Each call's signature must
-cover exactly the body that arrived with it, and each caller must get its own answer: nothing
-one thread signs or receives may end up on another thread's call.
+cover exactly the body that arrived with it, and each caller must get its own answer.
+
+A regression guard for per-call signing state on the shared client. Cookie isolation between
+threads is proven separately, with forced interleaving, in tests/common/test_outbound_isolation.py.
 """
 
 from __future__ import annotations

@@ -13,14 +13,14 @@ call sends or receives may reach another call:
 - Each thread has its own ``requests.Session`` (:func:`_get_session`), so no mutable
   transport state is shared between concurrent calls. ``requests`` does not document
   ``Session`` as safe to share between threads.
-- A Session's cookie jar refuses every cookie. ``requests`` merges the Session jar into
-  every outbound request, and a per-call ``cookies={}`` does not prevent that, so a
-  ``Set-Cookie`` from one Platform response would otherwise ride on the next call made on
-  that thread, which may be serving a different customer.
+- A Session's cookie jar never holds a cookie (:class:`_NoCookieJar`). ``requests`` merges
+  the Session jar into every outbound request, and a per-call ``cookies={}`` does not
+  prevent that, so a ``Set-Cookie`` from one Platform response would otherwise ride on the
+  next call made on that thread, which may be serving a different customer.
 - A caller cannot send a ``Cookie`` header; Portal -> Platform calls authenticate with HMAC
   headers built per call, never with cookies.
-- Per-call headers are passed with ``headers=``; a Session's headers are only its fixed
-  User-Agent and are never changed per call.
+- Per-call headers are passed with ``headers=``; a Session's own headers (its fixed
+  User-Agent and the ``requests`` defaults) are never changed per call.
 
 Tests fake Platform by patching :func:`_send`, the one place a call leaves the portal.
 
@@ -33,7 +33,7 @@ from __future__ import annotations
 import http.cookiejar
 import logging
 import threading
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlparse
 
 import requests
@@ -48,12 +48,43 @@ DEFAULT_USER_AGENT = "PRAHO-Portal/1.0 (+https://pragmatichost.com)"
 _sessions = threading.local()
 
 
+class _NoCookieJar(requests.cookies.RequestsCookieJar):
+    """A cookie jar that never holds a cookie, however one is offered.
+
+    A cookie policy alone only governs cookies taken from responses: ``jar.set()``,
+    ``set_cookie()`` and ``update()`` skip it, and ``requests`` copies whatever the jar
+    holds onto the outgoing request. Every path into a jar ends in ``set_cookie``.
+    """
+
+    def set_cookie(self, cookie: http.cookiejar.Cookie, *args: Any, **kwargs: Any) -> None:
+        return None
+
+
 def _new_session() -> requests.Session:
     session = requests.Session()
     session.headers["User-Agent"] = DEFAULT_USER_AGENT
-    # allowed_domains=[] makes the policy refuse to store, or return, any cookie at all.
-    session.cookies.set_policy(http.cookiejar.DefaultCookiePolicy(allowed_domains=[]))
+    # The policy (allowed_domains=[] refuses every cookie) also stops the jar returning any.
+    session.cookies = _NoCookieJar(policy=http.cookiejar.DefaultCookiePolicy(allowed_domains=[]))
     return session
+
+
+def _validated_timeout(timeout: Any) -> float | tuple[float, float]:
+    """A positive number, or a ``(connect, read)`` pair of positive numbers.
+
+    Every call must be bounded: ``None`` (or a ``None`` half of a pair) would let ``requests``
+    wait forever, and a computed 0 must not quietly become the default.
+    """
+    parts = timeout if isinstance(timeout, tuple) else (timeout,)
+    if len(parts) not in (1, 2) or (isinstance(timeout, tuple) and len(parts) == 1):
+        raise ValueError(f"Platform call timeout must be a number or a (connect, read) pair, got {timeout!r}")
+    for part in parts:
+        if isinstance(part, bool) or not isinstance(part, int | float) or not part > 0:
+            raise ValueError(f"Platform call timeout must be positive, got {timeout!r}")
+    return cast("float | tuple[float, float]", timeout)
+
+
+def _header_name(name: str | bytes) -> str:
+    return name.decode("latin-1") if isinstance(name, bytes) else name
 
 
 def _get_session() -> requests.Session:
@@ -87,7 +118,7 @@ def portal_request(
     method: str,
     url: str,
     *,
-    timeout: float | None = None,
+    timeout: float | tuple[float, float] | None = None,
     **kwargs: Any,
 ) -> requests.Response:
     """Enforced-safe request for Portal -> Platform communication.
@@ -104,7 +135,8 @@ def portal_request(
     Args:
         method: HTTP method (GET, POST, etc.)
         url: Target URL
-        timeout: Override the default timeout; must be positive
+        timeout: Override the default timeout: a positive number, or a ``(connect, read)``
+            pair of positive numbers
         **kwargs: Passed through to ``requests.Session.request``
 
     Returns:
@@ -113,7 +145,8 @@ def portal_request(
     Raises:
         OutboundSecurityError: If the URL violates portal security policy, or a
             caller supplies a ``Cookie`` header
-        ValueError: If ``timeout`` is not positive (a computed 0 must not become the default)
+        ValueError: If ``timeout`` is not positive, or is a pair with a part that is not
+            (a computed 0 must not become the default)
     """
     parsed = urlparse(url)
     allow_insecure = bool(getattr(settings, "PLATFORM_API_ALLOW_INSECURE_HTTP", False))
@@ -122,11 +155,10 @@ def portal_request(
 
     if timeout is None:
         timeout = getattr(settings, "PLATFORM_API_TIMEOUT", PORTAL_DEFAULT_TIMEOUT)
-    if not timeout > 0:
-        raise ValueError(f"Platform call timeout must be positive, got {timeout!r}")
+    timeout = _validated_timeout(timeout)
 
     headers = dict(kwargs.pop("headers", None) or {})
-    if any(name.lower() == "cookie" for name in headers):
+    if any(_header_name(name).lower() == "cookie" for name in headers):
         raise OutboundSecurityError("Portal -> Platform calls never carry a Cookie header")
     headers.setdefault("User-Agent", DEFAULT_USER_AGENT)
 
@@ -139,4 +171,4 @@ def portal_request(
     try:
         return _send(method=method, url=url, **kwargs)
     finally:
-        _get_session().cookies.clear()  # Defence in depth: the policy already refuses every cookie
+        _get_session().cookies.clear()  # Defence in depth: the jar already refuses every cookie

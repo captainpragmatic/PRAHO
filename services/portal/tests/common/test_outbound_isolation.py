@@ -9,9 +9,11 @@ never be sent on the other's call.
 from __future__ import annotations
 
 import http.server
+import importlib.util
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
@@ -22,6 +24,7 @@ from apps.common import outbound_http
 from apps.common.outbound_http import OutboundSecurityError, portal_request
 
 HOLD_SECONDS = 5
+GUNICORN_CONF = Path(__file__).resolve().parents[2] / "gunicorn.conf.py"
 
 
 class _PlatformStub(http.server.BaseHTTPRequestHandler):
@@ -119,9 +122,24 @@ class OutboundIsolationTests(SimpleTestCase):
         self.assertEqual(len(theirs), 1)
         self.assertIsNot(theirs[0], mine)
 
+    def test_a_cookie_put_into_the_jar_directly_is_never_held_or_sent(self) -> None:
+        # The policy only governs cookies from responses; jar.set() and set_cookie() skip it, and
+        # requests copies whatever the jar holds onto the outgoing request.
+        session = outbound_http._get_session()
+        with _platform() as platform:
+            for seed in ("set", "set_cookie"):
+                with self.subTest(seed=seed):
+                    if seed == "set":
+                        session.cookies.set("sessionid", "customer-x")
+                    else:
+                        session.cookies.set_cookie(requests.cookies.create_cookie("sessionid", "customer-x"))
+                    self.assertEqual(len(session.cookies), 0)
+                    portal_request("GET", platform.url(f"/seeded-{seed}"))
+                    self.assertIsNone(platform.cookie_sent_on(f"/seeded-{seed}"))
+
     def test_a_caller_supplied_cookie_header_is_refused(self) -> None:
         with _platform() as platform:
-            for name in ("Cookie", "cookie", "COOKIE"):
+            for name in ("Cookie", "cookie", "COOKIE", b"Cookie", b"cookie"):
                 with self.subTest(header=name), self.assertRaises(OutboundSecurityError):
                     portal_request("GET", platform.url("/refused"), headers={name: "sessionid=customer-x"})
         self.assertEqual(platform.seen, [])
@@ -133,6 +151,24 @@ class OutboundIsolationTests(SimpleTestCase):
                 with self.subTest(timeout=timeout), self.assertRaises(ValueError):
                     portal_request("GET", platform.url("/zero"), timeout=timeout)
         self.assertEqual(platform.seen, [])
+
+    def test_a_connect_and_read_timeout_pair_is_accepted_only_when_both_are_positive(self) -> None:
+        with _platform() as platform:
+            portal_request("GET", platform.url("/pair"), timeout=(1.5, 4.0))
+            for timeout in ((0, 4.0), (1.5, 0), (-1, 4.0), (1.5, None), (None, 4.0), (1.5,), (1, 2, 3)):
+                with self.subTest(timeout=timeout), self.assertRaises(ValueError):
+                    portal_request("GET", platform.url("/bad-pair"), timeout=timeout)
+        self.assertEqual([path for path, _cookie in platform.seen], ["/pair"])
+
+    def test_gunicorns_post_fork_hook_resets_the_sessions(self) -> None:
+        # Load the real gunicorn.conf.py, as gunicorn does, so the wiring itself is tested.
+        spec = importlib.util.spec_from_file_location("portal_gunicorn_conf", GUNICORN_CONF)
+        assert spec is not None and spec.loader is not None
+        conf = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(conf)
+        before = outbound_http._get_session()
+        conf.post_fork(None, None)
+        self.assertIsNot(outbound_http._get_session(), before)
 
     def test_a_forked_worker_starts_with_fresh_sessions(self) -> None:
         before = outbound_http._get_session()
