@@ -30,6 +30,7 @@ from apps.billing.models import (
     ProformaInvoice,
     ProformaLine,
     ProformaSequence,
+    Refund,
 )
 from apps.common.types import Ok
 from apps.customers.models import Customer
@@ -1402,36 +1403,92 @@ class InvoiceRefundViewTest(BillingViewsTestBase):
         data = response.json()
         self.assertFalse(data["success"])
 
-    def test_refund_full(self):
-        invoice = self._create_invoice()
-        self.client.force_login(self.admin_user)
-        response = self.client.post(
-            f"/billing/invoices/{invoice.id}/refund/",
-            {
-                "refund_type": "full",
-                "refund_reason": "customer_request",
-                "refund_notes": "Customer wants refund",
-            },
+    def _paid_card_invoice(self) -> tuple[Invoice, Payment]:
+        invoice = self._create_invoice(status="paid", paid_at=timezone.now())
+        payment = Payment.objects.create(
+            customer=invoice.customer,
+            invoice=invoice,
+            currency=invoice.currency,
+            amount_cents=invoice.total_cents,
+            payment_method="stripe",
+            gateway_txn_id="pi_staff_refund",
+            status="succeeded",
         )
-        self.assertEqual(response.status_code, 400)
-        data = response.json()
-        # Refund service not implemented yet
-        self.assertFalse(data["success"])
+        return invoice, payment
+
+    def _refund_through_the_view(self, invoice: Invoice, amount_cents: int, form: dict[str, str]):
+        gateway = MagicMock()
+        gateway.refund_payment.return_value = {
+            "success": True,
+            "refund_id": "re_staff",
+            "status": "succeeded",
+            "amount_refunded_cents": amount_cents,
+        }
+        self.client.force_login(self.admin_user)
+        with patch("apps.billing.refund_service.PaymentGatewayFactory.create_gateway", return_value=gateway):
+            response = self.client.post(f"/billing/invoices/{invoice.id}/refund/", form)
+        return response, gateway
+
+    def test_refund_full(self):
+        """A staff full refund reaches the gateway and records the whole amount."""
+        invoice, payment = self._paid_card_invoice()
+        response, gateway = self._refund_through_the_view(
+            invoice,
+            invoice.total_cents,
+            {"refund_type": "full", "refund_reason": "customer_request", "refund_notes": "Customer wants refund"},
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(response.json()["success"])
+        gateway.refund_payment.assert_called_once()
+        refund = Refund.objects.get(invoice=invoice)
+        self.assertEqual(refund.amount_cents, invoice.total_cents)
+        self.assertEqual(refund.payment, payment)
 
     def test_refund_partial_valid(self):
-        invoice = self._create_invoice()
-        self.client.force_login(self.admin_user)
-        response = self.client.post(
-            f"/billing/invoices/{invoice.id}/refund/",
+        """A staff partial refund moves exactly the typed amount, in cents."""
+        invoice, _payment = self._paid_card_invoice()
+        response, gateway = self._refund_through_the_view(
+            invoice,
+            5000,
             {
                 "refund_type": "partial",
-                "refund_reason": "quality_issue",
+                "refund_reason": "service_failure",
                 "refund_notes": "Partial refund",
                 "refund_amount": "50.00",
+                "idempotency_key": "staff-partial-1",
             },
         )
-        # Returns 400 because RefundService not yet implemented
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 200, response.content)
+        gateway.refund_payment.assert_called_once()
+        self.assertEqual(Refund.objects.get(invoice=invoice).amount_cents, 5000)
+
+    def test_refund_partial_amount_is_exact_or_refused(self):
+        """"10.999" used to be truncated to 1,099 cents and refunded; it is refused instead."""
+        invoice, _payment = self._paid_card_invoice()
+        for amount in ("10.999", "100.009", "0.001", "1E+999999", "1,50"):
+            with self.subTest(amount=amount):
+                response, gateway = self._refund_through_the_view(
+                    invoice,
+                    0,
+                    {
+                        "refund_type": "partial",
+                        "refund_reason": "service_failure",
+                        "refund_notes": "Precision",
+                        "refund_amount": amount,
+                        "idempotency_key": f"staff-precision-{amount}",
+                    },
+                )
+                self.assertEqual(response.status_code, 400, response.content)
+                gateway.refund_payment.assert_not_called()
+        self.assertFalse(Refund.objects.filter(invoice=invoice).exists())
+
+    def test_the_refund_dialog_offers_no_gateway_opt_out(self):
+        """No view reads `process_payment_refund`; a box promising a record-only refund would lie."""
+        invoice, _payment = self._paid_card_invoice()
+        self.client.force_login(self.admin_user)
+        response = self.client.get(f"/billing/invoices/{invoice.id}/")
+        self.assertContains(response, 'name="refund_notes"')  # the refund dialog rendered
+        self.assertNotContains(response, "process_payment_refund")
 
     def test_refund_partial_zero_amount(self):
         invoice = self._create_invoice()
@@ -1903,124 +1960,6 @@ class ApiConfirmPaymentTest(SignedBillingViewsTestBase):
             {"payment_intent_id": 123, "gateway": "stripe", "customer_id": self.customer.pk},
         )
         self.assertEqual(response.status_code, 400)
-
-
-class ApiProcessRefundTest(SignedBillingViewsTestBase):
-    """Tests for api_process_refund."""
-
-    def test_process_refund_invalid_payment_id(self):
-        """Refund with invalid payment ID format returns 400"""
-        response = self._post_json(
-            "/billing/process-refund/",
-            {
-                "payment_id": "pay_123",
-                "customer_id": self.customer.pk,
-                "user_id": self.api_actor.pk,
-                "amount_cents": 1000,
-                "reason": "Test",
-            },
-        )
-        self.assertEqual(response.status_code, 400)
-
-    def test_process_refund_missing_payment_id(self):
-        response = self._post_json(
-            "/billing/process-refund/",
-            {"customer_id": self.customer.pk, "amount_cents": 1000},
-        )
-        self.assertEqual(response.status_code, 400)
-
-    def test_process_refund_invalid_json(self):
-        response = self._post_invalid_json("/billing/process-refund/")
-        self.assertEqual(response.status_code, 400)
-
-    @patch("apps.billing.views.Payment.objects.filter")
-    def test_process_refund_exception(self, mock_lookup: MagicMock) -> None:
-        mock_lookup.side_effect = Exception("Unexpected")
-        response = self._post_json(
-            "/billing/process-refund/",
-            {"payment_id": str(uuid.uuid4()), "customer_id": self.customer.pk},
-        )
-        self.assertEqual(response.status_code, 500)
-        self.assertEqual(response.json(), {"success": False, "error": "Internal server error"})
-
-
-class ApiProcessRefundRoleTests(SignedBillingViewsTestBase):
-    """#104 [M11]: customer membership is not authority to move money.
-
-    ``api_process_refund`` reaches ``RefundService.refund_invoice`` after HMAC plus
-    ``_validate_user_membership``, which filters on user/customer/is_active and never on
-    ``role``. A read-only ``viewer`` member therefore qualified. The endpoint is currently
-    unreachable in practice (the portal sends ``invoice_id`` while this view requires
-    ``payment_id``), so this closes the gap *before* anyone repairs that wire contract and
-    activates it.
-    """
-
-    REFUND_SERVICE = "apps.billing.refund_service.RefundService.refund_invoice"
-
-    def setUp(self):
-        super().setUp()
-        self.viewer_user = User.objects.create_user(email="viewer@test.ro", password="testpass123")
-        CustomerMembership.objects.create(user=self.viewer_user, customer=self.customer, role="viewer")
-        self.tech_user = User.objects.create_user(email="tech@test.ro", password="testpass123")
-        CustomerMembership.objects.create(user=self.tech_user, customer=self.customer, role="tech")
-        self.owner_user = User.objects.create_user(email="owner@test.ro", password="testpass123")
-        CustomerMembership.objects.create(user=self.owner_user, customer=self.customer, role="owner")
-        self.cust_billing_user = User.objects.create_user(email="custbilling@test.ro", password="testpass123")
-        CustomerMembership.objects.create(user=self.cust_billing_user, customer=self.customer, role="billing")
-
-    def _post_refund(self, user: User) -> HttpResponse:
-        return self.portal_post(
-            "/billing/process-refund/",
-            {
-                "payment_id": str(uuid.uuid4()),
-                "customer_id": self.customer.pk,
-                "user_id": user.pk,
-                "amount_cents": 1000,
-                "reason": "Test",
-            },
-        )
-
-    def test_read_only_members_cannot_process_a_refund(self):
-        for user in (self.viewer_user, self.tech_user):
-            with self.subTest(role=user.customer_memberships.first().role), patch(self.REFUND_SERVICE) as refund:
-                response = self._post_refund(user)
-                self.assertEqual(response.status_code, 403)
-                self.assertEqual(response.json(), {"success": False, "error": "Access denied"})
-                self.assertEqual(response["Cache-Control"], "no-store")
-                self.assertEqual(response["X-Content-Type-Options"], "nosniff")
-                refund.assert_not_called()
-
-    def test_financial_members_pass_the_role_gate(self):
-        """owner/billing clear authorization; the request then fails later on its own merits."""
-        for user in (self.owner_user, self.cust_billing_user):
-            with self.subTest(role=user.customer_memberships.first().role):
-                response = self._post_refund(user)
-                self.assertEqual(response.status_code, 400)
-                self.assertIn("not found", response.json()["error"])
-
-    def test_malformed_user_id_is_refused_not_a_server_error(self):
-        """A non-integer actor id must deny, not raise through the view."""
-        # 10**20 coerces cleanly but is outside the PK domain; on SQLite an uncoerced value
-        # reaches the ORM and raises OverflowError into the broad handler as a 500.
-        for bad in ("not-an-int", {"nested": 1}, [1, 2], 10**20, 0, -5):
-            with self.subTest(user_id=bad), patch(self.REFUND_SERVICE) as refund:
-                response = self.portal_post(
-                    "/billing/process-refund/",
-                    {"payment_id": str(uuid.uuid4()), "customer_id": self.customer.pk, "user_id": bad},
-                )
-                self.assertEqual(response.status_code, 401)
-                self.assertEqual(response.json(), {"success": False, "error": "Authentication required"})
-                refund.assert_not_called()
-
-    def test_absent_user_id_is_refused(self):
-        with patch(self.REFUND_SERVICE) as refund:
-            response = self.portal_post(
-                "/billing/process-refund/",
-                {"payment_id": str(uuid.uuid4()), "customer_id": self.customer.pk},
-            )
-            self.assertEqual(response.status_code, 400)
-            self.assertEqual(response.json(), {"success": False, "error": "Invalid request format"})
-            refund.assert_not_called()
 
 
 class ApiStripeConfigTest(BillingViewsTestBase):

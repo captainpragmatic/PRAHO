@@ -49,3 +49,18 @@ class ServiceDomainsAPITests(ServiceDomainsFixture):
         response = self.portal_post(f"/api/services/{self.service.pk}/domains/", self._body())
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.json(), {"success": True, "data": {"domains": []}})
+
+    def test_a_malformed_user_id_is_refused_not_a_server_error(self) -> None:
+        """A non-integer or out-of-range actor id must deny in the shared membership check.
+
+        Moved from the removed customer refund endpoint, which was the only test of these values:
+        10**20 coerces cleanly but is outside the PK domain, and on SQLite an uncoerced value
+        reaches the ORM and raises OverflowError into the broad handler as a 500.
+        """
+        for bad in ("not-an-int", {"nested": 1}, [1, 2], 10**20, 0, -5):
+            with self.subTest(user_id=bad):
+                response = self.portal_post(
+                    f"/api/services/{self.service.pk}/domains/", {**self._body(), "user_id": bad}
+                )
+                self.assertEqual(response.status_code, 401, response.content)
+                self.assertEqual(response.json(), {"success": False, "error": "Authentication required"})

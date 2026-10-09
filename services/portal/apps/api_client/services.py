@@ -1013,28 +1013,6 @@ class PlatformAPIClient:
         """Download invoice PDF."""
         return self._make_binary_request("POST", f"/api/billing/invoices/{invoice_id}/pdf/", data={"user_id": user_id})
 
-    def process_refund(  # noqa: PLR0913
-        self,
-        invoice_id: int | None = None,
-        order_id: int | None = None,
-        customer_id: int | None = None,
-        amount_cents: int | None = None,
-        reason: str = "",
-        user_id: str = "",
-        refund_type: str = "full",
-    ) -> dict[str, Any]:
-        """Process a refund for an invoice or order."""
-        data: dict[str, Any] = {"reason": reason, "user_id": user_id, "refund_type": refund_type}
-        if customer_id is not None:
-            data["customer_id"] = customer_id
-        if invoice_id:
-            data["invoice_id"] = invoice_id
-        if order_id:
-            data["order_id"] = order_id
-        if amount_cents:
-            data["amount_cents"] = amount_cents
-        return self.post_billing("process-refund/", data=data)
-
     def get_invoice_details(self, invoice_id: int, user_id: int) -> dict[str, Any]:
         """Get invoice details"""
         return self._make_request("GET", f"/billing/invoices/{invoice_id}/", user_id=user_id)

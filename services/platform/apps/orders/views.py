@@ -37,6 +37,7 @@ from apps.billing.currency_policy import (
 from apps.billing.fiscal_identity import billing_country_code
 from apps.billing.refund_service import RefundData, RefundService
 from apps.common.decorators import billing_staff_api_required, staff_required_strict
+from apps.common.financial_arithmetic import MAX_AMOUNT_CENTS, parse_major_units_to_cents
 from apps.common.mixins import get_search_context
 from apps.common.pagination import pagination_query
 from apps.common.request_ip import get_safe_client_ip
@@ -1182,9 +1183,20 @@ def order_refund(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
         # `reason` stays accepted for non-form callers.
         "reason": (request.POST.get("refund_reason") or request.POST.get("reason") or "").strip(),
     }
-    amount_cents = request.POST.get("amount_cents")
-    if amount_cents:
-        refund_data["amount_cents"] = int(amount_cents)
+    # The staff dialog posts `refund_amount` in major units (templates/orders/order_detail.html).
+    # Reading only `amount_cents`, which the dialog never sends, fell back to the order total, so a
+    # typed partial refund returned the whole order. `amount_cents` stays accepted for other callers.
+    raw_amount_cents = (request.POST.get("amount_cents") or "").strip()
+    if raw_amount_cents:
+        # ASCII digits only: str.isdigit() accepts "²", which int() then rejects with a 500.
+        if not re.fullmatch(r"[0-9]{1,19}", raw_amount_cents) or not 0 < int(raw_amount_cents) <= MAX_AMOUNT_CENTS:
+            return json_error("Invalid or non-positive refund amount")
+        refund_data["amount_cents"] = int(raw_amount_cents)
+    elif refund_data["refund_type"] == "partial":
+        try:
+            refund_data["amount_cents"] = parse_major_units_to_cents(request.POST.get("refund_amount") or "")
+        except ValueError:
+            return json_error("Enter a positive refund amount with at most two decimal places")
     else:
         refund_data["amount_cents"] = order.total_cents
 

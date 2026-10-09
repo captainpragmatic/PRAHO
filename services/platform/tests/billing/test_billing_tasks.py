@@ -62,7 +62,6 @@ from tests.factories.billing_factories import (
 from tests.helpers.fsm_helpers import force_status
 
 from ._billing_service_task_cases import (
-    ApiRefundViewTests,
     CreditNoteSignalTests,
     EFacturaServiceTests,
     GenerateEFacturaViewTests,
@@ -78,7 +77,6 @@ from ._billing_service_task_cases import (
 
 # Keep imported case modules visible to unittest discovery without tripping F401.
 _IMPORTED_TASK_CASES = (
-    ApiRefundViewTests,
     CreditNoteSignalTests,
     EFacturaServiceTests,
     GenerateEFacturaViewTests,

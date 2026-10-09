@@ -42,15 +42,19 @@ class RefundReason(Enum):
     CANCELLATION = "cancellation"
     # ... more reasons
 
-class RefundData(TypedDict):
-    refund_type: RefundType
-    amount_cents: int                    # Required for partial refunds
-    reason: RefundReason
+class RefundData(TypedDict, total=False):
+    refund_type: RefundType | str
+    amount_cents: int                    # Required for partial refunds, in cents
+    reason: str                          # A Refund.REASON_CHOICES value
     notes: str
-    initiated_by: User | None
-    external_refund_id: str | None      # Payment gateway refund ID
-    process_payment_refund: bool        # Actually process payment refund
+    user_id: str
+    user_email: str
+    idempotency_key: str                 # Distinguishes a new partial refund from a retry
 ```
+
+Who issued the refund is passed separately as `actor=` (the staff user), not in `RefundData`.
+Every refund that has a refundable payment goes through the payment gateway; there is no
+record-only mode.
 
 ### Core Services
 
@@ -99,12 +103,9 @@ refund_data: RefundData = {
     'amount_cents': 0,  # Ignored for full refunds
     'reason': RefundReason.CUSTOMER_REQUEST,
     'notes': 'Customer dissatisfied with service',
-    'initiated_by': request.user,
-    'external_refund_id': 'stripe_re_1234567890',
-    'process_payment_refund': True
 }
 
-result = RefundService.refund_order(order.id, refund_data)
+result = RefundService.refund_order(order.id, refund_data, actor=request.user)
 
 if result.is_ok():
     refund_result = result.unwrap()
@@ -123,12 +124,10 @@ refund_data: RefundData = {
     'amount_cents': 5000,  # 50.00 RON
     'reason': RefundReason.SERVICE_FAILURE,
     'notes': 'Server downtime compensation',
-    'initiated_by': request.user,
-    'external_refund_id': None,
-    'process_payment_refund': False  # Credit note only
+    'idempotency_key': 'downtime-2026-10',  # a retry with the same key is not a second refund
 }
 
-result = RefundService.refund_invoice(invoice.id, refund_data)
+result = RefundService.refund_invoice(invoice.id, refund_data, actor=request.user)
 ```
 
 ### Check Eligibility Before Refunding
@@ -275,6 +274,31 @@ New refund calculations use Refund rows.
 
 ## Security & Compliance
 
+### Who Can Issue a Refund
+Refunds are staff-only. Every path that can move money back to a customer is a staff action on
+Platform:
+
+| Entry point | What it does | Gate |
+|---|---|---|
+| `apps/billing/views.py:invoice_refund` | new invoice refund | `@billing_staff_api_required` (admin, billing or manager role) |
+| `apps/orders/views.py:order_refund` | new order refund | `@billing_staff_api_required` |
+| `apps/billing/views.py:invoice_refund_retry` | resumes an unfinished refund | `@billing_staff_api_required` |
+| `apps/promotions/gift_staff_views.py:gift_card_action` | refunds a gift-card purchase | `@staff_required_strict` plus `can_manage_financial_data` |
+
+The two refund dialogs pass the staff user as `actor=` to `RefundService`. There is no customer or portal path:
+the portal's "Request Refund" button and Platform's HMAC endpoint `api_process_refund` were
+removed, because that endpoint executed the refund with the customer as actor while the portal
+described it as a request for review. Customers ask for a refund through an ordinary support
+ticket. `tests/billing/test_refund_authorization_guardrail.py` scans `apps/` for direct
+`RefundService.refund_invoice`/`refund_order` calls and fails until a new one is declared with its
+gate. It does not see aliased calls or the retry and gift-card paths above, so review any new
+refund path by hand.
+
+Both dialogs post the amount in major units as `refund_amount`; the views convert it to cents
+and refuse a missing, zero, negative or non-numeric partial amount before any gateway call.
+Every staff refund goes through the payment gateway; a refund made directly in the provider's
+dashboard is reconciled by its webhook.
+
 ### Audit Logging
 All refund operations generate security events:
 
@@ -316,16 +340,10 @@ log_security_event(
 ### Payment Processors
 The service integrates with payment processors via:
 
-```python
-# Process actual payment refund
-if refund_data['process_payment_refund']:
-    payment_result = RefundService._process_payment_refund(
-        order=order,
-        invoice=invoice,
-        refund_amount_cents=amount,
-        refund_data=refund_data
-    )
-```
+`RefundService` calls the payment's gateway (`PaymentGatewayFactory.create_gateway`) for every
+refund whose document has a refundable payment. A refund made directly in the provider's
+dashboard is not entered through `RefundService`; the provider's webhook reconciles it into the
+local `Refund` ledger.
 
 ### Order Management
 Integrates with `OrderService` for status updates:
@@ -386,27 +404,11 @@ If you currently handle refunds manually:
    ```
 
 ### Integration with Views
-```python
-def refund_order_view(request, order_id):
-    refund_data: RefundData = {
-        'refund_type': RefundType(request.POST['refund_type']),
-        'amount_cents': int(request.POST.get('amount_cents', 0)),
-        'reason': RefundReason(request.POST['reason']),
-        'notes': request.POST['notes'],
-        'initiated_by': request.user,
-        'external_refund_id': request.POST.get('external_refund_id'),
-        'process_payment_refund': request.POST.get('process_payment') == 'true'
-    }
-
-    result = RefundService.refund_order(UUID(order_id), refund_data)
-
-    if result.is_ok():
-        messages.success(request, "Refund processed successfully")
-        return redirect('order_detail', order_id=order_id)
-    else:
-        messages.error(request, f"Refund failed: {result.error}")
-        return redirect('refund_form', order_id=order_id)
-```
+The two staff entry points are the reference: `apps/billing/views.py:invoice_refund` and
+`apps/orders/views.py:order_refund`. Both are `@billing_staff_api_required`, convert the typed
+`refund_amount` with `apps.common.financial_arithmetic.parse_major_units_to_cents` (exact cents
+or a 400, never rounded), and pass `actor=request.user`. A new caller must be declared in
+`tests/billing/test_refund_authorization_guardrail.py`.
 
 ## API Reference
 

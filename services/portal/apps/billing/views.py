@@ -55,24 +55,6 @@ PROFORMA_STATUS_VARIANT_MAP: dict[str, str] = {
     "cancelled": "danger",
 }
 
-# Options for the refund-request modal's reason <select>, swapped from a static <option> list
-# to {% input_field type="select" %} - that component reads options from context, not from
-# inline template markup, so the (deliberately free-form, not server-validated - see
-# request_refund_view) reason strings moved here instead of staying literal in the template.
-# Labels are lazy: module-level gettext would freeze them to the import-time locale.
-REFUND_REASON_CHOICES: list[dict[str, Any]] = [
-    {"value": "customer_request", "label": gettext_lazy("General Customer Request")},
-    {"value": "service_failure", "label": gettext_lazy("Service Not Working")},
-    {"value": "quality_issue", "label": gettext_lazy("Quality Not As Expected")},
-    {"value": "technical_issue", "label": gettext_lazy("Technical Problems")},
-    {"value": "cancellation", "label": gettext_lazy("Want to Cancel Service")},
-    {"value": "duplicate_payment", "label": gettext_lazy("Duplicate Invoice")},
-    {"value": "billing_error", "label": gettext_lazy("Billing Error")},
-    {"value": "policy_violation", "label": gettext_lazy("Service Policy Issue")},
-    {"value": "unsatisfied_service", "label": gettext_lazy("Not Satisfied with Service")},
-    {"value": "other", "label": gettext_lazy("Other Reason")},
-]
-
 PROFORMA_STATUS_ICON_MAP: dict[str, str] = {
     "draft": "document",
     "sent": "mail",
@@ -379,7 +361,6 @@ def invoice_detail_view(request: HttpRequest, invoice_number: str) -> HttpRespon
             "invoice": invoice,
             "invoice_number": invoice_number,
             "status_variant": INVOICE_STATUS_VARIANT_MAP.get(invoice.status, "secondary"),
-            "refund_reason_choices": REFUND_REASON_CHOICES,
             "gift_card_form": _gift_payment_form(request, "invoice", invoice_number)
             if invoice.status in {"issued", "overdue"}
             else None,
@@ -880,69 +861,3 @@ def subscription_auto_payment(request: HttpRequest) -> JsonResponse:
         enabled=data["enabled"],
     )
     return JsonResponse(result, status=200 if result.get("success") else 400)
-
-
-# ===============================================================================
-# REFUND REQUEST VIEW 🔄
-# ===============================================================================
-
-
-@require_http_methods(["POST"])
-@require_billing_access()
-def request_refund_view(request: HttpRequest, invoice_number: str) -> JsonResponse:
-    """
-    🔄 Request Invoice Refund
-
-    POST /billing/invoices/{invoice_number}/refund/
-
-    Submits a refund request for a specific invoice through the Platform API.
-    """
-    customer_id = getattr(request, "customer_id", None)
-    user_id = getattr(request, "user_id", None)
-    if not customer_id or not user_id:
-        return JsonResponse({"success": False, "error": "Authentication required"}, status=401)
-
-    try:
-        data = json.loads(request.body) if request.body else {}
-        reason = data.get("refund_reason", "customer_request")
-        amount_cents = data.get("amount_cents")
-
-        invoice_service = InvoiceViewService()
-        result = invoice_service.request_refund(
-            invoice_number=invoice_number,
-            customer_id=int(customer_id),
-            user_id=int(user_id),
-            amount_cents=int(amount_cents) if amount_cents else None,
-            reason=reason,
-        )
-
-        if result.get("success"):
-            logger.info(f"✅ [Portal Billing] Refund requested for invoice {invoice_number} by customer {customer_id}")
-            return JsonResponse(
-                {
-                    "success": True,
-                    "message": _("Refund request submitted successfully."),
-                    "refund_id": result.get("refund_id"),
-                }
-            )
-
-        error_msg = result.get("error", _("Unable to process refund request."))
-        logger.warning(f"⚠️ [Portal Billing] Refund request failed for {invoice_number}: {error_msg}")
-        return JsonResponse({"success": False, "error": error_msg}, status=400)
-
-    except PlatformAPIError as e:
-        if not e.is_degraded:
-            raise
-        # A refund is a money request, so the customer has to know it did NOT happen rather than
-        # being shown a 500 that could mean anything. 503 says "not now", which is the truth.
-        logger.warning(f"⚠️ [Portal Billing] Refund request unavailable for {invoice_number}: {e}")
-        return JsonResponse(
-            {"success": False, "error": get_degraded_message(e)},
-            status=HTTPStatus.SERVICE_UNAVAILABLE,
-        )
-    except Exception as e:
-        logger.error(f"🔥 [Portal Billing] Refund request error for {invoice_number}: {e}")
-        return JsonResponse(
-            {"success": False, "error": _("Unable to process refund request. Please try again.")},
-            status=500,
-        )

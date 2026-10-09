@@ -400,45 +400,6 @@ class InvoiceViewService:
             logger.error(f"🔥 [Proforma PDF] Error retrieving PDF for proforma {proforma_number}: {e}")
             raise e
 
-    def request_refund(
-        self,
-        invoice_number: str,
-        customer_id: int,
-        user_id: int,
-        amount_cents: int | None = None,
-        reason: str = "customer_request",
-    ) -> dict[str, Any]:
-        """Request a refund for an invoice via Platform API"""
-        try:
-            # First resolve invoice_number to invoice_id via the detail endpoint
-            invoice = self.get_invoice_detail(invoice_number, customer_id, user_id)
-            if not invoice:
-                return {"success": False, "error": "Invoice not found"}
-
-            response = self.api_client.process_refund(
-                invoice_id=invoice.id,
-                customer_id=customer_id,
-                amount_cents=amount_cents,
-                reason=reason,
-                refund_type="partial" if amount_cents else "full",
-                user_id=str(user_id),
-            )
-
-            if response.get("success"):
-                logger.info(
-                    f"✅ [Refund API] Refund processed for invoice {invoice_number}, "
-                    f"refund_id={response.get('refund_id')}"
-                )
-            else:
-                logger.warning(f"⚠️ [Refund API] Refund failed for invoice {invoice_number}: {response}")
-
-            return response
-
-        except Exception as e:
-            logger.error(f"🔥 [Refund API] Error requesting refund for invoice {invoice_number}: {e}")
-            _raise_if_degraded(e)
-            return {"success": False, "error": str(e)}
-
     @staticmethod
     def _empty_summary() -> dict[str, Any]:
         """Return empty summary in case of errors"""
