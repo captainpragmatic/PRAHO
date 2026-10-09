@@ -21,6 +21,7 @@ What it is not: a defence against code written to evade it. It catches the accid
 (a new view, a dropped decorator, a forgotten actor). It does not follow a refund called through a
 lambda, an alias, an exported wrapper of a private helper, or an actor laundered through a
 variable; it does not prove a called check's result is enforced. Those are code-review concerns.
+A written-out check (`if not ...: raise`) counts only at the top level, before the refund call.
 """
 
 from __future__ import annotations
@@ -140,21 +141,31 @@ def _raises(statements: list[ast.stmt]) -> bool:
     return any(isinstance(node, ast.Raise) for statement in statements for node in ast.walk(statement))
 
 
-def _gate_tokens(func: FunctionNode) -> frozenset[str]:
+def _gate_tokens(func: FunctionNode, before_line: int | None = None) -> frozenset[str]:
     """The guards a function actually applies, never words that merely appear in it.
 
     A guard is a decorator, a function it calls, or an attribute or ``getattr`` string tested by
-    an ``if`` whose branch raises - `gift_card_action` writes
+    a denying ``if not ...: raise`` - `gift_card_action` writes
     ``if not getattr(request.user, "can_manage_financial_data", False): raise PermissionDenied``.
-    Strings in log calls, docstrings and attribute reads that decide nothing do not count.
+    Strings in log calls, docstrings and attribute reads that decide nothing do not count, nor
+    does an ``if`` with the polarity inverted, one placed after the refund call it should guard
+    (``before_line``), or one nested inside another branch.
     """
     tokens: set[str] = {_decorator_name(d) for d in func.decorator_list}
     for node in _own_nodes(func):
+        if before_line is not None and getattr(node, "lineno", 0) >= before_line:
+            continue
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name | ast.Attribute):
             name = _decorator_name(node.func)
             if name != "getattr":
                 tokens.add(name)
-        if isinstance(node, ast.If) and _raises(node.body):
+    # A denying `if` counts only as a top-level statement: inside another branch it guards that
+    # branch, not every path to the refund call.
+    for node in func.body:
+        if before_line is not None and node.lineno >= before_line:
+            break
+        denies = isinstance(node, ast.If) and isinstance(node.test, ast.UnaryOp) and isinstance(node.test.op, ast.Not)
+        if denies and _raises(node.body):
             for part in ast.walk(node.test):
                 if isinstance(part, ast.Attribute):
                     tokens.add(part.attr)
@@ -200,6 +211,15 @@ def _calls_name(func: FunctionNode, name: str) -> bool:
         isinstance(node, ast.Call) and isinstance(node.func, ast.Name | ast.Attribute) and _decorator_name(node.func) == name
         for node in _own_nodes(func)
     )
+
+
+def _first_call_line(func: FunctionNode, name: str) -> int | None:
+    lines = [
+        node.lineno
+        for node in _own_nodes(func)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name | ast.Attribute) and _decorator_name(node.func) == name
+    ]
+    return min(lines) if lines else None
 
 
 def _references_elsewhere(name: str, home: Path) -> bool:
@@ -250,7 +270,7 @@ def _find_refund_call_sites() -> list[RefundCallSite]:
                         identifier=f"{relative}:{node.name}",
                         line_number=calls[0].lineno,
                         decorators=tuple(_decorator_name(d) for d in node.decorator_list),
-                        gate_tokens=_gate_tokens(node) | _system_task_tokens(relative, node),
+                        gate_tokens=_gate_tokens(node, before_line=calls[0].lineno) | _system_task_tokens(relative, node),
                         passes_actor=passes_actor,
                     )
                 )
@@ -269,7 +289,7 @@ def _find_refund_call_sites() -> list[RefundCallSite]:
                         identifier=f"{relative}:{node.name} via {caller.name}",
                         line_number=calls[0].lineno,
                         decorators=tuple(_decorator_name(d) for d in caller.decorator_list),
-                        gate_tokens=_gate_tokens(caller),
+                        gate_tokens=_gate_tokens(caller, before_line=_first_call_line(caller, node.name)),
                         passes_actor=passes_actor,
                     )
                 )
