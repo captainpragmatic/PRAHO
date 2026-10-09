@@ -66,6 +66,8 @@ class SessionActivityWriteTests(TestCase):
     def setUp(self) -> None:
         cache.clear()
         self.addCleanup(cache.clear)
+        # After the suite's autouse fixture, which forces DEBUG=True and would undo a class override.
+        self.enterContext(override_settings(DEBUG=False))
         platform = PlatformAPIClient()
         self.enterContext(patch("apps.users.middleware.api_client", platform))
         self.enterContext(patch("apps.api_client.services.portal_request", side_effect=self._platform))
@@ -115,10 +117,11 @@ class SessionActivityWriteTests(TestCase):
 
     def test_a_stamp_older_than_a_minute_is_refreshed(self) -> None:
         client = self._client(last_activity=time.time() - 61)
+        before = time.time()
         response, updates = self._get(client)
         self.assertContains(response, MARKER)
         self.assertEqual(len(updates), 1)
-        self.assertGreater(client.session["last_activity"], time.time() - 5)
+        self.assertGreaterEqual(client.session["last_activity"], before)
 
     def test_a_session_without_a_stamp_gets_one_at_once(self) -> None:
         # Idle timeout reads a missing stamp as "now", so it must never stay missing.
