@@ -191,6 +191,35 @@ PLATFORM_API_TIMEOUT = seconds_setting(
     maximum=PLATFORM_API_TOTAL_BUDGET_SECONDS,
 )
 
+# Login timing floor (seconds). Every portal login takes at least this long, so the time a
+# failure takes gives no sign of whether the email belongs to an account (#640 follow-up).
+# Measured worst case was 0.46 s locally (a BCrypt-hashed account, 5 concurrent logins); the
+# production default leaves room for slower hosts. Unset here, so tests and dev do not sleep;
+# production and staging call `login_floor_seconds`.
+LOGIN_FLOOR_MAX_SECONDS = 10.0
+
+
+def login_floor_seconds(raw: str | None, default: float) -> float:
+    """Parse PLATFORM_API_AUTH_MIN_DURATION_SECONDS, refusing values that would disable the floor.
+
+    Unset or empty means the default. Anything else must be a finite number in (0, 10]: 0, a
+    negative or `nan` would silently turn the protection off, and `inf` would hang every login.
+    """
+    from django.core.exceptions import ImproperlyConfigured  # noqa: PLC0415  # settings import time
+
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = float(raw)
+    except ValueError as error:
+        raise ImproperlyConfigured(f"PLATFORM_API_AUTH_MIN_DURATION_SECONDS is not a number: {raw!r}") from error
+    if not math.isfinite(value) or not 0 < value <= LOGIN_FLOOR_MAX_SECONDS:
+        raise ImproperlyConfigured(
+            f"PLATFORM_API_AUTH_MIN_DURATION_SECONDS must be in (0, {LOGIN_FLOOR_MAX_SECONDS:g}]: {raw!r}"
+        )
+    return value
+
+
 # Cold-outage defaults mirror Platform's public company catalog entries.
 COMPANY_IDENTITY_DEFAULTS: dict[str, str] = {
     "legal_name": "PragmaticHost SRL",

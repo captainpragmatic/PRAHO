@@ -62,8 +62,8 @@ PLATFORM_MAX_CLOCK_AHEAD_SECONDS = 2
 PLATFORM_MAX_BODY_BYTES = 10 * 1024 * 1024
 
 
-class _SignatureRejectionLogGate:
-    """One critical log per window per process: every request fails the same way during an outage."""
+class _OncePerWindowLogGate:
+    """One log per window per process, for conditions that hit every request at once."""
 
     def __init__(self) -> None:
         self.last_logged_at: float | None = None
@@ -78,7 +78,9 @@ class _SignatureRejectionLogGate:
             return True
 
 
-_signature_rejection_log_gate = _SignatureRejectionLogGate()
+_signature_rejection_log_gate = _OncePerWindowLogGate()
+# A login that outlasts the timing floor is no longer hidden by it: say so, once per window.
+_login_floor_overrun_log_gate = _OncePerWindowLogGate()
 
 
 def quote_path_segment(value: object) -> str:
@@ -828,6 +830,15 @@ class PlatformAPIClient:
             return None
         finally:
             elapsed = time.perf_counter() - start_time
+            if 0 < min_duration < elapsed and _login_floor_overrun_log_gate.should_log():
+                logger.warning(
+                    "⚠️ [API Client] A login took %.3fs, longer than the %.3fs timing floor, so its timing "
+                    "was not hidden. Raise PLATFORM_API_AUTH_MIN_DURATION_SECONDS if this recurs "
+                    "(logged once per %ss).",
+                    elapsed,
+                    min_duration,
+                    int(SIGNATURE_REJECTION_LOG_INTERVAL_SECONDS),
+                )
             if elapsed < min_duration:
                 remaining = min_duration - elapsed
                 if remaining > HMAC_TIMING_THRESHOLD:

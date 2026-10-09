@@ -24,6 +24,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- A failed login no longer reveals whether the email has an account.
+  - **Staff login:** a locked account was told "Account temporarily locked for security reasons" and
+    answered without hashing the password, so both the message and the timing confirmed the email.
+    Every failure now hashes the password and gets the same "Incorrect email or password." A locked
+    account is refused with that message even with the right password, before the branch that
+    redirects customers to the portal, which would otherwise confirm the password during a lockout.
+  - **Both login paths:** the failed-attempt write, which only real accounts perform, could turn a
+    database error into a 500 that only real emails could cause. It is now best-effort and the
+    answer stays the same.
+  - **Portal timing:** every portal login now takes at least `PLATFORM_API_AUTH_MIN_DURATION_SECONDS`
+    (production and staging default 1.0 s), so failures cannot be told apart by time. Accounts whose
+    stored password still uses an older hash answered up to six times slower than an unknown email.
+    Invalid values refuse to start, and a login that outlasts the floor is logged.
 - **One customer can no longer use up the Platform budget every customer of a portal shares.**
   - **The problem.** Platform's limits on portal traffic were per portal. A busy customer could get every other customer throttled, or, through session revalidation, signed out.
   - **Per-principal budgets.** Each principal has its own budget, charged before the portal-wide ceiling and never against it once exceeded. A principal is the signed user, else the signed client IP, else "anonymous".

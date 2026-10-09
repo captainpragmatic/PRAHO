@@ -130,6 +130,8 @@ services:
       - PLATFORM_API_SECRET=${PLATFORM_API_SECRET:?PLATFORM_API_SECRET required}
       # Per-portal signing secret (#277). Unset/empty => sign with PLATFORM_API_SECRET.
       - PORTAL_HMAC_SECRET=${PORTAL_HMAC_SECRET:-}
+      # Login timing floor in seconds (empty = the production default, 1.0).
+      - PLATFORM_API_AUTH_MIN_DURATION_SECONDS=${PLATFORM_API_AUTH_MIN_DURATION_SECONDS:-}
       # Production refuses to start without it. This stack's Caddy reaches the portal over `web`, so
       # trust that subnet; the env file's PORTAL_TRUSTED_PROXY_CIDRS describes a native Caddy.
       - PORTAL_TRUSTED_PROXY_CIDRS=${PRAHO_WEB_SUBNET:-10.200.250.0/24}

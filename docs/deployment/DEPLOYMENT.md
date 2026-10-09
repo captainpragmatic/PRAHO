@@ -636,7 +636,13 @@ DJANGO_ENCRYPTION_KEY, CREDENTIAL_VAULT_MASTER_KEY   # platform, production sett
 PLATFORM_DOMAIN, PORTAL_DOMAIN
 PORTAL_TRUSTED_PROXY_CIDRS                 # the provider's load balancer range
 PLATFORM_API_BASE_URL=https://platform.praho.example.com/api
+PLATFORM_API_AUTH_MIN_DURATION_SECONDS     # optional, portal: login timing floor, default 1.0 (0 < s <= 10)
 ```
+
+`PLATFORM_API_AUTH_MIN_DURATION_SECONDS` makes every portal login take at least that long, so the
+time a failed login takes gives no sign of whether the email has an account. Production and
+staging default to 1.0 s; the portal refuses to start on 0, a negative value, `nan`, `inf` or
+anything above 10. If the portal logs "A login took … longer than the … timing floor", raise it.
 
 ---
 
