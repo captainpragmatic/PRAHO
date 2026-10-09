@@ -21,6 +21,7 @@ production sources, a frozen record per site, and an exact expected set.
 from __future__ import annotations
 
 import ast
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -30,37 +31,49 @@ PLATFORM_ROOT = Path(__file__).resolve().parents[2]
 SCAN_ROOT = PLATFORM_ROOT / "apps"
 
 # Every primitive that sends money back to a customer. ``RefundService`` methods are called as
-# attributes; the tender-retry and gift-card primitives are imported and called by bare name.
+# attributes; the others are imported and called by bare name. ``refresh_refund`` belongs here: a
+# gift-card refund reserved but not yet sent is submitted to the gateway by it.
 REFUND_SERVICE_METHODS = frozenset({"refund_invoice", "refund_order"})
-REFUND_PRIMITIVES = frozenset({"resume_refund", "refund_purchase"})
+REFUND_PRIMITIVES = frozenset({"resume_refund", "refund_purchase", "refresh_refund"})
+# Resumes a refund whose reservation already recorded its actor (``created_by``) and checked
+# ``can_manage_financial_data`` (``reserve_funding_refund``), so it takes no ``actor=`` of its own.
+RESUMING_PRIMITIVES = frozenset({"refresh_refund"})
 
 # Modules that define and orchestrate those primitives. Their internal calls (for example
 # ``refund_service.py`` -> ``tender_refunds.refund_from_existing_flow``) are plumbing reached
-# only through an entry point below, not entry points of their own. Out of scope by design:
-# ``record_bank_refund`` and ``refresh_refund`` record or poll a refund; neither starts a payout.
+# only through an entry point below, not entry points of their own. ``record_bank_refund`` is
+# out of scope by design: it records a bank transfer staff already made, it sends nothing.
 PRIMITIVE_MODULES = frozenset(
     {"apps/billing/refund_service.py", "apps/promotions/tender_refunds.py", "apps/promotions/gift_refunds.py"}
 )
 
-# The complete inventory of staff paths that start a refund, each mapped to the gate tokens that
-# must all be present on it. Refunds are staff-only: the portal's customer endpoint
+# A scheduled task has no request: its authority is the staff action that reserved the refund it
+# resumes. Declared with this marker, which holds only for a request-less function in a tasks.py.
+SYSTEM_TASK = "<system task>"
+
+# The complete inventory of paths that start a refund, each mapped to the gate tokens that must
+# all be present on it. Refunds are staff-only: the portal's customer endpoint
 # (`api_process_refund`) was removed, and a new entry point of any kind fails this test until it
-# is declared here. A private helper (`_name`) is classified through its only caller, named after
+# is declared here. A private helper (`_name`) is classified through its callers, named after
 # "via"; the gate must sit on that caller.
 EXPECTED_REFUND_ENTRY_POINTS: dict[str, tuple[str, ...]] = {
     "apps/billing/views.py:invoice_refund": ("billing_staff_api_required",),
     "apps/orders/views.py:order_refund": ("billing_staff_api_required",),
     "apps/billing/views.py:invoice_refund_retry": ("billing_staff_api_required",),
     "apps/promotions/gift_staff_views.py:_request_refund via gift_card_action": ("can_manage_financial_data",),
+    "apps/promotions/gift_staff_views.py:_existing_refund_action via gift_card_action": ("can_manage_financial_data",),
+    "apps/promotions/tasks.py:reconcile_gift_refunds": (SYSTEM_TASK,),
 }
 
 # Canary: the newest entry point. A scan that drifts off it (wrong root, helper resolution
-# broken, string gates no longer read) fails here instead of passing vacuously.
-NEWEST_KNOWN_ENTRY_POINT = "apps/promotions/gift_staff_views.py:_request_refund via gift_card_action"
+# broken, guards no longer read) fails here instead of passing vacuously.
+NEWEST_KNOWN_ENTRY_POINT = "apps/promotions/gift_staff_views.py:_existing_refund_action via gift_card_action"
 
 # A financial gate. Bare staff decorators admit `support` and plain `is_staff`, so on their own
 # they are not authority to move money (#104 [M11]); with one of these present they are fine.
 FINANCIAL_GATES = frozenset({"billing_staff_api_required", "billing_staff_required", "can_manage_financial_data"})
+
+FunctionNode = ast.FunctionDef | ast.AsyncFunctionDef
 
 
 @dataclass(frozen=True)
@@ -94,45 +107,123 @@ def _decorator_name(node: ast.expr) -> str:
     return "<unknown>"
 
 
-def _is_refund_call(node: ast.AST) -> bool:
-    if not isinstance(node, ast.Call):
-        return False
+def _own_nodes(func: FunctionNode) -> list[ast.AST]:
+    """Nodes in a function's own body, not in functions or classes nested inside it."""
+    found: list[ast.AST] = []
+    pending: list[ast.AST] = list(func.body)
+    while pending:
+        node = pending.pop()
+        found.append(node)
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Lambda):
+            continue
+        pending.extend(ast.iter_child_nodes(node))
+    return found
+
+
+def _is_refund_call(node: ast.Call) -> bool:
     func = node.func
     if isinstance(func, ast.Attribute) and func.attr in REFUND_SERVICE_METHODS:
         return isinstance(func.value, ast.Name) and func.value.id == "RefundService"
     return isinstance(func, ast.Name) and func.id in REFUND_PRIMITIVES
 
 
-def _refund_calls(func: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.Call]:
-    return [node for node in ast.walk(func) if isinstance(node, ast.Call) and _is_refund_call(node)]
+def _refund_calls(func: FunctionNode) -> list[ast.Call]:
+    return [node for node in _own_nodes(func) if isinstance(node, ast.Call) and _is_refund_call(node)]
 
 
-def _gate_tokens(func: ast.FunctionDef | ast.AsyncFunctionDef) -> frozenset[str]:
-    """Names, attribute names and string constants in a function: where a gate can be written.
+def _raises(statements: list[ast.stmt]) -> bool:
+    return any(isinstance(node, ast.Raise) for statement in statements for node in ast.walk(statement))
 
-    `gift_card_action` checks ``getattr(request.user, "can_manage_financial_data", False)``,
-    so a gate can be a string, which a Name-only scan cannot see.
+
+def _gate_tokens(func: FunctionNode) -> frozenset[str]:
+    """The guards a function actually applies, never words that merely appear in it.
+
+    A guard is a decorator, a function it calls, or an attribute or ``getattr`` string tested by
+    an ``if`` whose branch raises - `gift_card_action` writes
+    ``if not getattr(request.user, "can_manage_financial_data", False): raise PermissionDenied``.
+    Strings in log calls, docstrings and attribute reads that decide nothing do not count.
     """
     tokens: set[str] = {_decorator_name(d) for d in func.decorator_list}
-    for node in ast.walk(func):
-        if isinstance(node, ast.Name):
-            tokens.add(node.id)
-        elif isinstance(node, ast.Attribute):
-            tokens.add(node.attr)
-        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
-            tokens.add(node.value)
+    for node in _own_nodes(func):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name | ast.Attribute):
+            name = _decorator_name(node.func)
+            if name != "getattr":
+                tokens.add(name)
+        if isinstance(node, ast.If) and _raises(node.body):
+            for part in ast.walk(node.test):
+                if isinstance(part, ast.Attribute):
+                    tokens.add(part.attr)
+                elif (
+                    isinstance(part, ast.Call)
+                    and isinstance(part.func, ast.Name)
+                    and part.func.id == "getattr"
+                    and len(part.args) >= 2
+                    and isinstance(part.args[1], ast.Constant)
+                    and isinstance(part.args[1].value, str)
+                ):
+                    tokens.add(part.args[1].value)
     return frozenset(tokens)
 
 
-def _callers(tree: ast.Module, helper: str) -> list[ast.FunctionDef | ast.AsyncFunctionDef]:
-    return [
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
-        and node.name != helper
-        and any(isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == helper
-                for call in ast.walk(node))
-    ]
+def _system_task_tokens(relative: str, func: FunctionNode) -> frozenset[str]:
+    parameters = {arg.arg for arg in func.args.args + func.args.kwonlyargs}
+    return frozenset({SYSTEM_TASK}) if relative.endswith("/tasks.py") and "request" not in parameters else frozenset()
+
+
+def _passes_actor(calls: list[ast.Call]) -> bool:
+    """Every refund call names an actor, and not the constant ``None``."""
+
+    def named(call: ast.Call) -> bool:
+        return any(
+            keyword.arg == "actor" and not (isinstance(keyword.value, ast.Constant) and keyword.value.value is None)
+            for keyword in call.keywords
+        )
+
+    return all(
+        named(call)
+        for call in calls
+        if not (isinstance(call.func, ast.Name) and call.func.id in RESUMING_PRIMITIVES)
+    )
+
+
+def _functions(tree: ast.Module) -> list[FunctionNode]:
+    return [node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)]
+
+
+def _calls_name(func: FunctionNode, name: str) -> bool:
+    return any(
+        isinstance(node, ast.Call) and isinstance(node.func, ast.Name | ast.Attribute) and _decorator_name(node.func) == name
+        for node in _own_nodes(func)
+    )
+
+
+def _references_elsewhere(name: str, home: Path) -> bool:
+    """Whether any other production module names this private helper (an import or a call)."""
+    for path in SCAN_ROOT.rglob("*.py"):
+        relative = path.relative_to(PLATFORM_ROOT)
+        if path == home or "tests" in relative.parts or "migrations" in relative.parts:
+            continue
+        source = path.read_text(encoding="utf-8")
+        if name in source and re.search(rf"\b{re.escape(name)}\b", source):
+            return True
+    return False
+
+
+def _entry_callers(tree: ast.Module, helper: FunctionNode, depth: int = 0) -> list[FunctionNode | None]:
+    """The public functions that reach a private helper, following private helpers transitively.
+
+    ``None`` stands for "no caller found": an unreachable or externally called helper fails closed.
+    """
+    callers = [fn for fn in _functions(tree) if fn is not helper and _calls_name(fn, helper.name)]
+    if not callers or depth > 5:
+        return [None]
+    resolved: list[FunctionNode | None] = []
+    for caller in callers:
+        if caller.name.startswith("_"):
+            resolved.extend(_entry_callers(tree, caller, depth + 1))
+        else:
+            resolved.append(caller)
+    return resolved
 
 
 def _find_refund_call_sites() -> list[RefundCallSite]:
@@ -143,27 +234,27 @@ def _find_refund_call_sites() -> list[RefundCallSite]:
             continue
         tree = ast.parse(source, filename=str(path))
         relative = path.relative_to(PLATFORM_ROOT).as_posix()
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-                continue
+        for node in _functions(tree):
             calls = _refund_calls(node)
             if not calls:
                 continue
-            passes_actor = all(any(kw.arg == "actor" for kw in call.keywords) for call in calls)
+            passes_actor = _passes_actor(calls)
             if not node.name.startswith("_"):
                 sites.append(
                     RefundCallSite(
                         identifier=f"{relative}:{node.name}",
                         line_number=calls[0].lineno,
                         decorators=tuple(_decorator_name(d) for d in node.decorator_list),
-                        gate_tokens=_gate_tokens(node),
+                        gate_tokens=_gate_tokens(node) | _system_task_tokens(relative, node),
                         passes_actor=passes_actor,
                     )
                 )
                 continue
-            # A private helper: one site per caller, gated by that caller.
-            callers = _callers(tree, node.name) or [None]
-            for caller in callers:
+            if _references_elsewhere(node.name, path):
+                sites.append(RefundCallSite(f"{relative}:{node.name} via <another module>", calls[0].lineno, (),
+                                            frozenset(), passes_actor))
+                continue
+            for caller in _entry_callers(tree, node):
                 if caller is None:
                     sites.append(RefundCallSite(f"{relative}:{node.name} via <no caller>", calls[0].lineno, (),
                                                 frozenset(), passes_actor))
@@ -173,7 +264,7 @@ def _find_refund_call_sites() -> list[RefundCallSite]:
                         identifier=f"{relative}:{node.name} via {caller.name}",
                         line_number=calls[0].lineno,
                         decorators=tuple(_decorator_name(d) for d in caller.decorator_list),
-                        gate_tokens=_gate_tokens(caller) | _gate_tokens(node),
+                        gate_tokens=_gate_tokens(caller),
                         passes_actor=passes_actor,
                     )
                 )
