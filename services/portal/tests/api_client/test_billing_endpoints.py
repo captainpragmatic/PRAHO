@@ -19,11 +19,13 @@ def _ok() -> requests.Response:
 class BillingEndpointURLTests(SimpleTestCase):
     def test_payment_calls_go_to_api_billing_without_touching_the_base_url(self) -> None:
         # The helpers used to strip "/api" with str.replace, which turned
-        # "https://api.example.com/api" into "https://.example.com", and changed
+        # "https://api.example.com/api" into "https:/.example.com", and changed
         # self.base_url for the duration of the call.
         cases = (
             ("https://api.example.com/api", "https://api.example.com/api/billing/"),
             ("http://platform:8700/api", "http://platform:8700/api/billing/"),
+            ("https://platform.example.com/api/", "https://platform.example.com/api/billing/"),
+            ("https://platform.example.com", "https://platform.example.com/api/billing/"),
         )
         for base_url, expected_prefix in cases:
             with (

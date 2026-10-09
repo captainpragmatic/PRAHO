@@ -976,14 +976,18 @@ class PlatformAPIClient:
     def post_billing(
         self, endpoint: str, data: dict[str, Any] | None = None, user_id: int | None = None
     ) -> dict[str, Any]:
-        """POST to a Platform billing API endpoint (/api/billing/<endpoint>)."""
-        return self._make_request("POST", f"billing/{endpoint}", user_id=user_id, data=data)
+        """POST to a Platform billing API endpoint (/api/billing/<endpoint>).
+
+        The "/api" prefix is explicit so an origin-only base URL works too; `_build_url` drops
+        the duplicate when the base already ends in "/api".
+        """
+        return self._make_request("POST", f"/api/billing/{endpoint}", user_id=user_id, data=data)
 
     def get_billing(
         self, endpoint: str, params: dict[str, Any] | None = None, user_id: int | None = None
     ) -> dict[str, Any]:
-        """GET a Platform billing API endpoint (/api/billing/<endpoint>)."""
-        return self._make_request("GET", f"billing/{endpoint}", user_id=user_id, params=params)
+        """GET a Platform billing API endpoint (/api/billing/<endpoint>); see `post_billing`."""
+        return self._make_request("GET", f"/api/billing/{endpoint}", user_id=user_id, params=params)
 
     def get_invoice_pdf(self, invoice_id: int, user_id: str) -> bytes:
         """Download invoice PDF."""

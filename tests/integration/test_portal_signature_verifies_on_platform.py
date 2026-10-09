@@ -244,7 +244,7 @@ class PortalSignatureVerifiesOnPlatformTests(SimpleTestCase):
                 self.assertEqual(len(reached), 1)
 
     def test_payment_calls_are_signed_for_api_billing(self) -> None:
-        # Platform's Caddy configuration publishes only /api/* on its hostname.
+        # On Platform's hostname, Caddy admits /api/* to any client; /billing/* only to PLATFORM_ALLOWED_CIDRS.
         payments = [record for record in self.records if record["call"] in {"payment-intent", "stripe-config"}]
         self.assertEqual(len(payments), 2 * len(CONFIGURATIONS))
         for record in payments:

@@ -137,8 +137,9 @@ PLATFORM_HMAC_REJECTION = {"error": "HMAC authentication failed"}
 class PortalPaymentEndpointRoutingTests(HMACTestMixin, TestCase):
     """The portal's payment endpoints live under /api/billing/, through the real urlconf.
 
-    Platform's Caddy configuration publishes only /api/* on its hostname, so endpoints under
-    /billing/ were unreachable for a portal on its own host. The middleware-only tests above
+    On its hostname, Platform's Caddy configuration admits /api/* (plus the webhook and
+    unsubscribe paths) from anywhere and everything else only from PLATFORM_ALLOWED_CIDRS, so
+    endpoints under /billing/ were unreachable for a portal on its own host. The middleware-only tests above
     wrap an always-200 callback and cannot show routing; these go through the test client.
     """
 
@@ -156,11 +157,18 @@ class PortalPaymentEndpointRoutingTests(HMACTestMixin, TestCase):
                 self.assertEqual(response.json(), PLATFORM_HMAC_REJECTION)
 
     def test_a_signed_request_reaches_the_view(self) -> None:
+        # Each answer comes from inside the view body: the two POST views' own customer check
+        # (no customer_id in the body), and stripe-config's disabled-integration answer. Neither
+        # the middleware (401) nor the portal-auth guard (403 "Access denied") produces them.
+        expected = {
+            "api_create_payment_intent": (400, {"success": False, "error": "Invalid request format"}),
+            "api_confirm_payment": (400, {"success": False, "error": "Invalid request format"}),
+            "api_stripe_config": (503, {"success": False, "error": "Stripe integration disabled"}),
+        }
         for name, path, method in PAYMENT_ENDPOINTS:
             with self.subTest(name=name):
                 response = self.portal_post(path, {}) if method == "POST" else self.portal_get(path)
-                self.assertNotIn(response.status_code, {401, 404}, response.content)
-                self.assertNotEqual(response.json(), PLATFORM_HMAC_REJECTION)
+                self.assertEqual((response.status_code, response.json()), expected[name], response.content)
 
     def test_stripe_config_answers_from_the_view_in_english(self) -> None:
         # LocalisationMiddleware skips /api/; these views hard-code English, so the move

@@ -55,9 +55,10 @@ urlpatterns = [
         name="subscription_auto_payment",
     ),
     # The portal's card-payment endpoints. They live in the billing app's views (plain Django
-    # views that authenticate the signed customer themselves) but are served under /api/, the
-    # only prefix Platform's Caddy configuration publishes on its hostname. Under /billing/
-    # they were unreachable for a portal on its own host.
+    # views that authenticate the signed customer themselves) but are served under /api/: on
+    # Platform's hostname Caddy admits /api/* (and the webhook/unsubscribe paths) from anywhere,
+    # and everything else only from PLATFORM_ALLOWED_CIDRS, so under /billing/ they were
+    # unreachable for a portal on its own host.
     path("create-payment-intent/", billing_views.api_create_payment_intent, name="api_create_payment_intent"),
     path("confirm-payment/", billing_views.api_confirm_payment, name="api_confirm_payment"),
     path("stripe-config/", billing_views.api_stripe_config, name="api_stripe_config"),
