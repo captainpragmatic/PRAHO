@@ -219,7 +219,6 @@ class PlatformAPIClient:
         self.retry_backoff_seconds = float(getattr(settings, "PLATFORM_API_RETRY_BACKOFF_SECONDS", 0.05))
         self.max_read_retry_attempts = int(getattr(settings, "PLATFORM_API_READ_MAX_RETRIES", 2))
         self.max_retry_wait_seconds = float(getattr(settings, "PLATFORM_API_MAX_RETRY_WAIT_SECONDS", 2.5))
-        self._thread_local = threading.local()
 
     def _generate_hmac_headers(
         self, method: str, path: str, body: bytes, fixed_timestamp: str | None = None
@@ -475,7 +474,6 @@ class PlatformAPIClient:
         try:
             for attempt in range(max_retries + 1):
                 headers = self._prepare_request_headers(method, url, params, body_bytes, body_ts)
-                self._thread_local.last_request_headers = dict(headers)
 
                 response = portal_request(
                     method=method,
