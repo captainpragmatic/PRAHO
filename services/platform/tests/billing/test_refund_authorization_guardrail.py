@@ -134,11 +134,14 @@ def _is_refund_call(node: ast.Call) -> bool:
 
 
 def _refund_calls(func: FunctionNode) -> list[ast.Call]:
-    return [node for node in _own_nodes(func) if isinstance(node, ast.Call) and _is_refund_call(node)]
+    """Refund calls in source order (``_own_nodes`` does not walk in source order)."""
+    calls = [node for node in _own_nodes(func) if isinstance(node, ast.Call) and _is_refund_call(node)]
+    return sorted(calls, key=lambda call: (call.lineno, call.col_offset))
 
 
 def _raises(statements: list[ast.stmt]) -> bool:
-    return any(isinstance(node, ast.Raise) for statement in statements for node in ast.walk(statement))
+    """The branch always ends by raising - a raise nested under another condition does not count."""
+    return bool(statements) and isinstance(statements[-1], ast.Raise)
 
 
 def _gate_tokens(func: FunctionNode, before_line: int | None = None) -> frozenset[str]:
