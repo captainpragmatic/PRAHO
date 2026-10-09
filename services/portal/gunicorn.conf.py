@@ -49,7 +49,8 @@ def post_fork(server: Any, worker: Any) -> None:
 
     from apps.common import outbound_http  # noqa: PLC0415
 
-    outbound_http._session.cookies.clear()
-    outbound_http._session.adapters.clear()
-    outbound_http._session.mount("http://", requests.adapters.HTTPAdapter())
-    outbound_http._session.mount("https://", requests.adapters.HTTPAdapter())
+    session = outbound_http._get_session()
+    session.cookies.clear()
+    session.adapters.clear()
+    session.mount("http://", requests.adapters.HTTPAdapter())
+    session.mount("https://", requests.adapters.HTTPAdapter())

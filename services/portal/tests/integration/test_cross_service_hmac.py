@@ -45,7 +45,7 @@ class CrossServiceHMACIntegrationTestCase(SimpleTestCase):
         client = PlatformAPIClient()
 
         # Mock the actual HTTP request to avoid network dependency
-        with patch('apps.common.outbound_http._session.request') as mock_request:
+        with patch('apps.common.outbound_http._send') as mock_request:
             # Mock successful Platform response
             mock_response = Mock()
             mock_response.status_code = 200
@@ -100,7 +100,7 @@ class CrossServiceHMACIntegrationTestCase(SimpleTestCase):
         with patch('django.conf.settings.PLATFORM_API_SECRET', 'wrong-secret-key'):
             client = PlatformAPIClient()
 
-        with patch('apps.common.outbound_http._session.request') as mock_request:
+        with patch('apps.common.outbound_http._send') as mock_request:
             # Mock Platform 401 response for invalid HMAC
             mock_response = Mock()
             mock_response.status_code = 401
@@ -134,7 +134,7 @@ class CrossServiceHMACIntegrationTestCase(SimpleTestCase):
         """🔐 Test HMAC authentication behavior during network timeouts"""
         client = PlatformAPIClient()
 
-        with patch('apps.common.outbound_http._session.request') as mock_request:
+        with patch('apps.common.outbound_http._send') as mock_request:
             # Simulate network timeout
             mock_request.side_effect = requests.exceptions.Timeout("Request timed out after 10s")
 
@@ -158,7 +158,7 @@ class CrossServiceHMACIntegrationTestCase(SimpleTestCase):
         """🔐 Test HMAC authentication when Platform service is unavailable"""
         client = PlatformAPIClient()
 
-        with patch('apps.common.outbound_http._session.request') as mock_request:
+        with patch('apps.common.outbound_http._send') as mock_request:
             # Simulate connection refused (Platform service down)
             mock_request.side_effect = requests.exceptions.ConnectionError("Connection refused")
 
@@ -176,7 +176,7 @@ class CrossServiceHMACIntegrationTestCase(SimpleTestCase):
         """🔐 Test HMAC headers are preserved during HTTP redirects"""
         client = PlatformAPIClient()
 
-        with patch('apps.common.outbound_http._session.request') as mock_request:
+        with patch('apps.common.outbound_http._send') as mock_request:
             # Mock redirect scenario
             redirect_response = Mock()
             redirect_response.status_code = 301
@@ -206,7 +206,7 @@ class CrossServiceHMACIntegrationTestCase(SimpleTestCase):
             PLATFORM_API_SECRET="integration-test-hmac-secret-key-2024",
             PORTAL_ID="portal-integration-test",
             PLATFORM_API_BASE_URL="http://localhost:8000"
-        ), patch('apps.common.outbound_http._session.request') as mock_request:
+        ), patch('apps.common.outbound_http._send') as mock_request:
             # Single shared mock avoids per-thread patching races.
             mock_response = Mock()
             mock_response.status_code = 200
@@ -254,7 +254,7 @@ class CrossServiceHMACIntegrationTestCase(SimpleTestCase):
 
         with patch('time.time', return_value=fixed_timestamp), \
              patch('secrets.token_urlsafe', return_value=fixed_nonce), \
-             patch('apps.common.outbound_http._session.request') as mock_request:
+             patch('apps.common.outbound_http._send') as mock_request:
 
             mock_response = Mock()
             mock_response.status_code = 200
@@ -287,7 +287,7 @@ class CrossServiceHMACIntegrationTestCase(SimpleTestCase):
         signatures = {}
 
         for method in http_methods:
-            with patch('apps.common.outbound_http._session.request') as mock_request:
+            with patch('apps.common.outbound_http._send') as mock_request:
                 mock_response = Mock()
                 mock_response.status_code = 200
                 mock_response.json.return_value = {'success': True, 'method': method}
@@ -333,7 +333,7 @@ class CrossServiceHMACResponseExtractionTestCase(SimpleTestCase):
         """Verify customer_id is extracted from the Platform's HMAC-authenticated response."""
         client = PlatformAPIClient()
 
-        with patch("apps.common.outbound_http._session.request") as mock_request:
+        with patch("apps.common.outbound_http._send") as mock_request:
             mock_response = Mock()
             mock_response.status_code = 200
             mock_response.json.return_value = {
@@ -370,7 +370,7 @@ class CrossServiceHMACResponseExtractionTestCase(SimpleTestCase):
         """Older Platform responses without customer_id should still work (backward compat)."""
         client = PlatformAPIClient()
 
-        with patch("apps.common.outbound_http._session.request") as mock_request:
+        with patch("apps.common.outbound_http._send") as mock_request:
             mock_response = Mock()
             mock_response.status_code = 200
             # Simulate an older Platform that doesn't include customer_id in user dict
@@ -412,7 +412,7 @@ class CrossServiceHMACFailureRecoveryTestCase(SimpleTestCase):
         """🔐 Test Portal retries HMAC authentication on Platform 503 responses"""
         client = PlatformAPIClient()
 
-        with patch('apps.common.outbound_http._session.request') as mock_request:
+        with patch('apps.common.outbound_http._send') as mock_request:
             # First request returns 503 (Platform overloaded)
             error_response = Mock()
             error_response.status_code = 503
@@ -449,7 +449,7 @@ class CrossServiceHMACFailureRecoveryTestCase(SimpleTestCase):
         api_services._signature_rejection_log_gate.last_logged_at = None
 
         with (
-            patch('apps.common.outbound_http._session.request') as mock_request,
+            patch('apps.common.outbound_http._send') as mock_request,
             self.assertLogs('apps.api_client.services', level='CRITICAL') as logs,
         ):
             # All requests return Platform's uniform HMAC rejection
@@ -476,7 +476,7 @@ class CrossServiceHMACFailureRecoveryTestCase(SimpleTestCase):
 
             # Simulate restart scenario
 
-            with patch('apps.common.outbound_http._session.request') as mock_request:
+            with patch('apps.common.outbound_http._send') as mock_request:
                 mock_response = Mock()
                 mock_response.status_code = 200
                 mock_response.json.return_value = {

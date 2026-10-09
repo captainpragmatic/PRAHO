@@ -8,7 +8,38 @@ import requests
 from django.test import SimpleTestCase, override_settings
 
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
-from apps.common.outbound_http import OutboundSecurityError, _session, portal_request
+from apps.common.outbound_http import DEFAULT_USER_AGENT, OutboundSecurityError, _get_session, portal_request
+
+
+class PortalRequestSessionBoundaryTest(SimpleTestCase):
+    """What reaches requests itself, below the `_send` seam the other tests patch.
+
+    Every other test here fakes Platform at `_send`, so none of them would notice `_send`
+    dropping the safety arguments on their way to the Session.
+    """
+
+    @override_settings(DEBUG=True, PLATFORM_API_TIMEOUT=7)
+    @patch("requests.Session.request", autospec=True)
+    def test_the_session_receives_every_safety_argument(self, session_request):
+        session_request.return_value = MagicMock(status_code=200)
+        portal_request("POST", "http://localhost:8700/api/test/", headers={"X-Nonce": "n"}, data=b"{}")
+
+        session_request.assert_called_once()
+        (session,), kwargs = session_request.call_args
+        self.assertIs(session, _get_session())
+        self.assertEqual(
+            kwargs,
+            {
+                "method": "POST",
+                "url": "http://localhost:8700/api/test/",
+                "allow_redirects": False,
+                "timeout": 7,
+                "verify": True,
+                "cookies": {},
+                "headers": {"X-Nonce": "n", "User-Agent": DEFAULT_USER_AGENT},
+                "data": b"{}",
+            },
+        )
 
 
 class PortalRequestHTTPSEnforcementTest(SimpleTestCase):
@@ -20,21 +51,21 @@ class PortalRequestHTTPSEnforcementTest(SimpleTestCase):
             portal_request("GET", "http://platform.example.com/api/test/")
 
     @override_settings(DEBUG=True)
-    @patch("apps.common.outbound_http._session.request")
+    @patch("apps.common.outbound_http._send")
     def test_allows_http_in_debug(self, mock_request):
         mock_request.return_value = MagicMock(status_code=200)
         resp = portal_request("GET", "http://localhost:8700/api/test/")
         self.assertEqual(resp.status_code, 200)
 
     @override_settings(DEBUG=False, PLATFORM_API_ALLOW_INSECURE_HTTP=True)
-    @patch("apps.common.outbound_http._session.request")
+    @patch("apps.common.outbound_http._send")
     def test_allows_http_with_insecure_setting(self, mock_request):
         mock_request.return_value = MagicMock(status_code=200)
         resp = portal_request("GET", "http://platform.example.com/api/test/")
         self.assertEqual(resp.status_code, 200)
 
     @override_settings(DEBUG=False)
-    @patch("apps.common.outbound_http._session.request")
+    @patch("apps.common.outbound_http._send")
     def test_allows_https_in_production(self, mock_request):
         mock_request.return_value = MagicMock(status_code=200)
         resp = portal_request("GET", "https://platform.example.com/api/test/")
@@ -45,7 +76,7 @@ class PortalRequestRedirectTest(SimpleTestCase):
     """portal_request() must block redirects."""
 
     @override_settings(DEBUG=True)
-    @patch("apps.common.outbound_http._session.request")
+    @patch("apps.common.outbound_http._send")
     def test_sets_allow_redirects_false(self, mock_request):
         mock_request.return_value = MagicMock(status_code=200)
         portal_request("GET", "http://localhost:8700/api/test/")
@@ -53,7 +84,7 @@ class PortalRequestRedirectTest(SimpleTestCase):
         self.assertFalse(kwargs["allow_redirects"])
 
     @override_settings(DEBUG=True)
-    @patch("apps.common.outbound_http._session.request")
+    @patch("apps.common.outbound_http._send")
     def test_overrides_caller_allow_redirects(self, mock_request):
         mock_request.return_value = MagicMock(status_code=200)
         portal_request("GET", "http://localhost:8700/api/test/", allow_redirects=True)
@@ -65,7 +96,7 @@ class PortalRequestTimeoutTest(SimpleTestCase):
     """portal_request() must always set a timeout."""
 
     @override_settings(DEBUG=True, PLATFORM_API_TIMEOUT=15)
-    @patch("apps.common.outbound_http._session.request")
+    @patch("apps.common.outbound_http._send")
     def test_uses_settings_timeout(self, mock_request):
         mock_request.return_value = MagicMock(status_code=200)
         portal_request("GET", "http://localhost:8700/api/test/")
@@ -73,7 +104,7 @@ class PortalRequestTimeoutTest(SimpleTestCase):
         self.assertEqual(kwargs["timeout"], 15)
 
     @override_settings(DEBUG=True)
-    @patch("apps.common.outbound_http._session.request")
+    @patch("apps.common.outbound_http._send")
     def test_uses_explicit_timeout(self, mock_request):
         mock_request.return_value = MagicMock(status_code=200)
         portal_request("GET", "http://localhost:8700/api/test/", timeout=5.0)
@@ -81,7 +112,7 @@ class PortalRequestTimeoutTest(SimpleTestCase):
         self.assertEqual(kwargs["timeout"], 5.0)
 
     @override_settings(DEBUG=True)
-    @patch("apps.common.outbound_http._session.request")
+    @patch("apps.common.outbound_http._send")
     def test_default_timeout_when_no_setting(self, mock_request):
         """Falls back to PORTAL_DEFAULT_TIMEOUT (30s) when setting is absent."""
         mock_request.return_value = MagicMock(status_code=200)
@@ -95,7 +126,7 @@ class PortalRequestTLSVerificationTest(SimpleTestCase):
     """portal_request() must always verify TLS."""
 
     @override_settings(DEBUG=True)
-    @patch("apps.common.outbound_http._session.request")
+    @patch("apps.common.outbound_http._send")
     def test_always_sets_verify_true(self, mock_request):
         mock_request.return_value = MagicMock(status_code=200)
         portal_request("GET", "http://localhost:8700/api/test/")
@@ -103,7 +134,7 @@ class PortalRequestTLSVerificationTest(SimpleTestCase):
         self.assertTrue(kwargs["verify"])
 
     @override_settings(DEBUG=True)
-    @patch("apps.common.outbound_http._session.request")
+    @patch("apps.common.outbound_http._send")
     def test_overrides_caller_verify_false(self, mock_request):
         mock_request.return_value = MagicMock(status_code=200)
         portal_request("GET", "http://localhost:8700/api/test/", verify=False)
@@ -115,7 +146,7 @@ class PortalRequestHMACPreservationTest(SimpleTestCase):
     """portal_request() must not alter URL or headers — HMAC must stay intact."""
 
     @override_settings(DEBUG=True)
-    @patch("apps.common.outbound_http._session.request")
+    @patch("apps.common.outbound_http._send")
     def test_url_passed_unchanged(self, mock_request):
         mock_request.return_value = MagicMock(status_code=200)
         url = "http://localhost:8700/api/users/login/"
@@ -125,7 +156,7 @@ class PortalRequestHMACPreservationTest(SimpleTestCase):
         self.assertEqual(kwargs["url"], url)
 
     @override_settings(DEBUG=True)
-    @patch("apps.common.outbound_http._session.request")
+    @patch("apps.common.outbound_http._send")
     def test_headers_passed_through(self, mock_request):
         mock_request.return_value = MagicMock(status_code=200)
         custom_headers = {"X-Portal-Id": "portal-1", "X-Signature": "sig123", "X-Nonce": "nonce"}
@@ -137,7 +168,7 @@ class PortalRequestHMACPreservationTest(SimpleTestCase):
 
 
 class PortalRequestCookieIsolationTest(SimpleTestCase):
-    """portal_request() must not let cookies leak across calls on the shared _session.
+    """portal_request() must not let cookies leak across calls on the outbound session.
 
     requests.Session persists Set-Cookie response cookies and merges session.cookies
     into every outbound request. For inter-service HMAC traffic across tenants, this
@@ -146,7 +177,7 @@ class PortalRequestCookieIsolationTest(SimpleTestCase):
     """
 
     @override_settings(DEBUG=True)
-    @patch("apps.common.outbound_http._session.request")
+    @patch("apps.common.outbound_http._send")
     def test_passes_empty_cookies_kwarg(self, mock_request):
         """Per-call cookies={} suppresses any session-level cookie merge for this request."""
         mock_request.return_value = MagicMock(status_code=200)
@@ -155,31 +186,31 @@ class PortalRequestCookieIsolationTest(SimpleTestCase):
         self.assertEqual(kwargs.get("cookies"), {})
 
     @override_settings(DEBUG=True)
-    @patch("apps.common.outbound_http._session.request")
+    @patch("apps.common.outbound_http._send")
     def test_clears_session_cookies_after_call(self, mock_request):
-        """_session.cookies is cleared after every call so a Set-Cookie from one
+        """The call's session cookie jar is cleared after every call so a Set-Cookie from one
         response cannot ride on the next portal_request() call."""
         # Simulate a previously-set cookie (e.g., from a prior Set-Cookie response).
-        _session.cookies.set("leak", "yes")
-        self.assertEqual(_session.cookies.get("leak"), "yes")
+        _get_session().cookies.set("leak", "yes")
+        self.assertEqual(_get_session().cookies.get("leak"), "yes")
 
         mock_request.return_value = MagicMock(status_code=200)
         portal_request("GET", "http://localhost:8700/api/test/")
 
-        self.assertEqual(len(_session.cookies), 0)
-        self.assertIsNone(_session.cookies.get("leak"))
+        self.assertEqual(len(_get_session().cookies), 0)
+        self.assertIsNone(_get_session().cookies.get("leak"))
 
     @override_settings(DEBUG=True)
-    @patch("apps.common.outbound_http._session.request")
+    @patch("apps.common.outbound_http._send")
     def test_clears_session_cookies_even_when_request_raises(self, mock_request):
         """Exception path must still clean up to avoid stale cookies leaking on retry."""
-        _session.cookies.set("leak", "yes")
+        _get_session().cookies.set("leak", "yes")
         mock_request.side_effect = requests.exceptions.ConnectionError("boom")
 
         with self.assertRaises(requests.exceptions.ConnectionError):
             portal_request("GET", "http://localhost:8700/api/test/")
 
-        self.assertEqual(len(_session.cookies), 0)
+        self.assertEqual(len(_get_session().cookies), 0)
 
 
 class PlatformAPIClientSecurityErrorTest(SimpleTestCase):

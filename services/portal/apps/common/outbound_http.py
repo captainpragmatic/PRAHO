@@ -24,6 +24,8 @@ adapters) is shared. Switching the portal to a threaded worker model requires
 either a ``threading.Lock`` around :func:`portal_request` or a thread-local
 session strategy.
 
+Tests fake Platform by patching :func:`_send`, the one place a call leaves the portal.
+
 Per-worker session reset is configured via ``services/portal/gunicorn.conf.py``
 (auto-loaded by gunicorn from the working directory). The ``post_fork`` hook
 clears cookies and re-mounts adapters in each worker so a Session created in
@@ -48,6 +50,20 @@ DEFAULT_USER_AGENT = "PRAHO-Portal/1.0 (+https://pragmatichost.com)"
 # See module docstring for the per-request isolation contract.
 _session = requests.Session()
 _session.headers["User-Agent"] = DEFAULT_USER_AGENT
+
+
+def _get_session() -> requests.Session:
+    """Return the Session that carries this call (one module Session today)."""
+    return _session
+
+
+def _send(method: str, url: str, **kwargs: Any) -> requests.Response:
+    """Send one prepared Platform call. The single seam tests patch to fake Platform.
+
+    Patching this module attribute reaches every thread, so tests never need to know
+    which Session object carries a call.
+    """
+    return _get_session().request(method=method, url=url, **kwargs)
 
 
 class OutboundSecurityError(Exception):
@@ -105,6 +121,6 @@ def portal_request(
     kwargs["headers"] = headers
 
     try:
-        return _session.request(method=method, url=url, **kwargs)
+        return _send(method=method, url=url, **kwargs)
     finally:
-        _session.cookies.clear()
+        _get_session().cookies.clear()
