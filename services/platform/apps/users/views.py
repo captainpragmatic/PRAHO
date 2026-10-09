@@ -22,6 +22,7 @@ from django.contrib.auth.views import (
     PasswordResetDoneView,
     PasswordResetView,
 )
+from django.db import Error as DatabaseFailure
 from django.db import models, transaction
 from django.db.models import QuerySet
 from django.forms import Form
@@ -70,25 +71,15 @@ def _handle_rate_limit(request: HttpRequest, form: LoginForm) -> HttpResponse | 
     return None
 
 
-def _handle_account_lockout(
-    request: HttpRequest, form: LoginForm, email: str
-) -> tuple[User | None, HttpResponse | None]:
-    """Check account lockout, return (user, response). Response is not None if locked."""
-    try:
-        user = User.objects.get(email=email)
-        if user.is_account_locked():
-            remaining_minutes = user.get_lockout_remaining_time()
-            messages.error(
-                request,
-                _("Account temporarily locked for security reasons. Try again in {minutes} minutes.").format(
-                    minutes=remaining_minutes
-                ),
-            )
-            return user, render(request, "users/login.html", {"form": form})
-        return user, None
-    except User.DoesNotExist:
-        # Don't reveal that user doesn't exist
-        return None, None
+def _login_candidate(email: str) -> User | None:
+    """The account an email names, if any - looked up only to record a failure against it.
+
+    The login view must not answer differently because this returns an account: a locked account
+    used to get "Account temporarily locked" (and skip the password hash, so it also answered
+    faster), which told anyone that the email exists. Lockout is enforced on the locked row in
+    `_handle_successful_login`, and every failure gets the same message.
+    """
+    return User.objects.filter(email=email).first()
 
 
 # The password step of an enrolled staff login parks its state here until mfa_verify.
@@ -183,8 +174,15 @@ def _read_pending_login(request: HttpRequest) -> _PendingLogin | None:
     return pending if usable else None
 
 
-def _handle_successful_login(request: HttpRequest, user: User, form: LoginForm) -> HttpResponse:
+def _handle_successful_login(request: HttpRequest, user: User, form: LoginForm) -> HttpResponse:  # noqa: PLR0911  # Each return is a distinct refusal or hand-off
     """Handle successful login logic - staff only on platform"""
+    # A locked account gets the wrong-password answer even with the right password, before any
+    # branch that would confirm the password (such as the customer redirect below): otherwise
+    # the lockout stops guessing nothing, and "locked" would confirm the email exists.
+    if user.is_account_locked():
+        messages.error(request, _("Incorrect email or password."))
+        return render(request, "users/login.html", {"form": form})
+
     # Check if user is staff - customers must use portal
     if not user.is_staff_user:
         # Log the rejected customer login attempt
@@ -265,7 +263,14 @@ def _handle_successful_login(request: HttpRequest, user: User, form: LoginForm) 
 def _handle_failed_login(request: HttpRequest, user: User | None) -> None:
     """Handle failed login logic"""
     if user:
-        user.increment_failed_login_attempts()
+        # A locked account's lock is not extended by more attempts (as before), and the counter
+        # write is best-effort: it runs only for real accounts, so its failure must not change the
+        # answer an attacker sees.
+        if not user.is_account_locked():
+            try:
+                user.increment_failed_login_attempts()
+            except DatabaseFailure:
+                logger.exception("🔥 [Auth] Could not record a failed login attempt")
 
         # Log failed login attempt
         UserLoginLog.objects.create(
@@ -302,12 +307,11 @@ def login_view(request: HttpRequest) -> HttpResponse:
             email = form.cleaned_data["email"]
             password = form.cleaned_data["password"]
 
-            # Check account lockout
-            user, lockout_response = _handle_account_lockout(request, form, email)
-            if lockout_response:
-                return lockout_response
+            user = _login_candidate(email)
 
-            # Authenticate user
+            # Authenticate every email the same way, locked accounts included: the locked-row
+            # check in _handle_successful_login refuses them with the same message as a wrong
+            # password, after the same hashing work.
             authenticated_user = authenticate(request, username=email, password=password)
 
             if authenticated_user:

@@ -13,6 +13,7 @@ from django.conf import settings
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import Error as DatabaseFailure
 from django.db import transaction
 from django.http import HttpRequest, JsonResponse
 from django.utils.crypto import constant_time_compare
@@ -130,10 +131,15 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911 -- 
         user = authenticate(request, username=email, password=password)
 
         if user is None:
-            # Increment counter silently (no-op if email doesn't exist)
+            # Increment counter silently (no-op if email doesn't exist). Best-effort: the write runs
+            # only for a real account, so letting its failure surface as a 500 would tell an
+            # attacker the email exists. The refusal below is the same either way.
             with contextlib.suppress(User.DoesNotExist):
                 failed_user = User.objects.get(email=email)
-                failed_user.increment_failed_login_attempts()
+                try:
+                    failed_user.increment_failed_login_attempts()
+                except DatabaseFailure:
+                    logger.exception("🔥 [Portal API Auth] Could not record a failed login attempt")
             logger.warning("⚠️ [Portal API Auth] Failed login — ip=%s", forwarded_ip or client_ip)
             _charge_login_failure(forwarded_ip)
             return JsonResponse({"success": False, "error": "Invalid email or password"}, status=401)
