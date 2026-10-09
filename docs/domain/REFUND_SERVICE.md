@@ -295,8 +295,9 @@ that starts or resumes a refund (`RefundService.refund_invoice`/`refund_order`, 
 `refund_purchase`, `refresh_refund`), follows private helpers to their public callers, and fails
 until a new path is declared with its gate. It counts only real guards (decorators, called
 checks, and `if` tests that raise), and requires a non-`None` `actor=` on every call that starts a
-refund. It reads calls by name, so an aliased import (`from … import resume_refund as r`) would
-still slip past it; review that pattern by hand.
+refund. It is a tripwire for accidental regressions, not a proof: an aliased import, a lambda, an
+exported wrapper around a private helper, or an actor passed through a variable would slip past
+it, so review those shapes by hand.
 
 Both dialogs post the amount in major units as `refund_amount`; the views convert it to cents
 and refuse a missing, zero, negative or non-numeric partial amount before any gateway call.

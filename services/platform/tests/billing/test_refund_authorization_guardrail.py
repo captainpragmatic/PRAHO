@@ -16,6 +16,11 @@ classified here, which is the point.
 
 Structure follows ``tests/users/test_staff_account_creation_guardrail.py``: AST over
 production sources, a frozen record per site, and an exact expected set.
+
+What it is not: a defence against code written to evade it. It catches the accidental shapes
+(a new view, a dropped decorator, a forgotten actor). It does not follow a refund called through a
+lambda, an alias, an exported wrapper of a private helper, or an actor laundered through a
+variable; it does not prove a called check's result is enforced. Those are code-review concerns.
 """
 
 from __future__ import annotations
