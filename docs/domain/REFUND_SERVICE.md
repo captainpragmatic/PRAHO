@@ -289,10 +289,11 @@ The two refund dialogs pass the staff user as `actor=` to `RefundService`. There
 the portal's "Request Refund" button and Platform's HMAC endpoint `api_process_refund` were
 removed, because that endpoint executed the refund with the customer as actor while the portal
 described it as a request for review. Customers ask for a refund through an ordinary support
-ticket. `tests/billing/test_refund_authorization_guardrail.py` scans `apps/` for direct
-`RefundService.refund_invoice`/`refund_order` calls and fails until a new one is declared with its
-gate. It does not see aliased calls or the retry and gift-card paths above, so review any new
-refund path by hand.
+ticket. `tests/billing/test_refund_authorization_guardrail.py` scans `apps/` for every function
+that starts a refund (`RefundService.refund_invoice`/`refund_order`, `resume_refund`,
+`refund_purchase`), follows a private helper to its caller, and fails until a new path is declared
+with its gate. It reads the call by name, so an aliased import (`from … import resume_refund as
+r`) would still slip past it; review that pattern by hand.
 
 Both dialogs post the amount in major units as `refund_amount`; the views convert it to cents
 and refuse a missing, zero, negative or non-numeric partial amount before any gateway call.

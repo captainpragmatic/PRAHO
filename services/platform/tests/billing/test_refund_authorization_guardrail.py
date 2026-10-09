@@ -8,9 +8,11 @@ through.
 
 The invariant is deliberately narrow. "Every money-moving view carries a staff decorator"
 would be false — customer payment endpoints and verified gateway webhooks move money
-legitimately without one. Instead this enumerates the direct callers of ``RefundService``
-and asserts each is gated by the mechanism it is supposed to be gated by. A new refund
-entry point fails this test until it is classified here, which is the point.
+legitimately without one. Instead this enumerates every function that starts a refund (a
+``RefundService.refund_*`` call, a tender-refund retry or a gift-card purchase refund) and
+asserts each is gated by the mechanism it is supposed to be gated by. A private helper is
+classified through its caller. A new refund entry point fails this test until it is
+classified here, which is the point.
 
 Structure follows ``tests/users/test_staff_account_creation_guardrail.py``: AST over
 production sources, a frozen record per site, and an exact expected set.
@@ -27,20 +29,38 @@ from django.test import SimpleTestCase
 PLATFORM_ROOT = Path(__file__).resolve().parents[2]
 SCAN_ROOT = PLATFORM_ROOT / "apps"
 
-REFUND_METHODS = frozenset({"refund_invoice", "refund_order"})
+# Every primitive that sends money back to a customer. ``RefundService`` methods are called as
+# attributes; the tender-retry and gift-card primitives are imported and called by bare name.
+REFUND_SERVICE_METHODS = frozenset({"refund_invoice", "refund_order"})
+REFUND_PRIMITIVES = frozenset({"resume_refund", "refund_purchase"})
 
-# The complete inventory of direct RefundService callers, each mapped to the mechanism that
-# authorizes it. `billing_staff_api_required` denies in JSON (these endpoints return
-# JsonResponse to clients that parse unconditionally). Refunds are staff-only: the portal's
-# customer endpoint (`api_process_refund`) was removed, and a new entry point of any kind
-# fails this test until it is declared here with the gate that authorizes it.
-EXPECTED_REFUND_ENTRY_POINTS: dict[str, str] = {
-    "apps/billing/views.py:invoice_refund": "billing_staff_api_required",
-    "apps/orders/views.py:order_refund": "billing_staff_api_required",
+# Modules that define and orchestrate those primitives. Their internal calls (for example
+# ``refund_service.py`` -> ``tender_refunds.refund_from_existing_flow``) are plumbing reached
+# only through an entry point below, not entry points of their own. Out of scope by design:
+# ``record_bank_refund`` and ``refresh_refund`` record or poll a refund; neither starts a payout.
+PRIMITIVE_MODULES = frozenset(
+    {"apps/billing/refund_service.py", "apps/promotions/tender_refunds.py", "apps/promotions/gift_refunds.py"}
+)
+
+# The complete inventory of staff paths that start a refund, each mapped to the gate tokens that
+# must all be present on it. Refunds are staff-only: the portal's customer endpoint
+# (`api_process_refund`) was removed, and a new entry point of any kind fails this test until it
+# is declared here. A private helper (`_name`) is classified through its only caller, named after
+# "via"; the gate must sit on that caller.
+EXPECTED_REFUND_ENTRY_POINTS: dict[str, tuple[str, ...]] = {
+    "apps/billing/views.py:invoice_refund": ("billing_staff_api_required",),
+    "apps/orders/views.py:order_refund": ("billing_staff_api_required",),
+    "apps/billing/views.py:invoice_refund_retry": ("billing_staff_api_required",),
+    "apps/promotions/gift_staff_views.py:_request_refund via gift_card_action": ("can_manage_financial_data",),
 }
 
-# Canary: a known entry point the scan must find. A scan that drifts off it is broken.
-NEWEST_KNOWN_ENTRY_POINT = "apps/orders/views.py:order_refund"
+# Canary: the newest entry point. A scan that drifts off it (wrong root, helper resolution
+# broken, string gates no longer read) fails here instead of passing vacuously.
+NEWEST_KNOWN_ENTRY_POINT = "apps/promotions/gift_staff_views.py:_request_refund via gift_card_action"
+
+# A financial gate. Bare staff decorators admit `support` and plain `is_staff`, so on their own
+# they are not authority to move money (#104 [M11]); with one of these present they are fine.
+FINANCIAL_GATES = frozenset({"billing_staff_api_required", "billing_staff_required", "can_manage_financial_data"})
 
 
 @dataclass(frozen=True)
@@ -48,7 +68,8 @@ class RefundCallSite:
     identifier: str
     line_number: int
     decorators: tuple[str, ...]
-    body_names: frozenset[str]
+    gate_tokens: frozenset[str]
+    passes_actor: bool
 
 
 def _iter_production_python_files() -> list[Path]:
@@ -56,6 +77,8 @@ def _iter_production_python_files() -> list[Path]:
     for path in SCAN_ROOT.rglob("*.py"):
         relative = path.relative_to(PLATFORM_ROOT)
         if "tests" in relative.parts or path.name.startswith("test_") or "migrations" in relative.parts:
+            continue
+        if relative.as_posix() in PRIMITIVE_MODULES:
             continue
         files.append(path)
     return files
@@ -71,42 +94,89 @@ def _decorator_name(node: ast.expr) -> str:
     return "<unknown>"
 
 
-def _calls_refund_service(func: ast.FunctionDef | ast.AsyncFunctionDef) -> int | None:
-    """Return the line of a direct ``RefundService.refund_*`` call, else None."""
+def _is_refund_call(node: ast.AST) -> bool:
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    if isinstance(func, ast.Attribute) and func.attr in REFUND_SERVICE_METHODS:
+        return isinstance(func.value, ast.Name) and func.value.id == "RefundService"
+    return isinstance(func, ast.Name) and func.id in REFUND_PRIMITIVES
+
+
+def _refund_calls(func: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.Call]:
+    return [node for node in ast.walk(func) if isinstance(node, ast.Call) and _is_refund_call(node)]
+
+
+def _gate_tokens(func: ast.FunctionDef | ast.AsyncFunctionDef) -> frozenset[str]:
+    """Names, attribute names and string constants in a function: where a gate can be written.
+
+    `gift_card_action` checks ``getattr(request.user, "can_manage_financial_data", False)``,
+    so a gate can be a string, which a Name-only scan cannot see.
+    """
+    tokens: set[str] = {_decorator_name(d) for d in func.decorator_list}
     for node in ast.walk(func):
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr in REFUND_METHODS
-            and isinstance(node.func.value, ast.Name)
-            and node.func.value.id == "RefundService"
-        ):
-            return node.lineno
-    return None
+        if isinstance(node, ast.Name):
+            tokens.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            tokens.add(node.attr)
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            tokens.add(node.value)
+    return frozenset(tokens)
+
+
+def _callers(tree: ast.Module, helper: str) -> list[ast.FunctionDef | ast.AsyncFunctionDef]:
+    return [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+        and node.name != helper
+        and any(isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == helper
+                for call in ast.walk(node))
+    ]
 
 
 def _find_refund_call_sites() -> list[RefundCallSite]:
     sites: list[RefundCallSite] = []
     for path in _iter_production_python_files():
         source = path.read_text(encoding="utf-8")
-        if "RefundService" not in source:
+        if not any(word in source for word in ("RefundService", *REFUND_PRIMITIVES)):
             continue
         tree = ast.parse(source, filename=str(path))
         relative = path.relative_to(PLATFORM_ROOT).as_posix()
         for node in ast.walk(tree):
             if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
                 continue
-            line = _calls_refund_service(node)
-            if line is None:
+            calls = _refund_calls(node)
+            if not calls:
                 continue
-            sites.append(
-                RefundCallSite(
-                    identifier=f"{relative}:{node.name}",
-                    line_number=line,
-                    decorators=tuple(_decorator_name(d) for d in node.decorator_list),
-                    body_names=frozenset(n.id for n in ast.walk(node) if isinstance(n, ast.Name)),
+            passes_actor = all(any(kw.arg == "actor" for kw in call.keywords) for call in calls)
+            if not node.name.startswith("_"):
+                sites.append(
+                    RefundCallSite(
+                        identifier=f"{relative}:{node.name}",
+                        line_number=calls[0].lineno,
+                        decorators=tuple(_decorator_name(d) for d in node.decorator_list),
+                        gate_tokens=_gate_tokens(node),
+                        passes_actor=passes_actor,
+                    )
                 )
-            )
+                continue
+            # A private helper: one site per caller, gated by that caller.
+            callers = _callers(tree, node.name) or [None]
+            for caller in callers:
+                if caller is None:
+                    sites.append(RefundCallSite(f"{relative}:{node.name} via <no caller>", calls[0].lineno, (),
+                                                frozenset(), passes_actor))
+                    continue
+                sites.append(
+                    RefundCallSite(
+                        identifier=f"{relative}:{node.name} via {caller.name}",
+                        line_number=calls[0].lineno,
+                        decorators=tuple(_decorator_name(d) for d in caller.decorator_list),
+                        gate_tokens=_gate_tokens(caller) | _gate_tokens(node),
+                        passes_actor=passes_actor,
+                    )
+                )
     return sites
 
 
@@ -126,7 +196,7 @@ class RefundAuthorizationGuardrailTests(SimpleTestCase):
         unguarded = [
             site.identifier
             for site in sites
-            if EXPECTED_REFUND_ENTRY_POINTS[site.identifier] not in set(site.decorators) | site.body_names
+            if not set(EXPECTED_REFUND_ENTRY_POINTS[site.identifier]) <= site.gate_tokens
         ]
         self.assertEqual(
             unguarded,
@@ -142,14 +212,15 @@ class RefundAuthorizationGuardrailTests(SimpleTestCase):
         """``staff_required``/``staff_required_strict`` both reduce to ``is_staff_user``.
 
         That predicate admits ``support`` and bare ``is_staff`` accounts, which is exactly
-        how the original defect shipped. Neither may guard a refund again.
+        how the original defect shipped. It may sit on a refund path only together with a
+        financial gate (the gift-card action adds an explicit ``can_manage_financial_data``).
         """
         bare_staff_decorators = {"staff_required", "staff_required_strict", "staff_member_required"}
         offenders = [
             f"{site.identifier} -> @{decorator}"
             for site in _find_refund_call_sites()
             for decorator in site.decorators
-            if decorator in bare_staff_decorators
+            if decorator in bare_staff_decorators and not (FINANCIAL_GATES & site.gate_tokens)
         ]
         self.assertEqual(offenders, [], msg="A refund is gated by a bare is_staff_user predicate (#104 [M11]).")
 
@@ -168,36 +239,12 @@ class RefundProvenanceGuardrailTests(SimpleTestCase):
     """
 
     def test_every_view_entry_point_passes_an_actor(self) -> None:
-        offenders = [
-            site.identifier
-            for site in _find_refund_call_sites()
-            if not _passes_actor(site)
-        ]
+        offenders = [site.identifier for site in _find_refund_call_sites() if not site.passes_actor]
         self.assertEqual(
             offenders,
             [],
             msg=(
-                "A refund entry point calls RefundService without naming who issued it. That is "
+                "A refund entry point starts a refund without naming who issued it. That is "
                 "how created_by stayed NULL since the first architecture commit."
             ),
         )
-
-
-def _passes_actor(site: RefundCallSite) -> bool:
-    """Whether this site's ``RefundService.refund_*`` call carries an ``actor=`` keyword."""
-    path = PLATFORM_ROOT / site.identifier.split(":")[0]
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    target = site.identifier.split(":")[1]
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) or node.name != target:
-            continue
-        for call in ast.walk(node):
-            if (
-                isinstance(call, ast.Call)
-                and isinstance(call.func, ast.Attribute)
-                and call.func.attr in REFUND_METHODS
-                and isinstance(call.func.value, ast.Name)
-                and call.func.value.id == "RefundService"
-            ):
-                return any(kw.arg == "actor" for kw in call.keywords)
-    return False
