@@ -85,7 +85,7 @@ if not PLATFORM_API_SECRET:
 PLATFORM_API_TIMEOUT = seconds_setting(
     "PLATFORM_API_TIMEOUT",
     os.environ.get("PLATFORM_API_TIMEOUT"),
-    30.0,
+    min(30.0, PLATFORM_API_TOTAL_BUDGET_SECONDS),
     minimum=1,
     maximum=PLATFORM_API_TOTAL_BUDGET_SECONDS,
 )

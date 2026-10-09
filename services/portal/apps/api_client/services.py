@@ -107,6 +107,20 @@ MIN_ATTEMPT_SECONDS = 0.5
 _clock = time.monotonic
 
 
+DEFAULT_PLATFORM_CALL_BUDGET_SECONDS = 45.0
+DEFAULT_PLATFORM_CALL_TIMEOUT_SECONDS = 30.0
+
+
+def platform_call_budget_seconds() -> float:
+    """PLATFORM_API_TOTAL_BUDGET_SECONDS, read per call (validated at settings load)."""
+    return float(getattr(settings, "PLATFORM_API_TOTAL_BUDGET_SECONDS", DEFAULT_PLATFORM_CALL_BUDGET_SECONDS))
+
+
+def platform_call_timeout_seconds() -> float:
+    """PLATFORM_API_TIMEOUT, read per call (validated at settings load)."""
+    return float(getattr(settings, "PLATFORM_API_TIMEOUT", DEFAULT_PLATFORM_CALL_TIMEOUT_SECONDS))
+
+
 class PlatformCallBudgetSpent(requests.exceptions.Timeout):
     """No time is left in a Platform call's budget for another attempt. Handled exactly as a timeout."""
 
@@ -115,7 +129,7 @@ class _CallDeadline:
     """The time budget of one Platform call, retries and backoff included (PLATFORM_API_TOTAL_BUDGET_SECONDS)."""
 
     def __init__(self) -> None:
-        self._ends = _clock() + float(settings.PLATFORM_API_TOTAL_BUDGET_SECONDS)
+        self._ends = _clock() + platform_call_budget_seconds()
 
     def remaining(self) -> float:
         return self._ends - _clock()
@@ -129,13 +143,40 @@ class _CallDeadline:
         remaining = self.remaining()
         if remaining < MIN_ATTEMPT_SECONDS:
             raise PlatformCallBudgetSpent(f"Platform call time budget spent ({max(remaining, 0):.2f}s left)")
-        per_phase = float(settings.PLATFORM_API_TIMEOUT)
+        per_phase = platform_call_timeout_seconds()
         connect = min(per_phase, remaining / 2)
         return connect, min(per_phase, remaining - connect)
 
     def allows_wait(self, seconds: float) -> bool:
         """Whether waiting this long still leaves time for another attempt."""
         return self.remaining() - seconds >= MIN_ATTEMPT_SECONDS
+
+
+BODY_CHUNK_BYTES = 64 * 1024
+
+
+def _read_body_within(response: requests.Response, deadline: _CallDeadline) -> None:
+    """Read a streamed Platform response body, giving up when the call's time budget runs out.
+
+    The read timeout only bounds each wait for the next bytes, so a body that keeps trickling in
+    could otherwise hold a thread past the budget. The deadline is checked between chunks: the
+    call can overrun it by at most one wait, which the attempt's read timeout bounds.
+
+    Only a body still on the wire is read here (requests keeps `_content` False until then); a
+    response already in memory, as test doubles are, is left as it is.
+    """
+    if getattr(response, "_content", None) is not False:
+        return
+    chunks: list[bytes] = []
+    try:
+        for chunk in response.iter_content(BODY_CHUNK_BYTES):
+            chunks.append(chunk)
+            if deadline.remaining() <= 0:
+                raise PlatformCallBudgetSpent("Platform response still arriving when the call's time budget ran out")
+        # What `Response.content` does after reading; set here because the body was read in chunks.
+        response._content = b"".join(chunks)
+    finally:
+        response.close()  # Returns a fully read connection to the pool; drops one cut short.
 
 
 def _client_ip_payload(client_ip: str) -> dict[str, str]:
@@ -556,7 +597,9 @@ class PlatformAPIClient:
                     data=body_bytes if body_bytes else None,
                     params=params if params else None,
                     timeout=deadline.attempt_timeout(),
+                    stream=True,
                 )
+                _read_body_within(response, deadline)
 
                 logger.debug(f"🌐 [API Client] {method} {url} -> {response.status_code}")
 
@@ -657,14 +700,17 @@ class PlatformAPIClient:
         headers = self._prepare_request_headers(method, url, params, body_bytes, body_ts)
 
         try:
+            deadline = _CallDeadline()
             response = portal_request(
                 method=method,
                 url=url,
                 headers=headers,
                 data=body_bytes if body_bytes else None,
                 params=params if params else None,
-                timeout=_CallDeadline().attempt_timeout(),
+                timeout=deadline.attempt_timeout(),
+                stream=True,
             )
+            _read_body_within(response, deadline)
 
             logger.debug(f"🌐 [API Client Binary] {method} {url} -> {response.status_code}")
             return self._handle_binary_response(response, endpoint)
@@ -694,14 +740,17 @@ class PlatformAPIClient:
         headers = self._prepare_request_headers(method, url, params, body_bytes, body_ts)
 
         try:
+            deadline = _CallDeadline()
             response = portal_request(
                 method=method,
                 url=url,
                 headers=headers,
                 data=body_bytes if body_bytes else None,
                 params=params if params else None,
-                timeout=_CallDeadline().attempt_timeout(),
+                timeout=deadline.attempt_timeout(),
+                stream=True,
             )
+            _read_body_within(response, deadline)
 
             logger.debug(f"🌐 [API Client Binary+Headers] {method} {url} -> {response.status_code}")
             content = self._handle_binary_response(response, endpoint)

@@ -158,19 +158,21 @@ def seconds_setting(name: str, raw: str | None, default: float, *, minimum: floa
     from django.core.exceptions import ImproperlyConfigured  # noqa: PLC0415  # settings import time
 
     if raw is None or not raw.strip():
-        return default
-    try:
-        value = float(raw)
-    except ValueError as error:
-        raise ImproperlyConfigured(f"{name} is not a number: {raw!r}") from error
+        value = default
+    else:
+        try:
+            value = float(raw)
+        except ValueError as error:
+            raise ImproperlyConfigured(f"{name} is not a number: {raw!r}") from error
+    # The default is checked too: it can fall outside a range that depends on another setting.
     if not math.isfinite(value) or not minimum <= value <= maximum:
-        raise ImproperlyConfigured(f"{name} must be between {minimum:g} and {maximum:g} seconds: {raw!r}")
+        raise ImproperlyConfigured(f"{name} must be between {minimum:g} and {maximum:g} seconds: {raw or value!r}")
     return value
 
 
 # The most one Platform call may take, retries and backoff included. Under threaded workers a call
 # that never ends holds a thread for good, and gunicorn's `timeout` does not end it (it only checks
-# that the worker is alive). Kept below the portal's gunicorn graceful_timeout (50 s), so a restart
+# that the worker is alive). Keep it below the portal gunicorn's graceful_timeout, so a restart
 # waits for calls in flight. Not a whole-page deadline: a page making several calls takes longer.
 PLATFORM_API_TOTAL_BUDGET_SECONDS = seconds_setting(
     "PLATFORM_API_TOTAL_BUDGET_SECONDS",
@@ -180,10 +182,11 @@ PLATFORM_API_TOTAL_BUDGET_SECONDS = seconds_setting(
     maximum=45,
 )
 # Each phase of one attempt (connecting; then each wait for the next bytes) is bounded by this.
+# The default never exceeds the budget; an explicit value outside 1..budget refuses to start.
 PLATFORM_API_TIMEOUT = seconds_setting(
     "PLATFORM_API_TIMEOUT",
     os.environ.get("PLATFORM_API_TIMEOUT"),
-    30.0,
+    min(30.0, PLATFORM_API_TOTAL_BUDGET_SECONDS),
     minimum=1,
     maximum=PLATFORM_API_TOTAL_BUDGET_SECONDS,
 )

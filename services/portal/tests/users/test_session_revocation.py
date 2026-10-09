@@ -336,7 +336,7 @@ class SessionRevocationTests(TransactionTestCase):
             body = kwargs["data"]
             assert isinstance(body, bytes)
             if json.loads(body)["session_auth_hash"] == "first":
-                clock[0] += 31
+                clock[0] += middleware._validation_lease_seconds() + 1  # the first lease expires
                 future = pool.submit(middleware, second)
                 try:
                     self.assertTrue(entered.wait(timeout=5))

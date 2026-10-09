@@ -8,9 +8,11 @@ binary paths with a fake clock, so nothing here sleeps.
 from __future__ import annotations
 
 import json
-from typing import Any
+from collections.abc import Iterator
+from typing import Any, ClassVar
 from unittest.mock import MagicMock, patch
 
+import requests
 from django.core.exceptions import ImproperlyConfigured
 from django.test import SimpleTestCase, override_settings
 
@@ -30,7 +32,7 @@ class _FakeClock:
 def _maintenance_503() -> MagicMock:
     response = MagicMock()
     response.status_code = 503
-    response.headers = {"content-type": "application/json"}
+    response.headers = {"content-type": "application/json", "Retry-After": "2"}
     response.json.return_value = {"error": "maintenance"}
     response.content = json.dumps({"error": "maintenance"}).encode()
     return response
@@ -53,8 +55,14 @@ class PlatformCallBudgetTests(SimpleTestCase):
         self.sent: list[tuple[float, Any]] = []  # (time sent, timeout given)
 
     def _platform(self, seconds_per_attempt: float, response: Any) -> Any:
+        """A Platform that answers in `seconds_per_attempt`, or times out when the attempt's timeouts are shorter."""
+
         def send(**kwargs: Any) -> Any:
             self.sent.append((self.clock.now, kwargs["timeout"]))
+            connect, read = kwargs["timeout"]
+            if seconds_per_attempt > connect + read:
+                self.clock.now += connect + read
+                raise requests.exceptions.ReadTimeout("read timed out")
             self.clock.now += seconds_per_attempt
             return response
 
@@ -64,22 +72,24 @@ class PlatformCallBudgetTests(SimpleTestCase):
         self.clock.now += seconds
 
     def test_retries_stop_at_the_budget_and_keep_the_platforms_answer(self) -> None:
-        # Each attempt takes 6 s of a 10 s budget: the first retry fits, a second one would not.
+        # Platform answers in 4 s and asks for a 2 s wait. Attempt 1 ends at 4 s, the retry runs
+        # from 6 s to 10 s, and a second retry would start after the 10 s budget has run out.
         with (
-            patch("apps.common.outbound_http._send", side_effect=self._platform(6, _maintenance_503())),
+            patch("apps.common.outbound_http._send", side_effect=self._platform(4, _maintenance_503())),
             patch.object(api_services.time, "sleep", side_effect=self._sleep),
             self.assertRaises(PlatformAPIError) as raised,
         ):
             PlatformAPIClient()._make_request("GET", "/services/")
 
-        self.assertEqual(len(self.sent), 2)
-        # The blocked retry returns what Platform said, not a made-up timeout.
+        self.assertEqual(len(self.sent), 1 + 1)
+        self.assertLessEqual(self.clock.now - self.sent[0][0], 10)
+        # The retry that did not fit answers with what Platform said, not a made-up timeout.
         self.assertEqual(raised.exception.status_code, 503)
         self.assertTrue(raised.exception.is_maintenance)
 
     def test_every_attempt_fits_what_is_left_of_the_budget(self) -> None:
         with (
-            patch("apps.common.outbound_http._send", side_effect=self._platform(6, _maintenance_503())),
+            patch("apps.common.outbound_http._send", side_effect=self._platform(4, _maintenance_503())),
             patch.object(api_services.time, "sleep", side_effect=self._sleep),
             self.assertRaises(PlatformAPIError),
         ):
@@ -105,6 +115,37 @@ class PlatformCallBudgetTests(SimpleTestCase):
             send.assert_not_called()
             self.assertTrue(raised.exception.is_unavailable)
             self.assertIsNone(raised.exception.status_code)
+
+    def test_a_body_that_keeps_trickling_in_stops_at_the_budget(self) -> None:
+        # Each chunk arrives within the read timeout, so only the deadline can stop it.
+        clock = self.clock
+
+        class TricklingResponse:
+            status_code = 200
+            headers: ClassVar[dict[str, str]] = {}
+            _content = False  # requests' marker for a body still on the wire
+            closed = False
+
+            def iter_content(self, chunk_size: int) -> Iterator[bytes]:
+                for _ in range(100):
+                    clock.now += 3
+                    yield b"x"
+
+            def close(self) -> None:
+                self.closed = True
+
+        for call in ("_make_request", "_make_binary_request"):
+            trickling = TricklingResponse()
+            with (
+                self.subTest(call=call),
+                patch("apps.common.outbound_http._send", side_effect=self._platform(0, trickling)),
+                self.assertRaises(PlatformAPIError) as raised,
+            ):
+                started = self.clock.now
+                getattr(PlatformAPIClient(), call)("GET", "/billing/invoices/1/pdf/")
+            self.assertTrue(raised.exception.is_unavailable)
+            self.assertLessEqual(self.clock.now - started, 10 + 3)  # the budget, plus at most one wait
+            self.assertTrue(trickling.closed)
 
     def test_binary_calls_are_bounded_too(self) -> None:
         pdf = MagicMock(status_code=200, content=b"%PDF-1.7", headers={"content-type": "application/pdf"})
@@ -143,9 +184,25 @@ class PlatformCallSettingsTests(SimpleTestCase):
             with self.subTest(raw=raw), self.assertRaises(ImproperlyConfigured):
                 seconds_setting("X", raw, 45.0, minimum=5, maximum=45)
 
+    def test_a_default_outside_the_range_refuses_to_start_too(self) -> None:
+        # e.g. PLATFORM_API_TIMEOUT left at its 30 s default under a 5 s budget.
+        with self.assertRaises(ImproperlyConfigured):
+            seconds_setting("PLATFORM_API_TIMEOUT", None, 30.0, minimum=1, maximum=5)
+
+    def test_the_middleware_takes_its_lease_for_that_long(self) -> None:
+        from django.core.cache import cache  # noqa: PLC0415
+
+        from apps.users.middleware import PortalAuthenticationMiddleware  # noqa: PLC0415
+
+        middleware = PortalAuthenticationMiddleware(lambda request: None)
+        with patch.object(cache, "add", return_value=True) as add:
+            middleware._should_revalidate_async("session-key")
+        self.assertEqual(add.call_args.kwargs["timeout"], middleware._validation_lease_seconds())
+
     def test_the_validation_lease_outlasts_a_whole_platform_call(self) -> None:
         from apps.users.middleware import PortalAuthenticationMiddleware  # noqa: PLC0415
 
-        with override_settings(PLATFORM_API_TOTAL_BUDGET_SECONDS=45):
+        # A call ends within its budget plus at most one read wait.
+        with override_settings(PLATFORM_API_TOTAL_BUDGET_SECONDS=45, PLATFORM_API_TIMEOUT=30):
             lease = PortalAuthenticationMiddleware(lambda request: None)._validation_lease_seconds()
-        self.assertGreaterEqual(lease, 50)
+        self.assertGreater(lease, 45 + 30)

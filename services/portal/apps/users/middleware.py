@@ -21,7 +21,12 @@ from django.shortcuts import redirect
 from django.utils import timezone as django_timezone
 from django.utils.http import urlencode
 
-from apps.api_client.services import PlatformAPIError, api_client
+from apps.api_client.services import (
+    PlatformAPIError,
+    api_client,
+    platform_call_budget_seconds,
+    platform_call_timeout_seconds,
+)
 from apps.common import counters
 from apps.common.localisation_services import store_localisation_preferences
 from apps.common.store_unavailable import end_session_or_unavailable
@@ -267,8 +272,12 @@ class PortalAuthenticationMiddleware:
                     cache.delete(lock_key)
 
     def _validation_lease_seconds(self) -> int:
-        """Outlast a whole validation call, so a slow one cannot let a second start beside it."""
-        return math.ceil(settings.PLATFORM_API_TOTAL_BUDGET_SECONDS) + self.VALIDATION_LEASE_MARGIN_SECONDS
+        """Outlast a whole validation call, so a slow one cannot let a second start beside it.
+
+        A Platform call ends within its time budget plus at most one read wait (PLATFORM_API_TIMEOUT).
+        """
+        longest_call = platform_call_budget_seconds() + platform_call_timeout_seconds()
+        return math.ceil(longest_call) + self.VALIDATION_LEASE_MARGIN_SECONDS
 
     def _should_revalidate_async(self, session_key: str) -> tuple[str, str] | None:
         """Acquire a per-session validation lease within this process.
