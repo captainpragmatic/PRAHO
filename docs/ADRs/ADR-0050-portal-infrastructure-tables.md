@@ -43,7 +43,7 @@ worker restarts and replay even after the cart is cleared. Platform also receive
 the idempotency key. Webhook and price-seal claims remain reserved throughout
 their acceptance windows. An expired owner cannot change another owner's claim.
 
-Default caches remain LocMemCache for preferences, customer lists and local
+Default caches remain LocMemCache for Platform's public defaults and local
 single-flight coordination. They are not security counter or claim storage.
 
 Deployment runs migrate sessions --noinput, migrate common --noinput, and

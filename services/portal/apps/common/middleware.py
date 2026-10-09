@@ -83,6 +83,7 @@ class SessionSecurityMiddleware(MiddlewareMixin):
 
     # Security constants
     SESSION_TIMEOUT_SECONDS = 3600  # 1 hour default
+    ACTIVITY_STAMP_INTERVAL_SECONDS = 60  # Refresh last_activity at most this often
     MAX_SESSION_AGE_SECONDS = 8 * 3600  # 8 hours absolute max
     IP_CHANGE_TOLERANCE = False  # Strict IP binding by default
 
@@ -155,7 +156,6 @@ class SessionSecurityMiddleware(MiddlewareMixin):
                 "ip_hash": hashlib.sha256(client_ip.encode()).hexdigest()[:16],
                 "user_agent_hash": user_agent_hash,
                 "created_at": time.time(),
-                "last_validated": time.time(),
             }
             session.modified = True
             logger.info(f"🔒 [Session] Security fingerprint created for {(session.session_key or 'unknown')[:8]}...")
@@ -202,13 +202,17 @@ class SessionSecurityMiddleware(MiddlewareMixin):
         return bool(current_time - created_at > self.MAX_SESSION_AGE_SECONDS)
 
     def _update_session_activity(self, request: HttpRequest) -> None:
-        """Update session last activity timestamp"""
-        request.session["last_activity"] = time.time()
+        """Refresh the session's last-activity stamp, at most once a minute.
 
-        # Update validation timestamp in fingerprint
-        if "security_fingerprint" in request.session:
-            request.session["security_fingerprint"]["last_validated"] = time.time()
-            request.session.modified = True
+        Every write saves the whole session row, so stamping every request made two concurrent
+        requests of one customer race, and the later save could undo the earlier one's changes.
+        A missing stamp is written at once: `_is_session_expired` reads it as "now", so it must
+        not stay missing. Idle expiry can therefore fire up to a minute early, never late.
+        """
+        now = time.time()
+        last_activity = request.session.get("last_activity")
+        if last_activity is None or now - last_activity >= self.ACTIVITY_STAMP_INTERVAL_SECONDS:
+            request.session["last_activity"] = now
 
     def _handle_security_violation(self, request: HttpRequest, violation_type: str) -> HttpResponse:
         """🔒 Handle detected security violations"""

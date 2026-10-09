@@ -257,6 +257,33 @@ def _fetch_summaries(
     return invoice_summary, services_summary, tickets_summary, all_succeeded
 
 
+def remember_account_health(
+    session: Any, customer_id: object, invoice: dict[str, Any], services: dict[str, Any], tickets: dict[str, Any]
+) -> None:
+    """Cache the summaries in the session, recording the customer they were fetched for."""
+    session["account_health_data"] = {
+        "customer_id": str(customer_id),
+        "invoice": invoice,
+        "services": services,
+        "tickets": tickets,
+    }
+    session["account_health_fetched_at"] = time.time()
+
+
+def cached_account_health(session: Any, customer_id: object) -> dict[str, Any] | None:
+    """The cached summaries, if fresh and fetched for this customer; otherwise None.
+
+    A request that started before a company switch can store the previous customer's summaries
+    after it, so an entry for another customer (or one that names none) is never used.
+    """
+    cached = session.get("account_health_data")
+    if not isinstance(cached, dict) or cached.get("customer_id") != str(customer_id):
+        return None
+    if time.time() - session.get("account_health_fetched_at", 0) > ACCOUNT_HEALTH_CACHE_TTL:
+        return None
+    return cached
+
+
 def get_account_health(request: HttpRequest) -> AccountHealthBanner | None:
     """Orchestrator: check session cache, fetch if stale, build banner.
 
@@ -277,12 +304,8 @@ def get_account_health(request: HttpRequest) -> AccountHealthBanner | None:
     if not customer_id or not user_id:
         return None
 
-    # Check session cache
-    cached = request.session.get("account_health_data")
-    fetched_at = request.session.get("account_health_fetched_at", 0)
-    cache_expired = (time.time() - fetched_at) > ACCOUNT_HEALTH_CACHE_TTL
-
-    if cached and not cache_expired:
+    cached = cached_account_health(request.session, customer_id)
+    if cached is not None:
         invoice_summary = cached.get("invoice", {})
         services_summary = cached.get("services", {})
         tickets_summary = cached.get("tickets", {})
@@ -295,12 +318,7 @@ def get_account_health(request: HttpRequest) -> AccountHealthBanner | None:
         # partial failure stamps an empty fallback as fresh-for-300s and
         # silently suppresses banners that should have been shown (H2b).
         if all_succeeded:
-            request.session["account_health_data"] = {
-                "invoice": invoice_summary,
-                "services": services_summary,
-                "tickets": tickets_summary,
-            }
-            request.session["account_health_fetched_at"] = time.time()
+            remember_account_health(request.session, customer_id, invoice_summary, services_summary, tickets_summary)
 
     conditions = evaluate_conditions(invoice_summary, services_summary, tickets_summary)
     return blend_banner(conditions)
