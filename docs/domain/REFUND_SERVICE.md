@@ -283,16 +283,21 @@ Platform:
 | `apps/billing/views.py:invoice_refund` | new invoice refund | `@billing_staff_api_required` (admin, billing or manager role) |
 | `apps/orders/views.py:order_refund` | new order refund | `@billing_staff_api_required` |
 | `apps/billing/views.py:invoice_refund_retry` | resumes an unfinished refund | `@billing_staff_api_required` |
-| `apps/promotions/gift_staff_views.py:gift_card_action` | refunds a gift-card purchase | `@staff_required_strict` plus `can_manage_financial_data` |
+| `apps/promotions/gift_staff_views.py:gift_card_action` | refunds a gift-card purchase, or resubmits one already reserved | `@staff_required_strict` plus `can_manage_financial_data` |
+| `apps/promotions/tasks.py:reconcile_gift_refunds` | scheduled: resubmits gift-card refunds that staff reserved but that never reached the provider | none needed: the reservation recorded its staff actor and checked `can_manage_financial_data` |
 
 The two refund dialogs pass the staff user as `actor=` to `RefundService`. There is no customer or portal path:
 the portal's "Request Refund" button and Platform's HMAC endpoint `api_process_refund` were
 removed, because that endpoint executed the refund with the customer as actor while the portal
 described it as a request for review. Customers ask for a refund through an ordinary support
-ticket. `tests/billing/test_refund_authorization_guardrail.py` scans `apps/` for direct
-`RefundService.refund_invoice`/`refund_order` calls and fails until a new one is declared with its
-gate. It does not see aliased calls or the retry and gift-card paths above, so review any new
-refund path by hand.
+ticket. `tests/billing/test_refund_authorization_guardrail.py` scans `apps/` for every function
+that starts or resumes a refund (`RefundService.refund_invoice`/`refund_order`, `resume_refund`,
+`refund_purchase`, `refresh_refund`), follows private helpers to their public callers, and fails
+until a new path is declared with its gate. It counts only real guards (decorators, called
+checks, and `if` tests that raise), and requires a non-`None` `actor=` on every call that starts a
+refund. It is a tripwire for accidental regressions, not a proof: an aliased import, a lambda, an
+exported wrapper around a private helper, or an actor passed through a variable would slip past
+it, so review those shapes by hand.
 
 Both dialogs post the amount in major units as `refund_amount`; the views convert it to cents
 and refuse a missing, zero, negative or non-numeric partial amount before any gateway call.
