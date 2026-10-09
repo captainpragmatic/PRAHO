@@ -976,38 +976,18 @@ class PlatformAPIClient:
     def post_billing(
         self, endpoint: str, data: dict[str, Any] | None = None, user_id: int | None = None
     ) -> dict[str, Any]:
-        """POST request to billing endpoints (outside /api/ namespace)"""
-        # Save current base URL
-        original_base = self.base_url
-        try:
-            # Temporarily change base URL to access /billing/ directly
-            self.base_url = self.base_url.replace("/api", "")
-            return self._make_request("POST", f"billing/{endpoint}", user_id=user_id, data=data)
-        finally:
-            # Restore original base URL
-            self.base_url = original_base
+        """POST to a Platform billing API endpoint (/api/billing/<endpoint>).
+
+        The "/api" prefix is explicit so an origin-only base URL works too; `_build_url` drops
+        the duplicate when the base already ends in "/api".
+        """
+        return self._make_request("POST", f"/api/billing/{endpoint}", user_id=user_id, data=data)
 
     def get_billing(
         self, endpoint: str, params: dict[str, Any] | None = None, user_id: int | None = None
     ) -> dict[str, Any]:
-        """GET request to billing endpoints (outside /api/ namespace)"""
-        # Save current base URL
-        original_base = self.base_url
-        try:
-            # Temporarily change base URL to access /billing/ directly
-            self.base_url = self.base_url.replace("/api", "")
-            return self._make_request("GET", f"billing/{endpoint}", user_id=user_id, params=params)
-        finally:
-            # Restore original base URL
-            self.base_url = original_base
-
-    def get_invoices(self, customer_id: str, user_id: str) -> dict[str, Any]:
-        """Get invoices for a customer."""
-        return self.get_billing(f"invoices/{customer_id}/", user_id=int(user_id))
-
-    def get_invoice_detail(self, invoice_id: int, user_id: str) -> dict[str, Any]:
-        """Get invoice detail."""
-        return self.get_billing(f"invoices/detail/{invoice_id}/", user_id=int(user_id))
+        """GET a Platform billing API endpoint (/api/billing/<endpoint>); see `post_billing`."""
+        return self._make_request("GET", f"/api/billing/{endpoint}", user_id=user_id, params=params)
 
     def get_invoice_pdf(self, invoice_id: int, user_id: str) -> bytes:
         """Download invoice PDF."""

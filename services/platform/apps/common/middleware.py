@@ -380,8 +380,8 @@ def _is_auth_exempt(request: HttpRequest) -> bool:
     path = request.path_info
     # Keep the reach of the marker where it was. The deleted list held only /api/ paths,
     # so a stray @public_api_endpoint could not previously exempt anything else. Reading
-    # the resolved view widened that to the entire ROOT_URLCONF, including the billing
-    # prefixes gated below, where a marker on a staff view would silently drop HMAC.
+    # the resolved view widened that to the entire ROOT_URLCONF, including staff views,
+    # where a marker would silently drop HMAC.
     if not path.startswith("/api/"):
         return False
 
@@ -608,22 +608,11 @@ class PortalServiceHMACMiddleware:
 
         return False, "", error_msg
 
-    # Portal-facing billing API endpoints that require HMAC authentication.
-    # Staff UI pages under /billing/ (invoices, proformas, reports) are NOT listed
-    # here and pass through without HMAC checks.
-    _BILLING_API_PREFIXES = (
-        "/billing/create-payment-intent/",
-        "/billing/confirm-payment/",
-        "/billing/stripe-config/",
-    )
-
     def __call__(self, request: HttpRequest) -> HttpResponse:
-        # Only intercept /api/ paths and specific /billing/ inter-service API endpoints.
-        # Staff billing UI pages (/billing/invoices/, /billing/proformas/, etc.) are
-        # excluded — they use normal session auth, not HMAC.
-        is_api = request.path.startswith("/api/")
-        is_billing_api = request.path.startswith(self._BILLING_API_PREFIXES)
-        if is_api or is_billing_api:
+        # Only intercept /api/ paths: every portal-facing endpoint lives there, including the
+        # payment endpoints at /api/billing/. Staff pages under /billing/ (invoices, proformas,
+        # reports) use normal session auth and pass through.
+        if request.path.startswith("/api/"):
             # Skip HMAC validation for public endpoints only (exact match to prevent bypass).
             # Login and both password-reset endpoints require signed Portal requests
             # to prevent direct credential brute-force and reset-mail abuse.
@@ -941,7 +930,7 @@ class MaintenanceModeMiddleware:
 
     @classmethod
     def _wants_json(cls, request: HttpRequest) -> bool:
-        """Path first, Accept as a courtesy: the portal's client does not set Accept."""
+        """Path first, Accept as a courtesy: every portal request is under /api/ (and sends Accept too)."""
         return request.path.startswith(cls.API_PREFIXES) or "application/json" in request.headers.get("Accept", "")
 
     @classmethod

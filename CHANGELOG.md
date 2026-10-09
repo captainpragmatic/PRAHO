@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- A portal on its own host could not take card payments. Its create-payment-intent,
+  confirm-payment and stripe-config calls went to `/billing/…` on the platform, and on the
+  platform's hostname Caddy admits only `/api/*` (plus the webhook and unsubscribe paths) from any
+  client, and everything else only from `PLATFORM_ALLOWED_CIDRS`, so every call was refused at the
+  edge. The three endpoints now live at `/api/billing/…`, the platform's HMAC check covers
+  `/api/` only, and the portal's billing helpers no longer rewrite the base URL, which also turned
+  an `api.` hostname such as `https://api.example.com/api` into an invalid one.
+  **Upgrading:** deploy the platform and the portal together, and roll both back together: an old
+  portal cannot reach a new platform's payment endpoints, or the other way round, so card checkout
+  fails for the minutes between the two restarts. Operators who added the portal host to
+  `PLATFORM_ALLOWED_CIDRS` only so these calls would pass can remove it afterwards; before any
+  rollback to an earlier release, put that entry back first, since the old endpoints need it.
+
 - Refunds are now staff-only. The portal's "Request Refund" button promised that the billing team
   would review the request, but it was wired to a platform endpoint that refunded immediately with
   the customer as the actor; it never paid out only because the portal sent an invoice where the
@@ -45,9 +58,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the re-authentication step on the backup-codes and disable-2FA pages, which counted an outage as a
   wrong password (five tries locked the customer out for 15 minutes), and a service-request form now
   keeps what the customer typed during such an outage.
-  **Known limitation:** on a split host, card payments still fail, because the portal's payment
-  endpoints sit outside `/api/` and the platform's Caddy configuration does not publish them. A
-  follow-up change moves them.
+  On a split host, card payments needed one more change, now made: see the payment-endpoint
+  entry above.
 
 - A separate portal host no longer has to hold the platform's secrets. `deploy.sh portal-only`
   accepted a full `.env.prod`, so a portal host stored the platform's database password, encryption

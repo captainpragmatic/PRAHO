@@ -1747,7 +1747,7 @@ class ApiCreatePaymentIntentTest(SignedBillingViewsTestBase):
             "client_secret": "cs_test123",
         }
         response = self._post_json(
-            "/billing/create-payment-intent/",
+            "/api/billing/create-payment-intent/",
             {
                 "order_id": "order-123",
                 "amount_cents": 5000,
@@ -1765,7 +1765,7 @@ class ApiCreatePaymentIntentTest(SignedBillingViewsTestBase):
     def test_create_intent_service_failure(self, mock_create):
         mock_create.return_value = {"success": False, "error": "Stripe error"}
         response = self._post_json(
-            "/billing/create-payment-intent/",
+            "/api/billing/create-payment-intent/",
             {
                 "order_id": "order-123",
                 "amount_cents": 5000,
@@ -1778,35 +1778,35 @@ class ApiCreatePaymentIntentTest(SignedBillingViewsTestBase):
 
     def test_create_intent_missing_order_id(self):
         response = self._post_json(
-            "/billing/create-payment-intent/",
+            "/api/billing/create-payment-intent/",
             {"amount_cents": 5000, "customer_id": self.customer.pk},
         )
         self.assertEqual(response.status_code, 400)
 
     def test_create_intent_missing_amount(self):
         response = self._post_json(
-            "/billing/create-payment-intent/",
+            "/api/billing/create-payment-intent/",
             {"order_id": "order-123", "customer_id": self.customer.pk},
         )
         self.assertEqual(response.status_code, 400)
 
     def test_create_intent_invalid_amount(self):
         response = self._post_json(
-            "/billing/create-payment-intent/",
+            "/api/billing/create-payment-intent/",
             {"order_id": "order-123", "amount_cents": -100, "customer_id": self.customer.pk},
         )
         self.assertEqual(response.status_code, 400)
 
     def test_create_intent_missing_customer(self):
         response = self._post_json(
-            "/billing/create-payment-intent/",
+            "/api/billing/create-payment-intent/",
             {"order_id": "order-123", "amount_cents": 5000},
         )
         self.assertEqual(response.status_code, 400)
 
     def test_create_intent_invalid_currency(self):
         response = self._post_json(
-            "/billing/create-payment-intent/",
+            "/api/billing/create-payment-intent/",
             {
                 "order_id": "order-123",
                 "amount_cents": 5000,
@@ -1818,7 +1818,7 @@ class ApiCreatePaymentIntentTest(SignedBillingViewsTestBase):
 
     def test_create_intent_invalid_gateway(self):
         response = self._post_json(
-            "/billing/create-payment-intent/",
+            "/api/billing/create-payment-intent/",
             {
                 "order_id": "order-123",
                 "amount_cents": 5000,
@@ -1831,7 +1831,7 @@ class ApiCreatePaymentIntentTest(SignedBillingViewsTestBase):
     @patch("apps.billing.views.PaymentService.create_payment_intent_direct")
     def test_create_intent_rejects_bank_transfer_gateway(self, mock_create):
         response = self._post_json(
-            "/billing/create-payment-intent/",
+            "/api/billing/create-payment-intent/",
             {
                 "order_id": "order-123",
                 "amount_cents": 5000,
@@ -1844,11 +1844,11 @@ class ApiCreatePaymentIntentTest(SignedBillingViewsTestBase):
         mock_create.assert_not_called()
 
     def test_create_intent_invalid_json(self):
-        response = self._post_invalid_json("/billing/create-payment-intent/")
+        response = self._post_invalid_json("/api/billing/create-payment-intent/")
         self.assertEqual(response.status_code, 400)
 
     def test_create_intent_get_not_allowed(self):
-        path = "/billing/create-payment-intent/"
+        path = "/api/billing/create-payment-intent/"
         body = b"{}"
         response = self.client.generic(
             "GET", path, body, content_type="application/json", **hmac_headers("GET", path, body)
@@ -1859,7 +1859,7 @@ class ApiCreatePaymentIntentTest(SignedBillingViewsTestBase):
     def test_create_intent_exception(self, mock_create):
         mock_create.side_effect = Exception("Unexpected error")
         response = self._post_json(
-            "/billing/create-payment-intent/",
+            "/api/billing/create-payment-intent/",
             {
                 "order_id": "order-123",
                 "amount_cents": 5000,
@@ -1872,14 +1872,14 @@ class ApiCreatePaymentIntentTest(SignedBillingViewsTestBase):
 
     def test_create_intent_order_id_not_string(self):
         response = self._post_json(
-            "/billing/create-payment-intent/",
+            "/api/billing/create-payment-intent/",
             {"order_id": 123, "amount_cents": 5000, "customer_id": self.customer.pk},
         )
         self.assertEqual(response.status_code, 400)
 
     def test_create_intent_amount_not_int(self):
         response = self._post_json(
-            "/billing/create-payment-intent/",
+            "/api/billing/create-payment-intent/",
             {"order_id": "order-123", "amount_cents": "5000", "customer_id": self.customer.pk},
         )
         self.assertEqual(response.status_code, 400)
@@ -1887,7 +1887,7 @@ class ApiCreatePaymentIntentTest(SignedBillingViewsTestBase):
     @patch("apps.billing.views.PaymentService.create_payment_intent_direct")
     def test_create_intent_rejects_non_object_metadata(self, mock_create):
         response = self._post_json(
-            "/billing/create-payment-intent/",
+            "/api/billing/create-payment-intent/",
             {
                 "order_id": "order-123",
                 "amount_cents": 5000,
@@ -1907,7 +1907,7 @@ class ApiConfirmPaymentTest(SignedBillingViewsTestBase):
     def test_confirm_success(self, mock_confirm):
         mock_confirm.return_value = {"success": True, "status": "succeeded"}
         response = self._post_json(
-            "/billing/confirm-payment/",
+            "/api/billing/confirm-payment/",
             {"payment_intent_id": "pi_test123", "gateway": "stripe", "customer_id": self.customer.pk},
         )
         self.assertEqual(response.status_code, 200)
@@ -1918,52 +1918,53 @@ class ApiConfirmPaymentTest(SignedBillingViewsTestBase):
     def test_confirm_failure(self, mock_confirm):
         mock_confirm.return_value = {"success": False, "error": "Payment failed"}
         response = self._post_json(
-            "/billing/confirm-payment/",
+            "/api/billing/confirm-payment/",
             {"payment_intent_id": "pi_test123", "gateway": "stripe", "customer_id": self.customer.pk},
         )
         self.assertEqual(response.status_code, 400)
 
     def test_confirm_missing_payment_id(self):
-        response = self._post_json("/billing/confirm-payment/", {"gateway": "stripe", "customer_id": self.customer.pk})
+        response = self._post_json("/api/billing/confirm-payment/", {"gateway": "stripe", "customer_id": self.customer.pk})
         self.assertEqual(response.status_code, 400)
 
     def test_confirm_invalid_stripe_format(self):
         response = self._post_json(
-            "/billing/confirm-payment/",
+            "/api/billing/confirm-payment/",
             {"payment_intent_id": "invalid_id", "gateway": "stripe", "customer_id": self.customer.pk},
         )
         self.assertEqual(response.status_code, 400)
 
     def test_confirm_invalid_gateway(self):
         response = self._post_json(
-            "/billing/confirm-payment/",
+            "/api/billing/confirm-payment/",
             {"payment_intent_id": "pi_test123", "gateway": "paypal", "customer_id": self.customer.pk},
         )
         self.assertEqual(response.status_code, 400)
 
     def test_confirm_invalid_json(self):
-        response = self._post_invalid_json("/billing/confirm-payment/")
+        response = self._post_invalid_json("/api/billing/confirm-payment/")
         self.assertEqual(response.status_code, 400)
 
     @patch("apps.billing.views.PaymentService.confirm_payment")
     def test_confirm_exception(self, mock_confirm):
         mock_confirm.side_effect = Exception("Unexpected")
         response = self._post_json(
-            "/billing/confirm-payment/",
+            "/api/billing/confirm-payment/",
             {"payment_intent_id": "pi_test123", "gateway": "stripe", "customer_id": self.customer.pk},
         )
         self.assertEqual(response.status_code, 500)
 
     def test_confirm_payment_id_not_string(self):
         response = self._post_json(
-            "/billing/confirm-payment/",
+            "/api/billing/confirm-payment/",
             {"payment_intent_id": 123, "gateway": "stripe", "customer_id": self.customer.pk},
         )
         self.assertEqual(response.status_code, 400)
 
 
-class ApiStripeConfigTest(BillingViewsTestBase):
-    """Tests for api_stripe_config."""
+@override_settings(PLATFORM_API_SECRET=HMAC_TEST_SECRET, MIDDLEWARE=HMAC_TEST_MIDDLEWARE)
+class ApiStripeConfigTest(SignedBillingViewsTestBase):
+    """Tests for api_stripe_config, signed as the portal sends it."""
 
     @patch("apps.settings.services.SettingsService")
     def test_stripe_config_enabled(self, mock_settings_cls):
@@ -1971,7 +1972,7 @@ class ApiStripeConfigTest(BillingViewsTestBase):
             "integrations.stripe_enabled": True,
             "integrations.stripe_publishable_key": "pk_test_123",
         }.get(key, kwargs.get("default"))
-        response = self.client.get("/billing/stripe-config/")
+        response = self.portal_get("/api/billing/stripe-config/")
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertTrue(data["success"])
@@ -1981,7 +1982,7 @@ class ApiStripeConfigTest(BillingViewsTestBase):
         mock_settings_cls.get_setting.side_effect = lambda key, **kwargs: {
             "integrations.stripe_enabled": False,
         }.get(key, kwargs.get("default", False))
-        response = self.client.get("/billing/stripe-config/")
+        response = self.portal_get("/api/billing/stripe-config/")
         self.assertEqual(response.status_code, 503)
 
     @patch("apps.settings.services.SettingsService")
@@ -1990,7 +1991,7 @@ class ApiStripeConfigTest(BillingViewsTestBase):
             "integrations.stripe_enabled": True,
             "integrations.stripe_publishable_key": None,
         }.get(key, kwargs.get("default"))
-        response = self.client.get("/billing/stripe-config/")
+        response = self.portal_get("/api/billing/stripe-config/")
         self.assertEqual(response.status_code, 500)
 
     @patch("apps.settings.services.SettingsService")
@@ -2001,11 +2002,11 @@ class ApiStripeConfigTest(BillingViewsTestBase):
             return kwargs.get("default")
 
         mock_settings_cls.get_setting.side_effect = setting_value
-        response = self.client.get("/billing/stripe-config/")
+        response = self.portal_get("/api/billing/stripe-config/")
         self.assertEqual(response.status_code, 500)
 
     def test_stripe_config_post_not_allowed(self):
-        response = self.client.post("/billing/stripe-config/")
+        response = self.portal_post("/api/billing/stripe-config/", {})
         self.assertEqual(response.status_code, 405)
 
 

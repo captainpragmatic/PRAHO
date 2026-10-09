@@ -62,7 +62,9 @@ class SellingCurrencyPolicyTests(TestCase):
         for code in ("EUR", "USD", "RON"):
             with self.subTest(code=code):
                 self.assertIsInstance(SettingsService.update_setting("billing.default_currency", code), Ok)
-                response = api_stripe_config(self.factory.get("/billing/stripe-config/"))
+                request = self.factory.get("/api/billing/stripe-config/")
+                request._portal_authenticated = True  # what PortalServiceHMACMiddleware sets
+                response = api_stripe_config(request)
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(json.loads(response.content)["config"]["currency"], code)
 

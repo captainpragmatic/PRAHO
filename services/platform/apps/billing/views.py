@@ -45,7 +45,7 @@ from django.views.decorators.http import require_http_methods, require_POST
 from django_fsm import TransitionNotAllowed
 from rest_framework.response import Response
 
-from apps.api.secure_auth import BILLING_ROLES, get_authenticated_customer
+from apps.api.secure_auth import BILLING_ROLES, get_authenticated_customer, require_portal_authentication
 from apps.billing.efactura.settings import ROMANIA_TIMEZONE, ro_local_date
 from apps.billing.pdf_generators import RomanianProformaPDFGenerator
 from apps.common.constants import DEFAULT_PAGE_SIZE
@@ -2248,6 +2248,8 @@ This ticket was automatically created from a customer refund request.
 
 
 @csrf_exempt  # nosemgrep: no-csrf-exempt — HMAC-authenticated inter-service endpoint
+# Below @csrf_exempt: this wrapper does not copy attributes, so above it the exemption would be lost.
+@require_portal_authentication
 @require_http_methods(["POST"])
 def api_create_payment_intent(  # noqa: C901, PLR0911, PLR0912  # Complexity: multi-step business logic
     request: HttpRequest,
@@ -2350,6 +2352,8 @@ def api_create_payment_intent(  # noqa: C901, PLR0911, PLR0912  # Complexity: mu
 
 
 @csrf_exempt  # nosemgrep: no-csrf-exempt — HMAC-authenticated inter-service endpoint
+# Below @csrf_exempt: this wrapper does not copy attributes, so above it the exemption would be lost.
+@require_portal_authentication
 @require_http_methods(["POST"])
 def api_confirm_payment(  # noqa: PLR0911  # Complexity: multi-step business logic
     request: HttpRequest,
@@ -2418,6 +2422,7 @@ def api_confirm_payment(  # noqa: PLR0911  # Complexity: multi-step business log
         return JsonResponse({"success": False, "error": "Internal server error"}, status=500)
 
 
+@require_portal_authentication
 @require_http_methods(["GET"])
 def api_stripe_config(request: HttpRequest) -> JsonResponse:
     """

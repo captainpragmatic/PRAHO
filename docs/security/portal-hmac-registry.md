@@ -80,7 +80,9 @@ Generate secrets with ≥256 bits of randomness, e.g.
 
 ## Notes
 
-- The billing-API HMAC endpoints (`/billing/create-payment-intent/`, …) share the same
-  middleware validator, so they are covered automatically.
+- The HMAC surface is `/api/` only. The portal's payment endpoints
+  (`/api/billing/create-payment-intent/`, `/api/billing/confirm-payment/`,
+  `/api/billing/stripe-config/`) live there like every other portal-facing endpoint; nothing
+  under `/billing/` is HMAC-gated, because those are staff pages.
 - Billing API tests and E2E requests use signed HMAC requests and active customer memberships;
   the view layer has no authentication bypass setting.
