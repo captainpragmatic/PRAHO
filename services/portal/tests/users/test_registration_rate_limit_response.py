@@ -78,7 +78,7 @@ class RegistrationRateLimitViewTests(SimpleTestCase):
                 response.headers["Retry-After"] = "3600"
             return response
 
-        with patch("apps.common.outbound_http._session.request", side_effect=platform_response):
+        with patch("apps.common.outbound_http._send", side_effect=platform_response):
             response = self.client.post("/register/", data)
 
         self.assertContains(response, expected)

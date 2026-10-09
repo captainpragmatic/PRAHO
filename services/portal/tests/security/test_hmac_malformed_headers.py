@@ -126,7 +126,7 @@ class HMACMalformedHeaderTestCase(SimpleTestCase):
 
                         mock_headers.return_value = headers
 
-                        with patch('apps.common.outbound_http._session.request', side_effect=self._create_mock_platform('reject_malformed')):
+                        with patch('apps.common.outbound_http._send', side_effect=self._create_mock_platform('reject_malformed')):
                             result = client.authenticate_customer('test@example.com', 'password123')
 
                             # Should fail gracefully
@@ -170,7 +170,7 @@ class HMACMalformedHeaderTestCase(SimpleTestCase):
                         }
                         mock_headers.return_value = headers
 
-                        with patch('apps.common.outbound_http._session.request', side_effect=self._create_mock_platform('reject_malformed')):
+                        with patch('apps.common.outbound_http._send', side_effect=self._create_mock_platform('reject_malformed')):
                             result = client.authenticate_customer('test@example.com', 'password123')
 
                             # Should fail for malformed signatures
@@ -223,7 +223,7 @@ class HMACMalformedHeaderTestCase(SimpleTestCase):
                         }
                         mock_headers.return_value = headers
 
-                        with patch('apps.common.outbound_http._session.request', side_effect=self._create_mock_platform('reject_malformed')):
+                        with patch('apps.common.outbound_http._send', side_effect=self._create_mock_platform('reject_malformed')):
                             result = client.authenticate_customer('test@example.com', 'password123')
 
                             # Should fail for malformed timestamps
@@ -270,7 +270,7 @@ class HMACMalformedHeaderTestCase(SimpleTestCase):
                         }
                         mock_headers.return_value = headers
 
-                        with patch('apps.common.outbound_http._session.request', side_effect=self._create_mock_platform('accept_all')):
+                        with patch('apps.common.outbound_http._send', side_effect=self._create_mock_platform('accept_all')):
                             # Test that client can generate requests with various nonces
                             # Platform validation would typically reject malicious ones
                             try:
@@ -343,7 +343,7 @@ class HMACMalformedHeaderTestCase(SimpleTestCase):
                                 }
                             return mock_response
 
-                        with patch('apps.common.outbound_http._session.request', side_effect=mock_portal_id_validation):
+                        with patch('apps.common.outbound_http._send', side_effect=mock_portal_id_validation):
                             result = client.authenticate_customer('test@example.com', 'password123')
 
                             # Should fail for all malformed Portal IDs
@@ -402,7 +402,7 @@ class HMACMalformedHeaderTestCase(SimpleTestCase):
                             mock_response.json.return_value = {'success': True}
                             return mock_response
 
-                        with patch('apps.common.outbound_http._session.request', side_effect=mock_injection_detection):
+                        with patch('apps.common.outbound_http._send', side_effect=mock_injection_detection):
                             result = client.authenticate_customer('test@example.com', 'password123')
 
                             # Should fail for header injection attempts
@@ -442,7 +442,7 @@ class HMACMalformedHeaderTestCase(SimpleTestCase):
                         headers[header_name] = encoded_value
                         mock_headers.return_value = headers
 
-                        with patch('apps.common.outbound_http._session.request', side_effect=self._create_mock_platform('reject_malformed')):
+                        with patch('apps.common.outbound_http._send', side_effect=self._create_mock_platform('reject_malformed')):
                             result = client.authenticate_customer('test@example.com', 'password123')
 
                             # Should handle encoded values appropriately
@@ -512,7 +512,7 @@ class HMACMalformedHeaderTestCase(SimpleTestCase):
                             # Normal validation after length check
                             return self._create_mock_platform('reject_malformed')(*args, **kwargs)
 
-                        with patch('apps.common.outbound_http._session.request', side_effect=mock_length_validation):
+                        with patch('apps.common.outbound_http._send', side_effect=mock_length_validation):
                             try:
                                 result = client.authenticate_customer('test@example.com', 'password123')
                                 # Should handle boundary values gracefully
@@ -555,7 +555,7 @@ class HMACMalformedHeaderTestCase(SimpleTestCase):
                     return mock_response
 
 
-                with patch('apps.common.outbound_http._session.request', side_effect=mock_duplicate_detection):
+                with patch('apps.common.outbound_http._send', side_effect=mock_duplicate_detection):
                     result = client.authenticate_customer('test@example.com', 'password123')
 
                     # Should handle normally (HTTP library resolves duplicates)
@@ -596,7 +596,7 @@ class HMACMalformedHeaderTestCase(SimpleTestCase):
                         }
                         mock_headers.return_value = headers
 
-                        with patch('apps.common.outbound_http._session.request', side_effect=self._create_mock_platform('accept_all')):
+                        with patch('apps.common.outbound_http._send', side_effect=self._create_mock_platform('accept_all')):
                             normal_result = client.authenticate_customer('test@example.com', 'password123')
 
                     # Should work normally regardless of header case

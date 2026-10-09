@@ -32,29 +32,24 @@ def keep_dev_debug_mode(settings: Any) -> Generator[None]:
 @pytest.fixture(autouse=True)
 def reset_outbound_http_session() -> Generator[None]:
     """
-    Reset module-level _session in apps.common.outbound_http between tests.
+    Clear the outbound Platform session's cookies between tests.
 
-    The shared _session is created at module import time and persists
-    across tests. Six HMAC test files patch _session.request directly
-    via @patch; that's safe (the patch context replaces .request and
-    restores it on exit). What's NOT automatically restored is
-    _session.cookies, which can be populated by direct .cookies.set()
-    calls in test setup or by Set-Cookie headers from a real request
-    that escaped a patch.
+    Tests fake Platform by patching ``apps.common.outbound_http._send``, which
+    every thread sees. What a patch does not restore is the session's cookie
+    jar, which direct ``.cookies.set()`` calls in setup, or a Set-Cookie from a
+    real request that escaped a patch, can populate.
 
-    This fixture clears _session.cookies before AND after each test so
-    pollution from one test cannot affect another. It deliberately does
-    NOT touch _session.headers (the User-Agent set at module load time
-    must persist) or reassign _session itself (would break the import
-    references in 6 HMAC test files that patch the bound method).
+    This fixture clears that jar before AND after each test so pollution from
+    one test cannot affect another. It deliberately leaves the session's
+    headers alone: the User-Agent set at module load must persist.
 
     PR #164 review L3.
     """
-    from apps.common.outbound_http import _session  # noqa: PLC0415
+    from apps.common.outbound_http import _get_session  # noqa: PLC0415
 
-    _session.cookies.clear()
+    _get_session().cookies.clear()
     yield
-    _session.cookies.clear()
+    _get_session().cookies.clear()
 
 
 @pytest.fixture(autouse=True)

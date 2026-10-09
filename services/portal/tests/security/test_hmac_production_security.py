@@ -109,7 +109,7 @@ class HMACProductionSecurityTestCase(SimpleTestCase):
                 # Production should warn about or reject insecure URLs
                 if insecure_url.startswith("http://"):
                     # Should either upgrade to HTTPS or reject
-                    with patch("apps.common.outbound_http._session.request") as mock_request:
+                    with patch("apps.common.outbound_http._send") as mock_request:
                         mock_response = Mock()
                         mock_response.status_code = 200
                         mock_response.json.return_value = {"success": True}
@@ -137,7 +137,7 @@ class HMACProductionSecurityTestCase(SimpleTestCase):
         """🔐 Test production validates all HMAC headers are present and properly formatted"""
         client = PlatformAPIClient()
 
-        with patch("apps.common.outbound_http._session.request") as mock_request:
+        with patch("apps.common.outbound_http._send") as mock_request:
             mock_response = Mock()
             mock_response.status_code = 200
             mock_response.json.return_value = {"success": True, "authenticated": True}
@@ -194,7 +194,7 @@ class HMACProductionSecurityTestCase(SimpleTestCase):
             for exception, expected_category in error_scenarios:
                 with (
                     self.subTest(error=expected_category),
-                    patch("apps.common.outbound_http._session.request") as mock_request,
+                    patch("apps.common.outbound_http._send") as mock_request,
                 ):
                     mock_request.side_effect = exception
 
@@ -351,7 +351,7 @@ class HMACProductionDeploymentTestCase(SimpleTestCase):
             for error_scenario in error_recovery_scenarios:
                 with (
                     self.subTest(error=str(error_scenario)),
-                    patch("apps.common.outbound_http._session.request") as mock_request,
+                    patch("apps.common.outbound_http._send") as mock_request,
                 ):
                     if isinstance(error_scenario, Exception):
                         mock_request.side_effect = error_scenario
@@ -365,7 +365,7 @@ class HMACProductionDeploymentTestCase(SimpleTestCase):
                     self.assertFalse(raised.exception.is_rate_limited)
 
             # The platform's maintenance signal must reach the caller, not be flattened.
-            with patch("apps.common.outbound_http._session.request") as mock_request:
+            with patch("apps.common.outbound_http._send") as mock_request:
                 mock_request.return_value = Mock(status_code=503, json=lambda: {"error": "maintenance"})
                 with self.assertRaises(PlatformAPIError) as caught:
                     client.authenticate_customer("test@example.com", "password123")
@@ -381,7 +381,7 @@ class HMACProductionDeploymentTestCase(SimpleTestCase):
             for gateway_status in (502, 504):
                 with (
                     self.subTest(status=gateway_status),
-                    patch("apps.common.outbound_http._session.request") as mock_request,
+                    patch("apps.common.outbound_http._send") as mock_request,
                 ):
                     mock_request.return_value = Mock(status_code=gateway_status, json=lambda: {"error": "Bad gateway"})
                     with self.assertRaises(PlatformAPIError) as caught:
@@ -395,7 +395,7 @@ class HMACProductionDeploymentTestCase(SimpleTestCase):
 
             # And an unmarked 503 - the shape `apps/api/billing/views.py` produces for an arbitrary
             # error - is degraded without being maintenance, for the same reason.
-            with patch("apps.common.outbound_http._session.request") as mock_request:
+            with patch("apps.common.outbound_http._send") as mock_request:
                 mock_request.return_value = Mock(status_code=503, json=lambda: {"error": "Failed to list documents"})
                 with self.assertRaises(PlatformAPIError) as caught:
                     client.authenticate_customer("test@example.com", "password123")

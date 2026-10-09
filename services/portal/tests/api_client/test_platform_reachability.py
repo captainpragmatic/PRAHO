@@ -27,7 +27,7 @@ class PlatformReachabilityTests(SimpleTestCase):
             ):
                 with (
                     self.subTest(call=call, failure=type(failure).__name__),
-                    patch("apps.common.outbound_http._session.request", side_effect=failure),
+                    patch("apps.common.outbound_http._send", side_effect=failure),
                     self.assertRaises(PlatformAPIError) as raised,
                 ):
                     call()
@@ -58,7 +58,7 @@ class PlatformReachabilityTests(SimpleTestCase):
             response.headers["Content-Type"] = "application/json"
             with (
                 self.subTest(body=body),
-                patch("apps.common.outbound_http._session.request", return_value=response) as transport,
+                patch("apps.common.outbound_http._send", return_value=response) as transport,
                 self.assertRaises(PlatformAPIError) as raised,
             ):
                 PlatformAPIClient()._make_request("POST", "/test/", max_retries=0)

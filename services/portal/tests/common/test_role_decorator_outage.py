@@ -141,7 +141,7 @@ class RoleDecoratorOutageTests(SimpleTestCase):
                         request = HttpRequest()
                         request.session = client.session
                         with patch(
-                            "apps.common.outbound_http._session.request",
+                            "apps.common.outbound_http._send",
                             return_value=_api_response(200, {"success": True, "results": []}),
                         ):
                             self.assertEqual(_fetch_user_memberships(request), [])
@@ -153,7 +153,7 @@ class RoleDecoratorOutageTests(SimpleTestCase):
                         retry_after=60,
                     )
                     with patch(
-                        "apps.common.outbound_http._session.request",
+                        "apps.common.outbound_http._send",
                         side_effect=requests.exceptions.ConnectionError("offline") if failure == "connection" else None,
                         return_value=unavailable,
                     ):
@@ -166,7 +166,7 @@ class RoleDecoratorOutageTests(SimpleTestCase):
                         if state == "realtime"
                         else {"success": True, "results": [{"id": 123, "role": "owner"}]}
                     )
-                    with patch("apps.common.outbound_http._session.request", return_value=_api_response(200, allowed)):
+                    with patch("apps.common.outbound_http._send", return_value=_api_response(200, allowed)):
                         recovered = self._get(client, kind, realtime=state == "realtime")
                     self.assertContains(recovered, VIEW_MARKER)
                     self.assertEqual(VIEW_CALLS, ["/role-check/realtime/" if state == "realtime" else "/role-check/"])
@@ -181,7 +181,7 @@ class RoleDecoratorOutageTests(SimpleTestCase):
                     retry_after=60,
                 )
                 with patch(
-                    "apps.common.outbound_http._session.request",
+                    "apps.common.outbound_http._send",
                     side_effect=requests.exceptions.ConnectionError("offline") if failure == "connection" else None,
                     return_value=unavailable,
                 ):
@@ -224,7 +224,7 @@ class RoleDecoratorOutageTests(SimpleTestCase):
         client = self._client(expired=True)
         before = time.time()
         with patch(
-            "apps.common.outbound_http._session.request",
+            "apps.common.outbound_http._send",
             return_value=_api_response(200, {"success": True, "results": []}),
         ):
             response = self._get(client, "page")
@@ -259,7 +259,7 @@ class RoleDecoratorOutageTests(SimpleTestCase):
                             if denial in {"fetch_error", "realtime_error"}
                             else {"success": True, "results": [], "has_access": False},
                         )
-                        with patch("apps.common.outbound_http._session.request", return_value=authoritative):
+                        with patch("apps.common.outbound_http._send", return_value=authoritative):
                             response = self._get(client, kind, realtime=denial in {"realtime_denied", "realtime_error"})
                     self.assertEqual(response.status_code, 403)
                     if kind == "page":

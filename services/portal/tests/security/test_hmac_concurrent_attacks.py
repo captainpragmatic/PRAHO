@@ -130,7 +130,7 @@ class HMACConcurrentAttackTestCase(SimpleTestCase):
                 PORTAL_ID=self.portal_id,
                 PLATFORM_API_BASE_URL="http://localhost:8000/api",
             ),
-            patch('apps.common.outbound_http._session.request', new=verifying_platform),
+            patch('apps.common.outbound_http._send', new=verifying_platform),
             concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor,
         ):
             attack = [executor.submit(worker, i, position) for i, position in attackers.items()]
@@ -184,7 +184,7 @@ class HMACConcurrentAttackTestCase(SimpleTestCase):
                 PLATFORM_API_SECRET=self.test_secret,
                 PORTAL_ID=self.portal_id,
             ),
-            patch('apps.common.outbound_http._session.request', new=mock_nonce_tracking),
+            patch('apps.common.outbound_http._send', new=mock_nonce_tracking),
             concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor,
         ):
             futures = [executor.submit(nonce_exhaustion_worker, i) for i in range(8)]
@@ -285,7 +285,7 @@ class HMACConcurrentAttackTestCase(SimpleTestCase):
                 PLATFORM_API_SECRET=self.test_secret,
                 PORTAL_ID=self.portal_id,
             ),
-            patch('apps.common.outbound_http._session.request', new=mock_coordinated_defense),
+            patch('apps.common.outbound_http._send', new=mock_coordinated_defense),
             concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor,
         ):
             futures = [

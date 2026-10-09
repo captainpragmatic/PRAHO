@@ -160,7 +160,7 @@ class ServiceRoleCheckOutageTests(SimpleTestCase):
                         with (
                             patch("apps.services.views.services_api") as services,
                             patch(
-                                "apps.common.outbound_http._session.request",
+                                "apps.common.outbound_http._send",
                                 side_effect=requests.exceptions.ConnectionError("offline")
                                 if failure == "connection"
                                 else None,
@@ -190,7 +190,7 @@ class ServiceRoleCheckOutageTests(SimpleTestCase):
 
                             # An authoritative viewer refresh must override the expired owner, even after an outage.
                             with patch(
-                                "apps.common.outbound_http._session.request",
+                                "apps.common.outbound_http._send",
                                 return_value=_api_response(
                                     200, {"success": True, "results": [{"id": 123, "role": "viewer"}]}
                                 ),
@@ -236,7 +236,7 @@ class ServiceRoleCheckOutageTests(SimpleTestCase):
                             with (
                                 patch("apps.services.views.services_api") as services,
                                 patch(
-                                    "apps.common.outbound_http._session.request",
+                                    "apps.common.outbound_http._send",
                                     side_effect=requests.exceptions.ConnectionError("offline")
                                     if failure == "connection"
                                     else None,

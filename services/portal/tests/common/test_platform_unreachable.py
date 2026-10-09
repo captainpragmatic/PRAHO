@@ -115,7 +115,7 @@ class PlatformUnreachableViewTests(SimpleTestCase):
                         cache.clear()
                         client = self._client()
                         headers = {"HX-Request": "true"} if htmx else {}
-                        with patch("apps.common.outbound_http._session.request", side_effect=failure_type("offline")):
+                        with patch("apps.common.outbound_http._send", side_effect=failure_type("offline")):
                             if caller.post and caller.json_response:
                                 response = client.post(
                                     caller.path, "{}", content_type="application/json", headers=headers
@@ -149,7 +149,7 @@ class PlatformUnreachableViewTests(SimpleTestCase):
         for failure_type in (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
             with self.subTest(failure=failure_type.__name__):
                 cache.clear()
-                with patch("apps.common.outbound_http._session.request", side_effect=failure_type("offline")):
+                with patch("apps.common.outbound_http._send", side_effect=failure_type("offline")):
                     response = self._client().post(
                         "/tickets/3/reply/", {"message": message}, headers={"HX-Request": "true"}
                     )
@@ -187,7 +187,7 @@ class PlatformUnreachableViewTests(SimpleTestCase):
     def test_login_outage_has_no_get_retry_link(self) -> None:
         cache.clear()
         with patch(
-            "apps.common.outbound_http._session.request", side_effect=requests.exceptions.ConnectionError("offline")
+            "apps.common.outbound_http._send", side_effect=requests.exceptions.ConnectionError("offline")
         ):
             response = Client().post("/login/", {"email": "someone@example.com", "password": "correct-horse"})
         self.assertContains(response, OUTAGE_MESSAGE)
@@ -213,7 +213,7 @@ class PlatformUnreachableViewTests(SimpleTestCase):
                             else [response, response, failure_type("offline")]
                         )
                         headers = {"HX-Request": "true"} if htmx else {}
-                        with patch("apps.common.outbound_http._session.request", side_effect=replies):
+                        with patch("apps.common.outbound_http._send", side_effect=replies):
                             result = self._client().get("/services/3/", headers=headers)
                         self._assert_outage(result, Caller("/services/3/", 503), htmx=htmx)
 
@@ -232,7 +232,7 @@ class PlatformUnreachableViewTests(SimpleTestCase):
                     response._content = b'{"success": true, "data": {"service": {"id": 3, "status": "active"}}}'
                     headers = {"HX-Request": "true"} if htmx else {}
                     with patch(
-                        "apps.common.outbound_http._session.request",
+                        "apps.common.outbound_http._send",
                         side_effect=[response, failure_type("offline")],
                     ):
                         result = client.post(
@@ -258,7 +258,7 @@ class PlatformUnreachableViewTests(SimpleTestCase):
                         response._content = b'{"success": true, "customer": {}, "profile": {}}'
                         headers = {"HX-Request": "true"} if htmx else {}
                         with patch(
-                            "apps.common.outbound_http._session.request",
+                            "apps.common.outbound_http._send",
                             side_effect=[response, failure_type("offline")],
                         ):
                             result = self._client().get(path, headers=headers)
@@ -276,7 +276,7 @@ class PlatformUnreachableViewTests(SimpleTestCase):
                     cache.clear()
                     headers = {"HX-Request": "true"} if htmx else {}
                     with patch(
-                        "apps.common.outbound_http._session.request",
+                        "apps.common.outbound_http._send",
                         side_effect=requests.exceptions.ConnectionError("offline"),
                     ):
                         self._assert_outage(self._client().get(path, headers=headers), Caller(path, 503), htmx=htmx)
@@ -284,7 +284,7 @@ class PlatformUnreachableViewTests(SimpleTestCase):
                         response = requests.Response()
                         response.status_code = status
                         response._content = b'{"error": "not found or access denied"}'
-                        with patch("apps.common.outbound_http._session.request", return_value=response):
+                        with patch("apps.common.outbound_http._send", return_value=response):
                             result = self._client().get(path, follow=True, headers=headers)
                         self.assertNotEqual(result.status_code, 500)
                         self.assertNotEqual(result.status_code, 503)

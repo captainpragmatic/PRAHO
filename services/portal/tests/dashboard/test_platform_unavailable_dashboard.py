@@ -80,7 +80,7 @@ class DashboardPlatformUnavailableTests(SimpleTestCase):
 
     def test_connection_error_shows_red_banner_and_dashes_instead_of_zero_counts(self) -> None:
         with patch(
-            "apps.common.outbound_http._session.request",
+            "apps.common.outbound_http._send",
             side_effect=requests.exceptions.ConnectionError("offline"),
         ):
             response = self.client.get("/dashboard/")
@@ -89,7 +89,7 @@ class DashboardPlatformUnavailableTests(SimpleTestCase):
         self._assert_all_counts_unknown(response)
 
     def test_one_unreachable_section_shows_red_banner_and_preserves_healthy_counts(self) -> None:
-        with patch("apps.common.outbound_http._session.request", side_effect=_billing_unreachable):
+        with patch("apps.common.outbound_http._send", side_effect=_billing_unreachable):
             response = self.client.get("/dashboard/")
 
         self._assert_red_banner(response)
@@ -103,7 +103,7 @@ class DashboardPlatformUnavailableTests(SimpleTestCase):
 
     def test_every_section_unavailable_shows_red_banner_and_dashes(self) -> None:
         unavailable = _api_response({"error": "unavailable"}, status=503)
-        with patch("apps.common.outbound_http._session.request", return_value=unavailable):
+        with patch("apps.common.outbound_http._send", return_value=unavailable):
             response = self.client.get("/dashboard/")
 
         self._assert_red_banner(response)
