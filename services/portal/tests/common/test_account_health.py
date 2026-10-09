@@ -396,6 +396,7 @@ class GetAccountHealthTest(TestCase):
             "customer_id": "1",
             "user_id": "10",
             "account_health_data": {
+                "customer_id": "1",
                 "invoice": {"overdue_invoices": 1},
                 "services": {},
                 "tickets": {},

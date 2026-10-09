@@ -15,6 +15,7 @@ from datetime import timedelta
 from unittest.mock import patch
 
 from django.conf import settings
+from django.contrib.sessions.models import Session
 from django.core.cache import cache
 from django.db import connection
 from django.http import HttpRequest, HttpResponse
@@ -129,5 +130,7 @@ class SessionActivityWriteTests(TestCase):
 
     def test_an_idle_session_still_times_out(self) -> None:
         client = self._client(last_activity=time.time() - SessionSecurityMiddleware.SESSION_TIMEOUT_SECONDS - 1)
+        key = client.session.session_key
         response, _updates = self._get(client)
-        self.assertNotContains(response, MARKER, status_code=response.status_code)
+        self.assertRedirects(response, "/login/?timeout=session_expired", fetch_redirect_response=False)
+        self.assertFalse(Session.objects.filter(session_key=key).exists())
