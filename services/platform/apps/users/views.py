@@ -37,10 +37,11 @@ from django.utils.translation import gettext_lazy
 from django.views.decorators.http import require_http_methods
 from django.views.generic import DetailView, ListView
 
-from apps.audit.services import AuthenticationAuditService, LogoutEventData
+from apps.audit.services import AuthenticationAuditService, LoginFailureEventData, LogoutEventData
 from apps.common.constants import BACKUP_CODE_LOW_WARNING_THRESHOLD
 from apps.common.rate_limiting import rate_limit
 from apps.common.request_ip import get_safe_client_ip
+from apps.common.transactions import best_effort_atomic
 
 from .forms import (
     LoginForm,
@@ -174,12 +175,38 @@ def _read_pending_login(request: HttpRequest) -> _PendingLogin | None:
     return pending if usable else None
 
 
+def _record_locked_login(request: HttpRequest, user: User) -> None:
+    """Record a locked account given the right password.
+
+    authenticate() succeeded, so user_login_failed never fires: without this the strongest sign of
+    an account under attack would leave no trace. It also keeps the work the same as every other
+    refusal, which each write one login log row and one audit event.
+    """
+    UserLoginLog.objects.create(
+        user=user,
+        ip_address=get_safe_client_ip(request),
+        user_agent=request.META.get("HTTP_USER_AGENT", ""),
+        status="account_locked",
+    )
+    with best_effort_atomic(logger=logger, scope="Auth", message="Could not audit a locked-account login"):
+        AuthenticationAuditService.log_login_failed(
+            LoginFailureEventData(
+                email=user.email,
+                user=user,
+                failure_reason="account_locked",
+                request=request,
+                metadata={"login_method": "staff_web", "password_correct": True},
+            )
+        )
+
+
 def _handle_successful_login(request: HttpRequest, user: User, form: LoginForm) -> HttpResponse:  # noqa: PLR0911  # Each return is a distinct refusal or hand-off
     """Handle successful login logic - staff only on platform"""
     # A locked account gets the wrong-password answer even with the right password, before any
     # branch that would confirm the password (such as the customer redirect below): otherwise
     # the lockout stops guessing nothing, and "locked" would confirm the email exists.
     if user.is_account_locked():
+        _record_locked_login(request, user)
         messages.error(request, _("Incorrect email or password."))
         return render(request, "users/login.html", {"form": form})
 

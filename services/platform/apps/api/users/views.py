@@ -85,6 +85,24 @@ def _mask_email(email: str) -> str:
     return f"{masked_local}@{domain}"
 
 
+def _record_failed_attempt(email: str) -> None:
+    """Count a failed portal login against the account, if there is one.
+
+    Silent for an unknown email. Best-effort: the write runs only for a real account, so letting
+    its failure surface as a 500 would tell an attacker the email exists. A locked account's lock
+    is not extended by more attempts, as on the staff login: otherwise anyone who knows an
+    address could keep that account locked out.
+    """
+    with contextlib.suppress(User.DoesNotExist):
+        failed_user = User.objects.get(email=email)
+        if failed_user.is_account_locked():
+            return
+        try:
+            failed_user.increment_failed_login_attempts()
+        except DatabaseFailure:
+            logger.exception("🔥 [Portal API Auth] Could not record a failed login attempt")
+
+
 def _charge_login_failure(forwarded_ip: str | None) -> None:
     """Charge the per-client login failure budget; successful logins never count."""
     if forwarded_ip is not None:
@@ -131,15 +149,7 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911 -- 
         user = authenticate(request, username=email, password=password)
 
         if user is None:
-            # Increment counter silently (no-op if email doesn't exist). Best-effort: the write runs
-            # only for a real account, so letting its failure surface as a 500 would tell an
-            # attacker the email exists. The refusal below is the same either way.
-            with contextlib.suppress(User.DoesNotExist):
-                failed_user = User.objects.get(email=email)
-                try:
-                    failed_user.increment_failed_login_attempts()
-                except DatabaseFailure:
-                    logger.exception("🔥 [Portal API Auth] Could not record a failed login attempt")
+            _record_failed_attempt(email)
             logger.warning("⚠️ [Portal API Auth] Failed login — ip=%s", forwarded_ip or client_ip)
             _charge_login_failure(forwarded_ip)
             return JsonResponse({"success": False, "error": "Invalid email or password"}, status=401)

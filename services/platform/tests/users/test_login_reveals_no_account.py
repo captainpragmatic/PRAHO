@@ -18,8 +18,9 @@ from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
+from apps.audit.models import AuditEvent
 from apps.users import views as user_views
-from apps.users.models import User
+from apps.users.models import User, UserLoginLog
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
 
 PASSWORD = "Correct-horse-battery-9"
@@ -84,6 +85,15 @@ class PortalLoginRevealsNoAccountTests(HMACTestMixin, TestCase):
         self.assertEqual(response.json(), UNIFORM_API_REFUSAL)
         charge.assert_called_once()  # the forwarded-IP failure budget is still charged
 
+    def test_a_locked_account_does_not_extend_its_lock_from_more_attempts(self) -> None:
+        # Otherwise anyone who knows an address could keep that account locked out from the portal.
+        locked = _locked(User.objects.create_user(email="api-still-locked@example.ro", password=PASSWORD))
+        before = (locked.failed_login_attempts, locked.account_locked_until)
+        response = self._attempt(locked.email, WRONG)
+        self.assertEqual(response.status_code, 401, response.content)
+        locked.refresh_from_db()
+        self.assertEqual((locked.failed_login_attempts, locked.account_locked_until), before)
+
 
 @override_settings(DISABLE_ACCOUNT_LOCKOUT=False)
 class StaffLoginRevealsNoAccountTests(TestCase):
@@ -114,10 +124,23 @@ class StaffLoginRevealsNoAccountTests(TestCase):
         }
         for case, (email, password) in attempts.items():
             with self.subTest(case=case), patch.object(user_views, "authenticate", wraps=user_views.authenticate) as checked:
+                logs, audits = UserLoginLog.objects.count(), AuditEvent.objects.count()
                 status, messages, logged_in = self._attempt(email, password)
                 self.assertEqual((status, messages, logged_in), (200, [UNIFORM_STAFF_REFUSAL], False))
                 # The password is hashed for every email: a locked account must not answer faster.
                 checked.assert_called_once()
+                # And every refusal writes the same records: one login log row, one audit event.
+                written = (UserLoginLog.objects.count() - logs, AuditEvent.objects.count() - audits)
+                self.assertEqual(written, (1, 1))
+
+    def test_a_locked_account_given_the_right_password_is_recorded(self) -> None:
+        # authenticate() succeeds, so no login-failed signal fires; the strongest sign of an
+        # account under attack must still leave a trace.
+        locked = _locked(self._staff("staff-locked-right@example.ro"))
+        self._attempt(locked.email, PASSWORD)
+        self.assertEqual(
+            list(UserLoginLog.objects.filter(user=locked).values_list("status", flat=True)), ["account_locked"]
+        )
 
     def test_a_locked_account_does_not_extend_its_lock_from_more_attempts(self) -> None:
         locked = _locked(self._staff("staff-still-locked@example.ro"))
