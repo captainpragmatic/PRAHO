@@ -8,7 +8,38 @@ import requests
 from django.test import SimpleTestCase, override_settings
 
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
-from apps.common.outbound_http import OutboundSecurityError, _get_session, portal_request
+from apps.common.outbound_http import DEFAULT_USER_AGENT, OutboundSecurityError, _get_session, portal_request
+
+
+class PortalRequestSessionBoundaryTest(SimpleTestCase):
+    """What reaches requests itself, below the `_send` seam the other tests patch.
+
+    Every other test here fakes Platform at `_send`, so none of them would notice `_send`
+    dropping the safety arguments on their way to the Session.
+    """
+
+    @override_settings(DEBUG=True, PLATFORM_API_TIMEOUT=7)
+    @patch("requests.Session.request", autospec=True)
+    def test_the_session_receives_every_safety_argument(self, session_request):
+        session_request.return_value = MagicMock(status_code=200)
+        portal_request("POST", "http://localhost:8700/api/test/", headers={"X-Nonce": "n"}, data=b"{}")
+
+        session_request.assert_called_once()
+        (session,), kwargs = session_request.call_args
+        self.assertIs(session, _get_session())
+        self.assertEqual(
+            kwargs,
+            {
+                "method": "POST",
+                "url": "http://localhost:8700/api/test/",
+                "allow_redirects": False,
+                "timeout": 7,
+                "verify": True,
+                "cookies": {},
+                "headers": {"X-Nonce": "n", "User-Agent": DEFAULT_USER_AGENT},
+                "data": b"{}",
+            },
+        )
 
 
 class PortalRequestHTTPSEnforcementTest(SimpleTestCase):
