@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **gunicorn upgraded from 25.0.3 to 26.2.0** for both services, and 26.2.0 is now the minimum. The new releases tighten how gunicorn reads HTTP requests:
+  - a stricter keep-alive request-smuggling gate (26.0);
+  - truncated chunked bodies are rejected (26.1);
+  - chunk-size lines and trailers are bounded (26.2.1, in the changelog but not yet on PyPI).
+
+  The only breaking change in 26.0 is the removal of the eventlet worker, which PRAHO does not use.
+
+### Security
+
 - A portal on its own host could not take card payments. Its create-payment-intent,
   confirm-payment and stripe-config calls went to `/billing/…` on the platform, and on the
   platform's hostname Caddy admits only `/api/*` (plus the webhook and unsubscribe paths) from any
