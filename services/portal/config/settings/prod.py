@@ -154,7 +154,7 @@ CACHES = {
 # Portal sessions: server-side DB sessions backed by local SQLite.
 # Ensures session_key is available for SecurityMiddleware fingerprinting,
 # keeps the cookie small (~32 bytes), and allows server-side revocation.
-SESSION_ENGINE = "django.contrib.sessions.backends.db"
+SESSION_ENGINE = "apps.common.session_store"  # DB sessions that merge concurrent writes (ADR-0055)
 
 # Production logging — structured JSON with request ID tracing
 LOGGING = {

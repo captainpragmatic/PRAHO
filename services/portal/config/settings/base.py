@@ -116,7 +116,7 @@ DATABASES: dict[str, dict[str, Any]] = {
 # Server-side DB sessions: session_key works, cookie stays ~32 bytes,
 # SecurityMiddleware can fingerprint/expire sessions, and server-side
 # revocation is possible. See ADR-0017 addendum for rationale.
-SESSION_ENGINE = "django.contrib.sessions.backends.db"
+SESSION_ENGINE = "apps.common.session_store"  # DB sessions that merge concurrent writes (ADR-0055)
 
 # Portal uses LocMemCache for disposable cached data and per-worker coordination (ADR-0050).
 # Rate limits and payment/checkout idempotency use apps.common.counters in the shared session database.

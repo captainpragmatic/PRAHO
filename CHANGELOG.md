@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Concurrent requests on one portal session no longer undo each other's changes.**
+  - **The problem.** Each request saved the whole session, so a second request could write back its stale copy and silently revert a cart edit or a company switch.
+  - **The fix.** A save now applies only what that request changed onto the latest stored session, using an atomic compare-and-swap.
+  - **Grouped keys.** Keys that belong together, such as the selected company's id, name and role, move as one.
+  - **Purchases in progress.** These merge per record.
+  - **Revocation.** A session deleted by logout is never recreated, and a key rotation that races a logout is refused.
+  - **Compatibility.** Existing sessions keep working. See ADR-0055.
 ### Changed
 
 - **Total time limit on Platform calls.** A portal call to Platform now has a total time budget, `PLATFORM_API_TOTAL_BUDGET_SECONDS` (default and maximum 45 s, minimum 5 s). It covers retries and backoff, and the response body is read in chunks with the budget checked between them, so a slow Platform no longer holds a portal worker for minutes.
