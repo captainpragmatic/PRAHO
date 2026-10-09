@@ -501,7 +501,7 @@ class BillingPortalAuthenticationTests(TestCase):
             customer_type="company", status="active",
         )
         request = RequestFactory().post(
-            "/billing/create-payment-intent/",
+            "/api/billing/create-payment-intent/",
             data={"customer_id": customer.pk},
             content_type="application/json",
         )

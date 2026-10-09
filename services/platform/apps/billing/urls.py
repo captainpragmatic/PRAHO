@@ -64,12 +64,5 @@ urlpatterns = [
     path("reports/", views.billing_reports, name="reports"),
     path("reports/vat/", views.vat_report, name="vat_report"),
     path("reports/d390/", d390_views.d390_report, name="d390_report"),
-    # ===============================================================================
-    # PAYMENT API ENDPOINTS FOR PORTAL CONSUMPTION
-    # ===============================================================================
-    # Payment Intent Management
-    path("create-payment-intent/", views.api_create_payment_intent, name="api_create_payment_intent"),
-    path("confirm-payment/", views.api_confirm_payment, name="api_confirm_payment"),
-    # Payment Methods & Configuration
-    path("stripe-config/", views.api_stripe_config, name="api_stripe_config"),
+    # The portal's payment endpoints are served under /api/billing/ (apps/api/billing/urls.py).
 ]

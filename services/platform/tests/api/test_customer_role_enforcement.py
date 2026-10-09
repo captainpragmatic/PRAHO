@@ -302,7 +302,7 @@ class CustomerRoleEnforcementTests(HMACTestMixin, TestCase):
                 return_value={"success": True, "status": "succeeded"},
             ),
         ):
-            for path in ("/billing/create-payment-intent/", "/billing/confirm-payment/"):
+            for path in ("/api/billing/create-payment-intent/", "/api/billing/confirm-payment/"):
                 with self.subTest(path=path):
                     fields = {
                         "order_id": "order-roles", "amount_cents": 1000,
@@ -321,7 +321,7 @@ class CustomerRoleEnforcementTests(HMACTestMixin, TestCase):
                         self.assertEqual(denied["Cache-Control"], "no-store")
 
     def test_payment_endpoints_reject_tech_before_payload_validation(self) -> None:
-        for path in ("/billing/create-payment-intent/", "/billing/confirm-payment/"):
+        for path in ("/api/billing/create-payment-intent/", "/api/billing/confirm-payment/"):
             with self.subTest(path=path):
                 response = self.portal_post(path, self._payload("tech"))
                 self.assertEqual(response.status_code, 403, response.content[:400])

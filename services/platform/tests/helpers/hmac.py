@@ -143,8 +143,14 @@ class HMACTestMixin:
         return self.client.post(path, body, content_type="application/json", **headers)
 
     def portal_get(self, path: str, data: dict | None = None, **extra: Any) -> HttpResponse:
-        """Send an HMAC-signed GET request through TestClient."""
-        body = json.dumps(data or {}).encode()
+        """Send an HMAC-signed GET request through TestClient, body included, as the portal does.
+
+        The portal's client sends a signed JSON body on GETs too. Signing a body and then sending
+        the GET without it made every request fail the body-hash check.
+        """
+        payload = dict(data or {})
+        payload.setdefault("timestamp", time.time())
+        body = json.dumps(payload).encode()
         headers = hmac_headers("GET", path, body, portal_id=self.portal_id)
         headers.update(extra)
-        return self.client.get(path, content_type="application/json", **headers)
+        return self.client.generic("GET", path, body, content_type="application/json", **headers)

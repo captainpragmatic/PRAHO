@@ -59,6 +59,8 @@ CALLS = (
     "none-param",
     "binary",
     "binary-with-headers",
+    "payment-intent",
+    "stripe-config",
     *(f"invoice-{name}" for name in INVOICE_NUMBERS),
     *(f"document-{name}" for name in DOCUMENT_NUMBERS),
 )
@@ -129,6 +131,8 @@ def calls(client):
         "POST", "/billing/invoices/INV-0001/pdf/", data={"customer_id": 1, "user_id": 1}
     )
     yield "binary-with-headers", lambda: client.download_ticket_attachment(1, 1, 2, 3)
+    yield "payment-intent", lambda: client.post_billing("create-payment-intent/", data={"order_id": "o-1"}, user_id=1)
+    yield "stripe-config", lambda: client.get_billing("stripe-config/")
     for name, number in INVOICE_NUMBERS.items():
         yield f"invoice-{name}", lambda number=number: client._make_request(
             "GET", f"/billing/invoices/{number}/", user_id=1
@@ -238,6 +242,14 @@ class PortalSignatureVerifiesOnPlatformTests(SimpleTestCase):
                 response, reached = self._replay(record)
                 self.assertEqual(response.status_code, 200, response.content)
                 self.assertEqual(len(reached), 1)
+
+    def test_payment_calls_are_signed_for_api_billing(self) -> None:
+        # Platform's Caddy configuration publishes only /api/* on its hostname.
+        payments = [record for record in self.records if record["call"] in {"payment-intent", "stripe-config"}]
+        self.assertEqual(len(payments), 2 * len(CONFIGURATIONS))
+        for record in payments:
+            with self.subTest(configuration=record["configuration"], call=record["call"]):
+                self.assertTrue(record["path_url"].startswith("/api/billing/"), record["path_url"])
 
     def test_document_numbers_reach_platform_as_one_unchanged_segment(self) -> None:
         documents = [record for record in self.records if record["call"].startswith("document-")]
