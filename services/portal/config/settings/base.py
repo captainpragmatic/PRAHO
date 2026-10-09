@@ -3,6 +3,7 @@ Django settings for PRAHO Portal Service - Customer-facing app configuration.
 """
 
 import logging
+import math
 import os
 from pathlib import Path
 from typing import Any
@@ -146,7 +147,46 @@ else:
 PLATFORM_API_BASE_URL = os.environ.get("PLATFORM_API_BASE_URL", "http://localhost:8700/api")
 # 🔒 SECURITY: No fallback secrets in base config - must be set in environment
 PLATFORM_API_SECRET = os.environ.get("PLATFORM_API_SECRET")
-PLATFORM_API_TIMEOUT = int(os.environ.get("PLATFORM_API_TIMEOUT", "30"))
+
+
+def seconds_setting(name: str, raw: str | None, default: float, *, minimum: float, maximum: float) -> float:
+    """Parse a duration setting in seconds, refusing to start on a value outside [minimum, maximum].
+
+    Unset or empty means the default. `nan`, `inf` and anything unparsable refuse too: a silently
+    unbounded or zero wait is worse than a portal that will not start.
+    """
+    from django.core.exceptions import ImproperlyConfigured  # noqa: PLC0415  # settings import time
+
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = float(raw)
+    except ValueError as error:
+        raise ImproperlyConfigured(f"{name} is not a number: {raw!r}") from error
+    if not math.isfinite(value) or not minimum <= value <= maximum:
+        raise ImproperlyConfigured(f"{name} must be between {minimum:g} and {maximum:g} seconds: {raw!r}")
+    return value
+
+
+# The most one Platform call may take, retries and backoff included. Under threaded workers a call
+# that never ends holds a thread for good, and gunicorn's `timeout` does not end it (it only checks
+# that the worker is alive). Kept below the portal's gunicorn graceful_timeout (50 s), so a restart
+# waits for calls in flight. Not a whole-page deadline: a page making several calls takes longer.
+PLATFORM_API_TOTAL_BUDGET_SECONDS = seconds_setting(
+    "PLATFORM_API_TOTAL_BUDGET_SECONDS",
+    os.environ.get("PLATFORM_API_TOTAL_BUDGET_SECONDS"),
+    45.0,
+    minimum=5,
+    maximum=45,
+)
+# Each phase of one attempt (connecting; then each wait for the next bytes) is bounded by this.
+PLATFORM_API_TIMEOUT = seconds_setting(
+    "PLATFORM_API_TIMEOUT",
+    os.environ.get("PLATFORM_API_TIMEOUT"),
+    30.0,
+    minimum=1,
+    maximum=PLATFORM_API_TOTAL_BUDGET_SECONDS,
+)
 
 # Cold-outage defaults mirror Platform's public company catalog entries.
 COMPANY_IDENTITY_DEFAULTS: dict[str, str] = {
