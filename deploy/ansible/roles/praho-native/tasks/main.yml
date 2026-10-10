@@ -193,6 +193,7 @@
   systemd:
     name: logrotate.timer
     daemon_reload: yes
+    enabled: yes
     state: restarted
   when: logrotate_hourly.changed
 

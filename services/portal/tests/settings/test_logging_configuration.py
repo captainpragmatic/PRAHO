@@ -22,6 +22,8 @@ _PROD_ENV = {
     "PORTAL_DOMAIN": "portal.pragmatichost.com",
     "PLATFORM_TO_PORTAL_WEBHOOK_SECRET": "test-webhook-secret-for-logging-config-tests",
     "PORTAL_TRUSTED_PROXY_CIDRS": "127.0.0.1/32",
+    # The deployed default: files on. Empty (as the Docker image sets) means console only.
+    "PORTAL_LOG_DIR": "/var/log/praho/portal",
 }
 
 

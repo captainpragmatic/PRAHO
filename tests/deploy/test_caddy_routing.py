@@ -189,7 +189,7 @@ def _assert_contract(name: str, source: str, allowed: list[str] | None = None) -
         _one(proxy, "response_buffers", "10MiB")
         # And a body must arrive in time, so a trickled upload cannot hold that buffer indefinitely.
         timeouts = _one(_one(_one(sites, *()).children, "servers").children, "timeouts").children
-        _one(timeouts, "read_body", "60s")
+        _one(timeouts, "read_body", "120s")
     if name != "portal":
         platform = _one(sites, PLATFORM_HOST).children
         handles = [node for node in platform if node.words[0] == "handle"]

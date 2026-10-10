@@ -12,5 +12,7 @@
     missingok
     notifempty
     su {{ project_user }} {{ project_group }}
-    create 0640 {{ project_user }} {{ project_group }}
+    # The portal re-creates the file itself on its next line (the unit's UMask keeps it 0640);
+    # logrotate creating it as well would race that and fail.
+    nocreate
 }
