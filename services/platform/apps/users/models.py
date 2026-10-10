@@ -308,6 +308,13 @@ class User(AbstractUser):
 
         with transaction.atomic():
             locked = type(self).objects.select_for_update().get(pk=self.pk)
+            if locked.is_account_locked():
+                # Callers check the lock before this, but concurrent failures all pass that check
+                # before any holds the row. Decided here, on the locked row, a lock set by the first
+                # of them is neither counted against again nor extended by the rest.
+                self.failed_login_attempts = locked.failed_login_attempts
+                self.account_locked_until = locked.account_locked_until
+                return
             locked.failed_login_attempts += 1
             update_fields = ["failed_login_attempts"]
 

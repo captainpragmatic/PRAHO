@@ -284,8 +284,15 @@ class EnhancedUserModelTest(TestCase):
             self.user.account_locked_until = None
             self.user.save()
 
-            # Increment attempts to trigger specific delay (i+1 attempts for delay[i])
-            for _ in range(i + 1):
+            # Increment attempts to trigger specific delay (i+1 attempts for delay[i]). Each failure
+            # after the first lands once the previous lock has expired, as in a real login: a lock in
+            # force is neither counted against nor extended.
+            for attempt in range(i + 1):
+                if attempt:
+                    UserModel.objects.filter(pk=self.user.pk).update(
+                        account_locked_until=timezone.now() - timedelta(seconds=1)
+                    )
+                    self.user.refresh_from_db()
                 self.user.increment_failed_login_attempts()
 
             # Check lockout time is approximately correct (allow for 1 minute tolerance)

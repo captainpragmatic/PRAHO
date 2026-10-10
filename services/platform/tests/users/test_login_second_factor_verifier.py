@@ -66,6 +66,7 @@ class VerifyLoginSecondFactorTests(TestCase):
         self.user.refresh_from_db()
         self.assertEqual(self.user.failed_login_attempts, 1)
 
+    @override_settings(ACCOUNT_LOCKOUT_THRESHOLD=10)  # not yet locked: a lock in force is not extended
     def test_exhausted_budget_is_reported_and_still_counts(self) -> None:
         for _attempt in range(5):
             self.assertFalse(self.verify("000000").rate_limited)
