@@ -83,6 +83,7 @@ services:
     build:
       context: ..
       dockerfile: deploy/portal/Dockerfile
+    stop_grace_period: 55s  # above gunicorn's graceful_timeout (50 s), so restarts drain
     environment:
       - DEBUG=0
       - PLATFORM_API_BASE_URL=${PLATFORM_API_BASE_URL:-http://platform:8700/api}
@@ -102,6 +103,10 @@ services:
       - DJANGO_SECURE_SSL_REDIRECT=false
       - SERVICE_NAME=portal
       - SESSION_DB_PATH=/app/data/portal.sqlite3
+      # Server settings (services/portal/gunicorn.conf.py); empty means its default.
+      - PORTAL_GUNICORN_WORKER_CLASS=${PORTAL_GUNICORN_WORKER_CLASS:-}
+      - PORTAL_GUNICORN_WORKERS=${PORTAL_GUNICORN_WORKERS:-}
+      - PORTAL_GUNICORN_THREADS=${PORTAL_GUNICORN_THREADS:-}
     volumes:
       - portal_sessions:/app/data
     expose:

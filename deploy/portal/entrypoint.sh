@@ -6,6 +6,9 @@
 # Supports command overrides after migrations and deployment checks succeed.
 set -euo pipefail
 
+# Refuse bad PORTAL_GUNICORN_* values before touching the database (config/server_settings.py).
+python -m config.server_settings
+
 SESSION_DB="${SESSION_DB_PATH:-portal.sqlite3}"
 export SESSION_DB_PATH="$SESSION_DB"
 SESSION_DIR=$(dirname "$SESSION_DB")
@@ -62,9 +65,9 @@ if [ $# -gt 0 ]; then
 fi
 
 echo "✅ Starting Gunicorn..."
+# Workers, threads, timeouts and log targets come from services/portal/gunicorn.conf.py
+# (PORTAL_GUNICORN_*); a flag here would override them.
 exec gunicorn \
     --bind "0.0.0.0:${PORT:-8701}" \
-    --workers "${GUNICORN_WORKERS:-2}" \
-    --timeout 60 \
     --no-control-socket \
     config.wsgi:application

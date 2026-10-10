@@ -165,7 +165,14 @@ class OutboundIsolationTests(SimpleTestCase):
         spec = importlib.util.spec_from_file_location("portal_gunicorn_conf", GUNICORN_CONF)
         assert spec is not None and spec.loader is not None
         conf = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(conf)
+        # The config reads the server settings at import; empty values mean the defaults, whatever
+        # the shell running the tests exports.
+        server_env = dict.fromkeys(
+            ("GUNICORN_CMD_ARGS", "PORTAL_GUNICORN_WORKER_CLASS", "PORTAL_GUNICORN_WORKERS", "PORTAL_GUNICORN_THREADS"),
+            "",
+        )
+        with patch.dict("os.environ", server_env):
+            spec.loader.exec_module(conf)
         before = outbound_http._get_session()
         conf.post_fork(None, None)
         self.assertIsNot(outbound_http._get_session(), before)
