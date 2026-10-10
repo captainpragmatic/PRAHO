@@ -1,15 +1,21 @@
 """Public Portal recovery uses Platform tokens and a trusted Portal email link."""
 
 from datetime import timedelta
+from typing import Any, cast
 from unittest.mock import patch
 
 from django.contrib.auth.tokens import default_token_generator
 from django.core import mail
 from django.core.cache import cache
+from django.db import DatabaseError, connection
 from django.test import SimpleTestCase, TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
+from django.utils.module_loading import import_string
+from django_q.models import OrmQ
+from django_q.signing import SignedPackage
 
 from apps.api.users.serializers import InvalidPasswordResetLink, MFADisableSerializer, PasswordResetConfirmSerializer
 from apps.audit.models import AuditEvent
@@ -17,6 +23,8 @@ from apps.settings.models import SystemSetting
 from apps.users.forms import LoginForm
 from apps.users.models import User
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
+
+RESET_TASK = "apps.users.tasks.send_password_reset_email"
 
 
 @override_settings(
@@ -46,9 +54,57 @@ class PasswordRecoveryAPITests(HMACTestMixin, TestCase):
             **overrides,
         })
 
-    def test_request_sends_real_templates_with_public_portal_url(self):
-        response = self.portal_post("/api/users/password/reset/", {"email": self.user.email})
+    def request_reset(self, email):
+        return self.portal_post("/api/users/password/reset/", {"email": email})
+
+    def queued_resets(self) -> list[dict[str, Any]]:
+        packages = [cast("dict[str, Any]", SignedPackage.loads(row.payload)) for row in OrmQ.objects.all()]
+        return [package for package in packages if package["func"] == RESET_TASK]
+
+    def deliver_queued_resets(self) -> list[dict[str, Any]]:
+        """Run every queued reset the way a worker would: by the stored dotted path and arguments."""
+        packages = self.queued_resets()
+        OrmQ.objects.all().delete()
+        return [import_string(package["func"])(*package["args"], **package["kwargs"]) for package in packages]
+
+    def test_request_queues_the_mail_and_sends_nothing_itself(self):
+        response = self.request_reset(self.user.email)
         self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(len(mail.outbox), 0)
+        self.assertEqual([package["args"] for package in self.queued_resets()], [(self.user.email,)])
+
+    def test_request_path_is_the_same_for_every_account(self):
+        inactive = User.objects.create_user(email="inactive@example.test", is_active=False)
+        self.request_reset("warm-up@example.test")
+        OrmQ.objects.all().delete()
+        observed = {}
+        for email in (self.user.email, inactive.email, "unknown@example.test"):
+            with CaptureQueriesContext(connection) as queries:
+                response = self.request_reset(email)
+            observed[email] = (response.status_code, response.json(), len(queries))
+            self.assertFalse(
+                [query["sql"] for query in queries if f'"{User._meta.db_table}"' in query["sql"]],
+                "the request must not look the account up",
+            )
+        self.assertEqual(len(set(map(str, observed.values()))), 1, observed)
+        self.assertEqual(len(mail.outbox), 0)
+        self.assertEqual(
+            [package["args"] for package in self.queued_resets()],
+            [(self.user.email,), (inactive.email,), ("unknown@example.test",)],
+        )
+
+    def test_a_queue_failure_still_answers_accepted(self):
+        with patch("apps.api.users.serializers.async_task", side_effect=DatabaseError("queue unavailable")), \
+                self.assertLogs("apps.api.users", level="ERROR") as diagnostics:
+            response = self.request_reset(self.user.email)
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json(), self.request_reset("unknown@example.test").json())
+        self.assertTrue(any("queue unavailable" in entry for entry in diagnostics.output))
+
+    def test_request_sends_real_templates_with_public_portal_url(self):
+        response = self.request_reset(self.user.email)
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(self.deliver_queued_resets(), [{"sent": True}])
         self.assertEqual(len(mail.outbox), 1)
         message = mail.outbox[0]
         self.assertEqual(message.to, [self.user.email])
@@ -60,6 +116,7 @@ class PasswordRecoveryAPITests(HMACTestMixin, TestCase):
 
     def test_unknown_and_inactive_accounts_match_known_response(self):
         known = self.portal_post("/api/users/password/reset/", {"email": self.user.email})
+        self.assertEqual(self.deliver_queued_resets(), [{"sent": True}])
         self.user.is_active = False
         self.user.save(update_fields=["is_active"])
         for email in (self.user.email, "unknown@example.test"):
@@ -67,26 +124,38 @@ class PasswordRecoveryAPITests(HMACTestMixin, TestCase):
                 result = self.portal_post("/api/users/password/reset/", {"email": email})
                 self.assertEqual(result.status_code, known.status_code)
                 self.assertEqual(result.json(), known.json())
+        no_account = {"sent": False, "reason": "no_active_account"}
+        self.assertEqual(self.deliver_queued_resets(), [no_account, no_account])
         self.assertEqual(len(mail.outbox), 1)
 
-    def test_delivery_failure_has_the_same_public_response_for_every_account(self):
-        inactive = User.objects.create_user(email="inactive@example.test", is_active=False)
+    def test_an_account_deactivated_after_the_request_gets_no_mail(self):
+        self.request_reset(self.user.email)
+        self.user.is_active = False
+        self.user.save(update_fields=["is_active"])
+        self.assertEqual(self.deliver_queued_resets(), [{"sent": False, "reason": "no_active_account"}])
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_delivery_failures_are_returned_never_raised(self):
         for failure in (OSError("SMTP unavailable"), 0):
             with self.subTest(failure=str(failure)):
-                cache.clear()
+                self.request_reset(self.user.email)
                 options = {"side_effect": failure} if isinstance(failure, OSError) else {"return_value": failure}
-                with patch("apps.api.users.serializers.send_mail", **options), self.assertLogs(
-                    "apps.api.users", level="ERROR"
+                with patch("apps.users.tasks.send_mail", **options), self.assertLogs(
+                    "apps.users.tasks", level="ERROR"
                 ) as diagnostics:
-                    responses = [self.portal_post("/api/users/password/reset/", {"email": email}) for email in (
-                        self.user.email, inactive.email, "unknown@example.test",
-                    )]
-                for response in responses:
-                    self.assertEqual(response.status_code, 200, response.content)
-                    self.assertEqual(response.json(), responses[0].json())
-                    self.assertIn("email delivery is available", response.json()["message"])
+                    results = self.deliver_queued_resets()
+                self.assertEqual(results, [{"sent": False, "reason": "delivery"}])
                 self.assertTrue(any("Failed to send email" in entry for entry in diagnostics.output))
                 self.assertEqual(len(mail.outbox), 0)
+
+    def test_a_rendering_failure_is_returned_never_raised(self):
+        self.request_reset(self.user.email)
+        with patch("apps.users.tasks.render_to_string", side_effect=ValueError("template broken")), self.assertLogs(
+            "apps.users.tasks", level="ERROR"
+        ) as diagnostics:
+            results = self.deliver_queued_resets()
+        self.assertEqual(results, [{"sent": False, "reason": "delivery"}])
+        self.assertTrue(any("template broken" in entry for entry in diagnostics.output))
 
     def test_password_is_changed_exactly_and_token_cannot_be_reused(self):
         response = self.confirm()
@@ -170,27 +239,41 @@ class PasswordRecoveryAPITests(HMACTestMixin, TestCase):
         self.assertTrue(self.user.check_password("Already-recovered-password-29!"))
 
     def test_delivery_failure_keeps_private_diagnostics(self):
-        with patch("apps.api.users.serializers.send_mail", side_effect=OSError("SMTP unavailable")), self.assertLogs(
-            "apps.api.users", level="ERROR"
+        response = self.request_reset(self.user.email)
+        with patch("apps.users.tasks.send_mail", side_effect=OSError("SMTP unavailable")), self.assertLogs(
+            "apps.users.tasks", level="ERROR"
         ) as diagnostics:
-            response = self.portal_post("/api/users/password/reset/", {"email": self.user.email})
+            self.deliver_queued_resets()
         self.assertEqual(response.status_code, 200, response.content)
         self.assertTrue(response.json()["success"])
         self.assertTrue(any("SMTP unavailable" in entry for entry in diagnostics.output))
 
     def test_zero_messages_sent_does_not_claim_delivery(self):
-        with patch("apps.api.users.serializers.send_mail", return_value=0):
-            response = self.portal_post("/api/users/password/reset/", {"email": self.user.email})
+        response = self.request_reset(self.user.email)
+        with patch("apps.users.tasks.send_mail", return_value=0), self.assertLogs("apps.users.tasks", level="ERROR"):
+            self.assertEqual(self.deliver_queued_resets(), [{"sent": False, "reason": "delivery"}])
         self.assertEqual(response.status_code, 200, response.content)
         self.assertIn("email delivery is available", response.json()["message"])
         self.assertEqual(len(mail.outbox), 0)
+
     def test_malformed_portal_origin_is_rejected_without_sending(self):
         SystemSetting.objects.filter(key="portal.public_base_url").update(
             value="https://attacker.example@customers.example.test/path"
         )
         cache.clear()
-        response = self.portal_post("/api/users/password/reset/", {"email": self.user.email})
+        with self.assertLogs("apps.api.users", level="ERROR"):
+            response = self.request_reset(self.user.email)
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), self.request_reset("unknown@example.test").json())
+        self.assertEqual(self.queued_resets(), [])
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_an_origin_broken_after_the_request_sends_nothing(self):
+        self.request_reset(self.user.email)
+        SystemSetting.objects.filter(key="portal.public_base_url").update(value="http://customers.example.test")
+        cache.clear()
+        with self.assertLogs("apps.users.tasks", level="ERROR"):
+            self.assertEqual(self.deliver_queued_resets(), [{"sent": False, "reason": "configuration"}])
         self.assertEqual(len(mail.outbox), 0)
 
 

@@ -13,8 +13,10 @@ from typing import Any
 
 from django.contrib.sessions.models import Session
 from django.core.cache import cache
+from django.core.mail import send_mail
 from django.db import transaction
 from django.db.models import Count
+from django.template.loader import render_to_string
 from django.utils import timezone
 from django_q.models import Schedule
 from django_q.tasks import async_task, schedule
@@ -32,6 +34,61 @@ TASK_RETRY_DELAY = 300  # 5 minutes
 TASK_MAX_RETRIES = 2
 TASK_SOFT_TIME_LIMIT = 300  # 5 minutes
 TASK_TIME_LIMIT = 600  # 10 minutes
+
+
+def send_password_reset_email(email: str) -> dict[str, Any]:
+    """Send the password-reset mail for an active account; anything else is a quiet no-op.
+
+    Queued for every reset request, whatever the address, so the request does the same work for
+    all of them. Never raises: Django-Q redelivers a failed task hours later (ORM broker, retry
+    4 h) without an attempt limit, and a stale reset mail must not arrive then. Each failure is
+    logged with its private diagnostics and returned instead.
+    """
+    from django.contrib.auth.tokens import default_token_generator  # noqa: PLC0415
+    from django.core.exceptions import ImproperlyConfigured  # noqa: PLC0415
+    from django.utils.encoding import force_bytes  # noqa: PLC0415
+    from django.utils.http import urlsafe_base64_encode  # noqa: PLC0415
+    from django.utils.translation import gettext  # noqa: PLC0415
+
+    from apps.settings.services import get_default_from_email  # noqa: PLC0415
+    from apps.users.services import portal_public_origin  # noqa: PLC0415
+
+    try:
+        base = portal_public_origin()
+    except ImproperlyConfigured as exc:
+        logger.error("🔥 [Password Reset] Not sent: %s", exc)
+        return {"sent": False, "reason": "configuration"}
+
+    user = User.objects.filter(email=email, is_active=True).first()
+    if user is None:
+        logger.warning("⚠️ [Password Reset] Reset requested for an address with no active account: %s", email)
+        return {"sent": False, "reason": "no_active_account"}
+
+    try:
+        uid = urlsafe_base64_encode(force_bytes(user.pk))
+        token = default_token_generator.make_token(user)
+        context = {
+            "user": user,
+            "uid": uid,
+            "token": token,
+            "reset_url": f"{base}/password-reset/confirm/{uid}/{token}/",
+        }
+        sent = send_mail(
+            subject=gettext("Password Reset Request - PRAHO Platform"),
+            message=render_to_string("users/emails/password_reset.txt", context),
+            from_email=get_default_from_email(),
+            recipient_list=[user.email],
+            html_message=render_to_string("users/emails/password_reset.html", context),
+            fail_silently=False,
+        )
+        if not sent:
+            raise OSError("Email backend did not accept the recovery message")
+    except Exception as exc:
+        logger.error("🔥 [Password Reset] Failed to send email to %s: %s", user.email, exc)
+        return {"sent": False, "reason": "delivery"}
+
+    logger.info("📧 [Password Reset] Reset email sent to: %s", user.email)
+    return {"sent": True}
 
 
 def reconcile_session_index() -> dict[str, int]:

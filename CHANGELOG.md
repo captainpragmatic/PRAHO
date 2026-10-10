@@ -36,6 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **A password-reset request no longer reveals, by its timing, whether the email has an account.**
+  - **The bug.** The answer was already the same for every address, but only an active account's request rendered and sent the mail before answering, so it took measurably longer.
+  - **Now.** Every request does the same work: it checks the portal link origin and queues the mail. The task worker looks the account up and sends the mail.
+  - **Deployment.** Reset mails now need the task worker (`qcluster`) running, as invoices and provisioning already do. A failed send is logged and not retried, so a stale reset link never arrives hours later.
 - A failed login no longer reveals whether the email has an account.
   - **Staff login:** a locked account was told "Account temporarily locked for security reasons" and
     answered without hashing the password, so both the message and the timing confirmed the email.

@@ -1,10 +1,15 @@
 """Browser prerequisites cannot be mistaken for or repair an ORM test database."""
 
+import json
 from io import StringIO
 
 from django.core.management import call_command
 from django.core.management.base import CommandError
+from django.db import connection
 from django.test import TestCase, override_settings
+from django_q.models import OrmQ
+from django_q.signing import SignedPackage
+from django_q.tasks import async_task
 
 from apps.billing.models import Invoice
 from apps.common.e2e_fixtures import seed_baseline, seed_scenario, validate_baseline
@@ -16,19 +21,38 @@ from apps.products.models import Product
 from apps.settings.models import SystemSetting
 from apps.users.models import CustomerMembership
 
+RESET_TASK = "apps.users.tasks.send_password_reset_email"
+
 
 @override_settings(ENCRYPTION_KEYS=["MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="])
 class E2EFixtureTests(TestCase):
     def test_commands_reject_regular_settings_and_wrong_database(self):
-        for command in ("seed_e2e", "validate_e2e"):
+        for command, options in (
+            ("seed_e2e", {}),
+            ("validate_e2e", {}),
+            ("run_e2e_tasks", {"func": RESET_TASK}),
+        ):
             with self.subTest(command=command), self.assertRaisesRegex(CommandError, "dedicated live database"):
-                call_command(command, stdout=StringIO())
+                call_command(command, stdout=StringIO(), **options)
             with (
                 override_settings(DEBUG=True, E2E_FIXTURES_ENABLED=True, E2E_DATABASE_PATH="not-the-live-db.sqlite3"),
                 self.assertRaisesRegex(CommandError, "dedicated live database"),
             ):
-                call_command(command, stdout=StringIO())
+                call_command(command, stdout=StringIO(), **options)
         self.assertFalse(Customer.objects.exists())
+
+    def test_queued_task_runner_runs_only_the_named_task(self):
+        async_task(RESET_TASK, "nobody@example.test")
+        async_task("apps.users.tasks.reconcile_session_index")
+        output = StringIO()
+        with override_settings(
+            DEBUG=True, E2E_FIXTURES_ENABLED=True, E2E_DATABASE_PATH=connection.settings_dict["NAME"]
+        ):
+            call_command("run_e2e_tasks", func=RESET_TASK, stdout=output)
+        self.assertEqual(json.loads(output.getvalue()), [{"reason": "configuration", "sent": False}])
+        remaining = [SignedPackage.loads(row.payload)["func"] for row in OrmQ.objects.all()]
+        self.assertNotIn(RESET_TASK, remaining)
+        self.assertIn("apps.users.tasks.reconcile_session_index", remaining)
 
     def test_baseline_is_idempotent_and_second_customer_is_independent(self):
         first = seed_baseline()

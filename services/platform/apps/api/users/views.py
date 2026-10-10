@@ -773,9 +773,9 @@ def password_reset_request_api(request: HttpRequest) -> Response:
         "email": "user@example.com"
     }
 
-    Sends password reset email if account exists.
-    Responses do not disclose account or delivery status. Delivery and configuration
-    failures remain in private error logs.
+    Queues the reset mail for every address; a worker sends it if the account is active.
+    Responses and the request's work do not disclose account or delivery status. Delivery
+    and configuration failures remain in private error logs.
 
     Response:
     {
@@ -793,7 +793,7 @@ def password_reset_request_api(request: HttpRequest) -> Response:
 
         except Exception as e:
             logger.error("🔥 [Password Reset] Request failed (%s): %s", type(e).__name__, e)
-            # Failures after the account lookup must not reveal whether it exists.
+            # A configuration or queue failure gets the same answer as everything else.
             return Response(PasswordResetRequestSerializer.accepted_response())
     else:
         return Response(
