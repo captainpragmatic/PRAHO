@@ -132,6 +132,26 @@ class PortalHMACTests(TestCase):
         self.assertEqual(response.status_code, 200)
 
     @override_settings(PLATFORM_API_SECRET="unit-test-secret")
+    def test_a_failed_request_off_the_allowlist_never_loads_the_user(self):
+        """The bypass checks the path first, so failed portal requests skip the session/user lookup."""
+
+        class UntouchableUser:
+            # Django's request.user is lazy: any use, truth-testing included, loads the session
+            # and the user. Both are refused here.
+            def __bool__(self) -> bool:
+                raise AssertionError("request.user was evaluated for a path off the allowlist")
+
+            def __getattribute__(self, name: str) -> object:
+                raise AssertionError(f"request.user.{name} was read for a path off the allowlist")
+
+        request = self.factory.get("/api/orders/")  # no HMAC headers, not an allowlisted path
+        request.user = UntouchableUser()
+        middleware = PortalServiceHMACMiddleware(lambda req: HttpResponse("ok", status=200))
+        response = middleware(request)
+
+        self.assertEqual(response.status_code, 401)
+
+    @override_settings(PLATFORM_API_SECRET="unit-test-secret")
     def test_customer_user_session_bypass_denied(self):
         """A non-staff customer user gets no session bypass — HMAC remains required."""
         user = User.objects.create_user(email="cust@test.com", password="x")
