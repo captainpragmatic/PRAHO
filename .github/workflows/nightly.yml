@@ -110,7 +110,8 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16-alpine
+        # Docker Official Images mirror: the same image, without Docker Hub's anonymous pull limit.
+        image: public.ecr.aws/docker/library/postgres:16-alpine
         env:
           POSTGRES_PASSWORD: test
           POSTGRES_DB: test_db
