@@ -377,6 +377,40 @@ class RegistrationConfirmAPITests(HMACTestMixin, TestCase):
         response = self.portal_post(self.path, self.body())
         self.assertEqual((response.status_code, response.json()["code"]), (409, "details_unavailable"))
 
+    def test_a_valid_link_shows_what_it_would_create(self) -> None:
+        response = self.portal_post(
+            "/api/users/register/pending/", {"registration_id": str(self.row.pk), "token": self.row.token()}
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(
+            response.json()["registration"],
+            {
+                "email": "new@example.test",
+                "first_name": "Zedrick",
+                "last_name": "Marlowe",
+                "company_name": "Quill Lantern SRL",
+                "vat_number": "",
+            },
+        )
+        self.assertIsNone(PendingRegistration.objects.get(pk=self.row.pk).consumed_at)
+
+    def test_a_bad_used_or_expired_link_shows_nothing(self) -> None:
+        used = pending("used@example.test", sent_at=timezone.now(), consumed_at=timezone.now())
+        expired = pending("old@example.test", sent_at=timezone.now() - timedelta(hours=24, seconds=1))
+        for registration_id, token in (
+            (str(self.row.pk), "0" * 64),
+            (str(used.pk), used.token()),
+            (str(expired.pk), expired.token()),
+            ("not-a-uuid", self.row.token()),
+        ):
+            with self.subTest(registration_id=registration_id):
+                response = self.portal_post(
+                    "/api/users/register/pending/", {"registration_id": registration_id, "token": token}
+                )
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.json()["code"], "invalid_link")
+                self.assertNotIn("registration", response.json())
+
     def test_an_unsigned_request_is_refused(self) -> None:
         response = self.client.post(self.path, self.body(), content_type="application/json")
         self.assertIn(response.status_code, (401, 403))

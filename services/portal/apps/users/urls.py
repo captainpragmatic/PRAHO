@@ -13,6 +13,12 @@ urlpatterns = [
     path("login/", views.login_view, name="login"),
     path("logout/", views.logout_view, name="logout"),
     path("register/", views.register_view, name="register"),
+    path("register/confirm/", views.register_confirm_view, name="register_confirm"),
+    path(
+        "register/confirm/<uuid:registration_id>/<str:token>/",
+        views.register_confirm_view,
+        name="register_confirm_link",
+    ),
     path("profile/", views.profile_view, name="profile"),
     path("company/", views.company_profile_view, name="company_profile"),
     path("company/edit/", views.company_profile_edit_view, name="company_profile_edit"),

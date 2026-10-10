@@ -873,6 +873,40 @@ class PlatformAPIClient:
             },
         )
 
+    def get_pending_registration(self, registration_id: str, token: str, client_ip: str = "") -> dict[str, Any]:
+        """What confirming a registration link would create; propagate Platform errors."""
+        return self._make_request(
+            "POST",
+            "/users/register/pending/",
+            data={"registration_id": registration_id, "token": token, **_client_ip_payload(client_ip)},
+        )
+
+    def confirm_registration(  # noqa: PLR0913  # one argument per value the confirmer supplies
+        self,
+        registration_id: str,
+        token: str,
+        password: str,
+        password_confirm: str,
+        *,
+        data_processing_consent: bool,
+        marketing_consent: bool,
+        client_ip: str = "",
+    ) -> dict[str, Any]:
+        """Finish a pending registration with the confirmer's password; propagate Platform errors."""
+        return self._make_request(
+            "POST",
+            "/users/register/confirm/",
+            data={
+                "registration_id": registration_id,
+                "token": token,
+                "password": password,
+                "password_confirm": password_confirm,
+                "data_processing_consent": data_processing_consent,
+                "marketing_consent": marketing_consent,
+                **_client_ip_payload(client_ip),
+            },
+        )
+
     def validate_session_secure(self, user_id: str, session_auth_hash: str | None = None) -> dict[str, Any]:
         """
 

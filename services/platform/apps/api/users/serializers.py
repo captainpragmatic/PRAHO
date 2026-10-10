@@ -262,6 +262,13 @@ class PasswordResetRequestSerializer(serializers.Serializer):
         return self.accepted_response()
 
 
+class RegistrationLinkSerializer(serializers.Serializer):
+    """A pending registration's link, as the mailbox holder received it."""
+
+    registration_id = serializers.UUIDField()
+    token = serializers.CharField(max_length=128, write_only=True)
+
+
 class RegistrationConfirmSerializer(serializers.Serializer):
     """What the mailbox holder supplies to finish a pending registration."""
 

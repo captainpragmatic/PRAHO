@@ -136,6 +136,23 @@ def _send(recipient: str, subject: str, text_message: str, html_message: str) ->
         raise OSError("Email backend did not accept the registration message")
 
 
+def preview(registration_id: str, token: str) -> dict[str, str] | None:
+    """What a usable link would create, for its holder to check before confirming, or None.
+
+    Someone else can submit any address, so the confirmer sees the submitted details first.
+    """
+    row = PendingRegistration.objects.filter(pk=registration_id).first()
+    if row is None or not row.token_matches(token) or not row.is_usable():
+        return None
+    return {
+        "email": row.email,
+        "first_name": str(row.user_data.get("first_name", "")),
+        "last_name": str(row.user_data.get("last_name", "")),
+        "company_name": str(row.customer_data.get("company_name", "")),
+        "vat_number": str(row.customer_data.get("vat_number", "")),
+    }
+
+
 def _refusal_before_creating(
     row: PendingRegistration, user_data: dict[str, Any], *, data_processing_consent: bool
 ) -> ConfirmRefusal | None:

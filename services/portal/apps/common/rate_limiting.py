@@ -56,6 +56,10 @@ def mark_auth_success(request: HttpRequest) -> None:
     setattr(request, "_portal_auth_outcome", "success")  # noqa: B010
 
 
+# Pages reached from an emailed link: each has its own budgets (_password_reset_budgets).
+LINK_PATHS = ("/password-reset/", "/register/confirm/")
+
+
 class AuthenticationRateLimitMiddleware:
     """
     🔒 Rate limiting middleware for authentication endpoints to prevent brute force attacks.
@@ -107,9 +111,9 @@ class AuthenticationRateLimitMiddleware:
         if not self._is_auth_endpoint(request):
             return self.get_response(request)
 
-        # Recovery submissions consume their own budget even when they succeed.
-        # They must neither clear login counters nor be cleared by a successful login.
-        if request.path.startswith("/password-reset/"):
+        # Recovery and registration-confirmation submissions consume their own budget even when
+        # they succeed. They must neither clear login counters nor be cleared by a successful login.
+        if request.path.startswith(LINK_PATHS):
             start_time = time.time()
             try:
                 return self.get_response(request)
@@ -158,7 +162,7 @@ class AuthenticationRateLimitMiddleware:
         if (
             getattr(settings, "RATE_LIMITING_ENABLED", True)
             and request.method == "POST"
-            and request.path.startswith("/password-reset/")
+            and request.path.startswith(LINK_PATHS)
         ):
             return self._check_password_reset_limits(request)
         return None
@@ -169,16 +173,34 @@ class AuthenticationRateLimitMiddleware:
             for key, window, maximum in self._password_reset_budgets(request):
                 attempts = counters.increment(key, window)
                 if attempts > maximum:
-                    return self._rate_limit_response(
-                        request, _("Too many password reset requests. Please try again later."), window, 429
+                    message = (
+                        _("Too many attempts. Please try again later.")
+                        if request.path.startswith("/register/confirm/")
+                        else _("Too many password reset requests. Please try again later.")
                     )
+                    return self._rate_limit_response(request, message, window, 429)
         except Exception:
             logger.exception("🔥 [RateLimit] Password reset limiter unavailable")
             return self._store_unavailable_response(request)
         return None
 
     def _password_reset_budgets(self, request: HttpRequest) -> list[tuple[str, int, int]]:
-        from apps.users.constants import PASSWORD_RESET_SESSION_KEY  # noqa: PLC0415
+        from apps.users.constants import (  # noqa: PLC0415
+            PASSWORD_RESET_SESSION_KEY,
+            REGISTRATION_CONFIRM_SESSION_KEY,
+        )
+
+        if request.path.startswith("/register/confirm/"):
+            limits = []
+            if _client_ip_is_distinguishable():
+                limits.append(
+                    (f"register_confirm_ip_{self._get_client_ip(request)}", self.IP_WINDOW_SECONDS, self.IP_RATE_LIMIT)
+                )
+            link = request.session.get(REGISTRATION_CONFIRM_SESSION_KEY)
+            if link:
+                digest = hashlib.sha256(f"{link['registration_id']}:{link['token']}".encode()).hexdigest()
+                limits.append((f"register_confirm_link_{digest}", self.IP_WINDOW_SECONDS, self.IP_RATE_LIMIT))
+            return limits
 
         confirmation = request.path.startswith("/password-reset/confirm/")
         prefix = "password_reset_confirm" if confirmation else "password_reset"
@@ -267,7 +289,7 @@ class AuthenticationRateLimitMiddleware:
 
     def _store_unavailable_response(self, request: HttpRequest) -> HttpResponse:
         """The shared store-failure contract (#554). A recovery page re-renders its form rather than redirecting."""
-        recovery = request.path.startswith("/password-reset/")
+        recovery = request.path.startswith(LINK_PATHS)
         if recovery and not wants_json(request):
             return self._rate_limit_response(
                 request, store_unavailable_message(), STORE_UNAVAILABLE_RETRY_AFTER_SECONDS, STORE_UNAVAILABLE_STATUS
@@ -279,7 +301,7 @@ class AuthenticationRateLimitMiddleware:
 
     def _apply_recovery_headers(self, request: HttpRequest, response: HttpResponse, retry_after: int) -> None:
         response["Retry-After"] = str(retry_after)
-        token_free = request.path in {"/password-reset/", "/password-reset/confirm/"}
+        token_free = request.path in {"/password-reset/", "/password-reset/confirm/", "/register/confirm/"}
         response["Referrer-Policy"] = "same-origin" if token_free else "no-referrer"
         add_never_cache_headers(response)
 
@@ -287,11 +309,20 @@ class AuthenticationRateLimitMiddleware:
         self, request: HttpRequest, error_msg: str, retry_after: int, status_code: int
     ) -> HttpResponse:
         """Return appropriate rate limit response based on request type."""
-        recovery = request.path.startswith("/password-reset/")
+        recovery = request.path.startswith(LINK_PATHS)
         response: HttpResponse
         if self._is_api_or_htmx_request(request):
             response = JsonResponse(
                 {"error": error_msg, "retry_after": retry_after, "attempts_remaining": 0},
+                status=status_code,
+            )
+        elif request.path.startswith("/register/confirm/"):
+            from apps.users.forms import RegistrationConfirmForm  # noqa: PLC0415
+
+            response = render(
+                request,
+                "users/register_confirm.html",
+                {"form": RegistrationConfirmForm(), "registration": None, "gone": "", "notice": error_msg},
                 status=status_code,
             )
         elif recovery:

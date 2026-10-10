@@ -456,6 +456,7 @@ class PortalServiceHMACMiddleware:
             "/api/users/password/reset",
             "/api/users/password/reset/confirm",
             "/api/users/register/confirm",
+            "/api/users/register/pending",
         }
         principal_key = f"hmac_rl:{portal_id}:principal:{principal}"
         if auth:
