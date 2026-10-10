@@ -652,6 +652,12 @@
 # The rotation policies, the handover of old backups and the hourly timer come only now, once
 # every writer runs the new handlers: logrotate moving a file under a process that still rotates
 # in process would recreate the race, and restarting the timer triggers a run immediately.
+- name: Keep logrotate idle while the policies and the backup handover change
+  systemd:
+    name: logrotate.timer
+    state: stopped
+  failed_when: false  # a host without the timer yet has nothing to stop
+
 - name: Rotate the portal's log files (the portal never rotates them itself)
   template:
     src: praho-portal.logrotate.j2
@@ -730,3 +736,9 @@
     enabled: yes
     state: restarted
   when: logrotate_hourly.changed
+
+- name: Start logrotate again
+  systemd:
+    name: logrotate.timer
+    enabled: yes
+    state: started
