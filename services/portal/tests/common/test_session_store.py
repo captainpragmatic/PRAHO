@@ -108,6 +108,41 @@ class MergingSessionStoreTests(TestCase):
         )
         self.assertEqual(stored["active_customer_id"], 1)  # harmless: the explicit selection takes priority
 
+    def test_backfilled_company_details_do_not_revert_a_concurrent_switch(self) -> None:
+        # An older session has no selected company. The profile page fills in the name and role of
+        # the default company, while another tab switches company explicitly and saves first.
+        key = self._session(user_id=7, user_memberships=[{"customer_id": 1, "role": "owner"}])
+        backfill, switch = self._load(key), self._load(key)
+        switch.update({"selected_customer_id": 2, "selected_customer_name": "Beta", "selected_customer_role": "viewer"})
+        switch.save()
+        backfill.update({"selected_customer_name": "Acme", "selected_customer_role": "owner"})
+        backfill.save()
+
+        stored = _stored(key)
+        self.assertEqual(
+            (
+                stored.get("selected_customer_id"),
+                stored.get("selected_customer_name"),
+                stored.get("selected_customer_role"),
+            ),
+            (2, "Beta", "viewer"),
+        )
+
+    def test_backfilled_company_details_apply_when_nobody_switched(self) -> None:
+        key = self._session(user_id=7, selected_customer_id=1)
+        backfill, unrelated = self._load(key), self._load(key)
+        unrelated["last_activity"] = 123.0
+        unrelated.save()
+        backfill.update({"selected_customer_name": "Acme", "selected_customer_role": "owner"})
+        backfill.save()
+
+        stored = _stored(key)
+        self.assertEqual(
+            (stored["selected_customer_id"], stored["selected_customer_name"], stored["selected_customer_role"]),
+            (1, "Acme", "owner"),
+        )
+        self.assertEqual(stored["last_activity"], 123.0)
+
     def test_a_key_another_request_deleted_stays_deleted(self) -> None:
         key = self._session(user_id=7, new_mfa_backup_codes=["a"], cart={"items": []})
         stale, deleter = self._load(key), self._load(key)

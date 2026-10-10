@@ -48,6 +48,10 @@ Docker portals already run two worker processes. Threaded workers make the race 
   - identity: `user_id`, `email`, `customer_id`, `session_auth_hash`, `authenticated_at`,
     `session_created_at`;
   - account health: `account_health_data`, `account_health_fetched_at`.
+- **An anchored group** names the key the rest of it describes; the company group's anchor is `selected_customer_id`.
+  - A request that changed the anchor stores its whole group, so the last explicit company switch wins.
+  - A request that changed only the rest describes the anchor it loaded. An example is the profile page filling in the default company's name and role.
+  - Its changes apply only while that is still the stored anchor. So stale details never revert a company switched to in the meantime, and never mix with it.
 - **Record maps** (`order_checkout_attempts`, `gift_purchase_forms`) merge per record, so two tabs
   keep both purchases in progress.
 - **Other lists and dicts**, including the cart, are one value. A concurrent edit to the same value is
