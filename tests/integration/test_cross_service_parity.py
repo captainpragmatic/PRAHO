@@ -154,6 +154,14 @@ class TestCounterStoreParity(TestCase):
             (REPO_ROOT / "services/portal" / relative_path).read_bytes(),
         )
 
+    def test_complete_body_guards_match(self) -> None:
+        for relative_path in (Path("apps/common/complete_body.py"), Path("tests/common/test_complete_body.py")):
+            with self.subTest(path=str(relative_path)):
+                self.assertEqual(
+                    (REPO_ROOT / "services/platform" / relative_path).read_bytes(),
+                    (REPO_ROOT / "services/portal" / relative_path).read_bytes(),
+                )
+
     def test_counter_cull_command_matches(self) -> None:
         relative_path = Path("management/commands/cull_counters.py")
         self.assertEqual(
@@ -190,7 +198,9 @@ class TestSignatureRejectionParity(TestCase):
                 RequestFactory().post("/api/test/", data=b"{}", content_type="application/json")
             )
         self.assertEqual(response.status_code, 401)
-        self.assertEqual(json.loads(self._portal_constant("PLATFORM_SIGNATURE_REJECTED")), json.loads(response.content)["error"])
+        self.assertEqual(
+            json.loads(self._portal_constant("PLATFORM_SIGNATURE_REJECTED")), json.loads(response.content)["error"]
+        )
 
     def test_the_portal_quotes_platforms_clock_window(self) -> None:
         from apps.common.constants import HMAC_NTP_SKEW_SECONDS, HMAC_TIMESTAMP_WINDOW_SECONDS  # noqa: PLC0415

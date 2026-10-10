@@ -22,6 +22,8 @@ _PROD_ENV = {
     "PORTAL_DOMAIN": "portal.pragmatichost.com",
     "PLATFORM_TO_PORTAL_WEBHOOK_SECRET": "test-webhook-secret-for-logging-config-tests",
     "PORTAL_TRUSTED_PROXY_CIDRS": "127.0.0.1/32",
+    # The deployed default: files on. Empty (as the Docker image sets) means console only.
+    "PORTAL_LOG_DIR": "/var/log/praho/portal",
 }
 
 
@@ -165,6 +167,14 @@ class TestStagingLoggingConfiguration:
     def test_apps_logger_is_debug(self) -> None:
         assert self.config["loggers"]["apps"]["level"] == "DEBUG"
 
-    def test_smaller_retention_than_prod(self) -> None:
+    def test_retention_is_left_to_logrotate(self) -> None:
+        # Several portal processes write these files, so neither environment rotates them in
+        # process (one process renaming a file under the others loses their lines); the native
+        # role's logrotate policy sets retention, and the handlers reopen a moved file.
         prod = _get_logging("config.settings.prod")
-        assert self.config["handlers"]["file"]["maxBytes"] < prod["handlers"]["file"]["maxBytes"]
+        for config in (self.config, prod):
+            for name in ("file", "error_file"):
+                handler = config["handlers"][name]
+                assert handler["class"] == "logging.handlers.WatchedFileHandler"
+                assert "maxBytes" not in handler
+                assert "backupCount" not in handler

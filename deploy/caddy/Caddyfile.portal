@@ -2,6 +2,19 @@
 # PRAHO - Caddy Configuration for Portal-Only Deployment
 # =============================================================================
 
+{
+    servers {
+        timeouts {
+            # A request body must arrive within this, so a client trickling an upload cannot hold
+            # Caddy's request buffer (or, before it, an application thread) for as long as it likes.
+            # It applies to every site on this server, Platform included: 120 s matches Platform's
+            # own request timeout. A body cut off here reaches the application short, which refuses
+            # it (apps/common/complete_body.py) rather than saving a partial request.
+            read_body 120s
+        }
+    }
+}
+
 {$PORTAL_DOMAIN} {
     tls {$ACME_EMAIL:admin@example.com}
 
@@ -41,6 +54,11 @@
             header_up X-Real-IP {remote_host}
             header_up X-Forwarded-For {remote_host}
             header_up X-Forwarded-Proto {scheme}
+            # Read the whole request before passing it on (the buffer is above the 5MB cap, so any
+            # accepted body is complete), and up to 10MiB of the response before sending it: a slow
+            # client then holds Caddy, not a portal thread.
+            request_buffers 6MB
+            response_buffers 10MiB
         }
     }
 

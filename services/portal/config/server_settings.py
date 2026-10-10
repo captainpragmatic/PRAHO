@@ -63,8 +63,8 @@ def server_settings(env: Mapping[str, str] = os.environ) -> ServerSettings:
         # connection for the reverse proxy to reuse after the worker has dropped it.
         "keepalive": 0,
         # Under sync this ends a request that runs past it; under gthread it only checks that the
-        # worker is alive: the Platform call budget bounds each Platform call, and a slow client
-        # is bounded only by the reverse proxy buffering bodies.
+        # worker is alive: the Platform call budget bounds each Platform call, and Caddy buffers
+        # request and response bodies, so a slow client holds Caddy rather than a thread.
         "timeout": 60,
         "graceful_timeout": 50,
     }

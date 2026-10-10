@@ -144,8 +144,8 @@ def _parse(source: str) -> list[Directive]:
             assert len(stack) > 1
             stack.pop()
             continue
-        block = line.endswith(" {")
-        words = tuple(shlex.split(line[:-2] if block else line, comments=True))
+        block = line.endswith(" {") or line == "{"  # a bare "{" opens the global options block
+        words = tuple(shlex.split(line[:-1] if block else line, comments=True))
         node = Directive(words)
         stack[-1].append(node)
         if block:
@@ -182,6 +182,14 @@ def _assert_contract(name: str, source: str, allowed: list[str] | None = None) -
         fallback = _one(portal, "handle").children
         _one(_one(fallback, "request_body").children, "max_size", "5MB")
         assert len(_proxy_targets(fallback)) == 1
+        # Portal threads have no request timeout, so a slow client must hold Caddy, not a thread.
+        proxy = next(node for node in fallback if node.words[0] == "reverse_proxy").children
+        # Above the 5MB body cap: a buffer equal to it would pass a body on before its last byte.
+        _one(proxy, "request_buffers", "6MB")
+        _one(proxy, "response_buffers", "10MiB")
+        # And a body must arrive in time, so a trickled upload cannot hold that buffer indefinitely.
+        timeouts = _one(_one(_one(sites, *()).children, "servers").children, "timeouts").children
+        _one(timeouts, "read_body", "120s")
     if name != "portal":
         platform = _one(sites, PLATFORM_HOST).children
         handles = [node for node in platform if node.words[0] == "handle"]
