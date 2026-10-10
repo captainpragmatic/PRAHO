@@ -671,7 +671,8 @@
 # Upgrading from in-process rotation leaves plain app.log.2 .. app.log.N (Platform's and the
 # portal's). logrotate's compress + delaycompress manages .1 plain and .2 onwards as .gz, so plain
 # leftovers would never expire. Compress them once so logrotate takes them over; .1 stays plain.
-# Without -f, a name that already has a .gz fails the task instead of overwriting rotated history.
+# If a .gz of the same name already exists (logrotate rotated before this ran), the old backup is
+# appended to it as a second gzip member: zcat reads both, and no history is overwritten.
 # logrotate only removes the one backup just past its count, so the portal's older backups beyond
 # its 14 (its error.log used to keep 30) are removed here, as its policy says; Platform's policy
 # keeps the counts the in-process rotation had.
@@ -679,7 +680,16 @@
   shell: |
     set -eu
     find /var/log/praho -maxdepth 2 -type f -regextype posix-extended \
-      -regex '.*/[a-z]+\.log\.([2-9]|[1-9][0-9]+)' -print -exec gzip -- {} +
+      -regex '.*/[a-z]+\.log\.([2-9]|[1-9][0-9]+)' |
+      while IFS= read -r backup; do
+        if [ -e "$backup.gz" ]; then
+          gzip -c -- "$backup" >> "$backup.gz"
+          rm -- "$backup"
+        else
+          gzip -- "$backup"
+        fi
+        echo "$backup"
+      done
     find /var/log/praho/portal -maxdepth 1 -type f -regextype posix-extended \
       -regex '.*/[a-z]+\.log\.(1[5-9]|[2-9][0-9]|[1-9][0-9][0-9]+)\.gz' -print -delete
   register: legacy_log_backups

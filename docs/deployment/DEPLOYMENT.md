@@ -839,6 +839,8 @@ Roll back to a specific image version. The tag applies to that run only (the env
 make rollback VERSION=v1.2.3
 ```
 
+**Native installs rolling back past the log rotation change** (releases before Platform and the portal stopped rotating their own log files): remove `/etc/logrotate.d/praho-platform` and `/etc/logrotate.d/praho-portal` first. The older release rotates those files in process again, and logrotate moving them as well would race it. The next deploy of a current release installs them again.
+
 ### Database Rollback
 
 Restore the latest database backup:
