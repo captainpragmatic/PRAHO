@@ -15,11 +15,11 @@ PORTAL = Path(__file__).resolve().parents[2]
 
 
 class ServerSettingsTests(SimpleTestCase):
-    def test_defaults_are_today_s_sync_workers(self) -> None:
+    def test_defaults_are_two_threaded_workers_of_four_threads(self) -> None:
         settings = server_settings({})
         self.assertEqual(
             {key: settings[key] for key in ("worker_class", "workers", "threads", "worker_connections")},
-            {"worker_class": "sync", "workers": 2, "threads": 1, "worker_connections": 1},
+            {"worker_class": "gthread", "workers": 2, "threads": 4, "worker_connections": 4},
         )
 
     def test_the_timeouts(self) -> None:
@@ -118,8 +118,12 @@ class GunicornReadsTheConfigTests(SimpleTestCase):
         self.assertEqual((cfg["timeout"], cfg["graceful_timeout"], cfg["accesslog"]), ("60", "50", "-"))
         self.assertIn("%(D)sus pid=%(p)s rid=%({x-request-id}o)s", cfg["access_log_format"])
 
-    def test_gunicorn_defaults_to_sync_workers(self) -> None:
+    def test_gunicorn_defaults_to_threaded_workers(self) -> None:
         cfg = self.effective()
+        self.assertEqual((cfg["worker_class"], cfg["workers"], cfg["threads"]), ("gthread", "2", "4"))
+
+    def test_sync_is_one_setting_away(self) -> None:
+        cfg = self.effective(PORTAL_GUNICORN_WORKER_CLASS="sync")
         self.assertEqual((cfg["worker_class"], cfg["workers"], cfg["threads"]), ("sync", "2", "1"))
 
     def test_a_value_that_is_not_allowed_stops_gunicorn_and_the_launchers_check(self) -> None:

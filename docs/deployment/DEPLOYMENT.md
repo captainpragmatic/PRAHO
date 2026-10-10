@@ -498,8 +498,8 @@ Override defaults with `-e` flags:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `gunicorn_workers_platform` | 2 | Platform Gunicorn workers |
-| `gunicorn_workers_portal` | 1 | Portal Gunicorn workers |
-| `gunicorn_worker_class_portal` | sync | Portal worker class: `sync` or `gthread` |
+| `gunicorn_workers_portal` | 2 | Portal Gunicorn workers |
+| `gunicorn_worker_class_portal` | gthread | Portal worker class: `gthread`, or `sync` to roll back (ADR-0056) |
 | `gunicorn_threads_portal` | 4 | Portal threads per worker (`gthread` only; `sync` always has one) |
 | `qcluster_workers` | 2 | Django-Q2 background workers |
 | `platform_memory_max` | 1G | systemd memory limit (platform) |
@@ -513,7 +513,7 @@ ansible-playbook -i inventory/native-single-server.yml \
   playbooks/native-single-server.yml \
   -e praho_env=prod \
   -e gunicorn_workers_platform=4 \
-  -e gunicorn_workers_portal=2
+  -e gunicorn_workers_portal=3
 ```
 
 #### Portal server settings
@@ -522,8 +522,8 @@ ansible-playbook -i inventory/native-single-server.yml \
 
 | Variable | Default | Allowed |
 |----------|---------|---------|
-| `PORTAL_GUNICORN_WORKER_CLASS` | `sync` | `sync` or `gthread` |
-| `PORTAL_GUNICORN_WORKERS` | 2 (native: `gunicorn_workers_portal`, 1) | 1-16 |
+| `PORTAL_GUNICORN_WORKER_CLASS` | `gthread` | `gthread`, or `sync` to roll back |
+| `PORTAL_GUNICORN_WORKERS` | 2 (native: `gunicorn_workers_portal`, 2) | 1-16 |
 | `PORTAL_GUNICORN_THREADS` | 4 for `gthread` (native: `gunicorn_threads_portal`, 4); always 1 for `sync` | 1-32 |
 
 Neither timeout is configurable:

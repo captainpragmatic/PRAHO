@@ -85,6 +85,7 @@ providing a historical record of why the system is built the way it is.
 | [ADR-0053](ADR-0053-every-settled-refund-issues-a-storno.md) | Every Settled Refund Issues a Storno Credit Note | Accepted | 2026-10-03 |
 | [ADR-0054](ADR-0054-supported-deployment-paths.md) | Two Supported Deployment Paths, Native Ansible and Docker Compose | Accepted | 2026-10-07 |
 | [ADR-0055](ADR-0055-portal-sessions-merge-concurrent-writes.md) | Portal Sessions Merge Concurrent Writes | Accepted | 2026-10-10 |
+| [ADR-0056](ADR-0056-portal-serves-requests-on-threads.md) | The Portal Serves Requests on Threads | Accepted | 2026-10-10 |
 
 ### 🟡 Partially Superseded
 
@@ -191,6 +192,7 @@ Billing Ownership
 ### 🚀 Deployment
 - [ADR-0054](ADR-0054-supported-deployment-paths.md) — native Ansible for servers, Docker Compose for Docker hosts, one operator env file; the Ansible Docker role is retired
 - [ADR-0055](ADR-0055-portal-sessions-merge-concurrent-writes.md) — portal session saves merge concurrent writes by compare-and-swap; key groups, record maps, revocation preserved
+- [ADR-0056](ADR-0056-portal-serves-requests-on-threads.md) — gunicorn gthread, 2 processes × 4 threads, so one customer waiting on Platform does not make the others wait; sync is the rollback
 
 ### 💰 Business & Domain
 - [ADR-0019](ADR-0019-virtualmin-automatic-provisioning.md) — VirtualMin provisioning
@@ -207,8 +209,8 @@ Billing Ownership
 
 ## Statistics
 
-- **Total ADRs**: 55 (ADR-0001 through ADR-0055)
-- **Active**: 48 (in the Active Decisions table: Accepted, Active, Implemented or Proposed)
+- **Total ADRs**: 56 (ADR-0001 through ADR-0056)
+- **Active**: 50 (in the Active Decisions table: Accepted, Active, Implemented or Proposed)
 - **Partially Superseded**: 1
 - **Superseded / Historical**: 5
-- **Next available**: ADR-0055
+- **Next available**: ADR-0057
