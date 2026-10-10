@@ -8,8 +8,37 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[2]
 PORTAL = ROOT / "services/portal"
+
+
+# gunicorn flags that would override services/portal/gunicorn.conf.py.
+SERVER_FLAGS = {
+    "-w", "--workers", "-k", "--worker-class", "--threads", "--worker-connections", "-t", "--timeout",
+    "--keep-alive", "--graceful-timeout", "-c", "--config", "--access-logfile", "--access-logformat",
+}  # fmt: skip
+
+
+class PortalServerSettingsOwnerTests(TestCase):
+    def test_the_native_unit_leaves_server_settings_to_the_config(self) -> None:
+        unit = (ROOT / "deploy/ansible/roles/praho-native/templates/praho-portal.service.j2").read_text()
+        start = unit.split("ExecStart=", 1)[1].split("\nRestart=", 1)[0]
+        self.assertEqual(SERVER_FLAGS & set(start.replace("\\", " ").split()), set(), start)
+        self.assertIn("ExecStartPre={{ project_root }}/.venv-linux/bin/python -m config.server_settings", unit)
+
+    def test_docker_waits_longer_than_gunicorns_graceful_shutdown(self) -> None:
+        graceful = subprocess.run(  # noqa: S603 -- a fixed command.
+            [sys.executable, "-c", "from config.server_settings import server_settings; print(server_settings({})['graceful_timeout'])"],
+            cwd=PORTAL, capture_output=True, text=True, timeout=60, check=True,
+        ).stdout.strip()  # fmt: skip
+        for stack in ("single-server", "container-service", "portal-only"):
+            with self.subTest(stack=stack):
+                compose = yaml.safe_load((ROOT / f"deploy/docker-compose.{stack}.yml").read_text())
+                grace = compose["services"]["portal"]["stop_grace_period"]
+                self.assertTrue(grace.endswith("s"), grace)
+                self.assertGreater(int(grace[:-1]), int(graceful))
 
 
 class PortalStartupTests(TestCase):
@@ -51,7 +80,8 @@ class PortalStartupTests(TestCase):
         )
         launcher.chmod(0o700)
         gunicorn = self.root / "gunicorn"
-        gunicorn.write_text("#!/bin/sh\nprintf '%s\\n' gunicorn >> \"$PORTAL_STARTUP_TRACE\"\n")
+        # Records its own name, then its arguments, so tests can see what the entrypoint passes.
+        gunicorn.write_text('#!/bin/sh\nprintf \'gunicorn\\nargs: %s\\n\' "$*" >> "$PORTAL_STARTUP_TRACE"\n')
         gunicorn.chmod(0o700)
         self.env["PATH"] = str(self.root) + os.pathsep + os.environ.get("PATH", "")
 
@@ -84,6 +114,21 @@ class PortalStartupTests(TestCase):
 
     def test_empty_database_starts_after_scoped_migrations(self) -> None:
         self.assert_started()
+
+    def test_the_entrypoint_leaves_server_settings_to_the_config(self) -> None:
+        # A flag would override gunicorn.conf.py, silently ignoring PORTAL_GUNICORN_*.
+        self.assert_started()
+        arguments = next(line for line in self.trace.read_text().splitlines() if line.startswith("args: "))
+        self.assertEqual(SERVER_FLAGS & set(arguments.split()), set(), arguments)
+        self.assertIn("--bind", arguments)
+
+    def test_bad_server_settings_stop_startup_before_migrations(self) -> None:
+        self.env["PORTAL_GUNICORN_WORKERS"] = "0"
+        result = self.start()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("PORTAL_GUNICORN_WORKERS", result.stderr)
+        commands = self.trace.read_text().splitlines() if self.trace.exists() else []
+        self.assertFalse([command for command in commands if "migrate" in command or command == "gunicorn"], commands)
 
     def test_sessions_only_upgrade_preserves_existing_sessions(self) -> None:
         result = self.manage("migrate", "sessions", "--noinput")
@@ -144,10 +189,11 @@ class PortalStartupTests(TestCase):
         self.assertEqual(health["uri"]["follow_redirects"], "none")
         unit = (ROOT / "deploy/ansible/roles/praho-native/templates/praho-portal.service.j2").read_text()
         commands = [line for line in unit.splitlines() if line.startswith("ExecStartPre=")]
-        self.assertEqual(len(commands), 3)
+        self.assertEqual(len(commands), 4)
         for command, expected in zip(
             commands,
             (
+                "python -m config.server_settings",
                 "manage.py migrate sessions --noinput",
                 "manage.py migrate common --noinput",
                 "manage.py check --deploy --fail-level ERROR",

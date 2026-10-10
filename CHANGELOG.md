@@ -481,13 +481,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **The portal's gunicorn settings have one owner:** `services/portal/gunicorn.conf.py` reads `PORTAL_GUNICORN_WORKER_CLASS` (`sync` or `gthread`), `PORTAL_GUNICORN_WORKERS` (1-16) and `PORTAL_GUNICORN_THREADS` (1-32). The launchers no longer pass `--workers` or `--timeout`. The defaults are unchanged: sync workers, two in Docker and one on native installs, and a 60 s request timeout. The graceful-shutdown timeout rises from gunicorn's 30 s to 50 s.
+- **The portal's gunicorn settings have one owner:** `services/portal/gunicorn.conf.py` reads `PORTAL_GUNICORN_WORKER_CLASS` (`sync` or `gthread`), `PORTAL_GUNICORN_WORKERS` (1-16) and `PORTAL_GUNICORN_THREADS` (1-32). The launchers no longer pass `--workers`, `--timeout` or log targets, and both check the settings before any migration runs. The defaults are unchanged: sync workers, two in Docker and one on native installs, and a 60 s request timeout. The graceful-shutdown timeout rises from gunicorn's 30 s to 50 s.
   - **Refuses bad values:** a value outside those ranges, or an inline `#` comment that systemd's `EnvironmentFile` keeps in the value, stops the portal from starting rather than running with something unintended. Under `sync` the thread count is not read.
   - **Refuses `GUNICORN_CMD_ARGS`,** which gunicorn applies over the config. On native installs the `.env` is shared with the platform, whose tuning would otherwise become the portal's.
   - **`sync` always means one thread.** Otherwise gunicorn quietly turns `sync` into `gthread` whenever threads > 1, so a rollback to `sync` that left the thread count set would stay threaded.
   - **Each connection closes after its response** (`keepalive 0`), as sync workers always did. A threaded worker accepts no more connections than it has threads.
-  - **Access log:** each line now carries the request duration, the worker pid and the request id.
-  - **Graceful restarts:** Docker allows 55 s, above gunicorn's 50 s graceful timeout, so a restart drains requests in flight.
+  - **Access log:** every deploy path now writes one to stdout; Docker had none. Each line is gunicorn's default line plus the request duration, the worker pid and the request id (`-` on a response refused before the request-id middleware ran).
+  - **Graceful restarts:** Docker allows 55 s, above gunicorn's 50 s graceful timeout, so a restart drains requests in flight. A single portal container refuses new requests while it drains.
   - **Upgrading:** a portal container no longer reads `GUNICORN_WORKERS`, which is the platform's setting. Set `PORTAL_GUNICORN_WORKERS` instead. On native installs, the Ansible variable `gunicorn_timeout_portal` is gone; the timeout is fixed at 60 s, so a raised value no longer applies. See the settings table and the rollback runbook in `docs/deployment/DEPLOYMENT.md`.
 - Deleting a Virtualmin account, and clearing the deletion-protection flag that guards it, now
   require an administrator rather than any staff member.

@@ -18,14 +18,14 @@ Environment="PORTAL_TRUSTED_PROXY_CIDRS={{ portal_django_env.PORTAL_TRUSTED_PROX
 Environment="PORTAL_GUNICORN_WORKER_CLASS={{ gunicorn_worker_class_portal }}"
 Environment="PORTAL_GUNICORN_WORKERS={{ gunicorn_workers_portal }}"
 Environment="PORTAL_GUNICORN_THREADS={{ gunicorn_threads_portal }}"
+# Refuse bad PORTAL_GUNICORN_* values before any migration runs (services/portal/config/server_settings.py).
+ExecStartPre={{ project_root }}/.venv-linux/bin/python -m config.server_settings
 ExecStartPre={{ project_root }}/.venv-linux/bin/python manage.py migrate sessions --noinput
 ExecStartPre={{ project_root }}/.venv-linux/bin/python manage.py migrate common --noinput
 ExecStartPre={{ project_root }}/.venv-linux/bin/python manage.py check --deploy --fail-level ERROR
 ExecStart={{ project_root }}/.venv-linux/bin/gunicorn \
     --bind 127.0.0.1:{{ portal_port }} \
     --no-control-socket \
-    --access-logfile - \
-    --error-logfile - \
     config.wsgi:application
 Restart=on-failure
 RestartSec=5
