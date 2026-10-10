@@ -7,6 +7,7 @@ from django.core import mail
 from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.utils import timezone
+from django_q.models import Schedule
 
 from apps.common import counters
 from apps.common.types import Err
@@ -15,27 +16,34 @@ from apps.settings.models import SystemSetting
 from apps.users import registration_confirmation
 from apps.users.models import CustomerMembership, User
 from apps.users.pending_registration import PendingRegistration
-from apps.users.tasks import cleanup_pending_registrations, deliver_registration
+from apps.users.tasks import (
+    cleanup_pending_registrations,
+    deliver_registration,
+    setup_user_security_scheduled_tasks,
+)
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
 
 PORTAL = "https://customers.example.test"
 PASSWORD = " Chosen-at-confirm-2026! "
 
 
+def pending_customer_data() -> dict[str, str]:
+    return {
+        "customer_type": "company",
+        "company_name": "Quill Lantern SRL",
+        "vat_number": "",
+        "billing_address": "Str. Exemplu 1",
+        "billing_city": "Cluj-Napoca",
+        "billing_postal_code": "400001",
+    }
+
+
 def pending(email: str = "new@example.test", **overrides: object) -> PendingRegistration:
     fields = {
         "email": email,
         "user_data": {"first_name": "Zedrick", "last_name": "Marlowe", "phone": ""},
-        "customer_data": {
-            "customer_type": "company",
-            "company_name": "Quill Lantern SRL",
-            "vat_number": "",
-            "billing_address": "Str. Exemplu 1",
-            "billing_city": "Cluj-Napoca",
-            "billing_postal_code": "400001",
-        },
+        "customer_data": pending_customer_data(),
         "language": "en",
-        "request_ip": "203.0.113.7",
         **overrides,
     }
     return PendingRegistration.objects.create(**fields)
@@ -120,6 +128,37 @@ class DeliverRegistrationTests(PortalOriginMixin, TestCase):
         row.refresh_from_db()
         self.assertIsNone(row.sent_at)
 
+    def test_a_backend_that_accepts_nothing_leaves_the_row_unsent(self) -> None:
+        row = pending()
+        with (
+            patch("apps.users.registration_confirmation.send_mail", return_value=0),
+            self.assertLogs("apps.users.tasks", level="ERROR"),
+        ):
+            self.assertEqual(deliver_registration(str(row.pk)), {"sent": False, "reason": "error"})
+        row.refresh_from_db()
+        self.assertIsNone(row.sent_at)
+
+    def test_the_row_is_marked_sent_before_the_link_leaves(self) -> None:
+        row = pending()
+        seen = []
+
+        def record_then_send(**kwargs: object) -> int:
+            seen.append(PendingRegistration.objects.get(pk=row.pk).sent_at)
+            return 1
+
+        with patch("apps.users.registration_confirmation.send_mail", side_effect=record_then_send):
+            self.assertTrue(deliver_registration(str(row.pk))["sent"])
+        self.assertIsNotNone(seen[0])
+
+    def test_an_address_gets_a_few_registration_mails_a_day_at_most(self) -> None:
+        recipient = registration_confirmation._recipient_key("new@example.test")
+        results = []
+        for _ in range(registration_confirmation.RECIPIENT_DAILY_LIMIT + 1):
+            counters.reset(f"registration_mail:{recipient}")  # as if the 10-minute cooldown had passed
+            results.append(deliver_registration(str(pending().pk)))
+        self.assertEqual(results[-1], {"sent": False, "reason": "daily_limit"})
+        self.assertEqual(len(mail.outbox), registration_confirmation.RECIPIENT_DAILY_LIMIT)
+
     def test_a_broken_portal_origin_sends_nothing(self) -> None:
         SystemSetting.objects.filter(key="portal.public_base_url").update(value="http://customers.example.test")
         cache.clear()
@@ -135,7 +174,11 @@ class ConfirmRegistrationTests(PortalOriginMixin, TestCase):
 
     def confirm(self, row: PendingRegistration, token: str | None = None, password: str = PASSWORD):
         return registration_confirmation.confirm(
-            str(row.pk), row.token() if token is None else token, password, accepts_marketing=True
+            str(row.pk),
+            row.token() if token is None else token,
+            password,
+            accepts_marketing=True,
+            data_processing_consent=True,
         )
 
     def test_the_confirmer_chooses_the_password_and_the_link_works_once(self) -> None:
@@ -177,7 +220,9 @@ class ConfirmRegistrationTests(PortalOriginMixin, TestCase):
         self.assertTrue(self.confirm(row).is_ok())
 
     def test_details_taken_since_the_request_are_refused(self) -> None:
-        email_row, company_row = self.sent("taken@example.test"), self.sent("other@example.test")
+        own_company = {**pending_customer_data(), "company_name": "Unrelated Ferry SRL"}
+        email_row = self.sent("taken@example.test", customer_data=own_company)
+        company_row = self.sent("other@example.test")
         User.objects.create_user(email="TAKEN@example.test", password="Existing-password-2026!")
         Customer.objects.create(
             name="Quill",
@@ -190,11 +235,30 @@ class ConfirmRegistrationTests(PortalOriginMixin, TestCase):
             with self.subTest(row.email):
                 self.assertEqual(self.confirm(row).unwrap_err().code, "details_unavailable")
         self.assertFalse(User.objects.filter(email="other@example.test").exists())
+        self.assertFalse(Customer.objects.filter(company_name="Unrelated Ferry SRL").exists())
+
+    def test_consent_is_required_and_recorded_as_given(self) -> None:
+        row = self.sent()
+        refused = registration_confirmation.confirm(
+            str(row.pk), row.token(), PASSWORD, accepts_marketing=True, data_processing_consent=False
+        )
+        self.assertEqual(refused.unwrap_err().code, "consent_required")
+        row.refresh_from_db()
+        self.assertTrue(row.is_usable())
+        user, customer = registration_confirmation.confirm(
+            str(row.pk), row.token(), PASSWORD, accepts_marketing=False, data_processing_consent=True
+        ).unwrap()
+        user.refresh_from_db()
+        customer.refresh_from_db()
+        self.assertFalse(user.accepts_marketing)
+        self.assertFalse(customer.marketing_consent)
+        self.assertTrue(customer.data_processing_consent)
 
     def test_an_account_that_cannot_be_created_now_keeps_the_link(self) -> None:
         row = self.sent()
         with patch(
-            "apps.users.services.SecureUserRegistrationService.create_customer_owner", return_value=Err("database busy")
+            "apps.users.services.SecureUserRegistrationService.create_customer_owner_unchecked",
+            return_value=Err("database busy"),
         ):
             self.assertEqual(self.confirm(row).unwrap_err().code, "unavailable")
         row.refresh_from_db()
@@ -205,7 +269,12 @@ class ConfirmRegistrationTests(PortalOriginMixin, TestCase):
         row = self.sent()
         before = counters.peek("rate_limit:registration:203.0.113.7"), counters.peek("rate_limit:registration:")
         result = registration_confirmation.confirm(
-            str(row.pk), row.token(), PASSWORD, accepts_marketing=False, request_ip="203.0.113.7"
+            str(row.pk),
+            row.token(),
+            PASSWORD,
+            accepts_marketing=False,
+            data_processing_consent=True,
+            request_ip="203.0.113.7",
         )
         self.assertTrue(result.is_ok(), result)
         after = counters.peek("rate_limit:registration:203.0.113.7"), counters.peek("rate_limit:registration:")
@@ -224,15 +293,26 @@ class CleanupPendingRegistrationTests(TestCase):
         keep = [
             pending("fresh@example.test"),
             pending("recent@example.test", sent_at=now - timedelta(hours=24)),
+            pending("waiting@example.test"),
         ]
         drop = [
             pending("used@example.test", sent_at=now, consumed_at=now),
             pending("expired@example.test", sent_at=now - timedelta(hours=25, seconds=1)),
             pending("unsent@example.test"),
         ]
-        PendingRegistration.objects.filter(pk=drop[2].pk).update(created_at=now - timedelta(hours=25, seconds=1))
+        # Unsent rows can only be sent within 15 minutes; cleanup waits a further hour.
+        PendingRegistration.objects.filter(pk=keep[2].pk).update(created_at=now - timedelta(minutes=74))
+        PendingRegistration.objects.filter(pk=drop[2].pk).update(created_at=now - timedelta(minutes=76))
         self.assertEqual(cleanup_pending_registrations(), {"deleted": 3})
         self.assertEqual(set(PendingRegistration.objects.values_list("pk", flat=True)), {row.pk for row in keep})
+
+    def test_cleanup_is_scheduled_hourly(self) -> None:
+        setup_user_security_scheduled_tasks()
+        scheduled = Schedule.objects.get(name="user-pending-registration-cleanup")
+        self.assertEqual(
+            (scheduled.func, scheduled.schedule_type),
+            ("apps.users.tasks.cleanup_pending_registrations", Schedule.HOURLY),
+        )
 
 
 @override_settings(
@@ -263,7 +343,24 @@ class RegistrationConfirmAPITests(HMACTestMixin, TestCase):
         response = self.portal_post(self.path, self.body())
         self.assertEqual(response.status_code, 201, response.content)
         self.assertEqual(response.json(), {"success": True, "email": "new@example.test"})
-        self.assertTrue(User.objects.get(email="new@example.test").check_password(PASSWORD))
+        user = User.objects.get(email="new@example.test")
+        self.assertTrue(user.check_password(PASSWORD))
+        self.assertFalse(user.accepts_marketing)
+        self.assertFalse(Customer.objects.get(company_name="Quill Lantern SRL").marketing_consent)
+
+    def test_marketing_consent_is_passed_through(self) -> None:
+        self.assertEqual(self.portal_post(self.path, self.body(marketing_consent=True)).status_code, 201)
+        self.assertTrue(User.objects.get(email="new@example.test").accepts_marketing)
+
+    def test_an_unexpected_failure_answers_503_and_keeps_the_link(self) -> None:
+        with (
+            patch("apps.users.registration_confirmation.confirm", side_effect=RuntimeError("boom")),
+            self.assertLogs("apps.api.users.views", level="ERROR"),
+        ):
+            response = self.portal_post(self.path, self.body())
+        self.assertEqual((response.status_code, response.json()["code"]), (503, "unavailable"))
+        self.row.refresh_from_db()
+        self.assertTrue(self.row.is_usable())
 
     def test_refusals_have_their_own_codes(self) -> None:
         cases = [

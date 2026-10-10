@@ -852,6 +852,7 @@ def registration_confirm_api(request: HttpRequest) -> Response:
             data["token"],
             data["password"],
             accepts_marketing=data["marketing_consent"],
+            data_processing_consent=data["data_processing_consent"],
             request_ip=forwarded_client_ip(request),
             user_agent=request.META.get("HTTP_USER_AGENT", ""),
         )
@@ -864,35 +865,38 @@ def registration_confirm_api(request: HttpRequest) -> Response:
         logger.info("✅ [Registration] Pending registration confirmed for user %s", user.pk)
         return Response({"success": True, "email": user.email}, status=status.HTTP_201_CREATED)
 
-    code = "unavailable" if result is None else result.unwrap_err().code
-    if code == "invalid_link":
-        return Response(
-            {"success": False, "code": code, "error": _("This link has expired or was already used.")},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-    if code == "password_rejected":
-        messages = [] if result is None else result.unwrap_err().messages
-        return Response(
-            {"success": False, "code": "validation_failed", "errors": {"password": messages}},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-    if code == "details_unavailable":
-        return Response(
+    refusal = None if result is None else result.unwrap_err()
+    code = "unavailable" if refusal is None else refusal.code
+    answers: dict[str, tuple[int, dict[str, Any]]] = {
+        "invalid_link": (
+            status.HTTP_400_BAD_REQUEST,
+            {"code": "invalid_link", "error": _("This link has expired or was already used.")},
+        ),
+        "consent_required": (
+            status.HTTP_400_BAD_REQUEST,
             {
-                "success": False,
-                "code": code,
+                "code": "validation_failed",
+                "errors": {"data_processing_consent": [_("Data processing consent is required.")]},
+            },
+        ),
+        "password_rejected": (
+            status.HTTP_400_BAD_REQUEST,
+            {"code": "validation_failed", "errors": {"password": [] if refusal is None else refusal.messages}},
+        ),
+        "details_unavailable": (
+            status.HTTP_409_CONFLICT,
+            {
+                "code": "details_unavailable",
                 "error": _("These details are no longer available. Please register again."),
             },
-            status=status.HTTP_409_CONFLICT,
-        )
-    return Response(
-        {
-            "success": False,
-            "code": "unavailable",
-            "error": _("Your account could not be created right now. Please try again."),
-        },
-        status=status.HTTP_503_SERVICE_UNAVAILABLE,
-    )
+        ),
+        "unavailable": (
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            {"code": "unavailable", "error": _("Your account could not be created right now. Please try again.")},
+        ),
+    }
+    answer_status, payload = answers[code]
+    return Response({"success": False, **payload}, status=answer_status)
 
 
 @api_view(["POST"])

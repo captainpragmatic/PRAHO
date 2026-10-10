@@ -140,5 +140,6 @@ def _validate_throttle_rates_at_startup() -> None:
         "rest_framework.throttling.AnonRateThrottle",
         "apps.common.performance.rate_limiting.LoginClientIPThrottle",
         "apps.common.performance.rate_limiting.ResetClientIPThrottle",
+        "apps.common.performance.rate_limiting.RegistrationConfirmClientIPThrottle",
     ]
     validate_throttle_class_scopes(scoped_class_paths, throttle_rates)

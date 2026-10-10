@@ -122,9 +122,9 @@ def deliver_registration(registration_id: str) -> dict[str, Any]:
     hours later. The request queues it with ``ack_failure``, and a request older than 15 minutes
     is dropped (apps.users.registration_confirmation.deliver).
     """
-    from apps.users import registration_confirmation  # noqa: PLC0415
-
     try:
+        from apps.users import registration_confirmation  # noqa: PLC0415
+
         return registration_confirmation.deliver(registration_id)
     except Exception as exc:
         logger.exception("🔥 [Registration] Not sent (%s): %s", type(exc).__name__, exc)

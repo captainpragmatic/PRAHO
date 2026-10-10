@@ -12,8 +12,8 @@ same link, and a row that no longer exists has no valid token.
 from __future__ import annotations
 
 import uuid
-from datetime import timedelta
-from typing import Any, ClassVar
+from datetime import datetime, timedelta
+from typing import ClassVar
 
 from django.db import models
 from django.utils import timezone
@@ -37,8 +37,6 @@ class PendingRegistration(models.Model):
     # customer_type, company_name, vat_number and the billing address fields.
     customer_data = models.JSONField(default=dict)
     language = models.CharField(max_length=10, default="en")
-    request_ip = models.GenericIPAddressField(null=True, blank=True)
-    user_agent = models.CharField(max_length=500, blank=True, default="")
     sent_at = models.DateTimeField(null=True, blank=True)
     consumed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -60,7 +58,7 @@ class PendingRegistration(models.Model):
     def token_matches(self, token: str) -> bool:
         return constant_time_compare(self.token(), token)
 
-    def is_usable(self, now: Any = None) -> bool:
+    def is_usable(self, now: datetime | None = None) -> bool:
         """Sent, not yet confirmed, and within the link's lifetime."""
         now = now or timezone.now()
         return self.consumed_at is None and self.sent_at is not None and now < self.sent_at + CONFIRMATION_LINK_LIFETIME

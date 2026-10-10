@@ -345,10 +345,10 @@ class SecureUserRegistrationService:
         - Rate limiting per IP and email
         - Timing attack prevention
         """
-        return cls.create_customer_owner(user_data, customer_data, request_ip, user_agent)
+        return cls.create_customer_owner_unchecked(user_data, customer_data, request_ip, user_agent)
 
     @classmethod
-    def create_customer_owner(
+    def create_customer_owner_unchecked(
         cls,
         user_data: dict[str, Any],
         customer_data: dict[str, Any],
