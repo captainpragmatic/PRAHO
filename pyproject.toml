@@ -145,7 +145,7 @@ dev = [
 # Production dependencies - server, monitoring, optimization
 prod = [
     # Production WSGI server
-    "gunicorn>=25.0.0",
+    "gunicorn>=26.2.0",
     "gevent>=23.7.0",
 
     # Production database optimizations
@@ -228,7 +228,7 @@ platform = [
 # Portal-specific dependencies (minimal, no database)
 portal = [
     # Production server only - portal is lightweight
-    "gunicorn>=25.0.0",
+    "gunicorn>=26.2.0",
 
     # IP address detection (used in rate limiting middleware)
     "django-ipware>=7.0.0",

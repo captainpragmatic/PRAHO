@@ -21,6 +21,7 @@ ExecStart={{ project_root }}/.venv-linux/bin/gunicorn \
     --bind 127.0.0.1:{{ portal_port }} \
     --workers {{ gunicorn_workers_portal }} \
     --timeout {{ gunicorn_timeout_portal }} \
+    --no-control-socket \
     --access-logfile - \
     --error-logfile - \
     config.wsgi:application
