@@ -239,9 +239,46 @@ class GetAccountHealthTest(TestCase):
         mock_fetch.assert_called_once_with(1, 10)
         assert banner is not None
         self.assertEqual(banner.severity, "critical")
-        # Verify session was populated
-        self.assertIn("account_health_data", session)
+        # Verify session was populated, bound to the customer it was fetched for
+        self.assertEqual(session["account_health_data"]["customer_id"], "1")
         self.assertIn("account_health_fetched_at", session)
+
+    @patch("apps.common.account_health._fetch_summaries")
+    def test_a_fresh_cache_for_another_customer_is_not_used(self, mock_fetch: MagicMock) -> None:
+        # A request that started before a company switch can store the previous customer's
+        # summaries after it. They must never be shown for the newly active customer.
+        mock_fetch.return_value = ({}, {}, {}, True)
+        session: dict = {
+            "customer_id": "2",
+            "user_id": "10",
+            "account_health_data": {
+                "customer_id": "1",
+                "invoice": {"overdue_invoices": 3},
+                "services": {},
+                "tickets": {},
+            },
+            "account_health_fetched_at": time.time(),  # Fresh, but for customer 1
+        }
+        request = self._make_request(session)
+
+        banner = get_account_health(request)
+
+        mock_fetch.assert_called_once_with(2, 10)
+        self.assertIsNone(banner)  # Customer 2's own summaries are all clear
+        self.assertEqual(session["account_health_data"]["customer_id"], "2")
+
+    @patch("apps.common.account_health._fetch_summaries")
+    def test_a_cache_without_a_customer_is_not_used(self, mock_fetch: MagicMock) -> None:
+        # Written before entries named their customer; read once more, then replaced.
+        mock_fetch.return_value = ({}, {}, {}, True)
+        session: dict = {
+            "customer_id": "1",
+            "user_id": "10",
+            "account_health_data": {"invoice": {"overdue_invoices": 3}, "services": {}, "tickets": {}},
+            "account_health_fetched_at": time.time(),
+        }
+        self.assertIsNone(get_account_health(self._make_request(session)))
+        mock_fetch.assert_called_once()
 
     @patch("apps.common.account_health._fetch_summaries")
     def test_uses_request_customer_id_not_legacy_session_key(self, mock_fetch: MagicMock) -> None:
@@ -337,6 +374,7 @@ class GetAccountHealthTest(TestCase):
             "customer_id": "1",
             "user_id": "10",
             "account_health_data": {
+                "customer_id": "1",
                 "invoice": {"overdue_invoices": 1},
                 "services": {},
                 "tickets": {},
@@ -358,6 +396,7 @@ class GetAccountHealthTest(TestCase):
             "customer_id": "1",
             "user_id": "10",
             "account_health_data": {
+                "customer_id": "1",
                 "invoice": {"overdue_invoices": 1},
                 "services": {},
                 "tickets": {},

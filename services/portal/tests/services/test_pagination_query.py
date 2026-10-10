@@ -1,11 +1,11 @@
 """Service list and HTMX links preserve encoded filters."""
 
-import time
 from unittest.mock import patch
 
 from django.test import TestCase
 from django.urls import reverse
 
+from apps.common.account_health import remember_account_health
 from tests.common.pagination_assertions import SEARCH, assert_next_query
 
 
@@ -14,8 +14,8 @@ class ServicePaginationQueryTests(TestCase):
         session = self.client.session
         session["customer_id"] = 1
         session["user_id"] = 2
-        session["account_health_data"] = {"invoice": {}, "services": {}, "tickets": {}}
-        session["account_health_fetched_at"] = time.time()
+        # A fresh banner cache for the active customer keeps the banner fetch off the network.
+        remember_account_health(session, 1, {}, {}, {})
         session.save()
 
     def check_page(self, route: str) -> None:

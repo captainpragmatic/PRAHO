@@ -4,7 +4,6 @@ Customer-facing dashboard with API integration - STATELESS ARCHITECTURE.
 """
 
 import logging
-import time
 from typing import Any
 
 from django.http import HttpRequest, HttpResponse
@@ -13,6 +12,7 @@ from django.utils.translation import gettext as _
 
 from apps.api_client.services import PlatformAPIError, api_client
 from apps.billing.services import InvoiceViewService
+from apps.common.account_health import remember_account_health
 from apps.common.api_utils import DictAsObj
 from apps.common.rate_limit_feedback import (
     build_maintenance_context,
@@ -272,12 +272,7 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0915
         and services_summary
         and tickets_summary
     ):
-        request.session["account_health_data"] = {
-            "invoice": invoice_summary,
-            "services": services_summary,
-            "tickets": tickets_summary,
-        }
-        request.session["account_health_fetched_at"] = time.time()
+        remember_account_health(request.session, customer_id, invoice_summary, services_summary, tickets_summary)
 
     # Fallback for greeting name if not resolved
     if not greeting_name:

@@ -223,3 +223,5 @@ class DashboardCacheSeedingGuardTests(SimpleTestCase):
         self._call_dashboard(request)
         self.assertIn("account_health_data", request.session)
         self.assertIn("account_health_fetched_at", request.session)
+        # Bound to the customer it was fetched for, so it is never shown for another one.
+        self.assertEqual(request.session["account_health_data"]["customer_id"], "1")

@@ -8,6 +8,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.billing.schemas import BillingDocumentPage, Currency, Invoice
+from apps.common.account_health import remember_account_health
 from tests.common.pagination_assertions import SEARCH, assert_next_query
 
 
@@ -19,8 +20,8 @@ class BillingPaginationQueryTests(TestCase):
         session["email"] = "owner@example.test"
         session["user_memberships"] = [{"customer_id": 42, "role": "owner"}]
         session["user_memberships_fetched_at"] = time.time()
-        session["account_health_data"] = {"invoice": {}, "services": {}, "tickets": {}}
-        session["account_health_fetched_at"] = time.time()
+        # A fresh banner cache for the active customer keeps the banner fetch off the network.
+        remember_account_health(session, 42, {}, {}, {})
         session.save()
 
     def check_page(self, route: str) -> None:
