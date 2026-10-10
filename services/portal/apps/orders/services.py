@@ -22,6 +22,18 @@ from apps.common import counters
 
 from .validators import MAX_CART_ITEMS, OrderInputValidator
 
+
+def platform_user_id(value: object) -> int | None:
+    """The signed-in user's id for a Platform call, or None.
+
+    Sent in the signed body of an authenticated call so Platform counts it against this customer's
+    own rate limit rather than the bucket every anonymous caller of the portal shares. Public
+    endpoints (the product catalog, service plans) skip that limiter, so they need no user.
+    """
+    text = str(value) if value is not None else ""
+    return int(text) if text.isascii() and text.isdigit() else None
+
+
 logger = logging.getLogger(__name__)
 
 

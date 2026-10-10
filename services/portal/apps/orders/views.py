@@ -44,6 +44,7 @@ from .services import (
     GDPRCompliantCartSession,
     HMACPriceSealer,
     OrderCreationService,
+    platform_user_id,
     read_selling_policy,
 )
 from .validators import OrderInputValidator
@@ -1254,7 +1255,9 @@ def order_confirmation(request: HttpRequest, order_id: str) -> HttpResponse:
             if payment_info:
                 try:
                     # Get Stripe configuration from Platform API
-                    stripe_config_result = platform_api.get_billing("stripe-config/")
+                    stripe_config_result = platform_api.get_billing(
+                        "stripe-config/", user_id=platform_user_id(_get_customer_context(request)[1])
+                    )
                     if stripe_config_result and stripe_config_result.get("success"):
                         stripe_config = stripe_config_result.get("config", {})
                         logger.info("✅ Retrieved Stripe configuration for checkout")

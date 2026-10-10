@@ -428,27 +428,65 @@ class PortalServiceHMACMiddleware:
 
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]):
         self.get_response = get_response
-        # Rate limit config (fallbacks if not in settings)
+        # Rate limit config (fallbacks if not in settings; config/settings/base.py sets and validates them)
         self._rl_window = int(getattr(settings, "HMAC_RATE_LIMIT_WINDOW", 60))
-        self._rl_max_calls = int(getattr(settings, "HMAC_RATE_LIMIT_MAX_CALLS", 300))
-        self._rl_max_auth_calls = int(getattr(settings, "HMAC_RATE_LIMIT_MAX_AUTH_CALLS", 120))
+        # The portal-wide ceiling: everything one portal sends, against a compromised portal.
+        self._rl_max_calls = int(getattr(settings, "HMAC_RATE_LIMIT_MAX_CALLS", 1000))
+        self._rl_max_auth_calls = int(getattr(settings, "HMAC_RATE_LIMIT_MAX_AUTH_CALLS", 600))
+        # Each principal's own budget, so one customer cannot use up what every customer shares.
+        self._rl_principal_calls = int(getattr(settings, "HMAC_RATE_LIMIT_PRINCIPAL_PER_MINUTE", 120))
+        self._rl_principal_burst = int(getattr(settings, "HMAC_RATE_LIMIT_PRINCIPAL_BURST", 40))
+        self._rl_principal_burst_window = int(getattr(settings, "HMAC_RATE_LIMIT_PRINCIPAL_BURST_WINDOW", 10))
+        self._rl_principal_auth_calls = int(getattr(settings, "HMAC_RATE_LIMIT_PRINCIPAL_AUTH_PER_MINUTE", 30))
+        self._rl_anonymous_calls = int(getattr(settings, "HMAC_RATE_LIMIT_ANONYMOUS_PER_MINUTE", 600))
+        # Logins and resets without a signed client IP (a portal without trusted proxies) share this.
+        self._rl_anonymous_auth_calls = int(getattr(settings, "HMAC_RATE_LIMIT_ANONYMOUS_AUTH_PER_MINUTE", 120))
 
-    def _rate_limited(self, portal_id: str, client_ip: str, *, path: str = "") -> tuple[bool, int]:
-        """Keep authentication traffic in a separate portal/IP fixed-window bucket."""
-        key = f"hmac_rl:{portal_id}:{client_ip}"
-        max_calls = self._rl_max_calls
-        if path.rstrip("/") in {
+    def _rate_limited(
+        self, portal_id: str, client_ip: str, *, path: str = "", principal: str = portal_hmac.ANONYMOUS_PRINCIPAL
+    ) -> tuple[bool, int]:
+        """Charge the principal's own windows first, then the portal-wide ceiling.
+
+        A principal over its own budget is refused without charging the portal-wide counter, so
+        it cannot use up what every other customer of that portal shares. Authentication traffic
+        keeps separate buckets at both levels.
+        """
+        auth = path.rstrip("/") in {
             "/api/users/login",
             "/api/users/password/reset",
             "/api/users/password/reset/confirm",
-        }:
-            key = f"{key}:auth"
-            max_calls = self._rl_max_auth_calls
+        }
+        principal_key = f"hmac_rl:{portal_id}:principal:{principal}"
+        if auth:
+            auth_budget = (
+                self._rl_anonymous_auth_calls
+                if principal == portal_hmac.ANONYMOUS_PRINCIPAL
+                else self._rl_principal_auth_calls
+            )
+            principal_windows = [(f"{principal_key}:auth", self._rl_window, auth_budget)]
+        elif principal == portal_hmac.ANONYMOUS_PRINCIPAL:
+            principal_windows = [(principal_key, self._rl_window, self._rl_anonymous_calls)]
+        else:
+            principal_windows = [
+                (principal_key, self._rl_window, self._rl_principal_calls),
+                (f"{principal_key}:burst", self._rl_principal_burst_window, self._rl_principal_burst),
+            ]
+        for key, window, budget in principal_windows:
+            limited, retry_after = self._charge(key, window, budget, portal_id, client_ip)
+            if limited:
+                return True, retry_after
+
+        portal_key = f"hmac_rl:{portal_id}:{client_ip}"
+        if auth:
+            return self._charge(f"{portal_key}:auth", self._rl_window, self._rl_max_auth_calls, portal_id, client_ip)
+        return self._charge(portal_key, self._rl_window, self._rl_max_calls, portal_id, client_ip)
+
+    def _charge(self, key: str, window: int, budget: int, portal_id: str, client_ip: str) -> tuple[bool, int]:
+        """Count one request in a fixed window; (refused, seconds until the window resets)."""
         now = time.time()
-        window_index = int(now // self._rl_window)
-        counter_key = f"{key}:{window_index}"
+        window_index = int(now // window)
         try:
-            current = counters.increment(counter_key, self._rl_window * 2)
+            current = counters.increment(f"{key}:{window_index}", window * 2)
         except (DatabaseError, InterfaceError) as error:
             logger.error(
                 "🔥 [HMACRateLimiter] Counter store unavailable — denying request for portal %s from %s",
@@ -457,12 +495,9 @@ class PortalServiceHMACMiddleware:
                 exc_info=True,
             )
             raise HMACStoreUnavailable from error
-
-        if current <= max_calls:
+        if current <= budget:
             return False, 0
-
-        retry_after = max(1, math.ceil(self._rl_window - (now % self._rl_window)))
-        return True, retry_after
+        return True, max(1, math.ceil(window - (now % window)))
 
     def _verify_signature_by_mode(self, portal_id: str, sig_ok: Callable[[str], bool]) -> str:
         """Return "" if the signature authenticates portal_id under PORTAL_HMAC_MODE, else an error.
@@ -638,10 +673,12 @@ class PortalServiceHMACMiddleware:
 
         return False, "", error_msg
 
-    def _rate_limit_refusal(self, request: HttpRequest, portal_id: str, client_ip: str) -> HttpResponse | None:
+    def _rate_limit_refusal(
+        self, request: HttpRequest, portal_id: str, client_ip: str, principal: str
+    ) -> HttpResponse | None:
         """The 429 (or, with the counter store down, 503) for a request over its budget; else None."""
         try:
-            is_limited, retry_after = self._rate_limited(portal_id, client_ip, path=request.path)
+            is_limited, retry_after = self._rate_limited(portal_id, client_ip, path=request.path, principal=principal)
         except HMACStoreUnavailable:
             return _store_unavailable_response()
         if not is_limited:
@@ -722,9 +759,13 @@ class PortalServiceHMACMiddleware:
             # not a re-read of the attacker-controllable header (#277).
             request._portal_authenticated = True
             request._portal_id = verified_portal_id or "unknown"
+            # Who the request is for, parsed once from the body the signature just verified.
+            request._portal_principal = portal_hmac.portal_principal(request.body)
 
             # Post-auth rate limiting: keyed by the verified portal_id (not the raw header).
-            if rate_limit_enabled and (refusal := self._rate_limit_refusal(request, request._portal_id, client_ip)):
+            if rate_limit_enabled and (
+                refusal := self._rate_limit_refusal(request, request._portal_id, client_ip, request._portal_principal)
+            ):
                 return refusal
 
             logger.info(f"✅ [HMAC Auth] API request authenticated from portal {request._portal_id} at {client_ip}")

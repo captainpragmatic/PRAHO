@@ -373,16 +373,23 @@ TIMESTAMP
 
 ### HMAC Rate Limiting
 
-- General bucket: `hmac_rl:{portal_id}:{client_ip}:{window_index}`, default 300 calls per 60 seconds.
-- Login, password reset, and reset confirmation share a separate
-  `hmac_rl:{portal_id}:{client_ip}:auth:{window_index}` bucket, default 120 calls per 60 seconds.
-  Paths match with or without trailing slashes. Exhausting this bucket does not
-  consume the general bucket.
-- `client_ip` in these middleware keys is the transport/proxy-resolved IP, usually
-  the Portal container's IP, rather than the end-user IP.
-- `HMAC_RATE_LIMIT_WINDOW` controls both windows; `HMAC_RATE_LIMIT_MAX_CALLS`
-  controls the general cap. `HMAC_RATE_LIMIT_MAX_AUTH_CALLS` controls the auth cap
-  as a Django setting (default 120; no environment-variable mapping).
+- **Per principal first** (ADR-0030): each request's principal (`user:<id>` from the
+  signed body, else `ip:<addr>` from the signed `client_ip`, else `anonymous`) has its own
+  buckets, `hmac_rl:{portal_id}:principal:{principal}[:burst|:auth]:{window_index}`. Defaults
+  per minute: 120 plus 40 per 10 s for a customer, 600 for anonymous, 30 per principal on the
+  auth paths and 120 for anonymous auth traffic. A principal over its budget is refused
+  without charging the portal-wide buckets below.
+- **Portal-wide ceilings**: `hmac_rl:{portal_id}:{client_ip}:{window_index}` (default 1000 per
+  minute) and, for login, password reset and reset confirmation,
+  `hmac_rl:{portal_id}:{client_ip}:auth:{window_index}` (default 600). `client_ip` here is the
+  transport/proxy-resolved IP, usually the Portal container's, not the end user's.
+- Settings, all environment-overridable and validated at startup (each principal budget below
+  its ceiling): `HMAC_RATE_LIMIT_MAX_CALLS`, `HMAC_RATE_LIMIT_MAX_AUTH_CALLS`,
+  `HMAC_RATE_LIMIT_PRINCIPAL_PER_MINUTE`, `HMAC_RATE_LIMIT_PRINCIPAL_BURST`,
+  `HMAC_RATE_LIMIT_PRINCIPAL_AUTH_PER_MINUTE`, `HMAC_RATE_LIMIT_ANONYMOUS_PER_MINUTE`,
+  `HMAC_RATE_LIMIT_ANONYMOUS_AUTH_PER_MINUTE`. `HMAC_RATE_LIMIT_WINDOW` is 60 seconds.
+- Public endpoints (`@public_api_endpoint`, e.g. currencies and registration) are not
+  portal-authenticated, skip this limiter and keep their own per-view limits.
 - Login, both password-reset endpoints, and `/api/customers/register/` require
   HMAC authentication. The duplicate `/api/users/register/` route has been removed.
 - Fixed-window counters include `window_index = int(now // window)` in their

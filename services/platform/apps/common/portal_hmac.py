@@ -29,6 +29,7 @@ middleware and the app-ready startup hook.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import re
 from functools import lru_cache
@@ -121,3 +122,54 @@ def validate_at_startup() -> None:
             "PORTAL_HMAC_MODE='enforce' requires a non-empty PORTAL_HMAC_CREDENTIALS registry "
             "(otherwise every portal request would be rejected)."
         )
+
+
+ANONYMOUS_PRINCIPAL = "anonymous"
+# A database id has at most 19 digits; a longer string is malformed (and int() of a very long one
+# raises), so it falls back to anonymous like any other bad value.
+MAX_USER_ID_DIGITS = 19
+
+
+class _DuplicateKeyError(ValueError):
+    pass
+
+
+def _refuse_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    keys = [key for key, _value in pairs]
+    if len(keys) != len(set(keys)):
+        raise _DuplicateKeyError("duplicate key in a signed body")
+    return dict(pairs)
+
+
+def portal_principal(body: bytes) -> str:
+    """Who a verified portal request is for: ``user:<id>``, else ``ip:<addr>``, else ``anonymous``.
+
+    Read only from the signed body the HMAC middleware has just verified, never from headers or
+    the query string. Anything ambiguous or malformed (duplicate keys, a body that is not a JSON
+    object, an id or address of the wrong shape) is ``anonymous``: it can never pick a bucket.
+    """
+    try:
+        data = json.loads(body, object_pairs_hook=_refuse_duplicate_keys)
+    except (ValueError, UnicodeDecodeError, RecursionError):
+        return ANONYMOUS_PRINCIPAL
+    if not isinstance(data, dict):
+        return ANONYMOUS_PRINCIPAL
+    user_id = data.get("user_id")
+    if isinstance(user_id, str) and user_id.isascii() and user_id.isdigit() and len(user_id) <= MAX_USER_ID_DIGITS:
+        user_id = int(user_id)
+    if isinstance(user_id, int) and not isinstance(user_id, bool) and 0 < user_id < 10**MAX_USER_ID_DIGITS:
+        return f"user:{user_id}"
+    client_ip = data.get("client_ip")
+    return _ip_principal(client_ip) if isinstance(client_ip, str) else ANONYMOUS_PRINCIPAL
+
+
+def _ip_principal(client_ip: str) -> str:
+    try:
+        address = ipaddress.ip_address(client_ip)
+    except ValueError:
+        return ANONYMOUS_PRINCIPAL
+    # An IPv6 scope id ("fe80::1%eth0") is free text that ends up in counter keys, where
+    # "%eth0:auth" would name another principal's auth counter. Client addresses never carry one.
+    if getattr(address, "scope_id", None) is not None:
+        return ANONYMOUS_PRINCIPAL
+    return f"ip:{address}"

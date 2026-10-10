@@ -698,6 +698,21 @@ CACHE_VERSION = int(os.environ.get("CACHE_VERSION", "1"))
 # DRF THROTTLING CONFIGURATION 🚦
 # ===============================================================================
 
+# HMAC middleware limits on portal traffic, per minute unless named otherwise (ADR-0030).
+# Each principal (the signed body's user, else its client IP, else "anonymous") has its own
+# budget, so one customer cannot use up what every customer of a portal shares. The portal-wide
+# ceilings stay as protection against a compromised portal. Checked at startup (apps.common.apps).
+HMAC_RATE_LIMIT_WINDOW = 60
+HMAC_RATE_LIMIT_MAX_CALLS = int(os.environ.get("HMAC_RATE_LIMIT_MAX_CALLS") or "1000")
+HMAC_RATE_LIMIT_MAX_AUTH_CALLS = int(os.environ.get("HMAC_RATE_LIMIT_MAX_AUTH_CALLS") or "600")
+HMAC_RATE_LIMIT_PRINCIPAL_PER_MINUTE = int(os.environ.get("HMAC_RATE_LIMIT_PRINCIPAL_PER_MINUTE") or "120")
+HMAC_RATE_LIMIT_PRINCIPAL_BURST = int(os.environ.get("HMAC_RATE_LIMIT_PRINCIPAL_BURST") or "40")
+HMAC_RATE_LIMIT_PRINCIPAL_BURST_WINDOW = 10
+HMAC_RATE_LIMIT_PRINCIPAL_AUTH_PER_MINUTE = int(os.environ.get("HMAC_RATE_LIMIT_PRINCIPAL_AUTH_PER_MINUTE") or "30")
+HMAC_RATE_LIMIT_ANONYMOUS_PER_MINUTE = int(os.environ.get("HMAC_RATE_LIMIT_ANONYMOUS_PER_MINUTE") or "600")
+# Logins and resets without a signed client IP share this (it was the portal-wide auth limit).
+HMAC_RATE_LIMIT_ANONYMOUS_AUTH_PER_MINUTE = int(os.environ.get("HMAC_RATE_LIMIT_ANONYMOUS_AUTH_PER_MINUTE") or "120")
+
 # Rate limiting rates for different scopes
 THROTTLE_RATES = {
     # Global DRF defaults (apps.common.performance.rate_limiting)

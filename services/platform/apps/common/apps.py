@@ -26,6 +26,7 @@ class CommonConfig(AppConfig):
     def ready(self) -> None:
         _validate_internal_service_domains()
         _validate_throttle_rates_at_startup()
+        _validate_hmac_rate_limits_at_startup()
         _validate_encryption_keyring_at_startup()
         _validate_portal_hmac_registry_at_startup()
 
@@ -77,6 +78,39 @@ def _validate_internal_service_domains() -> None:
                 "unreachable host: %s — inter-service requests to this host will fail",
                 domain,
             )
+
+
+HMAC_LIMIT_MAXIMUM = 100_000
+
+
+def _validate_hmac_rate_limits_at_startup() -> None:
+    """Fail fast on HMAC middleware limits that are not positive, or that let one principal fill a ceiling."""
+    names = (
+        "HMAC_RATE_LIMIT_WINDOW",
+        "HMAC_RATE_LIMIT_MAX_CALLS",
+        "HMAC_RATE_LIMIT_MAX_AUTH_CALLS",
+        "HMAC_RATE_LIMIT_PRINCIPAL_PER_MINUTE",
+        "HMAC_RATE_LIMIT_PRINCIPAL_BURST",
+        "HMAC_RATE_LIMIT_PRINCIPAL_BURST_WINDOW",
+        "HMAC_RATE_LIMIT_PRINCIPAL_AUTH_PER_MINUTE",
+        "HMAC_RATE_LIMIT_ANONYMOUS_PER_MINUTE",
+        "HMAC_RATE_LIMIT_ANONYMOUS_AUTH_PER_MINUTE",
+    )
+    values: dict[str, int] = {}
+    for name in names:
+        value = getattr(settings, name, None)
+        if not isinstance(value, int) or isinstance(value, bool) or not 0 < value <= HMAC_LIMIT_MAXIMUM:
+            raise ImproperlyConfigured(f"{name} must be an integer between 1 and {HMAC_LIMIT_MAXIMUM}: {value!r}")
+        values[name] = value
+    # A single principal must not be able to fill a ceiling every principal of the portal shares.
+    for own, shared in (
+        ("HMAC_RATE_LIMIT_PRINCIPAL_PER_MINUTE", "HMAC_RATE_LIMIT_MAX_CALLS"),
+        ("HMAC_RATE_LIMIT_PRINCIPAL_AUTH_PER_MINUTE", "HMAC_RATE_LIMIT_MAX_AUTH_CALLS"),
+        ("HMAC_RATE_LIMIT_ANONYMOUS_PER_MINUTE", "HMAC_RATE_LIMIT_MAX_CALLS"),
+        ("HMAC_RATE_LIMIT_ANONYMOUS_AUTH_PER_MINUTE", "HMAC_RATE_LIMIT_MAX_AUTH_CALLS"),
+    ):
+        if values[own] >= values[shared]:
+            raise ImproperlyConfigured(f"{own} ({values[own]}) must be below {shared} ({values[shared]})")
 
 
 def _validate_throttle_rates_at_startup() -> None:
