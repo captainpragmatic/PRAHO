@@ -86,7 +86,9 @@ GROUP_ANCHORS: dict[frozenset[str], str] = {
 
 # Dict-valued keys holding independent records (one per purchase in progress). Two tabs adding
 # different records must both keep theirs, so these merge per record.
-RECORD_MAPS = frozenset({"order_checkout_attempts", "gift_purchase_forms"})
+RECORD_MAPS = frozenset(
+    {"order_checkout_attempts", "gift_purchase_forms", "service_request_submissions", "gift_payment_requests"}
+)
 
 MAX_MERGE_ATTEMPTS = 25
 # Between attempts, a short random wait growing with the attempt, so requests that collided do not

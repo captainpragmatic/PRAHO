@@ -7,6 +7,7 @@ a failing test can always stop it and every worker it forked.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -172,16 +173,19 @@ def _portal_env(directory: Path, platform_url: str, server: dict[str, str]) -> d
 
 
 def _stop(process: subprocess.Popen[bytes]) -> None:
-    if process.poll() is not None:
+    """Stop the master and every worker in its group, even if the master has already exited."""
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(process.pid, sig)
+        except ProcessLookupError:
+            return  # nothing left in the group
+        try:
+            process.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            continue  # escalate
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGKILL)  # any worker the master left behind
         return
-    try:
-        os.killpg(process.pid, signal.SIGTERM)
-        process.wait(timeout=15)
-    except subprocess.TimeoutExpired:
-        os.killpg(process.pid, signal.SIGKILL)
-        process.wait(timeout=15)
-    except ProcessLookupError:
-        pass
 
 
 @contextmanager

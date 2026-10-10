@@ -41,7 +41,7 @@ The portal runs gunicorn's built-in **`gthread`** worker, **2 processes × 4 thr
   - Caddy keeps upstream connections for two minutes. It answers 502 to a non-idempotent request on a connection the worker has already closed, so closing every connection avoids that trap.
 - **`timeout` is only a liveness check under `gthread`.** The worker checks in while its requests run, so gunicorn never ends a slow request. Two other limits bound one:
   - **Platform calls:** each has a total budget, retries included (at most 45 s, `PLATFORM_API_TOTAL_BUDGET_SECONDS`).
-  - **Slow clients:** Caddy buffers the request (6 MB, above the 5 MB body cap) and up to 10 MiB of the response, and a body must arrive within 60 s (`read_body`). A slow client therefore holds Caddy, not a portal thread. Only a response larger than 10 MiB streams through a thread.
+  - **Slow clients:** Caddy buffers the request (6 MB, above the 5 MB body cap) and up to 10 MiB of the response, and a body must arrive within 120 s (`read_body`, server-wide). A slow client therefore holds Caddy, not a portal thread. Only a response larger than 10 MiB streams through a thread.
 - **`graceful_timeout = 50`,** with Docker's stop grace at 55 s, so a restart drains requests in flight.
 
 ## What threads share, and why it is safe

@@ -337,7 +337,7 @@ test-portal:
 # normal portal run deselects these (pytest.ini: -m "not server"); this target selects only them.
 test-portal-server:
 	@echo "🧪 [Portal] Server acceptance tests (real gunicorn, threaded workers)..."
-	@$(PYTHON_PORTAL) -m pytest -m server --no-cov -v tests/server
+	@cd services/portal && PORTAL_SERVER_TESTS=1 PYTHONPATH= PYTHONNOUSERSITE=1 DJANGO_SETTINGS_MODULE="$(PORTAL_DJANGO_SETTINGS_MODULE)" $(PWD)/$(VENV_DIR)/bin/python -m pytest -m server --no-cov -v tests/server
 	@echo "✅ Portal server acceptance tests completed!"
 
 # ===============================================================================

@@ -19,6 +19,8 @@ pytestmark = pytest.mark.server
 
 # A probe that is not stuck behind a held login answers well inside this.
 FAST_SECONDS = 2.0
+# What the login page says once the stub releases a held login: Platform's answer reached the view.
+REJECTED = "Invalid email address or password"
 
 
 @pytest.fixture
@@ -36,6 +38,17 @@ def _hold_logins(
     return held
 
 
+def _assert_still_held(held: list[Future[requests.Response]]) -> None:
+    # A login that already finished (a timeout freed its thread) would make the probes prove nothing.
+    assert not any(login.done() for login in held), [login.result() for login in held if login.done()]
+
+
+def _assert_rejected(login: Future[requests.Response]) -> None:
+    response = login.result(timeout=30)
+    assert response.status_code == 200
+    assert REJECTED in response.text, response.text[:500]
+
+
 def _probe(portal: Portal) -> float:
     started = time.monotonic()
     response = requests.get(f"{portal.base_url}/status/", timeout=FAST_SECONDS * 5)
@@ -51,9 +64,10 @@ def test_a_threaded_worker_serves_others_while_logins_wait(platform: StubPlatfor
         with ThreadPoolExecutor(max_workers=3) as pool:
             held = _hold_logins(portal, platform, pool, 3)
             assert _probe(portal) < FAST_SECONDS
+            _assert_still_held(held)
             platform.release.set()
             for login in held:
-                assert login.result(timeout=30).status_code == 200
+                _assert_rejected(login)
 
 
 def test_a_full_worker_leaves_new_requests_to_its_sibling(platform: StubPlatform) -> None:
@@ -71,9 +85,10 @@ def test_a_full_worker_leaves_new_requests_to_its_sibling(platform: StubPlatform
         held = _hold_logins(portal, platform, pool, 7)
         slow = [seconds for seconds in (_probe(portal) for _ in range(10)) if seconds >= FAST_SECONDS]
         assert slow == [], slow
+        _assert_still_held(held)
         platform.release.set()
         for login in held:
-            assert login.result(timeout=30).status_code == 200
+            _assert_rejected(login)
 
 
 def test_a_sync_worker_makes_everyone_wait(platform: StubPlatform) -> None:
@@ -87,8 +102,9 @@ def test_a_sync_worker_makes_everyone_wait(platform: StubPlatform) -> None:
             probe = pool.submit(_probe, portal)
             time.sleep(FAST_SECONDS)
             assert not probe.done()
+            _assert_still_held(held)
             platform.release.set()
-            assert held[0].result(timeout=30).status_code == 200
+            _assert_rejected(held[0])
             assert probe.result(timeout=30) >= FAST_SECONDS
 
 
