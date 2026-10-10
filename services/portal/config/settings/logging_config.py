@@ -1,6 +1,6 @@
 """Structured JSON logging for the deployed portal (prod and staging), with request ID tracing.
 
-Log lines always go to the console (stdout), which journald and ``docker logs`` collect. When
+Log lines always go to the console (stderr), which journald and ``docker logs`` collect. When
 PORTAL_LOG_DIR names a directory, they are also written to ``app.log`` and ``error.log`` there.
 
 Several gunicorn processes write those files at once, so the portal never rotates them itself: one

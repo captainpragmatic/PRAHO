@@ -65,7 +65,7 @@ LABEL maintainer="PRAHO Platform Team"
 LABEL service="portal"
 LABEL description="PRAHO Portal Service - Customer-facing API gateway"
 
-# PORTAL_LOG_DIR is empty: logs go to stdout only (docker logs); see config/settings/logging_config.py.
+# PORTAL_LOG_DIR is empty: logs go to the console only (docker logs); see config/settings/logging_config.py.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     DJANGO_SETTINGS_MODULE=config.settings.prod \

@@ -12,6 +12,16 @@
    praho_env: one hour on staging, so an existing staging .env without the key still gets it. #}
 {% set hsts_policy = (deployed_env.HSTS_POLICY | default('', true) | trim | trim('"') | trim("'"))
    or ('max-age=3600' if (praho_env | default('prod')) == 'staging' else 'max-age=31536000; includeSubDomains') %}
+{
+    servers {
+        timeouts {
+            # A request body must arrive within this, so a client trickling an upload cannot hold
+            # Caddy's request buffer (or, before it, a portal thread) for as long as it likes.
+            read_body 60s
+        }
+    }
+}
+
 {{ deployed_env.PORTAL_DOMAIN }} {
     tls {{ deployed_env.ACME_EMAIL | default('admin@example.com') }}
 
@@ -52,9 +62,10 @@
             header_up X-Real-IP {remote_host}
             header_up X-Forwarded-For {remote_host}
             header_up X-Forwarded-Proto {scheme}
-            # Read the whole request (at most the 5MB cap) before passing it on, and up to 10MiB of
-            # the response before sending it: a slow client then holds Caddy, not a portal thread.
-            request_buffers 5MB
+            # Read the whole request before passing it on (the buffer is above the 5MB cap, so any
+            # accepted body is complete), and up to 10MiB of the response before sending it: a slow
+            # client then holds Caddy, not a portal thread.
+            request_buffers 6MB
             response_buffers 10MiB
         }
     }

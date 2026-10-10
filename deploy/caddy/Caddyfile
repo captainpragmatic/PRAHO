@@ -3,6 +3,16 @@
 # =============================================================================
 # Two distinct hostnames are required because the services share URL paths.
 
+{
+    servers {
+        timeouts {
+            # A request body must arrive within this, so a client trickling an upload cannot hold
+            # Caddy's request buffer (or, before it, a portal thread) for as long as it likes.
+            read_body 60s
+        }
+    }
+}
+
 {$PORTAL_DOMAIN} {
     tls {$ACME_EMAIL:admin@example.com}
 
@@ -40,9 +50,10 @@
             header_up X-Real-IP {remote_host}
             header_up X-Forwarded-For {remote_host}
             header_up X-Forwarded-Proto {scheme}
-            # Read the whole request (at most the 5MB cap) before passing it on, and up to 10MiB of
-            # the response before sending it: a slow client then holds Caddy, not a portal thread.
-            request_buffers 5MB
+            # Read the whole request before passing it on (the buffer is above the 5MB cap, so any
+            # accepted body is complete), and up to 10MiB of the response before sending it: a slow
+            # client then holds Caddy, not a portal thread.
+            request_buffers 6MB
             response_buffers 10MiB
         }
     }

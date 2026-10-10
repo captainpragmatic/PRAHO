@@ -174,7 +174,7 @@ Never run tests with production settings or against the production database.
 | | Native | Docker |
 |---|---|---|
 | Service output | `journalctl -u praho-platform`, `-u praho-portal`, `-u praho-qcluster` | `docker compose -f deploy/docker-compose.single-server.yml logs -f platform portal` |
-| Application log files | Platform: `/var/log/praho/app.log`, `security.log`, `error.log`. Portal: `/var/log/praho/portal/app.log`, `error.log` | The same paths, inside each container |
+| Application log files | Platform: `/var/log/praho/app.log`, `security.log`, `error.log`. Portal: `/var/log/praho/portal/app.log`, `error.log` | Platform: the same paths, inside its container. Portal: none; it logs to the console only (`docker logs`) |
 | Caddy access logs | `/var/log/caddy/portal-access.log`, `/var/log/caddy/platform-access.log` | `/data/portal-access.log`, `/data/platform-access.log` in the Caddy container |
 
 ---

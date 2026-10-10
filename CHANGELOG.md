@@ -517,9 +517,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Portal log files are safe with several processes, and a slow client no longer holds a portal worker.**
   - **Log files.** The portal no longer rotates its own log files, which raced as soon as two processes wrote them: lines landed in the wrong file or were lost.
     - It writes `app.log` and `error.log` only when `PORTAL_LOG_DIR` is set (native default: `/var/log/praho/portal`), and reopens a file once logrotate has moved it.
-    - The native role installs logrotate and a daily policy for these files (14 kept, compressed, rotated early past 50 MB). Staging used to keep fewer files; both now follow this one policy.
-    - The Docker image sets `PORTAL_LOG_DIR` empty, so containers log to stdout only. Their files were never on a volume and were lost when the container was recreated; `docker logs` carries every line.
-  - **Proxy buffering.** Caddy now reads the whole request (at most the 5 MB body cap) and up to 10 MiB of each portal response before passing it on.
+    - The native role installs logrotate and a policy for these files: daily, 14 kept, compressed, and rotated sooner once past 50 MB. logrotate now runs hourly, so the size check happens within the hour. Staging used to keep fewer files; both now follow this one policy.
+    - On native installs keep the default directory: the unit and the rotation policy cover only `/var/log/praho/portal`.
+    - The Docker image sets `PORTAL_LOG_DIR` empty, so containers log to the console only. Their files were never on a volume and were lost when the container was recreated; `docker logs` carries every line.
+  - **Proxy buffering.** Caddy now reads the whole request (its 6 MB buffer is above the 5 MB body cap, so an accepted body is always complete) and up to 10 MiB of each portal response before passing it on. A request body must arrive within 60 s (`read_body`), so a trickled upload cannot hold that buffer indefinitely.
     - A client that uploads or reads slowly holds Caddy instead of a portal worker.
     - Threaded workers have no per-request timeout, so this is what bounds a slow client there.
 - Deleting a Virtualmin account, and clearing the deletion-protection flag that guards it, now

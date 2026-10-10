@@ -527,7 +527,7 @@ ansible-playbook -i inventory/native-single-server.yml \
 | `PORTAL_GUNICORN_THREADS` | 4 for `gthread` (native: `gunicorn_threads_portal`, 4); always 1 for `sync` | 1-32 |
 
 Neither timeout is configurable:
-- **Request timeout, 60 s, under `sync` only.** Under `gthread` the worker checks in with gunicorn while its requests run, so gunicorn never ends a slow request. Each Platform call is bounded by its budget (at most 45 s). A slow client is held by Caddy instead: the portal's `reverse_proxy` blocks read the whole request (at most the 5 MB body cap) and up to 10 MiB of the response before passing them on (`request_buffers`, `response_buffers`). Only a response larger than 10 MiB still streams to a slow reader through a portal thread.
+- **Request timeout, 60 s, under `sync` only.** Under `gthread` the worker checks in with gunicorn while its requests run, so gunicorn never ends a slow request. Each Platform call is bounded by its budget (at most 45 s). A slow client is held by Caddy instead: the portal's `reverse_proxy` blocks read the whole request (a 6 MB buffer, above the 5 MB body cap) and up to 10 MiB of the response before passing them on (`request_buffers`, `response_buffers`), and a request body must arrive within 60 s (`read_body`). Only a response larger than 10 MiB still streams to a slow reader through a portal thread. The buffers cost Caddy memory per connection, which is why the body deadline matters.
 - **Graceful shutdown, 50 s** (gunicorn's own default was 30 s). gunicorn stops accepting connections before it drains, so on a single portal container a restart refuses new requests until it is back, for up to 50 s while slow requests finish. Docker allows 55 s before it kills the container.
 
 Access lines go to stdout on every deploy path. Each line is gunicorn's default line plus the request duration, the worker pid and the request id; the id is `-` on a response refused before the portal's request-id middleware ran, such as an early 429.
@@ -979,13 +979,13 @@ journalctl -u praho-portal -f
 journalctl -u praho-qcluster -f
 
 # Native: the portal's JSON log files (rotated daily by /etc/logrotate.d/praho-portal)
-tail -f /var/log/praho/portal/app.log /var/log/praho/portal/error.log
+tail -F /var/log/praho/portal/app.log /var/log/praho/portal/error.log
 
 # Using make
 make deploy-logs
 ```
 
-**Portal log files.** The portal always logs to stdout. When `PORTAL_LOG_DIR` names a directory (native default: `/var/log/praho/portal`), it also writes `app.log` and `error.log` there. Several portal processes write those files, so the portal never rotates them itself: it reopens a file once logrotate has moved it, and the native role installs the logrotate policy. The Docker image sets `PORTAL_LOG_DIR` empty, so containers log to stdout only (`docker logs`). If you set it in Docker, rotate the files yourself.
+**Portal log files.** The portal always logs to the console (journald, `docker logs`). When `PORTAL_LOG_DIR` names a directory (native default: `/var/log/praho/portal`), it also writes `app.log` and `error.log` there. Several portal processes write those files, so the portal never rotates them itself: it reopens a file once logrotate has moved it. The native role installs the policy (daily, 14 kept, sooner once past 50 MB) and runs logrotate hourly. On native installs keep the default directory: the unit's writable paths and the rotation policy cover only `/var/log/praho/portal`. The Docker image sets `PORTAL_LOG_DIR` empty, so containers log to the console only (`docker logs`). If you set it in Docker, rotate the files yourself.
 
 ### Common Issues
 
