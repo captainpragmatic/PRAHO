@@ -253,31 +253,6 @@ class TicketsAPIClient(PlatformAPIClient):
             logger.error(f"🔥 [Tickets API] Error adding reply to ticket {ticket_id} for customer {customer_id}: {e}")
             raise
 
-    def get_ticket_replies(self, customer_id: int, user_id: int, ticket_id: int) -> list[dict[str, Any]]:
-        """
-        Get all replies for a ticket (customer view - excludes internal notes).
-
-        Args:
-            customer_id: Customer ID for authorization
-            user_id: User ID for HMAC authentication
-            ticket_id: Ticket ID to get replies for
-
-        Returns:
-            List of reply dictionaries
-        """
-        try:
-            data = {"customer_id": customer_id, "user_id": user_id}
-            response = self._make_request("POST", f"/tickets/{ticket_id}/reply/", data=data, idempotent=True)
-
-            logger.info(f"✅ [Tickets API] Retrieved replies for ticket {ticket_id} for customer {customer_id}")
-            return cast(list[dict[str, Any]], response.get("replies", []))
-
-        except PlatformAPIError as e:
-            logger.error(
-                f"🔥 [Tickets API] Error retrieving replies for ticket {ticket_id} for customer {customer_id}: {e}"
-            )
-            raise
-
     def get_tickets_summary(self, customer_id: int, user_id: int) -> dict[str, Any]:
         """
         Get ticket summary statistics for customer dashboard.

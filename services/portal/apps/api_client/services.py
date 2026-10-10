@@ -99,6 +99,87 @@ def quote_path_segment(value: object) -> str:
 
 HMAC_TIMING_THRESHOLD = 0.002
 
+# An attempt is not started, and a retry is not waited for, with less than this left of the call's
+# time budget: it could not finish, and would only push the answer past the budget.
+MIN_ATTEMPT_SECONDS = 0.5
+
+# The clock a call's time budget is measured on; a module attribute so tests can replace it.
+_clock = time.monotonic
+
+
+DEFAULT_PLATFORM_CALL_BUDGET_SECONDS = 45.0
+DEFAULT_PLATFORM_CALL_TIMEOUT_SECONDS = 30.0
+
+
+def platform_call_budget_seconds() -> float:
+    """PLATFORM_API_TOTAL_BUDGET_SECONDS, read per call (validated at settings load)."""
+    return float(getattr(settings, "PLATFORM_API_TOTAL_BUDGET_SECONDS", DEFAULT_PLATFORM_CALL_BUDGET_SECONDS))
+
+
+def platform_call_timeout_seconds() -> float:
+    """PLATFORM_API_TIMEOUT, read per call (validated at settings load)."""
+    return float(getattr(settings, "PLATFORM_API_TIMEOUT", DEFAULT_PLATFORM_CALL_TIMEOUT_SECONDS))
+
+
+class PlatformCallBudgetSpent(requests.exceptions.Timeout):
+    """No time is left in a Platform call's budget for another attempt. Handled exactly as a timeout."""
+
+
+class _CallDeadline:
+    """The time budget of one Platform call, retries and backoff included (PLATFORM_API_TOTAL_BUDGET_SECONDS)."""
+
+    def __init__(self) -> None:
+        self._ends = _clock() + platform_call_budget_seconds()
+
+    def remaining(self) -> float:
+        return self._ends - _clock()
+
+    def attempt_timeout(self) -> tuple[float, float]:
+        """The (connect, read) timeout for the next attempt, together no longer than what is left.
+
+        A single number would bound connecting and each read separately, so one attempt could take
+        twice as long. Raises PlatformCallBudgetSpent when no attempt fits.
+        """
+        remaining = self.remaining()
+        if remaining < MIN_ATTEMPT_SECONDS:
+            raise PlatformCallBudgetSpent(f"Platform call time budget spent ({max(remaining, 0):.2f}s left)")
+        per_phase = platform_call_timeout_seconds()
+        connect = min(per_phase, remaining / 2)
+        return connect, min(per_phase, remaining - connect)
+
+    def allows_wait(self, seconds: float) -> bool:
+        """Whether waiting this long still leaves time for another attempt."""
+        return self.remaining() - seconds >= MIN_ATTEMPT_SECONDS
+
+
+BODY_CHUNK_BYTES = 64 * 1024
+
+
+def _read_body_within(response: requests.Response, deadline: _CallDeadline) -> None:
+    """Read a streamed Platform response body, giving up when the call's time budget runs out.
+
+    The read timeout only bounds each wait for the next bytes, so a large body arriving slowly
+    could otherwise hold a thread well past the budget. The deadline is checked between chunks
+    of up to BODY_CHUNK_BYTES. Within one chunk the HTTP stack may read the socket many times,
+    so a peer that deliberately trickles bytes inside the read timeout can still overrun the
+    budget; Platform is an HMAC-authenticated internal peer, and that residual is accepted.
+
+    Only a body still on the wire is read here (requests keeps `_content` False until then); a
+    response already in memory, as test doubles are, is left as it is.
+    """
+    if getattr(response, "_content", None) is not False:
+        return
+    chunks: list[bytes] = []
+    try:
+        for chunk in response.iter_content(BODY_CHUNK_BYTES):
+            chunks.append(chunk)
+            if deadline.remaining() <= 0:
+                raise PlatformCallBudgetSpent("Platform response still arriving when the call's time budget ran out")
+        # What `Response.content` does after reading; set here because the body was read in chunks.
+        response._content = b"".join(chunks)
+    finally:
+        response.close()  # Returns a fully read connection to the pool; drops one cut short.
+
 
 def _client_ip_payload(client_ip: str) -> dict[str, str]:
     """Include a valid, normalized client IP in the signed request only when it means something.
@@ -214,7 +295,6 @@ class PlatformAPIClient:
         self.base_url = settings.PLATFORM_API_BASE_URL
         self.portal_id = getattr(settings, "PORTAL_ID", "portal-001")
         self.portal_secret = _resolve_portal_signing_secret()
-        self.timeout = settings.PLATFORM_API_TIMEOUT
         # Keep retries conservative by default; callers can opt in per request.
         self.retry_backoff_seconds = float(getattr(settings, "PLATFORM_API_RETRY_BACKOFF_SECONDS", 0.05))
         self.max_read_retry_attempts = int(getattr(settings, "PLATFORM_API_READ_MAX_RETRIES", 2))
@@ -384,6 +464,42 @@ class PlatformAPIClient:
         chosen_delay = max(retry_after_seconds or 0, jitter)
         return min(chosen_delay, self.max_retry_wait_seconds)
 
+    def _retry_wait(
+        self, response: requests.Response, attempt: int, max_retries: int, deadline: _CallDeadline, call: str
+    ) -> float | None:
+        """How long to wait before retrying, or None when the call should answer with this response.
+
+        No retry when Platform asks for a longer wait than the cap, or when the wait would leave too
+        little of the call's time budget for another attempt.
+        """
+        server_backoff = self._get_retry_after_seconds(response)
+        if server_backoff is not None and server_backoff > self.max_retry_wait_seconds:
+            logger.warning(
+                "⚠️ [API Client] Server requested backoff %ds exceeds cap %.1fs, not retrying %s",
+                server_backoff,
+                self.max_retry_wait_seconds,
+                call,
+            )
+            return None
+        backoff = self._compute_retry_delay(response, attempt)
+        if not deadline.allows_wait(backoff):
+            logger.warning(
+                "⚠️ [API Client] Not retrying %s after %s: %.2fs left of the call's time budget",
+                call,
+                response.status_code,
+                deadline.remaining(),
+            )
+            return None
+        logger.warning(
+            "⚠️ [API Client] Retrying %s after %s in %.2fs (%d/%d)",
+            call,
+            response.status_code,
+            backoff,
+            attempt + 1,
+            max_retries,
+        )
+        return backoff
+
     def _raise_if_signature_rejected(self, response: requests.Response, endpoint: str) -> None:
         """Raise an outage when Platform refused this request's authentication.
 
@@ -466,6 +582,7 @@ class PlatformAPIClient:
         body_ts = str(payload.get("timestamp")) if "timestamp" in payload else None
         self._refuse_oversized_body(body_bytes, endpoint)
 
+        deadline = _CallDeadline()
         auto_retry = self._is_read_retry_candidate(method, endpoint, idempotent=idempotent)
         retry_statuses = retry_on_status or ({503} if auto_retry else set())
         if auto_retry and max_retries == 0:
@@ -481,33 +598,18 @@ class PlatformAPIClient:
                     headers=headers,
                     data=body_bytes if body_bytes else None,
                     params=params if params else None,
-                    timeout=self.timeout,
+                    timeout=deadline.attempt_timeout(),
+                    stream=True,
                 )
+                _read_body_within(response, deadline)
 
                 logger.debug(f"🌐 [API Client] {method} {url} -> {response.status_code}")
 
                 should_retry = response.status_code in retry_statuses and attempt < max_retries
                 if should_retry:
-                    server_backoff = self._get_retry_after_seconds(response)
-                    if server_backoff is not None and server_backoff > self.max_retry_wait_seconds:
-                        logger.warning(
-                            "⚠️ [API Client] Server requested backoff %ds exceeds cap %.1fs, not retrying %s %s",
-                            server_backoff,
-                            self.max_retry_wait_seconds,
-                            method,
-                            endpoint,
-                        )
+                    backoff = self._retry_wait(response, attempt, max_retries, deadline, f"{method} {endpoint}")
+                    if backoff is None:
                         return self._handle_api_response(response, endpoint)
-                    backoff = self._compute_retry_delay(response, attempt)
-                    logger.warning(
-                        "⚠️ [API Client] Retrying %s %s after %s in %.2fs (%d/%d)",
-                        method,
-                        endpoint,
-                        response.status_code,
-                        backoff,
-                        attempt + 1,
-                        max_retries,
-                    )
                     time.sleep(backoff)
                     continue
 
@@ -600,14 +702,17 @@ class PlatformAPIClient:
         headers = self._prepare_request_headers(method, url, params, body_bytes, body_ts)
 
         try:
+            deadline = _CallDeadline()
             response = portal_request(
                 method=method,
                 url=url,
                 headers=headers,
                 data=body_bytes if body_bytes else None,
                 params=params if params else None,
-                timeout=self.timeout,
+                timeout=deadline.attempt_timeout(),
+                stream=True,
             )
+            _read_body_within(response, deadline)
 
             logger.debug(f"🌐 [API Client Binary] {method} {url} -> {response.status_code}")
             return self._handle_binary_response(response, endpoint)
@@ -637,14 +742,17 @@ class PlatformAPIClient:
         headers = self._prepare_request_headers(method, url, params, body_bytes, body_ts)
 
         try:
+            deadline = _CallDeadline()
             response = portal_request(
                 method=method,
                 url=url,
                 headers=headers,
                 data=body_bytes if body_bytes else None,
                 params=params if params else None,
-                timeout=self.timeout,
+                timeout=deadline.attempt_timeout(),
+                stream=True,
             )
+            _read_body_within(response, deadline)
 
             logger.debug(f"🌐 [API Client Binary+Headers] {method} {url} -> {response.status_code}")
             content = self._handle_binary_response(response, endpoint)

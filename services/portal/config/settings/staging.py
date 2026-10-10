@@ -62,7 +62,13 @@ if not PLATFORM_API_SECRET:
         "SECURITY ERROR: PLATFORM_API_SECRET must be set in staging.\n"
         'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(32))"'
     )
-PLATFORM_API_TIMEOUT = int(os.environ.get("PLATFORM_API_TIMEOUT", "20"))
+PLATFORM_API_TIMEOUT = seconds_setting(
+    "PLATFORM_API_TIMEOUT",
+    os.environ.get("PLATFORM_API_TIMEOUT"),
+    min(20.0, PLATFORM_API_TOTAL_BUDGET_SECONDS),
+    minimum=1,
+    maximum=PLATFORM_API_TOTAL_BUDGET_SECONDS,
+)
 
 # PRAHO-internal webhook secret: Platform → Portal notification after a payment succeeds.
 # This is NOT the Stripe webhook secret — it signs platform-to-portal HTTP calls only.

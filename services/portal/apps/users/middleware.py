@@ -5,6 +5,7 @@ Localisation policy is applied by apps.common.localisation_middleware.
 """
 
 import logging
+import math
 import random
 import threading
 import uuid
@@ -20,7 +21,12 @@ from django.shortcuts import redirect
 from django.utils import timezone as django_timezone
 from django.utils.http import urlencode
 
-from apps.api_client.services import PlatformAPIError, api_client
+from apps.api_client.services import (
+    PlatformAPIError,
+    api_client,
+    platform_call_budget_seconds,
+    platform_call_timeout_seconds,
+)
 from apps.common import counters
 from apps.common.localisation_services import store_localisation_preferences
 from apps.common.store_unavailable import end_session_or_unavailable
@@ -62,7 +68,7 @@ class PortalAuthenticationMiddleware:
     # Validation timing configuration
     REVALIDATE_EVERY = 600  # 10 minutes base interval
     JITTER_MAX = 120  # 0-2 minutes random jitter
-    VALIDATION_TIMEOUT = 30  # Single-flight lock timeout
+    VALIDATION_LEASE_MARGIN_SECONDS = 5  # Single-flight lease: a whole Platform call, plus this
     SOFT_TTL_GRACE = 300  # 5 minutes soft grace period (stale-while-revalidate)
     HARD_TTL_GRACE = 21600  # 6 hours hard grace period (force logout after this)
 
@@ -265,6 +271,15 @@ class PortalAuthenticationMiddleware:
                 if cache.get(lock_key) == token:
                     cache.delete(lock_key)
 
+    def _validation_lease_seconds(self) -> int:
+        """Outlast a validation call, so a slow one does not let a second start beside it.
+
+        Sized to the call's time budget plus one read wait. A call that overruns that (a peer
+        trickling bytes) only lets a duplicate validation of the same session start.
+        """
+        longest_call = platform_call_budget_seconds() + platform_call_timeout_seconds()
+        return math.ceil(longest_call) + self.VALIDATION_LEASE_MARGIN_SECONDS
+
     def _should_revalidate_async(self, session_key: str) -> tuple[str, str] | None:
         """Acquire a per-session validation lease within this process.
 
@@ -276,7 +291,7 @@ class PortalAuthenticationMiddleware:
         lock_key = f"validating:{session_key}"
         token = uuid.uuid4().hex
         with _VALIDATION_LOCK:
-            if not cache.add(lock_key, token, timeout=self.VALIDATION_TIMEOUT):
+            if not cache.add(lock_key, token, timeout=self._validation_lease_seconds()):
                 return None
         return lock_key, token
 

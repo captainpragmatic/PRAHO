@@ -82,7 +82,13 @@ if not PLATFORM_API_SECRET:
         "SECURITY ERROR: PLATFORM_API_SECRET must be set in production.\n"
         'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(32))"'
     )
-PLATFORM_API_TIMEOUT = int(os.environ.get("PLATFORM_API_TIMEOUT", "30"))
+PLATFORM_API_TIMEOUT = seconds_setting(
+    "PLATFORM_API_TIMEOUT",
+    os.environ.get("PLATFORM_API_TIMEOUT"),
+    min(30.0, PLATFORM_API_TOTAL_BUDGET_SECONDS),
+    minimum=1,
+    maximum=PLATFORM_API_TOTAL_BUDGET_SECONDS,
+)
 PLATFORM_TO_PORTAL_WEBHOOK_SECRET = os.environ.get("PLATFORM_TO_PORTAL_WEBHOOK_SECRET", "")
 if not PLATFORM_TO_PORTAL_WEBHOOK_SECRET:
     raise ValueError(

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Total time limit on Platform calls.** A portal call to Platform now has a total time budget, `PLATFORM_API_TOTAL_BUDGET_SECONDS` (default and maximum 45 s, minimum 5 s). It covers retries and backoff, and the response body is read in chunks with the budget checked between them, so a slow Platform no longer holds a portal worker for minutes.
+- **Startup checks.** `PLATFORM_API_TIMEOUT` is now checked at startup: it must be between 1 s and the budget. Its default follows the budget when that is lower.
+- **Upgrade note (native installs).** A `.env` that sets `PLATFORM_API_TIMEOUT` above 45, or to a non-number, now stops the portal from starting. Fix the value before upgrading.
+
 ### Security
 
 - **Platform tells a store outage apart from a forged portal request.**
