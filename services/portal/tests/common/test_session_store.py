@@ -52,7 +52,9 @@ class MergingSessionStoreTests(TestCase):
         self.assertTrue(issubclass(SessionStore, stock_db.SessionStore))
 
     def test_a_stale_request_does_not_undo_a_company_switch(self) -> None:
-        key = self._session(user_id=7, selected_customer_id=1, selected_customer_name="Acme", selected_customer_role="owner")
+        key = self._session(
+            user_id=7, selected_customer_id=1, selected_customer_name="Acme", selected_customer_role="owner"
+        )
         stale, switch = self._load(key), self._load(key)
         switch.update({"selected_customer_id": 2, "selected_customer_name": "Beta", "selected_customer_role": "viewer"})
         switch.save()
@@ -67,9 +69,13 @@ class MergingSessionStoreTests(TestCase):
         self.assertEqual(stored["last_activity"], 123.0)
 
     def test_a_company_group_is_stored_whole_never_mixed(self) -> None:
-        key = self._session(user_id=7, selected_customer_id=1, selected_customer_name="Acme", selected_customer_role="owner")
+        key = self._session(
+            user_id=7, selected_customer_id=1, selected_customer_name="Acme", selected_customer_role="owner"
+        )
         first, second = self._load(key), self._load(key)
-        second.update({"selected_customer_id": 3, "selected_customer_name": "Gamma", "selected_customer_role": "viewer"})
+        second.update(
+            {"selected_customer_id": 3, "selected_customer_name": "Gamma", "selected_customer_role": "viewer"}
+        )
         second.save()
         # The role this request picks equals its baseline, so only the id and name differ.
         first.update({"selected_customer_id": 2, "selected_customer_name": "Beta", "selected_customer_role": "owner"})
@@ -80,6 +86,27 @@ class MergingSessionStoreTests(TestCase):
             (stored["selected_customer_id"], stored["selected_customer_name"], stored["selected_customer_role"]),
             (2, "Beta", "owner"),
         )
+
+    def test_a_fallback_company_does_not_erase_an_explicit_switch(self) -> None:
+        # A fresh session has no company yet. One request's auth middleware sets only the fallback
+        # active_customer_id; meanwhile another request switches company explicitly and saves first.
+        key = self._session(user_id=7)
+        fallback, switch = self._load(key), self._load(key)
+        switch.update({"selected_customer_id": 2, "selected_customer_name": "Beta", "selected_customer_role": "viewer"})
+        switch.save()
+        fallback["active_customer_id"] = 1
+        fallback.save()
+
+        stored = _stored(key)
+        self.assertEqual(
+            (
+                stored.get("selected_customer_id"),
+                stored.get("selected_customer_name"),
+                stored.get("selected_customer_role"),
+            ),
+            (2, "Beta", "viewer"),
+        )
+        self.assertEqual(stored["active_customer_id"], 1)  # harmless: the explicit selection takes priority
 
     def test_a_key_another_request_deleted_stays_deleted(self) -> None:
         key = self._session(user_id=7, new_mfa_backup_codes=["a"], cart={"items": []})
@@ -116,9 +143,7 @@ class MergingSessionStoreTests(TestCase):
         tab_a.save()
         tab_b["gift_purchase_forms"] = {"form-b": {"amount": 70}}
         tab_b.save()
-        self.assertEqual(
-            _stored(key)["gift_purchase_forms"], {"form-a": {"amount": 50}, "form-b": {"amount": 70}}
-        )
+        self.assertEqual(_stored(key)["gift_purchase_forms"], {"form-a": {"amount": 50}, "form-b": {"amount": 70}})
 
     def test_removing_ones_last_record_keeps_anothers(self) -> None:
         key = self._session(user_id=7, order_checkout_attempts={"cart-a": {"key": "idem-a"}})
@@ -252,7 +277,9 @@ class MergingSessionStoreTests(TestCase):
         self.assertEqual(Session.objects.count(), 0)
 
     def test_rotation_keeps_a_concurrent_company_switch(self) -> None:
-        key = self._session(user_id=7, selected_customer_id=1, selected_customer_name="Acme", selected_customer_role="owner")
+        key = self._session(
+            user_id=7, selected_customer_id=1, selected_customer_name="Acme", selected_customer_role="owner"
+        )
         password_change, switch = self._load(key), self._load(key)
         switch.update({"selected_customer_id": 2, "selected_customer_name": "Beta", "selected_customer_role": "viewer"})
         switch.save()

@@ -57,9 +57,12 @@ from apps.common.store_unavailable import (
 logger = logging.getLogger(__name__)
 
 # Keys that are only meaningful together. If a request changed any of them, the whole group is
-# stored as that request saw it.
+# stored as that request saw it. active_customer_id is deliberately not in the company group: the
+# auth middleware sets it alone, as a fallback for a session with no selected company, and the
+# selected company always takes priority over it. In the group, a request that only set the
+# fallback would store its view of the group, with no selected company, over a concurrent switch.
 KEY_GROUPS: tuple[frozenset[str], ...] = (
-    frozenset({"selected_customer_id", "selected_customer_name", "selected_customer_role", "active_customer_id"}),
+    frozenset({"selected_customer_id", "selected_customer_name", "selected_customer_role"}),
     frozenset(
         {"validated_at", "next_validate_at", "membership_hash", "user_memberships", "user_memberships_fetched_at"}
     ),

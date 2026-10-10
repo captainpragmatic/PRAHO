@@ -42,7 +42,7 @@ Docker portals already run two worker processes. Threaded workers make the race 
 - **Single keys** are last-writer-wins when two requests change the same key, as before.
 - **Key groups** move together. If a request changed any key in a group, the whole group is stored as
   that request saw it, so a mixed combination can never be stored. The groups:
-  - company context: `selected_customer_id/name/role`, `active_customer_id`;
+  - company context: `selected_customer_id/name/role`. `active_customer_id` is deliberately outside it: the auth middleware sets it alone, as the fallback for a session with no selected company, and the selected company always takes priority. Inside the group, a request that only set the fallback would store its empty view of the selection over a concurrent explicit switch;
   - validation: `validated_at`, `next_validate_at`, `membership_hash`, `user_memberships`,
     `user_memberships_fetched_at`;
   - identity: `user_id`, `email`, `customer_id`, `session_auth_hash`, `authenticated_at`,
