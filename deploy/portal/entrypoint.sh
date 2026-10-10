@@ -66,4 +66,5 @@ exec gunicorn \
     --bind "0.0.0.0:${PORT:-8701}" \
     --workers "${GUNICORN_WORKERS:-2}" \
     --timeout 60 \
+    --no-control-socket \
     config.wsgi:application

@@ -29,4 +29,5 @@ exec gunicorn \
     --bind "0.0.0.0:${PORT:-8700}" \
     --workers "${GUNICORN_WORKERS:-4}" \
     --timeout 120 \
+    --no-control-socket \
     config.wsgi:application

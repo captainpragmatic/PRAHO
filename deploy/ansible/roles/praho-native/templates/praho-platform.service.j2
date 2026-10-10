@@ -17,6 +17,7 @@ ExecStart={{ project_root }}/.venv-linux/bin/gunicorn \
     --bind 127.0.0.1:{{ platform_port }} \
     --workers {{ gunicorn_workers_platform }} \
     --timeout {{ gunicorn_timeout_platform }} \
+    --no-control-socket \
     --access-logfile - \
     --error-logfile - \
     config.wsgi:application
