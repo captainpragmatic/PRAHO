@@ -13,6 +13,7 @@ from django.http import HttpRequest
 from django.utils.translation import gettext as _
 from rest_framework import status
 from rest_framework.decorators import action, api_view, authentication_classes, permission_classes, throttle_classes
+from rest_framework.exceptions import ValidationError as APIValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -20,11 +21,10 @@ from rest_framework.views import APIView
 
 from apps.api.core import ReadOnlyAPIViewSet
 from apps.api.core.permissions import IsAuthenticatedAndAccessible
-from apps.api.core.throttling import AuthThrottle, BurstAPIThrottle
+from apps.api.core.throttling import BurstAPIThrottle
 from apps.api.secure_auth import (
     BILLING_ROLES,
     _uniform_error_response,
-    public_api_endpoint,
     require_customer_authentication,
     require_customer_role_in,
     require_portal_authentication,
@@ -37,6 +37,7 @@ from apps.common.performance.rate_limiting import (
     PortalHMACBurstThrottle,
     PortalHMACCreateUserThrottle,
     PortalHMACRateThrottle,
+    RegistrationClientIPThrottle,
 )
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.validators import SecureInputValidator
@@ -344,107 +345,65 @@ def customer_create_api(request: HttpRequest) -> Response:
 # ===============================================================================
 
 
-@public_api_endpoint
 @api_view(["POST"])
-@authentication_classes([])  # public: consumes no credential. Also the one public view
-# whose throttle is anon-keyed, so authenticating a caller removed its ONLY rate limit
+@authentication_classes([])  # HMAC authentication is handled by middleware and the decorator.
 @permission_classes([AllowAny])
-@throttle_classes([AuthThrottle])
+@throttle_classes(
+    [
+        PortalHMACRateThrottle,
+        PortalHMACBurstThrottle,
+        RegistrationClientIPThrottle,
+        CustomerRateThrottle,
+        BurstRateThrottle,
+    ]
+)
+@require_portal_authentication
 def customer_register_api(request: HttpRequest) -> Response:
     """
-    🔐 Customer Registration API -- intentionally public.
+    🔐 Customer registration request, signed by the Portal.
 
-    New customer registration; throttled by AuthThrottle.
+    Nothing is created here. The registration is stored and a worker mails the address: a link
+    to finish creating the account, or a note that the address already has one. The answer is
+    the same either way, and the request looks up neither the address nor the company, so it
+    cannot tell anyone whether they exist.
 
     POST /api/customers/register/
-
-    Request Body:
     {
-        "user_data": {
-            "email": "user@company.com",
-            "first_name": "Ion",
-            "last_name": "Popescu",
-            "phone": "+40.21.123.4567",
-            "password": "secure_password_123"
-        },
-        "customer_data": {
-            "customer_type": "company",
-            "company_name": "Example SRL",
-            "vat_number": "RO12345678",
-            "address_line1": "Str. Example Nr. 123",
-            "city": "București",
-            "county": "București",
-            "postal_code": "010001",
-            "data_processing_consent": true,
-            "marketing_consent": false
-        }
+        "user_data": {"email": "...", "first_name": "...", "last_name": "...", "phone": "..."},
+        "customer_data": {"customer_type": "company", "company_name": "...", "vat_number": "...",
+                          "address_line1": "...", "city": "...", "county": "...",
+                          "postal_code": "...", "data_processing_consent": true},
+        "language": "ro",
+        "client_ip": "<end user's IP, signed>"
     }
 
-    Response:
-    {
-        "success": true,
-        "user": {
-            "id": 123,
-            "email": "user@company.com",
-            "first_name": "Ion",
-            "last_name": "Popescu"
-        },
-        "customer": {
-            "id": 456,
-            "company_name": "Example SRL",
-            "customer_type": "company"
-        }
-    }
-
-    Security Features:
-    - Rate limiting (AuthThrottle, the `auth` scope: 10 requests per minute per client)
-    - Romanian business validation
-    - GDPR compliance checks
-    - Input sanitization
+    202 for every accepted request. 400 for a form error, which depends only on what was
+    submitted. 429 when the client's registration budget is spent.
     """
     serializer = CustomerRegistrationSerializer(data=request.data, context={"request": request})
 
-    if serializer.is_valid():
-        try:
-            result = serializer.save()
-            logger.info(
-                f"✅ [Customer Registration] Successfully created customer: {result['customer']['company_name']}"
-            )
-
-            return Response(
-                {
-                    "success": True,
-                    "message": "Customer registration successful",
-                    "user": result["user"],
-                    "customer": result["customer"],
-                },
-                status=status.HTTP_201_CREATED,
-            )
-
-        except RegistrationRateLimitError as e:
-            failure = e.failure
-            logger.warning("⚠️ [Customer Registration] Security refusal: %s", failure)
-            headers = {"Retry-After": str(failure.retry_after)} if failure.retry_after is not None else {}
-            return Response(
-                {"success": False, "error": str(failure)},
-                status=failure.status_code,
-                headers=headers,
-            )
-        except Exception as e:
-            logger.error(f"🔥 [Customer Registration] Registration failed: {e}")
-            return Response(
-                {"success": False, "error": "Registration failed. Please try again."},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
-    else:
-        # Log validation errors (sanitized)
-        error_fields = list(serializer.errors.keys())
-        logger.warning(f"⚠️ [Customer Registration] Validation failed for fields: {error_fields}")
-
+    if not serializer.is_valid():
+        logger.warning("⚠️ [Customer Registration] Validation failed for fields: %s", list(serializer.errors.keys()))
         return Response(
             {"success": False, "error": "Validation failed", "errors": serializer.errors},
             status=status.HTTP_400_BAD_REQUEST,
         )
+    try:
+        serializer.save()
+    except RegistrationRateLimitError as e:
+        failure = e.failure
+        logger.warning("⚠️ [Customer Registration] Security refusal: %s", failure)
+        headers = {"Retry-After": str(failure.retry_after)} if failure.retry_after is not None else {}
+        return Response({"success": False, "error": str(failure)}, status=failure.status_code, headers=headers)
+    except APIValidationError as e:
+        return Response(
+            {"success": False, "error": "Validation failed", "errors": e.detail},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    return Response(
+        {"success": True, "message": _("Thank you. Check your email for a message with the next step.")},
+        status=status.HTTP_202_ACCEPTED,
+    )
 
 
 # ===============================================================================

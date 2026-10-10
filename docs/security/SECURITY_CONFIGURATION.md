@@ -388,10 +388,17 @@ TIMESTAMP
   `HMAC_RATE_LIMIT_PRINCIPAL_PER_MINUTE`, `HMAC_RATE_LIMIT_PRINCIPAL_BURST`,
   `HMAC_RATE_LIMIT_PRINCIPAL_AUTH_PER_MINUTE`, `HMAC_RATE_LIMIT_ANONYMOUS_PER_MINUTE`,
   `HMAC_RATE_LIMIT_ANONYMOUS_AUTH_PER_MINUTE`. `HMAC_RATE_LIMIT_WINDOW` is 60 seconds.
-- Public endpoints (`@public_api_endpoint`, e.g. currencies and registration) are not
+- Public endpoints (`@public_api_endpoint`, e.g. currencies and the product catalog) are not
   portal-authenticated, skip this limiter and keep their own per-view limits.
 - Login, both password-reset endpoints, and `/api/customers/register/` require
   HMAC authentication. The duplicate `/api/users/register/` route has been removed.
+- Registration (`/api/customers/register/`) creates nothing. It stores a pending registration,
+  answers 202 for every accepted request, and a worker mails the address either a confirmation
+  link or a note that it already has an account. It never looks up the address, the company or
+  the VAT number, so it cannot tell anyone whether they exist. Its per-client limits are
+  `RegistrationClientIPThrottle` (`auth_register_ip`, `5/minute`) and the
+  `security.registration_rate_limit_per_ip` budget, both keyed on the signed `client_ip`; the
+  path is charged to the middleware's authentication buckets.
 - Fixed-window counters include `window_index = int(now // window)` in their
   keys. Window rollover therefore works with DatabaseCache even when incrementing
   a counter changes its expiry. Retry-After reports the time until the next boundary.

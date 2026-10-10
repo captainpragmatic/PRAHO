@@ -19,7 +19,8 @@ from rest_framework.test import APIClient
 
 from apps.common.middleware import _is_auth_exempt
 from apps.customers.models import Customer
-from apps.users.models import APIToken, CustomerMembership
+from apps.users.models import APIToken
+from apps.users.pending_registration import PendingRegistration
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
 
 User = get_user_model()
@@ -381,7 +382,6 @@ class RegistrationRouteTests(HMACTestMixin, TestCase):
         payload = {
             "user_data": {
                 "email": "signed-registration@example.test",
-                "password": "Copper!Valley92-Forest",
                 "first_name": "Ana",
                 "last_name": "Pop",
                 "phone": "+40722123456",
@@ -405,13 +405,14 @@ class RegistrationRouteTests(HMACTestMixin, TestCase):
         self.assertEqual(Customer.objects.count(), customers_before)
 
         registered = self.portal_post("/api/customers/register/", payload)
-        self.assertEqual(registered.status_code, 201, registered.content)
+        self.assertEqual(registered.status_code, 202, registered.content)
         self.assertTrue(registered.json()["success"])
-        self.assertEqual(User.objects.count(), users_before + 1)
-        self.assertEqual(Customer.objects.count(), customers_before + 1)
-        user = User.objects.get(email="signed-registration@example.test")
-        self.assertTrue(user.check_password("Copper!Valley92-Forest"))
-        self.assertTrue(CustomerMembership.objects.filter(user=user, role="owner", is_active=True).exists())
+        # A registration creates nothing until its mailbox holder confirms it.
+        self.assertEqual(User.objects.count(), users_before)
+        self.assertEqual(Customer.objects.count(), customers_before)
+        self.assertTrue(PendingRegistration.objects.filter(email="signed-registration@example.test").exists())
+        unsigned = self.client.post("/api/customers/register/", payload, content_type="application/json")
+        self.assertIn(unsigned.status_code, (401, 403), unsigned.content)
 
 
 # ===============================================================================

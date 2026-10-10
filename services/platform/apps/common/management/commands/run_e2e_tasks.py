@@ -12,7 +12,7 @@ from django_q.signing import SignedPackage
 from apps.common.e2e_fixtures import require_e2e_database
 
 # Only tasks a browser test waits on; anything else stays queued.
-E2E_RUNNABLE_TASKS = ("apps.users.tasks.send_password_reset_email",)
+E2E_RUNNABLE_TASKS = ("apps.users.tasks.send_password_reset_email", "apps.users.tasks.deliver_registration")
 
 
 class Command(BaseCommand):

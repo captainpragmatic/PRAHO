@@ -873,6 +873,12 @@ class PlatformAPIClient:
             },
         )
 
+    def register_customer(self, registration_data: dict[str, Any], client_ip: str = "") -> dict[str, Any]:
+        """Send a registration; Platform answers the same for every address. Propagate errors."""
+        return self._make_request(
+            "POST", "/customers/register/", data={**registration_data, **_client_ip_payload(client_ip)}
+        )
+
     def get_pending_registration(self, registration_id: str, token: str, client_ip: str = "") -> dict[str, Any]:
         """What confirming a registration link would create; propagate Platform errors."""
         return self._make_request(

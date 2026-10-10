@@ -90,26 +90,13 @@
           </div>
         </div>
 
-        {# ── Step 4: Password ── #}
-        <div class="space-y-4">
-          <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
-            {% icon "lock" size="md" css_class="text-white" %} {% trans 'Account Security' %}
-          </h3>
-
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {% form_field form.password1 icon_left="lock" %}
-            {% form_field form.password2 icon_left="lock" %}
-          </div>
-        </div>
-
-        {# ── Step 5: GDPR Compliance ── #}
+        {# ── Step 4: GDPR Compliance ── #}
         <div class="space-y-4">
           <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
             {% icon "shield-check" size="md" css_class="text-white" %} {% trans 'Privacy & Consent' %}
           </h3>
 
           {% form_checkbox form.data_processing_consent %}
-          {% form_checkbox form.marketing_consent %}
           {% form_checkbox form.terms_accepted %}
         </div>
 

@@ -1,32 +1,48 @@
 """Registration and onboarding through public APIs/services, with persisted outcomes."""
 
 import json
+import re
 
 import pytest
 from django.conf import settings
+from django.core import mail
 from django.test import TestCase
 
 from apps.customers.contact_service import AddressData, ContactService
 from apps.customers.models import Customer
 from apps.orders.services import OrderService
+from apps.settings.models import SystemSetting
 from apps.users.models import CustomerMembership, User
+from apps.users.pending_registration import PendingRegistration
 from services.platform.tests.helpers.hmac import hmac_headers
+from services.platform.tests.helpers.task_queue import run_queued
+
+CHOSEN = "Registration-pass123!"
 
 pytestmark = pytest.mark.e2e
 
 
 class RegistrationCase(TestCase):
-    def post_registration(self, payload):
-        path = "/api/customers/register/"
+    def setUp(self):
+        SystemSetting.objects.update_or_create(
+            key="portal.public_base_url",
+            defaults={"name": "Portal URL", "category": "platform", "data_type": "string",
+                      "value": "https://customers.e2e.test", "default_value": ""},
+        )
+
+    def signed_post(self, path, payload):
         body = json.dumps(payload).encode()
         headers = hmac_headers("POST", path, body, secret=settings.PLATFORM_API_SECRET)
         return self.client.post(path, body, content_type="application/json", **headers)
+
+    def post_registration(self, payload):
+        with self.captureOnCommitCallbacks(execute=True):
+            return self.signed_post("/api/customers/register/", payload)
 
     def payload(self, *, individual=False):
         return {
             "user_data": {
                 "email": "owner@e2e.test",
-                "password": "Registration-pass123!",
                 "first_name": "Ana",
                 "last_name": "Pop",
                 "phone": "+40722123456",
@@ -45,11 +61,23 @@ class RegistrationCase(TestCase):
         }
 
     def register(self, *, individual=False):
+        """Register, follow the emailed link, and choose the password, as a customer does."""
         response = self.post_registration(self.payload(individual=individual))
-        self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(response.status_code, 202, response.content)
+        self.assertFalse(User.objects.filter(email="owner@e2e.test").exists())
+        self.assertEqual(run_queued("apps.users.tasks.deliver_registration"), [{"sent": True, "kind": "confirm"}])
+        [message] = mail.outbox
+        registration_id, token = re.search(
+            r"https://customers\.e2e\.test/register/confirm/([0-9a-f-]+)/([0-9a-f]+)/", message.body
+        ).groups()
+        confirmed = self.signed_post("/api/users/register/confirm/", {
+            "registration_id": registration_id, "token": token,
+            "password": CHOSEN, "password_confirm": CHOSEN, "data_processing_consent": True,
+        })
+        self.assertEqual(confirmed.status_code, 201, confirmed.content)
         user = User.objects.get(email="owner@e2e.test")
         customer = CustomerMembership.objects.get(user=user, role="owner", is_primary=True).customer
-        self.assertTrue(user.check_password("Registration-pass123!"))
+        self.assertTrue(user.check_password(CHOSEN))
         self.assertFalse(user.is_staff)
         self.assertTrue(customer.data_processing_consent)
         self.assertIsNotNone(user.gdpr_consent_date)
@@ -80,6 +108,7 @@ class TestSignupWorkflow(RegistrationCase):
         response = self.post_registration(payload)
         self.assertEqual(response.status_code, 400)
         self.assertIn("data_processing_consent", response.content.decode())
+        self.assertFalse(PendingRegistration.objects.exists())
         self.assertFalse(User.objects.exists())
         self.assertFalse(Customer.objects.exists())
 
@@ -99,7 +128,7 @@ class TestSignupWorkflow(RegistrationCase):
         self.assertGreater(address.version, original.version)
 
 
-class TestUserRegistrationFlow(TestCase):
+class TestUserRegistrationFlow(RegistrationCase):
     def test_login_page_accessible(self):
         response = self.client.get("/auth/login/")
         self.assertEqual(response.status_code, 200)
@@ -148,5 +177,6 @@ class TestCustomerOnboardingFlow(RegistrationCase):
         payload["customer_data"]["address_line1"] = ""
         response = self.post_registration(payload)
         self.assertEqual(response.status_code, 400)
+        self.assertFalse(PendingRegistration.objects.exists())
         self.assertFalse(User.objects.exists())
         self.assertFalse(Customer.objects.exists())

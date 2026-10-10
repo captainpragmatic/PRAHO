@@ -27651,6 +27651,10 @@ msgstr "Ați uitat parola?"
 msgid "Reset it here"
 msgstr "Resetați-o aici"
 
+#: apps/api/customers/views.py
+msgid "Thank you. Check your email for a message with the next step."
+msgstr "Vă mulțumim. Verificați-vă e-mailul pentru un mesaj cu pasul următor."
+
 #~ msgid "Process payment gateway refund"
 #~ msgstr "Procesează rambursare din gateway-ul de plată"
 

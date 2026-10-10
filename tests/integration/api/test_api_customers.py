@@ -79,12 +79,20 @@ class CustomerAPIIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertFalse(response.data["success"])
 
-    def test_customer_register_endpoint_is_public_but_validates_payload(self) -> None:
+    def test_customer_register_endpoint_requires_the_portal_and_validates_payload(self) -> None:
+        unsigned = self.factory.post(
+            "/api/customers/register/",
+            data={"user_data": {"email": "bad@example.ro"}},
+            format="json",
+        )
+        self.assertIn(customer_register_api(unsigned).status_code, (401, 403))
+
         request = self.factory.post(
             "/api/customers/register/",
             data={"user_data": {"email": "bad@example.ro"}},
             format="json",
         )
+        request._portal_authenticated = True
 
         response = customer_register_api(request)
 
