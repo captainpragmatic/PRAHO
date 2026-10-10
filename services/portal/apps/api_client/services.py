@@ -162,8 +162,7 @@ def _read_body_within(response: requests.Response, deadline: _CallDeadline) -> N
     could otherwise hold a thread well past the budget. The deadline is checked between chunks
     of up to BODY_CHUNK_BYTES. Within one chunk the HTTP stack may read the socket many times,
     so a peer that deliberately trickles bytes inside the read timeout can still overrun the
-    budget; Platform is an HMAC-authenticated internal peer, and that residual is accepted
-    (ADR-0055).
+    budget; Platform is an HMAC-authenticated internal peer, and that residual is accepted.
 
     Only a body still on the wire is read here (requests keeps `_content` False until then); a
     response already in memory, as test doubles are, is left as it is.
