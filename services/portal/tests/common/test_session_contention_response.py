@@ -15,6 +15,7 @@ from django.http import HttpRequest, HttpResponse
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import path
 
+from apps.common.middleware import SecurityHeadersMiddleware
 from apps.common.session_store import SessionMiddleware, SessionSaveContended, SessionStore
 
 
@@ -49,9 +50,18 @@ class ContendedSessionResponseTests(TestCase):
         middleware = SessionMiddleware(lambda request: HttpResponse("page"))
         middleware.process_request(request)
         request.session["cart"] = {"items": [1]}
-        page = HttpResponse("page")
-        page.set_cookie("messages", "", max_age=0)  # a notice the page already consumed
-        page["Content-Security-Policy"] = "default-src 'self'"
+
+        def view(request: HttpRequest) -> HttpResponse:
+            page = HttpResponse("page", content_type="text/html")
+            page.set_cookie("messages", "", max_age=0)  # a notice the page already consumed
+            page["Content-Security-Policy"] = "default-src 'self'"
+            page["Content-Disposition"] = 'attachment; filename="invoice.pdf"'  # describes the page, not the 503
+            return page
+
+        # The page as the real security-headers middleware (inside the session middleware) left it.
+        page = SecurityHeadersMiddleware(view)(request)
+        security = {name: value for name, value in page.items() if name not in {"Content-Type", "Content-Disposition"}}
+        self.assertTrue({"Permissions-Policy", "X-Content-Type-Options"} <= set(security), security)
         with (
             patch("django.db.models.query.QuerySet.update", return_value=0),
             patch("apps.common.session_store._back_off"),
@@ -59,8 +69,12 @@ class ContendedSessionResponseTests(TestCase):
             response = middleware.process_response(request, page)
         self.assertEqual(response.status_code, 503)
         self.assertIn("messages", response.cookies)
-        self.assertEqual(response["Content-Security-Policy"], "default-src 'self'")
+        for name, value in security.items():
+            with self.subTest(header=name):
+                self.assertEqual(response[name], value)
+        self.assertNotIn("Content-Disposition", response)
         self.assertIn("no-cache", response["Cache-Control"])
+        self.assertIn("Retry-After", response)
 
     def test_a_value_that_is_not_json_is_rejected_not_silently_dropped(self) -> None:
         store = SessionStore()

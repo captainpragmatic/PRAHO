@@ -360,13 +360,25 @@ class SessionMiddleware(middleware.SessionMiddleware):
         return None
 
 
-# Headers set by middleware that ran before the save gave up; the 503 keeps them.
-_KEPT_HEADERS = (
-    "Content-Security-Policy",
-    "Content-Security-Policy-Report-Only",
-    "X-Frame-Options",
-    "Referrer-Policy",
-    "X-Request-ID",
+# Headers that describe the replaced response's body or caching, which the 503 must not inherit.
+# Every other header (security policy, request id, ...) was set by middleware that ran before the
+# save gave up, and is kept: listing the ones to keep would silently drop any header added later.
+_BODY_HEADERS = frozenset(
+    {
+        "content-type",
+        "content-length",
+        "content-encoding",
+        "content-disposition",
+        "content-language",
+        "content-range",
+        "location",
+        "etag",
+        "last-modified",
+        "expires",
+        "cache-control",
+        "vary",
+        "retry-after",
+    }
 )
 
 
@@ -381,7 +393,7 @@ def _contended(request: HttpRequest, response: HttpResponse | None) -> HttpRespo
     if response is not None:
         for name, morsel in response.cookies.items():  # e.g. the messages cookie already consumed
             unavailable.cookies[name] = morsel
-        for header in _KEPT_HEADERS:
-            if header in response:
-                unavailable[header] = response[header]
+        for header, value in response.items():
+            if header.lower() not in _BODY_HEADERS and header not in unavailable:
+                unavailable[header] = value
     return unavailable
