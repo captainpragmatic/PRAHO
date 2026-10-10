@@ -3,7 +3,8 @@
 #
 # The gunicorn workers and the qcluster workers all write these files, so Platform never rotates
 # them itself: its WatchedFileHandler reopens a file once logrotate has moved it, and re-creates it
-# (the units' UMask keeps it 0640), so logrotate does not (nocreate). Each policy keeps as many files
+# (as it always created it), so logrotate does not (nocreate). No UMask on these units: Django
+# creates upload directories under the same mask, and Caddy must be able to serve them. Each policy keeps as many files
 # as the in-process rotation did; logrotate runs hourly, so a file past its size is rotated within
 # the hour. See services/platform/config/settings/log_files.py.
 /var/log/praho/app.log {

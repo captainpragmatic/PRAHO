@@ -8,8 +8,6 @@ Requires=postgresql.service
 
 [Service]
 Type=notify
-# Files this service creates (its log files, re-created after rotation) are not world-readable.
-UMask=0027
 User={{ project_user }}
 Group={{ project_group }}
 WorkingDirectory={{ project_root }}/src/services/platform

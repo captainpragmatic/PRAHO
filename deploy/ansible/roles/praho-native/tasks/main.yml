@@ -173,22 +173,6 @@
     group: root
     mode: "0644"
 
-# Upgrading from in-process rotation leaves plain app.log.2 .. app.log.N (Platform's and the
-# portal's). logrotate's compress + delaycompress manages .1 plain and .2 onwards as .gz, so plain
-# leftovers would never expire. Compress them once so logrotate takes them over; .1 stays plain.
-# Without -f, a name that already has a .gz fails the task instead of overwriting rotated history.
-# logrotate only removes the one backup just past its count, so the portal's older backups beyond
-# its 14 (its error.log used to keep 30) are removed here, as its policy says; Platform's policy
-# keeps the counts the in-process rotation had.
-- name: Hand log backups left by in-process rotation over to logrotate
-  shell: |
-    set -eu
-    find /var/log/praho -maxdepth 2 -type f -regextype posix-extended \
-      -regex '.*/[a-z]+\.log\.([2-9]|[1-9][0-9]+)' -print -exec gzip -- {} +
-    find /var/log/praho/portal -maxdepth 1 -type f -regextype posix-extended \
-      -regex '.*/[a-z]+\.log\.(1[5-9]|[2-9][0-9]|[1-9][0-9][0-9]+)\.gz' -print -delete
-  register: legacy_log_backups
-  changed_when: legacy_log_backups.stdout | length > 0
 
 # logrotate checks the policy's maxsize only when it runs, which is daily by default: run it hourly
 # so a busy portal's logs are rotated soon after they pass 50M. Daily and weekly policies elsewhere
@@ -704,3 +688,29 @@
         {{ project_root }}/scripts/health-check.sh
         {{ project_root }}/scripts/backup.sh
       ================================================
+
+# ---------------------------------------------------------------------------
+# 12. Hand old log backups over to logrotate (after every writer has restarted)
+# ---------------------------------------------------------------------------
+
+# Restart anything the deploy notified now: a process still running the old in-process rotation
+# could be writing to a backup that the next task compresses and unlinks.
+- name: Restart the services on the new code before touching their log backups
+  meta: flush_handlers
+
+# Upgrading from in-process rotation leaves plain app.log.2 .. app.log.N (Platform's and the
+# portal's). logrotate's compress + delaycompress manages .1 plain and .2 onwards as .gz, so plain
+# leftovers would never expire. Compress them once so logrotate takes them over; .1 stays plain.
+# Without -f, a name that already has a .gz fails the task instead of overwriting rotated history.
+# logrotate only removes the one backup just past its count, so the portal's older backups beyond
+# its 14 (its error.log used to keep 30) are removed here, as its policy says; Platform's policy
+# keeps the counts the in-process rotation had.
+- name: Hand log backups left by in-process rotation over to logrotate
+  shell: |
+    set -eu
+    find /var/log/praho -maxdepth 2 -type f -regextype posix-extended \
+      -regex '.*/[a-z]+\.log\.([2-9]|[1-9][0-9]+)' -print -exec gzip -- {} +
+    find /var/log/praho/portal -maxdepth 1 -type f -regextype posix-extended \
+      -regex '.*/[a-z]+\.log\.(1[5-9]|[2-9][0-9]|[1-9][0-9][0-9]+)\.gz' -print -delete
+  register: legacy_log_backups
+  changed_when: legacy_log_backups.stdout | length > 0
