@@ -2,7 +2,8 @@
 
 Run structural checks with: pytest -o addopts='' tests/deploy/test_caddy_routing.py -m 'not docker'
 Run container checks with: pytest -o addopts='' tests/deploy/test_caddy_routing.py -m docker -s
-Docker checks require a working daemon and the official caddy:2-alpine image.
+Docker checks require a working daemon and the official caddy:2-alpine image, pulled from
+AWS's mirror of Docker Official Images (the same image; see IMAGE).
 """
 
 from __future__ import annotations
@@ -26,7 +27,11 @@ import yaml
 from jinja2 import Environment, StrictUndefined
 
 ROOT = Path(__file__).resolve().parents[2]
-IMAGE = "caddy:2-alpine"
+# The official caddy:2-alpine image, from AWS's mirror of Docker Official Images (its manifest
+# digest matched Docker Hub's when this changed), without Docker Hub's anonymous pull limit, which
+# shared CI runners hit.
+# Deployments keep pulling caddy:2-alpine from Docker Hub.
+IMAGE = "public.ecr.aws/docker/library/caddy:2-alpine"
 LOOPBACK = ["127.0.0.1/32", "::1/128"]
 PORTAL_HOST = "portal.example.test"
 PLATFORM_HOST = "platform.example.test"
@@ -344,6 +349,27 @@ def docker_daemon() -> None:
     """Skip the container checks where no Docker daemon is reachable."""
     if shutil.which("docker") is None or _docker("info").returncode != 0:
         pytest.skip("Docker daemon unavailable")
+    _pull_once(IMAGE)
+
+
+PULL_ATTEMPTS = 6
+
+
+def _pull_once(image: str) -> None:
+    """Pull the image before the tests run it, waiting out registry throttling.
+
+    Shared CI runners share outbound addresses, so an anonymous pull can be throttled
+    ("toomanyrequests"); a short backoff gets past a per-second limit.
+    """
+    if _docker("image", "inspect", image).returncode == 0:
+        return
+    result = _docker("pull", image)
+    for attempt in range(1, PULL_ATTEMPTS):
+        if result.returncode == 0 or "toomanyrequests" not in (result.stdout + result.stderr).lower():
+            break
+        time.sleep(2**attempt)
+        result = _docker("pull", image)
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 @pytest.mark.docker
