@@ -139,7 +139,7 @@ class ServicePlansIdentityTests(SimpleTestCase):
         response = service_plans(request)
 
         self.assertEqual(response.status_code, 200)
-        mock_plans.assert_called_once_with(101, "")
+        mock_plans.assert_called_once_with(101, "", user_id=7)
 
     @patch("apps.services.views.services_api.get_available_plans")
     def test_plans_invalid_request_customer_id_fails_closed(self, mock_plans: MagicMock) -> None:

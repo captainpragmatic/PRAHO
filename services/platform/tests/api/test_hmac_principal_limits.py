@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import time
+from unittest.mock import patch
 
 from django.core.exceptions import ImproperlyConfigured
 from django.test import RequestFactory, TestCase, override_settings
@@ -32,10 +33,14 @@ ADMITTED, REFUSED = 404, 429
     HMAC_RATE_LIMIT_MAX_CALLS=6,
     HMAC_RATE_LIMIT_PRINCIPAL_PER_MINUTE=3,
     HMAC_RATE_LIMIT_PRINCIPAL_BURST=100,
-    HMAC_RATE_LIMIT_ANONYMOUS_PER_MINUTE=3,
+    HMAC_RATE_LIMIT_ANONYMOUS_PER_MINUTE=4,
     CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache", "LOCATION": "principal-limits"}},
 )
 class PrincipalLimitTests(HMACTestMixin, TestCase):
+    def setUp(self) -> None:
+        # Mid-window, so a run cannot straddle a minute boundary (signing reads the same clock).
+        self.enterContext(patch("time.time", return_value=1_800_000_030.0))
+
     def _as(self, body: dict[str, object], **headers: str) -> int:
         return self.portal_post(PROBE, dict(body), **headers).status_code
 
@@ -47,7 +52,7 @@ class PrincipalLimitTests(HMACTestMixin, TestCase):
 
     def test_an_anonymous_flood_does_not_consume_a_customers_budget(self) -> None:
         flood = [self._as({}) for _ in range(10)]
-        self.assertEqual(flood.count(ADMITTED), 3)
+        self.assertEqual(flood.count(ADMITTED), 4)  # the anonymous budget, not a customer's (3)
         self.assertEqual(self._as({"user_id": 2}), ADMITTED)
 
     def test_the_portal_wide_ceiling_still_trips(self) -> None:
@@ -64,8 +69,60 @@ class PrincipalLimitTests(HMACTestMixin, TestCase):
         for _ in range(3):
             headers = hmac_headers("POST", PROBE, body, portal_id=self.portal_id)  # a fresh nonce each time
             self.client.post(PROBE, body, content_type="application/json", **headers)
-        self.assertEqual(self._as({}), REFUSED)  # the anonymous bucket took those three
+        self._as({})  # the fourth anonymous request uses up the anonymous budget
+        self.assertEqual(self._as({}), REFUSED)
         self.assertEqual(self._as({"user_id": 1}), ADMITTED)
+
+
+LOGIN = "/api/users/login/"
+
+
+@override_settings(
+    PLATFORM_API_SECRET=HMAC_TEST_SECRET,
+    MIDDLEWARE=HMAC_TEST_MIDDLEWARE,
+    PORTAL_HMAC_MODE="legacy",
+    RATE_LIMITING_ENABLED=True,
+    HMAC_RATE_LIMIT_WINDOW=60,
+    HMAC_RATE_LIMIT_MAX_CALLS=100,
+    HMAC_RATE_LIMIT_MAX_AUTH_CALLS=100,
+    HMAC_RATE_LIMIT_PRINCIPAL_PER_MINUTE=50,
+    HMAC_RATE_LIMIT_PRINCIPAL_BURST=2,
+    HMAC_RATE_LIMIT_PRINCIPAL_BURST_WINDOW=10,
+    HMAC_RATE_LIMIT_PRINCIPAL_AUTH_PER_MINUTE=2,
+    HMAC_RATE_LIMIT_ANONYMOUS_AUTH_PER_MINUTE=3,
+    HMAC_RATE_LIMIT_ANONYMOUS_PER_MINUTE=50,
+    CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache", "LOCATION": "principal-burst"}},
+)
+class PrincipalBurstAndAuthTests(HMACTestMixin, TestCase):
+    def setUp(self) -> None:
+        self.enterContext(patch("time.time", return_value=1_800_000_001.0))  # early in a 10 s window
+
+    def test_a_customer_burst_is_limited_on_its_own(self) -> None:
+        self.assertEqual(
+            [self.portal_post(PROBE, {"user_id": 1}).status_code for _ in range(4)],
+            [ADMITTED, ADMITTED, REFUSED, REFUSED],
+        )
+        self.assertEqual(self.portal_post(PROBE, {"user_id": 2}).status_code, ADMITTED)
+
+    def test_login_attempts_from_one_address_leave_other_addresses_theirs(self) -> None:
+        def login(client_ip: str) -> int:
+            body = {"email": "nobody@example.ro", "password": "x", "client_ip": client_ip}
+            return self.portal_post(LOGIN, body).status_code
+
+        flood = [login("203.0.113.9") for _ in range(4)]
+        self.assertEqual(flood[2:], [REFUSED, REFUSED])
+        self.assertNotEqual(login("198.51.100.7"), REFUSED)
+
+    def test_a_login_without_a_signed_address_shares_the_anonymous_auth_bucket(self) -> None:
+        def login() -> int:
+            return self.portal_post(LOGIN, {"email": "nobody@example.ro", "password": "x"}).status_code
+
+        # The anonymous auth budget (3) is its own, separate from each signed address's (2).
+        self.assertEqual([login() for _ in range(4)], [401, 401, 401, REFUSED])
+        self.assertNotEqual(
+            self.portal_post(LOGIN, {"email": "a@example.ro", "password": "x", "client_ip": "198.51.100.7"}).status_code,
+            REFUSED,
+        )
 
 
 class PortalPrincipalTests(TestCase):
@@ -79,6 +136,8 @@ class PortalPrincipalTests(TestCase):
             b'{"user_id": true}': "anonymous",
             b'{"user_id": 0}': "anonymous",
             b'{"user_id": "7x"}': "anonymous",
+            b'{"user_id": "%s"}' % (b"9" * 4301): "anonymous",  # past int()'s digit limit
+            b'{"user_id": %s}' % (b"9" * 25): "anonymous",
             b'{"client_ip": "not-an-ip"}': "anonymous",
             b'{"user_id": 1, "user_id": 2}': "anonymous",
             b"[1, 2]": "anonymous",
@@ -121,6 +180,7 @@ class HMACLimitSettingsTests(TestCase):
             {"HMAC_RATE_LIMIT_PRINCIPAL_PER_MINUTE": 1000, "HMAC_RATE_LIMIT_MAX_CALLS": 1000},
             {"HMAC_RATE_LIMIT_PRINCIPAL_AUTH_PER_MINUTE": 700, "HMAC_RATE_LIMIT_MAX_AUTH_CALLS": 600},
             {"HMAC_RATE_LIMIT_ANONYMOUS_PER_MINUTE": 0},
+            {"HMAC_RATE_LIMIT_ANONYMOUS_PER_MINUTE": 600, "HMAC_RATE_LIMIT_MAX_CALLS": 600},
             {"HMAC_RATE_LIMIT_MAX_CALLS": "1000"},
         ):
             with self.subTest(overrides=overrides), override_settings(**overrides), self.assertRaises(ImproperlyConfigured):

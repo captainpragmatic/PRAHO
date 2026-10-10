@@ -125,6 +125,9 @@ def validate_at_startup() -> None:
 
 
 ANONYMOUS_PRINCIPAL = "anonymous"
+# A database id has at most 19 digits; a longer string is malformed (and int() of a very long one
+# raises), so it falls back to anonymous like any other bad value.
+MAX_USER_ID_DIGITS = 19
 
 
 class _DuplicateKeyError(ValueError):
@@ -152,9 +155,9 @@ def portal_principal(body: bytes) -> str:
     if not isinstance(data, dict):
         return ANONYMOUS_PRINCIPAL
     user_id = data.get("user_id")
-    if isinstance(user_id, str) and user_id.isascii() and user_id.isdigit():
+    if isinstance(user_id, str) and user_id.isascii() and user_id.isdigit() and len(user_id) <= MAX_USER_ID_DIGITS:
         user_id = int(user_id)
-    if isinstance(user_id, int) and not isinstance(user_id, bool) and user_id > 0:
+    if isinstance(user_id, int) and not isinstance(user_id, bool) and 0 < user_id < 10**MAX_USER_ID_DIGITS:
         return f"user:{user_id}"
     client_ip = data.get("client_ip")
     if isinstance(client_ip, str):

@@ -391,7 +391,9 @@ class ServicesAPIClient(PlatformAPIClient):
             )
             raise
 
-    def get_available_plans(self, customer_id: int, service_type: str = "") -> list[dict[str, Any]]:
+    def get_available_plans(
+        self, customer_id: int, service_type: str = "", user_id: int | None = None
+    ) -> list[dict[str, Any]]:
         """
         Get available hosting plans for customer (for upgrades/downgrades).
 
@@ -408,7 +410,7 @@ class ServicesAPIClient(PlatformAPIClient):
             if service_type:
                 params["plan_type"] = service_type
 
-            response = self._make_request("GET", "/services/plans/", params=params)
+            response = self._make_request("GET", "/services/plans/", user_id=user_id, params=params)
 
             logger.info(f"✅ [Services API] Retrieved available plans for customer {customer_id}")
             return cast(list[dict[str, Any]], response.get("data", {}).get("plans", []))

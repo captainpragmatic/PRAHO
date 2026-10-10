@@ -44,6 +44,7 @@ from .services import (
     GDPRCompliantCartSession,
     HMACPriceSealer,
     OrderCreationService,
+    platform_user_id,
     read_selling_policy,
 )
 from .validators import OrderInputValidator
@@ -594,7 +595,9 @@ def product_catalog(request: HttpRequest) -> HttpResponse:
             params["featured"] = "true"
 
         # Fetch products from platform
-        products_response = platform_api.get("/api/orders/products/", params=params)
+        products_response = platform_api.get(
+            "/api/orders/products/", params=params, user_id=platform_user_id(_get_customer_context(request)[1])
+        )
 
         if not products_response or "results" not in products_response:
             raise PlatformAPIError("Invalid response format")
@@ -661,7 +664,9 @@ def product_detail(request: HttpRequest, product_slug: str) -> HttpResponse:
         platform_api = PlatformAPIClient()
 
         # Fetch product details
-        product = platform_api.get(f"/api/orders/products/{product_slug}/")
+        product = platform_api.get(
+            f"/api/orders/products/{product_slug}/", user_id=platform_user_id(_get_customer_context(request)[1])
+        )
 
         if not product:
             messages.error(request, _("Product not found."))
@@ -1254,7 +1259,9 @@ def order_confirmation(request: HttpRequest, order_id: str) -> HttpResponse:
             if payment_info:
                 try:
                     # Get Stripe configuration from Platform API
-                    stripe_config_result = platform_api.get_billing("stripe-config/")
+                    stripe_config_result = platform_api.get_billing(
+                        "stripe-config/", user_id=platform_user_id(_get_customer_context(request)[1])
+                    )
                     if stripe_config_result and stripe_config_result.get("success"):
                         stripe_config = stripe_config_result.get("config", {})
                         logger.info("✅ Retrieved Stripe configuration for checkout")

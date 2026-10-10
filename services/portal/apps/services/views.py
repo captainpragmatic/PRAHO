@@ -610,7 +610,7 @@ def service_plans(request: HttpRequest) -> HttpResponse:
     service_type = request.GET.get("type", "")
 
     try:
-        plans = services_api.get_available_plans(customer_id, service_type)
+        plans = services_api.get_available_plans(customer_id, service_type, user_id=user_id)
 
         context = {
             "plans": plans,

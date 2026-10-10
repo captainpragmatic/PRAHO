@@ -439,6 +439,8 @@ class PortalServiceHMACMiddleware:
         self._rl_principal_burst_window = int(getattr(settings, "HMAC_RATE_LIMIT_PRINCIPAL_BURST_WINDOW", 10))
         self._rl_principal_auth_calls = int(getattr(settings, "HMAC_RATE_LIMIT_PRINCIPAL_AUTH_PER_MINUTE", 30))
         self._rl_anonymous_calls = int(getattr(settings, "HMAC_RATE_LIMIT_ANONYMOUS_PER_MINUTE", 600))
+        # Logins and resets without a signed client IP (a portal without trusted proxies) share this.
+        self._rl_anonymous_auth_calls = int(getattr(settings, "HMAC_RATE_LIMIT_ANONYMOUS_AUTH_PER_MINUTE", 120))
 
     def _rate_limited(
         self, portal_id: str, client_ip: str, *, path: str = "", principal: str = portal_hmac.ANONYMOUS_PRINCIPAL
@@ -456,7 +458,12 @@ class PortalServiceHMACMiddleware:
         }
         principal_key = f"hmac_rl:{portal_id}:principal:{principal}"
         if auth:
-            principal_windows = [(f"{principal_key}:auth", self._rl_window, self._rl_principal_auth_calls)]
+            auth_budget = (
+                self._rl_anonymous_auth_calls
+                if principal == portal_hmac.ANONYMOUS_PRINCIPAL
+                else self._rl_principal_auth_calls
+            )
+            principal_windows = [(f"{principal_key}:auth", self._rl_window, auth_budget)]
         elif principal == portal_hmac.ANONYMOUS_PRINCIPAL:
             principal_windows = [(principal_key, self._rl_window, self._rl_anonymous_calls)]
         else:

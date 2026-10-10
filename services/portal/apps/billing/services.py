@@ -48,7 +48,7 @@ class GiftCardPurchaseService:
         return result
 
     def stripe_public_key(self) -> str:
-        result = self.api_client.get_billing("stripe-config/")
+        result = self.api_client.get_billing("stripe-config/", user_id=self.user_id)
         key = result.get("config", {}).get("publishable_key")
         if result.get("success") is not True or not isinstance(key, str) or not key:
             raise PlatformAPIError("Card payments are unavailable")

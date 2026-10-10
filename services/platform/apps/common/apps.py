@@ -94,6 +94,7 @@ def _validate_hmac_rate_limits_at_startup() -> None:
         "HMAC_RATE_LIMIT_PRINCIPAL_BURST_WINDOW",
         "HMAC_RATE_LIMIT_PRINCIPAL_AUTH_PER_MINUTE",
         "HMAC_RATE_LIMIT_ANONYMOUS_PER_MINUTE",
+        "HMAC_RATE_LIMIT_ANONYMOUS_AUTH_PER_MINUTE",
     )
     values: dict[str, int] = {}
     for name in names:
@@ -105,6 +106,8 @@ def _validate_hmac_rate_limits_at_startup() -> None:
     for own, shared in (
         ("HMAC_RATE_LIMIT_PRINCIPAL_PER_MINUTE", "HMAC_RATE_LIMIT_MAX_CALLS"),
         ("HMAC_RATE_LIMIT_PRINCIPAL_AUTH_PER_MINUTE", "HMAC_RATE_LIMIT_MAX_AUTH_CALLS"),
+        ("HMAC_RATE_LIMIT_ANONYMOUS_PER_MINUTE", "HMAC_RATE_LIMIT_MAX_CALLS"),
+        ("HMAC_RATE_LIMIT_ANONYMOUS_AUTH_PER_MINUTE", "HMAC_RATE_LIMIT_MAX_AUTH_CALLS"),
     ):
         if values[own] >= values[shared]:
             raise ImproperlyConfigured(f"{own} ({values[own]}) must be below {shared} ({values[shared]})")

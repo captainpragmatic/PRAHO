@@ -60,13 +60,15 @@ Duplicate keys, a body that is not an object, or values of the wrong shape all g
 
 **Middleware order** (`HMAC_RATE_LIMIT_*` settings, validated at startup):
 
-1. The principal's own windows are charged first: per minute and a 10 s burst for customers; per minute for anonymous; a smaller auth window on login and reset.
+1. The principal's own windows are charged first: per minute and a 10 s burst for customers; per minute for anonymous; on login and reset, a small auth window per principal and a larger one shared by anonymous auth traffic.
 2. A principal over its budget is refused (429) **without** charging the portal-wide counter.
 3. Only then is the portal-wide ceiling charged. It is kept as protection against a compromised portal.
 
 Each principal budget must stay below its ceiling.
 
 **DRF throttles.** `portal_hmac`, `portal_hmac_burst` and the HMAC branch of `EndpointRateThrottle` (including `session_validation`) are keyed on `portal:principal`. `portal_hmac_create_user` deliberately stays per portal.
+
+**Out of scope.** Public endpoints (`@public_api_endpoint`, such as currencies and registration) are not portal-authenticated, skip this layer and keep their own per-view limits.
 
 **Deployment requirement.** Login and reset carry a signed `client_ip` only when the portal has trusted proxies configured. Production and staging refuse to start without them; elsewhere such traffic shares the `anonymous` bucket.
 
