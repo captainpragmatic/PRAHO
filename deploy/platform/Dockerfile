@@ -77,11 +77,13 @@ LABEL maintainer="PRAHO Platform Team"
 LABEL service="platform"
 LABEL description="PRAHO Platform Service - Admin and business logic"
 
+# PLATFORM_LOG_DIR is empty: logs go to the console only (docker logs); see config/settings/log_files.py.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     DJANGO_SETTINGS_MODULE=config.settings.prod \
     PYTHONPATH=/app/services/platform \
-    SERVICE_NAME=platform
+    SERVICE_NAME=platform \
+    PLATFORM_LOG_DIR=""
 
 # Runtime-only system packages (no build-essential, no git, no uv)
 RUN apt-get update \

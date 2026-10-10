@@ -17,6 +17,7 @@ except ImportError:
     HAS_SENTRY = False
 
 from .base import *  # noqa: F403  # Django settings pattern
+from .log_files import place_log_files, platform_log_dir
 
 # ===============================================================================
 # PRODUCTION SECURITY VALIDATION
@@ -496,37 +497,29 @@ LOGGING = {
         },
         # Main application log file
         "file": {
-            "class": "logging.handlers.RotatingFileHandler",
+            "class": "logging.handlers.WatchedFileHandler",
             "filename": "/var/log/praho/app.log",
-            "maxBytes": 52428800,  # 50MB
-            "backupCount": 10,
             "formatter": "json",
             "filters": ["add_request_id", "add_audit_context"],
         },
         # Security-specific log file (high severity events)
         "security_file": {
-            "class": "logging.handlers.RotatingFileHandler",
+            "class": "logging.handlers.WatchedFileHandler",
             "filename": "/var/log/praho/security.log",
-            "maxBytes": 52428800,  # 50MB
-            "backupCount": 30,  # Keep more security logs
             "formatter": "json",
             "filters": ["add_request_id", "add_audit_context"],
         },
         # Audit log file (immutable audit trail)
         "audit_file": {
-            "class": "logging.handlers.RotatingFileHandler",
+            "class": "logging.handlers.WatchedFileHandler",
             "filename": "/var/log/praho/audit.log",
-            "maxBytes": 104857600,  # 100MB
-            "backupCount": 90,  # 90 days for compliance
             "formatter": "audit",
             "filters": ["add_request_id", "add_audit_context"],
         },
         # Error log for critical issues
         "error_file": {
-            "class": "logging.handlers.RotatingFileHandler",
+            "class": "logging.handlers.WatchedFileHandler",
             "filename": "/var/log/praho/error.log",
-            "maxBytes": 52428800,  # 50MB
-            "backupCount": 30,
             "formatter": "json",
             "filters": ["add_request_id"],
             "level": "ERROR",
@@ -585,6 +578,9 @@ LOGGING = {
         },
     },
 }
+
+# Watched files in PLATFORM_LOG_DIR, rotated by logrotate, or console only (config/settings/log_files.py).
+LOGGING = place_log_files(LOGGING, platform_log_dir())
 
 # Ensure Sentry captures ERROR+ from application loggers (propagate=False blocks root handler)
 if HAS_SENTRY and SENTRY_DSN:

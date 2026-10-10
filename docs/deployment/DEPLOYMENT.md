@@ -988,11 +988,16 @@ journalctl -u praho-qcluster -f
 # Native: the portal's JSON log files (rotated daily by /etc/logrotate.d/praho-portal)
 tail -F /var/log/praho/portal/app.log /var/log/praho/portal/error.log
 
+# Native: Platform's JSON log files (rotated by /etc/logrotate.d/praho-platform)
+tail -F /var/log/praho/app.log /var/log/praho/security.log /var/log/praho/audit.log /var/log/praho/error.log
+
 # Using make
 make deploy-logs
 ```
 
 **Portal log files.** The portal always logs to the console (journald, `docker logs`). When `PORTAL_LOG_DIR` names a directory (native default: `/var/log/praho/portal`), it also writes `app.log` and `error.log` there. Several portal processes write those files, so the portal never rotates them itself: it reopens a file once logrotate has moved it. The native role installs the policy (daily, 14 kept, sooner once past 50 MB) and runs logrotate hourly. On native installs keep the default directory: the unit's writable paths and the rotation policy cover only `/var/log/praho/portal`. The Docker image sets `PORTAL_LOG_DIR` empty, so containers log to the console only (`docker logs`). If you set it in Docker, rotate the files yourself.
+
+**Platform log files** work the same way. The gunicorn workers and the qcluster workers all write `app.log`, `security.log`, `audit.log` and `error.log` in `PLATFORM_LOG_DIR` (native default `/var/log/praho`), and Platform never rotates them itself. The native role's policy keeps 10 days of `app.log`, 30 of `security.log` and `error.log`, and 90 of `audit.log` (each rotated sooner once past 50 MB, 100 MB for the audit log). The Docker image sets `PLATFORM_LOG_DIR` empty, so the container logs to the console only.
 
 ### Common Issues
 

@@ -165,6 +165,14 @@
     group: root
     mode: "0644"
 
+- name: Rotate Platform's log files (Platform never rotates them itself)
+  template:
+    src: praho-platform.logrotate.j2
+    dest: /etc/logrotate.d/praho-platform
+    owner: root
+    group: root
+    mode: "0644"
+
 # logrotate checks the policy's maxsize only when it runs, which is daily by default: run it hourly
 # so a busy portal's logs are rotated soon after they pass 50M. Daily and weekly policies elsewhere
 # still rotate on their own schedule; only size checks happen more often.
