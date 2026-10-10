@@ -1,5 +1,7 @@
 """A registration request does the same work, and answers the same, whatever already exists."""
 
+from unittest.mock import patch
+
 from django.core.cache import cache
 from django.db import connection
 from django.test import TestCase, override_settings
@@ -50,6 +52,9 @@ class RegistrationUniformAnswerTests(HMACTestMixin, TestCase):
         return response.status_code, response.json(), len(queries), looked_up
 
     def test_existing_and_new_details_get_the_same_answer_and_work(self) -> None:
+        # The counter store deletes expired rows on 1 write in 200, at random and whatever was
+        # submitted: hold that still so the counts compare only what depends on the submission.
+        self.enterContext(patch("apps.common.counters.randbelow", return_value=1))
         self.submit(registration("warm-up@example.test", "Warm Up SRL", ""))
         cases = {
             "new everything": registration("new@example.test", "New SRL", "RO18547290"),
@@ -64,3 +69,10 @@ class RegistrationUniformAnswerTests(HMACTestMixin, TestCase):
         self.assertEqual(len(answers), 1, observed)
         self.assertEqual(next(iter(answers))[0], 202)
         self.assertEqual(PendingRegistration.objects.count(), 5)
+
+    def test_the_submitted_language_is_kept_for_the_mail(self) -> None:
+        response = self.portal_post(
+            "/api/customers/register/", {**registration("ro@example.test", "Limba SRL", ""), "language": "ro"}
+        )
+        self.assertEqual(response.status_code, 202, response.content)
+        self.assertEqual(PendingRegistration.objects.get(email="ro@example.test").language, "ro")

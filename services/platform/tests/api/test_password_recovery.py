@@ -78,6 +78,9 @@ class PasswordRecoveryAPITests(HMACTestMixin, TestCase):
         self.request_reset("warm-up@example.test")
         OrmQ.objects.all().delete()
         observed = {}
+        # The counter store deletes expired rows on 1 write in 200, at random and whatever the
+        # address: hold that still so the counts compare only what depends on the address.
+        self.enterContext(patch("apps.common.counters.randbelow", return_value=1))
         for email in (self.user.email, inactive.email, "unknown@example.test"):
             with CaptureQueriesContext(connection) as queries:
                 response = self.request_reset(email)

@@ -45,6 +45,12 @@ class RegistrationUniformAnswerTests(TestCase):
         self.assertEqual(self.api.register_customer.call_args.kwargs, {"client_ip": "127.0.0.1"})
         self.assertNotIn("customer_id", self.client.session)
 
+    def test_the_page_language_goes_with_the_registration(self) -> None:
+        self.client.post("/register/", FORM, HTTP_ACCEPT_LANGUAGE="ro")
+        self.assertEqual(self.api.register_customer.call_args.args[0]["language"], "ro")
+        self.client.post("/register/", FORM, HTTP_ACCEPT_LANGUAGE="en")
+        self.assertEqual(self.api.register_customer.call_args.args[0]["language"], "en")
+
     def test_the_form_asks_for_no_password(self) -> None:
         page = self.client.get("/register/")
         self.assertNotContains(page, 'type="password"')

@@ -42,6 +42,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **The password is chosen on the confirmation page**, by whoever holds the mailbox, so nobody can set up an account for an address they do not control. The page shows the submitted details first, and asks for data-processing and marketing consent there.
   - **Links** work for 24 hours and once. One registration mail per address per 10 minutes, and 5 a day.
   - **API change.** `/api/customers/register/` now requires the portal's HMAC signature and answers 202. Its per-client limits use the signed client IP.
+  - **Deploy Platform first.** The new portal sends no password, which the old Platform requires.
+  - **Still possible:** whoever confirms a link learns whether the company name was taken meanwhile, because confirmation refuses a duplicate company. That needs a mailbox, a confirmation and the per-client registration budget for every name tried.
 - **A portal password-reset request no longer reveals, by its timing, whether the email has an account.**
   - **The bug.** The answer was already the same for every address, but only an active account's request rendered and sent the mail before answering, so it took measurably longer.
   - **Now.** Every request does the same work: it checks the portal link origin and queues the mail. The task worker looks the account up and sends the mail.

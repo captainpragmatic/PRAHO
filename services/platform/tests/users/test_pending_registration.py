@@ -9,6 +9,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 from django_q.models import Schedule
 
+from apps.audit.models import AuditEvent
 from apps.common import counters
 from apps.common.types import Err
 from apps.customers.models import Customer
@@ -263,6 +264,20 @@ class ConfirmRegistrationTests(PortalOriginMixin, TestCase):
             self.assertEqual(self.confirm(row).unwrap_err().code, "unavailable")
         row.refresh_from_db()
         self.assertIsNone(row.consumed_at)
+        self.assertTrue(self.confirm(row).is_ok())
+
+    def test_a_failure_part_way_through_creating_the_account_leaves_nothing_and_keeps_the_link(self) -> None:
+        row = self.sent()
+        with patch(
+            "apps.users.services.CustomerAddress.objects.create", side_effect=RuntimeError("address store down")
+        ):
+            self.assertEqual(self.confirm(row).unwrap_err().code, "unavailable")
+        self.assertFalse(User.objects.filter(email="new@example.test").exists())
+        self.assertFalse(Customer.objects.filter(company_name="Quill Lantern SRL").exists())
+        row.refresh_from_db()
+        self.assertTrue(row.is_usable())
+        # Discarding the partial user and customer must not discard the record of the failure.
+        self.assertTrue(AuditEvent.objects.filter(action="registration_system_error").exists())
         self.assertTrue(self.confirm(row).is_ok())
 
     def test_confirming_does_not_spend_the_registration_budget(self) -> None:
