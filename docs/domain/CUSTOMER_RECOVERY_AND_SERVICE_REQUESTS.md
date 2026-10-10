@@ -3,10 +3,16 @@
 ## Password recovery
 
 Customers request recovery at Portal `/password-reset/`. Portal sends a signed
-request to Platform, which generates the token and sends the email through its
-configured Django email backend. This path is synchronous and needs no queue worker.
-Public acknowledgements do not confirm account existence or email delivery. Delivery,
-template and configuration failures remain in Platform error logs for staff to diagnose.
+request to Platform, which checks the Portal origin and queues
+`apps.users.tasks.send_password_reset_email` for every address, without looking the
+account up, so neither the answer nor its timing depends on the account. The Django-Q
+worker (`qcluster`) looks up the active account, generates the token and sends the
+email through the configured Django email backend; recovery mail therefore needs the
+worker running. The task never raises and is queued with `ack_failure`, so a failed
+send is not redelivered, and it drops a request older than 15 minutes, so a link never
+arrives long after it was asked for. Public acknowledgements do not confirm account
+existence or email delivery. Delivery, template and configuration failures remain in
+Platform error logs for staff to diagnose.
 Portal transport outages and unavailable rate-limit infrastructure still show a
 temporary service error, independently of the submitted account.
 
@@ -29,7 +35,10 @@ are distinguishable through the configured trusted proxies. These counters are i
 opening the link or form consumes no quota. Platform's existing authentication
 throttle also applies; its IP limit is shared by requests from a Portal host.
 Recovery dispatch retains the authentication middleware's 100–500 ms response floor
-with jitter. This does not equalize synchronous mail calls that take longer than that target.
+with jitter. Mail is sent by the worker, so the request's own work is the same for every
+address. What remains: the worker sends mail only for real accounts, so someone who can
+measure how long the shared worker takes to reach their own later request could, weakly,
+infer whether earlier requests had accounts. The request limits above bound that.
 
 Existing Portal session-hash validation still rejects sessions created before a
 password change. Native Platform recovery remains a separate staff-facing flow.

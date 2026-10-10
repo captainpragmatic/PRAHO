@@ -1,7 +1,8 @@
 """Public Portal recovery uses Platform tokens and a trusted Portal email link."""
 
+import time
 from datetime import timedelta
-from typing import Any, cast
+from typing import Any
 from unittest.mock import patch
 
 from django.contrib.auth.tokens import default_token_generator
@@ -13,16 +14,16 @@ from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
-from django.utils.module_loading import import_string
 from django_q.models import OrmQ
-from django_q.signing import SignedPackage
 
 from apps.api.users.serializers import InvalidPasswordResetLink, MFADisableSerializer, PasswordResetConfirmSerializer
 from apps.audit.models import AuditEvent
 from apps.settings.models import SystemSetting
 from apps.users.forms import LoginForm
 from apps.users.models import User
+from apps.users.tasks import PASSWORD_RESET_MAIL_MAX_AGE_SECONDS, send_password_reset_email
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
+from tests.helpers.task_queue import queued, run_queued
 
 RESET_TASK = "apps.users.tasks.send_password_reset_email"
 
@@ -58,20 +59,19 @@ class PasswordRecoveryAPITests(HMACTestMixin, TestCase):
         return self.portal_post("/api/users/password/reset/", {"email": email})
 
     def queued_resets(self) -> list[dict[str, Any]]:
-        packages = [cast("dict[str, Any]", SignedPackage.loads(row.payload)) for row in OrmQ.objects.all()]
-        return [package for package in packages if package["func"] == RESET_TASK]
+        return queued(RESET_TASK)
 
     def deliver_queued_resets(self) -> list[dict[str, Any]]:
-        """Run every queued reset the way a worker would: by the stored dotted path and arguments."""
-        packages = self.queued_resets()
-        OrmQ.objects.all().delete()
-        return [import_string(package["func"])(*package["args"], **package["kwargs"]) for package in packages]
+        return run_queued(RESET_TASK)
 
     def test_request_queues_the_mail_and_sends_nothing_itself(self):
         response = self.request_reset(self.user.email)
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(len(mail.outbox), 0)
-        self.assertEqual([package["args"] for package in self.queued_resets()], [(self.user.email,)])
+        [package] = self.queued_resets()
+        self.assertEqual(package["args"][0], self.user.email)
+        self.assertAlmostEqual(package["args"][1], time.time(), delta=60)
+        self.assertIs(package["ack_failure"], True)
 
     def test_request_path_is_the_same_for_every_account(self):
         inactive = User.objects.create_user(email="inactive@example.test", is_active=False)
@@ -89,8 +89,8 @@ class PasswordRecoveryAPITests(HMACTestMixin, TestCase):
         self.assertEqual(len(set(map(str, observed.values()))), 1, observed)
         self.assertEqual(len(mail.outbox), 0)
         self.assertEqual(
-            [package["args"] for package in self.queued_resets()],
-            [(self.user.email,), (inactive.email,), ("unknown@example.test",)],
+            [package["args"][0] for package in self.queued_resets()],
+            [self.user.email, inactive.email, "unknown@example.test"],
         )
 
     def test_a_queue_failure_still_answers_accepted(self):
@@ -108,6 +108,7 @@ class PasswordRecoveryAPITests(HMACTestMixin, TestCase):
         self.assertEqual(len(mail.outbox), 1)
         message = mail.outbox[0]
         self.assertEqual(message.to, [self.user.email])
+        self.assertEqual(message.subject, "Password Reset Request - PRAHO Platform")
         self.assertIn(f"https://customers.example.test/password-reset/confirm/{self.uid}/", message.body)
         self.assertNotIn("localhost:8700", message.body)
         self.assertIn("can only be used once", message.body)
@@ -154,8 +155,24 @@ class PasswordRecoveryAPITests(HMACTestMixin, TestCase):
             "apps.users.tasks", level="ERROR"
         ) as diagnostics:
             results = self.deliver_queued_resets()
-        self.assertEqual(results, [{"sent": False, "reason": "delivery"}])
-        self.assertTrue(any("template broken" in entry for entry in diagnostics.output))
+        self.assertEqual(results, [{"sent": False, "reason": "error"}])
+        self.assertTrue(any("ValueError" in entry and "template broken" in entry for entry in diagnostics.output))
+
+    def test_a_database_failure_is_returned_never_raised(self):
+        with patch("apps.users.services.SettingsService.get_setting", side_effect=DatabaseError("connection lost")), \
+                self.assertLogs("apps.users.tasks", level="ERROR") as diagnostics:
+            result = send_password_reset_email(self.user.email, time.time())
+        self.assertEqual(result, {"sent": False, "reason": "error"})
+        self.assertTrue(any("DatabaseError" in entry and "connection lost" in entry for entry in diagnostics.output))
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_a_request_older_than_the_limit_sends_nothing(self):
+        late = time.time() - PASSWORD_RESET_MAIL_MAX_AGE_SECONDS - 1
+        with self.assertLogs("apps.users.tasks", level="WARNING"):
+            self.assertEqual(send_password_reset_email(self.user.email, late), {"sent": False, "reason": "stale"})
+        self.assertEqual(len(mail.outbox), 0)
+        on_time = time.time() - PASSWORD_RESET_MAIL_MAX_AGE_SECONDS + 30
+        self.assertEqual(send_password_reset_email(self.user.email, on_time), {"sent": True})
 
     def test_password_is_changed_exactly_and_token_cannot_be_reused(self):
         response = self.confirm()

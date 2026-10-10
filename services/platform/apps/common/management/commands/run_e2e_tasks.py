@@ -4,6 +4,7 @@ import json
 from typing import Any, cast
 
 from django.core.management.base import BaseCommand, CommandParser
+from django.core.signing import BadSignature
 from django.utils.module_loading import import_string
 from django_q.models import OrmQ
 from django_q.signing import SignedPackage
@@ -24,7 +25,10 @@ class Command(BaseCommand):
         require_e2e_database()
         results = []
         for row in OrmQ.objects.order_by("id"):
-            package = cast("dict[str, Any]", SignedPackage.loads(row.payload))
+            try:
+                package = cast("dict[str, Any]", SignedPackage.loads(row.payload))
+            except BadSignature:
+                continue  # Not ours to judge: the live database keeps rows between runs.
             if package["func"] != options["func"]:
                 continue
             row.delete()

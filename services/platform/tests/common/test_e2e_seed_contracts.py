@@ -1,8 +1,10 @@
 """Browser prerequisites cannot be mistaken for or repair an ORM test database."""
 
 import json
+import time
 from io import StringIO
 
+from django.core.cache import cache
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import connection
@@ -42,14 +44,20 @@ class E2EFixtureTests(TestCase):
         self.assertFalse(Customer.objects.exists())
 
     def test_queued_task_runner_runs_only_the_named_task(self):
-        async_task(RESET_TASK, "nobody@example.test")
+        SystemSetting.objects.update_or_create(
+            key="portal.public_base_url",
+            defaults={"name": "Portal URL", "category": "platform", "data_type": "string",
+                      "value": "https://customers.example.test", "default_value": ""},
+        )
+        cache.clear()
+        async_task(RESET_TASK, "nobody@example.test", time.time())
         async_task("apps.users.tasks.reconcile_session_index")
         output = StringIO()
         with override_settings(
             DEBUG=True, E2E_FIXTURES_ENABLED=True, E2E_DATABASE_PATH=connection.settings_dict["NAME"]
         ):
             call_command("run_e2e_tasks", func=RESET_TASK, stdout=output)
-        self.assertEqual(json.loads(output.getvalue()), [{"reason": "configuration", "sent": False}])
+        self.assertEqual(json.loads(output.getvalue()), [{"reason": "no_active_account", "sent": False}])
         remaining = [SignedPackage.loads(row.payload)["func"] for row in OrmQ.objects.all()]
         self.assertNotIn(RESET_TASK, remaining)
         self.assertIn("apps.users.tasks.reconcile_session_index", remaining)

@@ -70,10 +70,10 @@ services:
     # PLATFORM_ALLOWED_CIDRS staff allowlist; set PLATFORM_BIND only for an external load balancer.
     ports:
       - "${PLATFORM_BIND:-127.0.0.1}:${PLATFORM_PORT:-8700}:8700"
-    env_file:
+    env_file: &platform-env-file
       # The operator's whole env file (deploy.sh exports its path); `environment:` below still wins.
       - "${PRAHO_ENV_FILE:?run deploy/scripts/deploy.sh, or set PRAHO_ENV_FILE to the file passed with --env-file}"
-    environment:
+    environment: &platform-environment
       - DEBUG=0
       - DB_HOST=${DB_HOST:-db}
       - DB_PORT=${DB_PORT:-5432}
@@ -102,7 +102,7 @@ services:
       - CSRF_TRUSTED_ORIGINS=https://${PLATFORM_DOMAIN:-${DOMAIN:-platform.localhost}}
       - DJANGO_SECURE_SSL_REDIRECT=false
       - SERVICE_NAME=platform
-    volumes:
+    volumes: &platform-volumes
       - static_files:/app/staticfiles
       - media_files:/app/media
       - logs:/app/logs
@@ -123,6 +123,25 @@ services:
         reservations:
           cpus: "0.5"
           memory: 512M
+    networks:
+      - internal
+      - web
+
+  # ===========================================================================
+  # TASK WORKER - Django-Q: queued mails, invoices, provisioning, scheduled jobs
+  # ===========================================================================
+  qcluster:
+    image: ${REGISTRY:-}praho-platform:${VERSION:-latest}
+    container_name: praho_qcluster
+    command: ["python", "manage.py", "qcluster"]
+    env_file: *platform-env-file
+    environment: *platform-environment
+    volumes: *platform-volumes
+    # The platform container runs the migrations; the worker starts once that one is healthy.
+    depends_on:
+      platform:
+        condition: service_healthy
+    restart: unless-stopped
     networks:
       - internal
       - web

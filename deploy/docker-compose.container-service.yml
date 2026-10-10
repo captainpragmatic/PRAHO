@@ -25,10 +25,10 @@ services:
     build:
       context: ..
       dockerfile: deploy/platform/Dockerfile
-    env_file:
+    env_file: &platform-env-file
       # The operator's whole env file (deploy.sh exports its path); `environment:` below still wins.
       - "${PRAHO_ENV_FILE:?run deploy/scripts/deploy.sh, or set PRAHO_ENV_FILE to the file passed with --env-file}"
-    environment:
+    environment: &platform-environment
       - DEBUG=0
       - DB_HOST=${DB_HOST:?DB_HOST required}
       - DB_PORT=${DB_PORT:-5432}
@@ -74,6 +74,20 @@ services:
       # A first boot runs every migration before Gunicorn listens (124 s measured on a fast machine);
       # failures during the start period don't count, and a passing check ends it early.
       start_period: 600s
+
+  # ===========================================================================
+  # TASK WORKER - Django-Q: queued mails, invoices, provisioning, scheduled jobs
+  # ===========================================================================
+  qcluster:
+    image: ${REGISTRY:-}praho-platform:${VERSION:-latest}
+    command: ["python", "manage.py", "qcluster"]
+    env_file: *platform-env-file
+    environment: *platform-environment
+    # The platform container runs the migrations; the worker starts once that one is healthy.
+    depends_on:
+      platform:
+        condition: service_healthy
+    restart: unless-stopped
 
   # ===========================================================================
   # PORTAL SERVICE

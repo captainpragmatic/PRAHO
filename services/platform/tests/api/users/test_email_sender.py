@@ -8,6 +8,7 @@ from apps.api.users.serializers import PasswordResetRequestSerializer
 from apps.settings.models import SystemSetting
 from apps.settings.services import SettingsService
 from apps.users.models import User
+from tests.helpers.task_queue import run_queued
 
 
 @override_settings(
@@ -41,6 +42,7 @@ class PasswordResetSenderTests(TestCase):
                 self.assertTrue(serializer.is_valid(), serializer.errors)
                 result = serializer.save()
                 self.assertTrue(result["success"])
+                self.assertEqual(run_queued("apps.users.tasks.send_password_reset_email"), [{"sent": True}])
                 self.assertEqual(len(mail.outbox), 1)
                 self.assertEqual(mail.outbox[0].from_email, expected)
                 self.assertEqual(mail.outbox[0].to, [self.user.email])

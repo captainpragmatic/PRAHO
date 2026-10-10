@@ -12,10 +12,12 @@ broker, and `Conf.SYNC`, so nothing runs inline.
 from __future__ import annotations
 
 import unittest
-from typing import cast
+from typing import Any, cast
 from unittest.mock import patch
 
+from django.utils.module_loading import import_string
 from django_q.conf import Conf
+from django_q.models import OrmQ
 from django_q.signing import SignedPackage
 
 
@@ -43,3 +45,21 @@ def quiet_task_queue(case: unittest.TestCase) -> DiscardingBroker:
         patcher.start()
         case.addCleanup(patcher.stop)
     return broker
+
+
+def queued(func: str) -> list[dict[str, Any]]:
+    """The packages queued in the ORM broker for one task, oldest first."""
+    packages = [cast("dict[str, Any]", SignedPackage.loads(row.payload)) for row in OrmQ.objects.order_by("id")]
+    return [package for package in packages if package["func"] == func]
+
+
+def run_queued(func: str) -> list[Any]:
+    """Run and dequeue every queued call of one task as a worker would; other tasks stay queued."""
+    results = []
+    for row in OrmQ.objects.order_by("id"):
+        package = cast("dict[str, Any]", SignedPackage.loads(row.payload))
+        if package["func"] != func:
+            continue
+        row.delete()
+        results.append(import_string(func)(*package["args"], **package["kwargs"]))
+    return results

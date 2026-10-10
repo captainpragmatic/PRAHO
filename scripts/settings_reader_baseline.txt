@@ -5,9 +5,6 @@
 @ services/platform/apps/api/billing/views.py
 integrations.stripe_publishable_key|begin_recurring_authorization_api|1
 
-@ services/platform/apps/api/users/serializers.py
-portal.public_base_url|PasswordResetRequestSerializer.create|1
-
 @ services/platform/apps/audit/tasks.py
 audit.notify_on_critical_alerts|_send_integrity_escalation_alert|1
 audit.notify_on_file_integrity_alerts|_create_file_integrity_alert|1

@@ -5,6 +5,7 @@
 import io
 import logging
 import re
+import time
 from typing import TYPE_CHECKING, Any, cast
 
 import pyotp
@@ -256,7 +257,8 @@ class PasswordResetRequestSerializer(serializers.Serializer):
         from apps.users.services import portal_public_origin  # noqa: PLC0415
 
         portal_public_origin()
-        async_task("apps.users.tasks.send_password_reset_email", validated_data["email"])
+        # ack_failure: a failed send is never redelivered hours later (see the task).
+        async_task("apps.users.tasks.send_password_reset_email", validated_data["email"], time.time(), ack_failure=True)
         return self.accepted_response()
 
 
