@@ -17,7 +17,7 @@ import uuid
 
 from django.core.exceptions import ImproperlyConfigured
 from django.http import JsonResponse
-from django.test import SimpleTestCase, override_settings
+from django.test import TestCase, override_settings
 from django.urls import path
 
 from apps.common import portal_hmac
@@ -53,7 +53,7 @@ def _signed(portal_id: str, secret: str, nonce: str | None = None) -> tuple[dict
     PLATFORM_API_SECRET=SHARED,
     RATE_LIMITING_ENABLED=False,
 )
-class PortalRegistryEnforceModeTests(SimpleTestCase):
+class PortalRegistryEnforceModeTests(TestCase):  # nonce claims live in the counter table
     def _post(self, portal_id: str, secret: str, nonce: str | None = None):
         portal_hmac._parse.cache_clear()
         headers, body = _signed(portal_id, secret, nonce)
@@ -106,7 +106,7 @@ class PortalRegistryEnforceModeTests(SimpleTestCase):
     PLATFORM_API_SECRET=SHARED,
     RATE_LIMITING_ENABLED=False,
 )
-class PortalRegistryLegacyAndAuditTests(SimpleTestCase):
+class PortalRegistryLegacyAndAuditTests(TestCase):  # nonce claims live in the counter table
     def _post(self, portal_id, secret, nonce=None):
         portal_hmac._parse.cache_clear()
         headers, body = _signed(portal_id, secret, nonce)
@@ -153,7 +153,7 @@ class PortalRegistryLegacyAndAuditTests(SimpleTestCase):
         self.assertFalse(any("shared-secret fallback" in m for m in logs.output))
 
 
-class PortalHmacStartupValidationTests(SimpleTestCase):
+class PortalHmacStartupValidationTests(TestCase):  # nonce claims live in the counter table
     @override_settings(PORTAL_HMAC_MODE="bogus")
     def test_invalid_mode_rejected(self):
         with self.assertRaises(ImproperlyConfigured):
