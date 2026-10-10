@@ -39,6 +39,7 @@ from apps.common.rate_limit_feedback import (
 )
 from apps.common.rate_limiting import mark_auth_failure, mark_auth_success
 from apps.common.request_ip import get_safe_client_ip
+from apps.common.session_store import SessionSaveContended
 from apps.common.store_unavailable import end_session_or_unavailable
 from apps.users.constants import PASSWORD_RESET_SESSION_KEY
 from apps.users.forms import (
@@ -204,6 +205,8 @@ def _handle_totp_setup_post(request: HttpRequest, customer_id: str, token: str) 
                 request, "users:mfa_setup_totp", _("Invalid verification code. Please try again.")
             )
 
+    except SessionSaveContended:
+        raise  # The session middleware answers 503 with Retry-After (ADR-0055).
     except Exception as e:
         logger.error(f"🔥 [Portal 2FA] Error verifying TOTP: {e}")
         return _handle_mfa_error_redirect(request, "users:mfa_setup_totp", _("An error occurred. Please try again."))
@@ -396,6 +399,8 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
                         request, _("Authentication service is temporarily unavailable. Please try again later.")
                     )
 
+            except SessionSaveContended:
+                raise  # The session middleware answers 503 with Retry-After (ADR-0055).
             except Exception as e:
                 logger.error(f"🔥 [Portal Auth] Unexpected error during login: {e}")
                 messages.error(request, _("An unexpected error occurred. Please try again."))
