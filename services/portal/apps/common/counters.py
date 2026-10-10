@@ -154,7 +154,12 @@ def claim(key: str, ttl_seconds: int, token: str) -> bool:
     if len(token) > MAX_VALUE_LENGTH:
         raise ValueError(_("Claim tokens must contain at most 255 characters."))
     now = int(time.time())
-    with _write_connection().cursor() as cursor:
+    connection = _write_connection()
+    # Claims cull too: request nonces claim a row per request, so expired rows must not depend
+    # on rate-limit increments (which can be switched off) to be cleared.
+    if randbelow(CULL_CHANCE) == 0:
+        _cull(connection, now)
+    with connection.cursor() as cursor:
         cursor.execute(
             "INSERT INTO common_counters (key, count, expires_at, value) VALUES (%s, 1, %s, %s) "
             "ON CONFLICT (key) DO UPDATE SET "
