@@ -165,6 +165,14 @@ class TestStagingLoggingConfiguration:
     def test_apps_logger_is_debug(self) -> None:
         assert self.config["loggers"]["apps"]["level"] == "DEBUG"
 
-    def test_smaller_retention_than_prod(self) -> None:
+    def test_retention_is_left_to_logrotate(self) -> None:
+        # Several portal processes write these files, so neither environment rotates them in
+        # process (one process renaming a file under the others loses their lines); the native
+        # role's logrotate policy sets retention, and the handlers reopen a moved file.
         prod = _get_logging("config.settings.prod")
-        assert self.config["handlers"]["file"]["maxBytes"] < prod["handlers"]["file"]["maxBytes"]
+        for config in (self.config, prod):
+            for name in ("file", "error_file"):
+                handler = config["handlers"][name]
+                assert handler["class"] == "logging.handlers.WatchedFileHandler"
+                assert "maxBytes" not in handler
+                assert "backupCount" not in handler
