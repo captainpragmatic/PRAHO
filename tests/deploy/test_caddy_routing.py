@@ -2,7 +2,8 @@
 
 Run structural checks with: pytest -o addopts='' tests/deploy/test_caddy_routing.py -m 'not docker'
 Run container checks with: pytest -o addopts='' tests/deploy/test_caddy_routing.py -m docker -s
-Docker checks require a working daemon and the official caddy:2-alpine image.
+Docker checks require a working daemon and the official caddy:2-alpine image, pulled from
+AWS's mirror of Docker Official Images (the same image; see IMAGE).
 """
 
 from __future__ import annotations
@@ -26,7 +27,10 @@ import yaml
 from jinja2 import Environment, StrictUndefined
 
 ROOT = Path(__file__).resolve().parents[2]
-IMAGE = "caddy:2-alpine"
+# The official caddy:2-alpine image, from AWS's mirror of Docker Official Images: the same image
+# (same manifest digest), without Docker Hub's anonymous pull limit, which shared CI runners hit.
+# Deployments keep pulling caddy:2-alpine from Docker Hub.
+IMAGE = "public.ecr.aws/docker/library/caddy:2-alpine"
 LOOPBACK = ["127.0.0.1/32", "::1/128"]
 PORTAL_HOST = "portal.example.test"
 PLATFORM_HOST = "platform.example.test"
