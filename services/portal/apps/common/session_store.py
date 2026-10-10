@@ -44,6 +44,7 @@ from django.contrib.sessions.exceptions import SessionInterrupted
 from django.db import DatabaseError, router
 from django.http import HttpRequest, HttpResponse
 from django.utils import timezone
+from django.utils.cache import add_never_cache_headers
 
 from apps.common.store_unavailable import (
     STORE_UNAVAILABLE_RETRY_AFTER_SECONDS,
@@ -90,7 +91,10 @@ def _same(before: Any, after: Any) -> bool:
     """Equal as stored: compared by JSON form, so True and 1, or 1 and 1.0, differ."""
     if before is _MISSING or after is _MISSING:
         return before is after
-    return json.dumps(before, sort_keys=True, default=str) == json.dumps(after, sort_keys=True, default=str)
+    try:
+        return json.dumps(before, sort_keys=True) == json.dumps(after, sort_keys=True)
+    except TypeError:  # not JSON at all: never "unchanged", so encoding the session rejects it
+        return False
 
 
 def _as_record_map(value: Any) -> dict[str, Any] | None:
@@ -347,8 +351,37 @@ class SessionMiddleware(middleware.SessionMiddleware):
         try:
             return super().process_response(request, response)
         except SessionSaveContended:
-            if wants_json(request):
-                return store_unavailable_json()
-            unavailable = HttpResponse(store_unavailable_message(), status=STORE_UNAVAILABLE_STATUS)
-            unavailable["Retry-After"] = str(STORE_UNAVAILABLE_RETRY_AFTER_SECONDS)
-            return unavailable
+            return _contended(request, response)
+
+    def process_exception(self, request: HttpRequest, exception: Exception) -> HttpResponse | None:
+        """A save or key rotation that gave up inside a view (a password change, a purchase)."""
+        if isinstance(exception, SessionSaveContended):
+            return _contended(request, None)
+        return None
+
+
+# Headers set by middleware that ran before the save gave up; the 503 keeps them.
+_KEPT_HEADERS = (
+    "Content-Security-Policy",
+    "Content-Security-Policy-Report-Only",
+    "X-Frame-Options",
+    "Referrer-Policy",
+    "X-Request-ID",
+)
+
+
+def _contended(request: HttpRequest, response: HttpResponse | None) -> HttpResponse:
+    """The portal's 503 for a session save that gave up, keeping what the response already carried."""
+    if wants_json(request):
+        unavailable: HttpResponse = store_unavailable_json()
+    else:
+        unavailable = HttpResponse(store_unavailable_message(), status=STORE_UNAVAILABLE_STATUS)
+        unavailable["Retry-After"] = str(STORE_UNAVAILABLE_RETRY_AFTER_SECONDS)
+        add_never_cache_headers(unavailable)
+    if response is not None:
+        for name, morsel in response.cookies.items():  # e.g. the messages cookie already consumed
+            unavailable.cookies[name] = morsel
+        for header in _KEPT_HEADERS:
+            if header in response:
+                unavailable[header] = response[header]
+    return unavailable
