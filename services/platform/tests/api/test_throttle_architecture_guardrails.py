@@ -67,6 +67,7 @@ class ThrottleArchitectureGuardrailTests(SimpleTestCase):
             rate_limiting.PortalHMACCreateUserThrottle,
             rate_limiting.LoginClientIPThrottle,
             rate_limiting.ResetClientIPThrottle,
+            rate_limiting.RegistrationConfirmClientIPThrottle,
         ]
 
         for throttle_cls in classes:
@@ -89,6 +90,7 @@ class ThrottleArchitectureGuardrailTests(SimpleTestCase):
             "token_request",
             "auth_login_ip",
             "auth_reset_ip",
+            "auth_register_confirm_ip",
             "sustained",
 
             "api_burst",

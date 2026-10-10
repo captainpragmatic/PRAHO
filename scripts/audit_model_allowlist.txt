@@ -107,3 +107,4 @@ billing.SmartBillRateGate       # outbound call scheduler: one timestamp per API
 common.Counter                  # infrastructure counters and claims: expiring rows with no business, financial or customer data
 users.UserSession               # session revocation index (key to user); the sessions it mirrors are not audited either
 users.UserCredentialVersion     # monotonic MFA binding version; every change is written by an audited MFA state change
+users.PendingRegistration       # unverified signup data, deleted within 25 h; confirming it logs pending_registration_confirmed and the account it creates is audited. Auditing each submission would keep unverified addresses in the immutable trail

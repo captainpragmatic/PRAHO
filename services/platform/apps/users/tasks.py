@@ -115,6 +115,31 @@ def _send_password_reset_email(email: str) -> dict[str, Any]:
     return {"sent": True}
 
 
+def deliver_registration(registration_id: str) -> dict[str, Any]:
+    """Mail a pending registration's link, or tell the address it already has an account.
+
+    Never raises, for the reason send_password_reset_email gives: a failed task would be redelivered
+    hours later. The request queues it with ``ack_failure``, and a request older than 15 minutes
+    is dropped (apps.users.registration_confirmation.deliver).
+    """
+    try:
+        from apps.users import registration_confirmation  # noqa: PLC0415
+
+        return registration_confirmation.deliver(registration_id)
+    except Exception as exc:
+        logger.exception("🔥 [Registration] Not sent (%s): %s", type(exc).__name__, exc)
+        return {"sent": False, "reason": "error"}
+
+
+def cleanup_pending_registrations() -> dict[str, int]:
+    """Delete confirmed pending registrations and those whose link expired."""
+    from apps.users import registration_confirmation  # noqa: PLC0415
+
+    deleted = registration_confirmation.cleanup()
+    logger.info("✅ [Registration] Deleted %s finished or expired pending registrations", deleted)
+    return {"deleted": deleted}
+
+
 def reconcile_session_index() -> dict[str, int]:
     """Index live sessions missed by old workers and prune rows whose session is gone.
 
@@ -641,6 +666,7 @@ def setup_user_security_scheduled_tasks() -> dict[str, str]:
                 "user-suspicious-pattern-audit",
                 "user-password-reset-cleanup",
                 "user-api-token-purge",
+                "user-pending-registration-cleanup",
             ]
         ).values_list("name", flat=True)
     )
@@ -713,6 +739,18 @@ def setup_user_security_scheduled_tasks() -> dict[str, str]:
         tasks_created["api_token_purge"] = "created"  # noqa: S105  # Not a secret: schedule status flag
     else:
         tasks_created["api_token_purge"] = "already_exists"  # noqa: S105  # Not a secret: schedule status flag
+
+    # Finished and expired pending registrations, hourly
+    if "user-pending-registration-cleanup" not in existing_tasks:
+        schedule(
+            "apps.users.tasks.cleanup_pending_registrations",
+            schedule_type=Schedule.HOURLY,
+            name="user-pending-registration-cleanup",
+            cluster="praho-cluster",
+        )
+        tasks_created["pending_registration_cleanup"] = "created"
+    else:
+        tasks_created["pending_registration_cleanup"] = "already_exists"
 
     logger.info(f"✅ [UserSecurity] Scheduled tasks setup: {tasks_created}")
     return tasks_created

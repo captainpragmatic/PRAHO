@@ -297,6 +297,21 @@ class PortalHMACTests(TestCase):
             (False, 0),
         )
 
+    @override_settings(HMAC_RATE_LIMIT_MAX_AUTH_CALLS=1)
+    def test_every_authentication_path_charges_the_auth_bucket(self) -> None:
+        middleware = PortalServiceHMACMiddleware(lambda req: HttpResponse("ok"))
+        for path in (
+            "/api/users/login/",
+            "/api/users/password/reset/",
+            "/api/users/password/reset/confirm/",
+            "/api/users/register/confirm/",
+        ):
+            with self.subTest(path=path):
+                portal = f"portal-{path}"
+                self.assertEqual(middleware._rate_limited(portal, "10.0.0.1", path=path), (False, 0))
+                self.assertTrue(middleware._rate_limited(portal, "10.0.0.1", path=path)[0])
+                self.assertEqual(middleware._rate_limited(portal, "10.0.0.1", path="/api/billing/documents/"), (False, 0))
+
     def test_password_reset_path_is_no_longer_exempt(self) -> None:
         self.assertFalse(_is_auth_exempt(RequestFactory().get("/api/users/password/reset/")))
         self.assertFalse(_is_auth_exempt(RequestFactory().get("/api/users/register/")))

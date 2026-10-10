@@ -44,6 +44,7 @@ from apps.common.performance.rate_limiting import (
     EndpointRateThrottle,
     PortalHMACBurstThrottle,
     PortalHMACRateThrottle,
+    RegistrationConfirmClientIPThrottle,
     ResetClientIPThrottle,
     fixed_window_limited,
     forwarded_client_ip,
@@ -63,6 +64,7 @@ from .serializers import (
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
     ProfileUpdateSerializer,
+    RegistrationConfirmSerializer,
     TokenObtainRequestSerializer,
 )
 
@@ -800,6 +802,101 @@ def password_reset_request_api(request: HttpRequest) -> Response:
             {"success": False, "error": "Invalid email address", "errors": serializer.errors},
             status=status.HTTP_400_BAD_REQUEST,
         )
+
+
+@api_view(["POST"])
+@authentication_classes([])  # HMAC authentication is handled by middleware and the decorator.
+@permission_classes([AllowAny])
+@throttle_classes(
+    [
+        PortalHMACRateThrottle,
+        PortalHMACBurstThrottle,
+        RegistrationConfirmClientIPThrottle,
+        CustomerRateThrottle,
+        BurstRateThrottle,
+    ]
+)
+@require_portal_authentication
+def registration_confirm_api(request: HttpRequest) -> Response:
+    """
+    Finish a pending registration through an HMAC-signed Portal call.
+
+    The link's token proves the caller holds the mailbox; the password is chosen here.
+
+    POST /api/users/register/confirm/
+    {
+        "registration_id": "<uuid>",
+        "token": "<hex>",
+        "password": "...",
+        "password_confirm": "...",
+        "data_processing_consent": true,
+        "marketing_consent": false
+    }
+
+    201 on success. 400 `invalid_link` for a link that is wrong, used or expired; 400
+    `validation_failed` for the form or a rejected password; 409 `details_unavailable` when the
+    email or company was taken meanwhile; 503 when the account could not be created now.
+    """
+    from apps.users import registration_confirmation  # noqa: PLC0415  # Deferred: users services import cycle
+
+    serializer = RegistrationConfirmSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(
+            {"success": False, "code": "validation_failed", "errors": serializer.errors},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    data = serializer.validated_data
+    try:
+        result = registration_confirmation.confirm(
+            str(data["registration_id"]),
+            data["token"],
+            data["password"],
+            accepts_marketing=data["marketing_consent"],
+            data_processing_consent=data["data_processing_consent"],
+            request_ip=forwarded_client_ip(request),
+            user_agent=request.META.get("HTTP_USER_AGENT", ""),
+        )
+    except Exception:
+        logger.exception("🔥 [Registration] Confirmation unavailable")
+        result = None
+
+    if result is not None and result.is_ok():
+        user, _customer = result.unwrap()
+        logger.info("✅ [Registration] Pending registration confirmed for user %s", user.pk)
+        return Response({"success": True, "email": user.email}, status=status.HTTP_201_CREATED)
+
+    refusal = None if result is None else result.unwrap_err()
+    code = "unavailable" if refusal is None else refusal.code
+    answers: dict[str, tuple[int, dict[str, Any]]] = {
+        "invalid_link": (
+            status.HTTP_400_BAD_REQUEST,
+            {"code": "invalid_link", "error": _("This link has expired or was already used.")},
+        ),
+        "consent_required": (
+            status.HTTP_400_BAD_REQUEST,
+            {
+                "code": "validation_failed",
+                "errors": {"data_processing_consent": [_("Data processing consent is required.")]},
+            },
+        ),
+        "password_rejected": (
+            status.HTTP_400_BAD_REQUEST,
+            {"code": "validation_failed", "errors": {"password": [] if refusal is None else refusal.messages}},
+        ),
+        "details_unavailable": (
+            status.HTTP_409_CONFLICT,
+            {
+                "code": "details_unavailable",
+                "error": _("These details are no longer available. Please register again."),
+            },
+        ),
+        "unavailable": (
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            {"code": "unavailable", "error": _("Your account could not be created right now. Please try again.")},
+        ),
+    }
+    answer_status, payload = answers[code]
+    return Response({"success": False, **payload}, status=answer_status)
 
 
 @api_view(["POST"])

@@ -1,0 +1,8 @@
+{% load i18n %}{% trans "Hello," %}
+
+{% trans "Someone asked to create a PRAHO account with this email address. To finish, open the link below and choose your password." %}
+
+{{ confirm_url }}
+
+{% trans "The link works for 24 hours and only once." %}
+{% trans "If you did not ask for this, you can ignore this email. No account will be created." %}

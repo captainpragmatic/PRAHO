@@ -27575,6 +27575,82 @@ msgstr "Pagini utilizator"
 msgid "Go to next page"
 msgstr "Mergeți la pagina următoare"
 
+#: apps/users/pending_registration.py
+msgid "Pending registration"
+msgstr "Înregistrare în așteptare"
+
+#: apps/users/pending_registration.py
+msgid "Pending registrations"
+msgstr "Înregistrări în așteptare"
+
+#: apps/users/registration_confirmation.py
+msgid "You already have a PRAHO account"
+msgstr "Aveți deja un cont PRAHO"
+
+#: apps/users/registration_confirmation.py
+msgid "Confirm your PRAHO account"
+msgstr "Confirmați contul dumneavoastră PRAHO"
+
+#: apps/api/users/views.py
+msgid "This link has expired or was already used."
+msgstr "Acest link a expirat sau a fost deja folosit."
+
+#: apps/api/users/views.py
+msgid "These details are no longer available. Please register again."
+msgstr "Aceste date nu mai sunt disponibile. Vă rugăm să vă înregistrați din nou."
+
+#: apps/api/users/views.py
+msgid "Your account could not be created right now. Please try again."
+msgstr "Contul dumneavoastră nu a putut fi creat acum. Vă rugăm să încercați din nou."
+
+#: templates/users/emails/registration_confirm.txt
+msgid "Hello,"
+msgstr "Bună ziua,"
+
+#: templates/users/emails/registration_confirm.txt
+msgid "Someone asked to create a PRAHO account with this email address. To finish, open the link below and choose your password."
+msgstr "Cineva a solicitat crearea unui cont PRAHO cu această adresă de e-mail. Pentru a finaliza, deschideți linkul de mai jos și alegeți-vă parola."
+
+#: templates/users/emails/registration_confirm.txt
+msgid "The link works for 24 hours and only once."
+msgstr "Linkul este valabil 24 de ore și poate fi folosit o singură dată."
+
+#: templates/users/emails/registration_confirm.txt
+msgid "If you did not ask for this, you can ignore this email. No account will be created."
+msgstr "Dacă nu ați solicitat acest lucru, puteți ignora acest e-mail. Nu va fi creat niciun cont."
+
+#: templates/users/emails/registration_confirm.html
+msgid "Finish creating your account"
+msgstr "Finalizați crearea contului"
+
+#: templates/users/emails/registration_existing_account.txt
+msgid "Someone tried to create a new PRAHO account with this email address. It already has an account."
+msgstr "Cineva a încercat să creeze un cont PRAHO nou cu această adresă de e-mail. Adresa are deja un cont."
+
+#: templates/users/emails/registration_existing_account.txt
+msgid "Sign in:"
+msgstr "Autentificare:"
+
+#: templates/users/emails/registration_existing_account.txt
+msgid "Forgot your password? Reset it here:"
+msgstr "Ați uitat parola? O puteți reseta aici:"
+
+#: templates/users/emails/registration_existing_account.txt
+msgid "If this was not you, you can ignore this email. Nothing on your account has changed."
+msgstr "Dacă nu ați fost dumneavoastră, puteți ignora acest e-mail. Contul dumneavoastră nu a fost modificat."
+
+#: templates/users/emails/registration_existing_account.html
+msgid "Sign in"
+msgstr "Autentificare"
+
+#: templates/users/emails/registration_existing_account.html
+msgid "Forgot your password?"
+msgstr "Ați uitat parola?"
+
+#: templates/users/emails/registration_existing_account.html
+msgid "Reset it here"
+msgstr "Resetați-o aici"
+
 #~ msgid "Process payment gateway refund"
 #~ msgstr "Procesează rambursare din gateway-ul de plată"
 

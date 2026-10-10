@@ -1,0 +1,8 @@
+{% load i18n %}{% trans "Hello," %}
+
+{% trans "Someone tried to create a new PRAHO account with this email address. It already has an account." %}
+
+{% trans "Sign in:" %} {{ login_url }}
+{% trans "Forgot your password? Reset it here:" %} {{ reset_url }}
+
+{% trans "If this was not you, you can ignore this email. Nothing on your account has changed." %}

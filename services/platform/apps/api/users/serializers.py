@@ -262,6 +262,27 @@ class PasswordResetRequestSerializer(serializers.Serializer):
         return self.accepted_response()
 
 
+class RegistrationConfirmSerializer(serializers.Serializer):
+    """What the mailbox holder supplies to finish a pending registration."""
+
+    registration_id = serializers.UUIDField()
+    token = serializers.CharField(max_length=128, write_only=True)
+    password = serializers.CharField(min_length=12, write_only=True, trim_whitespace=False)
+    password_confirm = serializers.CharField(min_length=12, write_only=True, trim_whitespace=False)
+    data_processing_consent = serializers.BooleanField()
+    marketing_consent = serializers.BooleanField(default=False)
+
+    def validate_data_processing_consent(self, value: bool) -> bool:
+        if not value:
+            raise serializers.ValidationError(_("Data processing consent is required."))
+        return value
+
+    def validate(self, data: dict[str, Any]) -> dict[str, Any]:
+        if data["password"] != data["password_confirm"]:
+            raise serializers.ValidationError({"password_confirm": _("Passwords do not match.")})
+        return data
+
+
 class InvalidPasswordResetLink(serializers.ValidationError):
     default_detail = _("Invalid or expired reset link.")
     default_code = "invalid_reset_link"
