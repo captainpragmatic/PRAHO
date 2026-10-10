@@ -25,6 +25,7 @@ from pathlib import Path
 from django.core.exceptions import ImproperlyConfigured as _ImproperlyConfigured
 
 from .base import *  # noqa: F403  # Django settings pattern
+from .log_files import place_log_files, platform_log_dir
 
 # ===============================================================================
 # STAGING SECURITY VALIDATION
@@ -224,39 +225,31 @@ LOGGING = {
             "formatter": "json",
             "filters": ["add_request_id", "add_audit_context"],
         },
-        # Main application log file (smaller retention than prod)
+        # Main application log file
         "file": {
-            "class": "logging.handlers.RotatingFileHandler",
+            "class": "logging.handlers.WatchedFileHandler",
             "filename": "/var/log/praho/app.log",
-            "maxBytes": 10485760,  # 10MB (prod: 50MB)
-            "backupCount": 5,  # prod: 10
             "formatter": "json",
             "filters": ["add_request_id", "add_audit_context"],
         },
         # Security-specific log file
         "security_file": {
-            "class": "logging.handlers.RotatingFileHandler",
+            "class": "logging.handlers.WatchedFileHandler",
             "filename": "/var/log/praho/security.log",
-            "maxBytes": 10485760,  # 10MB (prod: 50MB)
-            "backupCount": 10,  # prod: 30
             "formatter": "json",
             "filters": ["add_request_id", "add_audit_context"],
         },
         # Audit log file (immutable audit trail)
         "audit_file": {
-            "class": "logging.handlers.RotatingFileHandler",
+            "class": "logging.handlers.WatchedFileHandler",
             "filename": "/var/log/praho/audit.log",
-            "maxBytes": 20971520,  # 20MB (prod: 100MB)
-            "backupCount": 30,  # prod: 90
             "formatter": "audit",
             "filters": ["add_request_id", "add_audit_context"],
         },
         # Error log for critical issues
         "error_file": {
-            "class": "logging.handlers.RotatingFileHandler",
+            "class": "logging.handlers.WatchedFileHandler",
             "filename": "/var/log/praho/error.log",
-            "maxBytes": 10485760,  # 10MB (prod: 50MB)
-            "backupCount": 10,  # prod: 30
             "formatter": "json",
             "filters": ["add_request_id"],
             "level": "ERROR",
@@ -315,6 +308,9 @@ LOGGING = {
         },
     },
 }
+
+# Watched files in PLATFORM_LOG_DIR, rotated by logrotate, or console only (config/settings/log_files.py).
+LOGGING = place_log_files(LOGGING, platform_log_dir())
 
 # ===============================================================================
 # EMAIL CONFIGURATION (Staging - Use test backend)

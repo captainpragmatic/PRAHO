@@ -839,6 +839,8 @@ Roll back to a specific image version. The tag applies to that run only (the env
 make rollback VERSION=v1.2.3
 ```
 
+**Native installs rolling back past the log rotation change** (releases before Platform and the portal stopped rotating their own log files): remove `/etc/logrotate.d/praho-platform` and `/etc/logrotate.d/praho-portal` first. The older release rotates those files in process again, and logrotate moving them as well would race it. The next deploy of a current release installs them again.
+
 ### Database Rollback
 
 Restore the latest database backup:
@@ -988,11 +990,16 @@ journalctl -u praho-qcluster -f
 # Native: the portal's JSON log files (rotated daily by /etc/logrotate.d/praho-portal)
 tail -F /var/log/praho/portal/app.log /var/log/praho/portal/error.log
 
+# Native: Platform's JSON log files (rotated by /etc/logrotate.d/praho-platform)
+tail -F /var/log/praho/app.log /var/log/praho/security.log /var/log/praho/audit.log /var/log/praho/error.log
+
 # Using make
 make deploy-logs
 ```
 
 **Portal log files.** The portal always logs to the console (journald, `docker logs`). When `PORTAL_LOG_DIR` names a directory (native default: `/var/log/praho/portal`), it also writes `app.log` and `error.log` there. Several portal processes write those files, so the portal never rotates them itself: it reopens a file once logrotate has moved it. The native role installs the policy (daily, 14 kept, sooner once past 50 MB) and runs logrotate hourly. On native installs keep the default directory: the unit's writable paths and the rotation policy cover only `/var/log/praho/portal`. The Docker image sets `PORTAL_LOG_DIR` empty, so containers log to the console only (`docker logs`). If you set it in Docker, rotate the files yourself.
+
+**Platform log files** work the same way. The gunicorn workers and the qcluster workers all write `app.log`, `security.log`, `audit.log` and `error.log` in `PLATFORM_LOG_DIR` (native default `/var/log/praho`), and Platform never rotates them itself. The native role's policy keeps 10 rotated files of `app.log`, 30 of `security.log` and `error.log`, and 90 of `audit.log`, the counts the in-process rotation kept. Each is rotated daily, or within the hour once past 50 MB (100 MB for the audit log), so a busy file's history can be shorter than that many days; the audit trail itself is in the database, and this file is its copy. On native installs keep the default directory: the units' writable paths and the rotation policy cover only `/var/log/praho`. On the first deploy, backups left by the old in-process rotation are compressed and handed over to logrotate, and the portal's beyond its 14 are removed. The Docker image sets `PLATFORM_LOG_DIR` empty, so the container logs to the console only.
 
 ### Common Issues
 

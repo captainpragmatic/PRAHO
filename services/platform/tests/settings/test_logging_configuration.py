@@ -30,6 +30,7 @@ _PROD_ENV = {
     "CREDENTIAL_VAULT_MASTER_KEY": "dGVzdC1vbmx5LXZhdWx0LWtleS1mb3ItbG9nZ2luZy10ZXN0cw==",
     "SENTRY_DSN": "",  # Disable Sentry during test imports (placeholder in .env triggers BadDsn)
     "REDIS_URL": "",  # Prod refuses a set REDIS_URL (ADR-0020); a host export must not leak in
+    "PLATFORM_LOG_DIR": "/var/log/praho",  # The deployed default; empty would mean console only.
 }
 
 
@@ -193,10 +194,14 @@ class TestStagingLoggingConfiguration(_LoggingStructureMixin, SimpleTestCase):
     def test_has_required_loggers(self) -> None:
         self.assert_loggers_exist(["django", "django.security", "django.request", "apps"])
 
-    def test_smaller_retention_than_prod(self) -> None:
+    def test_retention_is_left_to_logrotate(self) -> None:
+        # Several processes write these files, so neither environment rotates them in process (one
+        # process renaming a file under the others drops records); the native role's logrotate
+        # policy sets retention, and the handlers reopen a moved file (config/settings/log_files.py).
         prod = _get_logging("config.settings.prod")
-        staging = self.logging_config
-        self.assertLess(
-            staging["handlers"]["file"]["maxBytes"],
-            prod["handlers"]["file"]["maxBytes"],
-        )
+        for config in (self.logging_config, prod):
+            for name in ("file", "security_file", "audit_file", "error_file"):
+                handler = config["handlers"][name]
+                self.assertEqual(handler["class"], "logging.handlers.WatchedFileHandler")
+                self.assertNotIn("maxBytes", handler)
+                self.assertNotIn("backupCount", handler)
