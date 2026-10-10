@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The portal says an invoice or proforma is "not found" only when it is.** Platform answers 404 for a document that does not exist or is not the customer's, and only that is now shown as not found.
+  - **The bug.** Every other failure (an outage, a server error, an answer without the document) also said "not found or access denied", which was false about the customer's own account. It also sent the invoice view on to look the number up as a proforma.
+  - **Now.** Those failures show "could not be loaded right now" with HTTP 502, and a missing document gets a 404. An answer that says success without the document is treated as an error.
+  - The invoice view tries the number as a proforma only after Platform said the invoice does not exist.
 - **Concurrent requests on one portal session no longer undo each other's changes.**
   - **The problem.** Each request saved the whole session, so a second request could write back its stale copy and silently revert a cart edit or a company switch.
   - **The fix.** A save now applies only what that request changed onto the latest stored session, using an atomic compare-and-swap.
