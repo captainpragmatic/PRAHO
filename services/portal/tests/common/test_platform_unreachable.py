@@ -186,9 +186,7 @@ class PlatformUnreachableViewTests(SimpleTestCase):
 
     def test_login_outage_has_no_get_retry_link(self) -> None:
         cache.clear()
-        with patch(
-            "apps.common.outbound_http._send", side_effect=requests.exceptions.ConnectionError("offline")
-        ):
+        with patch("apps.common.outbound_http._send", side_effect=requests.exceptions.ConnectionError("offline")):
             response = Client().post("/login/", {"email": "someone@example.com", "password": "correct-horse"})
         self.assertContains(response, OUTAGE_MESSAGE)
         self.assertNotContains(response, 'aria-label="Try again"')
@@ -288,5 +286,7 @@ class PlatformUnreachableViewTests(SimpleTestCase):
                             result = self._client().get(path, follow=True, headers=headers)
                         self.assertNotEqual(result.status_code, 500)
                         self.assertNotEqual(result.status_code, 503)
-                        self.assertContains(result, wording)
-                        self.assertNotContains(result, OUTAGE_HEADING)
+                        # Invoices and proformas answer a missing or denied document with 404.
+                        expected = 404 if path.startswith("/billing/") else 200
+                        self.assertContains(result, wording, status_code=expected)
+                        self.assertNotContains(result, OUTAGE_HEADING, status_code=expected)

@@ -42,6 +42,12 @@ class DocumentDetailServiceTests(SimpleTestCase):
             with self.subTest(method=method):
                 self.assertIsNone(self.fetch(method, number))
 
+    def test_access_denied_is_not_found_or_denied_too(self) -> None:
+        self.service.api_client.post.side_effect = PlatformAPIError("Access denied", status_code=403)
+        for method, _kind, number in DOCUMENTS:
+            with self.subTest(method=method):
+                self.assertIsNone(self.fetch(method, number))
+
     def test_a_server_error_is_an_error_not_a_missing_document(self) -> None:
         self.service.api_client.post.side_effect = SERVER_ERROR
         for method, _kind, number in DOCUMENTS:

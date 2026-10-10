@@ -184,8 +184,8 @@ class InvoiceViewService:
     def _fetch_document(self, kind: str, number: str, customer_id: int, user_id: int) -> dict[str, Any] | None:
         """Platform's record of one invoice or proforma, or None when there is no such document.
 
-        Platform answers 404 for a number that does not exist or is not this customer's, and only
-        that means "not found". Any other failure (an outage, a server error, an answer that says
+        Platform answers 404 for a number that does not exist or is not this customer's, or 403 when
+        access is denied, and only those mean "not found or access denied". Any other failure (an outage, a server error, an answer that says
         success without the document) raises: the views say the document could not be loaded,
         rather than wrongly telling the customer it does not exist.
         """
@@ -199,7 +199,7 @@ class InvoiceViewService:
                 data={"customer_id": customer_id, "user_id": user_id, "action": f"get_{kind}_detail"},
             )
         except PlatformAPIError as error:
-            if error.status_code == HTTPStatus.NOT_FOUND:
+            if error.status_code in (HTTPStatus.NOT_FOUND, HTTPStatus.FORBIDDEN):
                 logger.info(f"✅ [Billing API] Platform has no {kind} {number} for customer {customer_id}")
                 return None
             raise

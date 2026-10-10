@@ -22,11 +22,10 @@
         {% if error %}{% trans 'Could Not Load Proforma' %}{% else %}{% trans 'Proforma Not Available' %}{% endif %}
       </h2>
       {% if error %}
-        <p class="text-slate-400">
-          {% filter force_escape %}{% blocktrans with number=proforma_number %}
+        {% blocktrans with number=proforma_number asvar document_error %}
           Proforma {{ number }} could not be loaded right now. Please try again in a moment.
-          {% endblocktrans %}{% endfilter %}
-        </p>
+          {% endblocktrans %}
+        {% alert document_error variant="danger" %}
       {% elif proforma_number %}
         <p class="text-slate-400">
           {% filter force_escape %}{% blocktrans with number=proforma_number %}

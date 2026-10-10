@@ -22,11 +22,10 @@
         {% if error %}{% trans 'Could Not Load Invoice' %}{% else %}{% trans 'Invoice Not Available' %}{% endif %}
       </h2>
       {% if error %}
-        <p class="text-slate-400">
-          {% filter force_escape %}{% blocktrans with number=invoice_number %}
+        {% blocktrans with number=invoice_number asvar document_error %}
           Invoice {{ number }} could not be loaded right now. Please try again in a moment.
-          {% endblocktrans %}{% endfilter %}
-        </p>
+          {% endblocktrans %}
+        {% alert document_error variant="danger" %}
       {% elif invoice_number %}
         <p class="text-slate-400">
           {% filter force_escape %}{% blocktrans with number=invoice_number %}
