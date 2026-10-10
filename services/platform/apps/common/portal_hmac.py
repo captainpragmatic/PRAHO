@@ -29,6 +29,7 @@ middleware and the app-ready startup hook.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import re
 from functools import lru_cache
@@ -121,3 +122,44 @@ def validate_at_startup() -> None:
             "PORTAL_HMAC_MODE='enforce' requires a non-empty PORTAL_HMAC_CREDENTIALS registry "
             "(otherwise every portal request would be rejected)."
         )
+
+
+ANONYMOUS_PRINCIPAL = "anonymous"
+
+
+class _DuplicateKeyError(ValueError):
+    pass
+
+
+def _refuse_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    keys = [key for key, _value in pairs]
+    if len(keys) != len(set(keys)):
+        raise _DuplicateKeyError("duplicate key in a signed body")
+    return dict(pairs)
+
+
+def portal_principal(body: bytes) -> str:
+    """Who a verified portal request is for: ``user:<id>``, else ``ip:<addr>``, else ``anonymous``.
+
+    Read only from the signed body the HMAC middleware has just verified, never from headers or
+    the query string. Anything ambiguous or malformed (duplicate keys, a body that is not a JSON
+    object, an id or address of the wrong shape) is ``anonymous``: it can never pick a bucket.
+    """
+    try:
+        data = json.loads(body, object_pairs_hook=_refuse_duplicate_keys)
+    except (ValueError, UnicodeDecodeError, RecursionError):
+        return ANONYMOUS_PRINCIPAL
+    if not isinstance(data, dict):
+        return ANONYMOUS_PRINCIPAL
+    user_id = data.get("user_id")
+    if isinstance(user_id, str) and user_id.isascii() and user_id.isdigit():
+        user_id = int(user_id)
+    if isinstance(user_id, int) and not isinstance(user_id, bool) and user_id > 0:
+        return f"user:{user_id}"
+    client_ip = data.get("client_ip")
+    if isinstance(client_ip, str):
+        try:
+            return f"ip:{ipaddress.ip_address(client_ip)}"
+        except ValueError:
+            return ANONYMOUS_PRINCIPAL
+    return ANONYMOUS_PRINCIPAL

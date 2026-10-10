@@ -46,6 +46,30 @@ declare explicit scopes, and choose a stable identity from the verified portal,
 authenticated user, or client IP. Protected HMAC function views explicitly stack
 the global portal sustained/burst throttles with their endpoint-specific limit.
 
+### Per-principal limits on portal traffic (amendment, 2026-10)
+
+Every limit on portal traffic used to be per portal, so one customer could use up a budget all of the portal's customers share. Since five refused session revalidations sign a portal user out, one busy customer could sign others out.
+
+**The principal.** After the signature and the nonce claim, the HMAC middleware parses the verified body once into `request._portal_principal`:
+
+- `user:<id>` from the signed `user_id`;
+- else `ip:<addr>` from the signed `client_ip`;
+- else `anonymous`.
+
+Duplicate keys, a body that is not an object, or values of the wrong shape all give `anonymous`. Headers and the query string are never used.
+
+**Middleware order** (`HMAC_RATE_LIMIT_*` settings, validated at startup):
+
+1. The principal's own windows are charged first: per minute and a 10 s burst for customers; per minute for anonymous; a smaller auth window on login and reset.
+2. A principal over its budget is refused (429) **without** charging the portal-wide counter.
+3. Only then is the portal-wide ceiling charged. It is kept as protection against a compromised portal.
+
+Each principal budget must stay below its ceiling.
+
+**DRF throttles.** `portal_hmac`, `portal_hmac_burst` and the HMAC branch of `EndpointRateThrottle` (including `session_validation`) are keyed on `portal:principal`. `portal_hmac_create_user` deliberately stays per portal.
+
+**Deployment requirement.** Login and reset carry a signed `client_ip` only when the portal has trusted proxies configured. Production and staging refuse to start without them; elsewhere such traffic shares the `anonymous` bucket.
+
 ### Layer 3: Portal middleware throttles
 
 Portal middleware limits request bursts before API calls, including auth and API-path protections.

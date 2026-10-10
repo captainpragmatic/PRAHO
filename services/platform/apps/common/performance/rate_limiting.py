@@ -210,9 +210,9 @@ def _is_portal_authenticated(request: Request) -> bool:
     return bool(getattr(request, "_portal_authenticated", False))
 
 
-def _extract_hmac_identity(request: Request) -> str:
+def _extract_portal_identity(request: Request) -> str:
     """
-    Build a stable HMAC throttle identity.
+    The portal a verified HMAC request came from.
 
     Prefer the canonical portal ID stored by HMAC middleware after signature
     verification. The header fallback supports isolated tests and defensive
@@ -220,6 +220,18 @@ def _extract_hmac_identity(request: Request) -> str:
     """
     verified_portal_id = getattr(request, "_portal_id", None)
     return str(verified_portal_id or request.headers.get("X-Portal-Id", "unknown"))
+
+
+def _extract_hmac_identity(request: Request) -> str:
+    """
+    Build a stable HMAC throttle identity: the portal and the principal it is acting for.
+
+    The principal (``user:<id>``, ``ip:<addr>`` or ``anonymous``) is parsed once by the HMAC
+    middleware from the verified body, so one customer cannot use up a budget every customer of
+    the portal shares. A request the middleware never classified counts as anonymous.
+    """
+    principal = getattr(request, "_portal_principal", None) or "anonymous"
+    return f"{_extract_portal_identity(request)}:{principal}"
 
 
 class _CustomTimeRateMixin:
@@ -305,7 +317,7 @@ class PortalHMACCreateUserThrottle(_ConfigurableRateThrottle):
     def get_cache_key(self, request: Request, view: Any) -> str | None:
         if not _is_portal_authenticated(request):
             return None
-        ident = _extract_hmac_identity(request)
+        ident = _extract_portal_identity(request)  # deliberately per portal, not per principal
         return self.cache_format % {"scope": self.scope, "ident": ident}
 
 

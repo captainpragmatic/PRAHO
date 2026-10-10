@@ -698,6 +698,19 @@ CACHE_VERSION = int(os.environ.get("CACHE_VERSION", "1"))
 # DRF THROTTLING CONFIGURATION 🚦
 # ===============================================================================
 
+# HMAC middleware limits on portal traffic, per minute unless named otherwise (ADR-0030).
+# Each principal (the signed body's user, else its client IP, else "anonymous") has its own
+# budget, so one customer cannot use up what every customer of a portal shares. The portal-wide
+# ceilings stay as protection against a compromised portal. Checked at startup (apps.common.apps).
+HMAC_RATE_LIMIT_WINDOW = 60
+HMAC_RATE_LIMIT_MAX_CALLS = int(os.environ.get("HMAC_RATE_LIMIT_MAX_CALLS", "1000"))
+HMAC_RATE_LIMIT_MAX_AUTH_CALLS = int(os.environ.get("HMAC_RATE_LIMIT_MAX_AUTH_CALLS", "600"))
+HMAC_RATE_LIMIT_PRINCIPAL_PER_MINUTE = int(os.environ.get("HMAC_RATE_LIMIT_PRINCIPAL_PER_MINUTE", "120"))
+HMAC_RATE_LIMIT_PRINCIPAL_BURST = int(os.environ.get("HMAC_RATE_LIMIT_PRINCIPAL_BURST", "40"))
+HMAC_RATE_LIMIT_PRINCIPAL_BURST_WINDOW = 10
+HMAC_RATE_LIMIT_PRINCIPAL_AUTH_PER_MINUTE = int(os.environ.get("HMAC_RATE_LIMIT_PRINCIPAL_AUTH_PER_MINUTE", "30"))
+HMAC_RATE_LIMIT_ANONYMOUS_PER_MINUTE = int(os.environ.get("HMAC_RATE_LIMIT_ANONYMOUS_PER_MINUTE", "600"))
+
 # Rate limiting rates for different scopes
 THROTTLE_RATES = {
     # Global DRF defaults (apps.common.performance.rate_limiting)

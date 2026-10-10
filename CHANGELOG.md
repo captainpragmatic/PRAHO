@@ -15,6 +15,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **One customer can no longer use up the Platform budget every customer of a portal shares.**
+  - **The problem.** Platform's limits on portal traffic were per portal. A busy customer could get every other customer throttled, or, through session revalidation, signed out.
+  - **Per-principal budgets.** Each principal has its own budget, charged before the portal-wide ceiling and never against it once exceeded. A principal is the signed user, else the signed client IP, else "anonymous".
+  - **DRF throttles.** The general and per-endpoint throttles are per principal too. User creation stays per portal.
+  - **New settings, checked at startup:**
+    - `HMAC_RATE_LIMIT_PRINCIPAL_PER_MINUTE` (120);
+    - `HMAC_RATE_LIMIT_PRINCIPAL_BURST` (40 per 10 s);
+    - `HMAC_RATE_LIMIT_PRINCIPAL_AUTH_PER_MINUTE` (30);
+    - `HMAC_RATE_LIMIT_ANONYMOUS_PER_MINUTE` (600).
+  - **Raised ceilings.** The portal-wide ceilings rise to 1000 a minute, and 600 for login and reset. See ADR-0030.
+
+### Security
+
 - **Platform tells a store outage apart from a forged portal request.**
   - **The problem.** When the shared counter store (rate limits and nonce claims) failed, Platform answered 401 or 429. The portal reads a 401 as "the secret or the clock is wrong" and raised a misleading critical alert; it reads a 429 as "this customer is throttled".
   - **Now 503.** Such failures answer 503 with `Retry-After` (2 s, within the portal's retry cap). Any other unexpected error during signature validation still answers 401, and one in the rate limiter is a server error; both fail closed.
