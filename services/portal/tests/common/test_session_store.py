@@ -184,6 +184,21 @@ class MergingSessionStoreTests(TestCase):
         page.save()
         self.assertEqual(len(_stored(key)["user_memberships"]), 2)
 
+    def test_two_service_forms_keep_both_submissions(self) -> None:
+        # Two tabs open request forms for different services; each stores its own submission id.
+        for key_name, first, second in (
+            ("service_request_submissions", "1:7:101", "1:7:202"),
+            ("gift_payment_requests", "1:invoice:A-1", "1:proforma:P-2"),
+        ):
+            with self.subTest(map=key_name):
+                key = self._session(user_id=7)
+                tab_a, tab_b = self._load(key), self._load(key)
+                tab_a[key_name] = {first: {"id": "a", "accepted": False}}
+                tab_b[key_name] = {second: {"id": "b", "accepted": False}}
+                tab_a.save()
+                tab_b.save()
+                self.assertEqual(set(_stored(key)[key_name]), {first, second})
+
     def test_a_key_another_request_deleted_stays_deleted(self) -> None:
         key = self._session(user_id=7, new_mfa_backup_codes=["a"], cart={"items": []})
         stale, deleter = self._load(key), self._load(key)

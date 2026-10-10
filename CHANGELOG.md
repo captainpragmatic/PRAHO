@@ -506,7 +506,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **The portal's gunicorn settings have one owner:** `services/portal/gunicorn.conf.py` reads `PORTAL_GUNICORN_WORKER_CLASS` (`sync` or `gthread`), `PORTAL_GUNICORN_WORKERS` (1-16) and `PORTAL_GUNICORN_THREADS` (1-32). The launchers no longer pass `--workers`, `--timeout` or log targets, and both check the settings before any migration runs. The defaults are unchanged: sync workers, two in Docker and one on native installs, and a 60 s request timeout. The graceful-shutdown timeout rises from gunicorn's 30 s to 50 s.
+- **The portal's gunicorn settings have one owner:** `services/portal/gunicorn.conf.py` reads `PORTAL_GUNICORN_WORKER_CLASS` (`sync` or `gthread`), `PORTAL_GUNICORN_WORKERS` (1-16) and `PORTAL_GUNICORN_THREADS` (1-32). The launchers no longer pass `--workers`, `--timeout` or log targets, and both check the settings before any migration runs. The default is now threaded workers (see the entry on threads below), with `sync` one setting away. The request timeout stays 60 s under `sync`, and the graceful-shutdown timeout rises from gunicorn's 30 s to 50 s.
   - **Refuses bad values:** a value outside those ranges, or an inline `#` comment that systemd's `EnvironmentFile` keeps in the value, stops the portal from starting rather than running with something unintended. Under `sync` the thread count is not read.
   - **Refuses `GUNICORN_CMD_ARGS`,** which gunicorn applies over the config. On native installs the `.env` is shared with the platform, whose tuning would otherwise become the portal's.
   - **`sync` always means one thread.** Otherwise gunicorn quietly turns `sync` into `gthread` whenever threads > 1, so a rollback to `sync` that left the thread count set would stay threaded.
@@ -514,6 +514,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Access log:** every deploy path now writes one to stdout; Docker had none. Each line is gunicorn's default line plus the request duration, the worker pid and the request id (`-` on a response refused before the request-id middleware ran).
   - **Graceful restarts:** Docker allows 55 s, above gunicorn's 50 s graceful timeout, so a restart drains requests in flight. A single portal container refuses new requests while it drains.
   - **Upgrading:** a portal container no longer reads `GUNICORN_WORKERS`, which is the platform's setting. Set `PORTAL_GUNICORN_WORKERS` instead. On native installs, the Ansible variable `gunicorn_timeout_portal` is gone; the timeout is fixed at 60 s, so a raised value no longer applies. See the settings table and the rollback runbook in `docs/deployment/DEPLOYMENT.md`.
+- **The portal serves requests on threads (ADR-0056).** One customer waiting on Platform (a slow invoice PDF, a login held by its timing floor, a Platform retry) no longer makes every other customer wait.
+  - The default is gunicorn's `gthread` worker, 2 processes × 4 threads, on every deploy path. Native installs ran one sync process, which served one request at a time.
+  - Measured peak memory with eight concurrent 5 MiB responses: 195 MiB of the 512 MiB limit.
+  - **Rollback:** set `PORTAL_GUNICORN_WORKER_CLASS=sync`, then confirm `Using worker: sync` in the startup log (`docs/deployment/DEPLOYMENT.md`).
+  - `make test-portal-server`, run in its own CI job, starts real gunicorn against a stub Platform with logins held open, and checks that the others are still served.
+  - Platform still runs sync workers, so portal requests can queue there; that is recorded in the ADR as a residual risk.
 - **Portal log files are safe with several processes, and a slow client no longer holds a portal worker.**
   - **Log files.** The portal no longer rotates its own log files, which raced as soon as two processes wrote them: lines landed in the wrong file or were lost.
     - It writes `app.log` and `error.log` only when `PORTAL_LOG_DIR` is set (native default: `/var/log/praho/portal`), and reopens a file once logrotate has moved it.

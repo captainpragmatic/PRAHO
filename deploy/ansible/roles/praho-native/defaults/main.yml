@@ -14,8 +14,8 @@ python_version: "3.13"
 
 # Gunicorn
 gunicorn_workers_platform: 2
-gunicorn_workers_portal: 1
-gunicorn_worker_class_portal: sync  # sync or gthread (services/portal/gunicorn.conf.py)
+gunicorn_workers_portal: 2
+gunicorn_worker_class_portal: gthread  # gthread, or sync to roll back (services/portal/gunicorn.conf.py, ADR-0056)
 gunicorn_threads_portal: 4  # threads per worker under gthread; sync always has one
 gunicorn_timeout_platform: 120
 

@@ -44,7 +44,9 @@ def server_settings(env: Mapping[str, str] = os.environ) -> ServerSettings:
         # gunicorn applies these over this config, so they would replace the settings below. On a
         # native install the .env is shared with Platform, whose tuning would become the portal's.
         raise ValueError("GUNICORN_CMD_ARGS is not used by the portal; set PORTAL_GUNICORN_* instead")
-    requested = _text(env, "PORTAL_GUNICORN_WORKER_CLASS", "sync")
+    # Threaded by default (ADR-0056): one customer waiting on Platform must not make the others
+    # wait. "sync" is the rollback.
+    requested = _text(env, "PORTAL_GUNICORN_WORKER_CLASS", "gthread")
     if requested not in WORKER_CLASSES:
         raise ValueError(f"PORTAL_GUNICORN_WORKER_CLASS must be one of {WORKER_CLASSES}, got {requested!r}")
     worker_class: Literal["sync", "gthread"] = "gthread" if requested == "gthread" else "sync"

@@ -74,3 +74,25 @@ jobs:
           services/portal/htmlcov/
           services/portal/coverage-portal.xml
         if-no-files-found: warn
+
+  # Real gunicorn with the shipped config against a stub Platform (ADR-0056): threaded workers keep
+  # serving others while some requests wait on Platform. Deselected from portal-test, run here.
+  portal-server:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install uv and sync dependencies
+      uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+        cache-dependency-glob: "uv.lock"
+
+    - name: Set up Python and install dependencies
+      run: |
+        uv python install
+        uv sync --group portal --group dev
+
+    - name: Run portal server acceptance tests
+      run: make test-portal-server
