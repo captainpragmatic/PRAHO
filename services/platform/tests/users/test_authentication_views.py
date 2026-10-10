@@ -197,10 +197,10 @@ class LoginViewTest(BaseViewTestCase):
 
         self.assertEqual(response.status_code, 200)
 
-        # Check lockout message
+        # The same message as a wrong password: "locked" would reveal that the email exists.
         messages = list(get_messages(response.wsgi_request))
-        self.assertEqual(len(messages), 1)
-        self.assertIn("Account temporarily locked", str(messages[0]))
+        self.assertEqual([str(message) for message in messages], ["Incorrect email or password."])
+        self.assertNotIn("_auth_user_id", self.client.session)
 
     def test_login_form_invalid(self) -> None:
         """Test login with invalid form data"""
@@ -735,8 +735,10 @@ class SecurityTest(BaseViewTestCase):
             },
         )
 
-        messages = list(get_messages(response.wsgi_request))
-        self.assertTrue(any("locked" in str(msg) for msg in messages))
+        # Refused, and with the generic message rather than one that confirms the account exists.
+        messages = [str(msg) for msg in get_messages(response.wsgi_request)]
+        self.assertEqual(messages, ["Incorrect email or password."])
+        self.assertNotIn("_auth_user_id", self.client.session)
 
 
 # ===============================================================================

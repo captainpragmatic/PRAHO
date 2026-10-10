@@ -146,6 +146,13 @@ class LoginClientIPLimitsTests(HMACTestMixin, TestCase):
             self.assertEqual(self.user.failed_login_attempts, attempt)
             self.assertIsNone(self.user.account_locked_until)
         for minutes in (5, 15):
+            if minutes != 5:
+                # The next failure comes once the previous lock has expired, as in a real login: a lock
+                # in force is neither counted against nor extended.
+                type(self.user).objects.filter(pk=self.user.pk).update(
+                    account_locked_until=timezone.now() - timedelta(seconds=1)
+                )
+                self.user.refresh_from_db()
             before = timezone.now()
             self.user.increment_failed_login_attempts()
             self.user.refresh_from_db()

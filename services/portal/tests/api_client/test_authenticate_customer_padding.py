@@ -11,6 +11,7 @@ from unittest.mock import Mock, patch
 
 from django.test import SimpleTestCase, override_settings
 
+from apps.api_client import services as api_services
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 
 MIN_DURATION = 0.5
@@ -100,6 +101,40 @@ class AuthenticateCustomerPaddingTests(SimpleTestCase):
             with self.assertRaises(PlatformAPIError):
                 self.api_client.authenticate_customer("a@b.com", "pw")
         self.assertGreaterEqual(self.elapsed(clock, start), MIN_DURATION)
+
+    def test_every_exit_is_padded(self) -> None:
+        # A failure that leaves authenticate_customer by any path must still take the minimum,
+        # or the path itself becomes a timing sign.
+        exits = (
+            ("platform refuses the signature", 401, {"error": "HMAC authentication failed"}, PlatformAPIError),
+            ("throttled", 429, {"error": "Too many requests"}, PlatformAPIError),
+            ("platform error", 500, {"error": "boom"}, PlatformAPIError),
+        )
+        for name, status, payload, raised in exits:
+            with self.subTest(exit=name), self.platform_answers(status, payload) as clock:
+                start = clock.now
+                with self.assertRaises(raised):
+                    self.api_client.authenticate_customer("a@b.com", "pw")
+                self.assertGreaterEqual(self.elapsed(clock, start), MIN_DURATION)
+        with self.platform_answers(200, {}) as clock:
+            start = clock.now
+            with patch("apps.api_client.services.portal_request", side_effect=RuntimeError("unexpected")), self.assertRaises(
+                RuntimeError
+            ):
+                self.api_client.authenticate_customer("a@b.com", "pw")
+            self.assertGreaterEqual(self.elapsed(clock, start), MIN_DURATION)
+
+    def test_a_login_longer_than_the_floor_is_reported_once(self) -> None:
+        api_services._login_floor_overrun_log_gate.last_logged_at = None
+        with self.platform_answers(401, {"error": "Invalid credentials"}) as clock:
+            clock.tick = 2 * MIN_DURATION  # every clock read jumps past the floor
+            with self.assertLogs("apps.api_client.services", level="WARNING") as logs:
+                self.api_client.authenticate_customer("a@b.com", "pw")
+                self.api_client.authenticate_customer("b@c.com", "pw")
+        overruns = [r for r in logs.records if "timing floor" in r.getMessage()]
+        self.assertEqual(len(overruns), 1)
+        self.assertNotIn("a@b.com", overruns[0].getMessage())
+        self.assertEqual(clock.sleeps, [])  # already past the floor: nothing to pad
 
     def test_no_padding_when_no_minimum_is_configured(self) -> None:
         with self.platform_answers(401, {"error": "Invalid credentials"}, minimum=0) as clock:

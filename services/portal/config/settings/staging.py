@@ -70,6 +70,11 @@ PLATFORM_API_TIMEOUT = seconds_setting(
     minimum=1,
     maximum=PLATFORM_API_TOTAL_BUDGET_SECONDS,
 )
+# Login timing floor: a failed login takes as long as any other, so it gives no sign that the
+# email exists. See base.py `login_floor_seconds`.
+PLATFORM_API_AUTH_MIN_DURATION_SECONDS = login_floor_seconds(
+    os.environ.get("PLATFORM_API_AUTH_MIN_DURATION_SECONDS"), 1.0
+)
 
 # PRAHO-internal webhook secret: Platform → Portal notification after a payment succeeds.
 # This is NOT the Stripe webhook secret — it signs platform-to-portal HTTP calls only.

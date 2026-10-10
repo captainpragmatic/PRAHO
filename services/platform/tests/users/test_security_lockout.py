@@ -166,11 +166,10 @@ class AccountLockoutTestCase(TestCase):
             'password': 'TestPassword123!'
         })
 
-        # Should show lockout message
+        # The same answer as a wrong password: saying "locked" would reveal that the email exists.
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'Account temporarily locked for security reasons')
-        self.assertContains(response, 'Try again in')
-        self.assertContains(response, 'minutes')
+        self.assertContains(response, 'Incorrect email or password.')
+        self.assertNotContains(response, 'locked')
 
         # User should not be logged in
         self.assertFalse('_auth_user_id' in self.client.session)
