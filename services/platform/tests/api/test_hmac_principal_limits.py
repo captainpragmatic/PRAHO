@@ -10,6 +10,7 @@ import json
 import time
 from unittest.mock import patch
 
+from django.apps import apps
 from django.core.exceptions import ImproperlyConfigured
 from django.test import RequestFactory, TestCase, override_settings
 from rest_framework.request import Request
@@ -120,7 +121,9 @@ class PrincipalBurstAndAuthTests(HMACTestMixin, TestCase):
         # The anonymous auth budget (3) is its own, separate from each signed address's (2).
         self.assertEqual([login() for _ in range(4)], [401, 401, 401, REFUSED])
         self.assertNotEqual(
-            self.portal_post(LOGIN, {"email": "a@example.ro", "password": "x", "client_ip": "198.51.100.7"}).status_code,
+            self.portal_post(
+                LOGIN, {"email": "a@example.ro", "password": "x", "client_ip": "198.51.100.7"}
+            ).status_code,
             REFUSED,
         )
 
@@ -139,6 +142,10 @@ class PortalPrincipalTests(TestCase):
             b'{"user_id": "%s"}' % (b"9" * 4301): "anonymous",  # past int()'s digit limit
             b'{"user_id": %s}' % (b"9" * 25): "anonymous",
             b'{"client_ip": "not-an-ip"}': "anonymous",
+            b'{"client_ip": "fe80::1"}': "ip:fe80::1",
+            # A scope id is free text, so "fe80::1%eth0:auth" would name another address's auth counter.
+            b'{"client_ip": "fe80::1%eth0:auth"}': "anonymous",
+            b'{"client_ip": "fe80::1%eth0"}': "anonymous",
             b'{"user_id": 1, "user_id": 2}': "anonymous",
             b"[1, 2]": "anonymous",
             b"not json": "anonymous",
@@ -165,7 +172,9 @@ class ThrottleIdentityTests(TestCase):
         first = throttle.get_cache_key(self._request("user:1"), None)
         second = throttle.get_cache_key(self._request("user:2"), None)
         self.assertNotEqual(first, second)
-        self.assertEqual(throttle.get_cache_key(self._request(None), None), throttle.get_cache_key(self._request("anonymous"), None))
+        self.assertEqual(
+            throttle.get_cache_key(self._request(None), None), throttle.get_cache_key(self._request("anonymous"), None)
+        )
 
     def test_user_creation_stays_limited_per_portal(self) -> None:
         throttle = PortalHMACCreateUserThrottle()
@@ -183,8 +192,17 @@ class HMACLimitSettingsTests(TestCase):
             {"HMAC_RATE_LIMIT_ANONYMOUS_PER_MINUTE": 600, "HMAC_RATE_LIMIT_MAX_CALLS": 600},
             {"HMAC_RATE_LIMIT_MAX_CALLS": "1000"},
         ):
-            with self.subTest(overrides=overrides), override_settings(**overrides), self.assertRaises(ImproperlyConfigured):
+            with (
+                self.subTest(overrides=overrides),
+                override_settings(**overrides),
+                self.assertRaises(ImproperlyConfigured),
+            ):
                 _validate_hmac_rate_limits_at_startup()
 
     def test_the_shipped_defaults_are_valid(self) -> None:
         _validate_hmac_rate_limits_at_startup()
+
+    def test_the_check_runs_when_the_app_starts(self) -> None:
+        # A zero window would otherwise only surface as a division error on signed requests.
+        with override_settings(HMAC_RATE_LIMIT_WINDOW=0), self.assertRaises(ImproperlyConfigured):
+            apps.get_app_config("common").ready()

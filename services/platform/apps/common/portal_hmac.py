@@ -160,9 +160,16 @@ def portal_principal(body: bytes) -> str:
     if isinstance(user_id, int) and not isinstance(user_id, bool) and 0 < user_id < 10**MAX_USER_ID_DIGITS:
         return f"user:{user_id}"
     client_ip = data.get("client_ip")
-    if isinstance(client_ip, str):
-        try:
-            return f"ip:{ipaddress.ip_address(client_ip)}"
-        except ValueError:
-            return ANONYMOUS_PRINCIPAL
-    return ANONYMOUS_PRINCIPAL
+    return _ip_principal(client_ip) if isinstance(client_ip, str) else ANONYMOUS_PRINCIPAL
+
+
+def _ip_principal(client_ip: str) -> str:
+    try:
+        address = ipaddress.ip_address(client_ip)
+    except ValueError:
+        return ANONYMOUS_PRINCIPAL
+    # An IPv6 scope id ("fe80::1%eth0") is free text that ends up in counter keys, where
+    # "%eth0:auth" would name another principal's auth counter. Client addresses never carry one.
+    if getattr(address, "scope_id", None) is not None:
+        return ANONYMOUS_PRINCIPAL
+    return f"ip:{address}"

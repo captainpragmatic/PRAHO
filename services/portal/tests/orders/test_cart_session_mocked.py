@@ -77,8 +77,7 @@ class TestGDPRCompliantCartSessionMocked(SimpleTestCase):
         self.assertEqual(items[0]['domain_name'], 'example.ro')
 
         # Verify API was called
-        # This session has no user, so the call is anonymous.
-        mock_api.get.assert_called_once_with('/api/orders/products/shared-hosting-basic/', user_id=None)
+        mock_api.get.assert_called_once_with('/api/orders/products/shared-hosting-basic/')
 
     def test_cart_expiry(self):
         """Test cart automatic expiry functionality"""

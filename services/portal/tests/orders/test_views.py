@@ -152,8 +152,7 @@ class TestOrderViews(TestCase):
         self.assertContains(response, 'Basic Shared Hosting')
 
         # Verify API was called correctly
-        # The signed-in user rides along, so Platform rate-limits the call per customer.
-        mock_api.get.assert_called_once_with('/api/orders/products/', params={}, user_id=456)
+        mock_api.get.assert_called_once_with('/api/orders/products/', params={})
 
     @patch('apps.orders.views.PlatformAPIClient')
     def test_product_catalog_with_filters(self, mock_api_client):
@@ -171,7 +170,7 @@ class TestOrderViews(TestCase):
         mock_api.get.assert_called_once_with('/api/orders/products/', params={
             'product_type': 'shared_hosting',
             'featured': 'true'
-        }, user_id=456)
+        })
 
     @patch('apps.orders.views.PlatformAPIClient')
     def test_product_catalog_api_error(self, mock_api_client):

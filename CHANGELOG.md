@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - `HMAC_RATE_LIMIT_ANONYMOUS_PER_MINUTE` (600);
     - `HMAC_RATE_LIMIT_ANONYMOUS_AUTH_PER_MINUTE` (120).
   - **Raised ceilings.** The portal-wide ceilings rise to 1000 a minute, and 600 for login and reset.
-  - **Portal side.** Signed-in catalog, plans and Stripe-config calls now send the user, so they count against that customer.
+  - **Portal side.** Signed-in Stripe-config calls now send the user, so they count against that customer. The product catalog and service plans are public endpoints on Platform, outside these limits; the portal still limits them per client address.
   - **Out of scope.** Public endpoints (currencies, registration) keep their own limits. See ADR-0030.
 
 ### Security

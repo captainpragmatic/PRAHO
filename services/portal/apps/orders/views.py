@@ -595,9 +595,7 @@ def product_catalog(request: HttpRequest) -> HttpResponse:
             params["featured"] = "true"
 
         # Fetch products from platform
-        products_response = platform_api.get(
-            "/api/orders/products/", params=params, user_id=platform_user_id(_get_customer_context(request)[1])
-        )
+        products_response = platform_api.get("/api/orders/products/", params=params)
 
         if not products_response or "results" not in products_response:
             raise PlatformAPIError("Invalid response format")
@@ -664,9 +662,7 @@ def product_detail(request: HttpRequest, product_slug: str) -> HttpResponse:
         platform_api = PlatformAPIClient()
 
         # Fetch product details
-        product = platform_api.get(
-            f"/api/orders/products/{product_slug}/", user_id=platform_user_id(_get_customer_context(request)[1])
-        )
+        product = platform_api.get(f"/api/orders/products/{product_slug}/")
 
         if not product:
             messages.error(request, _("Product not found."))
