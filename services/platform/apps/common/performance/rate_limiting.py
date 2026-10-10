@@ -371,6 +371,12 @@ class ResetClientIPThrottle(ForwardedClientIPThrottle):
     scope = "auth_reset_ip"
 
 
+class RegistrationConfirmClientIPThrottle(ForwardedClientIPThrottle):
+    """Limit registration confirmations from an authenticated forwarded client IP."""
+
+    scope = "auth_register_confirm_ip"
+
+
 class CustomerRateThrottle(_CustomTimeRateMixin, SimpleRateThrottle):  # type: ignore[misc]  # DRF throttle base uses dynamic attrs
     """
     Rate throttling based on customer account.

@@ -89,6 +89,7 @@ class ThrottleArchitectureGuardrailTests(SimpleTestCase):
             "token_request",
             "auth_login_ip",
             "auth_reset_ip",
+            "auth_register_confirm_ip",
             "sustained",
 
             "api_burst",

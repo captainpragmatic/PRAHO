@@ -345,7 +345,22 @@ class SecureUserRegistrationService:
         - Rate limiting per IP and email
         - Timing attack prevention
         """
+        return cls.create_customer_owner(user_data, customer_data, request_ip, user_agent)
 
+    @classmethod
+    def create_customer_owner(
+        cls,
+        user_data: dict[str, Any],
+        customer_data: dict[str, Any],
+        request_ip: str | None = None,
+        user_agent: str | None = None,
+    ) -> Result[tuple[User, Customer], str]:
+        """Create the user, the customer and the owner membership, without the decorator's checks.
+
+        Callers validate first. `register_new_customer_owner` does so through its decorator, which
+        also charges the per-IP registration budget. Confirming a pending registration validates
+        itself and must not charge that budget a second time.
+        """
         try:
             # Business writes get their own savepoint: a failure discards a partial user and
             # customer, while the security event logged below still commits with the caller.

@@ -56,6 +56,7 @@ class StartupThrottleValidationTests(SimpleTestCase):
                 "session_validation": "60/min",
                 "auth_login_ip": "10/minute",
                 "auth_reset_ip": "5/minute",
+                "auth_register_confirm_ip": "5/minute",
             },
         }
     )
@@ -111,6 +112,7 @@ class StartupThrottleValidationTests(SimpleTestCase):
                 "session_validation": "60/min",
                 "auth_login_ip": "10/minute",
                 "auth_reset_ip": "5/minute",
+                "auth_register_confirm_ip": "5/minute",
             },
         }
     )

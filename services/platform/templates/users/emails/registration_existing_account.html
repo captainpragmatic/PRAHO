@@ -1,0 +1,12 @@
+{% load i18n %}
+<!DOCTYPE html>
+{% get_current_language as email_language %}
+<html lang="{{ email_language }}">
+  <body>
+    <p>{% trans "Hello," %}</p>
+    <p>{% trans "Someone tried to create a new PRAHO account with this email address. It already has an account." %}</p>
+    <p><a href="{{ login_url }}">{% trans "Sign in" %}</a></p>
+    <p>{% trans "Forgot your password?" %} <a href="{{ reset_url }}">{% trans "Reset it here" %}</a></p>
+    <p>{% trans "If this was not you, you can ignore this email. Nothing on your account has changed." %}</p>
+  </body>
+</html>

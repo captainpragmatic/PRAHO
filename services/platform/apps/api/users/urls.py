@@ -29,6 +29,7 @@ urlpatterns = [
     # Password Reset endpoints
     path("password/reset/", views.password_reset_request_api, name="password_reset_request"),
     path("password/reset/confirm/", views.password_reset_confirm_api, name="password_reset_confirm"),
+    path("register/confirm/", views.registration_confirm_api, name="registration_confirm"),
     # Customer profile management
     path("profile/", views.customer_profile_api, name="customer_profile"),
     # Accessible customers for user (HMAC-signed; identity from signed body)
