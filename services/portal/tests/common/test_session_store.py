@@ -143,6 +143,47 @@ class MergingSessionStoreTests(TestCase):
         )
         self.assertEqual(stored["last_activity"], 123.0)
 
+    def test_a_new_password_hash_survives_a_concurrent_timestamp(self) -> None:
+        # A password change stores the new session_auth_hash while another request's middleware
+        # stamps session_created_at. Whichever saves last, the new hash must stay, or the next
+        # validation logs the user out.
+        for hash_saves_first in (True, False):
+            with self.subTest(hash_saves_first=hash_saves_first):
+                key = self._session(user_id=7, email="a@example.com", session_auth_hash="old")
+                password, stamp = self._load(key), self._load(key)
+                password["session_auth_hash"] = "new"
+                stamp["session_created_at"] = "2026-10-10T08:00:00+00:00"
+                first, second = (password, stamp) if hash_saves_first else (stamp, password)
+                first.save()
+                second.save()
+                self.assertEqual(_stored(key)["session_auth_hash"], "new")
+
+    def test_a_stale_membership_list_does_not_replace_a_concurrent_validation(self) -> None:
+        key = self._session(user_id=7, membership_hash="h1", user_memberships=[{"customer_id": 1}], validated_at="t1")
+        page, validation = self._load(key), self._load(key)
+        validation.update(
+            {
+                "membership_hash": "h2",
+                "user_memberships": [{"customer_id": 1}, {"customer_id": 2}],
+                "validated_at": "t2",
+            }
+        )
+        validation.save()
+        page["user_memberships"] = [{"customer_id": 1, "role": "owner"}]  # fetched before the validation
+        page.save()
+
+        stored = _stored(key)
+        self.assertEqual((stored["membership_hash"], len(stored["user_memberships"])), ("h2", 2))
+
+    def test_a_partial_group_change_applies_when_nobody_else_changed_the_group(self) -> None:
+        key = self._session(user_id=7, membership_hash="h1", user_memberships=[{"customer_id": 1}])
+        page, unrelated = self._load(key), self._load(key)
+        unrelated["last_activity"] = 1.0
+        unrelated.save()
+        page["user_memberships"] = [{"customer_id": 1}, {"customer_id": 3}]
+        page.save()
+        self.assertEqual(len(_stored(key)["user_memberships"]), 2)
+
     def test_a_key_another_request_deleted_stays_deleted(self) -> None:
         key = self._session(user_id=7, new_mfa_backup_codes=["a"], cart={"items": []})
         stale, deleter = self._load(key), self._load(key)

@@ -70,12 +70,19 @@ KEY_GROUPS: tuple[frozenset[str], ...] = (
     frozenset({"account_health_data", "account_health_fetched_at"}),
 )
 
-# A group's anchor names what the rest of the group describes. A request that changed the anchor
-# stores its whole group (the last explicit company switch wins). A request that changed only the
-# rest (the profile page filling in the name and role of the default company) describes the anchor
-# it loaded: its changes apply only while that is still the stored anchor, so stale details never
-# revert, or mix with, a company switched to in the meantime.
-GROUP_ANCHORS: dict[frozenset[str], str] = {KEY_GROUPS[0]: "selected_customer_id"}
+# How a request's change to a group applies:
+# - it changed the group's anchor (the key the rest describes), or every key of the group: the whole
+#   group is stored as this request saw it, so the last company switch, password change or
+#   validation wins;
+# - it changed only part of the group (a page filling in the company's name, a timestamp, a
+#   membership list fetched in passing): the change applies only if no other request changed the
+#   group since this one loaded it. If one did, that change wins, so stale details never revert or
+#   mix with it.
+GROUP_ANCHORS: dict[frozenset[str], str] = {
+    KEY_GROUPS[0]: "selected_customer_id",
+    KEY_GROUPS[1]: "membership_hash",
+    KEY_GROUPS[2]: "session_auth_hash",
+}
 
 # Dict-valued keys holding independent records (one per purchase in progress). Two tabs adding
 # different records must both keep theirs, so these merge per record.
@@ -155,21 +162,23 @@ def _changes(baseline: dict[str, Any], mine: dict[str, Any]) -> list[Change]:
                 group_changes.append(("set", key, None, copy.deepcopy(mine[key])))
             else:
                 group_changes.append(("delete", key, None, None))
-        anchor = GROUP_ANCHORS.get(group)
-        if anchor is not None and anchor not in touched:
-            loaded = baseline.get(anchor, _MISSING)
-            expected = loaded if loaded is _MISSING else copy.deepcopy(loaded)
-            changes.append(("if_anchor_unchanged", anchor, expected, group_changes))
-        else:
+        if GROUP_ANCHORS.get(group) in touched or group <= touched:
             changes.extend(group_changes)
+        else:
+            loaded = {key: _copy(baseline.get(key, _MISSING)) for key in group}
+            changes.append(("if_group_unchanged", ",".join(sorted(group)), loaded, group_changes))
     return changes
+
+
+def _copy(value: Any) -> Any:
+    return value if value is _MISSING else copy.deepcopy(value)
 
 
 def _apply(changes: list[Change], latest: dict[str, Any]) -> dict[str, Any]:
     merged = copy.deepcopy(latest)
     for operation, key, entry, value in changes:
-        if operation == "if_anchor_unchanged":  # entry: the anchor as loaded; value: the group's changes
-            if _same(merged.get(key, _MISSING), entry):
+        if operation == "if_group_unchanged":  # entry: the group as loaded; value: the group's changes
+            if all(_same(merged.get(name, _MISSING), loaded) for name, loaded in entry.items()):
                 merged = _apply(value, merged)
             continue
         if operation == "set":
@@ -195,9 +204,10 @@ def _fingerprint(session_key: str | None) -> str:
 def _changed_keys(changes: list[Change]) -> str:
     keys: set[str] = set()
     for operation, key, _entry, value in changes:
-        keys.add(key)
-        if operation == "if_anchor_unchanged":
+        if operation == "if_group_unchanged":
             keys.update(nested_key for _op, nested_key, _e, _v in value)
+        else:
+            keys.add(key)
     return ", ".join(sorted(keys)) or "-"
 
 
