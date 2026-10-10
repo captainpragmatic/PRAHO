@@ -41,7 +41,7 @@ from django.contrib.sessions import middleware
 from django.contrib.sessions.backends import db
 from django.contrib.sessions.backends.base import UpdateError
 from django.contrib.sessions.exceptions import SessionInterrupted
-from django.db import DatabaseError, router
+from django.db import DatabaseError, InterfaceError, router
 from django.http import HttpRequest, HttpResponse
 from django.utils import timezone
 from django.utils.cache import add_never_cache_headers
@@ -282,7 +282,7 @@ class SessionStore(db.SessionStore):
             return
         try:
             self._rotate_authenticated(old_key, baseline, mine)
-        except BaseException:
+        except Exception:
             # Fail closed. This request's data (a new session_auth_hash, say) must never be saved
             # under the old key, which anyone holding the old cookie could keep using: forget the
             # session here and make sure the old row is gone, so the request ends signed out.
@@ -291,7 +291,7 @@ class SessionStore(db.SessionStore):
             self._forget_baseline()
             try:
                 self.model.objects.filter(session_key=old_key).delete()
-            except DatabaseError:
+            except (DatabaseError, InterfaceError):
                 logger.exception("🔥 [Session] Could not delete the old session after a failed key rotation")
             raise
 
