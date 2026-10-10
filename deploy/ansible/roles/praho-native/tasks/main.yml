@@ -676,7 +676,11 @@
 # logrotate only removes the one backup just past its count, so the portal's older backups beyond
 # its 14 (its error.log used to keep 30) are removed here, as its policy says; Platform's policy
 # keeps the counts the in-process rotation had.
+# As the service user, not root: the directory is the service's, so root following a link planted
+# there (an app.log.2.gz pointing at a system file) would write through it.
 - name: Hand log backups left by in-process rotation over to logrotate
+  become: yes
+  become_user: "{{ project_user }}"
   shell: |
     set -eu
     find /var/log/praho -maxdepth 2 -type f -regextype posix-extended \
