@@ -8,13 +8,16 @@ session management, 2FA maintenance, and security auditing.
 from __future__ import annotations
 
 import logging
+import time
 from datetime import timedelta
 from typing import Any
 
 from django.contrib.sessions.models import Session
 from django.core.cache import cache
+from django.core.mail import send_mail
 from django.db import transaction
 from django.db.models import Count
+from django.template.loader import render_to_string
 from django.utils import timezone
 from django_q.models import Schedule
 from django_q.tasks import async_task, schedule
@@ -32,6 +35,84 @@ TASK_RETRY_DELAY = 300  # 5 minutes
 TASK_MAX_RETRIES = 2
 TASK_SOFT_TIME_LIMIT = 300  # 5 minutes
 TASK_TIME_LIMIT = 600  # 10 minutes
+
+
+# A reset mail is only worth sending soon after it was asked for. Older requests are dropped.
+PASSWORD_RESET_MAIL_MAX_AGE_SECONDS = 15 * 60
+
+
+def send_password_reset_email(email: str, requested_at: float) -> dict[str, Any]:
+    """Send the password-reset mail for an active account; anything else is a quiet no-op.
+
+    Queued for every reset request, whatever the address, so the request does the same work for
+    all of them. A reset link must never arrive hours after it was asked for, so:
+
+    - this never raises, and it is queued with ``ack_failure``. Django-Q's ORM broker otherwise
+      redelivers a failed task after its 4 h lease, with no attempt limit;
+    - a request older than 15 minutes is dropped. A worker killed mid-task leaves no result, so its
+      task comes back after the lease, and a queue backlog delays it the same way.
+
+    Each failure is logged with its private diagnostics and returned as a reason.
+    """
+    age = time.time() - requested_at
+    if age > PASSWORD_RESET_MAIL_MAX_AGE_SECONDS:
+        logger.warning("⚠️ [Password Reset] Not sent: the request is %d s old", age)
+        return {"sent": False, "reason": "stale"}
+    try:
+        return _send_password_reset_email(email)
+    except Exception as exc:
+        logger.exception("🔥 [Password Reset] Not sent (%s): %s", type(exc).__name__, exc)
+        return {"sent": False, "reason": "error"}
+
+
+def _send_password_reset_email(email: str) -> dict[str, Any]:
+    from django.contrib.auth.tokens import default_token_generator  # noqa: PLC0415
+    from django.core.exceptions import ImproperlyConfigured  # noqa: PLC0415
+    from django.utils.encoding import force_bytes  # noqa: PLC0415
+    from django.utils.http import urlsafe_base64_encode  # noqa: PLC0415
+    from django.utils.translation import gettext  # noqa: PLC0415
+
+    from apps.settings.services import get_default_from_email  # noqa: PLC0415
+    from apps.users.services import portal_public_origin  # noqa: PLC0415
+
+    try:
+        base = portal_public_origin()
+    except ImproperlyConfigured as exc:
+        logger.error("🔥 [Password Reset] Not sent: %s", exc)
+        return {"sent": False, "reason": "configuration"}
+
+    user = User.objects.filter(email=email, is_active=True).first()
+    if user is None:
+        # Expected for any address without an active account; the address itself is not logged.
+        logger.info("💡 [Password Reset] Not sent: no active account for the requested address")
+        return {"sent": False, "reason": "no_active_account"}
+
+    uid = urlsafe_base64_encode(force_bytes(user.pk))
+    token = default_token_generator.make_token(user)
+    context = {"user": user, "uid": uid, "token": token, "reset_url": f"{base}/password-reset/confirm/{uid}/{token}/"}
+    subject = gettext("Password Reset Request - PRAHO Platform")
+    text_message = render_to_string("users/emails/password_reset.txt", context)
+    html_message = render_to_string("users/emails/password_reset.html", context)
+    from_email = get_default_from_email()
+
+    try:
+        sent = send_mail(
+            subject=subject,
+            message=text_message,
+            from_email=from_email,
+            recipient_list=[user.email],
+            html_message=html_message,
+            fail_silently=False,
+        )
+    except Exception as exc:
+        logger.exception("🔥 [Password Reset] Failed to send email to %s (%s): %s", user.email, type(exc).__name__, exc)
+        return {"sent": False, "reason": "delivery"}
+    if not sent:
+        logger.error("🔥 [Password Reset] Failed to send email to %s: the backend accepted no message", user.email)
+        return {"sent": False, "reason": "delivery"}
+
+    logger.info("📧 [Password Reset] Reset email sent to: %s", user.email)
+    return {"sent": True}
 
 
 def reconcile_session_index() -> dict[str, int]:

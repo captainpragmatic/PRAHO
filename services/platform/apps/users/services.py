@@ -6,13 +6,14 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, ClassVar, TypedDict, cast
+from urllib.parse import urlsplit
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.tokens import default_token_generator
 from django.contrib.sessions.models import Session
 from django.core.cache import cache
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.core.mail import send_mail
 from django.db import Error, transaction
 from django.db.models import Q
@@ -68,6 +69,31 @@ else:
     User = get_user_model()
 
 logger = logging.getLogger(__name__)
+
+
+def portal_public_origin() -> str:
+    """The Portal origin that customer email links point at, or ImproperlyConfigured.
+
+    Only an HTTPS origin qualifies (HTTP only for loopback): no credentials, path, query or fragment,
+    so a link can never carry a token to another host. Read on every use, because staff can change it.
+    """
+    base = str(SettingsService.get_setting("portal.public_base_url", "") or "").strip().rstrip("/")
+    try:
+        parsed = urlsplit(base)
+    except ValueError as exc:
+        raise ImproperlyConfigured("portal.public_base_url is not configured") from exc
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path
+        or parsed.query
+        or parsed.fragment
+        or (parsed.scheme == "http" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"})
+    ):
+        raise ImproperlyConfigured("portal.public_base_url must be an HTTPS origin (HTTP is allowed for loopback).")
+    return base
 
 
 # ===============================================================================

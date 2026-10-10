@@ -143,6 +143,26 @@ def e2e_scenario():
 
 
 @pytest.fixture
+def run_queued_tasks():
+    """Run the live server's queued tasks of one kind: the E2E stack runs no task worker."""
+    root = Path(__file__).resolve().parents[2]
+
+    def run(func):
+        result = subprocess.run(  # noqa: S603 -- fixed local management command and an allow-listed task name
+            [sys.executable, "manage.py", "run_e2e_tasks", "--func", func],
+            cwd=root / "services/platform",
+            env=environment(),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, f"Queued {func} tasks failed: {result.stderr}"
+        return json.loads(result.stdout)
+
+    return run
+
+
+@pytest.fixture
 def account_page(page, e2e_scenario, request):
     """A private account for password, MFA, contact and address mutations."""
     account = e2e_scenario("account")

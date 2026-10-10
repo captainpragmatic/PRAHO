@@ -36,6 +36,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **A portal password-reset request no longer reveals, by its timing, whether the email has an account.**
+  - **The bug.** The answer was already the same for every address, but only an active account's request rendered and sent the mail before answering, so it took measurably longer.
+  - **Now.** Every request does the same work: it checks the portal link origin and queues the mail. The task worker looks the account up and sends the mail.
+  - **Never late.** A failed send is logged and not redelivered, and a request older than 15 minutes is dropped, so a reset link never arrives long after it was asked for.
+  - **Covers** the portal's reset requests. The staff reset page is reachable only from the staff networks and is unchanged.
+- **The Docker stacks now run the task worker.** `single-server`, `platform-only` and `container-service` gain a `qcluster` service, from the Platform image with Platform's environment and volumes, started once Platform is healthy. Until now nothing queued ran on Docker: password-reset mails (above), invoice and provisioning jobs, and scheduled tasks stayed in the queue. On the first start the worker runs any jobs already queued.
 - A failed login no longer reveals whether the email has an account.
   - **Staff login:** a locked account was told "Account temporarily locked for security reasons" and
     answered without hashing the password, so both the message and the timing confirmed the email.

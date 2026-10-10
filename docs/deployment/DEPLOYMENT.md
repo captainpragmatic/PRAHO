@@ -563,7 +563,9 @@ Access lines go to stdout on every deploy path. Each line is gunicorn's default 
 
 ### Option 2: Docker Single Server
 
-Deploy Platform, Portal, PostgreSQL, and Caddy in Docker containers on a single server. Best for teams already using Docker.
+Deploy Platform, its task worker, Portal, PostgreSQL, and Caddy in Docker containers on a single server. Best for teams already using Docker.
+
+The task worker (`qcluster`, Django-Q) runs from the Platform image with Platform's environment and volumes, and starts once Platform is healthy, because Platform's container runs the migrations. It sends queued mail (password resets among them) and runs invoice, provisioning and scheduled jobs. Every Docker stack that includes Platform runs it: single-server, platform-only and container-service.
 
 **Architecture:**
 ```
@@ -595,7 +597,7 @@ cp .env.example.prod .env.prod
 ./deploy/scripts/deploy.sh single-server --stop       # or: make deploy-stop
 ```
 
-The script passes the file to every Compose call and waits until the platform, portal and database report healthy and Caddy, which has no healthcheck, is running (`up --wait`; Docker Compose v2 is required). A first boot migrates a fresh database before the platform reports healthy, which can take a few minutes. Health is read from the containers: the stack publishes only Caddy's ports 80 and 443.
+The script passes the file to every Compose call and waits until the platform, portal and database report healthy and Caddy and the task worker, which have no healthcheck, are running (`up --wait`; Docker Compose v2 is required). A first boot migrates a fresh database before the platform reports healthy, which can take a few minutes. Health is read from the containers: the stack publishes only Caddy's ports 80 and 443.
 
 To run Compose directly, pass the file twice: `--env-file` for `${VAR}` substitution, and `PRAHO_ENV_FILE` for the platform, which receives the whole file:
 
@@ -648,7 +650,7 @@ lowered. The portal refuses to start on anything below 1, above 10, `nan` or `in
 
 ### Option 4: Docker Platform Only
 
-Deploy just the Platform service (admin, API, business logic).
+Deploy just the Platform service (admin, API, business logic) and its task worker.
 
 **Use Cases:**
 - Portal runs on separate infrastructure

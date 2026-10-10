@@ -12,7 +12,7 @@ from tests.e2e.helpers import BASE_URL, ensure_fresh_session, login_user
 MAIL_DIRECTORY = Path(__file__).resolve().parents[3] / "logs" / "e2e-mail"
 
 
-def test_password_recovery_email_link_reset_and_login(page: Page, e2e_scenario) -> None:
+def test_password_recovery_email_link_reset_and_login(page: Page, e2e_scenario, run_queued_tasks) -> None:
     account = e2e_scenario("account")
     ensure_fresh_session(page)
     before = set(MAIL_DIRECTORY.glob("*.log"))
@@ -20,6 +20,8 @@ def test_password_recovery_email_link_reset_and_login(page: Page, e2e_scenario) 
     page.locator('input[name="email"]').fill(account["email"])
     page.locator('form button[type="submit"]').click()
     expect(page).to_have_url(f"{BASE_URL}/login/")
+    assert set(MAIL_DIRECTORY.glob("*.log")) == before, "The request queues the mail; only a worker sends it"
+    assert {"sent": True} in run_queued_tasks("apps.users.tasks.send_password_reset_email")
 
     delivered = set(MAIL_DIRECTORY.glob("*.log")) - before
     messages = [BytesParser(policy=policy.default).parsebytes(path.read_bytes()) for path in delivered]

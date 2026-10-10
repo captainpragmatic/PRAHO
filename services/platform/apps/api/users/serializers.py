@@ -5,8 +5,8 @@
 import io
 import logging
 import re
+import time
 from typing import TYPE_CHECKING, Any, cast
-from urllib.parse import urlsplit
 
 import pyotp
 import qrcode
@@ -14,14 +14,12 @@ import qrcode.image.svg
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth.tokens import default_token_generator
-from django.core.exceptions import ImproperlyConfigured
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.core.mail import send_mail
 from django.db import transaction
-from django.template.loader import render_to_string
-from django.utils.encoding import force_bytes, force_str
-from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
+from django.utils.encoding import force_str
+from django.utils.http import urlsafe_base64_decode
 from django.utils.translation import gettext_lazy as _
+from django_q.tasks import async_task
 from rest_framework import serializers
 
 from apps.common.localisation import DATE_FORMAT_CHOICES, LANGUAGE_CHOICES
@@ -251,73 +249,16 @@ class PasswordResetRequestSerializer(serializers.Serializer):
         return value.lower().strip()
 
     def create(self, validated_data: dict[str, Any]) -> dict[str, Any]:
+        """Queue the reset mail. The same work for every address: no account lookup here.
+
+        A worker looks the account up and sends the mail (apps.users.tasks.send_password_reset_email),
+        so neither the answer nor its timing says whether the address has an account.
         """
-        Send password reset email if user exists.
-        """
-        email = validated_data["email"]
+        from apps.users.services import portal_public_origin  # noqa: PLC0415
 
-        try:
-            user = User.objects.get(email=email, is_active=True)
-        except User.DoesNotExist:
-            # Don't reveal if user exists or not for security
-            logger.warning(f"🚨 [Password Reset] Reset requested for non-existent email: {email}")
-            return self.accepted_response()
-
-        # Generate reset token
-        token = default_token_generator.make_token(user)
-        uid = urlsafe_base64_encode(force_bytes(user.pk))
-
-        from apps.settings.services import SettingsService, get_default_from_email  # noqa: PLC0415
-
-        base = str(SettingsService.get_setting("portal.public_base_url", "") or "").strip().rstrip("/")
-        try:
-            parsed_base = urlsplit(base)
-        except ValueError as exc:
-            raise ImproperlyConfigured("portal.public_base_url is not configured") from exc
-        if (
-            parsed_base.scheme not in {"http", "https"}
-            or not parsed_base.hostname
-            or parsed_base.username is not None
-            or parsed_base.password is not None
-            or parsed_base.path
-            or parsed_base.query
-            or parsed_base.fragment
-            or (parsed_base.scheme == "http" and parsed_base.hostname not in {"localhost", "127.0.0.1", "::1"})
-        ):
-            raise ImproperlyConfigured("portal.public_base_url must be an HTTPS origin (HTTP is allowed for loopback).")
-
-        reset_url = f"{base}/password-reset/confirm/{uid}/{token}/"
-        context = {
-            "user": user,
-            "uid": uid,
-            "token": token,
-            "reset_url": reset_url,
-        }
-
-        # Render email templates
-        subject = _("Password Reset Request - PRAHO Platform")
-        text_message = render_to_string("users/emails/password_reset.txt", context)
-        html_message = render_to_string("users/emails/password_reset.html", context)
-
-        try:
-            # Send email
-            sent = send_mail(
-                subject=subject,
-                message=text_message,
-                from_email=get_default_from_email(),
-                recipient_list=[user.email],
-                html_message=html_message,
-                fail_silently=False,
-            )
-            if not sent:
-                raise OSError("Email backend did not accept the recovery message")
-
-            logger.info(f"📧 [Password Reset] Reset email sent to: {user.email}")
-
-        except Exception as e:
-            logger.error(f"🔥 [Password Reset] Failed to send email to {user.email}: {e}")
-            raise serializers.ValidationError(_("Failed to send reset email. Please try again later.")) from e
-
+        portal_public_origin()
+        # ack_failure: a failed send is never redelivered hours later (see the task).
+        async_task("apps.users.tasks.send_password_reset_email", validated_data["email"], time.time(), ack_failure=True)
         return self.accepted_response()
 
 

@@ -14,6 +14,7 @@ from django.utils.http import urlsafe_base64_encode
 from apps.settings.models import SystemSetting
 from apps.users.models import User
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
+from tests.helpers.task_queue import queued, run_queued
 
 
 @override_settings(
@@ -71,6 +72,8 @@ class PasswordResetAPITests(HMACTestMixin, TestCase):
         response = self.portal_post(self.request_path, {"email": self.user.email})
         self.assertEqual(response.status_code, 200, response.content)
         self.assertIs(response.json()["success"], True)
+        self.assertEqual(len(mail.outbox), 0)
+        self.assertEqual(run_queued("apps.users.tasks.send_password_reset_email"), [{"sent": True}])
         self.assertEqual(len(mail.outbox), 1)
         message = mail.outbox[0]
         self.assertEqual(message.to, [self.user.email])
@@ -103,6 +106,7 @@ class PasswordResetAPITests(HMACTestMixin, TestCase):
         self.assertEqual(known.status_code, 200, known.content)
         self.assertEqual((known.status_code, known.json()), (unknown.status_code, unknown.json()))
         self.assertTrue(any("portal.public_base_url" in entry for entry in diagnostics.output))
+        self.assertEqual(queued("apps.users.tasks.send_password_reset_email"), [])
         self.assertEqual(len(mail.outbox), 0)
 
     def test_invalid_portal_url_is_private_and_never_sends(self) -> None:
@@ -112,6 +116,7 @@ class PasswordResetAPITests(HMACTestMixin, TestCase):
                 response = self.portal_post(self.request_path, {"email": self.user.email})
                 self.assertEqual(response.status_code, 200, response.content)
                 self.assertIn("email delivery is available", response.json()["message"])
+                self.assertEqual(queued("apps.users.tasks.send_password_reset_email"), [])
                 self.assertEqual(len(mail.outbox), 0)
 
     def test_confirm_with_valid_token_sets_password_and_clears_lockout(self) -> None:
