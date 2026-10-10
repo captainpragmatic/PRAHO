@@ -527,7 +527,7 @@ ansible-playbook -i inventory/native-single-server.yml \
 | `PORTAL_GUNICORN_THREADS` | 4 for `gthread` (native: `gunicorn_threads_portal`, 4); always 1 for `sync` | 1-32 |
 
 Neither timeout is configurable:
-- **Request timeout, 60 s, under `sync` only.** Under `gthread` the worker checks in with gunicorn while its requests run, so gunicorn never ends a slow request; the Platform call budget (at most 45 s per call) bounds it instead.
+- **Request timeout, 60 s, under `sync` only.** Under `gthread` the worker checks in with gunicorn while its requests run, so gunicorn never ends a slow request. Each Platform call is bounded by its budget (at most 45 s), but a slow client is not: until the reverse proxy buffers request and response bodies, a client that uploads or reads slowly holds a thread for as long as it likes.
 - **Graceful shutdown, 50 s** (gunicorn's own default was 30 s). gunicorn stops accepting connections before it drains, so on a single portal container a restart refuses new requests until it is back, for up to 50 s while slow requests finish. Docker allows 55 s before it kills the container.
 
 Access lines go to stdout on every deploy path. Each line is gunicorn's default line plus the request duration, the worker pid and the request id; the id is `-` on a response refused before the portal's request-id middleware ran, such as an early 429.
