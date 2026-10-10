@@ -355,7 +355,12 @@ def invoice_detail_view(request: HttpRequest, invoice_number: str) -> HttpRespon
                 return redirect("billing:proforma_detail", proforma_number=invoice_number)
 
             messages.error(request, _("Invoice not found or access denied."))
-            return render(request, "billing/invoice_not_found.html", {"invoice_number": invoice_number})
+            return render(
+                request,
+                "billing/invoice_not_found.html",
+                {"invoice_number": invoice_number},
+                status=HTTPStatus.NOT_FOUND,
+            )
 
         context = {
             "invoice": invoice,
@@ -374,7 +379,12 @@ def invoice_detail_view(request: HttpRequest, invoice_number: str) -> HttpRespon
             return render_platform_unavailable(request, e)
         logger.error(f"🔥 [Portal Billing] Invoice detail error for {invoice_number}: {e}")
         messages.error(request, _("Unable to load invoice details. Please try again."))
-        return render(request, "billing/invoice_not_found.html", {"invoice_number": invoice_number, "error": True})
+        return render(
+            request,
+            "billing/invoice_not_found.html",
+            {"invoice_number": invoice_number, "error": True},
+            status=HTTPStatus.BAD_GATEWAY,
+        )
 
 
 # ===============================================================================
@@ -613,7 +623,12 @@ def proforma_detail_view(request: HttpRequest, proforma_number: str) -> HttpResp
 
         if not proforma:
             messages.error(request, _("Proforma not found or access denied."))
-            return render(request, "billing/proforma_not_found.html", {"proforma_number": proforma_number})
+            return render(
+                request,
+                "billing/proforma_not_found.html",
+                {"proforma_number": proforma_number},
+                status=HTTPStatus.NOT_FOUND,
+            )
 
         context = {
             "proforma": proforma,
@@ -637,7 +652,12 @@ def proforma_detail_view(request: HttpRequest, proforma_number: str) -> HttpResp
             return render_platform_unavailable(request, e)
         logger.error(f"🔥 [Portal Billing] Proforma detail error for {proforma_number}: {e}")
         messages.error(request, _("Unable to load proforma details. Please try again."))
-        return render(request, "billing/proforma_not_found.html", {"proforma_number": proforma_number, "error": True})
+        return render(
+            request,
+            "billing/proforma_not_found.html",
+            {"proforma_number": proforma_number, "error": True},
+            status=HTTPStatus.BAD_GATEWAY,
+        )
 
 
 # ===============================================================================

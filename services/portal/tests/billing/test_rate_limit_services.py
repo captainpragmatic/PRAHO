@@ -43,10 +43,12 @@ class InvoiceViewServiceRateLimitTests(SimpleTestCase):
         with self.assertRaises(PlatformAPIError):
             self.service.get_invoice_detail("INV-001", 1, 1)
 
-    def test_get_invoice_detail_returns_none_on_server_error(self) -> None:
+    def test_get_invoice_detail_reraises_server_error(self) -> None:
+        # None means "no such invoice"; a server error is not that, so the view can say it could
+        # not load the invoice instead of claiming it does not exist.
         self.service.api_client.post.side_effect = _server_error()
-        result = self.service.get_invoice_detail("INV-001", 1, 1)
-        self.assertIsNone(result)
+        with self.assertRaises(PlatformAPIError):
+            self.service.get_invoice_detail("INV-001", 1, 1)
 
     def test_get_invoice_summary_reraises_rate_limited(self) -> None:
         self.service.api_client.post.side_effect = _rate_limited_error()
@@ -73,10 +75,12 @@ class InvoiceViewServiceRateLimitTests(SimpleTestCase):
         with self.assertRaises(PlatformAPIError):
             self.service.get_proforma_detail("PF-001", 1, 1)
 
-    def test_get_proforma_detail_returns_none_on_server_error(self) -> None:
+    def test_get_proforma_detail_reraises_server_error(self) -> None:
+        # None means "no such proforma"; a server error is not that, so the view can say it could
+        # not load the proforma instead of claiming it does not exist.
         self.service.api_client.post.side_effect = _server_error()
-        result = self.service.get_proforma_detail("PF-001", 1, 1)
-        self.assertIsNone(result)
+        with self.assertRaises(PlatformAPIError):
+            self.service.get_proforma_detail("PF-001", 1, 1)
 
 
 @override_settings(

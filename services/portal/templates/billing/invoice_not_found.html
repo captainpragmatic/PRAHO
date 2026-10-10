@@ -2,7 +2,7 @@
 {% load i18n %}
 {% load ui_components %}
 
-{% block title %}{% trans 'Invoice Not Found' %} - PRAHO Portal{% endblock %}
+{% block title %}{% if error %}{% trans 'Invoice Unavailable' %}{% else %}{% trans 'Invoice Not Found' %}{% endif %} - PRAHO Portal{% endblock %}
 
 {% block content %}
 <div class="px-4 max-w-4xl mx-auto">
@@ -10,7 +10,7 @@
   <!-- Header -->
   <div class="text-center mb-8">
     <h1 class="text-3xl font-bold text-white mb-4">
-      {% icon "receipt" size="lg" css_class="text-white" %} {% trans 'Invoice Not Found' %}
+      {% icon "receipt" size="lg" css_class="text-white" %} {% if error %}{% trans 'Invoice Unavailable' %}{% else %}{% trans 'Invoice Not Found' %}{% endif %}
     </h1>
   </div>
 
@@ -19,9 +19,15 @@
     <div class="mb-6">
       <div class="text-red-400 mb-4">{% icon "x" size="2xl" %}</div> {# tmpl-allow TMPL005: needs badge unframed variant #}
       <h2 class="text-xl font-semibold text-white mb-2">
-        {% trans 'Invoice Not Available' %}
+        {% if error %}{% trans 'Could Not Load Invoice' %}{% else %}{% trans 'Invoice Not Available' %}{% endif %}
       </h2>
-      {% if invoice_number %}
+      {% if error %}
+        <p class="text-slate-400">
+          {% filter force_escape %}{% blocktrans with number=invoice_number %}
+          Invoice {{ number }} could not be loaded right now. Please try again in a moment.
+          {% endblocktrans %}{% endfilter %}
+        </p>
+      {% elif invoice_number %}
         <p class="text-slate-400">
           {% filter force_escape %}{% blocktrans with number=invoice_number %}
           Invoice {{ number }} could not be found or you don't have access to it.
@@ -33,11 +39,6 @@
         </p>
       {% endif %}
     </div>
-
-    {% if error %}
-    {% trans "An error occurred while loading the invoice. Please try again or contact support if the problem persists." as document_error %}
-    {% alert document_error variant="danger" css_class="mb-6" %}
-    {% endif %}
 
     <div class="flex justify-center space-x-4">
       {% url 'billing:invoices_list' as action_url %}

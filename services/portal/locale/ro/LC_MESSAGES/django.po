@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-09 00:30+0300\n"
+"POT-Creation-Date: 2026-10-10 15:12+0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -280,62 +280,62 @@ msgstr "Nu s-au putut încărca facturile. Vă rugăm să încercați din nou."
 msgid "Invoice not found or access denied."
 msgstr "Factura nu a fost găsită sau accesul este interzis."
 
-#: apps/billing/views.py:376
+#: apps/billing/views.py:378
 msgid "Unable to load invoice details. Please try again."
 msgstr "Nu s-au putut încărca detaliile facturii. Vă rugăm să încercați din nou."
 
-#: apps/billing/views.py:409
+#: apps/billing/views.py:416
 #: templates/billing/partials/currency_balances.html:30
 msgid "Billing balances are temporarily unavailable."
 msgstr "Soldurile de facturare sunt temporar indisponibile."
 
-#: apps/billing/views.py:501
+#: apps/billing/views.py:508
 msgid "Unable to sync invoices. Please try again."
 msgstr "Nu s-au putut sincroniza facturile. Vă rugăm să încercați din nou."
 
-#: apps/billing/views.py:543 apps/billing/views.py:579
+#: apps/billing/views.py:550 apps/billing/views.py:586
 msgid "Unable to generate PDF. Please try again."
 msgstr "Nu s-a putut genera PDF-ul. Vă rugăm să încercați din nou."
 
-#: apps/billing/views.py:615
+#: apps/billing/views.py:622
 msgid "Proforma not found or access denied."
 msgstr "Proforma nu a fost găsită sau accesul este interzis."
 
-#: apps/billing/views.py:639
+#: apps/billing/views.py:651
 msgid "Unable to load proforma details. Please try again."
 msgstr "Nu s-au putut încărca detaliile proformei. Vă rugăm să încercați din nou."
 
-#: apps/billing/views.py:679
+#: apps/billing/views.py:696
 msgid "Enter a valid gift-card code and billing document."
 msgstr "Introduceți un cod valid de card cadou și un document de facturare."
 
-#: apps/billing/views.py:699
+#: apps/billing/views.py:716
 msgid "Gift-card balance applied. Your billing document shows the remaining amount."
 msgstr "Soldul cardului cadou a fost aplicat. Documentul dvs. de facturare arată suma rămasă."
 
-#: apps/billing/views.py:701
+#: apps/billing/views.py:718
 msgid "The gift card could not be applied. Check its balance, currency, and expiry."
 msgstr "Cardul cadou nu a putut fi aplicat. Verificați soldul, moneda și data de expirare."
 
-#: apps/billing/views.py:703
+#: apps/billing/views.py:720
 msgid "The payment could not be confirmed. Refresh this document before trying again."
 msgstr "Plata nu a putut fi confirmată. Reîmprospătați acest document înainte de a încerca din nou."
 
-#: apps/billing/views.py:744
+#: apps/billing/views.py:761
 #, python-format
 msgid "Card ending %(last_four)s"
 msgstr "Card cu terminația %(last_four)s"
 
-#: apps/billing/views.py:760
+#: apps/billing/views.py:777
 msgid "Automatic payment off"
 msgstr "Plata automată dezactivată"
 
-#: apps/billing/views.py:764
+#: apps/billing/views.py:781
 #, python-format
 msgid "Pay automatically with %(card)s"
 msgstr "Plătiți automat cu %(card)s"
 
-#: apps/billing/views.py:787 templates/billing/partials/header_action.html:4
+#: apps/billing/views.py:804 templates/billing/partials/header_action.html:4
 #: templates/billing/partials/section_tabs.html:3
 #: templates/billing/recurring_payments.html:5
 #: templates/billing/recurring_payments.html:11
@@ -413,7 +413,7 @@ msgstr "Stocarea contoarelor Portalului este indisponibilă."
 msgid "Run migrate sessions --noinput and migrate common --noinput on the Portal database."
 msgstr "Executați migrate sessions --noinput și migrate common --noinput pe baza de date Portal."
 
-#: apps/common/context_processors.py:46 apps/users/views.py:679
+#: apps/common/context_processors.py:46 apps/users/views.py:684
 #: templates/users/profile.html:5 templates/users/profile.html:9
 msgid "Account Settings"
 msgstr "Setări Cont"
@@ -423,7 +423,7 @@ msgstr "Setări Cont"
 msgid "Security"
 msgstr "Securitate"
 
-#: apps/common/context_processors.py:49 apps/users/views.py:1245
+#: apps/common/context_processors.py:49 apps/users/views.py:1250
 #: templates/components/mobile_header.html:127
 #: templates/users/company_profile.html:5
 #: templates/users/company_profile.html:11
@@ -452,15 +452,15 @@ msgstr "Confidențialitate"
 msgid "Claim tokens must contain at most 255 characters."
 msgstr "Jetoanele de revendicare trebuie să conțină cel mult 255 de caractere."
 
-#: apps/common/counters.py:175
+#: apps/common/counters.py:180
 msgid "Claim results must contain at most 255 characters."
 msgstr "Rezultatele revendicării trebuie să conțină cel mult 255 de caractere."
 
-#: apps/common/counters.py:205
+#: apps/common/counters.py:210
 msgid "The counter store requires SQLite 3.35 or newer."
 msgstr "Stocarea contoarelor necesită SQLite 3.35 sau o versiune mai nouă."
 
-#: apps/common/counters.py:206
+#: apps/common/counters.py:211
 msgid "Upgrade the SQLite library used by Python."
 msgstr "Actualizați biblioteca SQLite folosită de Python."
 
@@ -508,7 +508,7 @@ msgstr "DD/MM/YYYY — 23/11/2026"
 msgid "MM/DD/YYYY — 11/23/2026"
 msgstr "MM/DD/YYYY — 11/23/2026"
 
-#: apps/common/localisation.py:27 config/settings/base.py:176
+#: apps/common/localisation.py:27 config/settings/base.py:219
 msgid "English"
 msgstr "Engleză"
 
@@ -590,7 +590,7 @@ msgid "Too many cart updates. Please slow down."
 msgstr "Prea multe actualizări ale coșului. Vă rugăm să reduceți ritmul."
 
 #: apps/common/store_unavailable.py:49 apps/orders/security.py:68
-#: apps/orders/views.py:337 apps/users/views.py:923
+#: apps/orders/views.py:339 apps/users/views.py:928
 msgid "Service temporarily unavailable. Please try again later."
 msgstr "Serviciul este temporar indisponibil. Vă rugăm să încercați din nou mai târziu."
 
@@ -717,7 +717,7 @@ msgstr "Adresa nu a putut fi actualizată."
 msgid "Address set as billing."
 msgstr "Adresa a fost setată ca adresă de facturare."
 
-#: apps/dashboard/views.py:363
+#: apps/dashboard/views.py:358
 msgid "Could not load account information. Please try again later."
 msgstr "Nu s-au putut încărca informațiile contului. Vă rugăm să încercați din nou mai târziu."
 
@@ -772,7 +772,7 @@ msgstr "Firmă din România fără număr de TVA - verificați profilul fiscal"
 msgid "VAT evidence missing for reverse charge; this order cannot be confirmed until the customer's VAT number is confirmed in VIES"
 msgstr "Lipsesc dovezile privind TVA pentru taxare inversă. Comanda nu poate fi confirmată până când codul de TVA al clientului nu este confirmat în VIES"
 
-#: apps/orders/security.py:98 apps/orders/views.py:343
+#: apps/orders/security.py:98 apps/orders/views.py:345
 msgid "Request is too large."
 msgstr "Cererea este prea mare."
 
@@ -788,66 +788,66 @@ msgstr "Cererea conține prea multe câmpuri."
 msgid "A field in the request is too long."
 msgstr "Un câmp din cerere este prea lung."
 
-#: apps/orders/services.py:38 apps/orders/services.py:366
-#: apps/orders/services.py:660 apps/orders/views.py:675
+#: apps/orders/services.py:50 apps/orders/services.py:378
+#: apps/orders/services.py:672 apps/orders/views.py:680
 msgid "Current prices are unavailable. Please try again later."
 msgstr "Prețurile curente sunt indisponibile. Vă rugăm să încercați mai târziu."
 
-#: apps/orders/services.py:43
+#: apps/orders/services.py:55
 msgid "Your cart prices changed. Review and confirm the updated total. Reapply any coupon or gift-card codes."
 msgstr "Prețurile din coșul dvs. s-au schimbat. Verificați și confirmați totalul actualizat. Aplicați din nou orice coduri de cupon sau card cadou."
 
-#: apps/orders/services.py:358 apps/orders/services.py:360
+#: apps/orders/services.py:370 apps/orders/services.py:372
 msgid "Product is not available"
 msgstr "Produsul nu este disponibil"
 
-#: apps/orders/services.py:370
+#: apps/orders/services.py:382
 msgid "This product requires a domain name"
 msgstr "Acest produs necesită un nume de domeniu"
 
-#: apps/orders/services.py:404
+#: apps/orders/services.py:416
 #, python-format
 msgid "Cart cannot contain more than %(max)s items"
 msgstr "Coșul nu poate conține mai mult de %(max)s articole"
 
-#: apps/orders/services.py:421 apps/orders/services.py:431
+#: apps/orders/services.py:433 apps/orders/services.py:443
 msgid "Product not found in cart"
 msgstr "Produsul nu a fost găsit în coș"
 
-#: apps/orders/services.py:680 apps/orders/services.py:684
+#: apps/orders/services.py:692 apps/orders/services.py:696
 #: templates/orders/partials/cart_totals.html:71
 msgid "Error calculating totals"
 msgstr "Eroare la calcularea totalurilor"
 
-#: apps/orders/services.py:739
+#: apps/orders/services.py:751
 msgid "The order response is incomplete. Retry to check the original purchase."
 msgstr "Răspunsul comenzii este incomplet. Reîncercați pentru a verifica achiziția inițială."
 
-#: apps/orders/services.py:762 apps/orders/services.py:884
+#: apps/orders/services.py:774 apps/orders/services.py:896
 msgid "Cart is empty"
 msgstr "Coșul este gol"
 
-#: apps/orders/services.py:860
+#: apps/orders/services.py:872
 msgid "Unable to validate your order. Please ensure your company profile is complete with:"
 msgstr "Nu se poate valida comanda dvs. Vă rugăm să vă asigurați că profilul companiei dvs. este complet cu:"
 
-#: apps/orders/services.py:861
+#: apps/orders/services.py:873
 msgid "Company name and VAT number"
 msgstr "Denumirea companiei și numărul de TVA"
 
-#: apps/orders/services.py:862
+#: apps/orders/services.py:874
 msgid "Complete billing address"
 msgstr "Adresa de facturare completă"
 
-#: apps/orders/services.py:863
+#: apps/orders/services.py:875
 msgid "Contact email and phone number"
 msgstr "Adresa de email și numărul de telefon de contact"
 
-#: apps/orders/services.py:949
+#: apps/orders/services.py:961
 msgid "An offer changed. Review and confirm the updated checkout total."
 msgstr "O ofertă s-a schimbat. Verificați și confirmați totalul actualizat al plății."
 
-#: apps/orders/services.py:950
+#: apps/orders/services.py:962
 msgid "Error creating order"
 msgstr "Eroare la crearea comenzii"
 
@@ -905,243 +905,243 @@ msgstr "Notele nu pot conține marcaje HTML."
 msgid "Notes contain invalid content."
 msgstr "Notele conțin conținut nevalid."
 
-#: apps/orders/views.py:55
+#: apps/orders/views.py:57
 msgid "Product Selection"
 msgstr "Selectarea produsului"
 
-#: apps/orders/views.py:56 templates/orders/cart_review.html:4
+#: apps/orders/views.py:58 templates/orders/cart_review.html:4
 #: templates/orders/cart_review.html:14
 msgid "Cart Review"
 msgstr "Revizuire coș"
 
-#: apps/orders/views.py:57 templates/orders/checkout.html:4
+#: apps/orders/views.py:59 templates/orders/checkout.html:4
 #: templates/orders/checkout.html:14
 msgid "Checkout"
 msgstr "Plată"
 
-#: apps/orders/views.py:58 templates/services/service_request_action.html:287
+#: apps/orders/views.py:60 templates/services/service_request_action.html:287
 msgid "Confirmation"
 msgstr "Confirmare"
 
-#: apps/orders/views.py:78
+#: apps/orders/views.py:80
 msgid "Request blocked by security policy."
 msgstr "Cererea a fost blocată de politica de securitate."
 
-#: apps/orders/views.py:96 templates/orders/cart_review.html:38
+#: apps/orders/views.py:98 templates/orders/cart_review.html:38
 #: templates/orders/partials/cart_updated.html:27
 #: templates/orders/product_catalog.html:43
 msgid "Something went wrong. Please try again."
 msgstr "Ceva nu a funcționat corect. Vă rugăm să încercați din nou."
 
-#: apps/orders/views.py:121 apps/orders/views.py:261
+#: apps/orders/views.py:123 apps/orders/views.py:263
 msgid "To place an order, you must be authenticated."
 msgstr "Pentru a plasa o comandă, trebuie să fiți autentificat."
 
-#: apps/orders/views.py:215
+#: apps/orders/views.py:217
 msgid "Cart version mismatch. Please refresh and try again."
 msgstr "Versiune coș incompatibilă. Vă rugăm reîncărcați și încercați din nou."
 
-#: apps/orders/views.py:216
+#: apps/orders/views.py:218
 msgid "Your cart was updated. Please review and try again."
 msgstr "Coșul dvs. a fost actualizat. Vă rugăm să verificați și să încercați din nou."
 
-#: apps/orders/views.py:253
+#: apps/orders/views.py:255
 msgid "Your order is being processed."
 msgstr "Comanda dvs. se procesează."
 
-#: apps/orders/views.py:257
+#: apps/orders/views.py:259
 msgid "Cannot create order with empty cart."
 msgstr "Nu se poate crea o comandă cu un coș gol."
 
-#: apps/orders/views.py:274
+#: apps/orders/views.py:276
 msgid "Invalid payment method selected."
 msgstr "Metodă de plată selectată nevalidă."
 
-#: apps/orders/views.py:280
+#: apps/orders/views.py:282
 msgid "You must agree to the terms and conditions."
 msgstr "Trebuie să acceptați termenii și condițiile."
 
-#: apps/orders/views.py:349
+#: apps/orders/views.py:351
 msgid "Invalid request."
 msgstr "Cerere nevalidă."
 
-#: apps/orders/views.py:378 apps/orders/views.py:468
+#: apps/orders/views.py:380 apps/orders/views.py:470
 msgid "Your order is being processed. Please check your orders list."
 msgstr "Comanda dvs. se procesează. Vă rugăm să verificați lista comenzilor."
 
-#: apps/orders/views.py:381
+#: apps/orders/views.py:383
 msgid "Your order is being processed. Please wait a moment."
 msgstr "Comanda dvs. se procesează. Vă rugăm să așteptați un moment."
 
-#: apps/orders/views.py:408 apps/orders/views.py:1108
+#: apps/orders/views.py:410 apps/orders/views.py:1113
 msgid "We need more information to complete your order."
 msgstr "Avem nevoie de mai multe informații pentru a finaliza comanda dvs."
 
-#: apps/orders/views.py:415
+#: apps/orders/views.py:417
 #, python-format
 msgid "Order validation failed: %s"
 msgstr "Validarea comenzii a eșuat: %s"
 
-#: apps/orders/views.py:477
+#: apps/orders/views.py:479
 msgid "The order currency is unavailable. Please contact support."
 msgstr "Moneda comenzii nu este disponibilă. Contactați echipa de suport."
 
-#: apps/orders/views.py:487
+#: apps/orders/views.py:489
 msgid "Unable to process payment. Please contact support."
 msgstr "Nu am putut procesa plata. Contactați echipa de suport."
 
-#: apps/orders/views.py:526
+#: apps/orders/views.py:528
 #, python-format
 msgid "Order #%s was created successfully. Please complete bank transfer to activate it."
 msgstr "Comanda #%s a fost creată cu succes. Finalizați transferul bancar pentru a o activa."
 
-#: apps/orders/views.py:530
+#: apps/orders/views.py:532
 msgid "Please complete your payment to activate your order."
 msgstr "Vă rugăm completați plata pentru a activa comanda dumneavoastră."
 
-#: apps/orders/views.py:534
+#: apps/orders/views.py:536
 #, python-format
 msgid "Order #%s was created successfully, but payment processing is temporarily unavailable."
 msgstr "Comanda #%s a fost creată cu succes, dar procesarea plății este temporar indisponibilă."
 
-#: apps/orders/views.py:540
+#: apps/orders/views.py:542
 #, python-format
 msgid "Order #%s was created successfully! You can view it in your orders list."
 msgstr "Comanda #%s a fost creată cu succes! O puteți vizualiza în lista de comenzi."
 
-#: apps/orders/views.py:560
+#: apps/orders/views.py:565
 msgid "Error creating order. Please try again."
 msgstr "Eroare la crearea comenzii. Vă rugăm încercați din nou."
 
-#: apps/orders/views.py:612
+#: apps/orders/views.py:617
 msgid "All Products"
 msgstr "Toate Produsele"
 
-#: apps/orders/views.py:613 apps/services/views.py:620
+#: apps/orders/views.py:618 apps/services/views.py:620
 msgid "Shared Hosting"
 msgstr "Găzduire partajată"
 
-#: apps/orders/views.py:614 apps/services/views.py:621
+#: apps/orders/views.py:619 apps/services/views.py:621
 msgid "VPS Hosting"
 msgstr "Găzduire VPS"
 
-#: apps/orders/views.py:615
+#: apps/orders/views.py:620
 msgid "Dedicated Server"
 msgstr "Server dedicat"
 
-#: apps/orders/views.py:616 templates/components/service_detail_tabs.html:28
+#: apps/orders/views.py:621 templates/components/service_detail_tabs.html:28
 msgid "Domains"
 msgstr "Domenii"
 
-#: apps/orders/views.py:617
+#: apps/orders/views.py:622
 msgid "SSL Certificates"
 msgstr "Certificate SSL"
 
-#: apps/orders/views.py:618
+#: apps/orders/views.py:623
 msgid "Email Hosting"
 msgstr "Găzduire Email"
 
-#: apps/orders/views.py:642
+#: apps/orders/views.py:647
 msgid "Error loading products. Please try again."
 msgstr "Eroare la încărcarea produselor. Vă rugăm încercați din nou."
 
-#: apps/orders/views.py:667 apps/orders/views.py:712
+#: apps/orders/views.py:672 apps/orders/views.py:717
 msgid "Product not found."
 msgstr "Produsul nu a fost găsit."
 
-#: apps/orders/views.py:681 templates/orders/product_catalog.html:92
+#: apps/orders/views.py:686 templates/orders/product_catalog.html:92
 #: templates/services/plans_list.html:111
 #: templates/services/service_detail.html:115
 #: templates/services/service_detail.html:118
 msgid "Monthly"
 msgstr "Lunar"
 
-#: apps/orders/views.py:682
+#: apps/orders/views.py:687
 msgid "Every six months"
 msgstr "La fiecare șase luni"
 
-#: apps/orders/views.py:683 templates/orders/product_catalog.html:99
+#: apps/orders/views.py:688 templates/orders/product_catalog.html:99
 #: templates/services/plans_list.html:132
 msgid "Annual"
 msgstr "Anual"
 
-#: apps/orders/views.py:751 apps/orders/views.py:755
+#: apps/orders/views.py:756 apps/orders/views.py:760
 msgid "Invalid price seal"
 msgstr "Sigiliu de preț nevalid"
 
-#: apps/orders/views.py:805
+#: apps/orders/views.py:810
 msgid "Product added to cart successfully!"
 msgstr "Produs adăugat în coș cu succes!"
 
-#: apps/orders/views.py:817
+#: apps/orders/views.py:822
 msgid "Product is currently not available for purchase."
 msgstr "Produsul nu este disponibil momentan pentru achiziție."
 
-#: apps/orders/views.py:835
+#: apps/orders/views.py:840
 msgid "Error adding to cart. Please try again."
 msgstr "Eroare la adăugarea în coș. Vă rugăm încercați din nou."
 
-#: apps/orders/views.py:890
+#: apps/orders/views.py:895
 msgid "Invalid quantity value."
 msgstr "Valoare nevalidă pentru cantitate."
 
-#: apps/orders/views.py:893
+#: apps/orders/views.py:898
 msgid "Error updating cart."
 msgstr "Eroare la actualizarea coșului."
 
-#: apps/orders/views.py:940
+#: apps/orders/views.py:945
 msgid "Product removed from cart!"
 msgstr "Produs eliminat din coș!"
 
-#: apps/orders/views.py:949
+#: apps/orders/views.py:954
 msgid "Error removing from cart."
 msgstr "Eroare la eliminarea din coș."
 
-#: apps/orders/views.py:962
+#: apps/orders/views.py:967
 msgid "Your cart is empty."
 msgstr "Coșul dumneavoastră este gol."
 
-#: apps/orders/views.py:1069
+#: apps/orders/views.py:1074
 msgid "Cannot proceed with empty cart."
 msgstr "Nu se poate continua cu un coș gol."
 
-#: apps/orders/views.py:1111
+#: apps/orders/views.py:1116
 msgid "Error calculating order totals."
 msgstr "Eroare la calcularea totalurilor comenzii."
 
-#: apps/orders/views.py:1149
+#: apps/orders/views.py:1154
 msgid "Enter at most five coupon codes, separated by commas."
 msgstr "Introduceți cel mult cinci coduri de cupon, separate prin virgule."
 
-#: apps/orders/views.py:1156
+#: apps/orders/views.py:1161
 msgid "Enter a valid gift-card code."
 msgstr "Introduceți un cod valid de card cadou."
 
-#: apps/orders/views.py:1169
+#: apps/orders/views.py:1174
 msgid "The coupon or gift card could not be applied. Check its eligibility and try again."
 msgstr "Cuponul sau cardul cadou nu a putut fi aplicat. Verificați eligibilitatea și încercați din nou."
 
-#: apps/orders/views.py:1171
+#: apps/orders/views.py:1176
 msgid "Review the updated total before placing your order."
 msgstr "Verificați totalul actualizat înainte de a plasa comanda."
 
-#: apps/orders/views.py:1224
+#: apps/orders/views.py:1229
 msgid "Invalid order identifier."
 msgstr "Identificator de comandă nevalid."
 
-#: apps/orders/views.py:1243
+#: apps/orders/views.py:1248
 msgid "Order not found."
 msgstr "Comanda nu a fost găsită."
 
-#: apps/orders/views.py:1294
+#: apps/orders/views.py:1301
 msgid "Error loading order details."
 msgstr "Eroare la încărcarea detaliilor comenzii."
 
-#: apps/orders/views.py:1404
+#: apps/orders/views.py:1411
 msgid "Unauthorized"
 msgstr "Neautorizat"
 
-#: apps/orders/views.py:1430
+#: apps/orders/views.py:1437
 msgid "Webhook processing failed"
 msgstr "Procesarea webhook-ului a eșuat"
 
@@ -2009,319 +2009,319 @@ msgstr "Numărul din registrul comerțului este recomandat atunci când este fur
 msgid "Current password"
 msgstr "Parola actuală"
 
-#: apps/users/views.py:153
+#: apps/users/views.py:154
 msgid "Failed to initialize MFA setup. Please try again."
 msgstr "Inițializarea configurării MFA a eșuat. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:161 templates/users/mfa_management.html:115
+#: apps/users/views.py:162 templates/users/mfa_management.html:115
 #: templates/users/mfa_setup_totp.html:5 templates/users/mfa_setup_totp.html:9
 msgid "Set Up Authenticator App"
 msgstr "Configurați aplicația de autentificare"
 
-#: apps/users/views.py:168 apps/users/views.py:209
+#: apps/users/views.py:169 apps/users/views.py:212
 #: templates/orders/checkout.html:488
 msgid "An error occurred. Please try again."
 msgstr "A apărut o eroare. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:185
+#: apps/users/views.py:186
 msgid "Please enter the verification code."
 msgstr "Vă rugăm să introduceți codul de verificare."
 
-#: apps/users/views.py:188
+#: apps/users/views.py:189
 msgid "Finish setup with the 6-digit code."
 msgstr "Finalizați configurarea cu codul de 6 cifre."
 
-#: apps/users/views.py:199
+#: apps/users/views.py:200
 msgid "Two-factor authentication has been enabled successfully!"
 msgstr "Autentificarea cu doi factori a fost activată cu succes!"
 
-#: apps/users/views.py:204
+#: apps/users/views.py:205
 msgid "Invalid verification code. Please try again."
 msgstr "Cod de verificare invalid. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:342
+#: apps/users/views.py:345
 #, python-format
 msgid "Sign in confirmed, %(name)s!"
 msgstr "Autentificare confirmată, %(name)s!"
 
-#: apps/users/views.py:345 apps/users/views.py:348
+#: apps/users/views.py:348 apps/users/views.py:351
 msgid "Sign in confirmed!"
 msgstr "Autentificare confirmată!"
 
-#: apps/users/views.py:357
+#: apps/users/views.py:360
 msgid "Invalid email address or password. Please try again."
 msgstr "Adresă de email sau parolă invalidă. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:374 apps/users/views.py:396
+#: apps/users/views.py:377 apps/users/views.py:399
 msgid "Authentication service is temporarily unavailable. Please try again later."
 msgstr "Serviciul de autentificare este temporar indisponibil. Vă rugăm să încercați mai târziu."
 
-#: apps/users/views.py:390
+#: apps/users/views.py:393
 #, python-format
 msgid "Too many login attempts. Please try again in %(seconds)s seconds."
 msgstr "Prea multe încercări de autentificare. Încercați din nou în %(seconds)s secunde."
 
-#: apps/users/views.py:401 templates/orders/order_confirmation.html:467
+#: apps/users/views.py:406 templates/orders/order_confirmation.html:467
 msgid "An unexpected error occurred. Please try again."
 msgstr "A apărut o eroare neașteptată. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:405
+#: apps/users/views.py:410
 msgid "Customer Login"
 msgstr "Autentificare client"
 
-#: apps/users/views.py:429
+#: apps/users/views.py:434
 msgid "You have been logged out successfully."
 msgstr "Ați fost deconectat cu succes."
 
-#: apps/users/views.py:462
+#: apps/users/views.py:467
 msgid "Too many registration attempts. Please try again later."
 msgstr "Prea multe încercări de înregistrare. Vă rugăm să încercați din nou mai târziu."
 
-#: apps/users/views.py:465
+#: apps/users/views.py:470
 msgid "Registration is temporarily unavailable. Please try again in a few minutes."
 msgstr "Înregistrarea este temporar indisponibilă. Vă rugăm să încercați din nou peste câteva minute."
 
-#: apps/users/views.py:500
+#: apps/users/views.py:505
 msgid "Registration successful! You can now login with your credentials."
 msgstr "Înregistrare realizată cu succes! Puteți acum să vă conectați cu datele dvs."
 
-#: apps/users/views.py:503
+#: apps/users/views.py:508
 msgid "Registration failed. Please check your information and try again."
 msgstr "Înregistrarea a eșuat. Vă rugăm să verificați informațiile și să încercați din nou."
 
-#: apps/users/views.py:510 apps/users/views.py:513
+#: apps/users/views.py:515 apps/users/views.py:518
 msgid "An unexpected error occurred during registration. Please try again."
 msgstr "A apărut o eroare neașteptată în timpul înregistrării. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:517
+#: apps/users/views.py:522
 msgid "Customer Registration"
 msgstr "Înregistrare client"
 
-#: apps/users/views.py:551
+#: apps/users/views.py:556
 msgid "Error loading profile data."
 msgstr "Eroare la încărcarea datelor profilului."
 
-#: apps/users/views.py:582
+#: apps/users/views.py:587
 msgid "Profile updated successfully!"
 msgstr "Profil actualizat cu succes!"
 
-#: apps/users/views.py:587 apps/users/views.py:591
+#: apps/users/views.py:592 apps/users/views.py:596
 msgid "Error updating profile. Please try again."
 msgstr "Eroare la actualizarea profilului. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:712
+#: apps/users/views.py:717
 msgid "If an eligible account exists and email delivery is available, you will receive password reset instructions."
 msgstr "Dacă există un cont eligibil și livrarea e-mailului este disponibilă, veți primi instrucțiuni de resetare a parolei."
 
-#: apps/users/views.py:726 apps/users/views.py:800
+#: apps/users/views.py:731 apps/users/views.py:805
 msgid "Password recovery is temporarily unavailable. Please try again later."
 msgstr "Recuperarea parolei nu este disponibilă temporar. Încercați din nou mai târziu."
 
-#: apps/users/views.py:743
+#: apps/users/views.py:748
 msgid "Please check your new password and try again."
 msgstr "Verificați noua parolă și încercați din nou."
 
-#: apps/users/views.py:780
+#: apps/users/views.py:785
 msgid "Password reset successfully. Please sign in with your new password."
 msgstr "Parola a fost resetată cu succes. Autentificați-vă cu noua parolă."
 
-#: apps/users/views.py:837
+#: apps/users/views.py:842
 msgid "Password changed successfully!"
 msgstr "Parola a fost schimbată cu succes!"
 
-#: apps/users/views.py:839
+#: apps/users/views.py:844
 msgid "Password change failed. Check your current password and authentication code."
 msgstr "Schimbarea parolei a eșuat. Verificați parola actuală și codul de autentificare."
 
-#: apps/users/views.py:844
+#: apps/users/views.py:849
 #, python-format
 msgid "Too many attempts. Please try again in %(seconds)s seconds."
 msgstr "Prea multe încercări. Încercați din nou în %(seconds)s secunde."
 
-#: apps/users/views.py:848
+#: apps/users/views.py:853
 msgid "Password change failed. Please try again."
 msgstr "Schimbarea parolei a eșuat. Încercați din nou."
 
-#: apps/users/views.py:878 templates/users/privacy_dashboard.html:5
+#: apps/users/views.py:883 templates/users/privacy_dashboard.html:5
 #: templates/users/privacy_dashboard.html:9 templates/users/profile.html:255
 msgid "Privacy Dashboard"
 msgstr "Panoul de confidențialitate"
 
-#: apps/users/views.py:904
+#: apps/users/views.py:909
 msgid "Authentication required."
 msgstr "Autentificare obligatorie."
 
-#: apps/users/views.py:913
+#: apps/users/views.py:918
 msgid "Data export request submitted successfully. You will receive an email with download instructions within 48 hours."
 msgstr "Cererea de export de date a fost trimisă cu succes. Veți primi un e-mail cu instrucțiuni de descărcare în termen de 48 de ore."
 
-#: apps/users/views.py:917
+#: apps/users/views.py:922
 msgid "Failed to create export request. Please try again."
 msgstr "Nu s-a putut crea cererea de export. Vă rugăm să încercați din nou."
 
 #  Duplicate merged with apps/common/rate_limiting.py entry above
 #  msgid "Service temporarily unavailable. Please try again later."
-#: apps/users/views.py:926
+#: apps/users/views.py:931
 msgid "Error processing your data export request. Please try again."
 msgstr "Eroare la procesarea cererii dvs. de export de date. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:946 templates/users/data_export.html:5
+#: apps/users/views.py:951 templates/users/data_export.html:5
 #: templates/users/data_export.html:9 templates/users/privacy_dashboard.html:64
 #: templates/users/profile.html:268
 msgid "Export My Data"
 msgstr "Exportă datele mele"
 
-#: apps/users/views.py:996 templates/users/consent_history.html:5
+#: apps/users/views.py:1001 templates/users/consent_history.html:5
 #: templates/users/consent_history.html:9
 #: templates/users/privacy_dashboard.html:77 templates/users/profile.html:281
 msgid "Consent History"
 msgstr "Istoricul consimțămintelor"
 
-#: apps/users/views.py:1033
+#: apps/users/views.py:1038
 msgid "Multi-Factor Authentication"
 msgstr "Autentificare multifactor"
 
-#: apps/users/views.py:1084
+#: apps/users/views.py:1089
 msgid "You need to enable 2FA first before accessing backup codes."
 msgstr "Trebuie să activați mai întâi autentificarea cu doi factori înainte de a accesa codurile de backup."
 
-#: apps/users/views.py:1101
+#: apps/users/views.py:1106
 msgid "Could not regenerate codes. Check your password and authentication code."
 msgstr "Nu s-au putut regenera codurile. Verificați parola și codul de autentificare."
 
-#: apps/users/views.py:1130
+#: apps/users/views.py:1135
 msgid "Two-factor authentication has been disabled."
 msgstr "Autentificarea cu doi factori a fost dezactivată."
 
-#: apps/users/views.py:1133 apps/users/views.py:1140
+#: apps/users/views.py:1138 apps/users/views.py:1145
 msgid "Could not disable MFA. Check your password and authentication code."
 msgstr "Nu s-a putut dezactiva MFA. Verificați parola și codul de autentificare."
 
-#: apps/users/views.py:1159
+#: apps/users/views.py:1164
 msgid "Please select a customer to view profile."
 msgstr "Selectați un client pentru a vizualiza profilul."
 
-#: apps/users/views.py:1229
+#: apps/users/views.py:1234
 msgid "Unable to load company profile data."
 msgstr "Nu s-au putut încărca datele profilului companiei."
 
-#: apps/users/views.py:1237
+#: apps/users/views.py:1242
 msgid "Error loading company profile. Please try again."
 msgstr "Eroare la încărcarea profilului companiei. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:1240
+#: apps/users/views.py:1245
 msgid "An unexpected error occurred."
 msgstr "A apărut o eroare neașteptată."
 
-#: apps/users/views.py:1270
+#: apps/users/views.py:1275
 msgid "Please select a customer to edit profile."
 msgstr "Selectați un client pentru a edita profilul."
 
-#: apps/users/views.py:1282
+#: apps/users/views.py:1287
 #, python-brace-format
 msgid "You don't have permission to edit this company profile. Your role: {role}"
 msgstr "Nu aveți permisiune să editați profilul acestei companii. Rolul dvs.: {role}"
 
-#: apps/users/views.py:1326
+#: apps/users/views.py:1331
 msgid "Unable to load current company data."
 msgstr "Nu s-au putut încărca datele curente ale companiei."
 
-#: apps/users/views.py:1330
+#: apps/users/views.py:1335
 msgid "Error loading company data. Please try again."
 msgstr "Eroare la încărcarea datelor companiei. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:1355
+#: apps/users/views.py:1360
 msgid "Company profile updated successfully!"
 msgstr "Profilul companiei a fost actualizat cu succes!"
 
-#: apps/users/views.py:1375
+#: apps/users/views.py:1380
 #, python-brace-format
 msgid "Failed to update profile: {}"
 msgstr "Actualizarea profilului a eșuat: {}"
 
-#: apps/users/views.py:1381
+#: apps/users/views.py:1386
 msgid "Error updating company profile. Please try again."
 msgstr "Eroare la actualizarea profilului companiei. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:1384
+#: apps/users/views.py:1389
 msgid "An unexpected error occurred while updating profile."
 msgstr "A apărut o eroare neașteptată la actualizarea profilului."
 
-#: apps/users/views.py:1386
+#: apps/users/views.py:1391
 msgid "Please correct the errors below."
 msgstr "Vă rugăm să corectați erorile de mai jos."
 
-#: apps/users/views.py:1391 templates/users/company_profile.html:25
+#: apps/users/views.py:1396 templates/users/company_profile.html:25
 #: templates/users/company_profile_edit.html:5
 #: templates/users/company_profile_edit.html:11
 msgid "Edit Company Profile"
 msgstr "Editare profil companie"
 
-#: apps/users/views.py:1421
+#: apps/users/views.py:1426
 msgid "Please select a valid customer."
 msgstr "Selectați un client valid."
 
-#: apps/users/views.py:1445
+#: apps/users/views.py:1450
 msgid "Customer access verification failed. Please try again."
 msgstr "Verificarea accesului clientului a eșuat. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:1454
+#: apps/users/views.py:1459
 msgid "You don't have access to this customer."
 msgstr "Nu aveți acces la acest client."
 
-#: apps/users/views.py:1469
+#: apps/users/views.py:1474
 msgid "Unable to verify customer access. Please try again."
 msgstr "Nu s-a putut verifica accesul clientului. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:1510 templates/components/customer_selector.html:21
+#: apps/users/views.py:1515 templates/components/customer_selector.html:21
 #: templates/components/customer_selector.html:72
 #: templates/customers/team.html:73 templates/customers/team_invite.html:57
 msgid "Owner"
 msgstr "Proprietar"
 
-#: apps/users/views.py:1511
+#: apps/users/views.py:1516
 msgid "Administrator"
 msgstr "Administrator"
 
-#: apps/users/views.py:1512
+#: apps/users/views.py:1517
 msgid "Billing Manager"
 msgstr "Manager facturare"
 
-#: apps/users/views.py:1513
+#: apps/users/views.py:1518
 msgid "Technical Manager"
 msgstr "Manager tehnic"
 
-#: apps/users/views.py:1514 templates/components/customer_selector.html:24
+#: apps/users/views.py:1519 templates/components/customer_selector.html:24
 #: templates/components/customer_selector.html:75
 #: templates/customers/team.html:70 templates/customers/team_invite.html:54
 msgid "Viewer"
 msgstr "Vizualizator"
 
-#: apps/users/views.py:1518
+#: apps/users/views.py:1523
 #, python-brace-format
 msgid "Switched to {customer} ({role})"
 msgstr "Comutat la {customer} ({role})"
 
-#: apps/users/views.py:1589
+#: apps/users/views.py:1594
 #, python-brace-format
 msgid "Company '{}' created successfully! You are now the owner."
 msgstr "Compania '{}' a fost creată cu succes! Sunteți acum proprietarul."
 
-#: apps/users/views.py:1612
+#: apps/users/views.py:1617
 #, python-brace-format
 msgid "Failed to create company: {}"
 msgstr "Crearea companiei a eșuat: {}"
 
-#: apps/users/views.py:1618
+#: apps/users/views.py:1623
 msgid "Error creating company. Please try again."
 msgstr "Eroare la crearea companiei. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:1622 templates/users/create_company.html:5
+#: apps/users/views.py:1627 templates/users/create_company.html:5
 #: templates/users/create_company.html:273 templates/users/profile.html:200
 msgid "Create Company"
 msgstr "Creați compania"
 
-#: config/settings/base.py:177
+#: config/settings/base.py:220
 msgid "Română"
 msgstr "Română"
 
@@ -2389,8 +2389,8 @@ msgstr "Dacă problema persistă, vă rugăm să contactați echipa noastră de 
 msgid "PRAHO Customer Portal - Manage your hosting services"
 msgstr "PRAHO Portal Client - Gestionați serviciile dvs. de găzduire"
 
-#: templates/base.html:74 templates/billing/invoice_not_found.html:49
-#: templates/billing/proforma_not_found.html:49
+#: templates/base.html:74 templates/billing/invoice_not_found.html:50
+#: templates/billing/proforma_not_found.html:50
 #: templates/components/mobile_header.html:57
 #: templates/dashboard/dashboard.html:5
 msgid "Dashboard"
@@ -2661,9 +2661,9 @@ msgid "Download PDF"
 msgstr "Descarcă PDF"
 
 #: templates/billing/invoice_detail.html:31
-#: templates/billing/invoice_not_found.html:44
+#: templates/billing/invoice_not_found.html:45
 #: templates/billing/proforma_detail.html:31
-#: templates/billing/proforma_not_found.html:44
+#: templates/billing/proforma_not_found.html:45
 msgid "Back to Billing"
 msgstr "Înapoi la facturare"
 
@@ -2772,14 +2772,34 @@ msgstr "Unitate:"
 
 #: templates/billing/invoice_not_found.html:5
 #: templates/billing/invoice_not_found.html:13
+msgid "Invoice Unavailable"
+msgstr "Factură indisponibilă"
+
+#: templates/billing/invoice_not_found.html:5
+#: templates/billing/invoice_not_found.html:13
 msgid "Invoice Not Found"
 msgstr "Factura nu a fost găsită"
+
+#: templates/billing/invoice_not_found.html:22
+msgid "Could Not Load Invoice"
+msgstr "Factura nu a putut fi încărcată"
 
 #: templates/billing/invoice_not_found.html:22
 msgid "Invoice Not Available"
 msgstr "Factura nu este disponibilă"
 
 #: templates/billing/invoice_not_found.html:26
+#, python-format
+msgid ""
+"\n"
+"          Invoice %(number)s could not be loaded right now. Please try again in a moment.\n"
+"          "
+msgstr ""
+"\n"
+"          Factura %(number)s nu a putut fi încărcată momentan. Încercați din nou în câteva momente.\n"
+"          "
+
+#: templates/billing/invoice_not_found.html:32
 #, python-format
 msgid ""
 "\n"
@@ -2790,13 +2810,9 @@ msgstr ""
 "          Factura %(number)s nu a putut fi găsită sau nu aveți acces la ea.\n"
 "          "
 
-#: templates/billing/invoice_not_found.html:32
+#: templates/billing/invoice_not_found.html:38
 msgid "The requested invoice could not be found or you don\\"
 msgstr "Factura solicitată nu a putut fi găsită sau nu aveți\\"
-
-#: templates/billing/invoice_not_found.html:38
-msgid "An error occurred while loading the invoice. Please try again or contact support if the problem persists."
-msgstr "A apărut o eroare la încărcarea facturii. Încercați din nou sau contactați asistența dacă problema persistă."
 
 #: templates/billing/invoices_list.html:23
 #: templates/services/service_list.html:22
@@ -3021,14 +3037,34 @@ msgstr "Deschideți un bilet de suport"
 
 #: templates/billing/proforma_not_found.html:5
 #: templates/billing/proforma_not_found.html:13
+msgid "Proforma Unavailable"
+msgstr "Proformă indisponibilă"
+
+#: templates/billing/proforma_not_found.html:5
+#: templates/billing/proforma_not_found.html:13
 msgid "Proforma Not Found"
 msgstr "Proforma nu a fost găsită"
+
+#: templates/billing/proforma_not_found.html:22
+msgid "Could Not Load Proforma"
+msgstr "Proforma nu a putut fi încărcată"
 
 #: templates/billing/proforma_not_found.html:22
 msgid "Proforma Not Available"
 msgstr "Proforma nu este disponibilă"
 
 #: templates/billing/proforma_not_found.html:26
+#, python-format
+msgid ""
+"\n"
+"          Proforma %(number)s could not be loaded right now. Please try again in a moment.\n"
+"          "
+msgstr ""
+"\n"
+"          Proforma %(number)s nu a putut fi încărcată momentan. Încercați din nou în câteva momente.\n"
+"          "
+
+#: templates/billing/proforma_not_found.html:32
 #, python-format
 msgid ""
 "\n"
@@ -3039,13 +3075,9 @@ msgstr ""
 "          Proforma %(number)s nu a putut fi găsită sau nu aveți acces la ea.\n"
 "          "
 
-#: templates/billing/proforma_not_found.html:32
+#: templates/billing/proforma_not_found.html:38
 msgid "The requested proforma could not be found or you don\\"
 msgstr "Proforma solicitată nu a putut fi găsită sau nu aveți\\"
-
-#: templates/billing/proforma_not_found.html:38
-msgid "An error occurred while loading the proforma. Please try again or contact support if the problem persists."
-msgstr "A apărut o eroare la încărcarea proformei. Încercați din nou sau contactați asistența dacă problema persistă."
 
 #: templates/billing/recurring_payments.html:13
 msgid "Authorize a card once, then choose which subscriptions PRAHO may collect automatically."
@@ -6715,6 +6747,12 @@ msgstr "Conectați-vă aici"
 #: tests/common/pagination_assertions.py:20
 msgid "Go to next page"
 msgstr "Mergeți la pagina următoare"
+
+#~ msgid "An error occurred while loading the invoice. Please try again or contact support if the problem persists."
+#~ msgstr "A apărut o eroare la încărcarea facturii. Încercați din nou sau contactați asistența dacă problema persistă."
+
+#~ msgid "An error occurred while loading the proforma. Please try again or contact support if the problem persists."
+#~ msgstr "A apărut o eroare la încărcarea proformei. Încercați din nou sau contactați asistența dacă problema persistă."
 
 #~ msgid "General Customer Request"
 #~ msgstr "Solicitare generală a clientului"

@@ -13,6 +13,7 @@ Security guidelines:
 from __future__ import annotations
 
 import logging
+from http import HTTPStatus
 from typing import Any
 
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError, quote_path_segment
@@ -180,40 +181,43 @@ class InvoiceViewService:
             _raise_if_degraded(e)
             return []
 
+    def _fetch_document(self, kind: str, number: str, customer_id: int, user_id: int) -> dict[str, Any] | None:
+        """Platform's record of one invoice or proforma, or None when there is no such document.
+
+        Platform answers 404 for a number that does not exist or is not this customer's, and only
+        that means "not found". Any other failure (an outage, a server error, an answer that says
+        success without the document) raises: the views say the document could not be loaded,
+        rather than wrongly telling the customer it does not exist.
+        """
+        try:
+            segment = quote_path_segment(number)
+        except ValueError:
+            return None  # a number that cannot be one path segment names no document
+        try:
+            response = self.api_client.post(
+                f"/billing/{kind}s/{segment}/",
+                data={"customer_id": customer_id, "user_id": user_id, "action": f"get_{kind}_detail"},
+            )
+        except PlatformAPIError as error:
+            if error.status_code == HTTPStatus.NOT_FOUND:
+                logger.info(f"✅ [Billing API] Platform has no {kind} {number} for customer {customer_id}")
+                return None
+            raise
+        document = response.get(kind) if response.get("success") is True else None
+        if not isinstance(document, dict) or not document:
+            raise PlatformAPIError(f"Platform answered the {kind} lookup without the {kind}", response_data=response)
+        return document
+
     def get_invoice_detail(
         self, invoice_number: str, customer_id: int, user_id: int, force_sync: bool = False
     ) -> Invoice | None:
-        """Get invoice details by number directly from Platform API"""
-        try:
-            # Debug logging reduced after stabilization
-            # Call Platform API directly
-            response = self.api_client.post(
-                f"/billing/invoices/{quote_path_segment(invoice_number)}/",
-                data={"customer_id": customer_id, "user_id": user_id, "action": "get_invoice_detail"},
-            )
-
-            if not response.get("success"):
-                logger.error(f"🔥 [Invoice API] Failed to fetch invoice {invoice_number}: {response}")
-                return None
-
-            invoice_data = response.get("invoice")
-            if not invoice_data:
-                logger.warning(f"⚠️ [Invoice API] No invoice data for {invoice_number}")
-                return None
-
-            # Get line items if included
-            lines_data = invoice_data.get("lines", [])
-
-            # Convert API response to dataclass instance
-            invoice = create_invoice_from_api(invoice_data, lines_data)
-
-            logger.info(f"✅ [Invoice API] Retrieved invoice {invoice_number} for customer {customer_id}")
-            return invoice
-
-        except Exception as e:
-            logger.error(f"🔥 [Invoice API] Error retrieving invoice {invoice_number}: {e}")
-            _raise_if_degraded(e)
+        """One invoice from Platform, or None when it does not exist; any other failure raises."""
+        invoice_data = self._fetch_document("invoice", invoice_number, customer_id, user_id)
+        if invoice_data is None:
             return None
+        invoice = create_invoice_from_api(invoice_data, invoice_data.get("lines", []))
+        logger.info(f"✅ [Invoice API] Retrieved invoice {invoice_number} for customer {customer_id}")
+        return invoice
 
     def get_invoice_summary(self, customer_id: int, user_id: int) -> dict[str, Any]:
         """Get invoice summary statistics directly from Platform API"""
@@ -307,64 +311,13 @@ class InvoiceViewService:
     def get_proforma_detail(
         self, proforma_number: str, customer_id: int, user_id: int, force_sync: bool = False
     ) -> Proforma | None:
-        """Get proforma details by number directly from Platform API"""
-        try:
-            # Call Platform API directly
-            response = self.api_client.post(
-                f"/billing/proformas/{quote_path_segment(proforma_number)}/",
-                data={"customer_id": customer_id, "user_id": user_id, "action": "get_proforma_detail"},
-            )
-
-            if not response.get("success"):
-                logger.error(f"🔥 [Proforma API] Failed to fetch proforma {proforma_number}: {response}")
-                return None
-
-            proforma_data = response.get("proforma")
-            if not proforma_data:
-                logger.warning(f"⚠️ [Proforma API] No proforma data for {proforma_number}")
-                return None
-
-            # DEBUG: Log the actual data structure to understand the issue
-            logger.debug(
-                f"🔍 [Proforma API] Received proforma_data keys: {list(proforma_data.keys()) if proforma_data else 'None'}"
-            )
-            logger.debug(f"🔍 [Proforma API] Proforma data: {proforma_data}")
-
-            # Get line items if included
-            lines_data = proforma_data.get("lines", [])
-
-            # Convert API response to dataclass instance
-            try:
-                # DEBUG: Check data before calling serializer
-                logger.debug(
-                    f"🔍 [Proforma API] About to call create_proforma_from_api with keys: {list(proforma_data.keys()) if proforma_data else 'None'}"
-                )
-                logger.debug(
-                    f"🔍 [Proforma API] ID field check: {'id' in proforma_data if proforma_data else 'No data'}"
-                )
-                if proforma_data and "id" in proforma_data:
-                    logger.debug(
-                        f"🔍 [Proforma API] ID value type: {type(proforma_data['id'])}, value: {proforma_data['id']}"
-                    )
-
-                proforma = create_proforma_from_api(proforma_data, lines_data)
-
-                logger.info(f"✅ [Proforma API] Retrieved proforma {proforma_number} for customer {customer_id}")
-                return proforma
-            except KeyError as e:
-                logger.error(f"🔥 [Proforma API] KeyError in create_proforma_from_api: {e}")
-                logger.error(
-                    f"🔍 [Proforma API] Available keys: {list(proforma_data.keys()) if proforma_data else 'None'}"
-                )
-                raise e
-            except Exception as e:
-                logger.error(f"🔥 [Proforma API] Unexpected error in create_proforma_from_api: {e}")
-                raise e
-
-        except Exception as e:
-            logger.error(f"🔥 [Proforma API] Error retrieving proforma {proforma_number}: {e}")
-            _raise_if_degraded(e)
+        """One proforma from Platform, or None when it does not exist; any other failure raises."""
+        proforma_data = self._fetch_document("proforma", proforma_number, customer_id, user_id)
+        if proforma_data is None:
             return None
+        proforma = create_proforma_from_api(proforma_data, proforma_data.get("lines", []))
+        logger.info(f"✅ [Proforma API] Retrieved proforma {proforma_number} for customer {customer_id}")
+        return proforma
 
     def get_invoice_pdf(self, invoice_number: str, customer_id: int, user_id: int | None = None) -> bytes:
         """Get invoice PDF directly from Platform API"""
