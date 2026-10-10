@@ -152,6 +152,19 @@
     - /var/log/praho
     - /var/log/praho/portal
 
+- name: Install logrotate
+  apt:
+    name: logrotate
+    state: present
+
+- name: Rotate the portal's log files (the portal never rotates them itself)
+  template:
+    src: praho-portal.logrotate.j2
+    dest: /etc/logrotate.d/praho-portal
+    owner: root
+    group: root
+    mode: "0644"
+
 - name: Deploy code via rsync
   ansible.posix.synchronize:
     src: "{{ playbook_dir }}/../../../"

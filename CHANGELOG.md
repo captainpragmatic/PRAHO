@@ -514,6 +514,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Access log:** every deploy path now writes one to stdout; Docker had none. Each line is gunicorn's default line plus the request duration, the worker pid and the request id (`-` on a response refused before the request-id middleware ran).
   - **Graceful restarts:** Docker allows 55 s, above gunicorn's 50 s graceful timeout, so a restart drains requests in flight. A single portal container refuses new requests while it drains.
   - **Upgrading:** a portal container no longer reads `GUNICORN_WORKERS`, which is the platform's setting. Set `PORTAL_GUNICORN_WORKERS` instead. On native installs, the Ansible variable `gunicorn_timeout_portal` is gone; the timeout is fixed at 60 s, so a raised value no longer applies. See the settings table and the rollback runbook in `docs/deployment/DEPLOYMENT.md`.
+- **Portal log files are safe with several processes, and a slow client no longer holds a portal worker.**
+  - **Log files.** The portal no longer rotates its own log files, which raced as soon as two processes wrote them: lines landed in the wrong file or were lost.
+    - It writes `app.log` and `error.log` only when `PORTAL_LOG_DIR` is set (native default: `/var/log/praho/portal`), and reopens a file once logrotate has moved it.
+    - The native role installs logrotate and a daily policy for these files (14 kept, compressed, rotated early past 50 MB). Staging used to keep fewer files; both now follow this one policy.
+    - The Docker image sets `PORTAL_LOG_DIR` empty, so containers log to stdout only. Their files were never on a volume and were lost when the container was recreated; `docker logs` carries every line.
+  - **Proxy buffering.** Caddy now reads the whole request (at most the 5 MB body cap) and up to 10 MiB of each portal response before passing it on.
+    - A client that uploads or reads slowly holds Caddy instead of a portal worker.
+    - Threaded workers have no per-request timeout, so this is what bounds a slow client there.
 - Deleting a Virtualmin account, and clearing the deletion-protection flag that guards it, now
   require an administrator rather than any staff member.
 - The revenue report shows fiscal and cash revenue side by side (ADR-0053). Fiscal revenue counts

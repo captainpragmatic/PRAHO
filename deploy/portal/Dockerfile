@@ -65,12 +65,14 @@ LABEL maintainer="PRAHO Platform Team"
 LABEL service="portal"
 LABEL description="PRAHO Portal Service - Customer-facing API gateway"
 
+# PORTAL_LOG_DIR is empty: logs go to stdout only (docker logs); see config/settings/logging_config.py.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     DJANGO_SETTINGS_MODULE=config.settings.prod \
     PYTHONPATH=/app/services/portal \
     SESSION_DB_PATH=/app/portal.sqlite3 \
-    SERVICE_NAME=portal
+    SERVICE_NAME=portal \
+    PORTAL_LOG_DIR=""
 
 # Portal uses config.settings.prod (not config.settings) because portal has a
 # settings package (config/settings/{base,dev,prod}.py), same as platform.

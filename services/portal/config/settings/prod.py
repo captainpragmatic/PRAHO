@@ -6,6 +6,7 @@ import os
 from urllib.parse import urlsplit
 
 from .base import *  # noqa: F403
+from .logging_config import portal_log_dir, portal_logging
 
 # Security
 DEBUG = False
@@ -156,73 +157,5 @@ CACHES = {
 # keeps the cookie small (~32 bytes), and allows server-side revocation.
 SESSION_ENGINE = "apps.common.session_store"  # DB sessions that merge concurrent writes (ADR-0055)
 
-# Production logging — structured JSON with request ID tracing
-LOGGING = {
-    "version": 1,
-    "disable_existing_loggers": False,
-    "formatters": {
-        "json": {
-            "()": "apps.common.logging.PortalJSONFormatter",
-        },
-        "verbose": {
-            "format": "[{asctime}] {levelname} [{name}:{funcName}:{lineno}] {message}",
-            "style": "{",
-            "datefmt": "%Y-%m-%d %H:%M:%S",
-        },
-    },
-    "filters": {
-        "add_request_id": {
-            "()": "apps.common.middleware.RequestIDFilter",
-        },
-    },
-    "handlers": {
-        "console": {
-            "class": "logging.StreamHandler",
-            "formatter": "json",
-            "filters": ["add_request_id"],
-        },
-        "file": {
-            "class": "logging.handlers.RotatingFileHandler",
-            "filename": "/var/log/praho/portal/app.log",
-            "maxBytes": 52428800,  # 50MB
-            "backupCount": 10,
-            "formatter": "json",
-            "filters": ["add_request_id"],
-        },
-        "error_file": {
-            "class": "logging.handlers.RotatingFileHandler",
-            "filename": "/var/log/praho/portal/error.log",
-            "maxBytes": 52428800,  # 50MB
-            "backupCount": 30,
-            "formatter": "json",
-            "filters": ["add_request_id"],
-            "level": "ERROR",
-        },
-    },
-    "root": {
-        "handlers": ["console", "file"],
-        "level": "INFO",
-    },
-    "loggers": {
-        "django": {
-            "handlers": ["console", "file"],
-            "level": "INFO",
-            "propagate": False,
-        },
-        "django.security": {
-            "handlers": ["console", "file", "error_file"],
-            "level": "WARNING",
-            "propagate": False,
-        },
-        "django.request": {
-            "handlers": ["console", "file", "error_file"],
-            "level": "ERROR",
-            "propagate": False,
-        },
-        "apps": {
-            "handlers": ["console", "file"],
-            "level": "INFO",
-            "propagate": False,
-        },
-    },
-}
+# Structured JSON logging; files only when PORTAL_LOG_DIR is set (config/settings/logging_config.py)
+LOGGING = portal_logging(portal_log_dir())

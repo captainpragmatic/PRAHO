@@ -182,6 +182,10 @@ def _assert_contract(name: str, source: str, allowed: list[str] | None = None) -
         fallback = _one(portal, "handle").children
         _one(_one(fallback, "request_body").children, "max_size", "5MB")
         assert len(_proxy_targets(fallback)) == 1
+        # Portal threads have no request timeout, so a slow client must hold Caddy, not a thread.
+        proxy = next(node for node in fallback if node.words[0] == "reverse_proxy").children
+        _one(proxy, "request_buffers", "5MB")
+        _one(proxy, "response_buffers", "10MiB")
     if name != "portal":
         platform = _one(sites, PLATFORM_HOST).children
         handles = [node for node in platform if node.words[0] == "handle"]

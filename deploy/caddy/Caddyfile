@@ -40,6 +40,10 @@
             header_up X-Real-IP {remote_host}
             header_up X-Forwarded-For {remote_host}
             header_up X-Forwarded-Proto {scheme}
+            # Read the whole request (at most the 5MB cap) before passing it on, and up to 10MiB of
+            # the response before sending it: a slow client then holds Caddy, not a portal thread.
+            request_buffers 5MB
+            response_buffers 10MiB
         }
     }
 
