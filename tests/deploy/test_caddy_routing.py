@@ -349,6 +349,27 @@ def docker_daemon() -> None:
     """Skip the container checks where no Docker daemon is reachable."""
     if shutil.which("docker") is None or _docker("info").returncode != 0:
         pytest.skip("Docker daemon unavailable")
+    _pull_once(IMAGE)
+
+
+PULL_ATTEMPTS = 6
+
+
+def _pull_once(image: str) -> None:
+    """Pull the image before the tests run it, waiting out registry throttling.
+
+    Shared CI runners share outbound addresses, so an anonymous pull can be throttled
+    ("toomanyrequests"); a short backoff gets past a per-second limit.
+    """
+    if _docker("image", "inspect", image).returncode == 0:
+        return
+    result = _docker("pull", image)
+    for attempt in range(1, PULL_ATTEMPTS):
+        if result.returncode == 0 or "toomanyrequests" not in (result.stdout + result.stderr).lower():
+            break
+        time.sleep(2**attempt)
+        result = _docker("pull", image)
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 @pytest.mark.docker

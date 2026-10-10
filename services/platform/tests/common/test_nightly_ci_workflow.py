@@ -48,7 +48,7 @@ class NightlyPostgresConcurrencyWorkflowTests(SimpleTestCase):
 
     def test_concurrency_step_runs_on_postgresql_before_broad_suite(self) -> None:
         postgres_service = self.nightly_job["services"]["postgres"]
-        self.assertEqual(postgres_service["image"], "postgres:16-alpine")
+        self.assertEqual(postgres_service["image"], "public.ecr.aws/docker/library/postgres:16-alpine")
 
         steps = self.nightly_job["steps"]
         steps_by_name = {step.get("name"): step for step in steps}
@@ -82,7 +82,7 @@ class NightlyPostgresConcurrencyWorkflowTests(SimpleTestCase):
         self.assertNotIn("--parallel", command)
 
     def test_api_token_concurrency_runs_on_postgresql_for_pull_requests(self) -> None:
-        self.assertEqual(self.integration_job["services"]["postgres"]["image"], "postgres:16")
+        self.assertEqual(self.integration_job["services"]["postgres"]["image"], "public.ecr.aws/docker/library/postgres:16")
         steps_by_name = {step.get("name"): step for step in self.integration_job["steps"]}
         api_token_step = steps_by_name[_API_TOKEN_STEP_NAME]
         self.assertEqual(api_token_step["timeout-minutes"], 8)
