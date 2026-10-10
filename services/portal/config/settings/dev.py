@@ -138,7 +138,7 @@ if is_testing:
 
     # DB-backed sessions in tests — matches base/prod and ensures session_key
     # is available for SecurityMiddleware and rate-limiting tests.
-    SESSION_ENGINE = "django.contrib.sessions.backends.db"
+    SESSION_ENGINE = "apps.common.session_store"  # DB sessions that merge concurrent writes (ADR-0055)
 
     # Disable rate limiting during tests
     RATE_LIMITING_ENABLED = False

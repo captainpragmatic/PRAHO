@@ -400,8 +400,13 @@ class SessionSettingsConsistencyTests(SimpleTestCase):
     """Verify session backend settings are consistent across environments."""
 
     def test_base_settings_use_db_sessions(self):
-        """base.py must configure DB-backed sessions."""
-        self.assertEqual(SESSION_ENGINE, "django.contrib.sessions.backends.db")
+        """base.py must configure DB-backed sessions: the store that merges concurrent writes."""
+        from django.contrib.sessions.backends import db  # noqa: PLC0415
+
+        from apps.common.session_store import SessionStore as MergingStore  # noqa: PLC0415
+
+        self.assertEqual(SESSION_ENGINE, "apps.common.session_store")
+        self.assertTrue(issubclass(MergingStore, db.SessionStore))
 
     def test_dev_settings_use_db_sessions(self):
         """dev.py must not override to signed_cookies."""

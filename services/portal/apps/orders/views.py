@@ -36,6 +36,7 @@ from apps.common import counters
 from apps.common.decorators import require_billing_access
 from apps.common.rate_limit_feedback import get_rate_limit_message, is_rate_limited_error
 from apps.common.request_ip import get_safe_client_ip
+from apps.common.session_store import SessionSaveContended
 from apps.common.store_unavailable import store_unavailable_json, store_unavailable_response
 
 from .security import OrderSecurityHardening
@@ -556,8 +557,11 @@ def _create_and_process_order(request: HttpRequest, ctx: CheckoutContext) -> Htt
                 except DatabaseError:
                     logger.exception("🔥 [Orders] Failed to release idempotency claim: %s", idem_cache_key)
 
-    except Exception as e:
-        logger.error("🔥 [Orders] Unexpected error creating order: %s", e)
+    except SessionSaveContended:
+        raise  # The session middleware answers 503 with Retry-After (ADR-0055).
+    except Exception:
+        # With the traceback: a session save failing here (UpdateError) has no message of its own.
+        logger.exception("🔥 [Orders] Unexpected error creating order")
         messages.error(request, _("Error creating order. Please try again."))
         return redirect("orders:checkout")
 

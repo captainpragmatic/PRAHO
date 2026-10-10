@@ -1,0 +1,437 @@
+"""Portal sessions that merge concurrent writes instead of overwriting them (ADR-0055).
+
+Django's database backend saves the whole session dict. Two requests of one customer that load
+the same session and both save it race: the later save writes back the earlier one's stale view,
+undoing its changes (a cart edit, a company switch). Threaded workers make that likely.
+
+This store remembers the session exactly as it loaded it (the stored text and a deep copy of the
+decoded dict). On save it applies only what this request changed onto the latest stored row, with
+a compare-and-swap on the stored text: ``UPDATE ... WHERE session_key = ? AND session_data = ?``.
+Without contention that is the only query. When another request saved in between, the latest row
+is re-read and the same changes are applied to it again.
+
+Rules:
+
+- A key, or a key group below, is last-writer-wins when two requests both change it. Groups move
+  together, so a mixed company id/name/role can never be stored. A list or dict is one value,
+  except the record maps below, which merge entry by entry.
+- A row that is gone (logout, flush, revocation) is never recreated: the save raises UpdateError,
+  which the session middleware turns into SessionInterrupted. Only a confirmed missing row does;
+  a database error propagates as itself.
+- Rotating the key of a session that was authenticated when loaded deletes exactly the row it
+  read first. If a concurrent logout deleted it, rotation is refused rather than minting a new
+  authenticated session.
+
+The class keeps Django's name, ``SessionStore``: Django imports ``engine.SessionStore``, and the
+signing salt is derived from the class name, so existing sessions keep decoding.
+"""
+
+from __future__ import annotations
+
+import copy
+import hashlib
+import json
+import logging
+import random
+import time
+from typing import Any
+
+from asgiref.sync import sync_to_async
+from django.contrib.sessions import middleware
+from django.contrib.sessions.backends import db
+from django.contrib.sessions.backends.base import UpdateError
+from django.contrib.sessions.exceptions import SessionInterrupted
+from django.db import DatabaseError, InterfaceError, router
+from django.http import HttpRequest, HttpResponse
+from django.utils import timezone
+from django.utils.cache import add_never_cache_headers
+
+from apps.common.store_unavailable import (
+    STORE_UNAVAILABLE_RETRY_AFTER_SECONDS,
+    STORE_UNAVAILABLE_STATUS,
+    store_unavailable_json,
+    store_unavailable_message,
+    wants_json,
+)
+
+logger = logging.getLogger(__name__)
+
+# Keys that are only meaningful together. If a request changed any of them, the whole group is
+# stored as that request saw it. active_customer_id is deliberately not in the company group: the
+# auth middleware sets it alone, as a fallback for a session with no selected company, and the
+# selected company always takes priority over it. In the group, a request that only set the
+# fallback would store its view of the group, with no selected company, over a concurrent switch.
+KEY_GROUPS: tuple[frozenset[str], ...] = (
+    frozenset({"selected_customer_id", "selected_customer_name", "selected_customer_role"}),
+    frozenset(
+        {"validated_at", "next_validate_at", "membership_hash", "user_memberships", "user_memberships_fetched_at"}
+    ),
+    frozenset({"user_id", "email", "customer_id", "session_auth_hash", "authenticated_at", "session_created_at"}),
+    frozenset({"account_health_data", "account_health_fetched_at"}),
+)
+
+# How a request's change to a group applies:
+# - it changed the group's anchor (the key the rest describes), or every key of the group: the whole
+#   group is stored as this request saw it, so the last company switch, password change or
+#   validation wins;
+# - it changed only part of the group (a page filling in the company's name, a timestamp, a
+#   membership list fetched in passing): the change applies only if no other request changed the
+#   group since this one loaded it. If one did, that change wins, so stale details never revert or
+#   mix with it.
+GROUP_ANCHORS: dict[frozenset[str], str] = {
+    KEY_GROUPS[0]: "selected_customer_id",
+    KEY_GROUPS[1]: "membership_hash",
+    KEY_GROUPS[2]: "session_auth_hash",
+}
+
+# Dict-valued keys holding independent records (one per purchase in progress). Two tabs adding
+# different records must both keep theirs, so these merge per record.
+RECORD_MAPS = frozenset({"order_checkout_attempts", "gift_purchase_forms"})
+
+MAX_MERGE_ATTEMPTS = 25
+# Between attempts, a short random wait growing with the attempt, so requests that collided do not
+# collide again in lockstep. The worst case is well under a second.
+MERGE_BACKOFF_SECONDS = 0.002
+
+_MISSING = object()
+
+
+class SessionSaveContended(Exception):  # noqa: N818  # reads as what happened, like UpdateError
+    """Other requests kept saving the same session; this save gave up rather than overwrite them.
+
+    Deliberately not UpdateError: the session middleware reports that as "session deleted", which
+    would be false here.
+    """
+
+
+def _same(before: Any, after: Any) -> bool:
+    """Equal as stored: compared by JSON form, so True and 1, or 1 and 1.0, differ."""
+    if before is _MISSING or after is _MISSING:
+        return before is after
+    try:
+        return json.dumps(before, sort_keys=True) == json.dumps(after, sort_keys=True)
+    except TypeError:  # not JSON at all: never "unchanged", so encoding the session rejects it
+        return False
+
+
+def _as_record_map(value: Any) -> dict[str, Any] | None:
+    """A record map's records; an absent map counts as empty, any other value is not a map."""
+    if value is _MISSING:
+        return {}
+    return value if isinstance(value, dict) else None
+
+
+# One change to apply onto the latest stored dict: (operation, key, entry, value).
+Change = tuple[str, str, Any, Any]
+
+
+def _record_changes(key: str, before: dict[str, Any], after: dict[str, Any]) -> list[Change]:
+    """Per-record changes to a record map, so concurrent requests keep each other's records."""
+    changes: list[Change] = []
+    for entry in after.keys() | before.keys():
+        if entry not in after:
+            changes.append(("delete_entry", key, entry, None))
+        elif not _same(before.get(entry, _MISSING), after[entry]):
+            changes.append(("set_entry", key, entry, copy.deepcopy(after[entry])))
+    return changes
+
+
+def _changes(baseline: dict[str, Any], mine: dict[str, Any]) -> list[Change]:
+    """What this request changed compared with what it loaded."""
+    changes: list[Change] = []
+    touched: set[str] = set()
+    for key in mine.keys() | baseline.keys():
+        before, after = baseline.get(key, _MISSING), mine.get(key, _MISSING)
+        if _same(before, after):
+            continue
+        touched.add(key)
+        before_map, after_map = _as_record_map(before), _as_record_map(after)
+        if key in RECORD_MAPS and before_map is not None and after_map is not None:
+            changes.extend(_record_changes(key, before_map, after_map))
+        elif after is _MISSING:
+            changes.append(("delete", key, None, None))
+        else:
+            changes.append(("set", key, None, copy.deepcopy(after)))
+    for group in KEY_GROUPS:
+        if not group & touched:
+            continue
+        group_changes = [change for change in changes if change[1] in group]
+        changes = [change for change in changes if change[1] not in group]
+        for key in group - touched:  # the group's other keys, as this request saw them
+            if key in mine:
+                group_changes.append(("set", key, None, copy.deepcopy(mine[key])))
+            else:
+                group_changes.append(("delete", key, None, None))
+        if GROUP_ANCHORS.get(group) in touched or group <= touched:
+            changes.extend(group_changes)
+        else:
+            loaded = {key: _copy(baseline.get(key, _MISSING)) for key in group}
+            changes.append(("if_group_unchanged", ",".join(sorted(group)), loaded, group_changes))
+    return changes
+
+
+def _copy(value: Any) -> Any:
+    return value if value is _MISSING else copy.deepcopy(value)
+
+
+def _apply(changes: list[Change], latest: dict[str, Any]) -> dict[str, Any]:
+    merged = copy.deepcopy(latest)
+    for operation, key, entry, value in changes:
+        if operation == "if_group_unchanged":  # entry: the group as loaded; value: the group's changes
+            if all(_same(merged.get(name, _MISSING), loaded) for name, loaded in entry.items()):
+                merged = _apply(value, merged)
+            continue
+        if operation == "set":
+            merged[key] = value
+        elif operation == "delete":
+            merged.pop(key, None)
+        else:
+            records = merged.get(key)
+            records = dict(records) if isinstance(records, dict) else {}
+            if operation == "set_entry":
+                records[entry] = value
+            else:
+                records.pop(entry, None)
+            merged[key] = records
+    return merged
+
+
+def _fingerprint(session_key: str | None) -> str:
+    """A short, non-reversible session identifier for logs."""
+    return hashlib.sha256((session_key or "").encode()).hexdigest()[:8]
+
+
+def _changed_keys(changes: list[Change]) -> str:
+    keys: set[str] = set()
+    for operation, key, _entry, value in changes:
+        if operation == "if_group_unchanged":
+            keys.update(nested_key for _op, nested_key, _e, _v in value)
+        else:
+            keys.add(key)
+    return ", ".join(sorted(keys)) or "-"
+
+
+def _back_off(attempt: int) -> None:
+    time.sleep(random.uniform(0, MERGE_BACKOFF_SECONDS * (attempt + 1)))  # noqa: S311  # jitter, not security
+
+
+class SessionStore(db.SessionStore):
+    """Database sessions whose saves merge with concurrent saves; see the module docstring."""
+
+    def __init__(self, session_key: str | None = None) -> None:
+        super().__init__(session_key)
+        self._baseline: dict[str, Any] | None = None  # the dict as loaded or last written
+        self._baseline_text: str | None = None  # its stored text, the compare-and-swap token
+        self._pending: tuple[dict[str, Any], str] | None = None
+
+    # ---- loading -------------------------------------------------------------------------------
+
+    def load(self) -> dict[str, Any]:
+        stored = self.model.objects.filter(session_key=self.session_key, expire_date__gt=timezone.now()).first()
+        if stored is None:
+            self._session_key = None  # as Django does for a missing or expired session
+            self._forget_baseline()
+            return {}
+        data: dict[str, Any] = self.decode(stored.session_data)
+        self._baseline, self._baseline_text = copy.deepcopy(data), stored.session_data
+        return data
+
+    async def aload(self) -> dict[str, Any]:
+        return await sync_to_async(self.load)()
+
+    def _forget_baseline(self) -> None:
+        self._baseline = self._baseline_text = None
+
+    def _publish(self, data: dict[str, Any], text: str) -> None:
+        """Only an acknowledged write becomes the new baseline."""
+        self._baseline, self._baseline_text = copy.deepcopy(data), text
+
+    # ---- writing -------------------------------------------------------------------------------
+
+    def create_model_instance(self, data: dict[str, Any]) -> Any:
+        instance = super().create_model_instance(data)
+        self._pending = (data, instance.session_data)  # published only once the insert succeeds
+        return instance
+
+    def save(self, must_create: bool = False) -> None:
+        if must_create or self.session_key is None:
+            super().save(must_create=must_create)  # an insert; Django's own path
+            if self._pending is not None:
+                self._publish(*self._pending)
+                self._pending = None
+            return
+        self._merge_and_save()
+
+    async def asave(self, must_create: bool = False) -> None:
+        await sync_to_async(self.save)(must_create)
+
+    def _stored_text(self, using: str) -> str | None:
+        text: str | None = (
+            self.model.objects.using(using)
+            .filter(session_key=self.session_key)
+            .values_list("session_data", flat=True)
+            .first()
+        )
+        return text
+
+    def _merge_and_save(self) -> None:
+        mine = dict(self.items())  # loads the session if this request never read it
+        using = router.db_for_write(self.model)
+        # Without a baseline (cleared before it was ever loaded) this request's view replaces the
+        # stored one, as Django's own save would; it still never inserts.
+        changes = _changes(self._baseline, mine) if self._baseline is not None else None
+        expected_text = self._baseline_text
+        latest = copy.deepcopy(self._baseline) if self._baseline is not None else None
+        for _attempt in range(MAX_MERGE_ATTEMPTS):
+            if expected_text is None or latest is None:
+                expected_text = self._stored_text(using)
+                if expected_text is None:
+                    raise UpdateError("The session row is gone; it is never recreated")
+                latest = self.decode(expected_text)
+            merged = _apply(changes, latest) if changes is not None else copy.deepcopy(mine)
+            text = self.encode(merged)
+            expire_date = self.get_expiry_date(expiry=merged.get("_session_expiry"))
+            updated = (
+                self.model.objects.using(using)
+                .filter(session_key=self.session_key, session_data=expected_text)
+                .update(session_data=text, expire_date=expire_date)
+            )
+            if updated:
+                self._session_cache = merged
+                self._publish(merged, text)
+                return
+            expected_text = latest = None  # another request saved first: merge onto its row
+            _back_off(_attempt)
+        logger.error(
+            "🔥 [Session] Gave up saving session %s after %d contended attempts (changed: %s)",
+            _fingerprint(self.session_key),
+            MAX_MERGE_ATTEMPTS,
+            _changed_keys(changes) if changes is not None else "all",
+        )
+        raise SessionSaveContended(f"Session save still contended after {MAX_MERGE_ATTEMPTS} attempts")
+
+    # ---- rotation and removal ------------------------------------------------------------------
+
+    def cycle_key(self) -> None:
+        mine = dict(self.items())  # load first: whether the session is authenticated decides the path
+        old_key, baseline = self.session_key, self._baseline
+        if old_key is None or baseline is None or baseline.get("user_id") is None:
+            super().cycle_key()  # not authenticated when loaded: rotate exactly as Django does
+            return
+        try:
+            self._rotate_authenticated(old_key, baseline, mine)
+        except Exception:
+            # Fail closed. This request's data (a new session_auth_hash, say) must never be saved
+            # under the old key, which anyone holding the old cookie could keep using: forget the
+            # session here and make sure the old row is gone, so the request ends signed out.
+            self._session_cache = {}
+            self._session_key = None
+            self._forget_baseline()
+            try:
+                self.model.objects.filter(session_key=old_key).delete()
+            except (DatabaseError, InterfaceError):
+                logger.exception("🔥 [Session] Could not delete the old session after a failed key rotation")
+            raise
+
+    def _rotate_authenticated(self, old_key: str, baseline: dict[str, Any], mine: dict[str, Any]) -> None:
+        changes = _changes(baseline, mine)
+        expected_text: str | None = self._baseline_text
+        latest: dict[str, Any] | None = copy.deepcopy(baseline)
+        merged: dict[str, Any] = {}
+        using = router.db_for_write(self.model)
+        for _attempt in range(MAX_MERGE_ATTEMPTS):
+            if expected_text is None or latest is None:
+                expected_text = self._stored_text(using)
+                if expected_text is None:
+                    # A concurrent logout or revocation deleted the session: never mint a new one.
+                    raise SessionInterrupted("The session ended while its key was being rotated.")
+                latest = self.decode(expected_text)
+            merged = _apply(changes, latest)
+            deleted, _ = (
+                self.model.objects.using(using).filter(session_key=old_key, session_data=expected_text).delete()
+            )
+            if deleted:
+                break
+            expected_text = latest = None
+            _back_off(_attempt)
+        else:
+            logger.error(
+                "🔥 [Session] Gave up rotating session %s after %d contended attempts (changed: %s)",
+                _fingerprint(old_key),
+                MAX_MERGE_ATTEMPTS,
+                _changed_keys(changes),
+            )
+            raise SessionSaveContended(f"Session key rotation still contended after {MAX_MERGE_ATTEMPTS} attempts")
+        self._session_cache = merged
+        self._forget_baseline()
+        self.create()  # inserts the merged data under a new key, and publishes it as the baseline
+        self._session_cache = merged
+
+    async def acycle_key(self) -> None:
+        await sync_to_async(self.cycle_key)()
+
+    def flush(self) -> None:
+        super().flush()
+        self._forget_baseline()
+
+    async def aflush(self) -> None:
+        await sync_to_async(self.flush)()
+
+
+class SessionMiddleware(middleware.SessionMiddleware):
+    """Django's session middleware, answering a contended save as a temporary outage.
+
+    Without this, SessionSaveContended would surface as a server error. It is the portal's
+    usual 503 with Retry-After instead: the session still exists, only this save gave up.
+    """
+
+    def process_response(self, request: HttpRequest, response: HttpResponse) -> HttpResponse:
+        try:
+            return super().process_response(request, response)
+        except SessionSaveContended:
+            return _contended(request, response)
+
+    def process_exception(self, request: HttpRequest, exception: Exception) -> HttpResponse | None:
+        """A save or key rotation that gave up inside a view (a password change, a purchase)."""
+        if isinstance(exception, SessionSaveContended):
+            return _contended(request, None)
+        return None
+
+
+# Headers that describe the replaced response's body or caching, which the 503 must not inherit.
+# Every other header (security policy, request id, ...) was set by middleware that ran before the
+# save gave up, and is kept: listing the ones to keep would silently drop any header added later.
+_BODY_HEADERS = frozenset(
+    {
+        "content-type",
+        "content-length",
+        "content-encoding",
+        "content-disposition",
+        "content-language",
+        "content-range",
+        "location",
+        "etag",
+        "last-modified",
+        "expires",
+        "cache-control",
+        "vary",
+        "retry-after",
+    }
+)
+
+
+def _contended(request: HttpRequest, response: HttpResponse | None) -> HttpResponse:
+    """The portal's 503 for a session save that gave up, keeping what the response already carried."""
+    if wants_json(request):
+        unavailable: HttpResponse = store_unavailable_json()
+    else:
+        unavailable = HttpResponse(store_unavailable_message(), status=STORE_UNAVAILABLE_STATUS)
+        unavailable["Retry-After"] = str(STORE_UNAVAILABLE_RETRY_AFTER_SECONDS)
+        add_never_cache_headers(unavailable)
+    if response is not None:
+        for name, morsel in response.cookies.items():  # e.g. the messages cookie already consumed
+            unavailable.cookies[name] = morsel
+        for header, value in response.items():
+            if header.lower() not in _BODY_HEADERS and header not in unavailable:
+                unavailable[header] = value
+    return unavailable
