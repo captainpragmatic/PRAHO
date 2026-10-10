@@ -403,7 +403,9 @@ class HMACStoreUnavailable(Exception):  # noqa: N818  # names the condition, lik
     """
 
 
-HMAC_STORE_RETRY_AFTER_SECONDS = 5
+# Within the portal's immediate-retry cap (PLATFORM_API_MAX_RETRY_WAIT_SECONDS, 2.5 s), so a brief
+# store outage is absorbed by one retry instead of failing the page.
+HMAC_STORE_RETRY_AFTER_SECONDS = 2
 
 
 def _store_unavailable_response() -> HttpResponse:
@@ -452,6 +454,7 @@ class PortalServiceHMACMiddleware:
                 "🔥 [HMACRateLimiter] Counter store unavailable — denying request for portal %s from %s",
                 portal_id,
                 client_ip,
+                exc_info=True,
             )
             raise HMACStoreUnavailable from error
 
@@ -681,7 +684,7 @@ class PortalServiceHMACMiddleware:
             try:
                 is_valid, verified_portal_id, error_msg = self._validate_hmac_signature(request)
             except HMACStoreUnavailable:
-                logger.error("🔥 [HMAC Auth] Nonce store unavailable — answering 503 to %s", client_ip)
+                logger.error("🔥 [HMAC Auth] Nonce store unavailable — answering 503 to %s", client_ip, exc_info=True)
                 return _store_unavailable_response()
 
             if not is_valid:

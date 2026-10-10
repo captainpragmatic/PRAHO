@@ -50,14 +50,14 @@ class HMACStoreFaultTests(HMACTestMixin, TestCase):
 
     def test_a_replayed_nonce_is_still_refused_as_authentication(self) -> None:
         nonce = "replayed-nonce-0123456789abcdef0123"
-        self._signed_post(nonce)
+        self.assertEqual(self._signed_post(nonce).status_code, 404)  # accepted: past the middleware, no route
         response = self._signed_post(nonce)
         self.assertEqual(response.status_code, 401)
 
     def test_a_claimed_nonce_survives_the_cache_being_cleared(self) -> None:
         # Claims live in the counter table, not the cache, so eviction cannot reopen a replay.
         nonce = "evicted-nonce-0123456789abcdef01234"
-        self._signed_post(nonce)
+        self.assertEqual(self._signed_post(nonce).status_code, 404)  # accepted: past the middleware, no route
         cache.clear()
         response = self._signed_post(nonce)
         self.assertEqual(response.status_code, 401)

@@ -31,7 +31,7 @@ Portal signs every outbound API request to Platform using a canonical string sch
 | **Secret** | `PLATFORM_API_SECRET` / `HMAC_SECRET` (same value, two setting names) |
 | **Algorithm** | HMAC-SHA256 over a 7-field canonical string |
 | **Headers sent** | `X-Portal-Id`, `X-Nonce`, `X-Timestamp`, `X-Body-Hash`, `X-Signature` |
-| **Replay protection** | Per-nonce dedup via `cache.add()` (database cache, shared across workers) |
+| **Replay protection** | Per-nonce claim in the shared counter table (`apps.common.counters.claim`, atomic; a cache could evict a live nonce) |
 | **Timestamp window** | 300 seconds (5 minutes), with 2-second forward skew tolerance for NTP jitter |
 | **Nonce requirements** | 32-256 characters, UUID4 recommended |
 | **User identity** | Signed in JSON body (`user_id` field), not in headers |
@@ -105,7 +105,7 @@ Each service presents a client certificate; the other verifies it against a trus
 Use one HMAC scheme and one shared secret for both directions.
 
 **Rejected because:**
-- **Different infrastructure constraints**: System 1 runs on Platform with a database-backed cache shared across workers, enabling reliable cross-worker nonce dedup. System 2 runs on Portal with only LocMemCache (per-process, no cross-worker visibility). A unified nonce dedup strategy would either require adding shared cache infrastructure to Portal (violating its stateless design) or downgrading Platform's replay protection.
+- **Different infrastructure constraints** (when this was decided): System 1 runs on Platform with a store shared across workers, enabling reliable cross-worker nonce dedup (today the counter table). System 2 ran on Portal with only LocMemCache (per-process, no cross-worker visibility); Portal has since gained its own counter table (ADR-0050). A unified nonce dedup strategy would either require adding shared cache infrastructure to Portal (violating its stateless design) or downgrading Platform's replay protection.
 - **Different threat models**: System 1 faces external-facing risk (Portal is internet-exposed, an attacker who compromises Portal could forge requests to Platform). System 2 is internal-only (Platform calls Portal on a private network). Secret isolation ensures compromise of one direction does not compromise the other.
 - **Different signing needs**: System 1 signs 7 fields (method, path, query, content-type, body hash, portal ID, nonce, timestamp) because Portal makes diverse API calls. System 2 signs only `timestamp.body` because it has a single fixed endpoint with a predictable payload shape.
 - **Operational rotation**: Separate secrets can be rotated independently. Rotating the Platform-to-Portal webhook secret does not require restarting Portal's API client or vice versa.
@@ -141,7 +141,7 @@ Standard OAuth2 flow where Portal obtains short-lived access tokens from Platfor
 | **Body integrity** | SHA-256 hash of raw body included in canonical string |
 | **Path integrity** | Full path + sorted query params in canonical string |
 | **Method integrity** | HTTP method in canonical string (prevents GET-to-POST confusion) |
-| **Nonce dedup** | Database cache `cache.add()` — atomic, shared across all workers |
+| **Nonce dedup** | Counter-table claim (`counters.claim`) — atomic, shared across all workers, never evicted while live; a store failure answers 503 |
 | **Nonce TTL** | `HMAC_TIMESTAMP_WINDOW_SECONDS + 30s` buffer |
 | **Rate limiting placement** | After signature validation — keyed on verified `portal_id`, not attacker-controlled header |
 

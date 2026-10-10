@@ -16,7 +16,6 @@ import sys
 from pathlib import Path
 from typing import Any, ClassVar
 
-from django.core.cache import cache
 from django.http import HttpRequest, HttpResponse
 from django.test import RequestFactory, TestCase, override_settings
 
@@ -207,7 +206,6 @@ class PortalSignatureVerifiesOnPlatformTests(TestCase):  # nonce claims live in 
             reached.append(request.path)
             return HttpResponse("view reached")
 
-        cache.clear()  # each test replays every record; a nonce is accepted once
         headers = record["headers"]
         request = RequestFactory().generic(
             record["method"],
