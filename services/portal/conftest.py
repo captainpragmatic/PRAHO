@@ -35,13 +35,9 @@ def reset_outbound_http_session() -> Generator[None]:
     Clear the outbound Platform session's cookies between tests.
 
     Tests fake Platform by patching ``apps.common.outbound_http._send``, which
-    every thread sees. What a patch does not restore is the session's cookie
-    jar, which direct ``.cookies.set()`` calls in setup, or a Set-Cookie from a
-    real request that escaped a patch, can populate.
-
-    This fixture clears that jar before AND after each test so pollution from
-    one test cannot affect another. It deliberately leaves the session's
-    headers alone: the User-Agent set at module load must persist.
+    every thread sees. The outbound sessions' jars refuse every cookie, so this
+    is a belt-and-braces clear of the test thread's session, before AND after
+    each test, so no cookie state can pass from one test to another.
 
     PR #164 review L3.
     """

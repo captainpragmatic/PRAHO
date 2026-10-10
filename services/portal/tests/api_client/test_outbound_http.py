@@ -168,18 +168,18 @@ class PortalRequestHMACPreservationTest(SimpleTestCase):
 
 
 class PortalRequestCookieIsolationTest(SimpleTestCase):
-    """portal_request() must not let cookies leak across calls on the outbound session.
+    """portal_request()'s cookie hygiene, at the call boundary.
 
-    requests.Session persists Set-Cookie response cookies and merges session.cookies
-    into every outbound request. For inter-service HMAC traffic across tenants, this
-    is a cross-tenant leakage risk: a Set-Cookie from one Platform response would ride
-    on the next portal_request() call regardless of caller.
+    requests merges a Session's cookie jar into every outbound request, and a per-call
+    ``cookies={}`` does not stop that, so these checks alone prove no isolation. The
+    isolation itself (a jar that refuses every cookie, a Session per thread, a refused
+    Cookie header) is proven against a real server in tests/common/test_outbound_isolation.py.
     """
 
     @override_settings(DEBUG=True)
     @patch("apps.common.outbound_http._send")
     def test_passes_empty_cookies_kwarg(self, mock_request):
-        """Per-call cookies={} suppresses any session-level cookie merge for this request."""
+        """No per-call cookies are attached; the Session jar is what must stay empty."""
         mock_request.return_value = MagicMock(status_code=200)
         portal_request("GET", "http://localhost:8700/api/test/")
         _, kwargs = mock_request.call_args
@@ -187,18 +187,15 @@ class PortalRequestCookieIsolationTest(SimpleTestCase):
 
     @override_settings(DEBUG=True)
     @patch("apps.common.outbound_http._send")
-    def test_clears_session_cookies_after_call(self, mock_request):
-        """The call's session cookie jar is cleared after every call so a Set-Cookie from one
-        response cannot ride on the next portal_request() call."""
-        # Simulate a previously-set cookie (e.g., from a prior Set-Cookie response).
+    def test_the_session_jar_holds_nothing_before_or_after_a_call(self, mock_request):
+        """A cookie offered to the jar is refused, so nothing can ride on the next call."""
         _get_session().cookies.set("leak", "yes")
-        self.assertEqual(_get_session().cookies.get("leak"), "yes")
+        self.assertIsNone(_get_session().cookies.get("leak"))
 
         mock_request.return_value = MagicMock(status_code=200)
         portal_request("GET", "http://localhost:8700/api/test/")
 
         self.assertEqual(len(_get_session().cookies), 0)
-        self.assertIsNone(_get_session().cookies.get("leak"))
 
     @override_settings(DEBUG=True)
     @patch("apps.common.outbound_http._send")
