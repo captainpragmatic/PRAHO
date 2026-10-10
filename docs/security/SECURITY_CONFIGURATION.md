@@ -403,8 +403,9 @@ TIMESTAMP
   reset endpoints. Its per-client budget becomes active when Portal forwards
   `client_ip` on those calls; that forwarding is scheduled for a later package.
 - `RegistrationConfirmClientIPThrottle` (`auth_register_confirm_ip`, `5/minute`) is attached
-  to `/api/users/register/confirm/`, which requires HMAC authentication and is charged to the
-  middleware's authentication buckets, like login and password reset.
+  to `/api/users/register/confirm/` and `/api/users/register/pending/` (which shows a link's
+  holder what confirming would create). Both require HMAC authentication and are charged to
+  the middleware's authentication buckets, like login and password reset.
 - Forwarded-IP limits accept only a valid IP string in an HMAC-authenticated body.
   Missing or malformed IPs skip that limit without falling back to the transport IP.
 

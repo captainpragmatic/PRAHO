@@ -623,6 +623,22 @@ class PasswordResetConfirmForm(forms.Form):
         return cleaned_data
 
 
+class RegistrationConfirmForm(PasswordResetConfirmForm):
+    """The password and consent a registration's mailbox holder gives to finish it."""
+
+    # Which registration the page showed. Compared with the session's link, never sent on.
+    registration_id = forms.CharField(widget=forms.HiddenInput, required=False)
+
+    data_processing_consent = forms.BooleanField(
+        label=_("I agree to the processing of my personal data for this account."),
+        required=True,
+    )
+    marketing_consent = forms.BooleanField(
+        label=_("Send me news and offers by email."),
+        required=False,
+    )
+
+
 class ChangePasswordForm(forms.Form):
     """Change password form for authenticated users"""
 

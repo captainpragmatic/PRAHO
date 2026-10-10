@@ -7,6 +7,8 @@ import logging
 import time
 from collections.abc import Mapping
 from http import HTTPStatus
+from typing import Any
+from uuid import UUID
 
 from django.conf import settings
 from django.contrib import messages
@@ -41,7 +43,7 @@ from apps.common.rate_limiting import mark_auth_failure, mark_auth_success
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.session_store import SessionSaveContended
 from apps.common.store_unavailable import end_session_or_unavailable
-from apps.users.constants import PASSWORD_RESET_SESSION_KEY
+from apps.users.constants import PASSWORD_RESET_SESSION_KEY, REGISTRATION_CONFIRM_SESSION_KEY
 from apps.users.forms import (
     ChangePasswordForm,
     CompanyCreationForm,
@@ -52,6 +54,7 @@ from apps.users.forms import (
     MFAReauthenticationForm,
     PasswordResetConfirmForm,
     PasswordResetRequestForm,
+    RegistrationConfirmForm,
 )
 
 logger = logging.getLogger(__name__)
@@ -811,6 +814,143 @@ def password_reset_confirm_view(
         "users/password_reset_confirm.html",
         {"form": form, "validlink": bool(credentials)},
         status=response_status,
+    )
+    # The token is already absent from this URL. Form POSTs need a real Origin for CSRF.
+    response["Referrer-Policy"] = "same-origin"
+    if retry_after:
+        response["Retry-After"] = str(retry_after)
+    return response
+
+
+_CONFIRM_FIELD_NAMES = {"password": "new_password", "password_confirm": "confirm_password"}
+
+
+def _refusal_notice(exc: PlatformAPIError) -> tuple[str, int, int | None]:
+    """A rate-limit or outage refusal as a notice, its status and its Retry-After."""
+    if exc.is_rate_limited:
+        return get_rate_limit_message(exc.retry_after), 429, exc.retry_after
+    return _("Account confirmation is temporarily unavailable. Please try again later."), 503, exc.retry_after
+
+
+def _load_registration(
+    request: HttpRequest, link: dict[str, Any]
+) -> tuple[dict[str, Any] | None, str, int, int | None]:
+    """The details behind the session's link: (details, notice, status, Retry-After).
+
+    Fetched once per link and kept with it in the session, so revisiting the page or a rejected
+    password does not ask Platform again. None with no notice means the link is gone.
+    """
+    if isinstance(link.get("details"), dict):
+        return link["details"], "", 200, None
+    try:
+        details = api_client.get_pending_registration(
+            link["registration_id"], link["token"], client_ip=get_safe_client_ip(request)
+        ).get("registration")
+    except PlatformAPIError as exc:
+        if (exc.response_data or {}).get("code") == "invalid_link":
+            request.session.pop(REGISTRATION_CONFIRM_SESSION_KEY, None)
+            return None, "", 400, None
+        return (None, *_refusal_notice(exc))
+    if not isinstance(details, dict):
+        return (None, *_refusal_notice(PlatformAPIError("Pending registration answer without details")))
+    request.session[REGISTRATION_CONFIRM_SESSION_KEY] = {**link, "details": details}
+    return details, "", 200, None
+
+
+def _confirm_registration(
+    request: HttpRequest, form: RegistrationConfirmForm, link: dict[str, Any]
+) -> tuple[HttpResponse | None, int, int | None, str]:
+    """Submit the confirmation. Return a redirect on success, else a status, Retry-After and a notice."""
+    try:
+        result = api_client.confirm_registration(
+            link["registration_id"],
+            link["token"],
+            form.cleaned_data["new_password"],
+            form.cleaned_data["confirm_password"],
+            data_processing_consent=form.cleaned_data["data_processing_consent"],
+            marketing_consent=form.cleaned_data["marketing_consent"],
+            client_ip=get_safe_client_ip(request),
+        )
+        if not result.get("success"):
+            raise PlatformAPIError("Registration confirmation was not accepted")
+    except PlatformAPIError as exc:
+        payload = exc.response_data or {}
+        code = payload.get("code")
+        if code in {"invalid_link", "details_unavailable"}:
+            request.session.pop(REGISTRATION_CONFIRM_SESSION_KEY, None)
+            return None, (409 if code == "details_unavailable" else 400), None, code
+        if exc.status_code == HTTPStatus.BAD_REQUEST:
+            errors = payload.get("errors")
+            for field, field_errors in (errors if isinstance(errors, dict) else {}).items():
+                name = _CONFIRM_FIELD_NAMES.get(field, field)
+                form.add_error(name if name in form.fields else None, field_errors)
+            if not form.errors:
+                form.add_error(None, _("Please check the form and try again."))
+            return None, 400, None, ""
+        notice, status, retry_after = _refusal_notice(exc)
+        form.add_error(None, notice)
+        return None, status, retry_after, ""
+    request.session.pop(REGISTRATION_CONFIRM_SESSION_KEY, None)
+    messages.success(request, _("Your account is confirmed. You can sign in now."))
+    response = redirect("users:login")
+    response["Referrer-Policy"] = "no-referrer"
+    return response, 302, None, ""
+
+
+@never_cache
+@csrf_protect
+@require_http_methods(["GET", "POST"])
+def register_confirm_view(
+    request: HttpRequest, registration_id: UUID | None = None, token: str | None = None
+) -> HttpResponse:
+    """Finish a registration from its emailed link; the person confirming chooses the password.
+
+    Opening the link only stores it in the session and redirects to a page without the token in
+    its URL, as the password-reset link does, so a mail scanner that follows it changes nothing.
+    The form carries the id of the registration it shows, so a tab left open on an earlier link
+    cannot confirm a later one.
+    """
+    if registration_id is not None and token is not None:
+        if request.method != "GET":
+            return HttpResponse(status=405)
+        request.session[REGISTRATION_CONFIRM_SESSION_KEY] = {"registration_id": str(registration_id), "token": token}
+        response = redirect("users:register_confirm")
+        response["Referrer-Policy"] = "no-referrer"
+        return response
+
+    link = request.session.get(REGISTRATION_CONFIRM_SESSION_KEY)
+    registration, notice, status, retry_after = (None, "", 400, None) if not link else _load_registration(request, link)
+    gone = "" if registration is not None or notice else "invalid_link"
+    form = RegistrationConfirmForm(initial={"registration_id": link["registration_id"]} if link else None)
+
+    if link and registration is not None and request.method == "POST":
+        posted = RegistrationConfirmForm(request.POST)
+        if request.POST.get("registration_id") != link["registration_id"]:
+            status, notice = 409, _("This page was for an earlier link. Check these details and submit again.")
+        elif posted.is_valid():
+            done, status, retry_after, gone = _confirm_registration(request, posted, link)
+            if done is not None:
+                return done
+            form = posted
+        else:
+            status, form = 400, posted
+    if not link and request.method == "GET":
+        status = 200
+
+    gone_messages = {
+        "invalid_link": _("This link has expired or was already used."),
+        "details_unavailable": _("These details are no longer available. Please register again."),
+    }
+    response = render(
+        request,
+        "users/register_confirm.html",
+        {
+            "form": form,
+            "registration": None if gone else registration,
+            "gone": gone_messages.get(gone, ""),
+            "notice": notice,
+        },
+        status=status,
     )
     # The token is already absent from this URL. Form POSTs need a real Origin for CSRF.
     response["Referrer-Policy"] = "same-origin"

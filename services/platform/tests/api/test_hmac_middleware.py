@@ -305,12 +305,15 @@ class PortalHMACTests(TestCase):
             "/api/users/password/reset/",
             "/api/users/password/reset/confirm/",
             "/api/users/register/confirm/",
+            "/api/users/register/pending/",
         ):
             with self.subTest(path=path):
                 portal = f"portal-{path}"
                 self.assertEqual(middleware._rate_limited(portal, "10.0.0.1", path=path), (False, 0))
                 self.assertTrue(middleware._rate_limited(portal, "10.0.0.1", path=path)[0])
-                self.assertEqual(middleware._rate_limited(portal, "10.0.0.1", path="/api/billing/documents/"), (False, 0))
+                self.assertEqual(
+                    middleware._rate_limited(portal, "10.0.0.1", path="/api/billing/documents/"), (False, 0)
+                )
 
     def test_password_reset_path_is_no_longer_exempt(self) -> None:
         self.assertFalse(_is_auth_exempt(RequestFactory().get("/api/users/password/reset/")))

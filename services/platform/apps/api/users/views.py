@@ -65,6 +65,7 @@ from .serializers import (
     PasswordResetRequestSerializer,
     ProfileUpdateSerializer,
     RegistrationConfirmSerializer,
+    RegistrationLinkSerializer,
     TokenObtainRequestSerializer,
 )
 
@@ -802,6 +803,46 @@ def password_reset_request_api(request: HttpRequest) -> Response:
             {"success": False, "error": "Invalid email address", "errors": serializer.errors},
             status=status.HTTP_400_BAD_REQUEST,
         )
+
+
+@api_view(["POST"])
+@authentication_classes([])  # HMAC authentication is handled by middleware and the decorator.
+@permission_classes([AllowAny])
+@throttle_classes(
+    [
+        PortalHMACRateThrottle,
+        PortalHMACBurstThrottle,
+        RegistrationConfirmClientIPThrottle,
+        CustomerRateThrottle,
+        BurstRateThrottle,
+    ]
+)
+@require_portal_authentication
+def registration_pending_api(request: HttpRequest) -> Response:
+    """
+    Show the holder of a registration link what confirming it would create.
+
+    POST /api/users/register/pending/ {"registration_id": "<uuid>", "token": "<hex>"}
+
+    200 with the email, name, company and VAT number; 400 `invalid_link` for a link that is
+    wrong, used or expired.
+    """
+    from apps.users import registration_confirmation  # noqa: PLC0415  # Deferred: users services import cycle
+
+    serializer = RegistrationLinkSerializer(data=request.data)
+    details = (
+        registration_confirmation.preview(
+            str(serializer.validated_data["registration_id"]), serializer.validated_data["token"]
+        )
+        if serializer.is_valid()
+        else None
+    )
+    if details is None:
+        return Response(
+            {"success": False, "code": "invalid_link", "error": _("This link has expired or was already used.")},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    return Response({"success": True, "registration": details})
 
 
 @api_view(["POST"])

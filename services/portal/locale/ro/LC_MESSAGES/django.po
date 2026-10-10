@@ -6955,6 +6955,66 @@ msgstr "Conectați-vă aici"
 msgid "Go to next page"
 msgstr "Mergeți la pagina următoare"
 
+#: apps/users/forms.py
+msgid "I agree to the processing of my personal data for this account."
+msgstr "Sunt de acord cu prelucrarea datelor mele personale pentru acest cont."
+
+#: apps/users/forms.py
+msgid "Send me news and offers by email."
+msgstr "Trimiteți-mi noutăți și oferte prin e-mail."
+
+#: apps/users/views.py
+msgid "Account confirmation is temporarily unavailable. Please try again later."
+msgstr "Confirmarea contului este temporar indisponibilă. Vă rugăm să încercați din nou mai târziu."
+
+#: apps/users/views.py
+msgid "These details are no longer available. Please register again."
+msgstr "Aceste date nu mai sunt disponibile. Vă rugăm să vă înregistrați din nou."
+
+#: apps/users/views.py
+msgid "This link has expired or was already used."
+msgstr "Acest link a expirat sau a fost deja folosit."
+
+#: apps/users/views.py
+msgid "Please check the form and try again."
+msgstr "Vă rugăm să verificați formularul și să încercați din nou."
+
+#: apps/users/views.py
+msgid "Your account is confirmed. You can sign in now."
+msgstr "Contul dumneavoastră a fost confirmat. Vă puteți autentifica acum."
+
+#: apps/common/rate_limiting.py
+msgid "Too many attempts. Please try again later."
+msgstr "Prea multe încercări. Vă rugăm să încercați din nou mai târziu."
+
+#: templates/users/register_confirm.html
+msgid "Finish creating your account"
+msgstr "Finalizați crearea contului"
+
+#: templates/users/register_confirm.html
+msgid "Check the details, then choose your password"
+msgstr "Verificați datele, apoi alegeți-vă parola"
+
+#: templates/users/register_confirm.html
+msgid "Full name"
+msgstr "Nume și prenume"
+
+#: apps/users/views.py
+msgid "This page was for an earlier link. Check these details and submit again."
+msgstr "Această pagină era pentru un link anterior. Verificați aceste date și trimiteți din nou."
+
+#: templates/users/register_confirm.html
+msgid "If these details are not yours, do not continue. Without confirmation no account is created."
+msgstr "Dacă aceste date nu vă aparțin, nu continuați. Fără confirmare nu se creează niciun cont."
+
+#: templates/users/register_confirm.html
+msgid "Create my account"
+msgstr "Creați-mi contul"
+
+#: templates/users/register_confirm.html
+msgid "Register again"
+msgstr "Înregistrați-vă din nou"
+
 #~ msgid "An error occurred while loading the invoice. Please try again or contact support if the problem persists."
 #~ msgstr "A apărut o eroare la încărcarea facturii. Încercați din nou sau contactați asistența dacă problema persistă."
 
