@@ -25,7 +25,25 @@ PR #164 review M1.
 
 from __future__ import annotations
 
+import os
 from typing import Any
+
+from config.server_settings import server_settings
+
+# Server settings come from PORTAL_GUNICORN_* (config/server_settings.py). The launchers pass only
+# the bind address and log targets, since a command-line flag would override these.
+_settings = server_settings()
+worker_class = _settings["worker_class"]
+workers = _settings["workers"]
+threads = _settings["threads"]
+worker_connections = _settings["worker_connections"]
+keepalive = _settings["keepalive"]
+timeout = _settings["timeout"]
+graceful_timeout = _settings["graceful_timeout"]
+if os.path.isdir("/dev/shm"):  # noqa: S108  # a RAM-backed heartbeat file, as gunicorn recommends
+    worker_tmp_dir = "/dev/shm"  # noqa: S108
+# Request duration (%(D)s, microseconds), worker pid and request id on every access line.
+access_log_format = '%(h)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s %(D)sus pid=%(p)s rid=%({x-request-id}o)s'
 
 
 def post_fork(server: Any, worker: Any) -> None:

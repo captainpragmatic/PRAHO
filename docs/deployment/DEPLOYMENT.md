@@ -499,6 +499,8 @@ Override defaults with `-e` flags:
 |----------|---------|-------------|
 | `gunicorn_workers_platform` | 2 | Platform Gunicorn workers |
 | `gunicorn_workers_portal` | 1 | Portal Gunicorn workers |
+| `gunicorn_worker_class_portal` | sync | Portal worker class: `sync` or `gthread` |
+| `gunicorn_threads_portal` | 1 | Portal threads per worker (`gthread` only; `sync` always has one) |
 | `qcluster_workers` | 2 | Django-Q2 background workers |
 | `platform_memory_max` | 1G | systemd memory limit (platform) |
 | `portal_memory_max` | 512M | systemd memory limit (portal) |
@@ -513,6 +515,40 @@ ansible-playbook -i inventory/native-single-server.yml \
   -e gunicorn_workers_platform=4 \
   -e gunicorn_workers_portal=2
 ```
+
+#### Portal server settings
+
+`services/portal/gunicorn.conf.py` owns the portal's gunicorn settings. The launchers pass only the bind address and log targets, because a command-line flag would override the config. Set these environment variables:
+
+| Variable | Default | Allowed |
+|----------|---------|---------|
+| `PORTAL_GUNICORN_WORKER_CLASS` | `sync` | `sync` or `gthread` |
+| `PORTAL_GUNICORN_WORKERS` | 2 (native: `gunicorn_workers_portal`, 1) | 1-16 |
+| `PORTAL_GUNICORN_THREADS` | 4 for `gthread` (native: `gunicorn_threads_portal`, 4); always 1 for `sync` | 1-32 |
+
+The request timeout is 60 s and the graceful-shutdown timeout is 50 s (gunicorn's own default was 30 s). Neither is configurable.
+
+- **Bad values stop the portal.** A worker class or worker count outside those ranges stops the portal from starting. So does a thread count under `gthread`; under `sync` the thread count is not read, so a rollback can leave it set.
+- **No inline comments.** In a `.env` read by systemd, `#` comments are kept as part of the value, so `PORTAL_GUNICORN_WORKERS=2 # two` is refused.
+- **`GUNICORN_CMD_ARGS` is refused.** gunicorn applies it over the config, and on native installs the `.env` is shared with the platform, so the platform's tuning would become the portal's. Use the variables above.
+- **Precedence on native installs.** The unit sets these from the Ansible variables above, and the `.env` (`EnvironmentFile=`) overrides them. An empty value in the `.env` (`PORTAL_GUNICORN_WORKERS=`) still overrides, and means the code's default (2 workers), not the Ansible value.
+- **Docker.** The compose files take them from `--env-file` (or the shell running `docker compose`); unset means the default.
+
+**Upgrading from a release where the launchers passed these flags:**
+- **Docker:** the portal no longer reads `GUNICORN_WORKERS`, which is the platform's setting. If you set it for the portal, set `PORTAL_GUNICORN_WORKERS` instead.
+- **Native:** the Ansible variable `gunicorn_timeout_portal` is gone. If you had raised it, note that the portal now stops a request after 60 s under `sync` workers.
+
+**Rollback to sync workers**, on any deploy path:
+1. Set `PORTAL_GUNICORN_WORKER_CLASS=sync`. Threads then become 1 automatically: gunicorn would otherwise quietly keep `gthread` whenever threads > 1. Optionally raise `PORTAL_GUNICORN_WORKERS`.
+   - native: in the `.env`, or `-e gunicorn_worker_class_portal=sync` when re-running the playbook;
+   - Docker: in the env file passed with `--env-file`.
+2. Restart:
+   - native: `sudo systemctl restart praho-portal`;
+   - Docker, from the repository root, with your stack file (`single-server`, `container-service` or `portal-only`):
+     `PRAHO_ENV_FILE=$PWD/.env.prod docker compose --env-file .env.prod -f deploy/docker-compose.single-server.yml up -d portal`
+3. Confirm the startup log line `Using worker: sync`:
+   - native: `journalctl -u praho-portal | grep "Using worker"`;
+   - Docker: `PRAHO_ENV_FILE=$PWD/.env.prod docker compose --env-file .env.prod -f deploy/docker-compose.single-server.yml logs portal | grep "Using worker"`.
 
 **Caveats:**
 - Ubuntu 24.04 LTS only (relies on deadsnakes PPA for Python 3.13)

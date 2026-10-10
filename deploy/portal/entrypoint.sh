@@ -62,9 +62,9 @@ if [ $# -gt 0 ]; then
 fi
 
 echo "✅ Starting Gunicorn..."
+# Workers, threads and timeouts come from services/portal/gunicorn.conf.py (PORTAL_GUNICORN_*);
+# a flag here would override them.
 exec gunicorn \
     --bind "0.0.0.0:${PORT:-8701}" \
-    --workers "${GUNICORN_WORKERS:-2}" \
-    --timeout 60 \
     --no-control-socket \
     config.wsgi:application
