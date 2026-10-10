@@ -464,18 +464,13 @@ def check_authentication(request: HttpRequest) -> dict | None:
 def _redisplay_after_registration_refusal(
     request: HttpRequest, form: CustomerRegistrationForm, error: PlatformAPIError
 ) -> None:
-    """Explain a refusal the customer cannot fix by editing, and keep what they typed except passwords."""
+    """Explain a refusal the customer cannot fix by editing, and keep what they typed."""
     if error.is_rate_limited:
         logger.warning("⚠️ [Portal Registration] Registration rate limit exceeded")
         messages.error(request, _("Too many registration attempts. Please try again later."))
     else:
         logger.warning(f"⚠️ [Portal Registration] Platform unavailable: {error}")
         messages.error(request, _("Registration is temporarily unavailable. Please try again in a few minutes."))
-    redisplay_data = request.POST.copy()
-    for password_field in ("password1", "password2"):
-        redisplay_data.pop(password_field, None)
-        form.cleaned_data.pop(password_field, None)
-    form.data = redisplay_data
 
 
 @never_cache
@@ -499,13 +494,12 @@ def register_view(request: HttpRequest) -> HttpResponse:
         if form.is_valid():
             try:
                 # Register customer via Platform API
-                registration_result = form.register_customer()
+                registration_result = form.register_customer(client_ip=get_safe_client_ip(request))
 
                 if registration_result:
-                    email = form.cleaned_data["email"]
-                    logger.info(f"✅ [Portal Registration] Customer {email} registered successfully")
-
-                    messages.success(request, _("Registration successful! You can now login with your credentials."))
+                    # The same message whatever the address: Platform mails either a confirmation
+                    # link or a note that the address already has an account.
+                    messages.success(request, _("Thank you. Check your email for a message with the next step."))
                     return redirect("/login/")
                 else:
                     messages.error(request, _("Registration failed. Please check your information and try again."))

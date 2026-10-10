@@ -56,7 +56,6 @@ PUBLIC_ROUTED_PATHS = {"/api/users/health", "/api/orders/products"}
 PUBLIC_API_VIEWS = {
     "available_service_plans_api",
     "currencies_api",
-    "customer_register_api",
     "health_check",
     "obtain_token",
     "product_detail",

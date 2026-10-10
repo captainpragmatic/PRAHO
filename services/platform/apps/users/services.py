@@ -55,6 +55,7 @@ from apps.customers.profile_models import CustomerBillingProfile, CustomerTaxPro
 from apps.settings.services import SettingsService, get_default_from_email
 
 from .models import APIToken, CustomerMembership, UserSession
+from .pending_registration import PendingRegistration
 
 """
 SECURE User Registration Services - PRAHO Platform
@@ -346,6 +347,44 @@ class SecureUserRegistrationService:
         - Timing attack prevention
         """
         return cls.create_customer_owner_unchecked(user_data, customer_data, request_ip, user_agent)
+
+    @classmethod
+    @secure_user_registration()
+    def submit_pending_registration(
+        cls,
+        user_data: dict[str, Any],
+        customer_data: dict[str, Any],
+        request_ip: str | None = None,
+        user_agent: str | None = None,
+        *,
+        language: str = "en",
+        **kwargs: Any,
+    ) -> Result[PendingRegistration, str]:
+        """Store a registration for its mailbox holder to confirm, and queue the mail.
+
+        The same work for every submission: nothing here looks up the address, the company or the
+        VAT number, so neither the answer nor its timing says whether they exist. The decorator
+        charges the per-IP registration budget and validates the user data. No password is
+        taken: whoever confirms the link chooses it (apps.users.pending_registration).
+        """
+        from django_q.tasks import async_task  # noqa: PLC0415  # Deferred: keeps the queue out of import time
+
+        row = PendingRegistration.objects.create(
+            email=str(user_data["email"]).strip().lower(),
+            user_data={
+                "first_name": user_data["first_name"],
+                "last_name": user_data["last_name"],
+                "phone": user_data.get("phone", ""),
+            },
+            customer_data=customer_data,
+            language=language,
+        )
+        registration_id = str(row.pk)
+        # ack_failure: a failed delivery is never redelivered hours later (see the task).
+        transaction.on_commit(
+            lambda: async_task("apps.users.tasks.deliver_registration", registration_id, ack_failure=True)
+        )
+        return Ok(row)
 
     @classmethod
     def create_customer_owner_unchecked(

@@ -22,7 +22,6 @@ class RegistrationSerializerErrorPathTests(TestCase):
         data = {
             "user_data": {
                 "email": "e@example.com",
-                "password": "CorrectHorse12!",
                 "first_name": "Ana",
                 "last_name": "Pop",
             },
@@ -40,7 +39,7 @@ class RegistrationSerializerErrorPathTests(TestCase):
 
         with (
             patch(
-                "apps.api.customers.serializers.SecureUserRegistrationService.register_new_customer_owner",
+                "apps.api.customers.serializers.SecureUserRegistrationService.submit_pending_registration",
                 return_value=Err("Invalid characters detected"),
             ),
             self.assertRaises(serializers.ValidationError) as ctx,

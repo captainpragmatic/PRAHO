@@ -9,6 +9,7 @@ from typing import Any
 
 from django import forms
 from django.core.exceptions import ValidationError
+from django.utils.translation import get_language
 from django.utils.translation import gettext_lazy as _
 
 from apps.api_client.services import PlatformAPIError, api_client
@@ -143,28 +144,6 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
         ),
     )
 
-    password1 = forms.CharField(
-        label=_("Password"),
-        strip=False,
-        widget=forms.PasswordInput(
-            attrs={
-                "class": "w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400",
-                "placeholder": _("Minimum 12 characters"),
-            }
-        ),
-    )
-
-    password2 = forms.CharField(
-        label=_("Confirm Password"),
-        strip=False,
-        widget=forms.PasswordInput(
-            attrs={
-                "class": "w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400",
-                "placeholder": _("Repeat password"),
-            }
-        ),
-    )
-
     # ===============================================================================
     # COMPANY INFORMATION
     # ===============================================================================
@@ -294,15 +273,6 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
         ),
     )
 
-    marketing_consent = forms.BooleanField(
-        label=_("I agree to receive marketing communications"),
-        required=False,
-        help_text=_("Optional: Receive newsletters and product updates."),
-        widget=forms.CheckboxInput(
-            attrs={"class": "h-4 w-4 text-blue-600 focus:ring-blue-500 border-slate-600 rounded bg-slate-800"}
-        ),
-    )
-
     terms_accepted = forms.BooleanField(
         label=_("I accept the terms and conditions"),
         help_text=_("Required: Agreement to terms of service."),
@@ -314,18 +284,6 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
     def clean_email(self) -> str:
         email = str(self.cleaned_data.get("email", "")).lower().strip()
         return email
-
-    def clean_password2(self) -> str:
-        password1 = self.cleaned_data.get("password1")
-        password2 = self.cleaned_data.get("password2")
-
-        if password1 and password2 and password1 != password2:
-            raise ValidationError(_("The two password fields didn't match."))
-
-        if password1 and len(password1) < REGISTRATION_PASSWORD_MIN_LENGTH:
-            raise ValidationError(_("Password must be at least 12 characters long."))
-
-        return str(password2 or "")
 
     def clean_phone(self) -> str:
         """Validate Romanian phone number format"""
@@ -392,10 +350,10 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
     # inventory guardrail does not mistake the non-profit key for an on*= event handler.
     _CUSTOMER_TYPE_TO_PLATFORM = dict(srl="company", sa="company", ong="ngo")  # noqa: C408
 
-    def register_customer(self) -> dict[str, Any] | None:
+    def register_customer(self, client_ip: str = "") -> dict[str, Any] | None:
         """
-        Register customer via Platform API.
-        Returns customer data on success, None on failure.
+        Send the registration to Platform, which stores it and mails the address.
+        Returns Platform's answer, the same for every address, or None on a refusal.
         """
         try:
             form_customer_type = self.cleaned_data["customer_type"]
@@ -405,7 +363,6 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
                     "first_name": self.cleaned_data["first_name"],
                     "last_name": self.cleaned_data["last_name"],
                     "phone": self.cleaned_data.get("phone", ""),
-                    "password": self.cleaned_data["password1"],
                 },
                 "customer_data": {
                     "customer_type": self._CUSTOMER_TYPE_TO_PLATFORM.get(form_customer_type, form_customer_type),
@@ -418,14 +375,11 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
                     "postal_code": self.cleaned_data["postal_code"],
                     "country": self.cleaned_data["country"],
                     "data_processing_consent": self.cleaned_data["data_processing_consent"],
-                    "marketing_consent": self.cleaned_data.get("marketing_consent", False),
                     "terms_accepted": self.cleaned_data.get("terms_accepted", False),
                 },
+                "language": "ro" if (get_language() or "").startswith("ro") else "en",
             }
-
-            # Call Platform API for customer registration
-            response = api_client._make_request("POST", "/customers/register/", data=registration_data)
-            return response
+            return api_client.register_customer(registration_data, client_ip=client_ip)
 
         except PlatformAPIError as e:
             # Refusals the customer cannot fix by editing the form go back to the view

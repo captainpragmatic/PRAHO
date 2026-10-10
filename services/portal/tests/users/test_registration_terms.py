@@ -7,10 +7,9 @@ No database access — pure form validation logic.
 """
 
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from apps.users.forms import CustomerRegistrationForm
-
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -20,8 +19,6 @@ _BASE_DATA = {
     'email': 'test@example.com',
     'first_name': 'Ion',
     'last_name': 'Popescu',
-    'password1': 'SecurePassword123!',
-    'password2': 'SecurePassword123!',
     'customer_type': 'srl',
     'company_name': 'Test Company SRL',
     'vat_number': 'RO12345678',
@@ -30,7 +27,6 @@ _BASE_DATA = {
     'county': 'București',
     'postal_code': '010001',
     'data_processing_consent': True,
-    'marketing_consent': False,
 }
 
 
@@ -99,32 +95,34 @@ class RegistrationPayloadTermsTestCase(unittest.TestCase):
     @patch('apps.users.forms.api_client')
     def test_register_customer_payload_includes_terms_accepted_true(self, mock_api: MagicMock) -> None:
         """register_customer() passes terms_accepted=True in the customer_data payload."""
-        mock_api._make_request.return_value = {'success': True, 'customer_id': 42}
+        mock_api.register_customer.return_value = {'success': True}
 
         form = self._get_validated_form()
-        form.register_customer()
+        form.register_customer(client_ip='203.0.113.4')
 
-        mock_api._make_request.assert_called_once()
-        call_kwargs = mock_api._make_request.call_args
-        # _make_request is called as: _make_request("POST", path, data=payload)
-        payload = call_kwargs.kwargs.get('data') or call_kwargs[1].get('data') or call_kwargs[0][2]
+        mock_api.register_customer.assert_called_once()
+        payload = mock_api.register_customer.call_args.args[0]
+        self.assertEqual(mock_api.register_customer.call_args.kwargs, {'client_ip': '203.0.113.4'})
         customer_data = payload.get('customer_data', {})
         self.assertIn('terms_accepted', customer_data)
         self.assertTrue(customer_data['terms_accepted'])
+        # Whoever confirms the emailed link chooses the password and gives marketing consent.
+        self.assertNotIn('password', payload['user_data'])
+        self.assertNotIn('marketing_consent', customer_data)
+        self.assertEqual(payload['language'], 'en')
 
     @patch('apps.users.forms.api_client')
     def test_register_customer_payload_includes_terms_accepted_false(self, mock_api: MagicMock) -> None:
         """Even when terms_accepted=False slips through (hypothetical), the value is forwarded."""
         # Directly set cleaned_data to bypass form validation for this low-level test
-        mock_api._make_request.return_value = {'success': True}
+        mock_api.register_customer.return_value = {'success': True}
 
         form = self._get_validated_form()
         # Override cleaned_data to simulate a False value being passed
         form.cleaned_data['terms_accepted'] = False
         form.register_customer()
 
-        call_kwargs = mock_api._make_request.call_args
-        payload = call_kwargs.kwargs.get('data') or call_kwargs[1].get('data') or call_kwargs[0][2]
+        payload = mock_api.register_customer.call_args.args[0]
         customer_data = payload.get('customer_data', {})
         self.assertFalse(customer_data.get('terms_accepted', True))
 
@@ -133,7 +131,7 @@ class RegistrationPayloadTermsTestCase(unittest.TestCase):
         """register_customer() returns None when the API call raises an exception."""
         from apps.api_client.services import PlatformAPIError
 
-        mock_api._make_request.side_effect = PlatformAPIError('server error')
+        mock_api.register_customer.side_effect = PlatformAPIError('server error')
 
         form = self._get_validated_form()
         result = form.register_customer()

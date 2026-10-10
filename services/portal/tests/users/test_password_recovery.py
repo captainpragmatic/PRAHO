@@ -9,7 +9,7 @@ from django.test import Client, SimpleTestCase, TestCase, override_settings
 
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 from apps.common import counters
-from apps.users.forms import ChangePasswordForm, CustomerRegistrationForm, MFAReauthenticationForm
+from apps.users.forms import ChangePasswordForm, MFAReauthenticationForm, RegistrationConfirmForm
 
 
 @override_settings(
@@ -268,7 +268,8 @@ class PasswordRecoveryClientTests(SimpleTestCase):
         for form, fields in (
             (ChangePasswordForm(), ("current_password", "new_password", "confirm_password")),
             (MFAReauthenticationForm(), ("password",)),
-            (CustomerRegistrationForm(), ("password1", "password2")),
+            # A registration's password is chosen on the confirmation page.
+            (RegistrationConfirmForm(), ("new_password", "confirm_password")),
         ):
             for name in fields:
                 with self.subTest(form=type(form).__name__, field=name):

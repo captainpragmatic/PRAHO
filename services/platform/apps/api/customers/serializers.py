@@ -10,16 +10,15 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
-from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
 from apps.api.users.serializers import ProfileUpdateSerializer
 from apps.common.localisation import country_name, normalize_country_code, resolve_display
 from apps.common.localisation_services import get_localisation_defaults, user_localisation_preferences
-from apps.common.request_ip import get_safe_client_ip
+from apps.common.performance.rate_limiting import forwarded_client_ip
 from apps.common.security_errors import RateLimitFailure
-from apps.common.types import Err, Ok
+from apps.common.types import Err
 from apps.customers.models import Customer, CustomerAddress, CustomerTaxProfile
 from apps.users.models import CustomerMembership
 from apps.users.services import SecureUserRegistrationService
@@ -76,13 +75,10 @@ class UserRegistrationDataSerializer(serializers.Serializer):
     first_name = serializers.CharField(max_length=30)
     last_name = serializers.CharField(max_length=30)
     phone = serializers.CharField(max_length=20, required=False, allow_blank=True)
-    password = serializers.CharField(min_length=12, write_only=True, trim_whitespace=False)
 
     def validate_email(self, value: str) -> str:
-        """Ensure email is not already taken"""
-        if User.objects.filter(email=value.lower()).exists():
-            raise serializers.ValidationError(_("A user with this email already exists."))
-        return value.lower()
+        """Normalise only. Whether the address has an account is never checked here."""
+        return value.strip().lower()
 
     def validate_phone(self, value: str) -> str:
         """Validate Romanian phone format"""
@@ -112,9 +108,7 @@ class CustomerRegistrationDataSerializer(serializers.Serializer):
     marketing_consent = serializers.BooleanField(default=False)
 
     def validate_company_name(self, value: str) -> str:
-        """Ensure company name is unique"""
-        if Customer.objects.filter(company_name__iexact=value.strip()).exists():
-            raise serializers.ValidationError(_("A company with this name already exists."))
+        """Normalise only. Uniqueness is checked when the registration is confirmed."""
         return value.strip()
 
     def validate_vat_number(self, value: str) -> str:
@@ -149,79 +143,44 @@ class RegistrationRateLimitError(serializers.ValidationError):
 
 class CustomerRegistrationSerializer(serializers.Serializer):
     """
-    Main serializer for customer registration requests.
-    Handles both user and customer data creation.
+    A registration request. It is stored for its mailbox holder to confirm, and the answer is the
+    same whether or not the address, the company or the VAT number already exist.
     """
 
     user_data = UserRegistrationDataSerializer()
     customer_data = CustomerRegistrationDataSerializer()
+    language = serializers.ChoiceField(choices=[("en", "English"), ("ro", "Română")], default="en")
 
     def create(self, validated_data: dict[str, Any]) -> dict[str, Any]:
-        """
-        Create new customer owner using secure registration service.
-        """
+        """Store the registration and queue its mail; raise on refusals."""
         customer_data = dict(validated_data["customer_data"])
-        user_data = {
-            **validated_data["user_data"],
-            "accepts_marketing": customer_data["marketing_consent"],
-            # Consent was required by the nested serializer; its time is server-owned.
-            "gdpr_consent_date": timezone.now(),
-        }
+        # Consent to the rest is collected from whoever confirms the link.
+        customer_data.pop("marketing_consent", None)
+        customer_data.pop("data_processing_consent", None)
         customer_data.update(
             billing_address=customer_data.pop("address_line1"),
             billing_city=customer_data.pop("city"),
             billing_postal_code=customer_data.pop("postal_code"),
         )
-
-        # Get request context for IP tracking
         request = self.context.get("request")
-        request_ip = None
-        user_agent = None
-
-        if request:
-            request_ip = get_safe_client_ip(request)
-            user_agent = request.META.get("HTTP_USER_AGENT", "")
-
         try:
-            # The decorator consumes allowance before its atomic business transaction.
-            # Use secure registration service
-            result = SecureUserRegistrationService.register_new_customer_owner(
-                user_data=user_data, customer_data=customer_data, request_ip=request_ip, user_agent=user_agent
+            result = SecureUserRegistrationService.submit_pending_registration(
+                user_data=dict(validated_data["user_data"]),
+                customer_data=customer_data,
+                request_ip=forwarded_client_ip(request) if request is not None else None,
+                language=validated_data["language"],
             )
-
-            if isinstance(result, Ok):
-                user, customer = result.value
-                logger.info(f"✅ [API Registration] Created user {user.email} and customer {customer.company_name}")
-                return {
-                    "user": {
-                        "id": user.id,
-                        "email": user.email,
-                        "first_name": user.first_name,
-                        "last_name": user.last_name,
-                    },
-                    "customer": {
-                        "id": customer.id,
-                        "company_name": customer.company_name,
-                        "customer_type": customer.customer_type,
-                    },
-                }
-            else:
-                error = result.unwrap_err() if isinstance(result, Err) else _("Registration failed")
-                if isinstance(error, RateLimitFailure):
-                    raise RegistrationRateLimitError(error)
-                error_msg = str(error)
-                logger.error(f"🔥 [API Registration] Service error: {error_msg}")
-                raise serializers.ValidationError({"non_field_errors": [error_msg]})
-
-        except serializers.ValidationError:
-            # The Err branch above raises a ValidationError carrying the real reason;
-            # let it propagate instead of masking it as "temporarily unavailable".
-            raise
         except Exception as e:
             logger.error(f"🔥 [API Registration] Unexpected error: {e}")
             raise serializers.ValidationError(
                 {"non_field_errors": ["Registration service temporarily unavailable"]}
             ) from e
+        if isinstance(result, Err):
+            error = result.unwrap_err()
+            if isinstance(error, RateLimitFailure):
+                raise RegistrationRateLimitError(error)
+            raise serializers.ValidationError({"non_field_errors": [str(error)]})
+        return {"accepted": True}
 
 
 # ===============================================================================

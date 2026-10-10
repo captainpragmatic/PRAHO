@@ -42,7 +42,7 @@ class RegistrationRateLimitViewTests(SimpleTestCase):
         # Signup is anonymous: adding customer_id would redirect before the form is processed.
         session.save()
 
-    def test_platform_429_shows_signup_message_and_preserves_only_non_password_values(self) -> None:
+    def test_platform_429_shows_signup_message_and_preserves_the_form(self) -> None:
         self.assert_refusal_keeps_the_form(429, MESSAGE)
 
     def test_platform_503_shows_temporarily_unavailable_not_check_your_information(self) -> None:
@@ -54,8 +54,6 @@ class RegistrationRateLimitViewTests(SimpleTestCase):
             "first_name": "Ana",
             "last_name": "Pop",
             "phone": "",
-            "password1": "CorrectHorse12!",
-            "password2": "CorrectHorse12!",
             "customer_type": "srl",
             "company_name": "FX Signup SRL",
             "address_line1": "Str. Test 1",
@@ -64,7 +62,6 @@ class RegistrationRateLimitViewTests(SimpleTestCase):
             "postal_code": "010001",
             "country": "RO",
             "data_processing_consent": "on",
-            "marketing_consent": "on",
             "terms_accepted": "on",
         }
 
@@ -88,10 +85,4 @@ class RegistrationRateLimitViewTests(SimpleTestCase):
         form = response.context["form"]
         self.assertTrue(form.is_bound)
         for name, value in data.items():
-            if name.startswith("password"):
-                self.assertNotIn(name, form.data)
-                self.assertNotIn(name, form.cleaned_data)
-                self.assertIsNone(form[name].value())
-            else:
-                self.assertEqual(form.data[name], value)
-        self.assertNotContains(response, data["password1"])
+            self.assertEqual(form.data[name], value)

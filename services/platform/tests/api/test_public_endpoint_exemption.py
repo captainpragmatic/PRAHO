@@ -27,7 +27,6 @@ PUBLIC_PATHS = [
     "/api/orders/products/",
     "/api/orders/products/some-product-slug/",
     "/api/billing/currencies/",
-    "/api/customers/register/",
     "/api/services/plans/",
     "/api/tickets/categories/",
     "/api/users/token/me/",
@@ -43,7 +42,6 @@ HMAC_REJECTION = {"error": "HMAC authentication failed"}
 # is named "view" for every one of them, so __name__ cannot tell them apart.
 EXPECTED_PUBLIC_ROUTES = {
     "api/billing/currencies/",
-    "api/customers/register/",
     "api/orders/products/",
     "api/orders/products/<slug:slug>/",
     "api/services/plans/",

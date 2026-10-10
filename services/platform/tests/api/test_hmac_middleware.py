@@ -306,6 +306,7 @@ class PortalHMACTests(TestCase):
             "/api/users/password/reset/confirm/",
             "/api/users/register/confirm/",
             "/api/users/register/pending/",
+            "/api/customers/register/",
         ):
             with self.subTest(path=path):
                 portal = f"portal-{path}"

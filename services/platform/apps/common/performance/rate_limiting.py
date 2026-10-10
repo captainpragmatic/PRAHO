@@ -371,6 +371,12 @@ class ResetClientIPThrottle(ForwardedClientIPThrottle):
     scope = "auth_reset_ip"
 
 
+class RegistrationClientIPThrottle(ForwardedClientIPThrottle):
+    """Limit registration requests from an authenticated forwarded client IP."""
+
+    scope = "auth_register_ip"
+
+
 class RegistrationConfirmClientIPThrottle(ForwardedClientIPThrottle):
     """Limit registration confirmations from an authenticated forwarded client IP."""
 

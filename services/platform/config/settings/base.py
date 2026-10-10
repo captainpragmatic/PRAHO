@@ -732,6 +732,7 @@ THROTTLE_RATES = {
     # End-user IP from the Portal's signed body; no throttle key (None) when absent.
     "auth_login_ip": "10/minute",
     "auth_reset_ip": "5/minute",
+    "auth_register_ip": "5/minute",
     "auth_register_confirm_ip": "5/minute",
     "sustained": "2000/hour",
     "api_burst": "120/min",
