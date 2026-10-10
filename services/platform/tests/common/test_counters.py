@@ -129,6 +129,13 @@ class CounterStoreTests(TestCase):
                 self.assertEqual(counters.lookup(key), "order-1")
                 counters.reset(key)
 
+    def test_claims_cull_expired_rows_too(self) -> None:
+        # Request nonces claim a row per request; they must not rely on increments to be cleared.
+        Counter.objects.create(key="stale", count=1, expires_at=10_000 - counters.CULL_GRACE_SECONDS - 1)
+        with patch("apps.common.counters.randbelow", return_value=0):
+            self.assertTrue(counters.claim("hmac_nonce:portal:abc", 330, "nonce"))
+        self.assertFalse(Counter.objects.filter(key="stale").exists())
+
     def test_cull_counters_command_deletes_only_rows_past_grace(self) -> None:
         Counter.objects.bulk_create(
             [

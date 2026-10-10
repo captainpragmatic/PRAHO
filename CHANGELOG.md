@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Platform tells a store outage apart from a forged portal request.**
+  - **The problem.** When the shared counter store (rate limits and nonce claims) failed, Platform answered 401 or 429. The portal reads a 401 as "the secret or the clock is wrong" and raised a misleading critical alert; it reads a 429 as "this customer is throttled".
+  - **Now 503.** Such failures answer 503 with `Retry-After` (2 s, within the portal's retry cap). Any other unexpected error during signature validation still answers 401, and one in the rate limiter is a server error; both fail closed.
+  - **Nonce claims.** Request nonces are now claimed atomically in the counter table instead of the cache. A cache can evict a live nonce under load and reopen a replay window.
+  - **Smaller fixes.**
+    - An `X-Timestamp` of `inf` or `1e400` is a format error.
+    - The staff-session bypass checks the path before touching `request.user`, so failed portal requests skip the session and user lookup.
 - **gunicorn upgraded from 25.0.3 to 26.2.0** for both services, and 26.2.0 is now the minimum.
   - **Stricter request parsing:**
     - a stricter keep-alive request-smuggling gate (26.0);

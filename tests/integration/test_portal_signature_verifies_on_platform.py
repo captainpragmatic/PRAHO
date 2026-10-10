@@ -16,9 +16,8 @@ import sys
 from pathlib import Path
 from typing import Any, ClassVar
 
-from django.core.cache import cache
 from django.http import HttpRequest, HttpResponse
-from django.test import RequestFactory, SimpleTestCase, override_settings
+from django.test import RequestFactory, TestCase, override_settings
 
 from apps.common.middleware import PortalServiceHMACMiddleware
 
@@ -192,7 +191,7 @@ def _record_portal_requests() -> list[dict[str, Any]]:
     RATE_LIMITING_ENABLED=False,
     CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache", "LOCATION": "signatures"}},
 )
-class PortalSignatureVerifiesOnPlatformTests(SimpleTestCase):
+class PortalSignatureVerifiesOnPlatformTests(TestCase):  # nonce claims live in the counter table
     records: ClassVar[list[dict[str, Any]]]
 
     @classmethod
@@ -207,7 +206,6 @@ class PortalSignatureVerifiesOnPlatformTests(SimpleTestCase):
             reached.append(request.path)
             return HttpResponse("view reached")
 
-        cache.clear()  # each test replays every record; a nonce is accepted once
         headers = record["headers"]
         request = RequestFactory().generic(
             record["method"],

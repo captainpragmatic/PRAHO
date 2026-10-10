@@ -21,7 +21,6 @@ from datetime import datetime, timedelta
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import get_user_model, logout
-from django.core.cache import cache
 from django.db import DatabaseError, InterfaceError
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
@@ -396,6 +395,29 @@ def _is_auth_exempt(request: HttpRequest) -> bool:
     return False
 
 
+class HMACStoreUnavailable(Exception):  # noqa: N818  # names the condition, like DatabaseError
+    """The shared counter store (rate limits, nonce claims) could not be reached.
+
+    Answered 503, never 401 or 429: the portal reads a 401 as "the secret or the clock is wrong"
+    and a 429 as "this customer is throttled", and neither is what happened.
+    """
+
+
+# Within the portal's immediate-retry cap (PLATFORM_API_MAX_RETRY_WAIT_SECONDS, 2.5 s), so a brief
+# store outage is absorbed by one retry instead of failing the page.
+HMAC_STORE_RETRY_AFTER_SECONDS = 2
+
+
+def _store_unavailable_response() -> HttpResponse:
+    response = HttpResponse(
+        json.dumps({"success": False, "error": "Platform temporarily unavailable", "status": 503}),
+        status=503,
+        content_type="application/json",
+    )
+    response["Retry-After"] = str(HMAC_STORE_RETRY_AFTER_SECONDS)
+    return response
+
+
 class PortalServiceHMACMiddleware:
     """
     🔐 HMAC authentication middleware for portal service API requests.
@@ -427,13 +449,14 @@ class PortalServiceHMACMiddleware:
         counter_key = f"{key}:{window_index}"
         try:
             current = counters.increment(counter_key, self._rl_window * 2)
-        except Exception:
+        except (DatabaseError, InterfaceError) as error:
             logger.error(
                 "🔥 [HMACRateLimiter] Counter store unavailable — denying request for portal %s from %s",
                 portal_id,
                 client_ip,
+                exc_info=True,
             )
-            return True, self._rl_window
+            raise HMACStoreUnavailable from error
 
         if current <= max_calls:
             return False, 0
@@ -544,7 +567,7 @@ class PortalServiceHMACMiddleware:
                     # Allow 2s forward skew for NTP jitter between portal and platform clocks.
                     if not (-HMAC_NTP_SKEW_SECONDS <= (current_time - request_time) <= HMAC_TIMESTAMP_WINDOW_SECONDS):
                         error_msg = "Request timestamp outside allowed window"
-                except ValueError:
+                except (ValueError, OverflowError):  # OverflowError: "inf" or "1e400"
                     error_msg = "Invalid timestamp format"
 
             # Enforce body size limit before reading into memory (DoS prevention)
@@ -595,18 +618,50 @@ class PortalServiceHMACMiddleware:
             # a nonce, so a bad signature / unregistered portal cannot pollute the nonce cache.
             if not error_msg:
                 nonce_key = f"hmac_nonce:{portal_id}:{nonce}"
-                # +30s buffer ensures nonces outlive their timestamp validity window
-                if not cache.add(nonce_key, True, timeout=HMAC_TIMESTAMP_WINDOW_SECONDS + 30):
+                # An atomic claim in the counter table, not a cache entry: a cache can evict a live
+                # nonce under load and reopen a replay. +30s keeps it past the timestamp window.
+                try:
+                    claimed = counters.claim(nonce_key, HMAC_TIMESTAMP_WINDOW_SECONDS + 30, "nonce")
+                except (DatabaseError, InterfaceError) as error:
+                    raise HMACStoreUnavailable from error
+                if not claimed:
                     error_msg = "Nonce already used (replay attack)"
 
             if not error_msg:
                 return True, portal_id, ""
 
+        except HMACStoreUnavailable:
+            raise  # an outage, answered 503 by the caller; never a forgery
         except Exception as e:
             logger.error(f"🔥 [HMAC Auth] Signature validation error: {e}")
             error_msg = f"Signature validation error: {e!s}"
 
         return False, "", error_msg
+
+    def _rate_limit_refusal(self, request: HttpRequest, portal_id: str, client_ip: str) -> HttpResponse | None:
+        """The 429 (or, with the counter store down, 503) for a request over its budget; else None."""
+        try:
+            is_limited, retry_after = self._rate_limited(portal_id, client_ip, path=request.path)
+        except HMACStoreUnavailable:
+            return _store_unavailable_response()
+        if not is_limited:
+            return None
+        logger.warning(f"🚨 [HMAC Auth] Rate limit exceeded for portal={portal_id} ip={client_ip}")
+        response = HttpResponse(
+            json.dumps(
+                {
+                    "success": False,
+                    "error": "Too many requests",
+                    "detail": "Too Many Requests",
+                    "retry_after": retry_after,
+                    "status": 429,
+                }
+            ),
+            status=429,
+            content_type="application/json",
+        )
+        response["Retry-After"] = str(retry_after)
+        return response
 
     def __call__(self, request: HttpRequest) -> HttpResponse:
         # Only intercept /api/ paths: every portal-facing endpoint lives there, including the
@@ -626,7 +681,11 @@ class PortalServiceHMACMiddleware:
 
             # Validate HMAC signature first so rate limiting uses the verified portal_id,
             # not an attacker-controlled header value.
-            is_valid, verified_portal_id, error_msg = self._validate_hmac_signature(request)
+            try:
+                is_valid, verified_portal_id, error_msg = self._validate_hmac_signature(request)
+            except HMACStoreUnavailable:
+                logger.error("🔥 [HMAC Auth] Nonce store unavailable — answering 503 to %s", client_ip, exc_info=True)
+                return _store_unavailable_response()
 
             if not is_valid:
                 # Allow session-authenticated staff users to access specific API paths
@@ -637,13 +696,15 @@ class PortalServiceHMACMiddleware:
                 ]
                 if (
                     request.method == "GET"
+                    # The path first: the lazy user (a session and user lookup) is only touched for
+                    # the allowlisted paths, never for every failed portal request.
+                    and any(request.path.startswith(p) for p in staff_session_allowed_prefixes)
                     and getattr(request, "user", None)
                     and getattr(request.user, "is_authenticated", False)
                     # Use the canonical is_staff_user so role-only staff (staff_role set,
                     # is_staff=False) — already admitted to the page by the is_staff_user
                     # platform gate — aren't denied the browser fetch it makes (#271).
                     and getattr(request.user, "is_staff_user", False)
-                    and any(request.path.startswith(p) for p in staff_session_allowed_prefixes)
                 ):
                     logger.debug(
                         f"🔓 [HMAC Auth] Allowing session-authenticated staff user {getattr(request.user, 'email', '')} for {request.path}"
@@ -663,25 +724,8 @@ class PortalServiceHMACMiddleware:
             request._portal_id = verified_portal_id or "unknown"
 
             # Post-auth rate limiting: keyed by the verified portal_id (not the raw header).
-            if rate_limit_enabled:
-                is_limited, retry_after = self._rate_limited(request._portal_id, client_ip, path=request.path)
-                if is_limited:
-                    logger.warning(f"🚨 [HMAC Auth] Rate limit exceeded for portal={request._portal_id} ip={client_ip}")
-                    response = HttpResponse(
-                        json.dumps(
-                            {
-                                "success": False,
-                                "error": "Too many requests",
-                                "detail": "Too Many Requests",
-                                "retry_after": retry_after,
-                                "status": 429,
-                            }
-                        ),
-                        status=429,
-                        content_type="application/json",
-                    )
-                    response["Retry-After"] = str(retry_after)
-                    return response
+            if rate_limit_enabled and (refusal := self._rate_limit_refusal(request, request._portal_id, client_ip)):
+                return refusal
 
             logger.info(f"✅ [HMAC Auth] API request authenticated from portal {request._portal_id} at {client_ip}")
 

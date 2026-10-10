@@ -368,7 +368,7 @@ TIMESTAMP
 | Timestamp window | 300 seconds (5 minutes) |
 | NTP skew tolerance | 2 seconds forward |
 | Nonce length | 32-256 bytes |
-| Nonce deduplication | Cache-based with atomic `cache.add()`, TTL = timestamp window + 30s |
+| Nonce deduplication | Atomic claim in the counter table (`counters.claim`), TTL = timestamp window + 30s |
 | Comparison | `hmac.compare_digest()` (timing-safe) |
 
 ### HMAC Rate Limiting

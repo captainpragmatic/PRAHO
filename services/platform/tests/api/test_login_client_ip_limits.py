@@ -128,7 +128,8 @@ class LoginClientIPLimitsTests(HMACTestMixin, TestCase):
             self.assertEqual(response.status_code, 401, response.content)
         self.assertEqual(counters.peek(self.login_cache_key), 0)
 
-        self.assertEqual(Counter.objects.count(), 0)
+        # No rate-limit counters (value NULL); each request's nonce claim is a row of its own.
+        self.assertEqual(Counter.objects.filter(value__isnull=True).count(), 0)
 
     def test_password_reset_request_requires_hmac(self) -> None:
         path = "/api/users/password/reset/"
