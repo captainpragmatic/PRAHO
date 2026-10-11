@@ -69,7 +69,7 @@ repos:
         args: [services/platform/scripts/check_types_modified.py, --staged]
         language: system
         files: \.py$
-        exclude: ^(migrations/.*\.py|services/platform/scripts/backup\.py|services/platform/scripts/deploy\.py)$
+        exclude: ^migrations/.*\.py$
         pass_filenames: false
         require_serial: false
 

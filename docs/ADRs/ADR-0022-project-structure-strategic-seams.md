@@ -163,8 +163,7 @@ pragmatichost/                  # 🚀 Root directory for Romanian hosting provi
 │  ├─ rq_worker.py             # Redis Queue worker entry point for async tasks
 │  └─ beat_scheduler.py        # Periodic task scheduler: invoicing, cleanup, monitoring
 ├─ scripts/                     # 🛠️ Operational scripts & management commands
-│  ├─ backup.py                # Database backup script with Romanian cloud storage
-│  ├─ deploy.py                # Zero-downtime deployment automation
+│  │                            # (deploy, rollback and backup live in deploy/scripts/ and the Ansible role)
 │  └─ migrate_data.py          # Data migration utilities for production updates
 ├─ tests/                       # 🧪 Integration & end-to-end tests (cross-app functionality)
 │  ├─ conftest.py              # Pytest configuration: fixtures, database setup, mocks
