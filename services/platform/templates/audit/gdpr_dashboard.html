@@ -232,9 +232,8 @@
         {% trans 'Your personal data is processed according to GDPR (EU 2016/679) and Romanian Law 190/2018. As a Romanian hosting provider, we ensure compliance with national data protection requirements.' %}
       </p>
       <div class="flex flex-wrap gap-4 text-xs">
-        <a href="/privacy-policy/" class="text-blue-400 hover:text-blue-300">{% trans 'Privacy Policy' %}</a>
-        <a href="/terms/" class="text-blue-400 hover:text-blue-300">{% trans 'Terms of Service' %}</a>
-        <a href="/gdpr-compliance/" class="text-blue-400 hover:text-blue-300">{% trans 'GDPR Compliance' %}</a>
+        <a href="{% url 'privacy_policy' %}" class="text-blue-400 hover:text-blue-300">{% trans 'Privacy Policy' %}</a>
+        <a href="{% url 'terms_of_service' %}" class="text-blue-400 hover:text-blue-300">{% trans 'Terms of Service' %}</a>
         <span class="text-slate-500">|</span>
         <span class="text-slate-400">{% trans 'Data Protection Officer:' %} {% setting "company.email_dpo" %}</span>
       </div>

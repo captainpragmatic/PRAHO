@@ -15,6 +15,8 @@ from datetime import UTC, datetime
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
 
+from apps.common.legal import TERMS_OF_SERVICE_VERSION
+
 logger = logging.getLogger(__name__)
 
 
@@ -28,10 +30,12 @@ def privacy_policy(request: HttpRequest) -> HttpResponse:
 
 
 def terms_of_service(request: HttpRequest) -> HttpResponse:
-    """Terms of Service page."""
+    """Terms of Service page. The text is shared with the portal's /terms/ page."""
+    effective_date = datetime.fromisoformat(TERMS_OF_SERVICE_VERSION).replace(tzinfo=UTC)
     context = {
-        "last_updated": datetime(2024, 12, 27, tzinfo=UTC),
-        "effective_date": datetime(2024, 12, 27, tzinfo=UTC),
+        "last_updated": effective_date,
+        "effective_date": effective_date,
+        "terms_version": TERMS_OF_SERVICE_VERSION,
     }
     return render(request, "legal/terms_of_service.html", context)
 

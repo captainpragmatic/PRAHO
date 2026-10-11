@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PRAHO shared UI\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-08 01:38+0300\n"
+"POT-Creation-Date: 2026-10-11 10:25+0300\n"
 "PO-Revision-Date: 2026-10-06 00:00+0300\n"
 "Last-Translator: PRAHO contributors\n"
 "Language-Team: Romanian\n"
@@ -50,7 +50,8 @@ msgstr "Introduceți aici textul de confirmare..."
 
 #: templates/components/dangerous_action_modal.html:95
 #: templates/components/form_actions.html:24
-#: templates/components/form_actions.html:25 templates/components/modal.html:70
+#: templates/components/form_actions.html:25
+#: templates/components/modal.html:70
 msgid "Cancel"
 msgstr "Anulează"
 
@@ -112,7 +113,8 @@ msgid "Go to next page"
 msgstr "Mergeți la pagina următoare"
 
 #: templates/components/pagination.html:201
-#: templates/components/pagination.html:208 templates/components/table.html:158
+#: templates/components/pagination.html:208
+#: templates/components/table.html:158
 msgid "Next"
 msgstr "Următorul"
 
@@ -170,6 +172,658 @@ msgstr "rezultate"
 #: templates/components/toast.html:51
 msgid "Close notification"
 msgstr "Închide notificarea"
+
+#: templates/legal/terms_of_service_content.html:11
+msgid "Terms of Service"
+msgstr "Termeni și condiții"
+
+#: templates/legal/terms_of_service_content.html:13
+msgid "Last updated"
+msgstr "Ultima actualizare"
+
+#: templates/legal/terms_of_service_content.html:14
+msgid "Effective date"
+msgstr "Data de intrare în vigoare"
+
+#: templates/legal/terms_of_service_content.html:15
+msgid "Version"
+msgstr "Versiune"
+
+#: templates/legal/terms_of_service_content.html:21
+msgid "Quick Navigation"
+msgstr "Navigare rapidă"
+
+#: templates/legal/terms_of_service_content.html:23
+#: templates/legal/terms_of_service_content.html:43
+msgid "Acceptance of Terms"
+msgstr "Acceptarea Termenilor"
+
+#: templates/legal/terms_of_service_content.html:24
+#: templates/legal/terms_of_service_content.html:68
+msgid "Description of Services"
+msgstr "Descrierea serviciilor"
+
+#: templates/legal/terms_of_service_content.html:25
+msgid "Account Registration"
+msgstr "Înregistrarea contului"
+
+#: templates/legal/terms_of_service_content.html:26
+#: templates/legal/terms_of_service_content.html:121
+msgid "Payment Terms"
+msgstr "Termeni de Plată"
+
+#: templates/legal/terms_of_service_content.html:27
+#: templates/legal/terms_of_service_content.html:167
+msgid "Acceptable Use Policy"
+msgstr "Politica de Utilizare Acceptabilă"
+
+#: templates/legal/terms_of_service_content.html:28
+#: templates/legal/terms_of_service_content.html:200
+msgid "Intellectual Property"
+msgstr "Proprietate Intelectuală"
+
+#: templates/legal/terms_of_service_content.html:29
+msgid "Data Protection"
+msgstr "Protecția datelor"
+
+#: templates/legal/terms_of_service_content.html:30
+msgid "Warranties & Disclaimers"
+msgstr "Garanții și Declinări de Răspundere"
+
+#: templates/legal/terms_of_service_content.html:31
+#: templates/legal/terms_of_service_content.html:270
+msgid "Limitation of Liability"
+msgstr "Limitarea Răspunderii"
+
+#: templates/legal/terms_of_service_content.html:32
+#: templates/legal/terms_of_service_content.html:285
+msgid "Termination"
+msgstr "Încetare"
+
+#: templates/legal/terms_of_service_content.html:33
+msgid "Governing Law"
+msgstr "Legea Aplicabilă"
+
+#: templates/legal/terms_of_service_content.html:34
+#: templates/legal/terms_of_service_content.html:340
+msgid "Contact Information"
+msgstr "Informații de contact"
+
+#: templates/legal/terms_of_service_content.html:45
+#, python-format
+msgid ""
+"\n"
+"                By accessing or using the PRAHO Platform services provided by %(legal_name)s (\"Company\", \"we\", \"us\", \"our\"),\n"
+"                you (\"Customer\", \"you\", \"your\") agree to be bound by these Terms of Service (\"Terms\").\n"
+"                "
+msgstr ""
+"\n"
+"                Prin accesarea sau utilizarea serviciilor PRAHO Platform furnizate de %(legal_name)s (\"Companie\", \"noi\", \"ne\", \"noastră\"),\n"
+"                dvs. (\"Client\", \"dvs.\", \"al dvs.\") acceptați să fiți obligați de acești Termeni de Serviciu (\"Termeni\").\n"
+"                "
+
+#: templates/legal/terms_of_service_content.html:51
+#, python-format
+msgid ""
+"\n"
+"                If you do not agree to these Terms, you may not access or use our services. These Terms constitute\n"
+"                a legally binding agreement between you and %(legal_name)s.\n"
+"                "
+msgstr ""
+"\n"
+"                Dacă nu sunteți de acord cu acești Termeni, nu puteți accesa sau utiliza serviciile noastre. Acești Termeni constituie\n"
+"                un acord legal obligatoriu între dvs. și %(legal_name)s.\n"
+"                "
+
+#: templates/legal/terms_of_service_content.html:58
+msgid ""
+"\n"
+"                    IMPORTANT: By creating an account or using our services, you confirm that you are at least 18 years old\n"
+"                    and have the legal capacity to enter into binding contracts.\n"
+"                    "
+msgstr ""
+"\n"
+"                    IMPORTANT: Prin crearea unui cont sau utilizarea serviciilor noastre, confirmați că aveți cel puțin 18 ani\n"
+"                    și aveți capacitatea juridică de a încheie contracte obligatorii.\n"
+"                    "
+
+#: templates/legal/terms_of_service_content.html:70
+#, python-format
+msgid ""
+"\n"
+"                %(legal_name)s provides web hosting and related services through the PRAHO Platform, including but not limited to:\n"
+"                "
+msgstr ""
+"\n"
+"                %(legal_name)s oferă servicii de găzduire web și servicii conexe prin PRAHO Platform, inclusiv, dar fără a se limita la:\n"
+"                "
+
+#: templates/legal/terms_of_service_content.html:75
+msgid "Shared and VPS web hosting"
+msgstr "Găzduire web partajată și VPS"
+
+#: templates/legal/terms_of_service_content.html:76
+msgid "Domain name registration and management"
+msgstr "Înregistrarea și gestionarea numelor de domenii"
+
+#: templates/legal/terms_of_service_content.html:77
+msgid "Email hosting services"
+msgstr "Servicii de găzduire e-mail"
+
+#: templates/legal/terms_of_service_content.html:78
+msgid "SSL certificate provisioning"
+msgstr "Furnizare de certificate SSL"
+
+#: templates/legal/terms_of_service_content.html:79
+msgid "Technical support services"
+msgstr "Servicii de suport tehnic"
+
+#: templates/legal/terms_of_service_content.html:80
+msgid "Automated backup solutions"
+msgstr "Soluții de backup automatizat"
+
+#: templates/legal/terms_of_service_content.html:83
+msgid ""
+"\n"
+"                Service specifications, features, and limitations are described in the specific service plans\n"
+"                available on our platform.\n"
+"                "
+msgstr ""
+"\n"
+"                Specificațiile serviciului, caracteristicile și limitările sunt descrise în planurile de servicii specifice\n"
+"                disponibile pe platforma noastră.\n"
+"                "
+
+#: templates/legal/terms_of_service_content.html:92
+msgid "Account Registration and Security"
+msgstr "Înregistrarea și Securitatea Contului"
+
+#: templates/legal/terms_of_service_content.html:94
+msgid "3.1 Registration Requirements"
+msgstr "3.1 Cerințe de înregistrare"
+
+#: templates/legal/terms_of_service_content.html:96
+msgid ""
+"\n"
+"                To use our services, you must create an account by providing accurate, current, and complete information.\n"
+"                You agree to update your information promptly if it changes.\n"
+"                "
+msgstr ""
+"\n"
+"                Pentru a utiliza serviciile noastre, trebuie să creați un cont furnizând informații precise, actuale și complete.\n"
+"                Acceptați să vă actualizați informațiile fără întârziere dacă se schimbă.\n"
+"                "
+
+#: templates/legal/terms_of_service_content.html:102
+msgid "3.2 Account Security"
+msgstr "3.2 Securitatea Contului"
+
+#: templates/legal/terms_of_service_content.html:104
+msgid ""
+"You are responsible for maintaining the confidentiality of your account "
+"credentials."
+msgstr ""
+"Sunteți responsabil de menținerea confidențialității acreditărilor dvs. de "
+"cont."
+
+#: templates/legal/terms_of_service_content.html:105
+msgid ""
+"You must immediately notify us of any unauthorized access to your account."
+msgstr "Trebuie să ne anunțați imediat orice acces neautorizat la contul dvs."
+
+#: templates/legal/terms_of_service_content.html:106
+msgid "We strongly recommend enabling two-factor authentication (2FA)."
+msgstr ""
+"Vă recomandăm cu insistență activarea autentificării cu doi factori (2FA)."
+
+#: templates/legal/terms_of_service_content.html:107
+msgid "You are responsible for all activities that occur under your account."
+msgstr "Sunteți responsabil de toate activitățile care au loc sub contul dvs."
+
+#: templates/legal/terms_of_service_content.html:110
+msgid "3.3 Business Customers"
+msgstr "3.3 Clienți business"
+
+#: templates/legal/terms_of_service_content.html:112
+msgid ""
+"\n"
+"                Business customers must provide accurate company information, including VAT registration number (CUI/CIF)\n"
+"                for Romanian companies. This information is required for invoicing and tax compliance.\n"
+"                "
+msgstr ""
+"\n"
+"                Clienții cu activitate de afaceri trebuie să furnizeze informații exacte despre companie, inclusiv numărul de înregistrare TVA (CUI/CIF)\n"
+"                pentru companiile din România. Aceste informații sunt necesare pentru facturare și conformitate fiscală.\n"
+"                "
+
+#: templates/legal/terms_of_service_content.html:123
+msgid "4.1 Pricing and Fees"
+msgstr "4.1 Prețuri și taxe"
+
+#: templates/legal/terms_of_service_content.html:125
+msgid ""
+"\n"
+"                Prices show their currency and applicable VAT. Existing invoices, gift cards and credit balances\n"
+"                retain their original currency when the currency for new sales changes.\n"
+"                Prices may change with 30 days' prior notice.\n"
+"                "
+msgstr ""
+"\n"
+"                Prețurile afișează moneda și TVA-ul aplicabil. Facturile existente, cardurile cadou și soldurile de credit păstrează moneda lor originală atunci când se modifică moneda pentru vânzările noi.\n"
+"                Prețurile se pot schimba cu notificare prealabilă de 30 de zile.\n"
+"                "
+
+#: templates/legal/terms_of_service_content.html:132
+msgid "4.2 Payment Methods"
+msgstr "4.2 Metode de plată"
+
+#: templates/legal/terms_of_service_content.html:134
+msgid "Bank transfer (Romanian and international)"
+msgstr "Transfer bancar (românesc și internațional)"
+
+#: templates/legal/terms_of_service_content.html:135
+msgid "Credit/debit cards (Visa, Mastercard)"
+msgstr "Carduri de credit/debit (Visa, Mastercard)"
+
+#: templates/legal/terms_of_service_content.html:136
+msgid "PayPal (where available)"
+msgstr "PayPal (unde este disponibil)"
+
+#: templates/legal/terms_of_service_content.html:139
+msgid "4.3 Billing Cycle"
+msgstr "4.3 Ciclu de facturare"
+
+#: templates/legal/terms_of_service_content.html:141
+msgid ""
+"\n"
+"                Services are billed in advance according to the billing cycle selected (monthly, annually, etc.).\n"
+"                Proforma invoices are issued before service activation; fiscal invoices are issued upon payment.\n"
+"                "
+msgstr ""
+"\n"
+"                Serviciile sunt facturate în avans conform ciclului de facturare selectat (lunar, anual, etc.).\n"
+"                Facturile proformă sunt emise înainte de activarea serviciului; facturile fiscale sunt emise la plată.\n"
+"                "
+
+#: templates/legal/terms_of_service_content.html:147
+msgid "4.4 Late Payment"
+msgstr "4.4 Plată cu întârziere"
+
+#: templates/legal/terms_of_service_content.html:149
+msgid ""
+"\n"
+"                Invoices are due within 14 days of issue. Late payments may result in service suspension.\n"
+"                We reserve the right to charge interest on overdue amounts at the legal rate.\n"
+"                "
+msgstr ""
+"\n"
+"                Facturile sunt scadente în termen de 14 zile de la emitere. Plățile cu întârziere pot duce la suspendarea serviciului.\n"
+"                Ne rezervăm dreptul de a percepe dobândă asupra sumelor întârziate conform ratei legale.\n"
+"                "
+
+#: templates/legal/terms_of_service_content.html:155
+msgid "4.5 Refund Policy"
+msgstr "4.5 Politica de rambursare"
+
+#: templates/legal/terms_of_service_content.html:157
+msgid ""
+"\n"
+"                We offer a 30-day money-back guarantee for new hosting services. Domain registration fees,\n"
+"                SSL certificates, and add-on services are non-refundable. Refund requests must be submitted\n"
+"                through the support ticket system.\n"
+"                "
+msgstr ""
+"\n"
+"                Oferim o garanție de rambursare în 30 de zile pentru serviciile noi de găzduire. Taxele de înregistrare a domeniului,\n"
+"                certificatele SSL și serviciile suplimentare sunt nerambursabile. Cererile de rambursare trebuie depuse\n"
+"                prin sistemul de tichete de suport.\n"
+"                "
+
+#: templates/legal/terms_of_service_content.html:169
+msgid ""
+"\n"
+"                You agree to use our services only for lawful purposes and in compliance with these Terms.\n"
+"                You must NOT use our services to:\n"
+"                "
+msgstr ""
+"\n"
+"                Sunteți de acord să utilizați serviciile noastre doar pentru scopuri legale și în conformitate cu acești Termeni.\n"
+"                NU trebuie să utilizați serviciile noastre pentru:\n"
+"                "
+
+#: templates/legal/terms_of_service_content.html:176
+msgid "Prohibited Activities"
+msgstr "Activități interzise"
+
+#: templates/legal/terms_of_service_content.html:178
+msgid "Host or distribute malware, viruses, or malicious code"
+msgstr "Găzduirea sau distribuirea de malware, viruși sau cod malițios"
+
+#: templates/legal/terms_of_service_content.html:179
+msgid "Send spam or unsolicited bulk emails"
+msgstr "Trimiterea de spam sau de e-mailuri comerciale nesolicitate"
+
+#: templates/legal/terms_of_service_content.html:180
+msgid "Infringe intellectual property rights"
+msgstr "Încălcarea drepturilor de proprietate intelectuală"
+
+#: templates/legal/terms_of_service_content.html:181
+msgid "Host illegal content under Romanian or EU law"
+msgstr "Găzduirea de conținut ilegal conform legislației din România sau a UE"
+
+#: templates/legal/terms_of_service_content.html:182
+msgid "Engage in phishing or fraudulent activities"
+msgstr "Implicarea în activități de phishing sau frauduloase"
+
+#: templates/legal/terms_of_service_content.html:183
+msgid "Attack or attempt to breach other systems"
+msgstr "Atacarea sau încercarea de a compromite alte sisteme"
+
+#: templates/legal/terms_of_service_content.html:184
+msgid "Consume excessive resources affecting other customers"
+msgstr "Consumați resurse excesive care afectează alți clienți"
+
+#: templates/legal/terms_of_service_content.html:185
+msgid "Host content promoting violence or hatred"
+msgstr "Găzduiți conținut care promovează violența sau ura"
+
+#: templates/legal/terms_of_service_content.html:186
+msgid "Operate cryptocurrency mining without authorization"
+msgstr "Operați mining de criptomonede fără autorizație"
+
+#: templates/legal/terms_of_service_content.html:191
+msgid ""
+"\n"
+"                Violation of this policy may result in immediate service termination without refund.\n"
+"                We reserve the right to remove content that violates these terms.\n"
+"                "
+msgstr ""
+"\n"
+"                Încălcarea acestei politici poate duce la rezilierea imediată a serviciului fără rambursare.\n"
+"                Ne rezervăm dreptul de a elimina conținutul care încalcă acești termeni.\n"
+"                "
+
+#: templates/legal/terms_of_service_content.html:202
+msgid "6.1 Our Property"
+msgstr "6.1 Proprietatea noastră"
+
+#: templates/legal/terms_of_service_content.html:204
+#, python-format
+msgid ""
+"\n"
+"                The PRAHO Platform, including its software, design, logos, and documentation, is owned by\n"
+"                %(legal_name)s and protected by intellectual property laws.\n"
+"                "
+msgstr ""
+"\n"
+"                Platforma PRAHO, inclusiv software-ul, designul, logo-urile și documentația acesteia, este deținută de\n"
+"                %(legal_name)s și protejată de legile de proprietate intelectuală.\n"
+"                "
+
+#: templates/legal/terms_of_service_content.html:210
+msgid "6.2 Your Content"
+msgstr "6.2 Conținutul dvs."
+
+#: templates/legal/terms_of_service_content.html:212
+msgid ""
+"\n"
+"                You retain all rights to the content you upload to our services. By using our services,\n"
+"                you grant us a limited license to store and transmit your content as necessary to provide the services.\n"
+"                "
+msgstr ""
+"\n"
+"                Păstrați toate drepturile asupra conținutului pe care îl încărcați în serviciile noastre. Prin utilizarea serviciilor noastre,\n"
+"                ne acordați o licență limitată pentru a stoca și transmite conținutul dvs. după cum este necesar pentru furnizarea serviciilor.\n"
+"                "
+
+#: templates/legal/terms_of_service_content.html:221
+msgid "Data Protection and Privacy"
+msgstr "Protecția datelor și confidențialitate"
+
+#: templates/legal/terms_of_service_content.html:223
+msgid ""
+"\n"
+"                We process personal data in accordance with the General Data Protection Regulation (GDPR)\n"
+"                and Romanian Law 190/2018. Please review our Privacy Policy for detailed information about\n"
+"                how we collect, use, and protect your data.\n"
+"                "
+msgstr ""
+"\n"
+"                Prelucrăm datele cu caracter personal în conformitate cu Regulamentul general privind protecția datelor (GDPR)\n"
+"                și Legea română 190/2018. Vă rugăm să consultați Politica noastră de confidențialitate pentru informații detaliate despre\n"
+"                modul în care colectăm, folosim și protejăm datele dvs.\n"
+"                "
+
+#: templates/legal/terms_of_service_content.html:231
+msgid "View Privacy Policy"
+msgstr "Vizualizați Politica de confidențialitate"
+
+#: templates/legal/terms_of_service_content.html:235
+msgid "7.1 Customer Data Responsibility"
+msgstr "7.1 Responsabilitatea datelor clienților"
+
+#: templates/legal/terms_of_service_content.html:237
+msgid ""
+"\n"
+"                If you collect personal data through services hosted on our platform, you are the data controller\n"
+"                for that data and are responsible for compliance with applicable data protection laws.\n"
+"                "
+msgstr ""
+"\n"
+"                Dacă colectați date cu caracter personal prin serviciile găzduite pe platforma noastră, sunteți operatorul de date personale\n"
+"                pentru acele date și sunteți responsabil de conformitatea cu legile aplicabile de protecție a datelor.\n"
+"                "
+
+#: templates/legal/terms_of_service_content.html:246
+msgid "Warranties and Disclaimers"
+msgstr "Garanții și declinări de răspundere"
+
+#: templates/legal/terms_of_service_content.html:248
+msgid "8.1 Service Level"
+msgstr "8.1 Nivelul serviciului"
+
+#: templates/legal/terms_of_service_content.html:250
+#, python-format
+msgid ""
+"\n"
+"                We strive to maintain 99.9%% uptime for our hosting services. Service credits may be issued\n"
+"                for downtime exceeding this threshold, as specified in our Service Level Agreement.\n"
+"                "
+msgstr ""
+"\n"
+"                Ne străduim să asigurăm o disponibilitate de 99,9%% pentru serviciile noastre de găzduire. Credite de serviciu pot fi emise\n"
+"                pentru perioade de indisponibilitate care depășesc această limită, așa cum se specifică în Acordul privind nivelul serviciului.\n"
+"                "
+
+#: templates/legal/terms_of_service_content.html:256
+msgid "8.2 Disclaimer"
+msgstr "8.2 Declinare de răspundere"
+
+#: templates/legal/terms_of_service_content.html:259
+msgid ""
+"\n"
+"                    SERVICES ARE PROVIDED \"AS IS\" WITHOUT WARRANTIES OF ANY KIND, EXPRESS OR IMPLIED,\n"
+"                    INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE,\n"
+"                    AND NON-INFRINGEMENT. WE DO NOT WARRANT THAT SERVICES WILL BE UNINTERRUPTED OR ERROR-FREE.\n"
+"                    "
+msgstr ""
+"\n"
+"                    SERVICIILE SUNT FURNIZATE \"CUM SUNT\" FĂRĂ GARANȚII DE NICIO NATURĂ, EXPRESE SAU IMPLICITE,\n"
+"                    INCLUSIV, FĂRĂ A SE LIMITA LA, GARANȚII PRIVIND COMERCIALIZABILITATEA, ADECVAREA PENTRU UN SCOP PARTICULAR,\n"
+"                    ȘI NEÎNCĂLCAREA DREPTURILOR TERȚILOR. NU GARANTĂM CĂ SERVICIILE VOR FI NEÎNTRERUPTE SAU FĂRĂ ERORI.\n"
+"                    "
+
+#: templates/legal/terms_of_service_content.html:272
+msgid ""
+"\n"
+"                To the maximum extent permitted by Romanian law:\n"
+"                "
+msgstr ""
+"\n"
+"                În limita maximă permisă de legea română:\n"
+"                "
+
+#: templates/legal/terms_of_service_content.html:277
+msgid ""
+"We shall not be liable for indirect, incidental, special, or consequential "
+"damages."
+msgstr ""
+"Nu vom fi răspunzători pentru daune indirecte, accidentale, speciale sau "
+"consecutive."
+
+#: templates/legal/terms_of_service_content.html:278
+msgid ""
+"Our total liability shall not exceed the fees paid by you in the 12 months "
+"preceding the claim."
+msgstr ""
+"Răspunderea noastră totală nu va depăși taxele plătite de dvs. în cele 12 "
+"luni anterioare reclamației."
+
+#: templates/legal/terms_of_service_content.html:279
+msgid ""
+"We are not liable for data loss; you are responsible for maintaining "
+"backups."
+msgstr ""
+"Nu suntem răspunzători pentru pierderea de date; sunteți responsabil de "
+"menținerea copiilor de siguranță."
+
+#: templates/legal/terms_of_service_content.html:287
+msgid "10.1 By Customer"
+msgstr "10.1 Din partea clientului"
+
+#: templates/legal/terms_of_service_content.html:289
+msgid ""
+"\n"
+"                You may cancel your services at any time through the customer portal or by contacting support.\n"
+"                Prepaid fees are non-refundable except as specified in our refund policy.\n"
+"                "
+msgstr ""
+"\n"
+"                Puteți anula serviciile dvs. în orice moment prin portalul de client sau contactând echipa de suport.\n"
+"                Taxele plătite în avans nu sunt rambursabile, cu excepția cazurilor specificate în politica noastră de rambursare.\n"
+"                "
+
+#: templates/legal/terms_of_service_content.html:295
+msgid "10.2 By Company"
+msgstr "10.2 Din partea companiei"
+
+#: templates/legal/terms_of_service_content.html:297
+msgid ""
+"\n"
+"                We may suspend or terminate services immediately if you:\n"
+"                "
+msgstr ""
+"\n"
+"                Putem suspenda sau rezilia serviciile imediat dacă dvs.:\n"
+"                "
+
+#: templates/legal/terms_of_service_content.html:302
+msgid "Violate these Terms or Acceptable Use Policy"
+msgstr "Încălcați acești Termeni sau Politica de utilizare acceptabilă"
+
+#: templates/legal/terms_of_service_content.html:303
+msgid "Fail to pay invoices within 30 days"
+msgstr "Nu plătiți facturile în termen de 30 de zile"
+
+#: templates/legal/terms_of_service_content.html:304
+msgid "Engage in illegal activities"
+msgstr "Desfășurați activități ilegale"
+
+#: templates/legal/terms_of_service_content.html:307
+msgid "10.3 Data After Termination"
+msgstr "10.3 Datele după reziliere"
+
+#: templates/legal/terms_of_service_content.html:309
+msgid ""
+"\n"
+"                Upon termination, we will retain your data for 30 days to allow for retrieval.\n"
+"                After this period, data may be permanently deleted unless legally required to be retained.\n"
+"                "
+msgstr ""
+"\n"
+"                După reziliere, vom păstra datele dvs. pentru 30 de zile pentru a permite recuperarea.\n"
+"                După această perioadă, datele pot fi șterse permanent, cu excepția cazului în care legea cere retenția.\n"
+"                "
+
+#: templates/legal/terms_of_service_content.html:318
+msgid "Governing Law and Disputes"
+msgstr "Legea aplicabilă și litigii"
+
+#: templates/legal/terms_of_service_content.html:320
+msgid ""
+"\n"
+"                These Terms shall be governed by and construed in accordance with the laws of Romania.\n"
+"                "
+msgstr ""
+"\n"
+"                Acești Termeni vor fi reglementați de și interpretați în conformitate cu legile României.\n"
+"                "
+
+#: templates/legal/terms_of_service_content.html:325
+msgid ""
+"\n"
+"                Any disputes arising from these Terms shall be submitted to the exclusive jurisdiction of\n"
+"                the courts of Bucharest, Romania.\n"
+"                "
+msgstr ""
+"\n"
+"                Orice dispute care decurg din acești Termeni vor fi supuse jurisdicției exclusive a\n"
+"                tribunalelor din București, România.\n"
+"                "
+
+#: templates/legal/terms_of_service_content.html:331
+msgid ""
+"\n"
+"                For consumers in the EU, this does not affect your statutory rights or your right to bring\n"
+"                claims before the courts of your country of residence.\n"
+"                "
+msgstr ""
+"\n"
+"                Pentru consumatorii din UE, aceasta nu afectează drepturile dvs. legale sau dreptul dvs. de a depune\n"
+"                reclamații în fața instanțelor din țara dvs. de reședință.\n"
+"                "
+
+#: templates/legal/terms_of_service_content.html:342
+msgid "Company"
+msgstr "Companie"
+
+#: templates/legal/terms_of_service_content.html:343
+msgid "Registration Number"
+msgstr "Număr de înregistrare"
+
+#: templates/legal/terms_of_service_content.html:344
+msgid "Address"
+msgstr "Adresă"
+
+#: templates/legal/terms_of_service_content.html:345
+msgid "Email"
+msgstr "Email"
+
+#: templates/legal/terms_of_service_content.html:346
+msgid "Phone"
+msgstr "Telefon"
+
+#: templates/legal/terms_of_service_content.html:347
+msgid "Support"
+msgstr "Suport"
+
+#: templates/legal/terms_of_service_content.html:353
+msgid "Changes to These Terms"
+msgstr "Modificări ale acestor Termeni"
+
+#: templates/legal/terms_of_service_content.html:355
+msgid ""
+"\n"
+"                We reserve the right to modify these Terms at any time. We will notify you of material changes\n"
+"                at least 30 days before they take effect. Your continued use of our services after changes\n"
+"                become effective constitutes acceptance of the modified Terms.\n"
+"                "
+msgstr ""
+"\n"
+"                Ne rezervăm dreptul de a modifica acești Termeni în orice moment. Vă vom notifica cu privire la modificări importante\n"
+"                cel puțin 30 de zile înainte ca acestea să intre în vigoare. Utilizarea continuă a serviciilor noastre după ce modificările\n"
+"                intră în vigoare constituie acceptarea Termenilor modificați.\n"
+"                "
 
 #~ msgid "Label"
 #~ msgstr "Etichetă"

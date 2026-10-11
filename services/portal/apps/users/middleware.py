@@ -62,6 +62,7 @@ class PortalAuthenticationMiddleware:
         "/favicon.ico",
         "/robots.txt",
         "/cookie-policy/",
+        "/terms/",
         "/api/cookie-consent/",
     ]
 

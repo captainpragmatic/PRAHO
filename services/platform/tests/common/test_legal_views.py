@@ -5,6 +5,7 @@ Validates that all 4 legal views return HTTP 200 with correct datetime usage.
 
 from django.contrib.auth.models import AnonymousUser
 from django.test import RequestFactory, TestCase
+from django.urls import reverse
 
 from apps.common.legal_views import cookie_policy, data_processors, privacy_policy, terms_of_service
 
@@ -40,3 +41,14 @@ class LegalViewsSmokeTestCase(TestCase):
         request = self._make_request("/data-processors/")
         response = data_processors(request)
         self.assertEqual(response.status_code, 200)
+
+
+class TermsOfServiceVersionTests(TestCase):
+    """The page states the version Platform records when a customer accepts the terms."""
+
+    def test_the_page_states_the_recorded_version(self):
+        from apps.common.legal import TERMS_OF_SERVICE_VERSION  # noqa: PLC0415
+
+        response = self.client.get(reverse("terms_of_service"))
+        self.assertContains(response, TERMS_OF_SERVICE_VERSION)
+        self.assertEqual(response.context["effective_date"].date().isoformat(), TERMS_OF_SERVICE_VERSION)

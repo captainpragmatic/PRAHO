@@ -38,6 +38,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Purchases in progress.** These merge per record.
   - **Revocation.** A session deleted by logout is never recreated, and a key rotation that races a logout is refused.
   - **Compatibility.** Existing sessions keep working. See ADR-0055.
+### Added
+
+- **The portal publishes the Terms of Service at `/terms/`.**
+  - **Why.** Checkout asks customers to accept the terms and linked to `/terms/`, which did not exist: anonymous visitors were sent to the login page and signed-in customers got a 404. Registration will ask for acceptance next, and a customer should be able to read what they accept.
+  - **What.** The page is public, linked from the portal footer, and shows the same text as Platform's `/terms-of-service/`, from one shared template. Both pages state the version, which is the one Platform will record when a customer accepts. A test fails if the text changes without a new version.
+  - Platform's GDPR dashboard linked to `/terms/` too, which Platform never served. It now links to `/terms-of-service/`, and its "GDPR Compliance" link, to a page that never existed, is removed.
+
 ### Changed
 
 - **Total time limit on Platform calls.** A portal call to Platform now has a total time budget, `PLATFORM_API_TOTAL_BUDGET_SECONDS` (default and maximum 45 s, minimum 5 s). It covers retries and backoff, and the response body is read in chunks with the budget checked between them, so a slow Platform no longer holds a portal worker for minutes.
