@@ -50,19 +50,29 @@ else
     exit 1
 fi
 
-if tar -C "$(dirname "${MEDIA_ROOT}")" -czf "${MEDIA_PARTIAL}" "$(basename "${MEDIA_ROOT}")"; then
+# GNU tar exits 1 when a file changed while it was read (the task worker keeps writing): the archive
+# is complete, and that file is in its earlier or later state. Anything above 1 is a failure.
+MEDIA_STATUS=0
+tar -C "$(dirname "${MEDIA_ROOT}")" -czf "${MEDIA_PARTIAL}" "$(basename "${MEDIA_ROOT}")" || MEDIA_STATUS=$?
+if [ "${MEDIA_STATUS}" -le 1 ]; then
     mv "${MEDIA_PARTIAL}" "${MEDIA_FILE}"
+    if [ "${MEDIA_STATUS}" -eq 1 ]; then
+        echo "[$(date)] WARNING: Media changed while it was archived"
+    fi
     echo "[$(date)] Media archived: ${MEDIA_FILE} ($(du -h "${MEDIA_FILE}" | cut -f1))"
-else
+fi
+
+# Cleanup old backups, and the media archives that go with them. Also after a media failure, so a
+# lasting one does not pile dumps up.
+echo "[$(date)] Cleaning up backups older than ${RETENTION_DAYS} days..."
+find "${BACKUP_DIR}" -name "praho_backup_*.dump" -mtime "+${RETENTION_DAYS}" -delete
+find "${BACKUP_DIR}" -name "praho_backup_*.media.tar.gz" -mtime "+${RETENTION_DAYS}" -delete
+
+if [ "${MEDIA_STATUS}" -gt 1 ]; then
     # The database dump is complete and kept; the run still fails, so cron notices.
     echo "[$(date)] ERROR: Media archive failed; the database backup ${BACKUP_FILE} is complete"
     exit 1
 fi
-
-# Cleanup old backups, and the media archives that go with them
-echo "[$(date)] Cleaning up backups older than ${RETENTION_DAYS} days..."
-find "${BACKUP_DIR}" -name "praho_backup_*.dump" -mtime +${RETENTION_DAYS} -delete
-find "${BACKUP_DIR}" -name "praho_backup_*.media.tar.gz" -mtime +${RETENTION_DAYS} -delete
 
 echo "[$(date)] Current backups:"
 ls -lh "${BACKUP_DIR}"/praho_backup_*.dump 2>/dev/null || echo "No backups found"

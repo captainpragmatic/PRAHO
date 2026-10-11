@@ -58,7 +58,7 @@ cleanup_backups() {
 
     local COUNT=$(find "${BACKUP_DIR}" -name "praho_backup_*.sql.gz" -mtime +${DAYS} | wc -l)
     # A media archive goes with its dump.
-    find "${BACKUP_DIR}" -name "praho_backup_*.media.tar.gz" -mtime +${DAYS} -delete
+    find "${BACKUP_DIR}" -name "praho_backup_*.media.tar.gz" -mtime "+${DAYS}" -delete
 
     if [ "$COUNT" -gt 0 ]; then
         find "${BACKUP_DIR}" -name "praho_backup_*.sql.gz" -mtime +${DAYS} -delete
@@ -76,7 +76,9 @@ backup_media() {
         log_success "Media archived: ${MEDIA_FILE} ($(du -h "${MEDIA_FILE}" | cut -f1))"
     else
         # The database dump is complete and kept; the run still fails, so cron and callers notice.
+        # Retention still runs, so a lasting media failure does not pile dumps up.
         log_error "Media archive failed; the database backup ${BACKUP_FILE} is complete"
+        cleanup_backups
         exit 1
     fi
 }

@@ -90,13 +90,29 @@ list_and_select_backup() {
 
 # The archive holds the media directory itself, so it is unpacked into its parent. Files the backup
 # does not hold are kept: nothing is deleted. docker cp writes into a stopped container's volume.
+# -a gives the files to the container's user, whatever uid the archive recorded.
 restore_media() {
     local MEDIA_FILE="${1%.sql.gz}.media.tar.gz"
     if [ -f "$MEDIA_FILE" ]; then
         log_info "Restoring media from ${MEDIA_FILE}..."
-        gunzip -c "$MEDIA_FILE" | docker cp - "${MEDIA_CONTAINER}:$(dirname "$MEDIA_PATH")"
+        gunzip -c "$MEDIA_FILE" | docker cp -a - "${MEDIA_CONTAINER}:$(dirname "$MEDIA_PATH")"
     else
         log_warn "No media archive for this backup; the media was left as it is"
+    fi
+}
+
+# Before anything is dropped: the media must be restorable too, or the restore stops here.
+check_media_restorable() {
+    local MEDIA_FILE="${1%.sql.gz}.media.tar.gz"
+    [ -f "$MEDIA_FILE" ] || return 0
+    if ! gzip -t "$MEDIA_FILE" 2>/dev/null; then
+        log_error "The media archive ${MEDIA_FILE} is damaged; nothing was restored"
+        exit 1
+    fi
+    if ! docker container inspect "$MEDIA_CONTAINER" >/dev/null 2>&1; then
+        log_error "${MEDIA_CONTAINER} does not exist, so its media volume cannot be restored; nothing was restored."
+        log_error "Bring the stack up first (deploy.sh), then run the restore again."
+        exit 1
     fi
 }
 
@@ -123,6 +139,8 @@ restore_backup() {
         exit 0
     fi
 
+    check_media_restorable "${BACKUP_FILE}"
+
     # Create pre-restore backup
     log_info "Creating pre-restore backup..."
     "${SCRIPT_DIR}/backup.sh" || log_warn "Pre-restore backup failed"
@@ -130,7 +148,8 @@ restore_backup() {
     # Stop application services
     log_info "Stopping services..."
     cd "$PROJECT_ROOT"
-    docker stop praho_platform praho_portal 2>/dev/null || true
+    # The task worker too: it writes to the same database and media volume.
+    docker stop praho_qcluster praho_platform praho_portal 2>/dev/null || true
 
     # Drop and recreate database
     log_info "Preparing database..."
@@ -140,20 +159,25 @@ restore_backup() {
     log_info "Restoring database..."
     gunzip -c "${BACKUP_FILE}" | docker exec -i praho_db psql -U praho praho
 
-    restore_media "${BACKUP_FILE}"
+    # A media failure must not leave the services down: they restart, and the run fails at the end.
+    local MEDIA_FAILED=0
+    restore_media "${BACKUP_FILE}" || MEDIA_FAILED=1
 
     # Restart services
     log_info "Starting services and waiting for health..."
-    docker start praho_platform praho_portal 2>/dev/null || \
+    docker start praho_platform praho_portal praho_qcluster 2>/dev/null || \
         praho_compose single-server up -d --wait --wait-timeout "$WAIT_TIMEOUT" || true
 
-    if wait_healthy praho_platform praho_portal; then
-        log_success "Restore completed successfully!"
-    else
+    if ! wait_healthy praho_platform praho_portal; then
         # The data is restored, but the services did not come back; callers (rollback.sh) must know.
         log_error "The database was restored, but the services did not become healthy."
         exit 1
     fi
+    if [ "$MEDIA_FAILED" -ne 0 ]; then
+        log_error "The database was restored and the services are up, but restoring the media failed."
+        exit 1
+    fi
+    log_success "Restore completed successfully!"
 }
 
 praho_parse_env_args "$@"

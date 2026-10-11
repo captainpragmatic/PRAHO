@@ -30,9 +30,15 @@ pytestmark = pytest.mark.integration
 
 
 def _media_root_reads_environment(module: Path) -> bool:
+    """MEDIA_ROOT comes from the environment, defaulting to the code tree's media directory.
+
+    The default matters for stacks that do not set it (docker-compose.container-service.yml): the
+    image links that directory to its /app/media volume, and nothing else there is writable.
+    """
     for node in ast.walk(ast.parse(module.read_text())):
         if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == "MEDIA_ROOT" for t in node.targets):
-            return "MEDIA_ROOT" in ast.unparse(node.value) and "environ" in ast.unparse(node.value)
+            value = ast.unparse(node.value)
+            return "MEDIA_ROOT" in value and "environ" in value and "BASE_DIR / 'media'" in value  # unparse quotes
     return False
 
 
@@ -97,8 +103,59 @@ def test_a_restore_puts_the_media_back_before_the_services_start(project: Projec
     result = project.run("restore.sh", str(dump), stdin="yes\n")
     assert result.returncode == 0, result.stdout + result.stderr
     argvs = [call["argv"] for call in project.calls()]
-    restore = argvs.index(["cp", "-", "praho_platform:/app"])
-    assert restore < argvs.index(["start", "praho_platform", "praho_portal"])
+    restore = argvs.index(["cp", "-a", "-", "praho_platform:/app"])
+    assert argvs.index(["stop", "praho_qcluster", "praho_platform", "praho_portal"]) < restore
+    assert restore < argvs.index(["start", "praho_platform", "praho_portal", "praho_qcluster"])
+
+
+def _dump_with_media(project: Project, media: bytes = EMPTY_GZIP) -> Path:
+    backups = project.root / "backups"
+    backups.mkdir()
+    dump = backups / "praho_backup_20261007_000000_1.sql.gz"
+    dump.write_bytes(EMPTY_GZIP)
+    (backups / "praho_backup_20261007_000000_1.media.tar.gz").write_bytes(media)
+    return dump
+
+
+def _dropped(project: Project) -> bool:
+    return any("DROP SCHEMA" in " ".join(call["argv"]) for call in project.calls())
+
+
+@pytest.mark.parametrize(
+    ("case", "media", "env"),
+    [
+        ("container removed", EMPTY_GZIP, {"DOCKER_CONTAINER_MISSING": "1"}),
+        ("damaged archive", b"not a gzip stream", {}),
+    ],
+)
+def test_a_restore_that_could_not_restore_the_media_changes_nothing(
+    project: Project, case: str, media: bytes, env: dict[str, str]
+) -> None:
+    dump = _dump_with_media(project, media)
+    result = project.run("restore.sh", str(dump), stdin="yes\n", **env)
+    assert result.returncode != 0, case
+    assert "nothing was restored" in result.stdout, result.stdout
+    assert not _dropped(project), case
+
+
+def test_a_media_failure_after_the_database_still_brings_the_services_back(project: Project) -> None:
+    dump = _dump_with_media(project)
+    result = project.run("restore.sh", str(dump), stdin="yes\n", DOCKER_CP_FAILS="1")
+    assert result.returncode != 0
+    assert "restoring the media failed" in result.stdout, result.stdout
+    assert ["start", "praho_platform", "praho_portal", "praho_qcluster"] in [call["argv"] for call in project.calls()]
+
+
+def test_a_media_failure_still_applies_retention(project: Project) -> None:
+    backups = project.root / "backups"
+    backups.mkdir()
+    old = backups / "praho_backup_20200101_000000_1.sql.gz"
+    old.write_bytes(EMPTY_GZIP)
+    os.utime(old, (0, 0))
+    result = project.run("backup.sh", DOCKER_CP_FAILS="1")
+    assert result.returncode != 0
+    assert not old.exists()
+    assert list(backups.glob("praho_backup_*.sql.gz")), "the new dump is kept"
 
 
 def test_a_restore_without_a_media_archive_says_the_media_was_left_alone(project: Project) -> None:
@@ -109,7 +166,7 @@ def test_a_restore_without_a_media_archive_says_the_media_was_left_alone(project
     result = project.run("restore.sh", str(dump), stdin="yes\n")
     assert result.returncode == 0, result.stdout + result.stderr
     assert "No media archive" in result.stdout
-    assert ["cp", "-", "praho_platform:/app"] not in [call["argv"] for call in project.calls()]
+    assert ["cp", "-a", "-", "praho_platform:/app"] not in [call["argv"] for call in project.calls()]
 
 
 # --- Native backups -------------------------------------------------------------------------------
@@ -161,6 +218,35 @@ def test_a_native_backup_archives_the_media_directory(tmp_path: Path) -> None:
     media = root / "backups" / dump.name.replace(".dump", ".media.tar.gz")
     with tarfile.open(media) as archive:
         assert "media/efactura/response.zip" in archive.getnames()
+
+
+def _tar_exiting(tmp_path: Path, status: int) -> None:
+    """A tar that does the work, then exits like GNU tar does for a file that changed under it."""
+    real = subprocess.run(["sh", "-c", "command -v tar"], capture_output=True, text=True, check=True).stdout.strip()  # noqa: S607
+    stub = tmp_path / "bin" / "tar"
+    stub.write_text(f'#!/bin/sh\n"{real}" "$@" || exit $?\nexit {status}\n')
+    stub.chmod(0o755)
+
+
+def test_a_file_changing_during_the_native_archive_is_not_a_failure(tmp_path: Path) -> None:
+    root, env = _native(tmp_path)
+    _tar_exiting(tmp_path, 1)
+    result = _run(_render("backup-native.sh.j2", root), env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "changed while it was archived" in result.stdout
+    assert list((root / "backups").glob("praho_backup_*.media.tar.gz"))
+
+
+def test_a_failed_native_archive_fails_the_run_after_retention(tmp_path: Path) -> None:
+    root, env = _native(tmp_path)
+    (root / "backups").mkdir()
+    old = root / "backups" / "praho_backup_20200101_000000_1.dump"
+    old.write_bytes(b"dump")
+    os.utime(old, (0, 0))
+    _tar_exiting(tmp_path, 2)
+    result = _run(_render("backup-native.sh.j2", root), env)
+    assert result.returncode != 0
+    assert not old.exists()
 
 
 def test_a_native_restore_puts_the_media_back(tmp_path: Path) -> None:
