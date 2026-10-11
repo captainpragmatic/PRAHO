@@ -41,14 +41,10 @@ signed customer rather than the caller, nothing called it, and `token/me/` cover
 
 ### Token Model
 
-Uses DRF's built-in `rest_framework.authtoken.Token`:
-
-```python
-class Token(models.Model):
-    key     = CharField(max_length=40, primary_key=True)  # 40-char hex, stored plaintext
-    user    = OneToOneField(User)                          # one token per user, ever
-    created = DateTimeField(auto_now_add=True)
-```
+Tokens are `APIToken` rows (see "Implemented: Custom `APIToken` model" below): only the
+SHA-256 hash of the key is stored, a user may hold several, and each has a name, a description,
+an expiry and `last_used_at`. This replaced DRF's `rest_framework.authtoken.Token`, which kept
+the 40-character key in plaintext with one token per user.
 
 ### `obtain_token` — What Works
 
@@ -68,10 +64,10 @@ class Token(models.Model):
 ### `revoke_token` — What Works
 
 - Accepts `DELETE` only (405 on any other verb)
-- Requires `Authorization: Token <key>` header (`TokenAuthentication + IsAuthenticated`)
+- Requires `Authorization: Token <key>` or `Bearer <key>` (`HashedTokenAuthentication + IsAuthenticated`)
 - Deletes `request.auth` — the token that authenticated the request
 - Self-revocation only: the body is ignored; you cannot revoke another user's token
-- No throttle (low risk — requires a valid token to call)
+- Throttled per user by `BurstAPIThrottle` (`api_burst`) and `StandardAPIThrottle` (`sustained`)
 
 ### Intended Script / CLI Usage
 

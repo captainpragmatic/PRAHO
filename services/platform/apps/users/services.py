@@ -1435,7 +1435,9 @@ class SessionSecurityService:
             logger.warning(f"🚨 [SessionSecurity] Suspicious IP pattern for {request.user.email}: {set(last_seen)}")
 
         # A known address needs its time refreshed at most once a minute: the hour window does
-        # not need finer timing, and skipping the write keeps most requests to a cache read.
+        # not need finer timing, and skipping the write keeps most requests to a cache read. An
+        # address can therefore age out up to a minute early. The read-modify-write is not atomic,
+        # as before: two addresses arriving in the same instant can miss or double one alert.
         if previously_seen is None or now - previously_seen > SUSPICIOUS_ACTIVITY_REFRESH_SECONDS:
             cache.set(cache_key, last_seen, timeout=3600)
 

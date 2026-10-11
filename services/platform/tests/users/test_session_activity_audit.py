@@ -111,16 +111,15 @@ class SuspiciousActivityDetectionTests(TestCase):
         self.assertTrue(self.detect("203.0.113.4"))
         self.assertEqual(self.detections(), 2)
 
-    def test_addresses_seen_more_than_an_hour_ago_are_forgotten(self) -> None:
-        """Guard: the window is one hour either side of the boundary (green before and after)."""
+    def test_an_address_older_than_an_hour_leaves_the_pattern_and_can_rejoin(self) -> None:
+        """Guard: each address ages out on its own, while the stored history stays alive."""
         with freeze_time("2026-10-11 09:00:00") as clock:
-            self.detect("203.0.113.1")
-            self.detect("203.0.113.2")
-            clock.tick(timedelta(minutes=59))
-            self.assertTrue(self.detect("203.0.113.3"))  # both still inside the hour
-        cache.clear()
-        with freeze_time("2026-10-11 09:00:00") as clock:
-            self.detect("203.0.113.1")
-            self.detect("203.0.113.2")
-            clock.tick(timedelta(minutes=61))
-            self.assertFalse(self.detect("203.0.113.3"))  # both have aged out
+            self.detect("203.0.113.1")  # A at 09:00
+            clock.tick(timedelta(minutes=50))
+            self.detect("203.0.113.2")  # B at 09:50 keeps the cached history alive past 10:00
+            clock.tick(timedelta(minutes=11))  # 10:01: A was last seen 61 minutes ago
+            self.assertFalse(self.detect("203.0.113.3"))  # only B and C count
+            self.assertEqual(self.detections(), 0)
+
+            self.assertTrue(self.detect("203.0.113.1"))  # A comes back: three addresses again
+            self.assertEqual(self.detections(), 1)

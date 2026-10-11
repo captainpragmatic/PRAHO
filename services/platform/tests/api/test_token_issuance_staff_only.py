@@ -153,6 +153,9 @@ class TokenIssuanceStaffOnlyTests(TestCase):
         with self.authenticate_then(demote):
             self.assertEqual(self.post(staff.email), REFUSED)
         self.assertFalse(APIToken.objects.filter(user=staff).exists())
+        # It followed a correct password too, so it leaves the same failed-login trace.
+        self.assertEqual(failed_logins().count(), 1)
+        self.assertEqual(failed_logins().get().metadata["failure_reason"], "account_changed")
 
 
 class TokenVerifyRouteRemovedTests(SimpleTestCase):

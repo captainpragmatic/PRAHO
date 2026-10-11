@@ -367,6 +367,7 @@ def _issue_token_under_lock(
             logger.warning(  # nosemgrep: python-logger-credential-disclosure — literal log message, no secrets
                 "[Auth] Token request refused, account changed during the request — ip=%s", client_ip
             )
+            _audit_refusal_after_correct_password(request, user, "account_changed")
             return refused
         # A password alone must never yield a token for an enrolled account (#565).
         if (
