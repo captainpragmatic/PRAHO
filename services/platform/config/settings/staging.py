@@ -376,6 +376,8 @@ MONITORING = {
 # Use local static file serving for staging
 STATIC_URL = "/static/"
 STATIC_ROOT = Path(_os.environ.get("STATIC_ROOT", "/opt/praho/static"))
+# Uploads and generated documents: the deployment's media volume or directory, which backups include.
+MEDIA_ROOT = Path(_os.environ.get("MEDIA_ROOT", str(BASE_DIR / "media")))
 
 # ===============================================================================
 # DEVELOPMENT HELPERS (Staging specific)

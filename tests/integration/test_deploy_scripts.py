@@ -61,6 +61,10 @@ elif argv[:1] == ["start"] and os.environ.get("DOCKER_START_FAILS"):
     sys.exit(1)
 elif argv[:1] == ["exec"] and os.environ.get("DOCKER_EXEC_FAILS"):
     sys.exit(1)
+elif argv[:2] == ["container", "inspect"] and os.environ.get("DOCKER_CONTAINER_MISSING"):
+    sys.exit(1)
+elif argv[:1] == ["cp"] and os.environ.get("DOCKER_CP_FAILS"):
+    sys.exit(1)
 """
 # A gzip stream of no data, which the restore pipes into psql.
 EMPTY_GZIP = b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03\x03\x00\x00\x00\x00\x00\x00\x00\x00\x00"

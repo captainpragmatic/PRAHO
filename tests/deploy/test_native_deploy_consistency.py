@@ -194,7 +194,8 @@ class TestNativeBackupScript:
     @staticmethod
     def _render(backups: Path) -> str:
         """The template with its placeholders filled; a new placeholder fails here, not silently."""
-        values = {"backup_directory": str(backups), "backup_retention_days": "7"}
+        # project_root holds the media directory the script archives next to each dump.
+        values = {"backup_directory": str(backups), "backup_retention_days": "7", "project_root": str(backups.parent)}
 
         def fill(match: re.Match[str]) -> str:
             expression = match.group(1)
@@ -212,6 +213,7 @@ class TestNativeBackupScript:
         for stub in stubs.iterdir():
             stub.chmod(0o755)
         script = tmp_path / "backup.sh"
+        (tmp_path / "media").mkdir()
         script.write_text(self._render(tmp_path / "backups"))
         return script, {**os.environ, "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}"}
 

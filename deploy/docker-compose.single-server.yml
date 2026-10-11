@@ -80,6 +80,8 @@ services:
       - CREDENTIAL_VAULT_MASTER_KEY=${CREDENTIAL_VAULT_MASTER_KEY:-}
       - DJANGO_SETTINGS_MODULE=${DJANGO_SETTINGS_MODULE:-config.settings.prod}
       - STATIC_ROOT=/app/staticfiles
+      # The media_files volume: uploads and generated documents outlive the container, and backups read it.
+      - MEDIA_ROOT=/app/media
       - PLATFORM_DOMAIN=${PLATFORM_DOMAIN:-platform.localhost}
       - PORTAL_DOMAIN=${PORTAL_DOMAIN:-${DOMAIN:-localhost}}
       - ALLOWED_HOSTS=${PLATFORM_DOMAIN:-platform.localhost},localhost,platform

@@ -785,6 +785,15 @@ process id keeps two backups started in the same second apart. Both scripts writ
 untouched for a day. A downloaded dump gets mode `0600` in a `0700` directory, and git ignores
 `praho_backup_*` anywhere in the checkout.
 
+Each backup also archives the media directory (`MEDIA_ROOT`) next to its dump, as
+`praho_backup_YYYYMMDD_HHMMSS_<pid>.media.tar.gz`.
+- **What it holds:** what the database cannot rebuild, including ANAF's e-Factura response archives, issued invoice PDFs, ticket attachments and GDPR exports.
+- **Where it comes from:** in Docker, the `media_files` volume (`MEDIA_ROOT=/app/media`); natively, `/opt/praho/media`.
+- **Restoring:** a restore unpacks the archive with the same name as its dump into the media directory, keeping files the archive does not hold. A dump with no archive (one made before this change) restores the database only.
+- **Retention:** expires an archive with its dump.
+- **A failed archive** fails the backup run, but keeps the complete dump.
+- **Downloads:** `make ansible-backup FETCH=true` downloads the dump only; copy the media archive from the server's backup directory when you need it.
+
 ### Restoring from Backup
 
 ```bash

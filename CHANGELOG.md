@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Media is backed up, and native installs can write it.** Media holds what the database cannot rebuild: ANAF's e-Factura response archives, issued invoice PDFs, ticket attachments and GDPR exports.
+  - **The bugs.** Neither backup script saved it. Production and staging settings also ignored `MEDIA_ROOT`. Docker was unaffected, because the image links that directory to its `media_files` volume. On native installs the files went under the code tree, which the services' `ProtectSystem=strict` makes read-only, so writing them failed.
+  - **Now.** Both settings read `MEDIA_ROOT` (Ansible sets `/opt/praho/media`; Compose now names the volume path explicitly).
+    - Each backup archives the media directory next to its dump. A restore checks the archive and the platform container before it changes anything, stops the task worker as well, and puts the media back.
+    - Retention expires the pair together.
+    - See "Creating Backups" in the deployment guide.
 - **A customer who registers through the portal keeps their CNP, CUI and trade registry number.**
   - **The bug.** Platform's registration API did not declare the CNP the portal requires from individuals, so it was dropped, and every individual who registered through the portal was invoiced with the placeholder CNP. A company had no way to give a CUI or trade registry number.
   - **Now.** Individuals billed in Romania must give a CNP, checked in full, and companies may give a CUI (stored as digits) and a trade registry number. While the registration waits for its email confirmation, the CNP is stored encrypted and bound to that registration, never in plain text, and it is cleared once the link is used.

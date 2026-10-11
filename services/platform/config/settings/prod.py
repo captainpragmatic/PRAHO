@@ -312,6 +312,8 @@ CACHES["default"].update(
 
 # Static files — env-driven for deployment flexibility (native, Docker)
 STATIC_ROOT = Path(os.environ.get("STATIC_ROOT", str(BASE_DIR / "staticfiles")))
+# Uploads and generated documents: the deployment's media volume or directory, which backups include.
+MEDIA_ROOT = Path(os.environ.get("MEDIA_ROOT", str(BASE_DIR / "media")))
 
 # ===============================================================================
 # CUSTOM STAFF INTERFACE (Admin Removed)
