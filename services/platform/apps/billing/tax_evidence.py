@@ -260,6 +260,9 @@ def read_vat_evidence(document: Invoice | ProformaInvoice) -> VATDecision | None
             category = "O"
         if data["category"] != category or (category in {"AE", "O"} and rate != 0):
             raise ValueError("VAT category disagrees with decision")
+        # Reverse charge shifts the VAT to the buyer, so the buyer's VAT number must be stated (BR-AE-02).
+        if category == "AE" and not data["vat_number"]:
+            raise ValueError("Reverse charge without the buyer's VAT number")
         if data["subtotal_cents"] + data["tax_cents"] != data["total_cents"]:
             raise ValueError("Decision totals disagree")
         return VATDecision(

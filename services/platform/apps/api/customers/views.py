@@ -65,8 +65,12 @@ logger = logging.getLogger(__name__)
 SEARCH_QUERY_MIN_LENGTH = 2
 
 
-def _vat_number_error(value: str, country: str | None) -> str | None:
-    """Validate EU numbers while preserving non-EU identifiers as entered."""
+def _checked_vat_number(value: str, country: str | None) -> tuple[str, str | None]:
+    """An EU VAT number with its country prefix, or the reason it is invalid. Non-EU IDs stay as entered.
+
+    Stored with its prefix as the staff forms store it: a document without VAT evidence states a
+    buyer VAT identifier only when its tax ID carries a country prefix, since a bare one is a CUI.
+    """
     from apps.billing.tax_evidence import vat_country  # noqa: PLC0415
     from apps.common.eu_vat_validator import is_eu_country, parse_vat_number, validate_vat_format  # noqa: PLC0415
 
@@ -74,8 +78,9 @@ def _vat_number_error(value: str, country: str | None) -> str | None:
     if is_eu_country(country_code):
         result = validate_vat_format(country_code, digits)
         if not result.is_valid:
-            return result.error_message
-    return None
+            return value, result.error_message
+        return result.full_vat_number, None
+    return value, None
 
 
 def _customer_payload_for_role(customer_data: dict[str, object], role: str | None) -> dict[str, object]:
@@ -770,7 +775,10 @@ def update_customer_billing_address(  # noqa: C901, PLR0912, PLR0915  # Complexi
 
     validated_data = serializer.validated_data
     if validated_data.get("vat_number"):
-        vat_error = _vat_number_error(validated_data["vat_number"], validated_data.get("country") or existing_country)
+        vat_number, vat_error = _checked_vat_number(
+            validated_data["vat_number"], validated_data.get("country") or existing_country
+        )
+        validated_data["vat_number"] = vat_number
         if vat_error is not None:
             return Response(
                 {"success": False, "error": _("Invalid VAT number: %(error)s") % {"error": vat_error}},
@@ -864,11 +872,16 @@ def update_customer_billing_address(  # noqa: C901, PLR0912, PLR0915  # Complexi
                 tax_fields["cui"] = cui_result.digits
             if validated_data.get("vat_number"):
                 tax_fields["vat_number"] = validated_data["vat_number"]
+                # Giving a VAT number states VAT registration, also for a profile that began CUI-only.
+                tax_fields["is_vat_payer"] = True
             if validated_data.get("registration_number"):
                 tax_fields["registration_number"] = validated_data["registration_number"]
 
             if tax_fields:
-                tax_profile, created = CustomerTaxProfile.objects.get_or_create(customer=customer, defaults=tax_fields)
+                # A new profile with only a CUI is not a VAT payer; the model default (True) would say so.
+                tax_profile, created = CustomerTaxProfile.objects.get_or_create(
+                    customer=customer, defaults={"is_vat_payer": bool(tax_fields.get("vat_number")), **tax_fields}
+                )
 
                 if not created:
                     for field, value in tax_fields.items():
@@ -1339,7 +1352,10 @@ def customer_tax_profile_update(  # noqa: C901, PLR0912  # Validate each permitt
     if "reverse_charge_eligible" in data:
         logger.info("✅ [Customer API] Ignored derived reverse-charge flag for customer %s", customer.id)
 
-    tax_profile, _created = CustomerTaxProfile.objects.get_or_create(customer=customer)
+    # A new profile is a VAT payer only when given a VAT number; the model default (True) would say so.
+    tax_profile, _created = CustomerTaxProfile.objects.get_or_create(
+        customer=customer, defaults={"is_vat_payer": bool(str(data.get("vat_number") or "").strip())}
+    )
     update_fields = []
     for field in tax_bool_fields | tax_string_fields:
         if field in data:
@@ -1365,7 +1381,7 @@ def customer_tax_profile_update(  # noqa: C901, PLR0912  # Validate each permitt
                     value = result.digits
                 if field == "vat_number" and value:
                     billing_address = customer.get_billing_address()
-                    vat_error = _vat_number_error(value, billing_address.country if billing_address else None)
+                    value, vat_error = _checked_vat_number(value, billing_address.country if billing_address else None)
                     if vat_error is not None:
                         return Response(
                             {"success": False, "error": _("Invalid VAT number: %(error)s") % {"error": vat_error}},
@@ -1374,6 +1390,11 @@ def customer_tax_profile_update(  # noqa: C901, PLR0912  # Validate each permitt
             setattr(tax_profile, field, value)
 
             update_fields.append(field)
+
+    if tax_profile.vat_number and "vat_number" in update_fields and "is_vat_payer" not in data:
+        # Giving a VAT number states VAT registration, also for a profile that began CUI-only.
+        tax_profile.is_vat_payer = True
+        update_fields.append("is_vat_payer")
 
     if update_fields:
         with transaction.atomic():

@@ -64,6 +64,7 @@ class MapperTestBase(TestCase):
                 "scenario": "romania_b2b",
                 "category": "S",
                 "country_code": "RO",
+                "vat_number": "RO12345678",
                 "is_business": True,
                 "vat_rate_percent": "0.21",
             },
@@ -304,10 +305,15 @@ class FiscalFactTests(MapperTestBase):
     def test_a_non_vat_registered_company_is_not_marked_as_registered(self) -> None:
         """A Romanian company can hold a CUI without being VAT-registered.
 
-        Inferring `isTaxPayer` from the presence of a tax ID would misstate it.
+        Inferring `isTaxPayer` from the presence of a tax ID, or from `is_business` (which only
+        means "has a company name"), would misstate it. The frozen VAT number decides.
         """
         invoice = self._invoice(
-            vat_evidence={"version": 1, "scenario": "romania_b2c", "category": "S", "is_business": False},
+            bill_to_tax_id="14399847",
+            vat_evidence={
+                "version": 1, "scenario": "romania_b2b", "category": "S", "country_code": "RO",
+                "vat_number": "", "is_business": True, "vat_rate_percent": "0.21",
+            },
         )
         self._line(invoice)
 

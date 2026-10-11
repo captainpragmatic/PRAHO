@@ -140,7 +140,12 @@ class CustomerTaxProfile(SoftDeleteModel):
     def save(self, *args: Any, **kwargs: Any) -> None:
         # A CUI is stored as its digits: an RO prefix would assert VAT registration (see cui_validator).
         if self.cui:
-            self.cui = CUIValidator.normalize(self.cui)
+            normalized = CUIValidator.normalize(self.cui)
+            update_fields = kwargs.get("update_fields")
+            if normalized != self.cui and update_fields is not None and "cui" not in update_fields:
+                # Store what the instance now says, or the tax signal reports a change never saved.
+                kwargs["update_fields"] = [*update_fields, "cui"]
+            self.cui = normalized
         super().save(*args, **kwargs)
 
     def validate_cui(self) -> bool:

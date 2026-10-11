@@ -237,8 +237,8 @@ class SecureInputValidator:
         if not isinstance(cui, str):
             raise ValidationError(_("Invalid input format"))
 
-        # Length check
-        if len(cui) > MAX_CUI_LENGTH:
+        # Length check: up to 10 digits, after an optional RO prefix
+        if len(cui.removeprefix("RO").removeprefix("ro")) > MAX_CUI_LENGTH:
             raise ValidationError(_("Input too long"))
 
         # XSS/injection check

@@ -65,6 +65,7 @@ class SmartBillSettingEffectTests(TestCase):
                 "scenario": "romania_b2b",
                 "category": "S",
                 "country_code": "RO",
+                "vat_number": "RO12345678",
                 "is_business": True,
                 "vat_rate_percent": "0.21",
             },
