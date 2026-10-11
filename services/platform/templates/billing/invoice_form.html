@@ -64,6 +64,7 @@
                 {% trans 'Select Customer' %} <span class="text-red-500">*</span>
               </label>
               <input type="hidden" name="customer" value="{{ invoice.customer_id }}">
+              {# tmpl-allow TMPL003: options rendered inline from a customers loop (disabled, display-only); select components take a view-built options list #}
               <select id="invoice-customer-select" disabled aria-label="{% trans 'Customer' %}"
                       class="w-full rounded-md border border-slate-600 bg-slate-700 px-3 py-2 text-white">
                 {% for customer in customers %}
@@ -117,8 +118,8 @@
               <label for="invoice-currency" class="block text-sm font-medium text-slate-300 mb-2">
                 {% trans 'Currency' %} <span class="text-red-500">*</span>
               </label>
-              <input id="invoice-currency" name="currency" value="{{ invoice.currency.code }}" readonly
-                     class="w-full rounded-md border border-slate-600 bg-slate-700 px-3 py-2 text-white">
+              {% trans 'Currency' as currency_label %}
+              {% input_field "currency" html_id="invoice-currency" value=invoice.currency.code readonly=True aria_label=currency_label %}
             </div>
             <div>
               <p class="text-sm text-slate-300">{% trans 'Status' %}: {{ invoice.get_status_display }}</p>
@@ -208,7 +209,7 @@
         <!-- Romanian Compliance Info -->
         <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
           <h3 class="text-lg font-semibold text-white border-b border-slate-600 pb-3 mb-4">
-            🇷🇴 {% trans 'Romanian Compliance' %}
+            {% icon "flag" size="sm" %} {% trans 'Romanian Compliance' %}
           </h3>
 
           <div class="space-y-3 text-sm">
@@ -287,11 +288,6 @@ document.addEventListener('DOMContentLoaded', function () {
 <style nonce="{{ csp_nonce }}">
 .sticky {
     position: sticky;
-}
-
-/* Romanian flag accent */
-.romanian-flag::before {
-    content: "🇷🇴 ";
 }
 
 /* Enhanced form styling */

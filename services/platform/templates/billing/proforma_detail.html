@@ -42,10 +42,8 @@
 
         {% if can_record_payment %}
           {# Payment triggers automatic conversion to invoice (Romanian proforma-first flow) #}
-          <button type="button" data-action="show" data-target="paymentModal"
-             class="inline-flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md font-medium transition-colors">
-            {% icon "currency" %} {% trans 'Record Payment' %}
-          </button>
+          {% trans 'Record Payment' as header_record_payment_label %}
+          {% button header_record_payment_label variant="success" type="button" icon="currency" data_action="show" attrs='data-target="paymentModal"' %}
         {% endif %}
 
         <a href="{% url 'billing:proforma_pdf' proforma.pk %}"
@@ -354,7 +352,7 @@
       <!-- Romanian Business Info -->
       <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
         <h3 class="text-lg font-semibold text-white border-b border-slate-600 pb-3 mb-4">
-          🇷🇴 {% trans 'Romanian Business Practice' %}
+          {% icon "flag" size="sm" %} {% trans 'Romanian Business Practice' %}
         </h3>
 
         <div class="space-y-3 text-sm">
@@ -371,7 +369,7 @@
             <span class="text-slate-300">{% trans 'Sequential numbering maintained' %}</span>
           </div>
           <div class="flex items-center space-x-2">
-            <span class="text-purple-400">🇷🇴</span>
+            <span class="text-purple-400">{% icon "flag" size="sm" %}</span>
             <span class="text-slate-300">{% trans 'Romanian VAT compliant' %}</span>
           </div>
         </div>
@@ -385,10 +383,8 @@
 
         <div class="space-y-3">
           {% if can_record_payment %}
-            <button type="button" data-action="show" data-target="paymentModal"
-               class="block w-full text-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md font-medium transition-colors">
-              {% icon "currency" %} {% trans 'Record Payment' %}
-            </button>
+            {% trans 'Record Payment' as actions_record_payment_label %}
+            {% button actions_record_payment_label variant="success" type="button" icon="currency" class_="w-full" data_action="show" attrs='data-target="paymentModal"' %}
           {% elif payment_block_reason and proforma.status != "converted" %}
             <p class="text-sm text-slate-400">{{ payment_block_reason }}</p>
           {% endif %}
@@ -398,14 +394,16 @@
             {% icon "document" %} {% trans 'Download PDF' %}
           </a>
 
-          <button data-action="invoke" data-invoke="sendProformaAction" data-proforma-id="{{ proforma.pk }}"
-                  class="block w-full text-center px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-md font-medium transition-colors">
-            {% if is_staff_user %}
-              {% icon "mail" %} {% trans 'Send to Customer' %}
-            {% else %}
-              {% icon "mail" %} {% trans 'Send to Email' %}
-            {% endif %}
-          </button>
+          {% if is_staff_user %}
+            {% trans 'Send to Customer' as send_proforma_label %}
+          {% else %}
+            {% trans 'Send to Email' as send_proforma_label %}
+          {% endif %}
+          {% with proforma_id=proforma.pk|stringformat:"s" %}
+            {% with send_proforma_attrs='data-proforma-id="'|add:proforma_id|add:'"' %}
+              {% button send_proforma_label variant="info" type="button" icon="mail" class_="w-full" data_action="invoke" data_invoke="sendProformaAction" attrs=send_proforma_attrs %}
+            {% endwith %}
+          {% endwith %}
 
           {% if can_edit and proforma.status != "converted" %}
             <a href="{% url 'billing:proforma_edit' proforma.pk %}"
@@ -477,6 +475,7 @@ function sendProforma(proformaId) {
 
           <div class="mb-4">
             <label for="payment_method" class="block text-sm font-medium text-slate-400 mb-2">{% trans "Payment Method" %}</label>
+            {# tmpl-allow TMPL003: options rendered inline from literal payment methods; select components take a view-built options list #}
             <select name="payment_method" id="payment_method" required
                     class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500">
               <option value="bank_transfer">{% trans "Bank Transfer" %}</option>
@@ -486,8 +485,9 @@ function sendProforma(proformaId) {
 
           <div class="mb-4">
             <label for="reference" class="block text-sm font-medium text-slate-400 mb-2">{% trans "Payment Reference" %} ({% trans "optional" %})</label>
-            <input type="text" name="reference" id="reference" placeholder="{% trans 'e.g., Bank transfer reference number' %}"
-                   class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500">
+            {% trans 'e.g., Bank transfer reference number' as payment_reference_placeholder %}
+            {% trans "Payment Reference" as payment_reference_label %}
+            {% input_field "reference" html_id="reference" placeholder=payment_reference_placeholder aria_label=payment_reference_label %}
           </div>
 
           <div class="bg-yellow-900/30 border border-yellow-700/50 rounded-lg p-3 text-sm text-yellow-300">
@@ -501,14 +501,10 @@ function sendProforma(proformaId) {
         </div>
 
         <div class="px-6 py-4 bg-slate-900 flex justify-end space-x-3">
-          <button type="button" data-action="hide" data-target="paymentModal"
-                  class="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white">
-            {% trans "Cancel" %}
-          </button>
-          <button type="submit"
-                  class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md font-medium transition-colors">
-            {% icon "check" %} {% trans "Confirm Payment" %}
-          </button>
+          {% trans "Cancel" as payment_cancel_label %}
+          {% button payment_cancel_label variant="secondary" type="button" data_action="hide" attrs='data-target="paymentModal"' %}
+          {% trans "Confirm Payment" as confirm_payment_label %}
+          {% button confirm_payment_label variant="success" type="submit" icon="check" %}
         </div>
       </form>
     </div>
