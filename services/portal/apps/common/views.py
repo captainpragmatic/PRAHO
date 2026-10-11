@@ -6,6 +6,7 @@ Cookie consent proxy, cookie policy page.
 import json
 import logging
 import uuid
+from datetime import date
 
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render
@@ -13,6 +14,8 @@ from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_POST
 
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
+from apps.common.legal import TERMS_OF_SERVICE_VERSION
+from apps.common.localisation_services import get_company_identity
 from apps.common.request_ip import get_safe_client_ip
 
 logger = logging.getLogger(__name__)
@@ -74,6 +77,21 @@ def cookie_consent_view(request: HttpRequest) -> HttpResponse:
         )
 
     return response
+
+
+def terms_of_service_view(request: HttpRequest) -> HttpResponse:
+    """Terms of Service - public. The text is shared with Platform's page, and the version is the one Platform records."""
+    company = get_company_identity()
+    effective_date = date.fromisoformat(TERMS_OF_SERVICE_VERSION)  # A calendar date, in every timezone
+    context = {
+        "terms_version": TERMS_OF_SERVICE_VERSION,
+        "last_updated": effective_date,
+        "effective_date": effective_date,
+        "legal_name": company["legal_name"],
+        "company_phone": company["phone"],
+        "company_support_email": company["email_support"],
+    }
+    return render(request, "legal/terms_of_service.html", context)
 
 
 def cookie_policy_view(request: HttpRequest) -> HttpResponse:

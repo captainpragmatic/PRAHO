@@ -65,6 +65,9 @@ class PortalAuthenticationMiddleware:
         "/api/cookie-consent/",
     ]
 
+    # Public leaf pages, matched exactly: a later route under them stays private.
+    PUBLIC_EXACT_URLS: ClassVar[frozenset[str]] = frozenset({"/terms/"})
+
     # Validation timing configuration
     REVALIDATE_EVERY = 600  # 10 minutes base interval
     JITTER_MAX = 120  # 0-2 minutes random jitter
@@ -180,7 +183,7 @@ class PortalAuthenticationMiddleware:
         extra_public_urls = getattr(settings, "PORTAL_EXTRA_PUBLIC_URLS", ())
         # Resolve development-only prefixes per request; never mutate the shared class list.
         debug_public_urls = ("/__debug__/",) if settings.DEBUG and "debug_toolbar" in settings.INSTALLED_APPS else ()
-        return any(
+        return path in self.PUBLIC_EXACT_URLS or any(
             path.startswith(public_url) for public_url in (*self.PUBLIC_URLS, *extra_public_urls, *debug_public_urls)
         )
 
