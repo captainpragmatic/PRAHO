@@ -66,13 +66,9 @@
             <label for="id_customer" class="block text-sm font-medium text-slate-400 mb-2">
               {% trans "Customer" %} <span class="text-red-400">*</span>
             </label>
-            <select id="id_customer" name="customer" required
-                    class="w-full bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-              <option value="">{% trans "Select a customer..." %}</option>
-              {% for option in customer_options %}
-                <option value="{{ option.value }}">{{ option.label }}</option>
-              {% endfor %}
-            </select>
+            {% trans "Select a customer..." as customer_placeholder %}
+            {% trans "Customer" as customer_label %}
+            {% input_field "customer" input_type="select" html_id="id_customer" options=customer_options placeholder=customer_placeholder required=True aria_label=customer_label %}
             <p class="mt-1 text-xs text-slate-500">{% trans "Select customer for this order" %}</p>
           </div>
         </div>
@@ -109,15 +105,9 @@
             <label for="id_payment_method" class="block text-sm font-medium text-slate-400 mb-2">
               {% trans "Payment Method" %}
             </label>
-            <select id="id_payment_method" name="payment_method"
-                    class="w-full bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-              <option value="">{% trans "Select payment method..." %}</option>
-              {% for option in payment_method_options %}
-                <option value="{{ option.value }}" {% if order and order.payment_method == option.value %}selected{% endif %}>
-                  {{ option.label }}
-                </option>
-              {% endfor %}
-            </select>
+            {% trans "Select payment method..." as payment_method_placeholder %}
+            {% trans "Payment Method" as payment_method_label %}
+            {% input_field "payment_method" input_type="select" html_id="id_payment_method" options=payment_method_options value=order.payment_method placeholder=payment_method_placeholder aria_label=payment_method_label %}
             <p class="mt-1 text-xs text-slate-500">{% trans "How customer will pay for this order" %}</p>
           </div>
         </div>
@@ -151,6 +141,7 @@
             {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
             {% trans "Create Order" as bt4 %}{% button bt4 type="submit" variant="outline" %}
             {% url 'orders:order_create_with_item' as create_with_item_url %}
+            {# tmpl-allow TMPL002: formaction= posts the form to the create-with-item URL; button attrs drop formaction (apps/ui/attributes.py) #}
             <button type="submit" formaction="{{ create_with_item_url }}"
                     class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg border border-green-600 bg-green-700 text-white hover:bg-green-600 focus:ring-2 focus:ring-green-500">
               {% icon "services" %} {% trans "Create Order with Item" %}
@@ -178,7 +169,7 @@
   {% if not order %}
   <div class="mt-6 bg-slate-800 rounded-lg border border-slate-700">
     <div class="px-6 py-4 border-b border-slate-700">
-      <h3 class="text-lg font-semibold text-white">🇷🇴 {% trans "Romanian Business Compliance" %}</h3>
+      <h3 class="text-lg font-semibold text-white">{% trans "Romanian Business Compliance" %}</h3>
     </div>
     <div class="p-6">
       <!-- First Item (Optional) -->
@@ -187,6 +178,7 @@
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label for="first_product" class="block text-sm font-medium text-slate-400 mb-2">{% trans "Product" %}</label>
+            {# tmpl-allow TMPL003: form="order-create-form" ties it to the form above this section; input_field has no form argument #}
             <select name="first_product" id="first_product" form="order-create-form"
                     class="w-full bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500" hx-post="{% url 'orders:order_create_preview' %}" hx-include="#id_customer, #id_currency, #id_currency_revision, #first_product, #first_billing_period, #first_quantity, #first_domain_name" hx-target="#create-preview" hx-swap="innerHTML">
               <option value="">{% trans "Select product..." %}</option>
@@ -197,6 +189,7 @@
           </div>
           <div>
             <label for="first_billing_period" class="block text-sm font-medium text-slate-400 mb-2">{% trans "Billing Period" %}</label>
+            {# tmpl-allow TMPL003: form="order-create-form" ties it to the form above this section; input_field has no form argument #}
             <select name="first_billing_period" id="first_billing_period" form="order-create-form"
                     class="w-full bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500" hx-post="{% url 'orders:order_create_preview' %}" hx-include="#id_customer, #id_currency, #id_currency_revision, #first_product, #first_billing_period, #first_quantity, #first_domain_name" hx-target="#create-preview" hx-swap="innerHTML">
               <option value="monthly">{% trans "Monthly" %}</option>
@@ -210,11 +203,13 @@
           </div>
           <div>
             <label for="first_quantity" class="block text-sm font-medium text-slate-400 mb-2">{% trans "Quantity" %}</label>
+            {# tmpl-allow TMPL001: form="order-create-form" ties it to the form above this section; input_field has no form argument #}
             <input type="number" min="1" value="1" name="first_quantity" id="first_quantity" form="order-create-form"
                    class="w-full bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500" hx-post="{% url 'orders:order_create_preview' %}" hx-include="#id_customer, #id_currency, #id_currency_revision, #first_product, #first_billing_period, #first_quantity, #first_domain_name" hx-target="#create-preview" hx-swap="innerHTML">
           </div>
           <div>
             <label for="first_domain_name" class="block text-sm font-medium text-slate-400 mb-2">{% trans "Domain (if required)" %}</label>
+            {# tmpl-allow TMPL001: form="order-create-form" ties it to the form above this section; input_field has no form argument #}
             <input type="text" name="first_domain_name" id="first_domain_name" placeholder="exemplu.ro" form="order-create-form"
                    class="w-full bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500" hx-post="{% url 'orders:order_create_preview' %}" hx-include="#id_customer, #id_currency, #id_currency_revision, #first_product, #first_billing_period, #first_quantity, #first_domain_name" hx-target="#create-preview" hx-swap="innerHTML">
           </div>

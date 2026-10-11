@@ -23,7 +23,7 @@
     <div class="bg-blue-900 border border-blue-700 rounded-lg p-4 mb-6">
       <div class="flex items-start">
         <div class="flex-shrink-0">
-          <span class="text-blue-300 text-xl">🇷🇴</span>
+          <span class="text-blue-300 text-xl">{% icon "info" %}</span>
         </div>
         <div class="ml-3">
           <h4 class="text-sm font-medium text-blue-200">{% trans 'Romanian VAT Compliance' %}</h4>
@@ -131,15 +131,15 @@
 
   <!-- Form Actions -->
   <div class="px-6 py-4 bg-slate-900 flex justify-end space-x-3">
-    <button type="button"
-            {% if action == 'create' %}
-              data-action="invoke" data-invoke="cancelAddItemOrModal"
-            {% else %}
-              data-action="invoke" data-invoke="cancelEditItemOrModal" data-item-id="{{ item.id }}"
-            {% endif %}
-            class="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white">
-      {% icon "x" %} {% trans "Cancel" %}
-    </button>
+    {% trans "Cancel" as cancel_label %}
+    {% if action == 'create' %}
+      {% button cancel_label variant="secondary" icon="x" data_action="invoke" data_invoke="cancelAddItemOrModal" %}
+    {% else %}
+      {# stringformat first: add returns "" when joining a string and a UUID #}
+      {% with item_id=item.id|stringformat:"s" %}{% with item_attrs='data-item-id="'|add:item_id|add:'"' %}
+        {% button cancel_label variant="secondary" icon="x" data_action="invoke" data_invoke="cancelEditItemOrModal" attrs=item_attrs %}
+      {% endwith %}{% endwith %}
+    {% endif %}
     {% if action == 'create' %}
       {% trans "Add Item" as bt1 %}{% button bt1 variant="primary" type="submit" %}
     {% else %}
