@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The legal pages open from their addresses without a trailing slash.** On the portal, `/terms`, `/privacy-policy` and `/cookie-policy` sent a visitor who was not signed in to the login page, because sign-in was checked before the missing slash was added. They now redirect to the page.
 - **Media is backed up, and native installs can write it.** Media holds what the database cannot rebuild: ANAF's e-Factura response archives, issued invoice PDFs, ticket attachments and GDPR exports.
   - **The bugs.** Neither backup script saved it. Production and staging settings also ignored `MEDIA_ROOT`. Docker was unaffected, because the image links that directory to its `media_files` volume. On native installs the files went under the code tree, which the services' `ProtectSystem=strict` makes read-only, so writing them failed.
   - **Now.** Both settings read `MEDIA_ROOT` (Ansible sets `/opt/praho/media`; Compose now names the volume path explicitly).
