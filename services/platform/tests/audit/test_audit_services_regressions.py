@@ -300,7 +300,7 @@ class TestGDPRExportService(TestCase):
         result = GDPRExportService.create_data_export_request(user, export_scope=scope)
         self.assertTrue(result.is_ok())
 
-    @patch("apps.audit.services.default_storage")
+    @patch("apps.audit.export_files.default_storage")
     def test_process_data_export_success(self, mock_storage):
         mock_storage.save.return_value = "gdpr_exports/test.json"
         user = _make_user()
@@ -321,7 +321,7 @@ class TestGDPRExportService(TestCase):
         export.refresh_from_db()
         self.assertEqual(export.status, "completed")
 
-    @patch("apps.audit.services.default_storage")
+    @patch("apps.audit.export_files.default_storage")
     def test_process_data_export_failure(self, mock_storage):
         mock_storage.save.side_effect = Exception("Storage error")
         user = _make_user()
@@ -361,7 +361,7 @@ class TestGDPRExportService(TestCase):
         count = GDPRExportService._count_records(data)
         self.assertEqual(count, 7)  # 1 + 2 + 0 + 1 + 3
 
-    @patch("apps.audit.services.default_storage")
+    @patch("apps.audit.export_files.default_storage")
     def test_collect_user_data_with_memberships(self, mock_storage):
         """Cover _collect_user_data with customer memberships."""
         mock_storage.save.return_value = "gdpr_exports/test.json"
@@ -388,7 +388,7 @@ class TestGDPRExportService(TestCase):
         result = GDPRExportService.process_data_export(export)
         self.assertTrue(result.is_ok())
 
-    @patch("apps.audit.services.default_storage")
+    @patch("apps.audit.export_files.default_storage")
     def test_collect_user_data_no_profile(self, mock_storage):
         """Cover scope with include_profile=False."""
         mock_storage.save.return_value = "gdpr_exports/test.json"

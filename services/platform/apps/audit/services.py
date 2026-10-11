@@ -17,8 +17,6 @@ from typing import TYPE_CHECKING, Any, ClassVar, TypedDict
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.contenttypes.models import ContentType
-from django.core.files.base import ContentFile
-from django.core.files.storage import default_storage
 from django.db import models, transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -30,6 +28,7 @@ from apps.common.types import EmailAddress, Err, Ok, Result
 from apps.settings.services import SettingsService
 from apps.tickets.models import Ticket  # Import for GDPR data export
 
+from .export_files import delete_export_file, write_export_file
 from .models import (
     AuditAlert,
     AuditEvent,
@@ -352,6 +351,9 @@ class BusinessEventData:
 
 
 logger = logging.getLogger(__name__)
+
+# A completed GDPR export can be downloaded for this many days, then its file is deleted.
+EXPORT_DOWNLOAD_DAYS = 7
 
 
 class AuthenticationAuditService:
@@ -1097,7 +1099,7 @@ class GDPRExportService:
                 export_type="gdpr",
                 scope=export_scope,
                 status="pending",
-                expires_at=timezone.now() + timedelta(days=7),  # 7 days to download
+                expires_at=timezone.now() + timedelta(days=EXPORT_DOWNLOAD_DAYS),  # Restarted at completion
             )
 
             # Log GDPR export request
@@ -1122,55 +1124,62 @@ class GDPRExportService:
     @classmethod
     @transaction.atomic
     def process_data_export(cls, export_request: DataExport) -> Result[str, str]:
-        """Process and generate the actual data export file"""
+        """Generate the export file, encrypted for this export (apps.audit.export_files).
+
+        The row is locked and only a pending or failed export is processed, so one export never
+        gets a second file. The download window starts at completion. A failure after the file is
+        written deletes it, so no file outlives a failed export.
+        """
+        list(DataExport.objects.select_for_update().filter(pk=export_request.pk).values_list("pk", flat=True))
+        export_request.refresh_from_db()
+        if export_request.status not in ("pending", "failed"):
+            return Err("Export has already been processed")
+
+        user = export_request.requested_by
+        if user is None:
+            # Orphaned request: the requester was deleted before processing (W7)
+            export_request.status = "failed"
+            export_request.error_message = "Requesting user was deleted before the export was processed"
+            export_request.save(update_fields=["status", "error_message"])
+            return Err("Requesting user no longer exists")
+
+        saved_path = ""
         try:
-            user = export_request.requested_by
-            if user is None:
-                # Orphaned request: the requester was deleted before processing (W7)
-                export_request.status = "failed"
-                export_request.error_message = "Requesting user was deleted before the export was processed"
-                export_request.save(update_fields=["status", "error_message"])
-                return Err("Requesting user no longer exists")
-            export_request.status = "processing"
-            export_request.started_at = timezone.now()
-            export_request.save(update_fields=["status", "started_at"])
+            with transaction.atomic():
+                if export_request.file_path:
+                    delete_export_file(export_request.file_path)
+                    export_request.file_path = ""
+                export_request.status = "processing"
+                export_request.started_at = timezone.now()
+                export_request.save(update_fields=["status", "started_at", "file_path"])
 
-            # Collect all user data
-            user_data = cls._collect_user_data(user, export_request.scope)
+                user_data = cls._collect_user_data(user, export_request.scope)
+                export_content = json.dumps(user_data, indent=2, default=str, ensure_ascii=False)
+                saved_path = write_export_file(export_request, export_content)
 
-            # Generate export file
-            export_content = json.dumps(user_data, indent=2, default=str, ensure_ascii=False)
+                export_request.status = "completed"
+                export_request.completed_at = timezone.now()
+                export_request.expires_at = export_request.completed_at + timedelta(days=EXPORT_DOWNLOAD_DAYS)
+                export_request.file_path = saved_path
+                export_request.file_size = len(export_content.encode("utf-8"))
+                export_request.record_count = cls._count_records(user_data)
+                export_request.save(
+                    update_fields=["status", "completed_at", "expires_at", "file_path", "file_size", "record_count"]
+                )
 
-            # Generate secure filename
-            file_hash = hashlib.sha256(export_content.encode()).hexdigest()[:16]
-            filename = f"gdpr_export_{user.id}_{file_hash}.json"
-
-            # Save to secure storage
-            file_path = f"gdpr_exports/{filename}"
-            saved_path = default_storage.save(file_path, ContentFile(export_content.encode("utf-8")))
-
-            # Update export request
-            export_request.status = "completed"
-            export_request.completed_at = timezone.now()
-            export_request.file_path = saved_path
-            export_request.file_size = len(export_content.encode("utf-8"))
-            export_request.record_count = cls._count_records(user_data)
-            export_request.save(update_fields=["status", "completed_at", "file_path", "file_size", "record_count"])
-
-            # Log completion
-            compliance_request = ComplianceEventRequest(
-                compliance_type="gdpr_consent",
-                reference_id=f"export_{export_request.id}",
-                description=f"GDPR data export completed for {user.email}",
-                user=user,
-                status="completed",
-                evidence={
-                    "file_size_bytes": export_request.file_size,
-                    "record_count": export_request.record_count,
-                    "completion_time": export_request.completed_at.isoformat(),
-                },
-            )
-            AuditService.log_compliance_event(compliance_request)
+                compliance_request = ComplianceEventRequest(
+                    compliance_type="gdpr_consent",
+                    reference_id=f"export_{export_request.id}",
+                    description=f"GDPR data export completed for {user.email}",
+                    user=user,
+                    status="completed",
+                    evidence={
+                        "file_size_bytes": export_request.file_size,
+                        "record_count": export_request.record_count,
+                        "completion_time": export_request.completed_at.isoformat(),
+                    },
+                )
+                AuditService.log_compliance_event(compliance_request)
 
             logger.info(
                 f"✅ [GDPR Export] Completed for {user.email}: {export_request.file_size} bytes, {export_request.record_count} records"
@@ -1178,10 +1187,12 @@ class GDPRExportService:
             return Ok(saved_path)
 
         except Exception as e:
-            # Mark as failed
+            if saved_path:
+                delete_export_file(saved_path)
             export_request.status = "failed"
             export_request.error_message = str(e)
-            export_request.save(update_fields=["status", "error_message"])
+            export_request.file_path = ""
+            export_request.save(update_fields=["status", "error_message", "file_path"])
 
             logger.error(f"🔥 [GDPR Export] Processing failed for export {export_request.id}: {e}")
             return Err(f"Export processing failed: {e!s}")
