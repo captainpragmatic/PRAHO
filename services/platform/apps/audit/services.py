@@ -1469,6 +1469,8 @@ class GDPRDeletionService:
     @classmethod
     def _anonymize_user_records(cls, user: User) -> None:
         """The anonymisation writes; `_anonymize_user_data` runs them in one savepoint."""
+        from apps.billing.invoice_models import Invoice  # noqa: PLC0415  # Deferred: import cycle
+        from apps.billing.proforma_models import ProformaInvoice  # noqa: PLC0415  # Deferred: import cycle
         from apps.customers.profile_models import CustomerTaxProfile  # noqa: PLC0415  # Deferred: import cycle
         from apps.users.models import CustomerMembership  # noqa: PLC0415  # Deferred: import cycle
 
@@ -1505,24 +1507,43 @@ class GDPRDeletionService:
                 ip_address=cls.ANONYMIZATION_MAP["ip_address"](), user_agent="Anonymized"
             )
 
-        # An individual customer's CNP is the person's national identification number. The tax
-        # profile's copy is cleared; issued invoices keep their own snapshot for the legal
-        # retention period. A queryset update needs no decryption, so an unreadable CNP cannot
-        # block the erasure, and all_objects includes soft-deleted profiles.
+        # An individual customer's CNP is the person's national identification number. It is
+        # cleared wherever it is not a fiscal record: the tax profile, every proforma (a proforma
+        # is not a fiscal document) and every invoice not yet issued. Issued invoices keep their
+        # snapshot for the legal retention period. Queryset updates need no decryption, so an
+        # unreadable CNP cannot block the erasure; all_objects includes soft-deleted profiles.
         owned_individuals = CustomerMembership.objects.filter(
             user=user, role="owner", customer__customer_type="individual"
         ).values("customer_id")
-        profiles = list(
-            CustomerTaxProfile.all_objects.filter(customer_id__in=owned_individuals, cnp__isnull=False).values_list(
-                "pk", "customer_id"
-            )
+        cls._clear_cnp(
+            CustomerTaxProfile.all_objects.filter(customer_id__in=owned_individuals),
+            "cnp",
+            id_key="tax_profile_id",
+            where="the customer tax profile",
         )
-        CustomerTaxProfile.all_objects.filter(pk__in=[pk for pk, _customer_id in profiles]).update(cnp=None)
-        for profile_id, customer_id in profiles:
+        cls._clear_cnp(
+            ProformaInvoice.objects.filter(customer_id__in=owned_individuals),
+            "bill_to_cnp",
+            id_key="proforma_id",
+            where="a proforma",
+        )
+        cls._clear_cnp(
+            Invoice.objects.filter(customer_id__in=owned_individuals, locked_at__isnull=True),
+            "bill_to_cnp",
+            id_key="invoice_id",
+            where="an invoice not yet issued",
+        )
+
+    @staticmethod
+    def _clear_cnp(rows: models.QuerySet[Any], field: str, *, id_key: str, where: str) -> None:
+        """Clear the CNP `field` on `rows`, and audit each cleared row without the value."""
+        cleared = list(rows.filter(**{f"{field}__isnull": False}).values_list("pk", "customer_id"))
+        rows.filter(pk__in=[pk for pk, _customer_id in cleared]).update(**{field: None})
+        for pk, customer_id in cleared:
             AuditService.log_simple_event(
                 "data_anonymization_completed",
-                description="CNP cleared from the customer tax profile (GDPR erasure)",
-                metadata={"field": "cnp", "tax_profile_id": profile_id, "customer_id": str(customer_id)},
+                description=f"CNP cleared from {where} (GDPR erasure)",
+                metadata={"field": field, id_key: pk, "customer_id": str(customer_id)},
                 actor_type="system",
             )
 

@@ -1,14 +1,17 @@
 """A customer's CNP is encrypted at rest, shown to staff only as "on file", and erased by GDPR.
 
 `CustomerTaxProfile.cnp` is an EncryptedTextField bound to the row's `encryption_context_id`,
-which a trigger keeps immutable (customers 0004, ADR-0040). GDPR anonymisation clears the
-profile's CNP for the individual customers the user owns; issued invoices keep their own
-snapshot for the legal retention period.
+which a trigger keeps immutable (customers 0004, ADR-0040). GDPR anonymisation clears the CNP of
+the individual customers the user owns wherever it is not a fiscal record: the tax profile, every
+proforma and every invoice not yet issued. Issued invoices keep their snapshot for the legal
+retention period.
 """
 
 from __future__ import annotations
 
 import uuid
+from datetime import timedelta
+from decimal import Decimal
 from io import StringIO
 from unittest.mock import patch
 
@@ -17,10 +20,13 @@ from django.core.management import call_command
 from django.db import DatabaseError, connection, transaction
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from apps.audit.models import AuditEvent
 from apps.audit.services import GDPRDeletionService, gdpr_deletion_service
 from apps.billing.invoice_models import Invoice
+from apps.billing.proforma_models import ProformaInvoice, ProformaLine
+from apps.billing.services import ProformaConversionService
 from apps.common.encryption import EncryptionError
 from apps.customers.models import Customer
 from apps.customers.profile_models import CustomerTaxProfile
@@ -137,14 +143,91 @@ class GDPRErasureCNPTests(TestCase):
         self.assertEqual(CustomerTaxProfile.objects.get(pk=viewer_profile.pk).cnp, CNP)
         self.assertIsNotNone(other_customer.pk)
 
-    def test_erasure_keeps_the_cnp_on_issued_invoices(self) -> None:
-        invoice = h.issued_invoice(self.customer, issue=False)
+    def invoice(self, customer: Customer, *, issue: bool) -> Invoice:
+        invoice = h.issued_invoice(customer, issue=False)
         invoice.bill_to_cnp = CNP
+        invoice.due_at = timezone.now() + timedelta(days=30)
         invoice.save()
+        if issue:
+            invoice.issue()
+            invoice.save()
+            self.assertIsNotNone(invoice.locked_at)
+        return invoice
+
+    def proforma(self, customer: Customer, **fields: object) -> ProformaInvoice:
+        return ProformaInvoice.objects.create(
+            customer=customer,
+            currency=h.ron(),
+            number=f"PRO-{uuid.uuid4().hex[:8]}",
+            valid_until=timezone.now() + timedelta(days=30),
+            bill_to_cnp=CNP,
+            **fields,
+        )
+
+    def test_erasure_keeps_the_cnp_on_issued_invoices(self) -> None:
+        issued = self.invoice(self.customer, issue=True)
 
         self.anonymize()
 
-        self.assertEqual(Invoice.objects.get(pk=invoice.pk).bill_to_cnp, CNP)
+        self.assertEqual(Invoice.objects.get(pk=issued.pk).bill_to_cnp, CNP)
+
+    def test_erasure_clears_proformas_and_invoices_not_yet_issued(self) -> None:
+        proformas = [self.proforma(self.customer, status=status) for status, _label in ProformaInvoice.STATUS_CHOICES]
+        self.assertEqual(
+            set(ProformaInvoice.objects.filter(pk__in=[p.pk for p in proformas]).values_list("status", flat=True)),
+            {status for status, _label in ProformaInvoice.STATUS_CHOICES},
+        )
+        draft = self.invoice(self.customer, issue=False)
+        other_customer, _other_profile = individual("Someone Else")
+        others = (self.proforma(other_customer), self.invoice(other_customer, issue=False))
+
+        self.anonymize()
+
+        for proforma in proformas:
+            with self.subTest(status=proforma.status):
+                self.assertEqual(ProformaInvoice.objects.get(pk=proforma.pk).bill_to_cnp, "")
+        self.assertEqual(Invoice.objects.get(pk=draft.pk).bill_to_cnp, "")
+        for document in others:
+            self.assertEqual(type(document).objects.get(pk=document.pk).bill_to_cnp, CNP)
+        cleared = AuditEvent.objects.filter(action="data_anonymization_completed", metadata__field="bill_to_cnp")
+        self.assertEqual(cleared.count(), len(proformas) + 1)
+        self.assertEqual(
+            {event.metadata.get("proforma_id") for event in cleared if "proforma_id" in event.metadata},
+            {proforma.pk for proforma in proformas},
+        )
+        self.assertEqual([event.metadata["invoice_id"] for event in cleared if "invoice_id" in event.metadata], [draft.pk])
+
+    def test_an_unreadable_cnp_does_not_block_the_erasure(self) -> None:
+        proforma = self.proforma(self.customer)
+        donor = self.proforma(self.customer)
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE billing_proforma_invoices SET bill_to_cnp = "
+                "(SELECT bill_to_cnp FROM billing_proforma_invoices WHERE id = %s) WHERE id = %s",
+                [donor.pk, proforma.pk],
+            )
+
+        self.anonymize()
+
+        self.assertEqual(ProformaInvoice.objects.get(pk=proforma.pk).bill_to_cnp, "")
+
+    def test_a_proforma_converted_after_erasure_bills_without_a_cnp(self) -> None:
+        proforma = self.proforma(self.customer, subtotal_cents=10000, tax_cents=2100, total_cents=12100)
+        ProformaLine.objects.create(
+            proforma=proforma,
+            kind="service",
+            description="Hosting",
+            quantity=Decimal("1"),
+            unit_price_cents=10000,
+            tax_rate=Decimal("0.2100"),
+            tax_cents=2100,
+            line_total_cents=12100,
+        )
+
+        self.anonymize()
+        invoice = ProformaConversionService.convert_to_invoice(str(proforma.pk)).unwrap()
+
+        self.assertEqual(Invoice.objects.get(pk=invoice.pk).bill_to_cnp, "")
 
     def test_erasure_is_audited_without_the_cnp(self) -> None:
         self.anonymize()
