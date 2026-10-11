@@ -28552,3 +28552,7 @@ msgstr "Termenii de Serviciu s-au modificat. Vă rugăm să îi citiți din nou 
 #: apps/api/users/views.py
 msgid "You must accept the Terms of Service."
 msgstr "Trebuie să acceptați Termenii de Serviciu."
+
+#: apps/api/users/serializers.py
+msgid "Send the Terms of Service version accepted."
+msgstr "Trimiteți versiunea Termenilor de Serviciu acceptată."

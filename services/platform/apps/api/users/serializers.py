@@ -290,6 +290,9 @@ class RegistrationConfirmSerializer(serializers.Serializer):
     def validate(self, data: dict[str, Any]) -> dict[str, Any]:
         if data["password"] != data["password_confirm"]:
             raise serializers.ValidationError({"password_confirm": _("Passwords do not match.")})
+        if data.get("terms_accepted") and not data.get("terms_version", "").strip():
+            # Without the version shown, every attempt would be refused as "terms changed".
+            raise serializers.ValidationError({"terms_version": _("Send the Terms of Service version accepted.")})
         return data
 
 

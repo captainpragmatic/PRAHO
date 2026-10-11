@@ -17,8 +17,9 @@ from django.utils import timezone
 from apps.audit.models import AuditEvent
 from apps.audit.services import GDPRDeletionService, GDPRExportService
 from apps.common.legal import TERMS_OF_SERVICE_VERSION
+from apps.customers.models import Customer
 from apps.users import registration_confirmation
-from apps.users.models import User
+from apps.users.models import CustomerMembership, User
 from apps.users.pending_registration import PendingRegistration
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
 
@@ -107,8 +108,10 @@ class TermsAcceptanceTests(HMACTestMixin, TestCase):
         with patch.object(AuditService, "log_simple_event", side_effect=failing), self.assertRaises(RuntimeError):
             self.confirm(terms_accepted=True, terms_version=TERMS_OF_SERVICE_VERSION)
         self.assertFalse(User.objects.filter(email="terms@example.test").exists())
-        self.row.refresh_from_db()
-        self.assertIsNone(self.row.consumed_at)
+        self.assertFalse(Customer.objects.filter(company_name="Terms SRL").exists())
+        self.assertFalse(CustomerMembership.objects.exists())
+        # The link was not spent: the same confirmation succeeds once the audit store is back.
+        self.assertTrue(self.confirm(terms_accepted=True, terms_version=TERMS_OF_SERVICE_VERSION).is_ok())
 
     def test_the_preview_names_the_version_to_accept(self) -> None:
         details = registration_confirmation.preview(str(self.row.pk), self.row.token())
@@ -132,6 +135,12 @@ class TermsAcceptanceTests(HMACTestMixin, TestCase):
         response = self.post_confirm(terms_accepted=True, terms_version=TERMS_OF_SERVICE_VERSION)
         self.assertEqual(response.status_code, 201, response.content)
         self.assertEqual(User.objects.get(email="terms@example.test").terms_version, TERMS_OF_SERVICE_VERSION)
+
+    def test_the_api_refuses_acceptance_without_the_version(self) -> None:
+        response = self.post_confirm(terms_accepted=True)
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("terms_version", response.json()["errors"])
+        self.assertFalse(User.objects.filter(email="terms@example.test").exists())
 
     def test_the_api_answers_a_changed_version_with_its_own_code(self) -> None:
         response = self.post_confirm(terms_accepted=True, terms_version=STALE_VERSION)
