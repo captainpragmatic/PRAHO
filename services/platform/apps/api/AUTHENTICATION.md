@@ -66,9 +66,12 @@ Content-Type: application/json
 }
 ```
 
+Tokens are issued to staff accounts only (#621). Use a dedicated staff service account with
+the smallest `staff_role` the script needs; a customer account is refused.
+
 `mfa_token` is required when the account has two-factor authentication enabled: a current
 TOTP code or an unused backup code. Every refusal returns the same `401 Invalid
-credentials` body, whether the password or the code was wrong.
+credentials` body, whether the password or the code was wrong, or the account is not staff.
 
 Optional fields: `name`, `description`, and `ttl_days` (1 to 365; the default lifetime is 90 days).
 
@@ -104,7 +107,7 @@ Authorization: Token <your-token>
 {
     "user_id": 123,
     "email": "user@example.com",
-    "staff_role": "",
+    "staff_role": "support",
     "is_active": true,
     "token_name": "ci-pipeline",
     "token_description": "Production deploys",

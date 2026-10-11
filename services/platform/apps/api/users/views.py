@@ -35,6 +35,7 @@ from apps.api.secure_auth import (
     require_user_authentication,
 )
 from apps.api.users.authentication import HashedTokenAuthentication
+from apps.audit.services import AuthenticationAuditService, LoginFailureEventData
 from apps.common.constants import HMAC_NTP_SKEW_SECONDS, HMAC_TIMESTAMP_WINDOW_SECONDS
 from apps.common.localisation import resolve_display
 from apps.common.localisation_services import get_localisation_defaults, user_localisation_preferences
@@ -50,6 +51,7 @@ from apps.common.performance.rate_limiting import (
     forwarded_client_ip,
 )
 from apps.common.request_ip import get_safe_client_ip
+from apps.common.transactions import best_effort_atomic
 from apps.common.validators import log_security_event
 from apps.customers.models import Customer
 from apps.users.mfa import MFAService, verify_login_second_factor
@@ -272,12 +274,13 @@ def _authenticate_token_request(request: HttpRequest) -> User | Response:
 
     client_ip = get_safe_client_ip(request)
 
-    # Timing is NOT uniform past this point. With the correct password, an account with
+    # Timing is NOT uniform past this point. With the correct password, a staff account with
     # 2FA goes on to verify the code, and an 8-digit code is checked against every stored
     # backup-code hash, so a slow refusal can confirm the password even though the body
-    # is the same. That is narrower than before #565, when the correct password simply
-    # returned a token, and TokenRequestAccountThrottle caps sampling at 5/min per
-    # address. ADR-0031 "What a bare token can reach" records it.
+    # is the same. A locked account and a customer are refused before that, after writing the
+    # failed-login audit row a wrong password writes. That is narrower than before #565, when
+    # the correct password simply returned a token, and TokenRequestAccountThrottle caps
+    # sampling at 5/min per address. ADR-0031 "What a bare token can reach" records it.
     user = authenticate(request, username=email, password=password)
 
     if user is None:
@@ -299,6 +302,7 @@ def _authenticate_token_request(request: HttpRequest) -> User | Response:
         logger.warning(  # nosemgrep: python-logger-credential-disclosure — literal log message, no secrets
             "[Auth] Token request for locked account — ip=%s", client_ip
         )
+        _audit_refusal_after_correct_password(request, user, "account_locked")
         return Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
 
     if not user.is_active:
@@ -307,7 +311,36 @@ def _authenticate_token_request(request: HttpRequest) -> User | Response:
         )
         return Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
 
+    # Tokens are for staff automation (ADR-0031). A customer gets the wrong-password answer, and
+    # gets it before the second factor, so the refusal neither spends a code nor counts against
+    # the account. _issue_token_under_lock checks again on the locked row.
+    if not user.is_staff_user:
+        logger.warning(  # nosemgrep: python-logger-credential-disclosure — literal log message, no secrets
+            "[Auth] Token request for a non-staff account — ip=%s", client_ip
+        )
+        _audit_refusal_after_correct_password(request, user, "not_staff")
+        return Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+
     return user
+
+
+def _audit_refusal_after_correct_password(request: HttpRequest, user: User, failure_reason: str) -> None:
+    """Record a token request refused although its password was right.
+
+    authenticate() succeeded, so user_login_failed never fired. Writing the failed-login audit row
+    a wrong password writes leaves a trace, and keeps the work the same as that refusal. The staff
+    web login does the same for a locked account (apps.users.views._record_locked_login).
+    """
+    with best_effort_atomic(logger=logger, scope="Auth", message="Could not audit a refused token request"):
+        AuthenticationAuditService.log_login_failed(
+            LoginFailureEventData(
+                email=user.email,
+                user=user,
+                failure_reason=failure_reason,
+                request=request,
+                metadata={"login_method": "api_token", "password_correct": True},
+            )
+        )
 
 
 def _issue_token_under_lock(
@@ -324,7 +357,13 @@ def _issue_token_under_lock(
     refused = Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
     with transaction.atomic():
         user = User.objects.select_for_update().get(pk=authenticated.pk)
-        if user.password != authenticated.password or user.is_account_locked() or not user.is_active:
+        # Before the second factor: a refusal returned after it would commit a spent code.
+        if (
+            user.password != authenticated.password
+            or user.is_account_locked()
+            or not user.is_active
+            or not user.is_staff_user
+        ):
             logger.warning(  # nosemgrep: python-logger-credential-disclosure — literal log message, no secrets
                 "[Auth] Token request refused, account changed during the request — ip=%s", client_ip
             )
@@ -474,56 +513,6 @@ def token_info(request: HttpRequest) -> Response:
             "created_at": token.created_at.isoformat(),
             "expires_at": token.expires_at.isoformat() if token.expires_at else None,
             "last_used_at": token.last_used_at.isoformat() if token.last_used_at else None,
-        }
-    )
-
-
-@api_view(["GET"])
-@authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
-@permission_classes([AllowAny])  # HMAC auth handled by secure_auth
-@require_customer_authentication
-def verify_token(request: HttpRequest, customer: Customer) -> Response:
-    """
-    ✅ Verify token is valid and get user info
-
-    GET /api/users/token/verify/
-    Requires customer authentication via HMAC.
-
-    Response:
-    {
-        "user_id": 123,
-        "email": "user@example.com",
-        "is_staff": false,
-        "accessible_customers": [1, 2, 3]
-    }
-    """
-    # Get the user from the customer context (since this is a customer-authenticated endpoint)
-    membership = CustomerMembership.objects.filter(customer=customer).first()
-    if not membership:
-        return Response(
-            {"success": False, "error": "No user associated with this customer"}, status=status.HTTP_400_BAD_REQUEST
-        )
-
-    user = membership.user
-
-    # Get accessible customers for this user
-    accessible_customers = user.get_accessible_customers()
-    customer_ids = []
-
-    if hasattr(accessible_customers, "values_list"):  # QuerySet
-        customer_ids = list(accessible_customers.values_list("id", flat=True))
-    elif accessible_customers:  # List
-        customer_ids = [c.id for c in accessible_customers]
-
-    logger.info(f"✅ [Auth] Token verified for user: {user.email}")
-
-    return Response(
-        {
-            "user_id": user.id,
-            "email": user.email,
-            "is_staff": user.is_staff,
-            "accessible_customers": customer_ids,
-            "full_name": f"{user.first_name} {user.last_name}".strip() or user.email,
         }
     )
 

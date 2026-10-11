@@ -141,6 +141,7 @@ class AccountLockoutTokenTests(TestCase):
             password=self.password,
             first_name="Lock",
             last_name="Out",
+            staff_role="support",  # tokens are for staff (ADR-0031)
         )
         self.url = "/api/users/token/"
 

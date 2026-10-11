@@ -42,7 +42,7 @@ class TokenEndpointSecondFactorTests(TestCase):
     def setUp(self) -> None:
         cache.clear()  # throttle buckets are cache-backed and leak between tests
         self.addCleanup(cache.clear)
-        self.user = User.objects.create_user(email="mfa-owner@example.ro", password=PASSWORD)
+        self.user = User.objects.create_user(email="mfa-owner@example.ro", password=PASSWORD, staff_role="support")
         self.secret = TOTPService.generate_secret()
         self.user.two_factor_secret = self.secret
         self.user.two_factor_enabled = True
@@ -100,7 +100,7 @@ class TokenEndpointSecondFactorTests(TestCase):
         return patch("apps.api.users.views.authenticate", side_effect=side_effect)
 
     def test_2fa_enrolled_after_the_password_check_is_still_required(self) -> None:
-        plain = User.objects.create_user(email="enrolling@example.ro", password=PASSWORD)
+        plain = User.objects.create_user(email="enrolling@example.ro", password=PASSWORD, staff_role="support")
 
         def enrol() -> None:
             User.objects.filter(pk=plain.pk).update(two_factor_enabled=True)
@@ -183,7 +183,7 @@ class TokenEndpointSecondFactorTests(TestCase):
         self.assertEqual(self.user.failed_login_attempts, 0)
 
     def test_accounts_without_2fa_are_unaffected(self) -> None:
-        plain = User.objects.create_user(email="plain@example.ro", password=PASSWORD)
+        plain = User.objects.create_user(email="plain@example.ro", password=PASSWORD, staff_role="support")
         status_code, payload = self.post(email=plain.email)
         self.assertEqual(status_code, 200, payload)
         self.assertEqual(APIToken.objects.filter(user=plain).count(), 1)
@@ -219,7 +219,7 @@ class RefusedIssuanceTOTPReplayTests(TestCase):
         call_command("createcachetable", verbosity=0)
         cache.clear()
         self.addCleanup(cache.clear)
-        self.user = User.objects.create_user(email="totp-quota@example.ro", password=PASSWORD)
+        self.user = User.objects.create_user(email="totp-quota@example.ro", password=PASSWORD, staff_role="support")
         self.secret = TOTPService.generate_secret()
         self.user.two_factor_secret = self.secret
         self.user.two_factor_enabled = True
