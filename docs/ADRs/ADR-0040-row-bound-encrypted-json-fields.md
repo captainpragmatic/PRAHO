@@ -21,8 +21,8 @@ Three related weaknesses made that gap more dangerous:
 - malformed base64 and empty AAD were accepted, and the per-key AES-GCM cache
   retained an unbounded number of rotation keys.
 
-Customer payment bank details are the only production EncryptedJSONField.
-They need row-level integrity without changing the public integer
+Customer payment bank details were the first production EncryptedJSONField
+(the CNP columns followed; see the second addendum). They need row-level integrity without changing the public integer
 payment-method identifier used by billing APIs and foreign keys.
 
 ## Decision
@@ -151,6 +151,42 @@ not an `EncryptedJSONField`, and binds each value to its row the same way:
 - **Key rotation.** `reencrypt_with_aad` finds only `EncryptedJSONField` columns and skips this
   one. A retired key must stay in the keyring until every pending row encrypted under it is gone:
   the link lifetime plus the cleanup margin, 25 hours.
+
+## Addendum (2026-10-11): the CNP on tax profiles, invoices and proformas
+
+`CustomerTaxProfile.cnp`, `Invoice.bill_to_cnp` and `ProformaInvoice.bill_to_cnp` are
+`EncryptedTextField`, a subclass of `EncryptedJSONField` for short strings. Each table has its own
+`encryption_context_id` (UUID, set before INSERT) and an immutability trigger, created by
+`apps.common.db_triggers` (customers 0004, billing 0010), as for payment methods.
+
+- **Python value.** Always a string, "" when there is none. The column holds NULL for "", so
+  the one-fiscal-identifier constraints test `bill_to_cnp IS NULL`. Assigning None stores "",
+  through a descriptor that subclasses `DeferredAttribute`, so deferred loading still works.
+  A string that looks like ciphertext is refused: the Python value is always plaintext.
+- **Queries.** Only `__isnull`. A custom lookup treats a Python-side "" as NULL, so
+  `validate_constraints()` agrees with the database. Nothing filters, orders or searches on a
+  CNP, so there is no blind index.
+- **Unbound writes.** `update(field=None)` clears a value without a model instance and is
+  allowed; any other unbound write is refused, as for the parent field. Issued invoices still
+  refuse it through their queryset guard.
+- **Readers.** The staff customer list defers the CNP and shows only whether one is on file.
+  Everything else reads the decrypted string unchanged: the fiscal-identity snapshot, e-Factura,
+  the ROTLD registrant data.
+- **GDPR erasure.** Anonymisation clears the profile CNP of the individual customers the user
+  owns, through a queryset update (no decryption, soft-deleted rows included), and records one
+  audit event per profile without the value. Issued invoices keep their snapshot for the 10-year
+  retention period. Proforma snapshots are not cleared; that is an open decision.
+- **Not covered.** The issued e-Factura XML holds the CNP in plain text, in
+  `billing_efactura_documents.xml_content` and in the stored XML file. It is the legal record sent
+  to ANAF and kept for the retention period.
+- **Blast radius.** These rows are loaded in full on many paths (customer dropdowns, EC Sales,
+  line writes, proforma conversion). An unreadable CNP raises `DecryptionError` on each of them.
+  Deferring cannot protect the paths that save an invoice, because the lock guard compares the
+  stored CNP. A CNP becomes unreadable only through key loss or ciphertext tampering, the threat
+  this ADR already accepts for bank details; the response is to restore the key or the row.
+- **SQLite rebuilds.** A migration that alters one of these tables on SQLite drops its trigger
+  and must create it again, after the change. `tests/common/test_migration_db_objects.py` turns
+  red when a trigger is missing.
 
 ## Related
 

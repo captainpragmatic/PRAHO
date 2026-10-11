@@ -329,7 +329,7 @@ def store_original_tax_values(sender: type[CustomerTaxProfile], instance: Custom
         # would re-run VIES/compliance side effects on a timestamp-only save.
         if instance.pk:
             try:
-                original = CustomerTaxProfile.objects.get(pk=instance.pk)
+                original = CustomerTaxProfile.objects.defer("cnp").get(pk=instance.pk)
                 instance._original_tax_values = {
                     "cui": getattr(original, "cui", None),
                     "vat_number": getattr(original, "vat_number", None),

@@ -28560,3 +28560,7 @@ msgstr "Trimiteți versiunea Termenilor de Serviciu acceptată."
 #: apps/api/customers/serializers.py
 msgid "Enter the company's VAT number or CUI."
 msgstr "Introduceți codul de TVA sau CUI-ul firmei."
+
+#: templates/customers/partials/customer_table.html
+msgid "CNP on file"
+msgstr "CNP înregistrat"

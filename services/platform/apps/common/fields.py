@@ -14,8 +14,12 @@ import logging
 import struct
 from typing import Any, cast
 
+from django import forms
+from django.core.exceptions import EmptyResultSet, FullResultSet
 from django.db import models
-from django.db.models.expressions import Col
+from django.db.models.expressions import Col, Value
+from django.db.models.lookups import IsNull
+from django.db.models.query_utils import DeferredAttribute
 from django.db.utils import NotSupportedError
 
 from apps.common.encryption import (
@@ -297,3 +301,75 @@ class EncryptedJSONField(models.JSONField):
         if self.aad_context_field:
             kwargs["aad_context_field"] = self.aad_context_field
         return name, path, list(args), kwargs
+
+
+class _TextValueDescriptor(DeferredAttribute):
+    """Keep the Python value a string: assigning None stores "".
+
+    It subclasses DeferredAttribute, as Django's FileDescriptor does, so `.defer()`, `.only()` and
+    `refresh_from_db(fields=...)` still load a deferred value on first access.
+    """
+
+    def __set__(self, instance: models.Model, value: Any) -> None:
+        instance.__dict__[self.field.attname] = "" if value is None else value
+
+
+class _EmptyTextIsNull(IsNull):
+    """`__isnull` treats a Python-side "" as NULL, because "" is what the database stores as NULL.
+
+    `Model.validate_constraints()` checks a constraint against the instance's Python values.
+    Django already decides `IsNull` on a Python value without preparing it, but only None counts
+    as NULL there.
+    """
+
+    def as_sql(self, compiler: Any, connection: Any) -> tuple[str, SQLParams]:
+        if isinstance(self.lhs, Value) and self.lhs.value == "" and isinstance(self.rhs, bool):
+            raise FullResultSet if self.rhs else EmptyResultSet
+        return super().as_sql(compiler, connection)
+
+
+class EncryptedTextField(EncryptedJSONField):
+    """A short text value encrypted at rest, with the row binding of EncryptedJSONField.
+
+    Python value: a str, "" when there is none. Stored value: NULL for "", otherwise the
+    AAD-bound ciphertext of the JSON string. The Python value is always plaintext, so a string
+    that looks like ciphertext is refused rather than stored as it is.
+
+    Only `__isnull` is meaningful in queries: the column holds ciphertext, so it cannot be
+    compared, ordered or searched. `Query.update(field=None)` clears the value without a model
+    instance, which needs no AAD; any other unbound write is refused, as for the parent field.
+    """
+
+    descriptor_class = _TextValueDescriptor
+
+    def pre_save(self, model_instance: models.Model, add: bool) -> Any:
+        value = getattr(model_instance, self.attname)
+        if value is None or value == "":
+            return None
+        if not isinstance(value, str) or value.startswith(ENCRYPTED_PREFIX):
+            raise EncryptionError(
+                f"EncryptedTextField {self.model._meta.db_table}.{self.attname} takes a plaintext string"
+            )
+        return super().pre_save(model_instance, add)
+
+    def from_db_value(self, value: Any, expression: Any, connection: Any) -> Any:
+        result = super().from_db_value(value, expression, connection)
+        if result is None:
+            return ""
+        if not isinstance(result, str):
+            raise DecryptionError(
+                f"EncryptedTextField {self.model._meta.db_table}.{self.attname} did not decrypt to a string"
+            )
+        return result
+
+    def formfield(self, **kwargs: Any) -> Any:  # type: ignore[override]  # A text input, not JSON
+        # Field.formfield, not JSONField.formfield: the JSON form field's encoder/decoder
+        # arguments are not accepted by CharField.
+        return models.Field.formfield(self, **{"form_class": forms.CharField, "max_length": self.max_length, **kwargs})
+
+    def deconstruct(self) -> tuple[str, str, list[Any], dict[str, Any]]:
+        name, _path, args, kwargs = super().deconstruct()
+        return name, "apps.common.fields.EncryptedTextField", args, kwargs
+
+
+EncryptedTextField.register_lookup(_EmptyTextIsNull)

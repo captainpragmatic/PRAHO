@@ -5,6 +5,7 @@ Tax compliance and billing profile models for customer business data.
 
 from __future__ import annotations
 
+import uuid
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -13,6 +14,7 @@ from django.utils.translation import gettext_lazy as _
 
 from apps.common.cnp_validator import validate_cnp
 from apps.common.cui_validator import CUIValidator, validate_cui
+from apps.common.fields import EncryptedTextField
 from apps.common.types import CurrencyCode
 
 from .customer_models import SoftDeleteModel
@@ -34,9 +36,16 @@ class CustomerTaxProfile(SoftDeleteModel):
         related_name="tax_profile",
     )
 
+    # Binds the encrypted CNP to this row (ADR-0040). Set before INSERT, and immutable: a database
+    # trigger refuses any change.
+    encryption_context_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+
     # Romanian Tax Fields
-    cnp = models.CharField(
+    cnp = EncryptedTextField(
+        aad_context_field="encryption_context_id",
+        require_v2=True,
         max_length=13,
+        null=True,
         blank=True,
         verbose_name=_("CNP"),
         help_text=_("Cod Numeric Personal (13 cifre)"),
@@ -114,7 +123,6 @@ class CustomerTaxProfile(SoftDeleteModel):
         verbose_name = _("Customer Tax Profile")
         verbose_name_plural = _("Customer Tax Profiles")
         indexes: ClassVar[tuple[models.Index, ...]] = (
-            models.Index(fields=["cnp"]),
             models.Index(fields=["cui"]),
             models.Index(fields=["vat_number"]),
             models.Index(fields=["vies_verification_status"], name="customer_tax_vies_status_idx"),

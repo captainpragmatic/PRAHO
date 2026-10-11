@@ -74,6 +74,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **The CNP is encrypted at rest.** A customer's CNP was stored in plain text on the tax profile and on every invoice and proforma.
+  - **Now.** All three are encrypted with AES-256-GCM, each value bound to its own row, as payment bank details already were (ADR-0040). Nothing reads differently: e-Factura, domain registration and the invoice snapshots get the same value as before.
+  - **Staff list.** The customer list showed the first 8 digits of each CNP, which encode the person's birth date, sex and county. It now says "CNP on file".
+  - **GDPR erasure** now clears the CNP from the tax profiles of the individual customers the user owns, and records that in the audit log without the number. Issued invoices keep their CNP for the 10-year retention period. An anonymisation that fails part way is now undone entirely, instead of leaving the user anonymised and the rest unchanged.
+  - **Credit notes** now carry the original invoice's CNP, trade registry number and second address line. A storno for an individual had the placeholder CNP.
+  - **Not covered.** The e-Factura XML sent to ANAF is stored as issued, with the CNP readable.
+  - **Deploy.** Development databases must be rebuilt (`make migrate` on a fresh database), as ADR-0052 requires for schema changes.
 - **Customer registration no longer reveals whether an email or company already has an account.**
   - **The bug.** An existing email was refused with "a user with this email already exists", and an existing company name with a similar error, so anyone could check who is a customer.
   - **Now.** Every accepted registration answers "Thank you. Check your email for a message with the next step." and creates nothing. A worker mails the address: a link to finish creating the account, or a note that it already has one, with sign-in and password-reset links.
