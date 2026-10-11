@@ -129,6 +129,29 @@ application encryption key.
 4. **Return None on failure** - makes corruption indistinguishable from a
    legitimate null and enables destructive resaves.
 
+## Addendum (2026-10-11): the CNP of a pending registration
+
+`PendingRegistration.cnp_encrypted` holds the CNP a registration was submitted with until its
+link is confirmed. It is a plain `TextField` with hand-written accessors (`set_cnp()`, `cnp()`),
+not an `EncryptedJSONField`, and binds each value to its row the same way:
+
+    users_pending_registrations:cnp_encrypted:<id>
+
+- **Context.** The row's UUID primary key, generated before the first INSERT, so the row is
+  stored with one write.
+- **Reads always pass the expected AAD.** Without it, v2 decryption accepts whatever context
+  the ciphertext embeds. A ciphertext moved from another row, an unbound v1 value, and plaintext
+  all raise `DecryptionError`.
+- **Failure spends the link.** `confirm()` creates no account without the CNP it was registered
+  with, so an unreadable value refuses with `details_unavailable` and the link is used up.
+- **No immutability trigger.** The id is not editable through the ORM. A database writer who
+  rewrites a row's id has replaced the row: its link token, an HMAC of the id, changes with it.
+  The rows live at most a day and the column is cleared when the link is used, so the trigger
+  that protects long-lived payment methods buys nothing here.
+- **Key rotation.** `reencrypt_with_aad` finds only `EncryptedJSONField` columns and skips this
+  one. A retired key must stay in the keyring until every pending row encrypted under it is gone:
+  the link lifetime plus the cleanup margin, 25 hours.
+
 ## Related
 
 - [ADR-0033](ADR-0033-encryption-architecture-consolidation.md) - AES-256-GCM

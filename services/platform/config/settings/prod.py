@@ -11,6 +11,7 @@ try:
     import sentry_sdk
     from sentry_sdk.integrations.django import DjangoIntegration
     from sentry_sdk.integrations.logging import LoggingIntegration
+    from sentry_sdk.scrubber import DEFAULT_DENYLIST, EventScrubber
 
     HAS_SENTRY = True
 except ImportError:
@@ -251,6 +252,8 @@ if SENTRY_DSN and HAS_SENTRY:
         ],
         traces_sample_rate=0.1,
         send_default_pii=False,
+        # Frame variables are captured whatever send_default_pii says: never send a CNP.
+        event_scrubber=EventScrubber(denylist=[*DEFAULT_DENYLIST, "cnp", "cnp_encrypted"]),
         environment="production",
         release=os.environ.get("APP_VERSION", "unknown"),
     )

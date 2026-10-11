@@ -22,6 +22,14 @@ logger = logging.getLogger(__name__)
 # Romanian validation constants
 MIN_VAT_DIGITS = 6
 CNP_LENGTH = 13  # Romanian Personal Numeric Code length
+_CNP_CHECK_WEIGHTS = "279146358279"
+
+
+def _cnp_check_digit_matches(cnp: str) -> bool:
+    """The 13th digit is the weighted sum of the first 12, mod 11 (10 counts as 1), as Platform checks it."""
+    remainder = sum(int(digit) * int(weight) for digit, weight in zip(cnp[:12], _CNP_CHECK_WEIGHTS, strict=True)) % 11
+    return int(cnp[12]) == (1 if remainder == 10 else remainder)  # noqa: PLR2004  # CNP check-digit rule
+
 
 # Password validation constants
 REGISTRATION_PASSWORD_MIN_LENGTH = 12
@@ -313,12 +321,13 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
         cnp = str(self.cleaned_data.get("cnp", "")).strip()
         if cnp:
             # CNP must be exactly 13 digits
-            if not cnp.isdigit() or len(cnp) != CNP_LENGTH:
+            # isascii(): isdigit() also accepts digits such as "²", which int() cannot read.
+            if not (cnp.isascii() and cnp.isdigit()) or len(cnp) != CNP_LENGTH:
                 raise ValidationError(_("CNP must be exactly 13 digits."))
 
-            # Basic CNP checksum validation (simplified)
-            # Full validation would include birth date validation, county codes, etc.
-            if cnp[0] not in "123456789":  # Valid century markers (0 is invalid)
+            # Century marker and check digit. Platform validates the CNP in full, and refuses
+            # one with a wrong check digit; checking it here puts the error on the field.
+            if cnp[0] not in "123456789" or not _cnp_check_digit_matches(cnp):
                 raise ValidationError(_("Invalid CNP format."))
 
         return cnp

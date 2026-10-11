@@ -320,7 +320,8 @@ class SecureUserRegistrationService:
         customer_type: str
         vat_number: VATString | None
         cnp: str | None
-        registration_number: CUIString | None
+        cui: CUIString | None
+        registration_number: str | None  # Trade registry (ONRC), e.g. J40/1234/2020
         billing_address: str | None
         billing_city: str | None
         billing_postal_code: str | None
@@ -350,7 +351,7 @@ class SecureUserRegistrationService:
 
     @classmethod
     @secure_user_registration()
-    def submit_pending_registration(
+    def submit_pending_registration(  # noqa: PLR0913  # The CNP travels apart from customer_data
         cls,
         user_data: dict[str, Any],
         customer_data: dict[str, Any],
@@ -358,6 +359,7 @@ class SecureUserRegistrationService:
         user_agent: str | None = None,
         *,
         language: str = "en",
+        cnp: str = "",
         **kwargs: Any,
     ) -> Result[PendingRegistration, str]:
         """Store a registration for its mailbox holder to confirm, and queue the mail.
@@ -366,10 +368,16 @@ class SecureUserRegistrationService:
         VAT number, so neither the answer nor its timing says whether they exist. The decorator
         charges the per-IP registration budget and validates the user data. No password is
         taken: whoever confirms the link chooses it (apps.users.pending_registration).
+
+        A CNP is stored encrypted in its own column, never in customer_data, including one a caller
+        left inside customer_data.
         """
         from django_q.tasks import async_task  # noqa: PLC0415  # Deferred: keeps the queue out of import time
 
-        row = PendingRegistration.objects.create(
+        customer_data = dict(customer_data)
+        cnp = cnp or str(customer_data.pop("cnp", "") or "")
+        customer_data.pop("cnp", None)
+        row = PendingRegistration(
             email=str(user_data["email"]).strip().lower(),
             user_data={
                 "first_name": user_data["first_name"],
@@ -379,6 +387,8 @@ class SecureUserRegistrationService:
             customer_data=customer_data,
             language=language,
         )
+        row.set_cnp(cnp)
+        row.save(force_insert=True)
         registration_id = str(row.pk)
         # ack_failure: a failed delivery is never redelivered hours later (see the task).
         transaction.on_commit(
@@ -442,28 +452,31 @@ class SecureUserRegistrationService:
                 )
 
                 # Step 4: Create tax profile with Romanian compliance
-                vat_number = customer_data.get("vat_number", "").strip()
+                vat_number = (customer_data.get("vat_number", "") or "").strip()
                 cnp = (customer_data.get("cnp", "") or "").strip()
-                registration_number = customer_data.get("registration_number", "").strip()
+                cui = (customer_data.get("cui", "") or "").strip()
+                registration_number = (customer_data.get("registration_number", "") or "").strip()
 
-                if vat_number or registration_number or cnp:
+                if vat_number or cui or registration_number or cnp:
                     CustomerTaxProfile.objects.update_or_create(
                         customer=customer,
                         defaults={
                             "vat_number": vat_number,  # RO prefix validated
-                            "cnp": cnp,
-                            "registration_number": registration_number,  # CUI format validated
+                            "cnp": cnp,  # Checksum validated, Romanian individuals only
+                            "cui": cui,  # Digits, check digit validated
+                            "registration_number": registration_number,  # Trade registry number
                             "is_vat_payer": bool(vat_number),
                         },
                     )
 
-                    # Log tax profile creation for Romanian compliance
+                    # Log tax profile creation for Romanian compliance (never the values)
                     log_security_event(
                         "tax_profile_created",
                         {
                             "customer_id": customer.id,
                             "has_vat": bool(vat_number),
-                            "has_cui": bool(registration_number),
+                            "has_cui": bool(cui),
+                            "has_registration_number": bool(registration_number),
                             "has_cnp": bool(cnp),
                         },
                         request_ip,
