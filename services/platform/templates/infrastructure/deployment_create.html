@@ -29,6 +29,7 @@
                     <div class="grid grid-cols-3 gap-4">
                         {% for code, label in form.environment.field.choices %}
                         <label class="relative cursor-pointer">
+                            {# tmpl-allow TMPL001: x-model="environment" binding; components accept no executable attributes (apps/ui/attributes.py) #}
                             <input type="radio" name="environment" value="{{ code }}" x-model="environment"
                                    class="sr-only peer" {% if code == 'prd' %}checked{% endif %}>
                             <div class="p-4 bg-slate-700 rounded-lg border-2 border-transparent peer-checked:border-blue-500 hover:bg-slate-600 transition-all">
@@ -45,6 +46,7 @@
                     <div class="grid grid-cols-3 gap-4">
                         {% for code, label in form.node_type.field.choices %}
                         <label class="relative cursor-pointer {% if code != 'sha' %}opacity-50{% endif %}">
+                            {# tmpl-allow TMPL001: x-model="nodeType" binding; components accept no executable attributes (apps/ui/attributes.py) #}
                             <input type="radio" name="node_type" value="{{ code }}" x-model="nodeType"
                                    class="sr-only peer" {% if code == 'sha' %}checked{% endif %} {% if code != 'sha' %}disabled{% endif %}>
                             <div class="p-4 bg-slate-700 rounded-lg border-2 border-transparent peer-checked:border-blue-500 {% if code == 'sha' %}hover:bg-slate-600{% endif %} transition-all">
@@ -67,6 +69,7 @@
                 <div class="grid grid-cols-2 gap-6">
                     <div>
                         <label for="id_provider" class="block text-sm font-medium text-slate-300 mb-2">{% trans "Cloud Provider" %}</label>
+                        {# tmpl-allow TMPL003: x-model="provider" and @change="updateRegions()" bindings; components accept no executable attributes (apps/ui/attributes.py) #}
                         <select id="id_provider" name="provider" x-model="provider" @change="updateRegions()"
                                 class="w-full bg-slate-700 border-slate-600 rounded-lg text-white px-4 py-2">
                             <option value="">{% trans "Select Provider" %}</option>
@@ -77,6 +80,7 @@
                     </div>
                     <div>
                         <label for="id_region" class="block text-sm font-medium text-slate-300 mb-2">{% trans "Region" %}</label>
+                        {# tmpl-allow TMPL003: x-model="region" and @change="updateHostname()" bindings, options built by x-for; components accept no executable attributes (apps/ui/attributes.py) #}
                         <select id="id_region" name="region" x-model="region" @change="updateHostname()"
                                 class="w-full bg-slate-700 border-slate-600 rounded-lg text-white px-4 py-2">
                             <option value="">{% trans "Select Region" %}</option>
@@ -95,6 +99,7 @@
                 <div class="grid grid-cols-3 gap-4">
                     <template x-for="size in filteredSizes" :key="size.id">
                         <label class="relative cursor-pointer">
+                            {# tmpl-allow TMPL001: x-model="nodeSize" and :value/:aria-label bindings; components accept no executable attributes (apps/ui/attributes.py) #}
                             <input type="radio" name="node_size" aria-label="{% trans 'Node size' %}" :aria-label="size.display_name" :value="size.id" x-model="nodeSize" class="sr-only peer">
                             <div class="p-4 bg-slate-700 rounded-lg border-2 border-transparent peer-checked:border-blue-500 hover:bg-slate-600 transition-all">
                                 <div class="text-white font-medium" x-text="size.name"></div>
@@ -120,6 +125,7 @@
                 <div class="grid grid-cols-2 gap-6 mb-6">
                     <div>
                         <label for="id_panel_type" class="block text-sm font-medium text-slate-300 mb-2">{% trans "Control Panel" %}</label>
+                        {# tmpl-allow TMPL003: options rendered inline from form.panel_type.field.queryset; select components take a view-built options list #}
                         <select id="id_panel_type" name="panel_type" class="w-full bg-slate-700 border-slate-600 rounded-lg text-white px-4 py-2">
                             {% for panel in form.panel_type.field.queryset %}
                             <option value="{{ panel.id }}" {% if panel.panel_type == 'virtualmin' %}selected{% endif %}>
@@ -135,13 +141,8 @@
                     </div>
                 </div>
 
-                <div class="flex items-center">
-                    <input type="checkbox" name="backup_enabled" id="backup_enabled" checked
-                           class="rounded bg-slate-700 border-slate-600 text-blue-500 focus:ring-blue-500">
-                    <label for="backup_enabled" class="ml-2 text-slate-300">
-                        {% trans "Enable automatic backups (local storage, 7-day retention)" %}
-                    </label>
-                </div>
+                {% trans "Enable automatic backups (local storage, 7-day retention)" as backup_enabled_label %}
+                {% checkbox_field "backup_enabled" html_id="backup_enabled" checked=True label=backup_enabled_label %}
             </div>
 
             <div>
@@ -170,6 +171,7 @@
             <!-- Actions -->
             <div class="flex justify-end space-x-4">
                 {% trans "Cancel" as cancel_label %}{% button cancel_label variant="outline" href=cancel_url %}
+                {# tmpl-allow TMPL002: :disabled="!canSubmit" binding; components accept no executable attributes (apps/ui/attributes.py) #}
                 <button type="submit" :disabled="!canSubmit"
                         class="px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-colors">
                     {% trans "Start Deployment" %}

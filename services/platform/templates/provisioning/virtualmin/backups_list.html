@@ -9,6 +9,7 @@
   <form method="get" class="space-y-4 rounded-lg border border-slate-700 bg-slate-800 p-6">
     <div>
       <label for="backup-domain" class="text-slate-100">{% trans "Domain" %}</label>
+      {# tmpl-allow TMPL003: options rendered inline from filters.domains; select components take a view-built options list #}
       <select id="backup-domain" name="domain" class="bg-slate-900 text-slate-100">
         <option value="">{% trans "All domains" %}</option>
         {% for domain in filters.domains %}
@@ -18,6 +19,7 @@
     </div>
     <div>
       <label for="backup-type" class="text-slate-100">{% trans "Backup type" %}</label>
+      {# tmpl-allow TMPL003: options rendered inline from filters.backup_types; select components take a view-built options list #}
       <select id="backup-type" name="type" class="bg-slate-900 text-slate-100">
         <option value="">{% trans "All types" %}</option>
         {% for backup_type, backup_label in filters.backup_types %}
@@ -28,8 +30,8 @@
       </select>
     </div>
     <div>
-      <label for="backup-age" class="text-slate-100">{% trans "Maximum age in days" %}</label>
-      <input id="backup-age" name="max_age" type="number" min="1" value="{{ filters.max_age_days }}" required>
+      {% trans "Maximum age in days" as max_age_label %}
+      {% input_field "max_age" input_type="number" html_id="backup-age" label=max_age_label min=1 value=filters.max_age_days required=True %}
     </div>
     {% trans "Filter backups" as filter_label %}
     {% button filter_label type="submit" variant="primary" %}

@@ -35,6 +35,7 @@
         </div>
         <div class="mt-4 sm:mt-0 flex items-center space-x-3">
             {% if account.is_active %}
+                {# tmpl-allow TMPL002: hx-headers embeds the CSRF token in inline JSON; the button tag's hx_headers needs a prebuilt string the template can only compose by chaining add filters onto the lazy csrf_token #}
                 <button class="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-500 transition-colors"
                         hx-post="{{ suspend_url }}"
                         hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
@@ -44,6 +45,7 @@
                     {% trans "Suspend" %}
                 </button>
             {% else %}
+                {# tmpl-allow TMPL002: hx-headers embeds the CSRF token in inline JSON; the button tag's hx_headers needs a prebuilt string the template can only compose by chaining add filters onto the lazy csrf_token #}
                 <button class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-500 transition-colors"
                         hx-post="{{ activate_url }}"
                         hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
@@ -131,21 +133,25 @@
         <!-- Tab Navigation -->
         <div class="border-b border-slate-700">
             <nav class="flex space-x-8 px-6" aria-label="Tabs">
+                {# tmpl-allow TMPL002: @click and :class bindings drive the Alpine tab state; components accept no executable attributes (apps/ui/attributes.py) #}
                 <button @click="activeTab = 'overview'"
                         :class="{ 'border-blue-500 text-blue-400': activeTab === 'overview', 'border-transparent text-slate-400 hover:text-slate-300 hover:border-slate-300': activeTab !== 'overview' }"
                         class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors">
                     {% trans "Overview" %}
                 </button>
+                {# tmpl-allow TMPL002: @click and :class bindings drive the Alpine tab state; components accept no executable attributes (apps/ui/attributes.py) #}
                 <button @click="activeTab = 'backups'"
                         :class="{ 'border-blue-500 text-blue-400': activeTab === 'backups', 'border-transparent text-slate-400 hover:text-slate-300 hover:border-slate-300': activeTab !== 'backups' }"
                         class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors">
                     {% trans "Backups" %}
                 </button>
+                {# tmpl-allow TMPL002: @click and :class bindings drive the Alpine tab state; components accept no executable attributes (apps/ui/attributes.py) #}
                 <button @click="activeTab = 'logs'"
                         :class="{ 'border-blue-500 text-blue-400': activeTab === 'logs', 'border-transparent text-slate-400 hover:text-slate-300 hover:border-slate-300': activeTab !== 'logs' }"
                         class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors">
                     {% icon "settings" %} {% trans "Jobs" %}
                 </button>
+                {# tmpl-allow TMPL002: @click and :class bindings drive the Alpine tab state; components accept no executable attributes (apps/ui/attributes.py) #}
                 <button @click="activeTab = 'settings'"
                         :class="{ 'border-blue-500 text-blue-400': activeTab === 'settings', 'border-transparent text-slate-400 hover:text-slate-300 hover:border-slate-300': activeTab !== 'settings' }"
                         class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors">
@@ -209,6 +215,7 @@
                             {% endif %}
 
                             <!-- Protection Toggle -->
+                            {# tmpl-allow TMPL002: seven data-* attributes carry per-account values (URL, CSRF token, domain, translated confirm texts); the button tag's attrs takes one literal string the template can't build #}
                             <button class="w-full px-4 py-2 text-sm font-medium rounded-lg transition-colors {% if account.protected_from_deletion %}text-orange-400 bg-orange-500/10 border border-orange-500/20 hover:bg-orange-500/20{% else %}text-blue-400 bg-blue-500/10 border border-blue-500/20 hover:bg-blue-500/20{% endif %}"
                                     data-protection-url="{{ toggle_protection_url }}"
                                     data-csrf="{{ csrf_token }}"
@@ -227,6 +234,7 @@
 
                             <!-- Delete Account -->
                             {% if account.can_be_deleted %}
+                            {# tmpl-allow TMPL002: data-delete-url, data-domain and translated data-confirm-* attributes carry per-account values; the button tag's attrs takes one literal string the template can't build #}
                             <button class="w-full px-4 py-2 text-sm font-medium text-red-400 bg-red-500/10 border border-red-500/20 hover:bg-red-500/20 rounded-lg transition-colors"
                                     data-delete-url="{{ delete_url }}"
                                     data-domain="{{ account.domain }}"
@@ -237,6 +245,7 @@
                                 {% icon "x" %} {% trans "Delete Account" %}
                             </button>
                             {% else %}
+                            {# tmpl-allow TMPL002: holds a second (Protected) span beside its label; the button tag renders one text and one icon #}
                             <button class="w-full px-4 py-2 text-sm font-medium text-slate-500 bg-slate-500/10 border border-slate-500/20 rounded-lg cursor-not-allowed"
                                     disabled>
                                 {% icon "x" %} {% trans "Delete Account" %} <span class="text-xs">({% trans "Protected" %})</span>
@@ -420,6 +429,7 @@
                                 <label for="account-contact-email" class="block text-sm font-medium text-slate-300 mb-1">
                                     {% trans "Contact Email" %}
                                 </label>
+                                {# tmpl-allow TMPL001: components/input.html loads the static library, which the minimal Engine in tests/provisioning/test_account_detail_confirmations.py does not register #}
                                 <input id="account-contact-email" type="email" value="{{ account.contact_email|default:'' }}"
                                        class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
                             </div>
@@ -428,6 +438,7 @@
                                 <label for="account-php-version" class="block text-sm font-medium text-slate-300 mb-1">
                                     {% trans "PHP Version" %}
                                 </label>
+                                {# tmpl-allow TMPL003: literal PHP version options rendered inline; select components take a view-built options list #}
                                 <select id="account-php-version" class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
                                     <option>PHP 8.1</option>
                                     <option>PHP 8.2</option>
@@ -444,6 +455,7 @@
                                 <label for="account-disk-quota" class="block text-sm font-medium text-slate-300 mb-1">
                                     {% trans "Disk Quota" %} (GB)
                                 </label>
+                                {# tmpl-allow TMPL001: components/input.html loads the static library, which the minimal Engine in tests/provisioning/test_account_detail_confirmations.py does not register #}
                                 <input id="account-disk-quota" type="number" value="{{ account.disk_quota_gb|default:'' }}"
                                        class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
                             </div>
@@ -452,6 +464,7 @@
                                 <label for="account-bandwidth-quota" class="block text-sm font-medium text-slate-300 mb-1">
                                     {% trans "Bandwidth Quota" %} (GB)
                                 </label>
+                                {# tmpl-allow TMPL001: components/input.html loads the static library, which the minimal Engine in tests/provisioning/test_account_detail_confirmations.py does not register #}
                                 <input id="account-bandwidth-quota" type="number" value="{% if account.bandwidth_quota_mb == -1 %}-1{% elif account.bandwidth_quota_mb %}{{ account.bandwidth_quota_mb|floatformat:0 }}{% endif %}"
                                        placeholder="{% trans "Use -1 for unlimited" %}"
                                        class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500">

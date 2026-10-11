@@ -1,4 +1,5 @@
 {% load i18n %}
+{% load ui_components %}
 {% if migration %}
   <section class="space-y-2 rounded-lg border border-slate-700 bg-slate-800 p-4">
     <h2 class="font-semibold text-slate-100">{% trans "Migration" %}</h2>
@@ -11,8 +12,9 @@
         {% csrf_token %}
         <input type="hidden" name="migration_id" value="{{ migration.pk }}">
 
-        <input type="text" aria-label="{% trans 'Migration resolution note' %}" name="note" maxlength="200" placeholder="{% trans 'What was repaired manually?' %}" class="w-full rounded border border-slate-600 bg-slate-900 p-2 text-slate-100">
-        <button type="submit" class="rounded bg-amber-600 px-3 py-2 text-white">{% trans "Mark resolved" %}</button>
+        {% trans 'Migration resolution note' as note_aria_label %}{% trans 'What was repaired manually?' as note_placeholder %}
+        {% input_field "note" html_id="migration-resolution-note" aria_label=note_aria_label maxlength=200 placeholder=note_placeholder %}
+        {% trans "Mark resolved" as mark_resolved_label %}{% button mark_resolved_label type="submit" variant="warning" %}
       </form>
     {% elif migration.status == "completed" %}
       <p>{% trans "Update routing/DNS manually and validate the target. The disabled source copy is retained; remove it manually after validation." %}</p>

@@ -78,9 +78,7 @@
                 <a href="{{ cancel_url }}" class="px-6 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg transition-colors">
                     {% trans "Cancel" %}
                 </a>
-                <button type="submit" class="px-6 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors">
-                    {% trans "Destroy Node" %}
-                </button>
+                {% trans "Destroy Node" as destroy_label %}{% button destroy_label type="submit" variant="danger" %}
             </div>
         </form>
     </div>

@@ -150,6 +150,7 @@
               {% url 'provisioning:service_edit' service.pk as edit_url %}
               {% trans "Edit" as edit_label %}{% button edit_label variant="secondary" href=edit_url %}
               {% if service.status == 'active' %}
+              {# tmpl-allow TMPL002: icon-only button whose data-confirm joins a translated prompt and the service name; the button tag always renders a text label beside its icon #}
               <button data-action="confirm-navigate"
                       data-confirm="{% trans 'Suspend service?' %} {{ service.service_name }}"
                       data-href="{% url 'provisioning:service_suspend' service.pk %}"
@@ -157,6 +158,7 @@
                 {% icon "clock" %}
               </button>
               {% elif service.status == 'suspended' %}
+              {# tmpl-allow TMPL002: icon-only button whose data-confirm joins a translated prompt and the service name; the button tag always renders a text label beside its icon #}
               <button data-action="confirm-navigate"
                       data-confirm="{% trans 'Reactivate service?' %} {{ service.service_name }}"
                       data-href="{% url 'provisioning:service_activate' service.pk %}"
@@ -226,6 +228,7 @@
           {% url 'provisioning:service_edit' service.pk as edit_url_m %}
           {% trans "Edit" as edit_label_m %}{% button edit_label_m variant="secondary" href=edit_url_m %}
           {% if service.status == 'active' %}
+          {# tmpl-allow TMPL002: icon-only button whose data-confirm joins a translated prompt and the service name; the button tag always renders a text label beside its icon #}
           <button data-action="confirm-navigate"
                   data-confirm="{% trans 'Suspend service?' %} {{ service.service_name }}"
                   data-href="{% url 'provisioning:service_suspend' service.pk %}"
@@ -233,6 +236,7 @@
             {% icon "clock" %}
           </button>
           {% elif service.status == 'suspended' %}
+          {# tmpl-allow TMPL002: icon-only button whose data-confirm joins a translated prompt and the service name; the button tag always renders a text label beside its icon #}
           <button data-action="confirm-navigate"
                   data-confirm="{% trans 'Reactivate service?' %} {{ service.service_name }}"
                   data-href="{% url 'provisioning:service_activate' service.pk %}"

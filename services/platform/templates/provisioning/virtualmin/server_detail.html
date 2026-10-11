@@ -219,14 +219,17 @@
     <div class="bg-slate-800 rounded-lg border border-slate-700">
         <div class="px-6 py-4 border-b border-slate-700">
             <nav class="flex space-x-8">
+                {# tmpl-allow TMPL002: tab button whose classes showTabAction swaps by selector, with a live count in its label; the button tag's variant classes would break the tab styling #}
                 <button class="text-blue-400 border-b-2 border-blue-400 pb-2 text-sm font-medium"
                         data-action="invoke" data-invoke="showTabAction" data-tab-name="live-domains">
                     {% icon "globe" %} {% trans "Live Domains" %} ({{ actual_domains|length }})
                 </button>
+                {# tmpl-allow TMPL002: tab button whose classes showTabAction swaps by selector, with a live count in its label; the button tag's variant classes would break the tab styling #}
                 <button class="text-slate-400 hover:text-slate-100 pb-2 text-sm font-medium"
                         data-action="invoke" data-invoke="showTabAction" data-tab-name="accounts">
                     {% icon "chart" %} {% trans "PRAHO Accounts" %} ({{ recent_accounts|length }})
                 </button>
+                {# tmpl-allow TMPL002: tab button whose classes showTabAction swaps by selector, with a live count in its label; the button tag's variant classes would break the tab styling #}
                 <button class="text-slate-400 hover:text-slate-100 pb-2 text-sm font-medium"
                         data-action="invoke" data-invoke="showTabAction" data-tab-name="jobs">
                     {% icon "settings" %} {% trans "Recent Jobs" %} ({{ recent_jobs|length }})

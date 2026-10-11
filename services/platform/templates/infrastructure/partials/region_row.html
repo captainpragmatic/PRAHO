@@ -26,9 +26,11 @@
               hx-target="#region-{{ region.id }}"
               hx-swap="outerHTML">
             {% csrf_token %}
-            <button type="submit" class="text-sm {% if region.is_active %}text-yellow-400 hover:text-yellow-300{% else %}text-green-400 hover:text-green-300{% endif %}">
-                {% if region.is_active %}{% trans "Disable" %}{% else %}{% trans "Enable" %}{% endif %}
-            </button>
+            {% if region.is_active %}
+            {% trans "Disable" as toggle_label %}{% button toggle_label type="submit" variant="warning" size="sm" %}
+            {% else %}
+            {% trans "Enable" as toggle_label %}{% button toggle_label type="submit" variant="success" size="sm" %}
+            {% endif %}
         </form>
     </td>
 </tr>

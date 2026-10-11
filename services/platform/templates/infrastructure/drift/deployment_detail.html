@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% load i18n %}
+{% load ui_components %}
 
 {% block title %}{% trans "Drift History" %} - {{ deployment.hostname }}{% endblock %}
 
@@ -14,9 +15,7 @@
             <div class="flex space-x-3">
                 <form method="post" action="{% url 'infrastructure:drift_scan_trigger' deployment.pk %}">
                     {% csrf_token %}
-                    <button type="submit" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors">
-                        {% trans "Run Scan" %}
-                    </button>
+                    {% trans "Run Scan" as run_scan_label %}{% button run_scan_label type="submit" variant="primary" %}
                 </form>
                 <a href="{% url 'infrastructure:drift_dashboard' %}" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white font-medium rounded-lg transition-colors">
                     {% trans "Back" %}
@@ -64,9 +63,7 @@
                                 {% if report.severity == 'low' or report.severity == 'moderate' %}
                                 {% trans "Dismiss this low-severity drift?" as confirm_dismiss %}<form method="post" action="{% url 'infrastructure:drift_report_dismiss' report.pk %}" class="inline" data-confirm="{{ confirm_dismiss }}">
                                     {% csrf_token %}
-                                    <button type="submit" class="ml-2 px-2 py-0.5 text-xs bg-slate-600 hover:bg-slate-500 text-white rounded transition-colors">
-                                        {% trans "Dismiss" %}
-                                    </button>
+                                    {% trans "Dismiss" as dismiss_label %}{% button dismiss_label type="submit" variant="secondary" size="xs" class_="ml-2" %}
                                 </form>
                                 {% endif %}
                                 {% endif %}

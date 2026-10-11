@@ -56,7 +56,9 @@
                 <div class="space-y-3">
                     {% for size in available_sizes %}
                     <label class="flex items-center p-4 bg-slate-700/50 rounded-lg hover:bg-slate-700 cursor-pointer transition-colors border border-slate-600 hover:border-cyan-500">
-                        <input type="radio" name="new_size" value="{{ size.id }}" class="h-4 w-4 text-cyan-500 focus:ring-cyan-500 border-slate-500 bg-slate-800">
+                        {% with size_id=size.id|stringformat:"s" size_label=size.display_name|default:size.name %}
+                        {% input_field "new_size" input_type="radio" value=size.id html_id="new-size-"|add:size_id aria_label=size_label css_class="h-4 w-4 text-cyan-500 focus:ring-cyan-500 border-slate-500 bg-slate-800" %}
+                        {% endwith %}
                         <div class="ml-4 flex-grow">
                             <div class="flex justify-between items-start">
                                 <div>
@@ -85,9 +87,7 @@
                     {% trans "Cancel" %}
                 </a>
                 {% if available_sizes %}
-                <button type="submit" class="px-6 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg transition-colors">
-                    {% trans "Upgrade Node" %}
-                </button>
+                {% trans "Upgrade Node" as upgrade_label %}{% button upgrade_label type="submit" variant="info" %}
                 {% endif %}
             </div>
         </form>

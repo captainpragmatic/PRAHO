@@ -21,6 +21,7 @@
             </p>
         </div>
         <div class="mt-4 sm:mt-0 flex items-center space-x-3">
+            {# tmpl-allow TMPL002: hx-headers embeds the CSRF token in inline JSON; the button tag's hx_headers needs a prebuilt string the template can only compose by chaining add filters onto the lazy csrf_token #}
             <button class="ui-btn inline-flex items-center justify-center font-medium rounded-lg transition-all duration-200 focus:outline-none focus:ring-4 bg-slate-600 text-white hover:bg-slate-700 focus:ring-slate-300 border border-slate-600 px-4 py-2 text-sm"
                     hx-post="{% url 'provisioning:virtualmin_accounts_sync' %}" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' hx-swap="innerHTML" hx-target="#accounts-container" hx-indicator="#sync-indicator" hx-confirm="{% trans 'Sync accounts from all active Virtualmin servers? This may take a few moments.' %}">
                 <span class="btn-label htmx-indicator-text">{% trans "Refresh Accounts" %}</span>
@@ -46,11 +47,11 @@
     <div class="bg-slate-800 rounded-lg border border-slate-700 p-4">
         <form method="get" class="flex flex-col sm:flex-row gap-4" hx-get="{{ request.path }}" hx-target="#accounts-container" hx-trigger="submit, change delay:500ms">
             <div class="flex-1">
-                <input type="search" aria-label="{% trans 'Search accounts' %}" name="search" value="{{ request.GET.search }}"
-                       placeholder="{% trans 'Search accounts by domain...' %}"
-                       class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                {% trans 'Search accounts' as search_aria_label %}{% trans 'Search accounts by domain...' as search_placeholder %}
+                {% input_field "search" input_type="search" html_id="accounts-search" aria_label=search_aria_label value=request.GET.search placeholder=search_placeholder %}
             </div>
             <div class="sm:w-48">
+                {# tmpl-allow TMPL003: literal status options rendered inline with request.GET selection; select components take a view-built options list #}
                 <select aria-label="{% trans 'Account status' %}" name="status" class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
                     <option value="">{% trans "All Status" %}</option>
                     <option value="active" {% if request.GET.status == "active" %}selected{% endif %}>{% trans "Active" %}</option>
@@ -59,6 +60,7 @@
                 </select>
             </div>
             <div class="sm:w-48">
+                {# tmpl-allow TMPL003: options rendered inline from available_plans; select components take a view-built options list #}
                 <select aria-label="{% trans 'Hosting plan' %}" name="plan" class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
                     <option value="">{% trans "All Plans" %}</option>
                     {% for plan in available_plans %}

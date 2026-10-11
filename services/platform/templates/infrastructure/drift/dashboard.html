@@ -60,9 +60,7 @@
                         {% endif %}
                         <form method="post" action="{% url 'infrastructure:drift_scan_trigger' item.deployment.pk %}">
                             {% csrf_token %}
-                            <button type="submit" class="text-xs px-3 py-1 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded transition-colors">
-                                {% trans "Scan Now" %}
-                            </button>
+                            {% trans "Scan Now" as scan_now_label %}{% button scan_now_label type="submit" variant="secondary" size="xs" %}
                         </form>
                     </div>
                 </div>

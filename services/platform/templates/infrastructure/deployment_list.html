@@ -23,6 +23,7 @@
             <form method="get" class="grid grid-cols-1 md:grid-cols-6 gap-4">
                 <div>
                     <label for="id_environment" class="block text-sm font-medium text-slate-300 mb-1">{% trans "Environment" %}</label>
+                    {# tmpl-allow TMPL003: options rendered inline from filters.environment_choices; select components take a view-built options list #}
                     <select id="id_environment" name="environment" class="w-full bg-slate-700 border-slate-600 rounded-lg text-white">
                         <option value="">{% trans "All" %}</option>
                         {% for code, label in filters.environment_choices %}
@@ -32,6 +33,7 @@
                 </div>
                 <div>
                     <label for="id_node_type" class="block text-sm font-medium text-slate-300 mb-1">{% trans "Type" %}</label>
+                    {# tmpl-allow TMPL003: options rendered inline from filters.node_type_choices; select components take a view-built options list #}
                     <select id="id_node_type" name="node_type" class="w-full bg-slate-700 border-slate-600 rounded-lg text-white">
                         <option value="">{% trans "All" %}</option>
                         {% for code, label in filters.node_type_choices %}
@@ -41,6 +43,7 @@
                 </div>
                 <div>
                     <label for="id_provider" class="block text-sm font-medium text-slate-300 mb-1">{% trans "Provider" %}</label>
+                    {# tmpl-allow TMPL003: options rendered inline from filters.providers; select components take a view-built options list #}
                     <select id="id_provider" name="provider" class="w-full bg-slate-700 border-slate-600 rounded-lg text-white">
                         <option value="">{% trans "All" %}</option>
                         {% for provider in filters.providers %}
@@ -50,6 +53,7 @@
                 </div>
                 <div>
                     <label for="id_status" class="block text-sm font-medium text-slate-300 mb-1">{% trans "Status" %}</label>
+                    {# tmpl-allow TMPL003: options rendered inline from filters.status_choices; select components take a view-built options list #}
                     <select id="id_status" name="status" class="w-full bg-slate-700 border-slate-600 rounded-lg text-white">
                         <option value="">{% trans "All" %}</option>
                         {% for code, label in filters.status_choices %}
@@ -58,10 +62,8 @@
                     </select>
                 </div>
                 <div>
-                    <label for="id_search" class="block text-sm font-medium text-slate-300 mb-1">{% trans "Search" %}</label>
-                    <input type="text" id="id_search" name="search" value="{{ filters.search }}"
-                           placeholder="{% trans 'Hostname, IP...' %}"
-                           class="w-full bg-slate-700 border-slate-600 rounded-lg text-white px-4 py-2">
+                    {% trans "Search" as search_label %}{% trans "Hostname, IP..." as search_placeholder %}
+                    {% input_field "search" label=search_label html_id="id_search" value=filters.search placeholder=search_placeholder %}
                 </div>
                 <div class="flex items-end">
                     {% trans "Filter" as filter_label %}{% button filter_label variant="secondary" type="submit" class_="w-full" %}
