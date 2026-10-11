@@ -177,6 +177,8 @@ jobs:
           tests.api.test_api_token_concurrency.APITokenPostgresConcurrencyTests \
           tests.domains.test_durable_operations \
           tests.customers.test_payment_method_encryption_trigger \
+          tests.customers.test_tax_profile_cnp_encryption \
+          tests.billing.test_cnp_encryption \
           tests.common.test_migration_db_objects \
           tests.users.test_lockout_counter_concurrency \
           tests.users.test_staff_login_second_factor_concurrency \

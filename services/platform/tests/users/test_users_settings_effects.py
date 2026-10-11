@@ -1,4 +1,8 @@
-"""Registration limits are live, explicit overrides win, and counters survive cache clears."""
+"""Registration limits are live, explicit overrides win, and counters survive cache clears.
+
+The registration entry point is `submit_pending_registration`: it carries the limit, and a refused
+submission stores no pending registration.
+"""
 
 from __future__ import annotations
 
@@ -16,10 +20,9 @@ from django.utils import timezone
 from apps.common import counters
 from apps.common.security_decorators import secure_user_registration
 from apps.common.types import Ok, Result
-from apps.customers.models import Customer
 from apps.settings.models import SystemSetting
 from apps.settings.services import SettingsService
-from apps.users.models import User
+from apps.users.pending_registration import PendingRegistration
 from apps.users.services import SecureUserRegistrationService
 
 REGISTRATION_KEY = "security.registration_rate_limit_per_ip"
@@ -47,33 +50,32 @@ class UsersSettingsEffectTests(TestCase):
             result = SettingsService.update_setting(REGISTRATION_KEY, limit)
         self.assertTrue(result.is_ok(), result)
 
-    def register(self, email: str, ip: str) -> Result[tuple[User, Customer], str]:
+    def register(self, email: str, ip: str) -> Result[PendingRegistration, str]:
         return cast(
-            "Result[tuple[User, Customer], str]",
-            SecureUserRegistrationService.register_new_customer_owner(
+            "Result[PendingRegistration, str]",
+            SecureUserRegistrationService.submit_pending_registration(
                 user_data=user_data(email),
                 customer_data={"company_name": email.split("@", 1)[0], "customer_type": "individual"},
                 request_ip=ip,
             ),
         )
 
-    def test_existing_registration_wrapper_enforces_runtime_limit_and_explicit_override_wins(self) -> None:
+    def test_registration_enforces_runtime_limit_and_explicit_override_wins(self) -> None:
         ip = "192.0.2.81"
         self.set_limit(1)
         self.assertTrue(self.register("first@example.test", ip).is_ok())
         second = self.register("second@example.test", ip)
         self.assertTrue(second.is_err())
-        self.assertFalse(User.objects.filter(email="second@example.test").exists())
-        self.assertFalse(Customer.objects.filter(primary_email="second@example.test").exists())
+        self.assertFalse(PendingRegistration.objects.filter(email="second@example.test").exists())
         self.assertEqual(counters.peek(f"rate_limit:registration:{ip}"), 2)
 
         self.set_limit(3)
         self.assertTrue(self.register("third@example.test", ip).is_ok())
         self.assertTrue(self.register("fourth@example.test", ip).is_err())
-        self.assertFalse(User.objects.filter(email="fourth@example.test").exists())
+        self.assertFalse(PendingRegistration.objects.filter(email="fourth@example.test").exists())
         self.set_limit(0)
         self.assertTrue(self.register("zero@example.test", "192.0.2.82").is_err())
-        self.assertFalse(User.objects.filter(email="zero@example.test").exists())
+        self.assertFalse(PendingRegistration.objects.filter(email="zero@example.test").exists())
 
         def registration(*, user_data: dict[str, object], request_ip: str) -> Result[str, str]:
             return Ok(str(user_data["email"]))
@@ -102,7 +104,7 @@ class UsersSettingsEffectTests(TestCase):
         cache.clear()
         blocked = self.register("cached-second@example.test", ip)
         self.assertTrue(blocked.is_err())
-        self.assertFalse(User.objects.filter(email="cached-second@example.test").exists())
+        self.assertFalse(PendingRegistration.objects.filter(email="cached-second@example.test").exists())
         counter = counters.Counter.objects.get(key=key)
         expires_at = counter.expires_at
         self.assertEqual(counter.count, 2)
@@ -114,13 +116,12 @@ class UsersSettingsEffectTests(TestCase):
             self.assertTrue(self.register("after-expiry@example.test", ip).is_ok())
             self.assertEqual(counters.peek(key), 1)
 
-    def test_unavailable_counter_store_refuses_registration_without_creating_a_user(self) -> None:
+    def test_unavailable_counter_store_refuses_registration_without_storing_it(self) -> None:
         self.set_limit(1)
         with patch("apps.common.counters.increment", side_effect=OperationalError("Counter store unavailable")):
             result = self.register("unavailable@example.test", "192.0.2.85")
         self.assertTrue(result.is_err())
-        self.assertFalse(User.objects.filter(email="unavailable@example.test").exists())
-        self.assertFalse(Customer.objects.filter(primary_email="unavailable@example.test").exists())
+        self.assertFalse(PendingRegistration.objects.filter(email="unavailable@example.test").exists())
 
 
 @override_settings(CACHES=LOCMEM, DISABLE_AUDIT_SIGNALS=True)

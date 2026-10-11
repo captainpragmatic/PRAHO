@@ -84,6 +84,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **The bug.** `POST /api/users/token/` checked the email, the password and the second factor, but not whether the account was staff, so any customer could mint a token. ADR-0031 and the settings page treat tokens as staff automation. A customer's token reached only `token/me/` and `token/revoke/`, because every business route requires the portal's signature, but the gap would have widened the day a route accepted a bare token.
   - **Now.** A customer gets the wrong-password answer, before the second factor, so the refusal neither spends a code nor counts toward the lockout. The check runs again on the locked account row, so a demotion during the request is not missed. Every refusal that follows a correct password (a customer, a locked account, or an account changed during the request) writes a failed-login audit event, as a wrong password does, with the reason in its details; before, it left no trace.
   - **Removed `GET /api/users/token/verify/`.** It answered with the first member of the signed customer, not the caller, reporting another person's email and staff flag. Nothing called it, and `token/me/` describes the caller's token.
+- **The CNP is encrypted at rest.** A customer's CNP was stored in plain text on the tax profile and on every invoice and proforma.
+  - **Now.** All three are encrypted with AES-256-GCM, each value bound to its own row, as payment bank details already were (ADR-0040). Nothing reads differently: e-Factura, domain registration and the invoice snapshots get the same value as before.
+  - **Staff list.** The customer list showed the first 8 digits of each CNP, which encode the person's birth date, sex and county. It now says "CNP on file".
+  - **GDPR erasure** now clears the CNP from the tax profiles of the individual customers the user owns, and records that in the audit log without the number. Issued invoices keep their CNP for the 10-year retention period. An anonymisation that fails part way is now undone entirely, instead of leaving the user anonymised and the rest unchanged.
+  - **Credit notes** now carry the original invoice's CNP, trade registry number and second address line. A storno for an individual had the placeholder CNP.
+  - **Not covered.** The e-Factura XML sent to ANAF is stored as issued, with the CNP readable.
+  - **Deploy.** Development databases must be rebuilt (`make migrate` on a fresh database), as ADR-0052 requires for schema changes.
 - **Customer registration no longer reveals whether an email or company already has an account.**
   - **The bug.** An existing email was refused with "a user with this email already exists", and an existing company name with a similar error, so anyone could check who is a customer.
   - **Now.** Every accepted registration answers "Thank you. Check your email for a message with the next step." and creates nothing. A worker mails the address: a link to finish creating the account, or a note that it already has one, with sign-in and password-reset links.
@@ -260,6 +267,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **Three security settings that changed nothing:** "Company check rate limit per ip", "Join-request notification limit" and "Max customer lookups per hour". They were read only by a join-request and company-lookup path that no page, API endpoint or task called. That path is removed too, along with a staff onboarding form nothing rendered. The lookup also had a bug that would have mattered if anything called it: it searched trade registry numbers with a CUI.
 - The Ansible Docker role (`deploy/ansible/roles/praho` and `roles/docker`), its playbooks
   (`single-server.yml`, `two-servers.yml`, and `rollback.yml`, which only worked with it),
   `inventory/two-servers.yml`, and the `make deploy-dev` and `make ansible-two-servers` targets. It

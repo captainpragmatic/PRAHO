@@ -5,10 +5,7 @@ Handles the actual form structure properly.
 
 from django.test import TestCase
 
-from apps.common.request_ip import get_safe_client_ip
-
 from apps.users.forms import (
-    CustomerOnboardingRegistrationForm,
     LoginForm,
     TwoFactorSetupForm,
     TwoFactorVerifyForm,
@@ -144,71 +141,6 @@ class MinimalTwoFactorFormsTestCase(TestCase):
         self.assertFalse(verify_form.is_valid())
 
 
-class MinimalCustomerOnboardingFormTestCase(TestCase):
-    """Minimal test for CustomerOnboardingRegistrationForm"""
-
-    def test_customer_onboarding_form_individual(self):
-        """Test customer onboarding form for individual"""
-        form_data = {
-            'first_name': 'Test',
-            'last_name': 'User',
-            'email': 'test@example.com',
-            'password1': 'complex_password_123',
-            'password2': 'complex_password_123',
-            'customer_type': 'individual',
-            'customer_name': 'Test User',
-            'company_name': 'Test Individual',  # Required for Romanian compliance
-            'cnp': '1234567890123',  # Required for individuals - Romanian Personal Numeric Code
-            'terms_accepted': True,  # Required for Romanian compliance
-            'gdpr_consent': True,  # Required for Romanian GDPR compliance
-            'phone': '+40712345678',
-            'address_line1': 'Test Street 123',
-            'city': 'Bucharest',
-            'county': 'Bucharest',
-            'postal_code': '123456',
-            'data_processing_consent': True,
-        }
-        form = CustomerOnboardingRegistrationForm(data=form_data)
-        # Test that form processes the data
-        result = form.is_valid()
-        if not result:
-            print("Individual form errors:", form.errors)
-
-    def test_customer_onboarding_form_company(self):
-        """Test customer onboarding form for company"""
-        form_data = {
-            'first_name': 'Test',
-            'last_name': 'User',
-            'email': 'test@example.com',
-            'password1': 'complex_password_123',
-            'password2': 'complex_password_123',
-            'customer_type': 'company',
-            'customer_name': 'Test Company SRL',
-            'company_name': 'Test Company SRL',  # Required for Romanian business
-            'terms_accepted': True,  # Required for Romanian compliance
-            'gdpr_consent': True,  # Required for Romanian GDPR compliance
-            'phone': '+40712345678',
-            'address_line1': 'Test Street 123',
-            'city': 'Bucharest',
-            'county': 'Bucharest',
-            'postal_code': '123456',
-            'data_processing_consent': True,
-        }
-        form = CustomerOnboardingRegistrationForm(data=form_data)
-        # Test that form processes the data
-        result = form.is_valid()
-        if not result:
-            print("Company form errors:", form.errors)
-
-    def test_customer_onboarding_form_missing_required(self):
-        """Test form with missing required fields"""
-        form_data = {
-            'email': 'test@example.com',
-        }
-        form = CustomerOnboardingRegistrationForm(data=form_data)
-        self.assertFalse(form.is_valid())
-        # Should have multiple validation errors
-        self.assertGreater(len(form.errors), 0)
 
 
 class MinimalFormIntegrationTestCase(TestCase):
@@ -228,9 +160,6 @@ class MinimalFormIntegrationTestCase(TestCase):
 
         verify_form = TwoFactorVerifyForm()
         self.assertIsNotNone(verify_form)
-
-        onboarding_form = CustomerOnboardingRegistrationForm()
-        self.assertIsNotNone(onboarding_form)
 
     def test_form_with_user_instance(self):
         """Test forms that work with user instances"""
@@ -291,15 +220,6 @@ class MinimalFormIntegrationTestCase(TestCase):
             # Should have errors
             self.assertGreater(len(form.errors), 0)
 
-    def test_customer_onboarding_validation_methods(self):
-        """Test customer onboarding form validation methods"""
-        form = CustomerOnboardingRegistrationForm()
-
-        # Test that form has expected fields related to customer creation
-        expected_fields = ['customer_type', 'customer_name', 'email']
-        for field in expected_fields:
-            if field in form.fields:
-                self.assertIn(field, form.fields)
 
     def test_two_factor_form_validation(self):
         """Test 2FA form validation logic"""

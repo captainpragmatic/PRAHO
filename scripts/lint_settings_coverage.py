@@ -1216,7 +1216,7 @@ def _callable_edges(tree: ast.Module, module: str) -> dict[str, set[str]]:
     returned nested functions and returned factory calls - hang off a separate `factory()` node, which
     is reached only by application: a production function decorated with `@factory()` gets an edge to
     it, and a test earns it through `@factory()` or `factory()(func)`. That is how
-    `SecureUserRegistrationService.register_new_customer_owner` reaches `_execute_security_checks`
+    `SecureUserRegistrationService.submit_pending_registration` reaches `_execute_security_checks`
     through `secure_user_registration()`, `secure_service_method()`, `decorator` and `wrapper`.
     """
     edges: dict[str, set[str]] = {}

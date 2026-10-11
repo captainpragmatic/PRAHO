@@ -9,22 +9,13 @@ Security-focused testing following OWASP best practices.
 
 from __future__ import annotations
 
-from unittest.mock import Mock, patch
-
 from django.contrib.auth import get_user_model
-
-from apps.common.request_ip import get_safe_client_ip
 from django.core.exceptions import ValidationError
-
-from apps.common.request_ip import get_safe_client_ip
 from django.test import TestCase
-
-from apps.common.request_ip import get_safe_client_ip
 
 from apps.customers.models import Customer
 from apps.users.forms import (
     CustomerMembershipForm,
-    CustomerOnboardingRegistrationForm,
     LoginForm,
     PasswordResetRequestForm,
     TwoFactorSetupForm,
@@ -648,173 +639,6 @@ class CustomerMembershipFormTest(BaseFormTestCase):
 # CUSTOMER ONBOARDING REGISTRATION FORM TESTS
 # ===============================================================================
 
-class CustomerOnboardingRegistrationFormTest(BaseFormTestCase):
-    """Test CustomerOnboardingRegistrationForm class"""
-
-    @patch('apps.users.services.UserRegistrationService.register_new_customer_owner')
-    def test_valid_form(self, mock_register: Mock) -> None:
-        """Test valid customer onboarding form"""
-        mock_register.return_value = (self.user, self.customer)
-
-        form_data = {
-            'email': 'newcustomer@example.com',
-            'first_name': 'New',
-            'last_name': 'Customer',
-            'password1': 'complexpassword123',
-            'password2': 'complexpassword123',
-            'phone': '+40.21.123.4567',
-            'company_name': 'New Company SRL',
-            'customer_type': 'company',
-            'vat_number': 'RO12345678',
-            'registration_number': 'J40/123/2023',
-            'address_line1': 'Str. Test 123',
-            'city': 'Bucharest',
-            'county': 'Ilfov',
-            'postal_code': '010101',
-            'accepts_marketing': False,
-            'gdpr_consent': True,
-            'terms_accepted': True,
-            'data_processing_consent': True
-        }
-
-        form = CustomerOnboardingRegistrationForm(data=form_data)
-        self.assertTrue(form.is_valid())
-
-    def test_missing_required_company_fields(self) -> None:
-        """Test missing required company fields"""
-        form_data = {
-            'email': 'newcustomer@example.com',
-            'first_name': 'New',
-            'last_name': 'Customer',
-            'password1': 'complexpassword123',
-            'password2': 'complexpassword123',
-            'gdpr_consent': True,
-            'terms_accepted': True
-            # company_name missing
-        }
-
-        form = CustomerOnboardingRegistrationForm(data=form_data)
-        self.assertFalse(form.is_valid())
-        self.assertIn('company_name', form.errors)
-
-    def test_terms_acceptance_required(self) -> None:
-        """Test terms acceptance is required"""
-        form_data = {
-            'email': 'newcustomer@example.com',
-            'first_name': 'New',
-            'last_name': 'Customer',
-            'password1': 'complexpassword123',
-            'password2': 'complexpassword123',
-            'company_name': 'New Company SRL',
-            'gdpr_consent': True,
-            'terms_accepted': False  # Should be True
-        }
-
-        form = CustomerOnboardingRegistrationForm(data=form_data)
-        self.assertFalse(form.is_valid())
-        self.assertIn('terms_accepted', form.errors)
-
-    def test_romanian_vat_number_format(self) -> None:
-        """Test Romanian VAT number format validation"""
-        form_data = {
-            'email': 'newcustomer@example.com',
-            'first_name': 'New',
-            'last_name': 'Customer',
-            'password1': 'complexpassword123',
-            'password2': 'complexpassword123',
-            'company_name': 'New Company SRL',
-            'vat_number': 'INVALID_VAT',  # Should start with RO
-            'gdpr_consent': True,
-            'terms_accepted': True
-        }
-
-        form = CustomerOnboardingRegistrationForm(data=form_data)
-        self.assertFalse(form.is_valid())
-        self.assertIn('vat_number', form.errors)
-
-    def test_valid_romanian_vat_number(self) -> None:
-        """Test valid Romanian VAT number"""
-        form_data = {
-            'email': 'newcustomer@example.com',
-            'first_name': 'New',
-            'last_name': 'Customer',
-            'password1': 'complexpassword123',
-            'password2': 'complexpassword123',
-            'company_name': 'New Company SRL',
-            'vat_number': 'RO12345678',  # Valid format
-            'gdpr_consent': True,
-            'terms_accepted': True
-        }
-
-        form = CustomerOnboardingRegistrationForm(data=form_data)
-        # Don't validate the form yet, just check VAT cleaning
-        form.full_clean()
-
-        if 'vat_number' not in form.errors:
-            self.assertEqual(form.cleaned_data['vat_number'], 'RO12345678')
-
-    def test_optional_fields(self) -> None:
-        """Test optional fields are handled correctly"""
-        form_data = {
-            'email': 'newcustomer@example.com',
-            'first_name': 'New',
-            'last_name': 'Customer',
-            'password1': 'complexpassword123',
-            'password2': 'complexpassword123',
-            'company_name': 'New Company SRL',
-            'gdpr_consent': True,
-            'terms_accepted': True
-            # Optional fields omitted: phone, vat_number, billing_address, etc.
-        }
-
-        form = CustomerOnboardingRegistrationForm(data=form_data)
-        if form.is_valid():
-            self.assertEqual(form.cleaned_data.get('phone', ''), '')
-            self.assertEqual(form.cleaned_data.get('vat_number', ''), '')
-
-    @patch('apps.users.services.UserRegistrationService.register_new_customer_owner')
-    def test_save_method(self, mock_register: Mock) -> None:
-        """Test form save method"""
-        mock_register.return_value = (self.user, self.customer)
-
-        form_data = {
-            'email': 'newcustomer@example.com',
-            'first_name': 'New',
-            'last_name': 'Customer',
-            'password1': 'complexpassword123',
-            'password2': 'complexpassword123',
-            'company_name': 'New Company SRL',
-            'customer_type': 'business',
-            'gdpr_consent': True,
-            'terms_accepted': True
-        }
-
-        form = CustomerOnboardingRegistrationForm(data=form_data)
-        if form.is_valid():
-            result = form.save()
-            self.assertIsNotNone(result)
-            mock_register.assert_called_once()
-
-    @patch('apps.users.services.UserRegistrationService.register_new_customer_owner')
-    def test_save_method_error_handling(self, mock_register: Mock) -> None:
-        """Test save method error handling"""
-        mock_register.side_effect = ValidationError('Registration failed')
-
-        form_data = {
-            'email': 'newcustomer@example.com',
-            'first_name': 'New',
-            'last_name': 'Customer',
-            'password1': 'complexpassword123',
-            'password2': 'complexpassword123',
-            'company_name': 'New Company SRL',
-            'gdpr_consent': True,
-            'terms_accepted': True
-        }
-
-        form = CustomerOnboardingRegistrationForm(data=form_data)
-        if form.is_valid():
-            with self.assertRaises(ValidationError):
-                form.save()
 
 
 # ===============================================================================

@@ -161,24 +161,13 @@ class PurchaseIdentityContracts(HMACTestMixin, TestCase):
                 self.assertFalse(User.objects.exists())
                 self.assertFalse(Customer.objects.exists())
 
-    def test_onboarding_checkbox_consent_is_preserved_without_a_user_timestamp(self):
-        data = self.registration()
-        result = SecureUserRegistrationService.register_new_customer_owner(
-            **{**data, "user_data": {**data["user_data"], "password": CHOSEN}}
-        )
-        self.assertTrue(result.is_ok(), str(result))
-        user, customer = result.unwrap()
-        user.refresh_from_db()
-        customer.refresh_from_db()
-        self.assertIsNotNone(user.gdpr_consent_date)
-        self.assertTrue(customer.data_processing_consent)
-
-    def test_absent_or_negative_checkbox_cannot_fabricate_consent(self):
-        for index, consent in enumerate((False, None, "false", "true")):
+    def test_a_customer_data_checkbox_never_stands_in_for_consent(self):
+        # Consent is the user's timestamp, which confirmation sets. No customer_data value replaces it.
+        for index, consent in enumerate((True, False, None, "false", "true")):
             data = self.registration(email=f"consent{index}@example.com")
             data["customer_data"].update(company_name=f"Consent Company {index}", data_processing_consent=consent)
-            result = SecureUserRegistrationService.register_new_customer_owner(
-                **{**data, "user_data": {**data["user_data"], "password": CHOSEN}}
+            result = SecureUserRegistrationService.create_customer_owner_unchecked(
+                {**data["user_data"], "password": CHOSEN}, data["customer_data"]
             )
             self.assertTrue(result.is_ok(), str(result))
             user, customer = result.unwrap()

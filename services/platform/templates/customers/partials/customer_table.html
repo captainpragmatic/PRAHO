@@ -71,8 +71,8 @@
           <td class="px-6 py-4">
             <div>
               {% if customer.customer_type == 'individual' %}
-                {% if customer.tax_profile and customer.tax_profile.cnp %}
-                  <div class="text-white font-mono text-sm">{% icon "receipt" size="sm" %} {{ customer.tax_profile.cnp|slice:':8' }}</div>
+                {% if customer.has_cnp %}
+                  <div class="text-white text-sm">{% icon "receipt" size="sm" %} {% trans "CNP on file" %}</div>
                 {% else %}
                   <div class="text-slate-500 text-sm">&mdash;</div>
                 {% endif %}
@@ -189,8 +189,8 @@
       </div>
       <div class="space-y-1">
         {% if customer.customer_type == 'individual' %}
-          {% if customer.tax_profile and customer.tax_profile.cnp %}
-            <div class="text-white font-mono">{% icon "receipt" size="sm" %} {{ customer.tax_profile.cnp|slice:':8' }}</div>
+          {% if customer.has_cnp %}
+            <div class="text-white">{% icon "receipt" size="sm" %} {% trans "CNP on file" %}</div>
           {% endif %}
         {% else %}
           {% if customer.tax_profile and customer.tax_profile.cui %}

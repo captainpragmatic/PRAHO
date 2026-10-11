@@ -15,7 +15,7 @@ from django.contrib.messages.api import MessageFailure
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
 from django.db import IntegrityError
-from django.db.models import Count, Prefetch, Q
+from django.db.models import BooleanField, Count, ExpressionWrapper, Prefetch, Q
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -106,9 +106,13 @@ def _build_customer_queryset(
         open_tickets_count=Count("tickets", filter=Q(tickets__status__in=["open", "in_progress"])),
     )
 
-    # Efficient prefetch: tax profile, billing profile, primary address only
+    # Efficient prefetch: tax profile, billing profile, primary address only.
+    # The list says only whether a CNP is on file, so the encrypted CNP is neither loaded nor
+    # decrypted (ADR-0040).
     customers = (
         customers.select_related("tax_profile", "billing_profile")
+        .defer("tax_profile__cnp")
+        .annotate(has_cnp=ExpressionWrapper(Q(tax_profile__cnp__isnull=False), output_field=BooleanField()))
         .prefetch_related(
             Prefetch(
                 "addresses",

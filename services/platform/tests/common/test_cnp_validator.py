@@ -1,15 +1,13 @@
 """
 Tests for apps.common.cnp_validator — canonical CNP validation.
 
-Covers CNPValidator.validate(), the validate_cnp Django field validator,
-and SecureInputValidator.validate_cnp_romanian().
+Covers CNPValidator.validate() and the validate_cnp Django field validator.
 """
 
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 
 from apps.common.cnp_validator import CNPValidator, validate_cnp
-from apps.common.validators import SecureInputValidator
 
 # Pre-computed valid CNPs (checksum-correct)
 VALID_CNP_MALE_1985 = "1850101123451"  # M, 1985-01-01, Cluj (12)
@@ -108,26 +106,3 @@ class TestValidateCnpDjangoValidator(TestCase):
         """Empty string is not 13 digits."""
         with self.assertRaises(ValidationError):
             validate_cnp("")
-
-
-class TestSecureInputValidatorCNP(TestCase):
-    """SecureInputValidator.validate_cnp_romanian() — security-aware wrapper."""
-
-    def test_valid_cnp_returns_stripped(self) -> None:
-        result = SecureInputValidator.validate_cnp_romanian(f"  {VALID_CNP_MALE_1985}  ")
-        self.assertEqual(result, VALID_CNP_MALE_1985)
-
-    def test_invalid_cnp_raises(self) -> None:
-        with self.assertRaises(ValidationError):
-            SecureInputValidator.validate_cnp_romanian("0000000000000")
-
-    def test_empty_returns_empty(self) -> None:
-        self.assertEqual(SecureInputValidator.validate_cnp_romanian(""), "")
-
-    def test_malicious_input_rejected(self) -> None:
-        with self.assertRaises(ValidationError):
-            SecureInputValidator.validate_cnp_romanian("<script>alert(1)</script>")
-
-    def test_oversized_input_rejected(self) -> None:
-        with self.assertRaises(ValidationError):
-            SecureInputValidator.validate_cnp_romanian("1" * 21)

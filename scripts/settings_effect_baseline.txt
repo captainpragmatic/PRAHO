@@ -158,7 +158,6 @@ provisioning.ssh_timeout
 provisioning.sudo_command_timeout
 provisioning.task_soft_time_limit
 provisioning.task_time_limit
-security.join_request_notification_limit_per_customer_per_hour
 security.max_session_age_seconds
 security.registration_rate_limit_per_ip
 security.welcome_invite_limit_per_target_per_hour

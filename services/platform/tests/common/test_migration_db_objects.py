@@ -3,10 +3,11 @@
 Django's model state does not know about these, so neither makemigrations
 nor the model tests notice if a migration that creates them goes missing:
 - nine PostgreSQL-only indexes (audit 0003, billing 0003, integrations 0002);
-- the payment-method encryption-context function and trigger (customers 0003).
+- the encryption-context functions and triggers: payment methods (customers 0003), tax
+  profiles (customers 0004), invoices and proformas (billing 0010).
 
 The test branches on the backend instead of skipping: PostgreSQL must have
-all of them, SQLite must have the trigger and none of the indexes, and any
+all of them, SQLite must have the triggers and none of the indexes, and any
 other backend fails, as the trigger migration itself does.
 """
 
@@ -35,8 +36,13 @@ POSTGRES_INDEXES: dict[str, dict[str, str]] = {
         "integration_webhook_events_received_at_brin": "USING brin",
     },
 }
-TRIGGER = "customer_payment_method_encryption_context_immutable"
-TRIGGER_TABLE = "customer_payment_methods"
+# trigger (and, on PostgreSQL, function) name -> table
+TRIGGERS: dict[str, str] = {
+    "customer_payment_method_encryption_context_immutable": "customer_payment_methods",
+    "customer_tax_profile_encryption_context_immutable": "customer_tax_profiles",
+    "billing_invoice_encryption_context_immutable": "billing_invoices",
+    "billing_proforma_encryption_context_immutable": "billing_proforma_invoices",
+}
 
 
 class MigrationOnlyDatabaseObjectsTests(TestCase):
@@ -62,22 +68,24 @@ class MigrationOnlyDatabaseObjectsTests(TestCase):
         else:
             self.fail(f"unsupported database backend: {connection.vendor}")
 
-    def test_encryption_context_trigger_exists(self) -> None:
+    def test_encryption_context_triggers_exist(self) -> None:
         with connection.cursor() as cursor:
-            if connection.vendor == "postgresql":
-                cursor.execute(
-                    "SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid "
-                    "WHERE t.tgname = %s AND c.relname = %s AND NOT t.tgisinternal",
-                    [TRIGGER, TRIGGER_TABLE],
-                )
-                self.assertEqual(cursor.fetchone()[0], 1)
-                cursor.execute("SELECT count(*) FROM pg_proc WHERE proname = %s", [TRIGGER])
-                self.assertEqual(cursor.fetchone()[0], 1)
-            elif connection.vendor == "sqlite":
-                cursor.execute(
-                    "SELECT count(*) FROM sqlite_master WHERE type = 'trigger' AND name = %s AND tbl_name = %s",
-                    [TRIGGER, TRIGGER_TABLE],
-                )
-                self.assertEqual(cursor.fetchone()[0], 1)
-            else:
-                self.fail(f"unsupported database backend: {connection.vendor}")
+            for trigger, table in TRIGGERS.items():
+                with self.subTest(trigger=trigger):
+                    if connection.vendor == "postgresql":
+                        cursor.execute(
+                            "SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid "
+                            "WHERE t.tgname = %s AND c.relname = %s AND NOT t.tgisinternal",
+                            [trigger, table],
+                        )
+                        self.assertEqual(cursor.fetchone()[0], 1)
+                        cursor.execute("SELECT count(*) FROM pg_proc WHERE proname = %s", [trigger])
+                        self.assertEqual(cursor.fetchone()[0], 1)
+                    elif connection.vendor == "sqlite":
+                        cursor.execute(
+                            "SELECT count(*) FROM sqlite_master WHERE type = 'trigger' AND name = %s AND tbl_name = %s",
+                            [trigger, table],
+                        )
+                        self.assertEqual(cursor.fetchone()[0], 1)
+                    else:
+                        self.fail(f"unsupported database backend: {connection.vendor}")
