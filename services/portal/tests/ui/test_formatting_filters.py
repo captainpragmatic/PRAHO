@@ -40,8 +40,8 @@ class CUIFormatFilterTestCase(unittest.TestCase):
     """A CUI is shown as its digits: an RO prefix would assert VAT registration."""
 
     def test_digits_are_shown_without_a_vat_prefix(self) -> None:
-        self.assertEqual(cui_format("14399847"), "14399847")
-        self.assertEqual(cui_format("RO14399847"), "14399847")
+        self.assertEqual(cui_format("14399840"), "14399840")
+        self.assertEqual(cui_format("RO14399840"), "14399840")
         self.assertEqual(cui_format(""), "")
 
 

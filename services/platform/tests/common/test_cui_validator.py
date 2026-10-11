@@ -152,10 +152,16 @@ class TestCUIValidatorStrict(TestCase):
         self.assertFalse(result.is_valid)
         self.assertIn("check digit", result.error_message.lower())
 
-    def test_short_cui_skips_check_digit(self) -> None:
-        """CUIs shorter than 8 digits skip check digit validation even in strict mode."""
-        result = CUIValidator.validate_strict("12345")
-        self.assertTrue(result.is_valid)
+    def test_short_cuis_are_checked_too(self) -> None:
+        """ANAF's check digit applies at every length: the body is left-padded to 9 digits."""
+        self.assertTrue(CUIValidator.validate_strict("12340").is_valid)
+        self.assertFalse(CUIValidator.validate_strict("12345").is_valid)
+
+    def test_published_cuis_pass(self) -> None:
+        """Pinned to real CUIs, so the formula cannot drift unnoticed."""
+        for cui in ("14399840", "18189442"):
+            with self.subTest(cui=cui):
+                self.assertTrue(CUIValidator.validate_strict(cui).is_valid)
 
     def test_strict_invalid_format_propagated(self) -> None:
         """Format failures from validate() are propagated before check digit step."""

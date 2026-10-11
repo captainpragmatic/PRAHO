@@ -147,7 +147,7 @@ class RegexSecurityTests(TestCase):
         """Test CUI pattern is more specific (6-10 digits)"""
         # Valid CUI with required fields
         form_data = {
-            'cui': 'RO123456',
+            'cui': 'RO123453',
             'registration_number': 'J12/123/2020',
             'is_vat_payer': False,
             'vat_rate': 19,
@@ -184,9 +184,9 @@ class RegexSecurityTests(TestCase):
         """Test VAT pattern is more specific (6-10 digits)"""
         # Valid VAT with all required fields
         form_data = {
-            'vat_number': 'RO123456',
+            'vat_number': 'RO123453',
             'is_vat_payer': True,
-            'cui': 'RO123456',
+            'cui': 'RO123453',
             'registration_number': 'J12/123/2020',
             'vat_rate': 19,
             'reverse_charge_eligible': False
@@ -200,7 +200,7 @@ class RegexSecurityTests(TestCase):
         form_data = {
             'vat_number': 'RO12',
             'is_vat_payer': True,
-            'cui': 'RO123456',
+            'cui': 'RO123453',
             'registration_number': 'J12/123/2020',
             'vat_rate': 19,
             'reverse_charge_eligible': False

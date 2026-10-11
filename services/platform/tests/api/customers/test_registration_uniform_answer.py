@@ -43,7 +43,7 @@ class RegistrationUniformAnswerTests(HMACTestMixin, TestCase):
             name="Taken SRL", company_name="Taken SRL", customer_type="company",
             primary_email=owner.email, status="active",
         )
-        CustomerTaxProfile.objects.create(customer=customer, vat_number="RO14399847")
+        CustomerTaxProfile.objects.create(customer=customer, vat_number="RO14399840")
 
     def submit(self, data: dict[str, object]) -> tuple[int, object, int, list[str]]:
         with CaptureQueriesContext(connection) as queries:
@@ -60,7 +60,7 @@ class RegistrationUniformAnswerTests(HMACTestMixin, TestCase):
             "new everything": registration("new@example.test", "New SRL", "RO18547290"),
             "taken email": registration("TAKEN@example.test", "Other SRL", ""),
             "taken company": registration("other@example.test", "taken srl", ""),
-            "taken VAT": registration("third@example.test", "Third SRL", "RO14399847"),
+            "taken VAT": registration("third@example.test", "Third SRL", "RO14399840"),
         }
         observed = {name: self.submit(data) for name, data in cases.items()}
         for name, (_status, _body, _count, looked_up) in observed.items():

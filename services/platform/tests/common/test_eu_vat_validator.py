@@ -72,10 +72,10 @@ class TestValidateVatFormatRO(SimpleTestCase):
     """Test validate_vat_format() for Romanian CUI numbers."""
 
     def test_valid_short_cui(self):
-        result = validate_vat_format("RO", "12345")
+        result = validate_vat_format("RO", "12340")
         self.assertTrue(result.is_valid)
         self.assertEqual(result.country_code, "RO")
-        self.assertEqual(result.full_vat_number, "RO12345")
+        self.assertEqual(result.full_vat_number, "RO12340")
 
     def test_invalid_cui_non_numeric(self):
         result = validate_vat_format("RO", "abc")

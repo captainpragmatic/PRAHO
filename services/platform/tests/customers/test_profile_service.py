@@ -195,21 +195,21 @@ class TestProfileServiceCUIValidation(TestCase):
 
     def test_valid_cui_is_accepted(self) -> None:
         """A correctly formatted CUI must be saved without raising."""
-        # RO14399847: digits 1439984, check digit = 7 (ANAF algorithm)
+        # RO14399840 (a published CUI): body 1439984, ANAF check digit 0
         ProfileService.update_tax_profile(
-            self.tax_profile, self.user, cui="RO14399847"
+            self.tax_profile, self.user, cui="RO14399840"
         )
         self.tax_profile.refresh_from_db()
-        self.assertEqual(self.tax_profile.cui, "14399847")  # stored as digits: an RO prefix would assert VAT registration
+        self.assertEqual(self.tax_profile.cui, "14399840")  # stored as digits: an RO prefix would assert VAT registration
 
     def test_valid_cui_without_ro_prefix_is_accepted(self) -> None:
         """CUI without RO prefix is also a valid format."""
-        # 14399847: same digits as above, no prefix
+        # 14399840: same digits as above, no prefix
         ProfileService.update_tax_profile(
-            self.tax_profile, self.user, cui="14399847"
+            self.tax_profile, self.user, cui="14399840"
         )
         self.tax_profile.refresh_from_db()
-        self.assertEqual(self.tax_profile.cui, "14399847")
+        self.assertEqual(self.tax_profile.cui, "14399840")
 
 
 class TestProfileServiceCreateTaxProfile(TestCase):
@@ -270,10 +270,10 @@ class TestProfileServiceCUIChangedFieldsTracking(TestCase):
 
     def test_cui_appears_in_update_fields_when_updated(self) -> None:
         """save() must be called with update_fields that includes 'cui'."""
-        # RO14399847 passes validate_strict (check digit = 7)
+        # RO14399840 passes validate_strict (check digit = 7)
         with patch.object(self.tax_profile.__class__, "save") as mock_save:
             ProfileService.update_tax_profile(
-                self.tax_profile, self.user, cui="RO14399847"
+                self.tax_profile, self.user, cui="RO14399840"
             )
         mock_save.assert_called_once()
         _, call_kwargs = mock_save.call_args

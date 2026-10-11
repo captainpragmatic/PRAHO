@@ -471,13 +471,13 @@ class CustomerProfileUpdateAPITests(TestCase):
 
         request = _make_request(self.factory, "/api/customers/tax-profile/", {
             "customer_id": self.customer.pk, "user_id": self.owner_user.pk,
-            "cui": "RO12345673", "is_vat_payer": True, "timestamp": int(time.time()),
+            "cui": "RO12345674", "is_vat_payer": True, "timestamp": int(time.time()),
         })
         response = customer_tax_profile_update(request)
         self.assertEqual(response.status_code, 200)
         self.customer.refresh_from_db()
         tax = self.customer.tax_profile
-        self.assertEqual(tax.cui, "12345673")  # stored as digits: an RO prefix would assert VAT registration
+        self.assertEqual(tax.cui, "12345674")  # stored as digits: an RO prefix would assert VAT registration
         self.assertTrue(tax.is_vat_payer)
 
     @patch("apps.api.secure_auth.get_authenticated_customer")

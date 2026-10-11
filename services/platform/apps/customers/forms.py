@@ -247,7 +247,7 @@ class CustomerTaxProfileForm(forms.ModelForm):
             "cui": forms.TextInput(
                 attrs={
                     "class": "w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500",
-                    "placeholder": _("RO12345678"),
+                    "placeholder": "12345678",
                 }
             ),
             "vat_number": forms.TextInput(
@@ -566,11 +566,11 @@ class CustomerCreationForm(CountryDefaultsMixin, forms.Form):
         max_length=20,
         required=False,
         label=_("CUI/CIF"),
-        help_text=_("Format: RO12345678 (6-10 digits after RO)"),
+        help_text=_("Digits only; an RO prefix is accepted and removed."),
         widget=forms.TextInput(
             attrs={
                 "class": "w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500",
-                "placeholder": _("RO12345678"),
+                "placeholder": "12345678",
             }
         ),
     )
@@ -907,11 +907,11 @@ class CustomerEditForm(CountryDefaultsMixin, forms.Form):
         max_length=20,
         required=False,
         label=_("CUI/CIF"),
-        help_text=_("Format: RO12345678 (6-10 digits after RO)"),
+        help_text=_("Digits only; an RO prefix is accepted and removed."),
         widget=forms.TextInput(
             attrs={
                 "class": "w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500",
-                "placeholder": _("RO12345678"),
+                "placeholder": "12345678",
             }
         ),
     )

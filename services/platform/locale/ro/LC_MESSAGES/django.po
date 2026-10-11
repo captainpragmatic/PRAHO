@@ -27663,6 +27663,10 @@ msgstr "Introduceți un CUI valid."
 msgid "Enter a valid trade registry number."
 msgstr "Introduceți un număr de înregistrare la Registrul Comerțului valid."
 
+#: apps/customers/forms.py
+msgid "Digits only; an RO prefix is accepted and removed."
+msgstr "Doar cifre; prefixul RO este acceptat și eliminat."
+
 #~ msgid "Process payment gateway refund"
 #~ msgstr "Procesează rambursare din gateway-ul de plată"
 

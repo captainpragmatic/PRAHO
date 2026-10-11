@@ -4,6 +4,9 @@ An "RO" prefix asserts VAT registration, which a CUI alone does not: a company c
 without being a VAT payer. The VAT number (vat_number) carries the prefix, not the CUI.
 """
 
+from unittest.mock import patch
+
+from django import forms
 from django.core.exceptions import ValidationError
 from django.test import SimpleTestCase, TestCase
 
@@ -18,8 +21,8 @@ from apps.customers.profile_service import ProfileService
 from apps.ui.templatetags.formatting import cui_format
 from apps.users.models import User
 
-CUI = "14399847"  # passes the ANAF check digit
-BAD_CHECK_DIGIT = "14399848"
+CUI = "14399840"  # a published CUI (Dante International); passes the ANAF check digit
+BAD_CHECK_DIGIT = "14399847"
 
 
 def customer(name: str = "Digits SRL") -> Customer:
@@ -96,10 +99,60 @@ class CUIFormTests(SimpleTestCase):
                 self.clean_cui(form_class, BAD_CHECK_DIGIT)
 
 
+class CUIFormValidityTests(TestCase):
+    """Through each form's whole validation, not just clean_cui."""
+
+    def test_the_tax_profile_form_accepts_digits_and_stores_them(self) -> None:
+        for value in (CUI, f"RO{CUI}"):
+            with self.subTest(value=value):
+                form = CustomerTaxProfileForm(data={
+                    "cui": value, "registration_number": "J40/1234/2020", "is_vat_payer": False,
+                    "vat_rate": 21, "reverse_charge_eligible": False,
+                })
+                self.assertTrue(form.is_valid(), form.errors)
+                self.assertEqual(form.cleaned_data["cui"], CUI)
+
+    def test_the_creation_form_no_longer_demands_an_ro_prefix(self) -> None:
+        form = CustomerCreationForm.__new__(CustomerCreationForm)
+        form.cleaned_data = {"customer_type": "company", "company_name": "Digits SRL", "cui": CUI}
+        # Only the form's own clean(), with Django's base clean() returning the data as is.
+        with patch.object(forms.Form, "clean", lambda self: self.cleaned_data):
+            self.assertEqual(form.clean()["cui"], CUI)
+
+
+class OrderSnapshotTests(TestCase):
+    """A staff order's buyer VAT ID is the VAT number, never the CUI."""
+
+    def test_staff_orders_do_not_carry_a_cui_as_the_vat_id(self) -> None:
+        from django.urls import reverse  # noqa: PLC0415
+
+        from tests.orders.test_staff_selling_currency import StaffSellingCurrencyTests  # noqa: PLC0415
+
+        case = StaffSellingCurrencyTests(methodName="setUp")
+        case.client = self.client
+        case.setUp()
+        CustomerTaxProfile.objects.create(customer=case.customer, cui=CUI, is_vat_payer=True)
+        for view in ("orders:order_create", "orders:order_create_with_item"):
+            with self.subTest(view=view):
+                policy = case.switch("RON")
+                response = self.client.post(reverse(view), case.order_payload("RON", policy.revision))
+                self.assertEqual(response.status_code, 302)
+                order = case.customer.orders.order_by("-created_at").first()
+                self.assertEqual(order.customer_vat_id, "")
+                self.assertEqual(order.billing_address.get("vat_id", ""), "")
+
+
 class CUIDisplayAndValidationTests(SimpleTestCase):
     def test_display_does_not_add_a_vat_prefix(self) -> None:
         self.assertEqual(cui_format(CUI), CUI)
         self.assertEqual(cui_format(f"RO{CUI}"), CUI)
+
+    def test_an_all_digit_foreign_number_longer_than_a_cui_is_not_romanian(self) -> None:
+        from apps.common.cui_validator import is_romanian_cui  # noqa: PLC0415
+
+        self.assertTrue(is_romanian_cui(CUI))
+        self.assertTrue(is_romanian_cui(f"RO{CUI}"))
+        self.assertFalse(is_romanian_cui("1234567890123"))  # e.g. a 13-digit foreign company number
 
     def test_the_one_normaliser_returns_digits(self) -> None:
         self.assertEqual(CUIValidator.normalize(f"ro{CUI}"), CUI)

@@ -442,15 +442,15 @@ class ValidateVatNumberTests(TestCase):
         mock_vies.return_value = VIESResponse(
             is_valid=True,
             country_code="RO",
-            vat_number="1234567",
+            vat_number="1234565",
             company_name="Test SRL",
             api_available=True,
         )
-        profile = self._make_tax_profile(vat_number="RO1234567")
+        profile = self._make_tax_profile(vat_number="RO1234565")
         result = validate_vat_number(str(profile.id))
 
         self.assertTrue(result["success"])
-        self.assertEqual(result["vat_number"], "RO1234567")
+        self.assertEqual(result["vat_number"], "RO1234565")
         self.assertIn("completed", result["message"])
         last_call = _last_audit_call_kwargs(mock_audit)
         self.assertEqual(last_call["event_type"], "vat_validation_completed")
@@ -465,23 +465,23 @@ class ValidateVatNumberTests(TestCase):
         from apps.billing.gateways.vies_gateway import VIESResponse  # noqa: PLC0415
         from apps.billing.tax_models import VATValidation  # noqa: PLC0415
 
-        profile = self._make_tax_profile(vat_number="RO1234567")
+        profile = self._make_tax_profile(vat_number="RO1234565")
         mock_vies.return_value = VIESResponse(
             is_valid=True,
             country_code="RO",
-            vat_number="1234567",
+            vat_number="1234565",
             company_name="Test SRL",
             request_identifier="WAPI-PRESERVED-123",
             api_available=True,
         )
         self.assertTrue(validate_vat_number(str(profile.id))["success"])
-        validation = VATValidation.objects.get(country_code="RO", vat_number="1234567")
+        validation = VATValidation.objects.get(country_code="RO", vat_number="1234565")
         self.assertEqual(validation.consultation_reference, "WAPI-PRESERVED-123")
 
         mock_vies.return_value = VIESResponse(
             is_valid=False,
             country_code="RO",
-            vat_number="1234567",
+            vat_number="1234565",
             api_available=False,
         )
         self.assertTrue(validate_vat_number(str(profile.id))["success"])
@@ -518,7 +518,7 @@ class ValidateVatNumberTests(TestCase):
         mock_vies.return_value = VIESResponse(
             is_valid=True,
             country_code="RO",
-            vat_number="1234567",
+            vat_number="1234565",
             api_available=True,
         )
 
@@ -527,7 +527,7 @@ class ValidateVatNumberTests(TestCase):
                 raise RuntimeError("network failure")
 
         mock_audit.side_effect = _raise_on_vat
-        profile = self._make_tax_profile(vat_number="RO1234567")
+        profile = self._make_tax_profile(vat_number="RO1234565")
         result = validate_vat_number(str(profile.id))
 
         # Validation succeeded; audit failure is swallowed and logged but not propagated
@@ -545,11 +545,11 @@ class ValidateVatNumberTests(TestCase):
         from apps.billing.gateways.vies_gateway import VIESResponse  # noqa: PLC0415
         from apps.billing.tax_models import VATValidation  # noqa: PLC0415
 
-        profile = self._make_tax_profile(vat_number="RO1234567")
+        profile = self._make_tax_profile(vat_number="RO1234565")
         validation = VATValidation.objects.create(
             country_code="RO",
-            vat_number="1234567",
-            full_vat_number="RO1234567",
+            vat_number="1234565",
+            full_vat_number="RO1234565",
             is_valid=True,
             is_active=True,
             validation_source="vies",
@@ -560,7 +560,7 @@ class ValidateVatNumberTests(TestCase):
         mock_vies.return_value = VIESResponse(
             is_valid=True,
             country_code="RO",
-            vat_number="1234567",
+            vat_number="1234565",
             company_name="Test SRL",
             request_identifier="WAPIAAABy123456789",
             api_available=True,
@@ -571,7 +571,7 @@ class ValidateVatNumberTests(TestCase):
         self.assertTrue(result["success"])
         mock_vies.assert_called_once_with(
             "RO",
-            "1234567",
+            "1234565",
             requester_member_state_code="RO",
             requester_number="87654321",
         )

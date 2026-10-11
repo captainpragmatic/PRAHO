@@ -89,8 +89,8 @@ def _customer(key: str, *, name: str) -> Customer:
     if created:
         CustomerTaxProfile.objects.create(
             customer=customer,
-            cui="14399847",
-            vat_number="RO14399847",
+            cui="14399840",
+            vat_number="RO14399840",
             is_vat_payer=True,
             registration_number="J40/1234/2020",
         )
@@ -134,7 +134,7 @@ def _document(customer: Customer, key: str, *, proforma: bool = False, paid: boo
         "bill_to_region": "București",
         "bill_to_postal": "010061",
         "bill_to_country": "RO",
-        "bill_to_tax_id": "RO14399847",
+        "bill_to_tax_id": "RO14399840",
         "meta": {"fixture_owner": OWNER, "fixture_name": key},
     }
     if proforma:
@@ -408,9 +408,9 @@ def seed_scenario(scenario: str, key: str) -> dict[str, Any]:
         "county": "București",
         "postal_code": "010061",
         "country": "RO",
-        "fiscal_code": "RO14399847",
+        "fiscal_code": "RO14399840",
         "registration_number": "J40/1234/2020",
-        "vat_number": "RO14399847",
+        "vat_number": "RO14399840",
     }
     result = OrderService.create_order(
         OrderCreateData(

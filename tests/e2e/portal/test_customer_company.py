@@ -167,13 +167,13 @@ def test_tax_profile_view(monitored_customer_page: Page) -> None:
 def test_tax_profile_save(account_page) -> None:
     page, _ = account_page
     page.goto(f"{BASE_URL}/company/tax/")
-    page.locator('[name="cui"]').fill("RO14399847")
-    page.locator('[name="vat_number"]').fill("RO14399847")
+    page.locator('[name="cui"]').fill("RO14399840")
+    page.locator('[name="vat_number"]').fill("RO14399840")
     page.locator('[name="is_vat_payer"]').check()
     page.get_by_role("button", name="Save Tax Profile").click()
     page.reload()
-    expect(page.locator('[name="cui"]')).to_have_value("RO14399847")
-    expect(page.locator('[name="vat_number"]')).to_have_value("RO14399847")
+    expect(page.locator('[name="cui"]')).to_have_value("RO14399840")
+    expect(page.locator('[name="vat_number"]')).to_have_value("RO14399840")
     expect(page.locator('[name="is_vat_payer"]')).to_be_checked()
 
 

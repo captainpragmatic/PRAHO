@@ -341,31 +341,6 @@ class CurrencyCode(StrEnum):
 # ===============================================================================
 
 
-@dataclass(frozen=True)
-class CUI:
-    """Romanian CUI (Company Unique Identifier)"""
-
-    value: CUIString
-
-    def __post_init__(self) -> None:
-        if not self.is_valid():
-            raise ValueError(f"Invalid Romanian CUI: {self.value}")
-
-    def is_valid(self) -> bool:
-        """Validate Romanian CUI format"""
-        if not self.value.startswith("RO"):
-            return False
-
-        digits = self.value[2:]
-        if not digits.isdigit():
-            return False
-
-        return len(digits) >= CUI_MIN_LENGTH and len(digits) <= CUI_MAX_LENGTH
-
-    def __str__(self) -> str:
-        return self.value
-
-
 # ===============================================================================
 # VALIDATION HELPERS
 # ===============================================================================

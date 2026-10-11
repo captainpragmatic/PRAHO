@@ -30,7 +30,7 @@ class D390SupplierPreservationTests(D390FixtureMixin, TestCase):
         before = render_d390_xml(report, DECLARANT)
         stored = {
             "name": "UBL Supplier SRL",
-            "cui": "RO18547293",
+            "cui": "RO18547290",
             "street": "UBL Street 9",
             "city": "Sibiu",
             "postal_code": "550001",
@@ -44,4 +44,4 @@ class D390SupplierPreservationTests(D390FixtureMixin, TestCase):
         self.assertEqual(
             ubl.findtext(party + "cac:PartyLegalEntity/cbc:RegistrationName", namespaces=NAMESPACES), stored["name"]
         )
-        self.assertEqual(ubl.findtext(party + "cac:PartyIdentification/cbc:ID", namespaces=NAMESPACES), "18547293")
+        self.assertEqual(ubl.findtext(party + "cac:PartyIdentification/cbc:ID", namespaces=NAMESPACES), "18547290")

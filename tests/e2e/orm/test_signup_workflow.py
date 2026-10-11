@@ -50,7 +50,7 @@ class RegistrationCase(TestCase):
             "customer_data": {
                 "customer_type": "individual" if individual else "company",
                 "company_name": "Ana Pop" if individual else "E2E Registration SRL",
-                "vat_number": "" if individual else "RO14399847",
+                "vat_number": "" if individual else "RO14399840",
                 "address_line1": "Str. Victoriei nr. 10",
                 "city": "București",
                 "county": "București",
@@ -89,7 +89,7 @@ class TestSignupWorkflow(RegistrationCase):
         user, customer = self.register()
         self.assertEqual(customer.company_name, "E2E Registration SRL")
         self.assertEqual(customer.primary_email, user.email)
-        self.assertEqual(customer.tax_profile.vat_number, "RO14399847")
+        self.assertEqual(customer.tax_profile.vat_number, "RO14399840")
         self.assertEqual(customer.billing_profile.preferred_currency, "RON")
         address = customer.addresses.get(is_current=True, is_billing=True)
         self.assertEqual(
@@ -169,7 +169,7 @@ class TestCustomerOnboardingFlow(RegistrationCase):
         self.assertEqual(address["company_name"], customer.company_name)
         self.assertEqual(address["email"], user.email)
         self.assertEqual(address["address_line1"], "Str. Victoriei nr. 10")
-        self.assertEqual(address["vat_number"], "RO14399847")
+        self.assertEqual(address["vat_number"], "RO14399840")
 
     def test_registration_rejects_incomplete_billing_profile(self):
         """Incomplete registration is rejected before any account or profile is persisted."""

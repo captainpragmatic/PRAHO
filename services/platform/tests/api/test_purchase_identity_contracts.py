@@ -53,7 +53,7 @@ class PurchaseIdentityContracts(HMACTestMixin, TestCase):
             "customer_data": {
                 "customer_type": "company",
                 "company_name": "Știință SRL",
-                "vat_number": "RO14399847",
+                "vat_number": "RO14399840",
                 "address_line1": "Str. Victoriei nr. 10",
                 "city": "București",
                 "county": "București",
@@ -101,7 +101,7 @@ class PurchaseIdentityContracts(HMACTestMixin, TestCase):
         self.assertIsNotNone(user.gdpr_consent_date)
         self.assertFalse(user.is_staff)
         self.assertTrue(user.check_password(CHOSEN))
-        self.assertEqual(customer.tax_profile.vat_number, "RO14399847")
+        self.assertEqual(customer.tax_profile.vat_number, "RO14399840")
         address = OrderService.build_billing_address_from_customer(customer)
         self.assertEqual(address["address_line1"], "Str. Victoriei nr. 10")
         self.assertEqual(address["city"], "București")

@@ -38,7 +38,7 @@ PERIOD = ReportingPeriod(2026, 8)
 DECLARANT = Declarant("Popescu", "Ana", "Contabil")
 SUPPLIER = {
     "COMPANY_NAME": "Example Hosting SRL",
-    "EFACTURA_COMPANY_CUI": "RO16397040",
+    "EFACTURA_COMPANY_CUI": "RO16397048",
     "COMPANY_STREET": "Strada Exemplu 1",
     "COMPANY_CITY": "Bucuresti",
     "COMPANY_POSTAL_CODE": "010101",
