@@ -231,6 +231,10 @@ COMPANY_IDENTITY_DEFAULTS: dict[str, str] = {
     "email_privacy": "privacy@pragmatichost.com",
     "email_finance": "",
     "phone": "",
+    "email_dpo": "dpo@pragmatichost.com",
+    "email_contact": "contact@pragmatichost.com",
+    "address": "",
+    "registration_number": "",
 }
 
 # Company bank details for bank transfer payment instructions

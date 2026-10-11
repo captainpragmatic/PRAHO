@@ -108,8 +108,11 @@ def privacy_policy_view(request: HttpRequest) -> HttpResponse:
         "last_updated": PRIVACY_POLICY_DATE,
         "effective_date": PRIVACY_POLICY_DATE,
         "legal_name": company["legal_name"],
-        "company_email": company["email_support"],
+        "company_registration_number": company["registration_number"],
+        "company_address": company["address"],
+        "company_email": company["email_contact"] or company["email_support"],
         "company_phone": company["phone"],
+        "company_dpo_email": company["email_dpo"],
         "company_privacy_email": company["email_privacy"],
         # The customer's own privacy dashboard; signing in leads there.
         "rights_url": reverse("users:privacy_dashboard"),

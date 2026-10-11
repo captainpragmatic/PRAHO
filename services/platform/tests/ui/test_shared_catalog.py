@@ -45,8 +45,8 @@ class SharedCatalogTests(SimpleTestCase):
         messages = _shared_msgids()
         self.assertEqual(len(list((ROOT / "shared/ui/templates").rglob("*.html"))), 27)
         # badge "Close" shares the modal msgid; the Terms of Service and Privacy Policy texts, shared
-        # since the portal publishes them too, bring 101 and 153.
-        self.assertEqual(len(messages), 288)
+        # since the portal publishes them too, bring 101 and 154.
+        self.assertEqual(len(messages), 289)
         self.assertIn((None, "Acceptance of Terms"), messages)
         self.assertIn((None, "Data Controller Information"), messages)
         self.assertTrue(SHARED_PO.is_file(), "Shared Romanian catalog is missing")

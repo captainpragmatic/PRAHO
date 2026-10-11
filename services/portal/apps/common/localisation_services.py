@@ -31,6 +31,8 @@ class PublicDefaults(TypedDict):
 
 
 _COMPANY_FIELDS = frozenset({"legal_name", "email_support", "email_privacy", "email_finance", "phone"})
+# Shown on the privacy policy. Optional, so the portal also reads a Platform that does not send them yet.
+_COMPANY_OPTIONAL_FIELDS = frozenset({"email_dpo", "email_contact", "address", "registration_number"})
 _LOCALISATION_FIELDS = frozenset(LocalisationDefaults().customer_payload())
 
 
@@ -54,12 +56,20 @@ def _validated_payload(response: object) -> PublicDefaults:
     if localisation != defaults.customer_payload():
         raise ValueError("Invalid localisation values")
 
-    company = _string_mapping(response.get("company"), _COMPANY_FIELDS)
+    company_value = response.get("company")
+    if not isinstance(company_value, dict) or not set(company_value) <= _COMPANY_FIELDS | _COMPANY_OPTIONAL_FIELDS:
+        raise ValueError("Invalid public defaults fields")
+    company = _string_mapping(
+        {field: company_value.get(field, "") for field in _COMPANY_FIELDS | _COMPANY_OPTIONAL_FIELDS},
+        _COMPANY_FIELDS | _COMPANY_OPTIONAL_FIELDS,
+    )
+    if not set(company_value) >= _COMPANY_FIELDS:
+        raise ValueError("Invalid public defaults fields")
     if not company["legal_name"].strip():
         raise ValueError("Invalid company legal name")
-    for field in ("email_support", "email_privacy", "email_finance"):
+    for field in ("email_support", "email_privacy", "email_finance", "email_dpo", "email_contact"):
         address = company[field]
-        if address or field != "email_finance":
+        if address or field in {"email_support", "email_privacy"}:
             validate_email(address)
     if any("\r" in value or "\n" in value for value in company.values()):
         raise ValueError("Invalid company identity control characters")

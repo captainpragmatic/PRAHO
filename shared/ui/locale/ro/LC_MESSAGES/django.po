@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PRAHO shared UI\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-11 18:41+0300\n"
+"POT-Creation-Date: 2026-10-11 19:27+0300\n"
 "PO-Revision-Date: 2026-10-06 00:00+0300\n"
 "Last-Translator: PRAHO contributors\n"
 "Language-Team: Romanian\n"
@@ -223,12 +223,12 @@ msgid "Your Rights (GDPR)"
 msgstr "Drepturile dvs. (GDPR)"
 
 #: templates/legal/privacy_policy_content.html:28
-#: templates/legal/privacy_policy_content.html:276
+#: templates/legal/privacy_policy_content.html:280
 msgid "Data Retention"
 msgstr "Păstrarea datelor"
 
 #: templates/legal/privacy_policy_content.html:29
-#: templates/legal/privacy_policy_content.html:325
+#: templates/legal/privacy_policy_content.html:329
 msgid "Security Measures"
 msgstr "Măsuri de securitate"
 
@@ -241,7 +241,7 @@ msgid "International Transfers"
 msgstr "Transferuri internaționale"
 
 #: templates/legal/privacy_policy_content.html:32
-#: templates/legal/privacy_policy_content.html:400
+#: templates/legal/privacy_policy_content.html:404
 msgid "Contact Us"
 msgstr "Contactați-ne"
 
@@ -310,7 +310,7 @@ msgid "Phone"
 msgstr "Telefon"
 
 #: templates/legal/privacy_policy_content.html:71
-#: templates/legal/privacy_policy_content.html:416
+#: templates/legal/privacy_policy_content.html:420
 msgid "Privacy inquiries"
 msgstr "Solicitări privind confidențialitatea"
 
@@ -447,7 +447,7 @@ msgid "Processing Activity"
 msgstr "Activitate de prelucrare"
 
 #: templates/legal/privacy_policy_content.html:127
-#: templates/legal/privacy_policy_content.html:289
+#: templates/legal/privacy_policy_content.html:293
 msgid "Legal Basis"
 msgstr "Bază legală"
 
@@ -460,7 +460,7 @@ msgid "Service provision"
 msgstr "Furnizarea serviciului"
 
 #: templates/legal/privacy_policy_content.html:134
-#: templates/legal/privacy_policy_content.html:296
+#: templates/legal/privacy_policy_content.html:300
 msgid "Contract performance"
 msgstr "Executarea contractului"
 
@@ -477,8 +477,8 @@ msgid "Security monitoring"
 msgstr "Monitorizarea securității"
 
 #: templates/legal/privacy_policy_content.html:144
-#: templates/legal/privacy_policy_content.html:306
-#: templates/legal/privacy_policy_content.html:311
+#: templates/legal/privacy_policy_content.html:310
+#: templates/legal/privacy_policy_content.html:315
 msgid "Legitimate interest"
 msgstr "Interes legitim"
 
@@ -499,8 +499,8 @@ msgid "Legitimate interest / Consent"
 msgstr "Interes legitim / Consimțământ"
 
 #: templates/legal/privacy_policy_content.html:158
-msgid "Financial record retention (7 years)"
-msgstr "Păstrarea înregistrărilor financiare (7 ani)"
+msgid "Financial record retention (10 years)"
+msgstr "Păstrarea înregistrărilor financiare (10 ani)"
 
 #: templates/legal/privacy_policy_content.html:159
 msgid "Legal obligation (Romanian Law)"
@@ -662,12 +662,13 @@ msgid "Right to Erasure"
 msgstr "Dreptul la ștergere"
 
 #: templates/legal/privacy_policy_content.html:239
-msgid "Request deletion of your personal data (\\"
-msgstr "Solicitați ștergerea datelor dvs. personale (\\"
+msgid "Request deletion of your personal data (\"Right to be Forgotten\")."
+msgstr ""
+"Solicitați ștergerea datelor dvs. personale („Dreptul de a fi uitat”)."
 
 #: templates/legal/privacy_policy_content.html:242
 msgid "Right to Restriction"
-msgstr "Dreptul de restricție"
+msgstr "Dreptul la restricționarea prelucrării"
 
 #: templates/legal/privacy_policy_content.html:243
 msgid "Request restriction of processing in certain circumstances."
@@ -693,7 +694,7 @@ msgstr ""
 
 #: templates/legal/privacy_policy_content.html:254
 msgid "Right to Withdraw Consent"
-msgstr "Drept de retragere a consimțământului"
+msgstr "Dreptul de a retrage consimțământul"
 
 #: templates/legal/privacy_policy_content.html:255
 msgid "Withdraw consent at any time for consent-based processing."
@@ -705,7 +706,7 @@ msgstr ""
 msgid "Exercise Your Rights"
 msgstr "Exercitați-vă drepturile"
 
-#: templates/legal/privacy_policy_content.html:262
+#: templates/legal/privacy_policy_content.html:263
 msgid ""
 "\n"
 "                    You can exercise your rights through our GDPR Privacy Dashboard or by contacting our DPO.\n"
@@ -715,7 +716,13 @@ msgstr ""
 "                    Vă puteți exercita drepturile prin intermediul panoului nostru de control al confidențialității RGPD sau contactând Responsabilul cu Protecția Datelor.\n"
 "                    "
 
-#: templates/legal/privacy_policy_content.html:278
+#: templates/legal/privacy_policy_content.html:267
+msgid "You can exercise your rights through our GDPR Privacy Dashboard."
+msgstr ""
+"Vă puteți exercita drepturile prin intermediul panoului nostru de control al"
+" confidențialității RGPD."
+
+#: templates/legal/privacy_policy_content.html:282
 msgid ""
 "\n"
 "                We retain your personal data only as long as necessary for the purposes outlined in this policy:\n"
@@ -725,63 +732,63 @@ msgstr ""
 "                Păstrăm datele dvs. personale doar pentru perioada necesară în scopurile descrise în această politică:\n"
 "                "
 
-#: templates/legal/privacy_policy_content.html:287
+#: templates/legal/privacy_policy_content.html:291
 msgid "Data Type"
 msgstr "Tip de date"
 
-#: templates/legal/privacy_policy_content.html:288
+#: templates/legal/privacy_policy_content.html:292
 msgid "Retention Period"
 msgstr "Perioada de retenție"
 
-#: templates/legal/privacy_policy_content.html:294
+#: templates/legal/privacy_policy_content.html:298
 msgid "Account data"
 msgstr "Datele contului"
 
-#: templates/legal/privacy_policy_content.html:295
+#: templates/legal/privacy_policy_content.html:299
 msgid "Duration of account + 2 years"
 msgstr "Durata contului + 2 ani"
 
-#: templates/legal/privacy_policy_content.html:299
+#: templates/legal/privacy_policy_content.html:303
 msgid "Financial records (invoices)"
 msgstr "Înregistrări financiare (facturi)"
 
-#: templates/legal/privacy_policy_content.html:300
-msgid "7 years"
-msgstr "7 ani"
+#: templates/legal/privacy_policy_content.html:304
+msgid "10 years"
+msgstr "10 ani"
 
-#: templates/legal/privacy_policy_content.html:301
+#: templates/legal/privacy_policy_content.html:305
 msgid "Romanian fiscal law"
 msgstr "Legislația fiscală românească"
 
-#: templates/legal/privacy_policy_content.html:304
+#: templates/legal/privacy_policy_content.html:308
 msgid "Security logs"
 msgstr "Jurnale de securitate"
 
-#: templates/legal/privacy_policy_content.html:305
+#: templates/legal/privacy_policy_content.html:309
 msgid "2 years"
 msgstr "2 ani"
 
-#: templates/legal/privacy_policy_content.html:309
+#: templates/legal/privacy_policy_content.html:313
 msgid "Support tickets"
 msgstr "Bilete de suport"
 
-#: templates/legal/privacy_policy_content.html:310
+#: templates/legal/privacy_policy_content.html:314
 msgid "5 years"
 msgstr "5 ani"
 
-#: templates/legal/privacy_policy_content.html:314
+#: templates/legal/privacy_policy_content.html:318
 msgid "Marketing consent records"
 msgstr "Evidențe ale consimțământului pentru marketing"
 
-#: templates/legal/privacy_policy_content.html:315
+#: templates/legal/privacy_policy_content.html:319
 msgid "Duration of consent + 3 years"
 msgstr "Durata consimțământului + 3 ani"
 
-#: templates/legal/privacy_policy_content.html:316
+#: templates/legal/privacy_policy_content.html:320
 msgid "Legal compliance"
 msgstr "Conformitate legală"
 
-#: templates/legal/privacy_policy_content.html:327
+#: templates/legal/privacy_policy_content.html:331
 msgid ""
 "\n"
 "                We implement appropriate technical and organizational measures to protect your personal data:\n"
@@ -791,75 +798,75 @@ msgstr ""
 "                Implementăm măsuri tehnice și organizatorice adecvate pentru a vă proteja datele personale:\n"
 "                "
 
-#: templates/legal/privacy_policy_content.html:334
+#: templates/legal/privacy_policy_content.html:338
 msgid "Encryption"
 msgstr "Criptare"
 
-#: templates/legal/privacy_policy_content.html:336
+#: templates/legal/privacy_policy_content.html:340
 msgid "TLS/HTTPS for data in transit"
 msgstr "TLS/HTTPS pentru datele în tranzit"
 
-#: templates/legal/privacy_policy_content.html:337
+#: templates/legal/privacy_policy_content.html:341
 msgid "AES-256 encryption for sensitive data at rest"
 msgstr "Criptare AES-256 pentru datele sensibile stocate"
 
-#: templates/legal/privacy_policy_content.html:338
+#: templates/legal/privacy_policy_content.html:342
 msgid "Encrypted backups"
 msgstr "Copii de siguranță criptate"
 
-#: templates/legal/privacy_policy_content.html:342
+#: templates/legal/privacy_policy_content.html:346
 msgid "Access Control"
 msgstr "Control al accesului"
 
-#: templates/legal/privacy_policy_content.html:344
+#: templates/legal/privacy_policy_content.html:348
 msgid "Role-based access control (RBAC)"
 msgstr "Control al accesului bazat pe roluri (RBAC)"
 
-#: templates/legal/privacy_policy_content.html:345
+#: templates/legal/privacy_policy_content.html:349
 msgid "Two-factor authentication (2FA)"
 msgstr "Autentificare cu Doi Factori"
 
-#: templates/legal/privacy_policy_content.html:346
+#: templates/legal/privacy_policy_content.html:350
 msgid "Account lockout protection"
 msgstr "Protecție prin blocarea contului"
 
-#: templates/legal/privacy_policy_content.html:350
+#: templates/legal/privacy_policy_content.html:354
 msgid "Monitoring"
 msgstr "Monitorizare"
 
-#: templates/legal/privacy_policy_content.html:352
+#: templates/legal/privacy_policy_content.html:356
 msgid "Comprehensive audit logging"
 msgstr "Jurnalizare completă a auditului"
 
-#: templates/legal/privacy_policy_content.html:353
+#: templates/legal/privacy_policy_content.html:357
 msgid "Real-time security alerts"
 msgstr "Alerte de securitate în timp real"
 
-#: templates/legal/privacy_policy_content.html:354
+#: templates/legal/privacy_policy_content.html:358
 msgid "Regular security assessments"
 msgstr "Evaluări de securitate regulate"
 
-#: templates/legal/privacy_policy_content.html:358
+#: templates/legal/privacy_policy_content.html:362
 msgid "Compliance"
 msgstr "Conformitate"
 
-#: templates/legal/privacy_policy_content.html:360
+#: templates/legal/privacy_policy_content.html:364
 msgid "Regular data protection training"
 msgstr "Instruire regulată privind protecția datelor"
 
-#: templates/legal/privacy_policy_content.html:361
+#: templates/legal/privacy_policy_content.html:365
 msgid "Incident response procedures"
 msgstr "Proceduri de răspuns la incidente"
 
-#: templates/legal/privacy_policy_content.html:362
+#: templates/legal/privacy_policy_content.html:366
 msgid "Vendor security assessments"
 msgstr "Evaluări de securitate ale furnizorilor"
 
-#: templates/legal/privacy_policy_content.html:370
+#: templates/legal/privacy_policy_content.html:374
 msgid "Cookies and Tracking"
 msgstr "Cookie-uri și Urmărire"
 
-#: templates/legal/privacy_policy_content.html:372
+#: templates/legal/privacy_policy_content.html:376
 msgid ""
 "\n"
 "                We use cookies and similar technologies to operate our service and improve your experience.\n"
@@ -871,15 +878,15 @@ msgstr ""
 "                Pentru informații detaliate, vă rugăm să consultați Politica noastră privind Cookie-urile.\n"
 "                "
 
-#: templates/legal/privacy_policy_content.html:378
+#: templates/legal/privacy_policy_content.html:382
 msgid "View Cookie Policy"
 msgstr "Vizualizați Politica privind Cookie-urile"
 
-#: templates/legal/privacy_policy_content.html:384
+#: templates/legal/privacy_policy_content.html:388
 msgid "International Data Transfers"
 msgstr "Transferuri Internaționale de Date"
 
-#: templates/legal/privacy_policy_content.html:386
+#: templates/legal/privacy_policy_content.html:390
 msgid ""
 "\n"
 "                Your data is primarily processed within the European Economic Area (EEA). If we transfer data\n"
@@ -891,19 +898,19 @@ msgstr ""
 "                în afara SEE, asigurăm garanții adecvate prin:\n"
 "                "
 
-#: templates/legal/privacy_policy_content.html:392
+#: templates/legal/privacy_policy_content.html:396
 msgid "EU-approved Standard Contractual Clauses (SCCs)"
 msgstr "Clauze Contractuale Standard aprobate de UE (SCC)"
 
-#: templates/legal/privacy_policy_content.html:393
+#: templates/legal/privacy_policy_content.html:397
 msgid "EU-US Data Privacy Framework (where applicable)"
 msgstr "Cadrul de Confidențialitate a Datelor UE-SUA (unde este aplicabil)"
 
-#: templates/legal/privacy_policy_content.html:394
+#: templates/legal/privacy_policy_content.html:398
 msgid "Binding Corporate Rules for processors"
 msgstr "Reguli Corporative Vinculante pentru Procesatori"
 
-#: templates/legal/privacy_policy_content.html:402
+#: templates/legal/privacy_policy_content.html:406
 msgid ""
 "\n"
 "                For questions about this Privacy Policy or to exercise your data protection rights:\n"
@@ -913,19 +920,19 @@ msgstr ""
 "                Pentru întrebări cu privire la această Politică de Confidențialitate sau pentru a vă exercita drepturile de protecție a datelor:\n"
 "                "
 
-#: templates/legal/privacy_policy_content.html:410
+#: templates/legal/privacy_policy_content.html:414
 msgid "Data Protection Officer"
 msgstr "Responsabil cu protecția datelor"
 
-#: templates/legal/privacy_policy_content.html:421
+#: templates/legal/privacy_policy_content.html:425
 msgid "General Inquiries"
 msgstr "Solicitări generale"
 
-#: templates/legal/privacy_policy_content.html:428
+#: templates/legal/privacy_policy_content.html:432
 msgid "Supervisory Authority"
 msgstr "Autoritate de Supraveghere"
 
-#: templates/legal/privacy_policy_content.html:430
+#: templates/legal/privacy_policy_content.html:434
 msgid ""
 "\n"
 "                    You have the right to lodge a complaint with the Romanian Data Protection Authority (ANSPDCP):\n"
@@ -935,11 +942,11 @@ msgstr ""
 "                    Dvs. aveți dreptul să depuneți o plângere la Autoritatea Națională de Supraveghere a Prelucrării Datelor cu Caracter Personal (ANSPDCP):\n"
 "                    "
 
-#: templates/legal/privacy_policy_content.html:444
+#: templates/legal/privacy_policy_content.html:448
 msgid "Changes to This Policy"
 msgstr "Modificări ale acestei Politici"
 
-#: templates/legal/privacy_policy_content.html:446
+#: templates/legal/privacy_policy_content.html:450
 msgid ""
 "\n"
 "                We may update this Privacy Policy from time to time. We will notify you of significant changes\n"

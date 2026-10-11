@@ -16207,7 +16207,7 @@ msgstr "Solicitare ștergere date"
 #: templates/audit/gdpr_dashboard.html:126
 #: templates/legal/privacy_policy.html:253
 msgid "Right to Withdraw Consent"
-msgstr "Drept de retragere a consimțământului"
+msgstr "Dreptul de a retrage consimțământul"
 
 #: templates/audit/gdpr_dashboard.html:127
 msgid "Change your consent anytime"
@@ -22436,7 +22436,7 @@ msgstr "Solicitați ștergerea datelor dvs. personale (\\"
 
 #: templates/legal/privacy_policy.html:241
 msgid "Right to Restriction"
-msgstr "Dreptul de restricție"
+msgstr "Dreptul la restricționarea prelucrării"
 
 #: templates/legal/privacy_policy.html:242
 msgid "Request restriction of processing in certain circumstances."

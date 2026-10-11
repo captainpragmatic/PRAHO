@@ -116,7 +116,7 @@ class LocalisationHMACIntegrationTests(HMACTestMixin, TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.json()["localisation"]["default_language"], "en")
 
-    def test_company_contract_has_exactly_five_fields_and_rejects_unsigned_requests(self) -> None:
+    def test_company_contract_has_exactly_its_public_fields_and_rejects_unsigned_requests(self) -> None:
         from django.core.cache import cache  # noqa: PLC0415
 
         cache.clear()
@@ -127,15 +127,17 @@ class LocalisationHMACIntegrationTests(HMACTestMixin, TestCase):
             "email_privacy": "privacy-contract@example.test",
             "email_finance": "finance-contract@example.test",
             "phone": "+40721123456",
+            # The privacy policy states these to customers (GDPR Art. 13(1)(b)).
+            "email_dpo": "dpo-contract@example.test",
+            "email_contact": "contact-contract@example.test",
+            "address": "Str. Contract 1, București",
+            "registration_number": "J40/1234/2020",
         }
         with self.captureOnCommitCallbacks(execute=True):
             for field, value in expected.items():
                 result = SettingsService.update_setting(f"company.{field}", value)
                 self.assertTrue(result.is_ok(), result)
-            for key, value in (
-                ("company.email_noreply", "private-sender@example.test"),
-                ("company.email_dpo", "private-dpo@example.test"),
-            ):
+            for key, value in (("company.email_noreply", "private-sender@example.test"),):
                 result = SettingsService.update_setting(key, value)
                 self.assertTrue(result.is_ok(), result)
 
@@ -144,7 +146,6 @@ class LocalisationHMACIntegrationTests(HMACTestMixin, TestCase):
         self.assertEqual(response.json().get("company"), expected)
         self.assertEqual(set(response.json()["company"]), set(expected))
         self.assertNotIn("private-sender@example.test", response.content.decode())
-        self.assertNotIn("private-dpo@example.test", response.content.decode())
 
         unsigned = self.client.post("/api/localisation/", "{}", content_type="application/json")
         self.assertEqual(unsigned.status_code, 401)

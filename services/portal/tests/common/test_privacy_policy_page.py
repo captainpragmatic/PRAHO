@@ -51,6 +51,28 @@ class PrivacyPolicyPageTests(SimpleTestCase):
         self.assertNotIn("Registered Address", html)
         self.assertNotIn("Data Protection Officer (DPO)", html)
 
+    def test_the_dpo_and_controller_details_platform_publishes_are_shown(self) -> None:
+        published = {
+            **IDENTITY,
+            "email_dpo": "dpo@privacy.example.test",
+            "email_contact": "contact@privacy.example.test",
+            "address": "Str. Exemplu 1, București",
+            "registration_number": "J40/1234/2020",
+        }
+        payload = {"success": True, "localisation": LocalisationDefaults().customer_payload(), "company": published}
+        cache.clear()
+        with patch.object(api_client, "get_localisation_defaults", return_value=payload):
+            text = " ".join(Client().get("/privacy-policy/").content.decode().split())
+        for shown in ("Data Protection Officer (DPO)", "dpo@privacy.example.test", "or by contacting our DPO"):
+            self.assertIn(shown, text)
+        for shown in ("contact@privacy.example.test", "Str. Exemplu 1, București", "J40/1234/2020"):
+            self.assertIn(shown, text)
+
+    def test_without_a_dpo_address_the_policy_does_not_send_customers_to_one(self) -> None:
+        text = " ".join(Client().get("/privacy-policy/").content.decode().split())
+        self.assertNotIn("contacting our DPO", text)
+        self.assertIn("You can exercise your rights through our GDPR Privacy Dashboard.", text)
+
     def test_rights_point_to_the_customers_privacy_dashboard(self) -> None:
         html = Client().get("/privacy-policy/").content.decode()
         self.assertIn(f'href="{reverse("users:privacy_dashboard")}"', html)
