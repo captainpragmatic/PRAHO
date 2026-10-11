@@ -8,6 +8,7 @@ from django.conf import settings
 from django.core import mail
 from django.test import TestCase
 
+from apps.common.legal import TERMS_OF_SERVICE_VERSION
 from apps.customers.contact_service import AddressData, ContactService
 from apps.customers.models import Customer
 from apps.orders.services import OrderService
@@ -75,6 +76,7 @@ class RegistrationCase(TestCase):
         confirmed = self.signed_post("/api/users/register/confirm/", {
             "registration_id": registration_id, "token": token,
             "password": CHOSEN, "password_confirm": CHOSEN, "data_processing_consent": True,
+            "terms_accepted": True, "terms_version": TERMS_OF_SERVICE_VERSION,
         })
         self.assertEqual(confirmed.status_code, 201, confirmed.content)
         user = User.objects.get(email="owner@e2e.test")

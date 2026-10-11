@@ -47,7 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Confirming a registration records the Terms of Service accepted.**
   - **Why.** The portal sent `terms_accepted` with a registration and Platform dropped it, so nothing recorded who accepted which terms, or when.
   - **What.** The person who confirms the emailed link accepts the version the confirmation page showed. The account records the time and version, and an audit event `terms_of_service_accepted` is written with it; if that write fails, no account is created. A version that is no longer current is refused (`terms_changed`) and the same link can be used again. The GDPR export includes the acceptance, and anonymisation clears it.
-  - Acceptance is optional until the portal asks for it on the confirmation page.
+  - **Required.** The portal's confirmation page asks for it, with a link to the terms, and Platform refuses a confirmation without it (`terms_required`). When the terms changed since the page was shown, the page fetches the current version and asks again. **Deploy the portal with or before Platform.**
 - **The portal publishes the Terms of Service at `/terms/`.**
   - **Why.** Checkout asks customers to accept the terms and linked to `/terms/`, which did not exist: anonymous visitors were sent to the login page and signed-in customers got a 404. Registration will ask for acceptance next, and a customer should be able to read what they accept.
   - **What.** The page is public, linked from the portal footer, and shows the same text as Platform's `/terms-of-service/`, from one shared template. Both pages state the version, which is the one Platform will record when a customer accepts. A test fails if the text changes without a new version.

@@ -896,6 +896,8 @@ class PlatformAPIClient:
         *,
         data_processing_consent: bool,
         marketing_consent: bool,
+        terms_accepted: bool,
+        terms_version: str,
         client_ip: str = "",
     ) -> dict[str, Any]:
         """Finish a pending registration with the confirmer's password; propagate Platform errors."""
@@ -909,6 +911,8 @@ class PlatformAPIClient:
                 "password_confirm": password_confirm,
                 "data_processing_consent": data_processing_consent,
                 "marketing_consent": marketing_consent,
+                "terms_accepted": terms_accepted,
+                "terms_version": terms_version,
                 **_client_ip_payload(client_ip),
             },
         )

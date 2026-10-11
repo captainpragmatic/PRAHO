@@ -7,6 +7,7 @@ from django.test import TestCase, override_settings
 
 from apps.api.orders.serializers import OrderDetailSerializer
 from apps.billing.models import Currency
+from apps.common.legal import TERMS_OF_SERVICE_VERSION
 from apps.common.performance.rate_limiting import RegistrationClientIPThrottle
 from apps.customers.models import Customer
 from apps.orders.models import Order
@@ -78,6 +79,8 @@ class PurchaseIdentityContracts(HMACTestMixin, TestCase):
                 "password": password,
                 "password_confirm": password,
                 "data_processing_consent": True,
+                "terms_accepted": True,
+                "terms_version": TERMS_OF_SERVICE_VERSION,
             },
         )
 
@@ -149,6 +152,8 @@ class PurchaseIdentityContracts(HMACTestMixin, TestCase):
                         "password": password,
                         "password_confirm": password,
                         "data_processing_consent": True,
+                        "terms_accepted": True,
+                        "terms_version": TERMS_OF_SERVICE_VERSION,
                     },
                 )
                 self.assertEqual(response.status_code, 400, response.content)

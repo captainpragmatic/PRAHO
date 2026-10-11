@@ -30,6 +30,7 @@ def form(**overrides: object) -> dict[str, object]:
         "new_password": CHOSEN,
         "confirm_password": CHOSEN,
         "data_processing_consent": "on",
+        "terms_accepted": "on",  # Required since the page asks for the Terms of Service
         **overrides,
     }
 
@@ -77,6 +78,8 @@ class RegistrationConfirmViewTests(TestCase):
             CHOSEN,
             data_processing_consent=True,
             marketing_consent=True,
+            terms_accepted=True,
+            terms_version="",  # These details name no version; Platform refuses that as changed terms
             client_ip="127.0.0.1",
         )
         self.assertTrue(any("can sign in now" in str(m) for m in get_messages(response.wsgi_request)))

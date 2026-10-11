@@ -7884,3 +7884,14 @@ msgstr "Doar cifre; prefixul RO este acceptat și eliminat."
 #: apps/users/forms.py
 msgid "Romanian Personal Identification Number - required for individuals in Romania."
 msgstr "Codul Numeric Personal - obligatoriu pentru persoanele fizice din România."
+
+msgid "I have read and accept the Terms of Service."
+msgstr "Am citit și accept Termenii de Serviciu."
+
+#: templates/users/register_confirm.html
+msgid "Read the Terms of Service"
+msgstr "Citiți Termenii de Serviciu"
+
+#: apps/users/views.py
+msgid "The Terms of Service have changed. Please read them again before confirming."
+msgstr "Termenii de Serviciu s-au modificat. Vă rugăm să îi citiți din nou înainte de confirmare."

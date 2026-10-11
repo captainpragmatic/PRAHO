@@ -18,6 +18,7 @@ from django.utils import timezone
 from apps.audit.models import AuditEvent
 from apps.billing.fiscal_identity import get_customer_fiscal_identity
 from apps.common.encryption import encrypt_sensitive_data
+from apps.common.legal import TERMS_OF_SERVICE_VERSION
 from apps.settings.services import SettingsService
 from apps.users import registration_confirmation
 from apps.users.models import User
@@ -76,7 +77,13 @@ class RegistrationFiscalIdentityTests(HMACTestMixin, TestCase):
 
     def confirm(self, row: PendingRegistration) -> Any:
         return registration_confirmation.confirm(
-            str(row.pk), row.token(), NEW_PASSPHRASE, accepts_marketing=False, data_processing_consent=True
+            str(row.pk),
+            row.token(),
+            NEW_PASSPHRASE,
+            accepts_marketing=False,
+            data_processing_consent=True,
+            terms_accepted=True,
+            terms_version=TERMS_OF_SERVICE_VERSION,
         )
 
     # --- The CNP reaches the customer, and never the plain JSON -------------------------------

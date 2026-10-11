@@ -853,7 +853,7 @@ def _load_registration(
 
 
 def _confirm_registration(
-    request: HttpRequest, form: RegistrationConfirmForm, link: dict[str, Any]
+    request: HttpRequest, form: RegistrationConfirmForm, link: dict[str, Any], details: dict[str, Any]
 ) -> tuple[HttpResponse | None, int, int | None, str]:
     """Submit the confirmation. Return a redirect on success, else a status, Retry-After and a notice."""
     try:
@@ -864,6 +864,8 @@ def _confirm_registration(
             form.cleaned_data["confirm_password"],
             data_processing_consent=form.cleaned_data["data_processing_consent"],
             marketing_consent=form.cleaned_data["marketing_consent"],
+            terms_accepted=form.cleaned_data["terms_accepted"],
+            terms_version=str(details.get("terms_version", "")),
             client_ip=get_safe_client_ip(request),
         )
         if not result.get("success"):
@@ -874,6 +876,13 @@ def _confirm_registration(
         if code in {"invalid_link", "details_unavailable"}:
             request.session.pop(REGISTRATION_CONFIRM_SESSION_KEY, None)
             return None, (409 if code == "details_unavailable" else 400), None, code
+        if code == "terms_changed":
+            # Forget the details fetched for the link, so the next submit sends the current version.
+            request.session[REGISTRATION_CONFIRM_SESSION_KEY] = {
+                key: value for key, value in link.items() if key != "details"
+            }
+            form.add_error(None, _("The Terms of Service have changed. Please read them again before confirming."))
+            return None, 409, None, ""
         if exc.status_code == HTTPStatus.BAD_REQUEST:
             errors = payload.get("errors")
             for field, field_errors in (errors if isinstance(errors, dict) else {}).items():
@@ -923,7 +932,7 @@ def register_confirm_view(
         if request.POST.get("registration_id") != link["registration_id"]:
             status, notice = 409, _("This page was for an earlier link. Check these details and submit again.")
         elif posted.is_valid():
-            done, status, retry_after, gone = _confirm_registration(request, posted, link)
+            done, status, retry_after, gone = _confirm_registration(request, posted, link, registration)
             if done is not None:
                 return done
             form = posted

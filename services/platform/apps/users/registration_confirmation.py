@@ -223,8 +223,9 @@ def confirm(  # noqa: PLR0913  # One argument per value the mailbox holder suppl
         row = PendingRegistration.objects.select_for_update().filter(pk=registration_id).first()
         if row is None or not row.token_matches(token) or not row.is_usable():
             return Err(ConfirmRefusal("invalid_link"))
-        if terms_accepted and terms_version != TERMS_OF_SERVICE_VERSION:
-            return Err(ConfirmRefusal("terms_changed"))
+        terms_refusal = _terms_refusal(terms_accepted, terms_version)
+        if terms_refusal is not None:
+            return Err(terms_refusal)
 
         try:
             cnp = row.cnp()
@@ -270,6 +271,15 @@ def confirm(  # noqa: PLR0913  # One argument per value the mailbox holder suppl
             request_ip,
         )
         return Ok((user, customer))
+
+
+def _terms_refusal(terms_accepted: bool, terms_version: str) -> ConfirmRefusal | None:
+    """Why the terms acceptance cannot be recorded, or None: none given, or not the current version."""
+    if not terms_accepted:
+        return ConfirmRefusal("terms_required")
+    if terms_version != TERMS_OF_SERVICE_VERSION:
+        return ConfirmRefusal("terms_changed")
+    return None
 
 
 def _audit_terms_acceptance(user: User, row: PendingRegistration, request_ip: str | None) -> None:

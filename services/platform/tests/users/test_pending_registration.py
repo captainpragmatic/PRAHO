@@ -28,6 +28,8 @@ from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestM
 PORTAL = "https://customers.example.test"
 PASSWORD = " Chosen-at-confirm-2026! "
 
+TERMS = {"terms_accepted": True, "terms_version": TERMS_OF_SERVICE_VERSION}
+
 
 def pending_customer_data() -> dict[str, str]:
     return {
@@ -181,6 +183,8 @@ class ConfirmRegistrationTests(PortalOriginMixin, TestCase):
             password,
             accepts_marketing=True,
             data_processing_consent=True,
+            terms_accepted=True,
+            terms_version=TERMS_OF_SERVICE_VERSION,
         )
 
     def test_the_confirmer_chooses_the_password_and_the_link_works_once(self) -> None:
@@ -242,13 +246,13 @@ class ConfirmRegistrationTests(PortalOriginMixin, TestCase):
     def test_consent_is_required_and_recorded_as_given(self) -> None:
         row = self.sent()
         refused = registration_confirmation.confirm(
-            str(row.pk), row.token(), PASSWORD, accepts_marketing=True, data_processing_consent=False
+            str(row.pk), row.token(), PASSWORD, accepts_marketing=True, data_processing_consent=False, **TERMS
         )
         self.assertEqual(refused.unwrap_err().code, "consent_required")
         row.refresh_from_db()
         self.assertTrue(row.is_usable())
         user, customer = registration_confirmation.confirm(
-            str(row.pk), row.token(), PASSWORD, accepts_marketing=False, data_processing_consent=True
+            str(row.pk), row.token(), PASSWORD, accepts_marketing=False, data_processing_consent=True, **TERMS
         ).unwrap()
         user.refresh_from_db()
         customer.refresh_from_db()
@@ -291,6 +295,7 @@ class ConfirmRegistrationTests(PortalOriginMixin, TestCase):
             accepts_marketing=False,
             data_processing_consent=True,
             request_ip="203.0.113.7",
+            **TERMS,
         )
         self.assertTrue(result.is_ok(), result)
         after = counters.peek("rate_limit:registration:203.0.113.7"), counters.peek("rate_limit:registration:")
@@ -352,6 +357,8 @@ class RegistrationConfirmAPITests(HMACTestMixin, TestCase):
             "password_confirm": PASSWORD,
             "data_processing_consent": True,
             "marketing_consent": False,
+            "terms_accepted": True,
+            "terms_version": TERMS_OF_SERVICE_VERSION,
             **overrides,
         }
 
