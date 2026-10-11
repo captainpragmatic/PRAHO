@@ -72,21 +72,13 @@ Comprehensive assessment of PRAHO's security and compliance posture against indu
 | Failed Login Tracking | Implemented | `apps/users/models.py` — `failed_login_attempts`, `account_locked_until` fields |
 | Progressive Account Lockout | Implemented | Lockout escalation: 5 → 15 → 30 → 60 → 120 → 240 minutes |
 | Session Security | Implemented | Middleware + `SessionSecurityService` |
-| Login Rate Limiting | Implemented | `apps/users/views.py` — 10/min global, 5/min per email |
+| Login Rate Limiting | Implemented | `apps/users/views.py` — 15/min per IP, 8/min per email |
 
 ### 1.4 Rate Limiting
 
 **Location:** `apps/common/performance/rate_limiting.py`
 
-| Throttle Class | Scope | Rate |
-|---------------|-------|------|
-| `CustomerRateThrottle` | Per customer tier | Basic: 100/min, Professional: 500/min, Enterprise: 2000/min |
-| `BurstRateThrottle` | Global burst | 30 requests per 10 seconds |
-| `SustainedRateThrottle` | Global sustained | 1000 requests per hour |
-| `ServiceRateThrottle` | Token bucket | Capacity: 100, refill: 10 tokens/sec, weighted by operation cost |
-| `AnonymousRateThrottle` | Unauthenticated | 20 requests per minute |
-| `WriteOperationThrottle` | POST/PUT/PATCH/DELETE | 60 per minute |
-| `EndpointThrottle` | Per-endpoint | login: 5/min, 2fa_verify: 10/min, provision: 10/min |
+Every throttle class, its scope, default rate and key are listed in [SECURITY_CONFIGURATION.md §7](SECURITY_CONFIGURATION.md#7-rate-limiting), which a test keeps in step with the code.
 
 See also: [ADR-0030](../ADRs/ADR-0030-rate-limiting-architecture.md)
 

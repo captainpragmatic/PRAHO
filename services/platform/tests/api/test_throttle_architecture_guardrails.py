@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import inspect
+import re
 from copy import deepcopy
+from importlib import import_module
+from pathlib import Path
 from unittest.mock import patch
 
 from django.conf import settings
@@ -38,6 +41,7 @@ from apps.api.users import views as users_views
 from apps.api.users.views import SessionValidationThrottle, validate_session_secure
 from apps.common.apps import _validate_throttle_rates_at_startup
 from apps.common.performance import rate_limiting
+from config.settings.base import DEFAULT_THROTTLE_RATES
 from config.settings.test import LOCMEM_TEST_CACHE
 from tests.api.test_api_auth_regressions import _has_public_marker
 
@@ -579,3 +583,72 @@ class EndpointThrottleBehaviorTests(TestCase):
         ]
 
         self.assertEqual([response.status_code for response in responses], [200, 200])
+
+
+REPO_ROOT = Path(__file__).resolve().parents[4]
+SECURITY_CONFIGURATION_DOC = REPO_ROOT / "docs" / "security" / "SECURITY_CONFIGURATION.md"
+SECURITY_ASSESSMENT_DOC = REPO_ROOT / "docs" / "security" / "SECURITY_COMPLIANCE_ASSESSMENT.md"
+# Rows of the rate-limiting table: | `ClassName` | `scope` | `rate` | ...
+_DOC_THROTTLE_ROW = re.compile(r"^\|\s*`(\w+Throttle)`\s*\|\s*`(\w+)`\s*\|\s*`([^`]+)`\s*\|", re.MULTILINE)
+_DOC_THROTTLE_NAME = re.compile(r"`(\w+Throttle)`")
+# Bases that carry no scope of their own; prose may name them.
+_UNSCOPED_THROTTLE_BASES = frozenset({"EndpointRateThrottle", "ForwardedClientIPThrottle"})
+REMOVED_THROTTLE_NAMES = (
+    "SustainedRateThrottle",
+    "AnonymousRateThrottle",
+    "WriteOperationThrottle",
+    "ServiceRateThrottle",
+    "EndpointThrottle",
+)
+EXPECTED_SCOPED_THROTTLE_COUNT = 18
+
+
+def _scoped_throttle_classes() -> dict[str, type[SimpleRateThrottle]]:
+    """Every concrete scoped throttle PRAHO defines, found the same way in any test run.
+
+    `__subclasses__()` sees only classes whose modules are already imported, so the result would
+    depend on which tests ran first. Importing the URLconf loads every view module, and with it
+    every throttle a view can attach. The walk is recursive because most throttles sit two or
+    three levels below `SimpleRateThrottle`.
+    """
+    import_module(settings.ROOT_URLCONF)
+    import_module("apps.common.performance.rate_limiting")
+    found: dict[str, type[SimpleRateThrottle]] = {}
+    pending: list[type[SimpleRateThrottle]] = [SimpleRateThrottle]
+    while pending:
+        for subclass in pending.pop().__subclasses__():
+            pending.append(subclass)
+            if subclass.__module__.startswith("apps.") and getattr(subclass, "scope", None):
+                found[subclass.__name__] = subclass
+    return found
+
+
+class SecurityDocsThrottleTableTests(SimpleTestCase):
+    """The security docs list the throttles the code defines, at their default rates (#622).
+
+    Both docs listed an `EndpointThrottle` with login, 2FA and provisioning rates. That class, and
+    four more in the same table, no longer existed, and every other rate was wrong.
+    SECURITY_CONFIGURATION.md owns the table; the assessment points to it.
+    """
+
+    def test_security_doc_throttle_table_matches_code(self) -> None:
+        text = SECURITY_CONFIGURATION_DOC.read_text(encoding="utf-8")
+        defined = _scoped_throttle_classes()
+        self.assertEqual(len(defined), EXPECTED_SCOPED_THROTTLE_COUNT, sorted(defined))
+        self.assertIn("TokenRequestAccountThrottle", defined)  # canary: the newest per-account throttle
+
+        named = set(_DOC_THROTTLE_NAME.findall(text))
+        self.assertEqual(named - set(defined) - _UNSCOPED_THROTTLE_BASES, set(), "the doc names a missing class")
+
+        documented = {name: (scope, rate) for name, scope, rate in _DOC_THROTTLE_ROW.findall(text)}
+        self.assertEqual(set(documented), set(defined))
+        for name, (scope, rate) in documented.items():
+            with self.subTest(name):
+                self.assertEqual(scope, defined[name].scope)
+                self.assertEqual(rate, DEFAULT_THROTTLE_RATES[scope])
+
+    def test_security_assessment_names_no_removed_throttle(self) -> None:
+        text = SECURITY_ASSESSMENT_DOC.read_text(encoding="utf-8")
+        for name in REMOVED_THROTTLE_NAMES:
+            with self.subTest(name):
+                self.assertFalse(f"`{name}`" in text, f"the assessment still names the removed {name}")

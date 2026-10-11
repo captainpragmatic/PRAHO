@@ -83,12 +83,20 @@ For those requests, customer/burst fallback classes skip throttling to avoid dou
 
 ### Single source of truth
 
-`REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]` is generated from `THROTTLE_RATES` with only active, consumed scopes:
+`REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]` is `THROTTLE_RATES`: the literal `DEFAULT_THROTTLE_RATES`,
+with `portal_hmac`, `portal_hmac_create_user` and `customer` overridable from the environment. Every
+scope is consumed by a throttle class except `anon`, which exists only so DRF's anonymous throttle
+validates at startup:
 
-- `portal_hmac`, `portal_hmac_burst`, `customer`, `burst`
-- `auth`, `sustained`, `api_burst`, `anon`
+- `portal_hmac`, `portal_hmac_burst`, `portal_hmac_create_user`, `customer`, `burst`
+- `auth`, `token_request`, `sustained`, `api_burst`
+- `auth_login_ip`, `auth_reset_ip`, `auth_register_ip`, `auth_register_confirm_ip`
 - `order_create`, `order_calculate`, `order_list`, `product_catalog`
 - `session_validation`
+- `anon` (validation only)
+
+`docs/security/SECURITY_CONFIGURATION.md` §7 lists every class with its scope, default rate and key;
+`tests/api/test_throttle_architecture_guardrails.py` keeps it in step (#622).
 
 ### Startup validation
 

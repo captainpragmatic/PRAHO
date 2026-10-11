@@ -387,12 +387,8 @@ class CustomerRateThrottle(_CustomTimeRateMixin, SimpleRateThrottle):  # type: i
     """
     Rate throttling based on customer account.
 
-    Customers share rate limits across all their users.
-
-    Rate limits can be customized per customer tier:
-    - basic: 100 requests/minute
-    - professional: 500 requests/minute
-    - enterprise: 2000 requests/minute
+    Customers share one rate limit across all their users: THROTTLE_RATES["customer"]. There
+    are no per-tier rates.
     """
 
     scope = "customer"

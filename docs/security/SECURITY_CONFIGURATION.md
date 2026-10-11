@@ -428,17 +428,37 @@ TIMESTAMP
 
 Source: `apps/common/performance/rate_limiting.py`
 
-| Throttle Class | Scope | Rate |
-|---------------|-------|------|
-| `CustomerRateThrottle` | Per customer tier | Basic: 100/min, Professional: 500/min, Enterprise: 2000/min |
-| `BurstRateThrottle` | Global burst | 30 requests per 10 seconds |
-| `SustainedRateThrottle` | Global sustained | 1000 requests per hour |
-| `ServiceRateThrottle` | Token bucket | Capacity: 100, refill: 10 tokens/sec, weighted by operation cost |
-| `AnonymousRateThrottle` | Unauthenticated | 20 requests per minute |
-| `WriteOperationThrottle` | POST/PUT/PATCH/DELETE | 60 per minute |
-| `EndpointThrottle` | Per-endpoint | login: 5/min, 2fa_verify: 10/min, provision: 10/min |
+Each throttle's rate comes from its scope in `THROTTLE_RATES` (`config/settings/base.py`). The
+defaults below are `DEFAULT_THROTTLE_RATES`; three can be overridden from the environment.
+`tests/api/test_throttle_architecture_guardrails.py` fails if this table and the code disagree.
 
-Token bucket operation costs: `provision: 10`, `backup: 5`, `sync: 2`, `query: 1`.
+| Throttle class | Scope | Default rate | Keyed by | Used by |
+|---|---|---|---|---|
+| `PortalHMACRateThrottle` | `portal_hmac` | `200/minute` | Verified portal and the signed principal; not applied to other traffic. Env `THROTTLE_RATE_PORTAL_HMAC` | DRF default; HMAC views |
+| `PortalHMACBurstThrottle` | `portal_hmac_burst` | `100/10s` | Verified portal and the signed principal; not applied to other traffic | DRF default; HMAC views |
+| `PortalHMACCreateUserThrottle` | `portal_hmac_create_user` | `30/min` | Verified portal only. Env `THROTTLE_RATE_PORTAL_CREATE_USER` | `customer_users_create` |
+| `CustomerRateThrottle` | `customer` | `200/minute` | Current customer, else user, else client IP; skips portal traffic. Env `THROTTLE_RATE_CUSTOMER` | DRF default |
+| `BurstRateThrottle` | `burst` | `60/10s` | User, else client IP; skips portal traffic | DRF default |
+| `StandardAPIThrottle` | `sustained` | `2000/hour` | User, else client IP | `token/me/`, `token/revoke/` |
+| `BurstAPIThrottle` | `api_burst` | `120/min` | User, else client IP | `token/me/`, `token/revoke/` |
+| `AuthThrottle` | `auth` | `10/minute` | Client IP | `obtain_token` |
+| `TokenRequestAccountThrottle` | `token_request` | `5/minute` | Hash of the submitted email | `obtain_token` |
+| `LoginClientIPThrottle` | `auth_login_ip` | `10/minute` | End-user IP in the Portal's signed body | Startup validation only; `portal_login_api` applies the rate through `fixed_window_limited` |
+| `ResetClientIPThrottle` | `auth_reset_ip` | `5/minute` | End-user IP in the Portal's signed body | Both password-reset endpoints |
+| `RegistrationClientIPThrottle` | `auth_register_ip` | `5/minute` | End-user IP in the Portal's signed body | `/api/customers/register/` |
+| `RegistrationConfirmClientIPThrottle` | `auth_register_confirm_ip` | `5/minute` | End-user IP in the Portal's signed body | `/api/users/register/pending/`, `/api/users/register/confirm/` |
+| `OrderCreateThrottle` | `order_create` | `20/min` | Portal for HMAC traffic, else user, else client IP | Order creation |
+| `OrderCalculateThrottle` | `order_calculate` | `60/min` | Portal for HMAC traffic, else user, else client IP | Cart totals and preflight |
+| `OrderListThrottle` | `order_list` | `200/min` | Portal for HMAC traffic, else user, else client IP | Order list, detail and confirmation |
+| `ProductCatalogThrottle` | `product_catalog` | `400/min` | Portal for HMAC traffic, else user, else client IP | Product catalog |
+| `SessionValidationThrottle` | `session_validation` | `60/min` | Portal for HMAC traffic, else user, else client IP | `validate_session_secure` |
+
+The order and session throttles subclass `EndpointRateThrottle`, and the four client-IP throttles
+subclass `ForwardedClientIPThrottle`; neither base has a scope of its own. The `anon` scope
+(`40/minute`) has no class: it exists so DRF's built-in anonymous throttle validates at startup.
+
+Portal traffic is limited a second time, before any view, by `PortalServiceHMACMiddleware`'s
+per-principal and portal-wide budgets (the `HMAC_RATE_LIMIT_*` settings above).
 
 > See [ADR-0030: Rate Limiting Architecture](../ADRs/ADR-0030-rate-limiting-architecture.md) for design rationale.
 

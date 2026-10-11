@@ -713,14 +713,15 @@ HMAC_RATE_LIMIT_ANONYMOUS_PER_MINUTE = int(os.environ.get("HMAC_RATE_LIMIT_ANONY
 # Logins and resets without a signed client IP share this (it was the portal-wide auth limit).
 HMAC_RATE_LIMIT_ANONYMOUS_AUTH_PER_MINUTE = int(os.environ.get("HMAC_RATE_LIMIT_ANONYMOUS_AUTH_PER_MINUTE") or "120")
 
-# Rate limiting rates for different scopes
-THROTTLE_RATES = {
+# Default rate per throttle scope. docs/security/SECURITY_CONFIGURATION.md lists these, and
+# tests/api/test_throttle_architecture_guardrails.py keeps the table in step with them.
+DEFAULT_THROTTLE_RATES = {
     # Global DRF defaults (apps.common.performance.rate_limiting)
-    "portal_hmac": os.environ.get("THROTTLE_RATE_PORTAL_HMAC", "200/minute"),
+    "portal_hmac": "200/minute",
     "portal_hmac_burst": "100/10s",
     # Strict per-portal cap on the user-creation mutation (apps.api.customers.views)
-    "portal_hmac_create_user": os.environ.get("THROTTLE_RATE_PORTAL_CREATE_USER", "30/min"),
-    "customer": os.environ.get("THROTTLE_RATE_CUSTOMER", "200/minute"),
+    "portal_hmac_create_user": "30/min",
+    "customer": "200/minute",
     "burst": "60/10s",
     # Per-view API throttles (apps.api.core.throttling)
     "auth": "10/minute",
@@ -744,6 +745,16 @@ THROTTLE_RATES = {
     "order_list": "200/min",
     "product_catalog": "400/min",
     "session_validation": "60/min",
+}
+
+# The rates in force: the defaults, three of which the environment may override.
+THROTTLE_RATES = {
+    **DEFAULT_THROTTLE_RATES,
+    "portal_hmac": os.environ.get("THROTTLE_RATE_PORTAL_HMAC", DEFAULT_THROTTLE_RATES["portal_hmac"]),
+    "portal_hmac_create_user": os.environ.get(
+        "THROTTLE_RATE_PORTAL_CREATE_USER", DEFAULT_THROTTLE_RATES["portal_hmac_create_user"]
+    ),
+    "customer": os.environ.get("THROTTLE_RATE_CUSTOMER", DEFAULT_THROTTLE_RATES["customer"]),
 }
 
 # Add throttling classes to REST_FRAMEWORK
