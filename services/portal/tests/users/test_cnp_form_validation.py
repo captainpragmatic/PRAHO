@@ -57,6 +57,11 @@ class TestPortalCNPFormValidation(SimpleTestCase):
         form.is_valid()
         self.assertIn("cnp", form.errors)
 
+    def test_non_ascii_digits_are_a_field_error(self) -> None:
+        form = self._make_form_with_cnp("185010112345\u00b2")  # Superscript two: isdigit() says yes
+        form.is_valid()
+        self.assertIn("cnp", form.errors)
+
     def test_non_13_digit_rejected(self) -> None:
         form = self._make_form_with_cnp("12345")
         form.is_valid()

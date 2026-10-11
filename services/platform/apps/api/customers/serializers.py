@@ -147,6 +147,10 @@ class CustomerRegistrationDataSerializer(serializers.Serializer):
 
         No identifier is looked up: whether it is already registered is never part of the answer.
         """
+        if not str(attrs.get("country") or "").strip():
+            # Keep the country this decision used: confirmation, up to a day later, must not
+            # resolve a default that has changed meanwhile.
+            attrs["country"] = country_name(get_localisation_defaults().default_country)
         if attrs.get("customer_type") == "individual":
             attrs.pop("cui", None)
             attrs.pop("registration_number", None)

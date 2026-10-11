@@ -181,6 +181,13 @@ class RegistrationFiscalIdentityTests(HMACTestMixin, TestCase):
         data = individual(cnp="")
         del data["customer_data"]["country"]
         self.assertEqual(self.submit(data).status_code, 202)
+        # The country the decision used is kept: confirmation must not resolve a different default.
+        self.assertEqual(PendingRegistration.objects.get().customer_data["country"], "Germany")
+
+    def test_non_ascii_digits_get_the_fixed_answer(self) -> None:
+        response = self.submit(individual(cnp="190010112345\u00b2"))
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("cnp", response.json()["errors"]["customer_data"])
 
     def test_a_company_keeps_no_cnp(self) -> None:
         row = self.submitted_row(registration(country="RO", cnp=CNP))

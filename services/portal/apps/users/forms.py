@@ -321,7 +321,8 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
         cnp = str(self.cleaned_data.get("cnp", "")).strip()
         if cnp:
             # CNP must be exactly 13 digits
-            if not cnp.isdigit() or len(cnp) != CNP_LENGTH:
+            # isascii(): isdigit() also accepts digits such as "²", which int() cannot read.
+            if not (cnp.isascii() and cnp.isdigit()) or len(cnp) != CNP_LENGTH:
                 raise ValidationError(_("CNP must be exactly 13 digits."))
 
             # Century marker and check digit. Platform validates the CNP in full, and refuses
