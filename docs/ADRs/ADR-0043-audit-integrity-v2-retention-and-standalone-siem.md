@@ -123,7 +123,7 @@ runbook: rebaseline after every release.
 
 The audit module stands alone. Integration surface: the structured JSON log
 stream (`SIEMJSONFormatter`) for any log shipper, and on-demand export
-(`audit_compliance export-events`, CEF/LEEF/JSON/Syslog/OCSF renderers in
+(`audit_compliance export-siem`, CEF/LEEF/JSON/Syslog/OCSF renderers in
 `apps/audit/siem.py`). Real-time in-app push is deliberately not implemented;
 delivery guarantees belong to the log-shipping layer. The dead transport
 stack, duplicate services, and orphan models are deleted.
