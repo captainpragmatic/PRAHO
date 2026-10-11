@@ -31,7 +31,12 @@ from apps.billing.document_adjustments import (
 from apps.billing.efactura.settings import ro_local_date
 from apps.billing.exchange_rate_service import ExchangeRateService
 from apps.billing.fiscal_identity import normalize_business_tax_id, normalize_country_code, validated_cnp_or_empty
-from apps.billing.tax_evidence import REVERSE_CHARGE_LEGAL_BASIS, recorded_tax_category
+from apps.billing.tax_evidence import (
+    REVERSE_CHARGE_LEGAL_BASIS,
+    read_vat_evidence,
+    recorded_tax_category,
+    vat_identity,
+)
 from apps.common.operator import REFERENCE_OPERATOR_COUNTRY, operator_country
 from apps.common.tax_service import TaxService
 
@@ -345,6 +350,23 @@ class BaseUBLBuilder:
         Every other non-standard category (AE/E/Z/K) does require Percent=0.
         """
         return self._get_tax_category() == TAX_CATEGORY_NOT_SUBJECT
+
+    def _buyer_vat_identifier(self, customer: CompanyInfo) -> str:
+        """BT-48, the buyer's VAT identifier, or "" for a buyer not recorded as VAT-registered.
+
+        bill_to_tax_id holds the VAT number or, failing that, the bare CUI, and a company can hold
+        a CUI without being VAT-registered. The frozen evidence records the VAT number the
+        issuance decided on. A document without evidence states only a country-prefixed VAT
+        number: CUIs are stored as digits, VAT numbers with their prefix.
+        """
+        decision = read_vat_evidence(self.invoice)
+        if decision is not None:
+            if not decision.vat_number:
+                return ""
+            prefix, body = vat_identity(decision.vat_number, decision.country)
+            return f"{prefix}{body}"
+        tax_id = "".join((customer.tax_id or "").split()).upper()
+        return tax_id if tax_id[:2].isalpha() else ""
 
     def _get_tax_category(self) -> str:
         """Use recorded decisions on new documents, retaining legacy presentation."""
@@ -784,9 +806,10 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         # PostalAddress - Mandatory
         self._add_postal_address(party, customer)
 
-        # PartyTaxScheme - Mandatory if VAT registered; BR-O-04 forbids BT-48 out of scope.
-        if customer.tax_id and not self._omits_vat_rate():
-            self._add_party_tax_scheme(party, customer.vat_number)
+        # PartyTaxScheme - only for a VAT-registered buyer; BR-O-04 forbids BT-48 out of scope.
+        buyer_vat_id = self._buyer_vat_identifier(customer)
+        if buyer_vat_id and not self._omits_vat_rate():
+            self._add_party_tax_scheme(party, buyer_vat_id)
 
         # PartyLegalEntity - Mandatory
         self._add_party_legal_entity(party, customer.name, self._customer_legal_identifier(customer))
@@ -1254,8 +1277,9 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
 
         self._add_postal_address(party, customer)
 
-        if customer.tax_id and not self._omits_vat_rate():  # BR-O-04
-            self._add_party_tax_scheme(party, customer.vat_number)
+        buyer_vat_id = self._buyer_vat_identifier(customer)
+        if buyer_vat_id and not self._omits_vat_rate():  # BR-O-04
+            self._add_party_tax_scheme(party, buyer_vat_id)
 
         self._add_party_legal_entity(party, customer.name, self._customer_legal_identifier(customer))
 

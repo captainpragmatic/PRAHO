@@ -162,7 +162,7 @@ def _collect_refusals(invoice: Invoice, lines: list[Any]) -> list[str]:  # noqa:
     # presence of a tax ID — a Romanian company can hold a CUI without being
     # VAT-registered, and marking it as registered misstates the document.
     evidence = invoice.vat_evidence or {}
-    if "is_business" not in evidence:
+    if "vat_number" not in evidence:
         problems.append(
             "No frozen VAT evidence on this invoice, so the buyer's VAT-registration "
             "status cannot be stated. SmartBill defaults isTaxPayer to false, which "
@@ -254,8 +254,9 @@ def build_invoice_payload(  # noqa: C901  # Payload assembly plus the pre-POST c
         "name": invoice.bill_to_name,
         "vatCode": invoice.bill_to_tax_id or "",
         # From the document's frozen VAT evidence, never inferred from the presence
-        # of a tax ID: a company can hold a CUI without being VAT-registered.
-        "isTaxPayer": bool((invoice.vat_evidence or {}).get("is_business")),
+        # of a tax ID: a company can hold a CUI without being VAT-registered. The evidence's
+        # vat_number is the buyer's VAT registration; is_business only means "has a company name".
+        "isTaxPayer": bool((invoice.vat_evidence or {}).get("vat_number")),
         "regCom": invoice.bill_to_registration_number or "",
         "address": invoice.bill_to_address1 or "",
         "city": invoice.bill_to_city or "",

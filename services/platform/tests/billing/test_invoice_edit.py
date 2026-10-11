@@ -57,7 +57,8 @@ class DraftInvoiceEditTests(TestCase):
             total_cents=1000 + int(rate * 10),
             country_code="DE" if scenario == VATScenario.EU_B2B_REVERSE_CHARGE else "RO",
             is_business=True,
-            vat_number=None,
+            # Reverse charge names the buyer's VAT number (BR-AE-02); evidence without it is refused.
+            vat_number="DE123456789" if scenario == VATScenario.EU_B2B_REVERSE_CHARGE else None,
             reasoning="Recorded test decision",
             audit_data={"calculated_at": timezone.now().isoformat()},
         )

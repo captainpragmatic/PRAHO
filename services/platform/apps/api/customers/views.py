@@ -868,7 +868,10 @@ def update_customer_billing_address(  # noqa: C901, PLR0912, PLR0915  # Complexi
                 tax_fields["registration_number"] = validated_data["registration_number"]
 
             if tax_fields:
-                tax_profile, created = CustomerTaxProfile.objects.get_or_create(customer=customer, defaults=tax_fields)
+                # A new profile with only a CUI is not a VAT payer; the model default (True) would say so.
+                tax_profile, created = CustomerTaxProfile.objects.get_or_create(
+                    customer=customer, defaults={"is_vat_payer": bool(tax_fields.get("vat_number")), **tax_fields}
+                )
 
                 if not created:
                     for field, value in tax_fields.items():
