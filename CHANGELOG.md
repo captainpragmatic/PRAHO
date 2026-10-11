@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A customer who registers through the portal keeps their CNP, CUI and trade registry number.**
+  - **The bug.** Platform's registration API did not declare the CNP the portal requires from individuals, so it was dropped, and every individual who registered through the portal was invoiced with the placeholder CNP. A company had no way to give a CUI or trade registry number.
+  - **Now.** Individuals billed in Romania must give a CNP, checked in full, and companies may give a CUI (stored as digits) and a trade registry number. While the registration waits for its email confirmation, the CNP is stored encrypted and bound to that registration, never in plain text, and it is cleared once the link is used.
+  - **Deploy** the portal with or before Platform: the portal's form now checks the CNP's check digit, so a mistyped CNP is explained on the field.
 - **e-Factura states a buyer VAT identifier only for a VAT-registered buyer.**
   - **The bug.** The XML gave the buyer a VAT identifier (BT-48) whenever the invoice carried any tax ID, as "RO" plus that ID. A company with a CUI but no VAT registration was declared VAT-registered. SmartBill marked every buyer with a company name as a taxpayer.
   - **Now.** BT-48 is the VAT number frozen on the document at issuance, with its country prefix, and is left out when there is none. The legal ID (BT-47) still carries the CUI. SmartBill's taxpayer flag follows the same VAT number.

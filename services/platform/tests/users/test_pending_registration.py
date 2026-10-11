@@ -405,6 +405,9 @@ class RegistrationConfirmAPITests(HMACTestMixin, TestCase):
                 "last_name": "Marlowe",
                 "company_name": "Quill Lantern SRL",
                 "vat_number": "",
+                # The company identifiers the confirmer checks; never the CNP.
+                "cui": "",
+                "registration_number": "",
             },
         )
         self.assertIsNone(PendingRegistration.objects.get(pk=self.row.pk).consumed_at)

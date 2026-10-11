@@ -28532,3 +28532,15 @@ msgstr "Doar cifre; prefixul RO este acceptat și eliminat."
 
 #~ msgid "more"
 #~ msgstr "mai mult"
+
+#: apps/api/customers/serializers.py
+msgid "A CNP is required for individuals in Romania."
+msgstr "Pentru persoanele fizice din România, CNP-ul este obligatoriu."
+
+#: apps/api/customers/serializers.py
+msgid "Enter a valid CNP."
+msgstr "Introduceți un CNP valid."
+
+#: apps/api/customers/serializers.py
+msgid "The VAT number does not match the CUI."
+msgstr "Codul de TVA nu corespunde CUI-ului."

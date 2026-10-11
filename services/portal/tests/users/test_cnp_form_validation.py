@@ -51,6 +51,12 @@ class TestPortalCNPFormValidation(SimpleTestCase):
         format_errors = [e for e in cnp_errors if "13 digits" in str(e) or "format" in str(e).lower()]
         self.assertEqual(format_errors, [])
 
+    def test_a_wrong_check_digit_is_rejected_on_the_field(self) -> None:
+        # Platform refuses it; checked here, the customer sees why on the CNP field.
+        form = self._make_form_with_cnp("1850101123452")
+        form.is_valid()
+        self.assertIn("cnp", form.errors)
+
     def test_non_13_digit_rejected(self) -> None:
         form = self._make_form_with_cnp("12345")
         form.is_valid()

@@ -15,7 +15,11 @@ from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestM
 LOOKED_UP_TABLES = (User._meta.db_table, Customer._meta.db_table, CustomerTaxProfile._meta.db_table)
 
 
-def registration(email: str, company: str, vat: str) -> dict[str, object]:
+TAKEN_CNP = "1900101123457"
+TAKEN_CUI = "18189442"
+
+
+def registration(email: str, company: str, vat: str, **customer: object) -> dict[str, object]:
     return {
         "user_data": {"email": email, "first_name": "Ana", "last_name": "Pop", "phone": ""},
         "customer_data": {
@@ -26,8 +30,13 @@ def registration(email: str, company: str, vat: str) -> dict[str, object]:
             "city": "București",
             "postal_code": "010061",
             "data_processing_consent": True,
+            **customer,
         },
     }
+
+
+def individual(email: str, cnp: str) -> dict[str, object]:
+    return registration(email, "Ana Pop", "", customer_type="individual", country="RO", cnp=cnp)
 
 
 @override_settings(
@@ -43,7 +52,11 @@ class RegistrationUniformAnswerTests(HMACTestMixin, TestCase):
             name="Taken SRL", company_name="Taken SRL", customer_type="company",
             primary_email=owner.email, status="active",
         )
-        CustomerTaxProfile.objects.create(customer=customer, vat_number="RO14399840")
+        CustomerTaxProfile.objects.create(customer=customer, vat_number="RO14399840", cui=TAKEN_CUI)
+        person = Customer.objects.create(
+            name="Ion Popescu", customer_type="individual", primary_email="ion@example.test", status="active"
+        )
+        CustomerTaxProfile.objects.create(customer=person, cnp=TAKEN_CNP)
 
     def submit(self, data: dict[str, object]) -> tuple[int, object, int, list[str]]:
         with CaptureQueriesContext(connection) as queries:
@@ -69,6 +82,37 @@ class RegistrationUniformAnswerTests(HMACTestMixin, TestCase):
         self.assertEqual(len(answers), 1, observed)
         self.assertEqual(next(iter(answers))[0], 202)
         self.assertEqual(PendingRegistration.objects.count(), 5)
+
+    def assert_uniform(self, warm_up: dict[str, object], cases: dict[str, dict[str, object]]) -> None:
+        # Compared within one customer type: an individual's country is resolved and a company's
+        # is not, which depends on what was submitted, not on what exists.
+        self.enterContext(patch("apps.common.counters.randbelow", return_value=1))
+        self.submit(warm_up)
+        observed = {name: self.submit(data) for name, data in cases.items()}
+        for name, (_status, _body, _count, looked_up) in observed.items():
+            self.assertEqual(looked_up, [], f"{name}: the request looked up existing accounts")
+        answers = {(status, str(body), count) for status, body, count, _ in observed.values()}
+        self.assertEqual(len(answers), 1, observed)
+        self.assertEqual(next(iter(answers))[0], 202)
+        self.assertEqual(PendingRegistration.objects.count(), 1 + len(cases))
+
+    def test_a_taken_cui_gets_the_same_answer_and_works(self) -> None:
+        self.assert_uniform(
+            registration("warm-up@example.test", "Warm Up SRL", "", cui="14399840"),
+            {
+                "new CUI": registration("new@example.test", "New SRL", "", cui="18547290"),
+                "taken CUI": registration("other@example.test", "Other SRL", "", cui=TAKEN_CUI),
+            },
+        )
+
+    def test_a_taken_cnp_gets_the_same_answer_and_works(self) -> None:
+        self.assert_uniform(
+            individual("warm-up@example.test", "2900505123403"),
+            {
+                "new CNP": individual("person@example.test", "6000101123459"),
+                "taken CNP": individual("taken-cnp@example.test", TAKEN_CNP),
+            },
+        )
 
     def test_the_submitted_language_is_kept_for_the_mail(self) -> None:
         response = self.portal_post(
