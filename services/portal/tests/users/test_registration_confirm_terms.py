@@ -84,7 +84,8 @@ class ConfirmTermsTests(TestCase):
         self.api.get_pending_registration.return_value = details(NEW_VERSION)
         self.api.confirm_registration.side_effect = None
         self.api.confirm_registration.return_value = {"success": True}
-        self.client.post(PAGE, form(terms_accepted="on"))
+        with patch("apps.users.views.TERMS_OF_SERVICE_VERSION", NEW_VERSION):  # Both services updated
+            self.client.post(PAGE, form(terms_accepted="on"))
         self.assertEqual(self.api.get_pending_registration.call_count, 2)
         self.assertEqual(self.api.confirm_registration.call_args.kwargs["terms_version"], NEW_VERSION)
 
@@ -107,3 +108,11 @@ class ConfirmTermsTests(TestCase):
         self.api.confirm_registration.return_value = {"success": True}
         self.client.post(PAGE, form(terms_accepted="on"))
         self.assertEqual(self.api.confirm_registration.call_args.kwargs["terms_version"], VERSION)
+
+    def test_nothing_is_confirmed_while_the_two_services_name_different_terms(self) -> None:
+        # Mid-deploy: /terms/ shows the portal's version, Platform would record its own.
+        self.api.get_pending_registration.return_value = details(NEW_VERSION)
+        self.client.get(PAGE)
+        response = self.client.post(PAGE, form(terms_accepted="on"))
+        self.assertContains(response, "being updated", status_code=503)
+        self.api.confirm_registration.assert_not_called()

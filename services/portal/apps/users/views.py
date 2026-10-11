@@ -29,6 +29,7 @@ from apps.common.decorators import (
     require_authentication,
     require_billing_access,
 )
+from apps.common.legal import TERMS_OF_SERVICE_VERSION
 from apps.common.localisation_middleware import sync_language_selection
 from apps.common.localisation_services import store_localisation_preferences
 from apps.common.rate_limit_feedback import (
@@ -857,6 +858,12 @@ def _confirm_registration(
     request: HttpRequest, form: RegistrationConfirmForm, link: dict[str, Any], details: dict[str, Any]
 ) -> tuple[HttpResponse | None, int, int | None, str]:
     """Submit the confirmation. Return a redirect on success, else a status, Retry-After and a notice."""
+    terms_version = str(details.get("terms_version", ""))
+    if terms_version != TERMS_OF_SERVICE_VERSION:
+        # Mid-deploy of new terms: /terms/ shows this portal's version, and Platform would record
+        # its own. Accept only when both name the same document.
+        form.add_error(None, _("The Terms of Service are being updated. Please try again in a few minutes."))
+        return None, 503, None, ""
     try:
         result = api_client.confirm_registration(
             link["registration_id"],
@@ -866,7 +873,7 @@ def _confirm_registration(
             data_processing_consent=form.cleaned_data["data_processing_consent"],
             marketing_consent=form.cleaned_data["marketing_consent"],
             terms_accepted=form.cleaned_data["terms_accepted"],
-            terms_version=str(details.get("terms_version", "")),
+            terms_version=terms_version,
             client_ip=get_safe_client_ip(request),
         )
         if not result.get("success"):

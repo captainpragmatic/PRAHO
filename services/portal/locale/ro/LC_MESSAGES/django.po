@@ -7899,3 +7899,7 @@ msgstr "Termenii de Serviciu s-au modificat. Vă rugăm să îi citiți din nou 
 #: templates/users/register_confirm.html
 msgid "(opens in a new tab)"
 msgstr "(se deschide într-o filă nouă)"
+
+#: apps/users/views.py
+msgid "The Terms of Service are being updated. Please try again in a few minutes."
+msgstr "Termenii de Serviciu sunt în curs de actualizare. Vă rugăm să încercați din nou peste câteva minute."
