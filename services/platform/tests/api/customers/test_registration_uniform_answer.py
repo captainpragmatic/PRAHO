@@ -30,6 +30,8 @@ def registration(email: str, company: str, vat: str, **customer: object) -> dict
             "city": "București",
             "postal_code": "010061",
             "data_processing_consent": True,
+            # A Romanian company gives a VAT number or a CUI.
+            **({} if vat else {"cui": "18547290"}),
             **customer,
         },
     }

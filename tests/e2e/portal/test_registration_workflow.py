@@ -29,6 +29,7 @@ def submit_registration(page: Page, email: str, company: str) -> None:
     page.locator('input[name="last_name"]').fill("Pop")
     page.locator('select[name="customer_type"]').select_option("srl")
     page.locator('input[name="company_name"]').fill(company)
+    page.locator('input[name="cui"]').fill("14399840")  # A Romanian company gives a VAT number or a CUI
     page.locator('input[name="address_line1"]').fill("Str. Victoriei 10")
     page.locator('input[name="city"]').fill("București")
     page.locator('input[name="county"]').fill("București")

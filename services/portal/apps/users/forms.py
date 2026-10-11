@@ -13,7 +13,14 @@ from django.utils.translation import get_language
 from django.utils.translation import gettext_lazy as _
 
 from apps.api_client.services import PlatformAPIError, api_client
-from apps.common.localisation import DATE_FORMAT_CHOICES, INHERIT_LABEL, LANGUAGE_CHOICES, TIMEZONES, country_name
+from apps.common.localisation import (
+    DATE_FORMAT_CHOICES,
+    INHERIT_LABEL,
+    LANGUAGE_CHOICES,
+    TIMEZONES,
+    country_name,
+    normalize_country_code,
+)
 from apps.common.localisation_forms import CountryDefaultsMixin
 from apps.common.localisation_services import get_localisation_defaults
 
@@ -205,12 +212,40 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
         label=_("CNP (Cod Numeric Personal)"),
         max_length=13,
         required=False,
-        help_text=_("Romanian Personal Identification Number - required for individuals."),
+        help_text=_("Romanian Personal Identification Number - required for individuals in Romania."),
         widget=forms.TextInput(
             attrs={
                 "class": "w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400",
                 "placeholder": "1234567890123",
                 "id": "id_cnp",
+            }
+        ),
+    )
+
+    cui = forms.CharField(
+        label=_("CUI"),
+        max_length=20,
+        required=False,
+        help_text=_("Digits only; an RO prefix is accepted and removed."),
+        widget=forms.TextInput(
+            attrs={
+                "class": "w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400",
+                "placeholder": "12345678",
+                "id": "id_cui",
+            }
+        ),
+    )
+
+    trade_registry_number = forms.CharField(
+        label=_("Trade Registry Number"),
+        max_length=50,
+        required=False,
+        help_text=_("Trade registry number from ONRC"),
+        widget=forms.TextInput(
+            attrs={
+                "class": "w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400",
+                "placeholder": _("e.g. J40/1234/2023"),
+                "id": "id_trade_registry_number",
             }
         ),
     )
@@ -332,25 +367,77 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
 
         return cnp
 
+    def clean_cui(self) -> str:
+        """The CUI's digits; Platform verifies the check digit and shows its answer on this field."""
+        cui = "".join(str(self.cleaned_data.get("cui", "")).split()).upper().removeprefix("RO")
+        if cui and not (cui.isascii() and cui.isdigit() and 2 <= len(cui) <= 10):  # noqa: PLR2004  # CUI length
+            raise ValidationError(_("Enter a valid CUI."))
+        return cui
+
+    def clean_trade_registry_number(self) -> str:
+        number = " ".join(str(self.cleaned_data.get("trade_registry_number", "")).upper().split())
+        if number and not re.fullmatch(r"[A-Z0-9/.\- ]{3,50}", number):
+            raise ValidationError(_("Enter a valid trade registry number."))
+        return number
+
     def clean(self) -> dict[str, Any]:
-        """Custom validation that depends on multiple fields"""
+        """Ask each customer for the fiscal identity it has: a CNP in Romania, else VAT number or CUI.
+
+        "Romania" is the billing country, or the default country when none was given, as Platform
+        decides it. Platform checks the identifiers in full.
+        """
         cleaned_data = super().clean() or {}
-        customer_type = cleaned_data.get("customer_type")
-        vat_number = cleaned_data.get("vat_number")
-        cnp = cleaned_data.get("cnp")
+        in_romania = normalize_country_code(cleaned_data.get("country")) == "RO"
 
-        # Validate that individuals have CNP, companies have VAT
-        if customer_type == "individual":
-            if not cnp:
-                raise ValidationError({"cnp": _("CNP is required for individuals.")})
-            if vat_number:
-                # Clear VAT number for individuals
-                cleaned_data["vat_number"] = ""
-        # For companies, CNP should be cleared
-        elif cnp:
-            cleaned_data["cnp"] = ""
+        if cleaned_data.get("customer_type") == "individual":
+            cleaned_data.update(vat_number="", cui="", trade_registry_number="")
+            self._drop_errors("vat_number", "cui", "trade_registry_number")
+            if not in_romania:
+                cleaned_data["cnp"] = ""
+                self._drop_errors("cnp")
+            elif not cleaned_data.get("cnp") and "cnp" not in self.errors:
+                self.add_error("cnp", _("CNP is required for individuals."))
+            return cleaned_data
 
+        cleaned_data["cnp"] = ""
+        self._drop_errors("cnp")
+        if (
+            in_romania
+            and not cleaned_data.get("vat_number")
+            and not cleaned_data.get("cui")
+            and not ({"vat_number", "cui"} & set(self.errors))
+        ):
+            self.add_error("cui", _("Enter the company's VAT number or CUI."))
         return cleaned_data
+
+    def _drop_errors(self, *names: str) -> None:
+        """Forget field errors for identifiers that do not apply: their values are not sent."""
+        for name in names:
+            self._errors.pop(name, None)
+
+    # Platform's field names for the registration, mapped onto this form's fields.
+    _PLATFORM_FIELDS = dict(  # noqa: C408  # identifier kwargs, as below
+        cnp="cnp",
+        cui="cui",
+        registration_number="trade_registry_number",
+        vat_number="vat_number",
+        country="country",
+        company_name="company_name",
+    )
+    _PLATFORM_USER_FIELDS = dict(email="email", first_name="first_name", last_name="last_name", phone="phone")  # noqa: C408
+
+    def _show_platform_field_errors(self, error: PlatformAPIError) -> bool:
+        """Put the field errors Platform answered with on this form's fields; True if any were."""
+        errors = (error.response_data or {}).get("errors")
+        shown = False
+        for group, fields in (("customer_data", self._PLATFORM_FIELDS), ("user_data", self._PLATFORM_USER_FIELDS)):
+            group_errors = errors.get(group) if isinstance(errors, dict) else None
+            for field, messages in (group_errors if isinstance(group_errors, dict) else {}).items():
+                name = fields.get(field)
+                if name and isinstance(messages, list):
+                    self.add_error(name, [str(message) for message in messages])
+                    shown = True
+        return shown
 
     # The form offers Romanian legal-entity granularity (SRL/SA/ONG); the platform
     # registration serializer only accepts individual/company/pfa/ngo. Map before sending
@@ -378,6 +465,8 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
                     "company_name": self.cleaned_data["company_name"],
                     "vat_number": self.cleaned_data.get("vat_number", ""),
                     "cnp": self.cleaned_data.get("cnp", ""),
+                    "cui": self.cleaned_data.get("cui", ""),
+                    "registration_number": self.cleaned_data.get("trade_registry_number", ""),
                     "address_line1": self.cleaned_data["address_line1"],
                     "city": self.cleaned_data["city"],
                     "county": self.cleaned_data["county"],
@@ -394,7 +483,10 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
             # Refusals the customer cannot fix by editing the form go back to the view
             if e.is_rate_limited or e.is_unavailable:
                 raise
-            logger.error(f"🔥 [Portal Registration] Platform API error: {e}")
+            if self._show_platform_field_errors(e):
+                logger.info("💡 [Portal Registration] Platform refused fields: %s", sorted(self.errors))
+            else:
+                logger.error(f"🔥 [Portal Registration] Platform API error: {e}")
             return None
         except Exception as e:
             logger.error(f"🔥 [Portal Registration] Unexpected error: {e}")

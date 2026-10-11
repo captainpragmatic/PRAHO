@@ -7864,3 +7864,23 @@ msgstr "Vă mulțumim. Verificați-vă e-mailul pentru un mesaj cu pasul următo
 
 #~ msgid "Default date format on customer web pages. Portal changes appear within one minute."
 #~ msgstr "Formatul implicit al datelor în interfața clienților. Modificările apar în portal în cel mult un minut."
+
+#: apps/users/forms.py
+msgid "Enter a valid CUI."
+msgstr "Introduceți un CUI valid."
+
+#: apps/users/forms.py
+msgid "Enter a valid trade registry number."
+msgstr "Introduceți un număr de înregistrare la Registrul Comerțului valid."
+
+#: apps/users/forms.py
+msgid "Enter the company's VAT number or CUI."
+msgstr "Introduceți codul de TVA sau CUI-ul firmei."
+
+#: apps/users/forms.py
+msgid "Digits only; an RO prefix is accepted and removed."
+msgstr "Doar cifre; prefixul RO este acceptat și eliminat."
+
+#: apps/users/forms.py
+msgid "Romanian Personal Identification Number - required for individuals in Romania."
+msgstr "Codul Numeric Personal - obligatoriu pentru persoanele fizice din România."

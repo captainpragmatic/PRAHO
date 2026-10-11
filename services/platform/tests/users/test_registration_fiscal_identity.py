@@ -42,6 +42,8 @@ def registration(**customer: Any) -> dict[str, Any]:
             "city": "Cluj-Napoca",
             "postal_code": "400001",
             "data_processing_consent": True,
+            # A Romanian company gives a VAT number or a CUI.
+            **({} if customer.get("vat_number") or customer.get("customer_type") == "individual" else {"cui": CUI}),
             **customer,
         },
     }
@@ -230,12 +232,28 @@ class RegistrationFiscalIdentityTests(HMACTestMixin, TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("cui", str(response.json()))
 
+    def test_a_refusal_is_in_the_registration_language(self) -> None:
+        # The portal shows Platform's message on the field, to the customer.
+        response = self.submit({**registration(cui="14399847"), "language": "ro"})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["errors"]["customer_data"]["cui"], ["Introduceți un CUI valid."])
+
     def test_a_vat_number_for_another_cui_is_refused(self) -> None:
         response = self.submit(registration(cui=CUI, vat_number="RO18547290"))
         self.assertEqual(response.status_code, 400)
         self.assertIn("cui", response.json()["errors"]["customer_data"])
         cache.clear()
         self.assertEqual(self.submit(registration(cui=CUI, vat_number=f"RO{CUI}")).status_code, 202)
+
+    def test_a_romanian_company_needs_a_vat_number_or_a_cui(self) -> None:
+        response = self.submit(registration(country="RO", cui=""))
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("cui", response.json()["errors"]["customer_data"])
+        self.assertFalse(PendingRegistration.objects.exists())
+
+    def test_a_company_abroad_needs_neither(self) -> None:
+        row = self.submitted_row(registration(country="DE", cui=""))
+        self.assertEqual(row.customer_data["cui"], "")
 
     def test_an_individual_keeps_no_company_identifiers(self) -> None:
         row = self.submitted_row(individual(cui=CUI, registration_number="J40/1234/2020"))

@@ -501,7 +501,8 @@ def register_view(request: HttpRequest) -> HttpResponse:
                     # link or a note that the address already has an account.
                     messages.success(request, _("Thank you. Check your email for a message with the next step."))
                     return redirect("/login/")
-                else:
+                elif not form.errors:
+                    # Field errors Platform answered with are shown on their fields instead.
                     messages.error(request, _("Registration failed. Please check your information and try again."))
 
             except PlatformAPIError as e:

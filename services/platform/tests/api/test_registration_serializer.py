@@ -28,6 +28,7 @@ class RegistrationSerializerErrorPathTests(TestCase):
             "customer_data": {
                 "customer_type": "company",
                 "company_name": "Acme",
+                "cui": "14399840",  # A Romanian company gives a VAT number or a CUI
                 "address_line1": "Str. Victoriei 10",
                 "city": "București",
                 "postal_code": "010061",

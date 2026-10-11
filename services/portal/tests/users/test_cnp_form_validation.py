@@ -23,8 +23,10 @@ class TestPortalCNPFormValidation(SimpleTestCase):
             "last_name": "Popescu",
             "password1": "securepass123!",
             "password2": "securepass123!",
-            "customer_type": "srl",
-            "company_name": "Test SRL",
+            # The CNP is checked for individuals in Romania only; for anyone else it is not sent.
+            "customer_type": "individual",
+            "company_name": "Ion Popescu",
+            "country": "România",
             "address_line1": "Str. Test 1",
             "city": "Bucuresti",
             "county": "Bucuresti",
