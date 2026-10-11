@@ -1246,7 +1246,11 @@ def proforma_edit(request: HttpRequest, pk: int) -> HttpResponse:
         return error_response
 
     if request.method == "POST":
-        return _handle_proforma_edit_post(request, proforma)
+        with transaction.atomic():
+            # Loaded under lock: the edit saves every field, so a copy read before a concurrent
+            # write (a GDPR erasure clearing the CNP) would put the old values back.
+            proforma = ProformaInvoice.objects.select_for_update().get(pk=proforma.pk)
+            return _handle_proforma_edit_post(request, proforma)
 
     # GET request - render form
     customers = _get_customers_for_edit_form(request.user)

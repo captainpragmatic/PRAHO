@@ -172,10 +172,19 @@ not an `EncryptedJSONField`, and binds each value to its row the same way:
 - **Readers.** The staff customer list defers the CNP and shows only whether one is on file.
   Everything else reads the decrypted string unchanged: the fiscal-identity snapshot, e-Factura,
   the ROTLD registrant data.
-- **GDPR erasure.** Anonymisation clears the profile CNP of the individual customers the user
-  owns, through a queryset update (no decryption, soft-deleted rows included), and records one
-  audit event per profile without the value. Issued invoices keep their snapshot for the 10-year
-  retention period. Proforma snapshots are not cleared; that is an open decision.
+- **GDPR erasure.** Anonymisation clears the CNP of the individual customers the user owns
+  wherever it is not a fiscal record: the tax profile, every proforma (a proforma is not a fiscal
+  document, whatever its status) and every invoice not yet issued. It uses queryset updates (no
+  decryption, soft-deleted profiles included) and records one audit event per cleared row without
+  the value. Issued invoices keep their snapshot for the legal retention period. A proforma
+  converted after erasure produces an invoice without a CNP, so e-Factura states ANAF's
+  placeholder for a Romanian individual, as it does for any customer whose CNP is unknown.
+  Erasure audits only the rows its update cleared. It holds against writers that load the row
+  under lock: invoice issuance, proforma conversion, provider finalisation and the staff proforma
+  edit. A full save of a draft invoice from a copy loaded without a lock, if it is in flight while
+  the erasure commits, can write the CNP back for that one request's window; the value stays
+  encrypted. A document created from a tax profile read just before the erasure commits can carry
+  the CNP the same way.
 - **Not covered.** The issued e-Factura XML holds the CNP in plain text, in
   `billing_efactura_documents.xml_content` and in the stored XML file. It is the legal record sent
   to ANAF and kept for the retention period.
