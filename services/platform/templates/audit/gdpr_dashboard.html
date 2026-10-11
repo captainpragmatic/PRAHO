@@ -256,30 +256,20 @@
             {% trans 'Select which data to include in your export:' %}
           </p>
 
-          <label class="flex items-center">
-            <input type="checkbox" name="include_profile" checked class="rounded border-slate-600 bg-slate-700 text-blue-600">
-            <span class="ml-2 text-sm text-white">{% trans 'Profile Information' %}</span>
-          </label>
+          {% trans 'Profile Information' as include_profile_label %}
+          {% checkbox_field "include_profile" label=include_profile_label checked=True %}
 
-          <label class="flex items-center">
-            <input type="checkbox" name="include_customers" checked class="rounded border-slate-600 bg-slate-700 text-blue-600">
-            <span class="ml-2 text-sm text-white">{% trans 'Customer Relationships' %}</span>
-          </label>
+          {% trans 'Customer Relationships' as include_customers_label %}
+          {% checkbox_field "include_customers" label=include_customers_label checked=True %}
 
-          <label class="flex items-center">
-            <input type="checkbox" name="include_billing" class="rounded border-slate-600 bg-slate-700 text-blue-600">
-            <span class="ml-2 text-sm text-white">{% trans 'Billing Information' %}</span>
-          </label>
+          {% trans 'Billing Information' as include_billing_label %}
+          {% checkbox_field "include_billing" label=include_billing_label %}
 
-          <label class="flex items-center">
-            <input type="checkbox" name="include_tickets" class="rounded border-slate-600 bg-slate-700 text-blue-600">
-            <span class="ml-2 text-sm text-white">{% trans 'Support Tickets' %}</span>
-          </label>
+          {% trans 'Support Tickets' as include_tickets_label %}
+          {% checkbox_field "include_tickets" label=include_tickets_label %}
 
-          <label class="flex items-center">
-            <input type="checkbox" name="include_audit_logs" class="rounded border-slate-600 bg-slate-700 text-blue-600">
-            <span class="ml-2 text-sm text-white">{% trans 'Activity Summary' %}</span>
-          </label>
+          {% trans 'Activity Summary' as include_audit_logs_label %}
+          {% checkbox_field "include_audit_logs" label=include_audit_logs_label %}
         </div>
 
         <div class="mt-6 flex space-x-3">
@@ -300,12 +290,11 @@
         <div class="space-y-4">
           {% alert "Warning: Withdrawing consent may affect your service." variant="warning" %}
 
-          <label class="flex items-center">
-            <input type="checkbox" name="consent_types" value="marketing" class="rounded border-slate-600 bg-slate-700 text-blue-600">
-            <span class="ml-2 text-sm text-white">{% trans 'Marketing Communications' %}</span>
-          </label>
+          {% trans 'Marketing Communications' as withdraw_marketing_label %}
+          {% checkbox_field "consent_types" value="marketing" html_id="consent-types-marketing" label=withdraw_marketing_label %}
 
           <label class="flex items-center">
+            {# tmpl-allow TMPL001: its label holds a red "(will anonymize account)" warning span; checkbox_field renders one plain-text label #}
             <input type="checkbox" name="consent_types" value="data_processing" class="rounded border-slate-600 bg-slate-700 text-blue-600">
             <span class="ml-2 text-sm text-white">{% trans 'Data Processing' %} <span class="text-red-400">({% trans 'will anonymize account' %})</span></span>
           </label>
@@ -331,6 +320,7 @@
 
           <div>
             <label for="deletion-type" class="block text-sm font-medium text-white mb-2">{% trans 'Deletion Type:' %}</label>
+            {# tmpl-allow TMPL003: options rendered inline from two literal deletion types; select components take a view-built options list #}
             <select id="deletion-type" name="deletion_type" class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white">
               <option value="anonymize">{% trans 'Anonymize (recommended)' %}</option>
               <option value="delete">{% trans 'Full Deletion (if legally possible)' %}</option>
@@ -338,14 +328,13 @@
           </div>
 
           <div>
-            <label for="deletion-reason" class="block text-sm font-medium text-white mb-2">{% trans 'Reason for deletion:' %}</label>
-            <textarea id="deletion-reason" name="reason" required class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white" rows="3" placeholder="{% trans 'Please provide a reason for this request...' %}"></textarea>
+            {% trans 'Reason for deletion:' as deletion_reason_label %}
+            {% trans 'Please provide a reason for this request...' as deletion_reason_placeholder %}
+            {% input_field "reason" input_type="textarea" html_id="deletion-reason" label=deletion_reason_label rows=3 required=True placeholder=deletion_reason_placeholder %}
           </div>
 
-          <label class="flex items-center">
-            <input type="checkbox" name="confirm_immediate" value="yes" class="rounded border-slate-600 bg-slate-700 text-red-600">
-            <span class="ml-2 text-sm text-white">{% trans 'Process immediately (for demo)' %}</span>
-          </label>
+          {% trans 'Process immediately (for demo)' as confirm_immediate_label %}
+          {% checkbox_field "confirm_immediate" value="yes" variant="danger" label=confirm_immediate_label %}
         </div>
 
         <div class="mt-6 flex space-x-3">
@@ -370,32 +359,20 @@
 
           <!-- Data Processing Consent -->
           <div class="p-3 bg-slate-700 rounded-lg">
-            <label class="flex items-start">
-              <input type="checkbox" name="gdpr_consent" {% if consent_status.data_processing %}checked disabled{% endif %} class="rounded border-slate-600 bg-slate-700 text-blue-600 mt-1 mr-3">
-              <div class="flex-1">
-                <div class="text-sm font-medium text-white">{% trans 'Data Processing' %}</div>
-                <div class="text-xs text-slate-400 mt-1">
-                  {% if consent_status.data_processing %}
-                    {% trans 'Already given. Use "Withdraw Consent" for changes.' %}
-                  {% else %}
-                    {% trans 'Required for account operation and service delivery.' %}
-                  {% endif %}
-                </div>
-              </div>
-            </label>
+            {% trans 'Data Processing' as gdpr_consent_label %}
+            {% if consent_status.data_processing %}
+              {% trans 'Already given. Use "Withdraw Consent" for changes.' as gdpr_consent_help %}
+            {% else %}
+              {% trans 'Required for account operation and service delivery.' as gdpr_consent_help %}
+            {% endif %}
+            {% checkbox_field "gdpr_consent" label=gdpr_consent_label help_text=gdpr_consent_help checked=consent_status.data_processing disabled=consent_status.data_processing %}
           </div>
 
           <!-- Marketing Consent -->
           <div class="p-3 bg-slate-700 rounded-lg">
-            <label class="flex items-start">
-              <input type="checkbox" name="accepts_marketing" {% if consent_status.marketing %}checked{% endif %} class="rounded border-slate-600 bg-slate-700 text-blue-600 mt-1 mr-3">
-              <div class="flex-1">
-                <div class="text-sm font-medium text-white">{% trans 'Marketing Communications' %}</div>
-                <div class="text-xs text-slate-400 mt-1">
-                  {% trans 'Receive newsletters, product updates, and promotional content.' %}
-                </div>
-              </div>
-            </label>
+            {% trans 'Marketing Communications' as accepts_marketing_label %}
+            {% trans 'Receive newsletters, product updates, and promotional content.' as accepts_marketing_help %}
+            {% checkbox_field "accepts_marketing" label=accepts_marketing_label help_text=accepts_marketing_help checked=consent_status.marketing %}
           </div>
         </div>
 

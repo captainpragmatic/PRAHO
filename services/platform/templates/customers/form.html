@@ -53,6 +53,7 @@
           <div class="space-y-3">
             <!-- Create new user option -->
             <label class="flex items-start p-4 rounded-lg border border-slate-600 hover:border-blue-500 transition-colors cursor-pointer">
+              {# tmpl-allow TMPL001: x-model binding; components accept no executable attributes (apps/ui/attributes.py) #}
               <input type="radio" name="user_action" value="create" x-model="userAction"
                      class="mt-1 text-blue-600 focus:ring-blue-500 border-slate-500 bg-slate-700">
               <div class="ml-3 flex-1">
@@ -65,6 +66,7 @@
 
             <!-- Link existing user option -->
             <label class="flex items-start p-4 rounded-lg border border-slate-600 hover:border-blue-500 transition-colors cursor-pointer">
+              {# tmpl-allow TMPL001: x-model binding; components accept no executable attributes (apps/ui/attributes.py) #}
               <input type="radio" name="user_action" value="link" x-model="userAction"
                      class="mt-1 text-blue-600 focus:ring-blue-500 border-slate-500 bg-slate-700">
               <div class="ml-3 flex-1">
@@ -77,6 +79,7 @@
 
             <!-- Skip user assignment option -->
             <label class="flex items-start p-4 rounded-lg border border-slate-600 hover:border-blue-500 transition-colors cursor-pointer">
+              {# tmpl-allow TMPL001: x-model binding; components accept no executable attributes (apps/ui/attributes.py) #}
               <input type="radio" name="user_action" value="skip" x-model="userAction"
                      class="mt-1 text-blue-600 focus:ring-blue-500 border-slate-500 bg-slate-700">
               <div class="ml-3 flex-1">

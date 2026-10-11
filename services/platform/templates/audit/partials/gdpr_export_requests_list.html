@@ -85,6 +85,7 @@
                     <!-- Actions Panel -->
                     <div class="flex flex-col space-y-1 ml-4">
                         <!-- Expand/Details Button -->
+                        {# tmpl-allow TMPL002: icon-only toggle whose raw chevron svg carries the chevron-icon class audit-fragments.js rotates; the button tag renders one text label and a catalog icon #}
                         <button class="text-slate-400 hover:text-white transition-colors expand-btn"
                                 hx-get="{% url 'audit:gdpr_export_detail' export_request.id %}"
                                 hx-target="#export-detail-{{ export_request.id }}"

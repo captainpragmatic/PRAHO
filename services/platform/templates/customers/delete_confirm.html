@@ -99,7 +99,7 @@
 
                 <div class="bg-blue-900/30 border border-blue-600 rounded-lg p-4">
                     <div class="flex items-start">
-                        <span class="text-xl mr-3">🇷🇴</span>
+                        <span class="text-xl mr-3">{% icon "flag" size="sm" %}</span>
                         <div>
                             <h3 class="text-sm font-semibold text-blue-400 mb-1">{% trans "Romanian Business Records" %}</h3>
                             <p class="text-sm text-blue-300">
@@ -115,16 +115,8 @@
                 {% csrf_token %}
 
                 <div class="bg-slate-900 rounded-lg p-4">
-                    <label for="confirm_name" class="block text-sm font-medium text-slate-300 mb-2">
-                        {% trans "Type the customer name to confirm deletion:" %}
-                    </label>
-                    <input type="text"
-                           id="confirm_name"
-                           name="confirm_name"
-                           autocomplete="off"
-                           required
-                           placeholder="{{ customer.name }}"
-                           class="w-full px-4 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500">
+                    {% trans "Type the customer name to confirm deletion:" as confirm_name_label %}
+                    {% input_field "confirm_name" html_id="confirm_name" label=confirm_name_label autocomplete="off" required=True placeholder=customer.name %}
                     <p class="mt-2 text-xs text-slate-500">
                         {% trans "This confirmation ensures you are deleting the correct customer." %}
                     </p>
@@ -136,11 +128,7 @@
                        class="inline-flex items-center px-4 py-2 text-sm font-medium text-slate-400 hover:text-white transition-colors">
                         {% trans "Cancel" %}
                     </a>
-                    <button type="submit"
-                            class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg bg-red-600 text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-slate-800 transition-colors">
-                        <span class="mr-2">{% icon "x" %}</span>
-                        {% trans "Delete Customer" %}
-                    </button>
+                    {% trans "Delete Customer" as delete_customer_label %}{% button delete_customer_label variant="danger" type="submit" icon="x" %}
                 </div>
             </form>
         </div>

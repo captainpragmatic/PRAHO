@@ -164,10 +164,8 @@
                     {% trans "Process Now" as bt6 %}{% button bt6 variant="success" size="sm" type="submit" %}
                 </form>
 
-                <button data-action="show" data-target="fail-modal-{{ export_request.id }}"
-                        class="inline-flex items-center px-3 py-1 border border-red-600 text-xs font-medium rounded-md text-red-400 bg-red-900/20 hover:bg-red-900/40 focus:outline-none focus:ring-2 focus:ring-red-500">
-                    {% icon "x" %} {% trans "Mark as Failed" %}
-                </button>
+                {% trans "Mark as Failed" as mark_failed_label %}
+                {% with export_id=export_request.id|stringformat:"s" %}{% button mark_failed_label variant="danger" size="xs" icon="x" data_action="show" attrs="data-target=fail-modal-"|add:export_id %}{% endwith %}
 
             {% elif export_request.status == 'completed' and not is_expired and file_exists %}
                 {% trans "Download Export" as bt7 %}{% button bt7 variant="primary" size="sm" href="/app/audit/gdpr_management/download/"|add:export_request.id|add:"/" %}
@@ -194,22 +192,14 @@
             <input type="hidden" name="action" value="mark_failed">
 
             <div class="mb-4">
-                <label for="export-error-{{ export_request.id }}" class="block text-sm font-medium text-slate-300 mb-2">
-                    {% trans "Error Message" %}
-                </label>
-                <textarea id="export-error-{{ export_request.id }}" name="error_message"
-                          rows="3"
-                          required
-                          placeholder="{% trans 'Describe why this export failed...' %}"
-                          class="w-full bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white text-sm focus:ring-2 focus:ring-red-500 focus:border-transparent"></textarea>
+                {% trans "Error Message" as error_message_label %}
+                {% trans 'Describe why this export failed...' as error_message_placeholder %}
+                {% with export_id=export_request.id|stringformat:"s" %}{% input_field "error_message" input_type="textarea" html_id="export-error-"|add:export_id label=error_message_label rows=3 required=True placeholder=error_message_placeholder %}{% endwith %}
             </div>
 
             <div class="flex justify-end space-x-3">
-                <button type="button"
-                        data-action="hide" data-target="fail-modal-{{ export_request.id }}"
-                        class="px-4 py-2 text-sm font-medium text-slate-300 bg-slate-700 border border-slate-600 rounded-md hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-slate-500">
-                    {% trans "Cancel" %}
-                </button>
+                {% trans "Cancel" as cancel_label %}
+                {% with export_id=export_request.id|stringformat:"s" %}{% button cancel_label variant="secondary" type="button" data_action="hide" attrs="data-target=fail-modal-"|add:export_id %}{% endwith %}
                 {% trans "Mark as Failed" as bt9 %}{% button bt9 variant="danger" size="sm" type="submit" %}
             </div>
         </form>

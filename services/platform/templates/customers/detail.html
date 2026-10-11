@@ -192,6 +192,7 @@
                         <div class="flex flex-col sm:items-end gap-2">
                             <!-- Role Badge with Dropdown -->
                             <div class="relative" x-data="{ open: false }">
+                                {# tmpl-allow TMPL002: @click and @click.away Alpine bindings; components accept no executable attributes (apps/ui/attributes.py) #}
                                 <button @click="open = !open" @click.away="open = false"
                                     class="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-medium transition-colors
                                            {% if membership.role == 'owner' %}bg-purple-900 text-purple-200 hover:bg-purple-800
@@ -211,6 +212,7 @@
                                      class="absolute right-0 mt-2 w-48 bg-slate-700 border border-slate-600 rounded-lg shadow-lg z-10">
                                     <form method="post" action="{% url 'customers:change_user_role' customer.pk membership.id %}" class="py-1">
                                         {% csrf_token %}
+                                        {# tmpl-allow TMPL002: holds structured inner markup (an icon, the role name and a subtitle span) plus a current-role highlight class; the button tag renders one text and one icon #}
                                         <button type="submit" name="role" value="owner"
                                                 class="w-full text-left px-4 py-2 text-sm text-white hover:bg-slate-600 transition-colors
                                                        {% if membership.role == 'owner' %}bg-slate-600{% endif %}">
@@ -220,18 +222,21 @@
 
                                         <!-- Non-owner roles - disabled if this is the last owner -->
                                         {% if not is_last_owner or membership.role != 'owner' %}
+                                            {# tmpl-allow TMPL002: holds structured inner markup (an icon, the role name and a subtitle span) plus a current-role highlight class; the button tag renders one text and one icon #}
                                             <button type="submit" name="role" value="billing"
                                                     class="w-full text-left px-4 py-2 text-sm text-white hover:bg-slate-600 transition-colors
                                                            {% if membership.role == 'billing' %}bg-slate-600{% endif %}">
                                                 {% icon "credit-card" %} {% trans "Billing" %}
                                                 <span class="block text-xs text-slate-400">{% trans "Invoices & payments" %}</span>
                                             </button>
+                                            {# tmpl-allow TMPL002: holds structured inner markup (an icon, the role name and a subtitle span) plus a current-role highlight class; the button tag renders one text and one icon #}
                                             <button type="submit" name="role" value="tech"
                                                     class="w-full text-left px-4 py-2 text-sm text-white hover:bg-slate-600 transition-colors
                                                            {% if membership.role == 'tech' %}bg-slate-600{% endif %}">
                                                 {% icon "settings" %} {% trans "Technical" %}
                                                 <span class="block text-xs text-slate-400">{% trans "Services & support" %}</span>
                                             </button>
+                                            {# tmpl-allow TMPL002: holds structured inner markup (an icon, the role name and a subtitle span) plus a current-role highlight class; the button tag renders one text and one icon #}
                                             <button type="submit" name="role" value="viewer"
                                                     class="w-full text-left px-4 py-2 text-sm text-white hover:bg-slate-600 transition-colors
                                                            {% if membership.role == 'viewer' %}bg-slate-600{% endif %}">
@@ -260,6 +265,7 @@
                                         {% csrf_token %}
                                         <input type="hidden" name="is_active" value="false">
                                         {% trans "Suspend" as suspend_btn %}
+                                        {# tmpl-allow TMPL002: data-title, data-message and data-confirm-text carry translated prose and data-submit-form a per-row form id; attrs takes one literal string, so these would need an |add chain a quote in any translation breaks #}
                                         <button type="button" class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded bg-amber-900 text-amber-200 hover:bg-amber-800 transition-colors"
                                           data-action="confirm-dangerous" data-title="{% trans "Suspend User" %}" data-message="{% trans "Are you sure you want to suspend this user?" %}" data-confirm-text="{% trans "Suspend" %}" data-submit-form="suspend-form-{{ membership.user.pk }}">
                                           {% icon "clock" size="sm" %} {{ suspend_btn }}
@@ -270,6 +276,7 @@
                                         {% csrf_token %}
                                         <input type="hidden" name="is_active" value="true">
                                         {% trans "Activate" as activate_btn %}
+                                        {# tmpl-allow TMPL002: data-title, data-message and data-confirm-text carry translated prose and data-submit-form a per-row form id; attrs takes one literal string, so these would need an |add chain a quote in any translation breaks #}
                                         <button type="button" class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded bg-green-900 text-green-200 hover:bg-green-800 transition-colors"
                                           data-action="confirm-dangerous" data-title="{% trans "Activate User" %}" data-message="{% trans "Are you sure you want to activate this user?" %}" data-confirm-text="{% trans "Activate" %}" data-submit-form="activate-form-{{ membership.user.pk }}">
                                           {% icon "check" size="sm" %} {{ activate_btn }}
@@ -279,12 +286,14 @@
 
                                 <!-- Remove Button with Safeguards -->
                                 {% if is_last_user %}
+                                    {# tmpl-allow TMPL002: its title tooltip is translated prose; attrs takes one literal string, so it would need an |add chain a quote in the translation breaks #}
                                     <button type="button" disabled
                                             class="text-xs px-2 py-1 text-slate-500 border border-slate-600 rounded cursor-not-allowed"
                                             title="{% trans 'Cannot remove the last user from customer' %}">
                                         {% icon "ban" %} {% trans "Cannot Remove" %}
                                     </button>
                                 {% elif membership.role == 'owner' and is_last_owner %}
+                                    {# tmpl-allow TMPL002: its title tooltip is translated prose; attrs takes one literal string, so it would need an |add chain a quote in the translation breaks #}
                                     <button type="button" disabled
                                             class="text-xs px-2 py-1 text-slate-500 border border-slate-600 rounded cursor-not-allowed"
                                             title="{% trans 'Cannot remove the only owner' %}">
@@ -294,6 +303,7 @@
                                     <form id="remove-form-{{ membership.pk }}" method="post" action="{% url 'customers:remove_user' customer.pk membership.id %}" class="inline">
                                         {% csrf_token %}
                                         {% trans "Remove" as remove_btn %}
+                                        {# tmpl-allow TMPL002: data-title, data-message and data-confirm-text carry translated prose and data-submit-form a per-row form id; attrs takes one literal string, so these would need an |add chain a quote in any translation breaks #}
                                         <button type="button" class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded bg-red-900 text-red-200 hover:bg-red-800 transition-colors"
                                           data-action="confirm-dangerous" data-title="{% trans "Remove User" %}" data-message="{% trans "Are you sure you want to remove this user? They will lose all access to this customer." %}" data-confirm-text="{% trans "Remove" %}" data-submit-form="remove-form-{{ membership.pk }}">
                                           {% icon "x" size="sm" %} {{ remove_btn }}
@@ -388,6 +398,7 @@
                     <div class="flex">
                         <span class="text-sm font-medium text-slate-400 w-32">{% trans 'CUI/CIF' %}:</span>
                         <span class="text-sm text-white font-mono">{{ tax_profile.cui }}</span>
+                        {# tmpl-allow TMPL002: icon-only inline copy affordance named by aria-label; the button tag renders a variant-coloured padded button with a visible text label #}
                         <button type="button" data-copy="{{ tax_profile.cui }}" data-action="copy" class="ml-2 text-slate-500 hover:text-white transition-colors" aria-label="{% trans 'Copy CUI' %}" title="{% trans 'Copy' %}">{% icon "copy" size="sm" %}</button>
                     </div>
                     {% endif %}

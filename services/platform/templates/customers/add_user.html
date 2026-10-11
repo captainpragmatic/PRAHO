@@ -30,6 +30,7 @@
                     <label for="user_email" class="block text-sm font-medium text-slate-300 mb-2">
                         {% icon "mail" %} {% trans 'User Email Address' %}
                     </label>
+                    {# tmpl-allow TMPL003: options rendered inline from a loop over available_users; select components take a view-built options list #}
                     <select name="user_email" id="user_email" required
                             class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
                         <option value="">{% trans 'Select a user...' %}</option>
@@ -52,6 +53,7 @@
                     <label for="role" class="block text-sm font-medium text-slate-300 mb-2">
                         {% icon "user" %} {% trans 'User Role' %}
                     </label>
+                    {# tmpl-allow TMPL003: options rendered inline from a loop over role_choices with a preselected default; select components take a view-built options list #}
                     <select name="role" id="role" required
                             class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
                         {% for role_value, role_display in role_choices %}
