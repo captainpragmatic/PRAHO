@@ -107,7 +107,7 @@ class CustomerListAttributeTests(TestCase):
         response = self.client.get(reverse("customers:list"))
         content = response.content.decode()
         # CUI value should be present
-        self.assertIn("RO12345678", content)
+        self.assertIn("12345678", content)  # stored as digits: an RO prefix would assert VAT registration
         # The emoji flag should not appear adjacent to CUI values
         self.assertNotIn("🇷🇴 RO12345678", content)
 

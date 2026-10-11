@@ -200,7 +200,7 @@ class TestProfileServiceCUIValidation(TestCase):
             self.tax_profile, self.user, cui="RO14399847"
         )
         self.tax_profile.refresh_from_db()
-        self.assertEqual(self.tax_profile.cui, "RO14399847")
+        self.assertEqual(self.tax_profile.cui, "14399847")  # stored as digits: an RO prefix would assert VAT registration
 
     def test_valid_cui_without_ro_prefix_is_accepted(self) -> None:
         """CUI without RO prefix is also a valid format."""

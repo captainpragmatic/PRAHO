@@ -477,7 +477,7 @@ class CustomerProfileUpdateAPITests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.customer.refresh_from_db()
         tax = self.customer.tax_profile
-        self.assertEqual(tax.cui, "RO12345673")
+        self.assertEqual(tax.cui, "12345673")  # stored as digits: an RO prefix would assert VAT registration
         self.assertTrue(tax.is_vat_payer)
 
     @patch("apps.api.secure_auth.get_authenticated_customer")

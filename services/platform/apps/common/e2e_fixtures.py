@@ -89,7 +89,7 @@ def _customer(key: str, *, name: str) -> Customer:
     if created:
         CustomerTaxProfile.objects.create(
             customer=customer,
-            cui="RO14399847",
+            cui="14399847",
             vat_number="RO14399847",
             is_vat_payer=True,
             registration_number="J40/1234/2020",

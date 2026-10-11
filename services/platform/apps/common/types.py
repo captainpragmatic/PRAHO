@@ -209,7 +209,7 @@ HTMXHandler = Callable[[HttpRequest], HttpResponse]
 # BUSINESS TYPES
 # ===============================================================================
 
-CUIString = str  # Romanian CUI format: "RO12345678"
+CUIString = str  # Romanian CUI, stored as digits: "12345678"
 VATString = str  # Romanian VAT format: "RO12345678"
 EmailAddress = str  # Validated email address
 InvoiceNumber = str  # Sequential invoice number: "2024-0001"
@@ -372,9 +372,7 @@ class CUI:
 
 
 def validate_romanian_cui(cui: str) -> Result[CUIString, str]:
-    """Validate Romanian CUI (company ID) - accepts only numeric format (no RO prefix)."""
-    if cui.upper().startswith("RO"):
-        return Err("CUI should not have RO prefix")
+    """Validate a Romanian CUI's format and return its digits (an RO prefix is accepted and dropped)."""
     result = CUIValidator.validate(cui)
     if not result.is_valid:
         return Err(result.error_message)

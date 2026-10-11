@@ -4,8 +4,9 @@ Romanian CUI (Cod Unic de Identificare) validator.
 Extracted to apps.common for reuse across customers, billing, and audit apps.
 Pure Python — no Django dependencies in the core validator.
 
-CUI format: 2-10 digits, optionally prefixed with "RO" (for VAT-registered entities).
-The model field stores the RO-prefixed form (e.g., "RO12345678").
+CUI format: 2-10 digits. Input may carry an "RO" prefix, but a CUI is stored as its digits
+("12345678"): the prefix asserts VAT registration, which a CUI alone does not. The VAT number
+(CustomerTaxProfile.vat_number) carries the prefix.
 """
 
 from __future__ import annotations
@@ -98,11 +99,11 @@ class CUIValidator:
 
     @classmethod
     def normalize(cls, cui: str) -> str:
-        """Normalize CUI to RO-prefixed uppercase form (e.g., 'ro12345678' -> 'RO12345678')."""
+        """The stored form of a CUI: its digits ('ro12345678' -> '12345678'). Invalid input is returned as is."""
         result = cls.validate(cui)
         if not result.is_valid:
             return cui
-        return f"RO{result.digits}"
+        return result.digits
 
     @staticmethod
     def _compute_check_digit(digits_without_check: str) -> int:
@@ -134,6 +135,28 @@ class CUIValidator:
                     has_ro_prefix=result.has_ro_prefix,
                 )
         return result
+
+
+_ROMANIAN_CUI_SHAPE = re.compile(r"^(RO)?[0-9]+$", re.IGNORECASE)
+
+
+def is_romanian_cui(value: str | None) -> bool:
+    """Whether a stored tax ID is a Romanian CUI (digits, optionally RO-prefixed), valid or not.
+
+    The same field holds foreign tax IDs (e.g. DE999999999), so "has a value" is not "Romanian".
+    """
+    return bool(value) and bool(_ROMANIAN_CUI_SHAPE.match(str(value).strip()))
+
+
+def normalize_cui_digits(value: str) -> str:
+    """The digits of a valid CUI, check digit verified, with or without an RO prefix.
+
+    Raises ValueError with the validator's reason for anything else.
+    """
+    result = CUIValidator.validate_strict(value.strip())
+    if not result.is_valid:
+        raise ValueError(result.error_message)
+    return result.digits
 
 
 def validate_cui(value: str) -> None:

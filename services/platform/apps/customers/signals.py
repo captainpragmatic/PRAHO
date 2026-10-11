@@ -28,6 +28,7 @@ from apps.audit.services import (
     AuditService,
     ComplianceEventRequest,
 )
+from apps.common.cui_validator import is_romanian_cui
 from apps.common.localisation import normalize_country_code
 from apps.common.transactions import best_effort_atomic, swallow_application_errors
 from apps.common.validators import log_security_event
@@ -239,7 +240,8 @@ def handle_tax_profile_changes(
         if not tax_fields_changed:
             return
 
-        is_romanian_registration = bool(instance.cui and instance.cui.startswith("RO"))
+        # A Romanian CUI is stored as digits (no RO prefix); the field also holds foreign tax IDs.
+        is_romanian_registration = is_romanian_cui(instance.cui)
 
         # One audit record per change (#241 dedup): Romanian registrations get the
         # ComplianceLog below - the AuditEvent restated it. Non-RO profiles have no
@@ -870,7 +872,7 @@ def _verify_romanian_company_compliance(customer: Customer) -> None:
 def _validate_romanian_cui(tax_profile: CustomerTaxProfile) -> None:
     """Validate Romanian CUI format and registration"""
     with best_effort_atomic(logger=logger, scope="customers", message="_validate_romanian_cui failed"):
-        if tax_profile.cui and tax_profile.cui.startswith("RO"):
+        if is_romanian_cui(tax_profile.cui):
             # Validate CUI format
             if tax_profile.validate_cui():
                 logger.info(f"✅ [Customer] Valid Romanian CUI: {tax_profile.cui}")

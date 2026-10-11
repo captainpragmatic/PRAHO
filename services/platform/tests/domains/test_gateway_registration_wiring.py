@@ -373,7 +373,7 @@ class RegistrantDataBuildingTests(TestCase):
             self.assertIn(key, data)
         self.assertEqual(data["entity_type"], "company")
         self.assertEqual(data["company_name"], "Acme SRL")
-        self.assertEqual(data["cui"], "RO12345678")
+        self.assertEqual(data["cui"], "12345678")  # stored as digits: an RO prefix would assert VAT registration
         self.assertEqual(data["phone"], "+40712345678")
         self.assertEqual(data["country_code"], "RO")
         self.assertEqual(data["address"], "Str. Test 1")

@@ -103,16 +103,16 @@ class TestCUIValidatorBasic(TestCase):
 
 
 class TestCUIValidatorNormalize(TestCase):
-    """CUIValidator.normalize() — always produces RO-prefixed uppercase form."""
+    """CUIValidator.normalize() — the stored form: the CUI's digits, without an RO prefix."""
 
     def test_normalize_bare_digits(self) -> None:
-        self.assertEqual(CUIValidator.normalize("18189442"), "RO18189442")
+        self.assertEqual(CUIValidator.normalize("18189442"), "18189442")
 
     def test_normalize_lowercase_ro(self) -> None:
-        self.assertEqual(CUIValidator.normalize("ro18189442"), "RO18189442")
+        self.assertEqual(CUIValidator.normalize("ro18189442"), "18189442")
 
     def test_normalize_already_normalized(self) -> None:
-        self.assertEqual(CUIValidator.normalize("RO18189442"), "RO18189442")
+        self.assertEqual(CUIValidator.normalize("RO18189442"), "18189442")
 
     def test_normalize_invalid_returns_original(self) -> None:
         """Invalid CUI is returned unchanged (no crash)."""

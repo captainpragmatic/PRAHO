@@ -291,7 +291,10 @@ def cui_format(value: str) -> str:
     Format Romanian CUI (Company Unique Identifier)
 
     Usage:
-        {{ company.cui|cui_format }}  -> "RO 12345678"
+        {{ company.cui|cui_format }}  -> "12345678"
+
+    A CUI is shown as its digits: an RO prefix would assert VAT registration, which a CUI alone
+    does not. VAT numbers carry the prefix.
 
     Args:
         value: CUI string (with or without RO prefix)
@@ -310,7 +313,7 @@ def cui_format(value: str) -> str:
     if not re.match(r"^\d{2,10}$", cui):
         return value  # Return original if invalid
 
-    return f"RO {cui}"
+    return cui
 
 
 @register.filter

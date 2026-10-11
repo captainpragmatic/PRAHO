@@ -11,7 +11,7 @@ from decimal import Decimal
 
 from django.test import TestCase
 
-from apps.ui.templatetags.formatting import as_percentage, format_currency, romanian_currency, romanian_date
+from apps.ui.templatetags.formatting import as_percentage, cui_format, format_currency, romanian_currency, romanian_date
 
 
 class CurrencyFormattingTests(unittest.TestCase):
@@ -34,6 +34,15 @@ class CurrencyFormattingTests(unittest.TestCase):
             with self.subTest(currency=code):
                 self.assertEqual(romanian_currency(12, code), "—")
                 self.assertEqual(format_currency(1200, code), "—")
+
+
+class CUIFormatFilterTestCase(unittest.TestCase):
+    """A CUI is shown as its digits: an RO prefix would assert VAT registration."""
+
+    def test_digits_are_shown_without_a_vat_prefix(self) -> None:
+        self.assertEqual(cui_format("14399847"), "14399847")
+        self.assertEqual(cui_format("RO14399847"), "14399847")
+        self.assertEqual(cui_format(""), "")
 
 
 class AsPercentageFilterTestCase(unittest.TestCase):

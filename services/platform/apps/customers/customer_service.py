@@ -116,12 +116,15 @@ class CustomerService:
         if not query.strip():
             return accessible_customers
 
-        # Search across name, company_name, email, and Romanian tax identifier (CUI)
+        from apps.common.cui_validator import CUIValidator  # noqa: PLC0415
+
+        # Search across name, company_name, email, and Romanian tax identifier (CUI). CUIs are
+        # stored as digits, so "RO14399847" is searched as "14399847".
         return accessible_customers.filter(
             models.Q(name__icontains=query)
             | models.Q(company_name__icontains=query)
             | models.Q(primary_email__icontains=query)
-            | models.Q(tax_profile__cui__icontains=query)
+            | models.Q(tax_profile__cui__icontains=CUIValidator.normalize(query.strip()))
         ).distinct()
 
     @staticmethod

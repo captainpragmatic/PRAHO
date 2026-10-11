@@ -158,9 +158,9 @@ class RegexSecurityTests(TestCase):
             print(f"CUI Form errors: {form.errors}")  # Debug output
         self.assertTrue(form.is_valid())
 
-        # Invalid CUI (too short)
+        # Invalid CUI (too short: a CUI has 2-10 digits)
         form_data = {
-            'cui': 'RO12',
+            'cui': 'RO1',
             'registration_number': 'J12/123/2020',
             'is_vat_payer': False,
             'vat_rate': 19,
