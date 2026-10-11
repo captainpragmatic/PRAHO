@@ -84,6 +84,31 @@ class RegistrationFiscalFieldsTests(SimpleTestCase):
         self.assertTrue(form.is_valid(), form.errors)
         self.assertEqual(sent_customer_data(form)["cnp"], "")
 
+    def test_identifiers_that_do_not_apply_raise_no_errors(self) -> None:
+        # An individual abroad typing a foreign ID, or leaving junk in the hidden CUI field.
+        data = form_data(customer_type="individual", country="Germany", postal_code="10115", cnp="AB12345", cui="x")
+        form = CustomerRegistrationForm(data=data)
+        self.assertTrue(form.is_valid(), form.errors)
+        sent = sent_customer_data(form)
+        self.assertEqual((sent["cnp"], sent["cui"]), ("", ""))
+
+    def test_a_spaced_cui_is_accepted(self) -> None:
+        form = CustomerRegistrationForm(data=form_data(cui="RO 14 399 840"))
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["cui"], CUI)
+
+    def test_platform_user_errors_are_shown_on_the_fields(self) -> None:
+        form = CustomerRegistrationForm(data=form_data(cui=CUI))
+        self.assertTrue(form.is_valid(), form.errors)
+        refusal = PlatformAPIError(
+            "Validation failed",
+            status_code=400,
+            response_data={"errors": {"user_data": {"email": ["Enter a valid email address."]}}},
+        )
+        with patch("apps.users.forms.api_client._make_request", side_effect=refusal):
+            self.assertIsNone(form.register_customer())
+        self.assertEqual(form.errors["email"], ["Enter a valid email address."])
+
     def test_platform_field_errors_are_shown_on_the_fields(self) -> None:
         form = CustomerRegistrationForm(data=form_data(cui=CUI, trade_registry_number="J40/1234/2020"))
         self.assertTrue(form.is_valid(), form.errors)

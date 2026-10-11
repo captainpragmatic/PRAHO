@@ -10,6 +10,7 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Q, QuerySet
 from django.http import HttpRequest
+from django.utils import translation
 from django.utils.translation import gettext as _
 from rest_framework import status
 from rest_framework.decorators import action, api_view, authentication_classes, permission_classes, throttle_classes
@@ -386,8 +387,11 @@ def customer_register_api(request: HttpRequest) -> Response:
     submitted. 429 when the client's registration budget is spent.
     """
     serializer = CustomerRegistrationSerializer(data=request.data, context={"request": request})
-
-    if not serializer.is_valid():
+    # The portal shows these messages to the customer: validate in the registration's language.
+    language = request.data.get("language") if isinstance(request.data, dict) else None
+    with translation.override(language if language in {"en", "ro"} else None):
+        valid = serializer.is_valid()
+    if not valid:
         logger.warning("⚠️ [Customer Registration] Validation failed for fields: %s", list(serializer.errors.keys()))
         return Response(
             {"success": False, "error": "Validation failed", "errors": serializer.errors},

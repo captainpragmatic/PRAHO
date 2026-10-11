@@ -7880,3 +7880,7 @@ msgstr "Introduceți codul de TVA sau CUI-ul firmei."
 #: apps/users/forms.py
 msgid "Digits only; an RO prefix is accepted and removed."
 msgstr "Doar cifre; prefixul RO este acceptat și eliminat."
+
+#: apps/users/forms.py
+msgid "Romanian Personal Identification Number - required for individuals in Romania."
+msgstr "Codul Numeric Personal - obligatoriu pentru persoanele fizice din România."

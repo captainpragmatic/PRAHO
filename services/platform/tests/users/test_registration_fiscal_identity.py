@@ -232,6 +232,12 @@ class RegistrationFiscalIdentityTests(HMACTestMixin, TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("cui", str(response.json()))
 
+    def test_a_refusal_is_in_the_registration_language(self) -> None:
+        # The portal shows Platform's message on the field, to the customer.
+        response = self.submit({**registration(cui="14399847"), "language": "ro"})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["errors"]["customer_data"]["cui"], ["Introduceți un CUI valid."])
+
     def test_a_vat_number_for_another_cui_is_refused(self) -> None:
         response = self.submit(registration(cui=CUI, vat_number="RO18547290"))
         self.assertEqual(response.status_code, 400)

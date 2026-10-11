@@ -212,7 +212,7 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
         label=_("CNP (Cod Numeric Personal)"),
         max_length=13,
         required=False,
-        help_text=_("Romanian Personal Identification Number - required for individuals."),
+        help_text=_("Romanian Personal Identification Number - required for individuals in Romania."),
         widget=forms.TextInput(
             attrs={
                 "class": "w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400",
@@ -224,7 +224,7 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
 
     cui = forms.CharField(
         label=_("CUI"),
-        max_length=12,
+        max_length=20,
         required=False,
         help_text=_("Digits only; an RO prefix is accepted and removed."),
         widget=forms.TextInput(
@@ -391,13 +391,16 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
 
         if cleaned_data.get("customer_type") == "individual":
             cleaned_data.update(vat_number="", cui="", trade_registry_number="")
+            self._drop_errors("vat_number", "cui", "trade_registry_number")
             if not in_romania:
                 cleaned_data["cnp"] = ""
+                self._drop_errors("cnp")
             elif not cleaned_data.get("cnp") and "cnp" not in self.errors:
                 self.add_error("cnp", _("CNP is required for individuals."))
             return cleaned_data
 
         cleaned_data["cnp"] = ""
+        self._drop_errors("cnp")
         if (
             in_romania
             and not cleaned_data.get("vat_number")
@@ -406,6 +409,11 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
         ):
             self.add_error("cui", _("Enter the company's VAT number or CUI."))
         return cleaned_data
+
+    def _drop_errors(self, *names: str) -> None:
+        """Forget field errors for identifiers that do not apply: their values are not sent."""
+        for name in names:
+            self._errors.pop(name, None)
 
     # Platform's field names for the registration, mapped onto this form's fields.
     _PLATFORM_FIELDS = dict(  # noqa: C408  # identifier kwargs, as below
@@ -416,17 +424,19 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
         country="country",
         company_name="company_name",
     )
+    _PLATFORM_USER_FIELDS = dict(email="email", first_name="first_name", last_name="last_name", phone="phone")  # noqa: C408
 
     def _show_platform_field_errors(self, error: PlatformAPIError) -> bool:
         """Put the field errors Platform answered with on this form's fields; True if any were."""
         errors = (error.response_data or {}).get("errors")
-        customer_errors = errors.get("customer_data") if isinstance(errors, dict) else None
         shown = False
-        for field, messages in (customer_errors if isinstance(customer_errors, dict) else {}).items():
-            name = self._PLATFORM_FIELDS.get(field)
-            if name and isinstance(messages, list):
-                self.add_error(name, [str(message) for message in messages])
-                shown = True
+        for group, fields in (("customer_data", self._PLATFORM_FIELDS), ("user_data", self._PLATFORM_USER_FIELDS)):
+            group_errors = errors.get(group) if isinstance(errors, dict) else None
+            for field, messages in (group_errors if isinstance(group_errors, dict) else {}).items():
+                name = fields.get(field)
+                if name and isinstance(messages, list):
+                    self.add_error(name, [str(message) for message in messages])
+                    shown = True
         return shown
 
     # The form offers Romanian legal-entity granularity (SRL/SA/ONG); the platform
