@@ -14,17 +14,26 @@ from datetime import UTC, date, datetime
 
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
+from django.urls import reverse
+from django.utils.translation import gettext as _
 
 from apps.common.legal import TERMS_OF_SERVICE_VERSION
+
+# A calendar date: shown as the same day in every timezone. The portal's page states the same one.
+PRIVACY_POLICY_DATE = date(2024, 12, 27)
 
 logger = logging.getLogger(__name__)
 
 
 def privacy_policy(request: HttpRequest) -> HttpResponse:
-    """GDPR-compliant Privacy Policy page."""
+    """GDPR-compliant Privacy Policy page. The text is shared with the portal's /privacy-policy/ page."""
+    dashboard = reverse("audit:gdpr_dashboard")
+    signed_in = request.user.is_authenticated
     context = {
-        "last_updated": datetime(2024, 12, 27, tzinfo=UTC),
-        "effective_date": datetime(2024, 12, 27, tzinfo=UTC),
+        "last_updated": PRIVACY_POLICY_DATE,
+        "effective_date": PRIVACY_POLICY_DATE,
+        "rights_url": dashboard if signed_in else f"{reverse('users:login')}?next={dashboard}",
+        "rights_label": _("Go to GDPR Dashboard") if signed_in else _("Login to Access GDPR Dashboard"),
     }
     return render(request, "legal/privacy_policy.html", context)
 

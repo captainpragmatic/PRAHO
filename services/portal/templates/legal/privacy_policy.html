@@ -1,0 +1,10 @@
+{% extends 'base.html' %}
+{% load i18n %}
+
+{% block title %}{% trans 'Privacy Policy' %} - {{ legal_name }}{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto px-4 py-8">
+  {% include "legal/privacy_policy_content.html" %}
+</div>
+{% endblock %}

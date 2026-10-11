@@ -10,6 +10,8 @@ from datetime import date
 
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render
+from django.urls import reverse
+from django.utils.translation import gettext as _
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_POST
 
@@ -90,8 +92,33 @@ def terms_of_service_view(request: HttpRequest) -> HttpResponse:
         "legal_name": company["legal_name"],
         "company_phone": company["phone"],
         "company_support_email": company["email_support"],
+        "privacy_policy_url": reverse("privacy_policy"),
     }
     return render(request, "legal/terms_of_service.html", context)
+
+
+# A calendar date, as Platform's page states it.
+PRIVACY_POLICY_DATE = date(2024, 12, 27)
+
+
+def privacy_policy_view(request: HttpRequest) -> HttpResponse:
+    """Privacy Policy - public. The text is shared with Platform's page."""
+    company = get_company_identity()
+    context = {
+        "last_updated": PRIVACY_POLICY_DATE,
+        "effective_date": PRIVACY_POLICY_DATE,
+        "legal_name": company["legal_name"],
+        "company_registration_number": company["registration_number"],
+        "company_address": company["address"],
+        "company_email": company["email_contact"] or company["email_support"],
+        "company_phone": company["phone"],
+        "company_dpo_email": company["email_dpo"],
+        "company_privacy_email": company["email_privacy"],
+        # The customer's own privacy dashboard; signing in leads there.
+        "rights_url": reverse("users:privacy_dashboard"),
+        "rights_label": _("Go to your Privacy Dashboard"),
+    }
+    return render(request, "legal/privacy_policy.html", context)
 
 
 def cookie_policy_view(request: HttpRequest) -> HttpResponse:

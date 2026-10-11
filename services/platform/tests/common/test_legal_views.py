@@ -52,3 +52,13 @@ class TermsOfServiceVersionTests(TestCase):
         response = self.client.get(reverse("terms_of_service"))
         self.assertContains(response, TERMS_OF_SERVICE_VERSION)
         self.assertEqual(response.context["effective_date"].isoformat(), TERMS_OF_SERVICE_VERSION)
+
+
+class PrivacyPolicyContactTests(TestCase):
+    """company.email_privacy says it is shown on the privacy policy; it now is."""
+
+    def test_the_page_shows_the_privacy_contact(self):
+        from apps.settings.services import SettingsService  # noqa: PLC0415
+
+        response = self.client.get(reverse("privacy_policy"))
+        self.assertContains(response, str(SettingsService.DEFAULT_SETTINGS["company.email_privacy"]))

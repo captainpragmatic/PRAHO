@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import time
+from collections.abc import Iterable
 from copy import deepcopy
 from pathlib import Path
 from unittest.mock import patch
@@ -25,6 +26,11 @@ CATALOG_COMPANY = {
     "email_privacy": "privacy@pragmatichost.com",
     "email_finance": "",
     "phone": "",
+    # Published for the privacy policy (GDPR Art. 13(1)(b)).
+    "email_dpo": "dpo@pragmatichost.com",
+    "email_contact": "contact@pragmatichost.com",
+    "address": "",
+    "registration_number": "",
 }
 CONFIGURED_COMPANY = {
     "legal_name": "Portal Identity SRL",
@@ -67,17 +73,14 @@ class PortalCompanyIdentityTests(SimpleTestCase):
             "company": dict(CONFIGURED_COMPANY if company is None else company),
         }
 
-    def identity_text(self) -> str:
+    def identity_text(self, fields: Iterable[str] = tuple(CONFIGURED_COMPANY)) -> str:
         request = RequestFactory().get("/")
         request.session = SessionBase()
-        template = engines["django"].from_string(
-            "{{ company.legal_name }}|{{ company.email_support }}|{{ company.email_privacy }}|"
-            "{{ company.email_finance }}|{{ company.phone }}"
-        )
+        template = engines["django"].from_string("|".join(f"{{{{ company.{field} }}}}" for field in fields))
         return template.render({}, request=request)
 
     def assert_identity(self, expected: dict[str, str]) -> None:
-        self.assertEqual(self.identity_text(), "|".join(expected.values()))
+        self.assertEqual(self.identity_text(expected), "|".join(expected.values()))
 
     def test_cold_outage_uses_the_mirrored_catalog_defaults(self) -> None:
         with patch.object(api_client, "get_localisation_defaults", side_effect=PlatformAPIError("offline")):
