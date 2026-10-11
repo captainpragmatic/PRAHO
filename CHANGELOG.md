@@ -74,6 +74,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **GDPR export files are encrypted.** An export was written to media as plain JSON, though its code said it was encrypted. From media it reached every backup and the staff network's direct `/media` route.
+  - **Now.** The file is AES-256-GCM ciphertext bound to its export (ADR-0040). Every download decrypts it, and refuses a file that is not that export's ciphertext instead of serving it.
+  - **Downloads are not cached** (`Cache-Control: no-store`). Staff can no longer download an expired export.
+  - **A refused file is not recorded as downloaded.** The download count and the audit log were written before the file was read.
+  - **One file per export.** An export already completed is not processed again, which left the first file behind. A failure after the file is written deletes it. The 7-day download window starts when the export completes, not when it is requested.
 - **The CNP is encrypted at rest.** A customer's CNP was stored in plain text on the tax profile and on every invoice and proforma.
   - **Now.** All three are encrypted with AES-256-GCM, each value bound to its own row, as payment bank details already were (ADR-0040). Nothing reads differently: e-Factura, domain registration and the invoice snapshots get the same value as before.
   - **Staff list.** The customer list showed the first 8 digits of each CNP, which encode the person's birth date, sex and county. It now says "CNP on file".

@@ -197,6 +197,29 @@ not an `EncryptedJSONField`, and binds each value to its row the same way:
   and must create it again, after the change. `tests/common/test_migration_db_objects.py` turns
   red when a trigger is missing.
 
+## Addendum (2026-10-12): GDPR export files
+
+A GDPR export is a file, not a column: `apps.audit.export_files` writes it to media as v2
+ciphertext bound to its export,
+
+    audit_data_exports:file:<export id>
+
+and is the only code that reads or writes those bytes.
+
+- **Why the file and not a column.** Media reaches every backup (#674) and the staff network's
+  direct `/media` route, which does not pass through Django's authorisation or expiry checks.
+  Encrypted files make both ciphertext only, with no deployment change. The key is not in the
+  backups.
+- **Reads always pass the expected AAD and require a v2 envelope.** `decrypt_sensitive_data`
+  returns "" for empty input and decrypts a v1 blob under whatever AAD it is given, so a
+  plaintext, empty, truncated or repackaged file, or one copied from another export, raises
+  `DecryptionError`. The views never serve it, and do not count or log it as downloaded.
+- **One owner.** An export is processed only from `pending` or `failed`, under a row lock, so it
+  never gets a second file. A failure after the write deletes the file. The download window
+  starts at completion.
+- **Key rotation.** `reencrypt_with_aad` does not find these files. A retired key must stay in the
+  keyring until every export file encrypted under it has been deleted.
+
 ## Related
 
 - [ADR-0033](ADR-0033-encryption-architecture-consolidation.md) - AES-256-GCM

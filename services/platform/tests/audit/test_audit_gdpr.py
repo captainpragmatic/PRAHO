@@ -21,6 +21,7 @@ from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
 
+from apps.audit.export_files import read_export_file
 from apps.audit.models import ComplianceLog, DataExport
 from apps.audit.services import (
     AuditService,
@@ -104,7 +105,7 @@ class GDPRExportServiceTestCase(TestCase):
 
         # Verify file exists and contains valid JSON
         self.assertTrue(default_storage.exists(export_request.file_path))
-        file_content = default_storage.open(export_request.file_path).read()
+        file_content = read_export_file(export_request)
         data = json.loads(file_content)
 
         # Check Romanian compliance metadata (updated field name)
@@ -126,7 +127,7 @@ class GDPRExportServiceTestCase(TestCase):
         export_request = result.value
 
         # Mock storage failure
-        with patch("apps.audit.services.default_storage.save") as mock_save:
+        with patch("apps.audit.export_files.default_storage.save") as mock_save:
             mock_save.side_effect = Exception("Storage error")
 
             process_result = gdpr_export_service.process_data_export(export_request)
@@ -325,7 +326,7 @@ class GDPRSecurityTest(TestCase):
         self.assertTrue(process_result.is_ok())
 
         # Read export data
-        file_content = default_storage.open(export_request.file_path).read()
+        file_content = read_export_file(export_request)
         export_data = json.loads(file_content)
 
         # Should not contain sensitive system fields
