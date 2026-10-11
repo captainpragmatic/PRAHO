@@ -1,8 +1,8 @@
 #!/bin/bash
 # =============================================================================
-# PRAHO - Database Restore Script
+# PRAHO - Database and Media Restore Script
 # =============================================================================
-# Restores database from a backup file
+# Restores the database from a backup file, and the media archive backup.sh wrote next to it
 #
 # Usage:
 #   ./restore.sh                           # Interactive - choose from list
@@ -21,6 +21,9 @@ BACKUP_DIR="${BACKUP_DIR:-${PROJECT_ROOT}/backups}"
 source "${SCRIPT_DIR}/lib/compose.sh"
 # Outlasts the platform healthcheck's 600s start period plus its failed-check retries.
 WAIT_TIMEOUT=900
+# MEDIA_ROOT inside the platform container: the media_files volume (see backup.sh).
+MEDIA_CONTAINER="${MEDIA_CONTAINER:-praho_platform}"
+MEDIA_PATH="${MEDIA_PATH:-/app/media}"
 
 # Colors
 GREEN='\033[0;32m'
@@ -85,6 +88,18 @@ list_and_select_backup() {
     echo "${BACKUPS[$((SELECTION-1))]}"
 }
 
+# The archive holds the media directory itself, so it is unpacked into its parent. Files the backup
+# does not hold are kept: nothing is deleted. docker cp writes into a stopped container's volume.
+restore_media() {
+    local MEDIA_FILE="${1%.sql.gz}.media.tar.gz"
+    if [ -f "$MEDIA_FILE" ]; then
+        log_info "Restoring media from ${MEDIA_FILE}..."
+        gunzip -c "$MEDIA_FILE" | docker cp - "${MEDIA_CONTAINER}:$(dirname "$MEDIA_PATH")"
+    else
+        log_warn "No media archive for this backup; the media was left as it is"
+    fi
+}
+
 restore_backup() {
     local BACKUP_FILE="$1"
 
@@ -124,6 +139,8 @@ restore_backup() {
     # Restore
     log_info "Restoring database..."
     gunzip -c "${BACKUP_FILE}" | docker exec -i praho_db psql -U praho praho
+
+    restore_media "${BACKUP_FILE}"
 
     # Restart services
     log_info "Starting services and waiting for health..."

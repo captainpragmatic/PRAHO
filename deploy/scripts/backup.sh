@@ -1,8 +1,9 @@
 #!/bin/bash
 # =============================================================================
-# PRAHO - Database Backup Script
+# PRAHO - Database and Media Backup Script
 # =============================================================================
-# Creates a timestamped PostgreSQL backup
+# Creates a timestamped PostgreSQL backup, and next to it an archive of the media volume
+# (uploads and generated documents such as ANAF's e-Factura response archives).
 #
 # Usage:
 #   ./backup.sh                    # Create backup
@@ -17,6 +18,9 @@ PROJECT_ROOT="$(dirname "$DEPLOY_DIR")"
 BACKUP_DIR="${BACKUP_DIR:-${PROJECT_ROOT}/backups}"
 RETENTION_DAYS="${RETENTION_DAYS:-30}"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+# MEDIA_ROOT inside the platform container: the media_files volume (see the compose files).
+MEDIA_CONTAINER="${MEDIA_CONTAINER:-praho_platform}"
+MEDIA_PATH="${MEDIA_PATH:-/app/media}"
 
 # Colors
 GREEN='\033[0;32m'
@@ -53,6 +57,8 @@ cleanup_backups() {
     remove_abandoned_partials
 
     local COUNT=$(find "${BACKUP_DIR}" -name "praho_backup_*.sql.gz" -mtime +${DAYS} | wc -l)
+    # A media archive goes with its dump.
+    find "${BACKUP_DIR}" -name "praho_backup_*.media.tar.gz" -mtime +${DAYS} -delete
 
     if [ "$COUNT" -gt 0 ]; then
         find "${BACKUP_DIR}" -name "praho_backup_*.sql.gz" -mtime +${DAYS} -delete
@@ -62,13 +68,29 @@ cleanup_backups() {
     fi
 }
 
+# docker cp reads a stopped container too, so the media is archived whether or not the platform runs.
+backup_media() {
+    log_info "Archiving media (${MEDIA_CONTAINER}:${MEDIA_PATH})..."
+    if docker cp "${MEDIA_CONTAINER}:${MEDIA_PATH}" - | gzip > "${MEDIA_PARTIAL}" && [ -s "${MEDIA_PARTIAL}" ]; then
+        mv "${MEDIA_PARTIAL}" "${MEDIA_FILE}"
+        log_success "Media archived: ${MEDIA_FILE} ($(du -h "${MEDIA_FILE}" | cut -f1))"
+    else
+        # The database dump is complete and kept; the run still fails, so cron and callers notice.
+        log_error "Media archive failed; the database backup ${BACKUP_FILE} is complete"
+        exit 1
+    fi
+}
+
 create_backup() {
     # The process id keeps two backups started in the same second apart: no two running processes share one.
     local BACKUP_FILE="${BACKUP_DIR}/praho_backup_${TIMESTAMP}_$$.sql.gz"
     # Written under another name and renamed once complete, so a failed dump never matches
     # praho_backup_*.sql.gz, which restore --latest picks from. Global: the EXIT trap reads it.
     PARTIAL_FILE="${BACKUP_FILE}.partial"
-    trap 'rm -f "${PARTIAL_FILE}"' EXIT
+    # The media archive sits next to its dump, so a restore finds the pair by name.
+    MEDIA_FILE="${BACKUP_FILE%.sql.gz}.media.tar.gz"
+    MEDIA_PARTIAL="${MEDIA_FILE}.partial"
+    trap 'rm -f "${PARTIAL_FILE}" "${MEDIA_PARTIAL}"' EXIT
     # Before the dump, so a string of interrupted runs cannot pile partials up either.
     remove_abandoned_partials
 
@@ -90,6 +112,8 @@ create_backup() {
         local SIZE=$(du -h "${BACKUP_FILE}" | cut -f1)
         log_success "Backup created successfully"
         log_info "Size: ${SIZE}"
+
+        backup_media
 
         # Auto cleanup
         cleanup_backups

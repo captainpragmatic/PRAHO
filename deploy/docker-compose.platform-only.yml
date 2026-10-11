@@ -86,6 +86,8 @@ services:
       - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY required}
       - DJANGO_SETTINGS_MODULE=${DJANGO_SETTINGS_MODULE:-config.settings.prod}
       - STATIC_ROOT=/app/staticfiles
+      # The media_files volume: uploads and generated documents outlive the container, and backups read it.
+      - MEDIA_ROOT=/app/media
       - HMAC_SECRET=${PLATFORM_API_SECRET:?PLATFORM_API_SECRET required}
       # Per-portal HMAC registry (#277). Unset => legacy shared-secret behavior (safe default).
       - PORTAL_HMAC_MODE=${PORTAL_HMAC_MODE:-legacy}
