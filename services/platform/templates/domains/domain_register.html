@@ -46,6 +46,7 @@
                             {% trans "Enter domain name" %}
                         </label>
                         <div class="flex">
+                            {# tmpl-allow TMPL001: left half of an input group (rounded-l-md, joined to the Search button); component wrapper breaks inline layout #}
                             <input
                                 type="text"
                                 id="domain-search"
@@ -54,6 +55,7 @@
                                 class="flex-1 rounded-l-md border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white placeholder-slate-500 dark:placeholder-slate-400 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
                                 autocomplete="off"
                             >
+                            {# tmpl-allow TMPL002: right half of an input group (rounded-r-md, border-l-0 joined to #domain-search); the button tag always renders rounded-lg with its own border #}
                             <button
                                 type="submit"
                                 class="inline-flex items-center px-4 py-2 border border-l-0 border-slate-300 dark:border-slate-600 rounded-r-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
@@ -122,6 +124,7 @@
                             <label for="customer_id" class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                                 {% icon "user" %} {% trans "Customer" %}
                             </label>
+                            {# tmpl-allow TMPL003: options rendered inline from the customers queryset; select components take a view-built options list #}
                             <select
                                 name="customer_id"
                                 id="customer_id"
@@ -142,12 +145,8 @@
                             <label for="years" class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                                 {% icon "clock" %} {% trans "Registration Period" %}
                             </label>
-                            <select
-                                name="years"
-                                id="years"
-                                class="block w-full rounded-md border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
-                            >
-                            </select>
+                            {% trans "Registration Period" as period_label %}
+                            {% input_field "years" input_type="select" html_id="years" aria_label=period_label %}
                         </div>
 
                         <!-- Domain Options -->
@@ -155,6 +154,7 @@
                             <h4 class="text-sm font-medium text-slate-700 dark:text-slate-300">{% icon "settings" %} {% trans "Domain Options" %}</h4>
 
                             <div class="flex items-center">
+                                {# tmpl-allow TMPL001: its sibling label holds an icon and the #whois-price-display span the page JS fills; checkbox_field renders a plain-text label #}
                                 <input
                                     id="whois_privacy"
                                     name="whois_privacy"
@@ -168,6 +168,7 @@
                             </div>
 
                             <div class="flex items-center">
+                                {# tmpl-allow TMPL001: its sibling label holds a refresh icon beside the text; checkbox_field renders a plain-text label and its wrapper breaks this inline row #}
                                 <input
                                     id="auto_renew"
                                     name="auto_renew"

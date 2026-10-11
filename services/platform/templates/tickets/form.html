@@ -30,6 +30,7 @@
           <label for="customer_id" class="block text-sm font-medium text-slate-300 mb-2">
             {% trans 'Customer' %}
           </label>
+          {# tmpl-allow TMPL003: options rendered inline from the customers queryset; select components take a view-built options list #}
           <select name="customer_id" id="customer_id"
             class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
             <option value="">{% trans 'Select a customer' %}</option>
@@ -45,13 +46,14 @@
             <label for="ticket_type" class="block text-sm font-medium text-slate-300 mb-2">
               {% trans 'Type' %}
             </label>
+            {# tmpl-allow TMPL003: options rendered inline from literal ticket types; select components take a view-built options list #}
             <select name="ticket_type" id="ticket_type"
               class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
-              <option value="support">🛠️ {% trans 'Technical Support' %}</option>
-              <option value="billing">💰 {% trans 'Billing Issue' %}</option>
-              <option value="feature">✨ {% trans 'Feature Request' %}</option>
-              <option value="bug">🐛 {% trans 'Bug Report' %}</option>
-              <option value="general">💬 {% trans 'General Inquiry' %}</option>
+              <option value="support">{% trans 'Technical Support' %}</option>
+              <option value="billing">{% trans 'Billing Issue' %}</option>
+              <option value="feature">{% trans 'Feature Request' %}</option>
+              <option value="bug">{% trans 'Bug Report' %}</option>
+              <option value="general">{% trans 'General Inquiry' %}</option>
             </select>
           </div>
 
@@ -59,12 +61,13 @@
             <label for="priority" class="block text-sm font-medium text-slate-300 mb-2">
               {% trans 'Priority' %}
             </label>
+            {# tmpl-allow TMPL003: options rendered inline from literal priorities (medium preselected); select components take a view-built options list #}
             <select name="priority" id="priority"
               class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
-              <option value="low">🟢 {% trans 'Low' %}</option>
-              <option value="medium" selected>🟡 {% trans 'Medium' %}</option>
-              <option value="high">🟠 {% trans 'High' %}</option>
-              <option value="urgent">🔴 {% trans 'Urgent' %}</option>
+              <option value="low">{% trans 'Low' %}</option>
+              <option value="medium" selected>{% trans 'Medium' %}</option>
+              <option value="high">{% trans 'High' %}</option>
+              <option value="urgent">{% trans 'Urgent' %}</option>
             </select>
           </div>
         </div>
@@ -84,10 +87,9 @@
           <label for="service" class="block text-sm font-medium text-slate-300 mb-2">
             {% trans 'Related Service' %} <span class="text-slate-500">({% trans 'optional' %})</span>
           </label>
-          <select name="service" id="service"
-            class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
-            <option value="">{% trans 'Select a service (if applicable)' %}</option>
-          </select>
+          {% trans 'Select a service (if applicable)' as service_placeholder %}
+          {% trans 'Related Service' as service_label %}
+          {% input_field "service" input_type="select" html_id="service" placeholder=service_placeholder aria_label=service_label %}
         </div>
 
         <!-- Description -->

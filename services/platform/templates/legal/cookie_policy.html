@@ -25,6 +25,7 @@
             </div>
             {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
             {% trans "Cookie preferences panel will appear on next page load." as cookie_msg %}
+            {# tmpl-allow TMPL002: data-fallback-message carries the translated cookie_msg variable; the button tag's attrs is a literal string and cannot interpolate it #}
             <button data-action="cookie-prefs" data-fallback-message="{{ cookie_msg }}"
                     class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded font-medium transition-colors">
                 {% trans "Cookie Settings" %}

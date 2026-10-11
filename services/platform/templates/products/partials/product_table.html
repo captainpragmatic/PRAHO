@@ -76,6 +76,7 @@
             <td class="px-6 py-4 whitespace-nowrap">
               <div class="flex flex-wrap gap-1">
                 <!-- Active Status Toggle -->
+                {# tmpl-allow TMPL002: its content is a badge component (structured inner HTML) and it replaces itself via hx-swap="outerHTML"; the button tag renders one text and one icon #}
                 <button class="toggle-switch"
                         hx-post="{% url 'products:product_toggle_active' slug=product.slug %}"
                         hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
@@ -90,6 +91,7 @@
                 </button>
 
                 <!-- Public Status Toggle -->
+                {# tmpl-allow TMPL002: its content is a badge component (structured inner HTML) and it replaces itself via hx-swap="outerHTML"; the button tag renders one text and one icon #}
                 <button class="toggle-switch"
                         hx-post="{% url 'products:product_toggle_public' slug=product.slug %}"
                         hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
@@ -189,6 +191,7 @@
           {% badge product.get_product_type_display variant="secondary" %}
 
           <!-- Active Status Toggle -->
+          {# tmpl-allow TMPL002: its content is a badge component (structured inner HTML) and it replaces itself via hx-swap="outerHTML"; the button tag renders one text and one icon #}
           <button class="toggle-switch"
                   hx-post="{% url 'products:product_toggle_active' slug=product.slug %}"
                   hx-target="this"
@@ -202,6 +205,7 @@
           </button>
 
           <!-- Public Status Toggle -->
+          {# tmpl-allow TMPL002: its content is a badge component (structured inner HTML) and it replaces itself via hx-swap="outerHTML"; the button tag renders one text and one icon #}
           <button class="toggle-switch"
                   hx-post="{% url 'products:product_toggle_public' slug=product.slug %}"
                   hx-target="this"

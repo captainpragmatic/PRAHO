@@ -240,6 +240,7 @@
           <!-- Active Status -->
           <div class="flex items-center justify-between">
             <span class="text-slate-400">{% trans 'Active' %}</span>
+            {# tmpl-allow TMPL002: its content is a badge component (structured inner HTML) and it replaces itself via hx-swap="outerHTML"; the button tag renders one text and one icon #}
             <button class="toggle-switch"
                     hx-post="{% url 'products:product_toggle_active' slug=product.slug %}"
                     hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
@@ -256,6 +257,7 @@
           <!-- Public Status -->
           <div class="flex items-center justify-between">
             <span class="text-slate-400">{% trans 'Public' %}</span>
+            {# tmpl-allow TMPL002: its content is a badge component (structured inner HTML) and it replaces itself via hx-swap="outerHTML"; the button tag renders one text and one icon #}
             <button class="toggle-switch"
                     hx-post="{% url 'products:product_toggle_public' slug=product.slug %}"
                     hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
@@ -272,6 +274,7 @@
           <!-- Featured Status -->
           <div class="flex items-center justify-between">
             <span class="text-slate-400">{% trans 'Featured' %}</span>
+            {# tmpl-allow TMPL002: its content is a badge component (structured inner HTML) and it replaces itself via hx-swap="outerHTML"; the button tag renders one text and one icon #}
             <button class="toggle-switch"
                     hx-post="{% url 'products:product_toggle_featured' slug=product.slug %}"
                     hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'

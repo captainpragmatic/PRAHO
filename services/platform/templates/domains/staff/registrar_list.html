@@ -89,12 +89,13 @@
                 <label for="status" class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                     {% trans "Status" %}
                 </label>
+                {# tmpl-allow TMPL003: options rendered inline from literal registrar statuses with selected from request.GET.status; select components take a view-built options list #}
                 <select name="status" id="status"
                         class="block w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-3 py-2 text-sm">
                     <option value="">{% trans "All Statuses" %}</option>
-                    <option value="active" {% if request.GET.status == 'active' %}selected{% endif %}>🟢 {% trans "Active" %}</option>
-                    <option value="suspended" {% if request.GET.status == 'suspended' %}selected{% endif %}>🟡 {% trans "Suspended" %}</option>
-                    <option value="disabled" {% if request.GET.status == 'disabled' %}selected{% endif %}>🔴 {% trans "Disabled" %}</option>
+                    <option value="active" {% if request.GET.status == 'active' %}selected{% endif %}>{% trans "Active" %}</option>
+                    <option value="suspended" {% if request.GET.status == 'suspended' %}selected{% endif %}>{% trans "Suspended" %}</option>
+                    <option value="disabled" {% if request.GET.status == 'disabled' %}selected{% endif %}>{% trans "Disabled" %}</option>
                 </select>
             </div>
             <div class="flex items-end">
