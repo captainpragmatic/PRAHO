@@ -20,6 +20,7 @@ DETAILS = {
         "last_name": "Marlowe",
         "company_name": "Quill Lantern SRL",
         "vat_number": "RO12345678",
+        "terms_version": "2024-12-27",  # Platform names the version to accept (#670)
     }
 }
 
@@ -30,6 +31,7 @@ def form(**overrides: object) -> dict[str, object]:
         "new_password": CHOSEN,
         "confirm_password": CHOSEN,
         "data_processing_consent": "on",
+        "terms_accepted": "on",  # Required since the page asks for the Terms of Service
         **overrides,
     }
 
@@ -77,6 +79,8 @@ class RegistrationConfirmViewTests(TestCase):
             CHOSEN,
             data_processing_consent=True,
             marketing_consent=True,
+            terms_accepted=True,
+            terms_version="2024-12-27",
             client_ip="127.0.0.1",
         )
         self.assertTrue(any("can sign in now" in str(m) for m in get_messages(response.wsgi_request)))

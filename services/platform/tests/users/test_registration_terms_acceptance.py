@@ -87,13 +87,19 @@ class TermsAcceptanceTests(HMACTestMixin, TestCase):
         self.assertIsNone(self.row.consumed_at)
         self.assertTrue(self.confirm(terms_accepted=True, terms_version=TERMS_OF_SERVICE_VERSION).is_ok())
 
-    def test_without_acceptance_nothing_is_recorded(self) -> None:
-        # Until the portal asks for acceptance at confirmation (next change), it is optional.
-        self.assertTrue(self.confirm().is_ok())
-        user = User.objects.get(email="terms@example.test")
-        self.assertIsNone(user.terms_accepted_at)
-        self.assertEqual(user.terms_version, "")
-        self.assertFalse(AuditEvent.objects.filter(action="terms_of_service_accepted").exists())
+    def test_without_acceptance_no_account_is_created_and_the_link_stays_usable(self) -> None:
+        result = self.confirm()
+        self.assertTrue(result.is_err())
+        self.assertEqual(result.unwrap_err().code, "terms_required")
+        self.assertFalse(User.objects.filter(email="terms@example.test").exists())
+        self.row.refresh_from_db()
+        self.assertIsNone(self.row.consumed_at)
+
+    def test_the_api_answers_missing_acceptance_on_the_field(self) -> None:
+        response = self.post_confirm()
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertEqual(response.json()["code"], "validation_failed")
+        self.assertIn("terms_accepted", response.json()["errors"])
 
     def test_an_audit_failure_rolls_the_account_back(self) -> None:
         from apps.audit.services import AuditService  # noqa: PLC0415

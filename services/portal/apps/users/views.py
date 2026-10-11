@@ -29,6 +29,7 @@ from apps.common.decorators import (
     require_authentication,
     require_billing_access,
 )
+from apps.common.legal import TERMS_OF_SERVICE_VERSION
 from apps.common.localisation_middleware import sync_language_selection
 from apps.common.localisation_services import store_localisation_preferences
 from apps.common.rate_limit_feedback import (
@@ -835,7 +836,8 @@ def _load_registration(
     Fetched once per link and kept with it in the session, so revisiting the page or a rejected
     password does not ask Platform again. None with no notice means the link is gone.
     """
-    if isinstance(link.get("details"), dict):
+    if isinstance(link.get("details"), dict) and "terms_version" in link["details"]:
+        # Details without the terms version to accept are fetched again (Platform before #670).
         return link["details"], "", 200, None
     try:
         details = api_client.get_pending_registration(
@@ -853,9 +855,15 @@ def _load_registration(
 
 
 def _confirm_registration(
-    request: HttpRequest, form: RegistrationConfirmForm, link: dict[str, Any]
+    request: HttpRequest, form: RegistrationConfirmForm, link: dict[str, Any], details: dict[str, Any]
 ) -> tuple[HttpResponse | None, int, int | None, str]:
     """Submit the confirmation. Return a redirect on success, else a status, Retry-After and a notice."""
+    terms_version = str(details.get("terms_version", ""))
+    if terms_version != TERMS_OF_SERVICE_VERSION:
+        # Mid-deploy of new terms: /terms/ shows this portal's version, and Platform would record
+        # its own. Accept only when both name the same document.
+        form.add_error(None, _("The Terms of Service are being updated. Please try again in a few minutes."))
+        return None, 503, None, ""
     try:
         result = api_client.confirm_registration(
             link["registration_id"],
@@ -864,6 +872,8 @@ def _confirm_registration(
             form.cleaned_data["confirm_password"],
             data_processing_consent=form.cleaned_data["data_processing_consent"],
             marketing_consent=form.cleaned_data["marketing_consent"],
+            terms_accepted=form.cleaned_data["terms_accepted"],
+            terms_version=terms_version,
             client_ip=get_safe_client_ip(request),
         )
         if not result.get("success"):
@@ -874,6 +884,16 @@ def _confirm_registration(
         if code in {"invalid_link", "details_unavailable"}:
             request.session.pop(REGISTRATION_CONFIRM_SESSION_KEY, None)
             return None, (409 if code == "details_unavailable" else 400), None, code
+        if code == "terms_changed":
+            # Forget the details fetched for the link, so the next submit sends the current version.
+            request.session[REGISTRATION_CONFIRM_SESSION_KEY] = {
+                key: value for key, value in link.items() if key != "details"
+            }
+            form.add_error(None, _("The Terms of Service have changed. Please read them again before confirming."))
+            # The tick was for the previous version: ask for it again.
+            form.data = form.data.copy()
+            form.data.pop("terms_accepted", None)
+            return None, 409, None, ""
         if exc.status_code == HTTPStatus.BAD_REQUEST:
             errors = payload.get("errors")
             for field, field_errors in (errors if isinstance(errors, dict) else {}).items():
@@ -923,7 +943,7 @@ def register_confirm_view(
         if request.POST.get("registration_id") != link["registration_id"]:
             status, notice = 409, _("This page was for an earlier link. Check these details and submit again.")
         elif posted.is_valid():
-            done, status, retry_after, gone = _confirm_registration(request, posted, link)
+            done, status, retry_after, gone = _confirm_registration(request, posted, link, registration)
             if done is not None:
                 return done
             form = posted

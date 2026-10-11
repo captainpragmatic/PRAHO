@@ -692,6 +692,11 @@ class RegistrationConfirmForm(PasswordResetConfirmForm):
         label=_("Send me news and offers by email."),
         required=False,
     )
+    # The page links the terms; Platform records the version the page showed.
+    terms_accepted = forms.BooleanField(
+        label=_("I have read and accept the Terms of Service."),
+        required=True,
+    )
 
 
 class ChangePasswordForm(forms.Form):
