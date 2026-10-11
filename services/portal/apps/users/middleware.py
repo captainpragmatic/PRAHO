@@ -66,7 +66,7 @@ class PortalAuthenticationMiddleware:
     ]
 
     # Public leaf pages, matched exactly: a later route under them stays private.
-    PUBLIC_EXACT_URLS: ClassVar[frozenset[str]] = frozenset({"/terms/"})
+    PUBLIC_EXACT_URLS: ClassVar[frozenset[str]] = frozenset({"/terms/", "/privacy-policy/"})
 
     # Validation timing configuration
     REVALIDATE_EVERY = 600  # 10 minutes base interval

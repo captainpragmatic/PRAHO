@@ -44,6 +44,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Compatibility.** Existing sessions keep working. See ADR-0055.
 ### Added
 
+- **The portal publishes the Privacy Policy at `/privacy-policy/`.**
+  - **Why.** The Terms of Service ask customers to review the Privacy Policy, and checkout linked "privacy policy" to the signed-in privacy dashboard. The policy itself was only on the staff service.
+  - **What.** A public page, linked from the portal footer, the terms and checkout, showing the same text as Platform's `/privacy-policy/` from one shared template. Company details come from what the portal knows; a detail it lacks is left out. The rights section points to the customer's privacy dashboard.
+  - Both pages now show the privacy contact (`company.email_privacy`), which the setting's help text said they did.
+  - Seven Romanian translations that differed between Platform and the portal now agree, using the official GDPR terms where they apply (for example "Dreptul la rectificare").
 - **Confirming a registration records the Terms of Service accepted.**
   - **Why.** The portal sent `terms_accepted` with a registration and Platform dropped it, so nothing recorded who accepted which terms, or when.
   - **What.** The person who confirms the emailed link accepts the version the confirmation page showed. The account records the time and version, and an audit event `terms_of_service_accepted` is written with it; if that write fails, no account is created. A version that is no longer current is refused (`terms_changed`) and the same link can be used again. The GDPR export includes the acceptance, and anonymisation clears it.

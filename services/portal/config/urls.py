@@ -8,7 +8,7 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect
 from django.urls import include, path
 
-from apps.common.views import cookie_consent_view, cookie_policy_view, terms_of_service_view
+from apps.common.views import cookie_consent_view, cookie_policy_view, privacy_policy_view, terms_of_service_view
 
 handler500 = "apps.common.error_views.server_error"
 
@@ -30,6 +30,7 @@ def robots_txt(request: HttpRequest) -> HttpResponse:
         "Allow: /login/",
         "Allow: /register/",
         "Allow: /terms/",
+        "Allow: /privacy-policy/",
     ]
     return HttpResponse("\n".join(lines), content_type="text/plain")
 
@@ -58,6 +59,7 @@ urlpatterns = [
     # GDPR / Legal pages (public, no auth required)
     path("cookie-policy/", cookie_policy_view, name="cookie_policy"),
     path("terms/", terms_of_service_view, name="terms_of_service"),
+    path("privacy-policy/", privacy_policy_view, name="privacy_policy"),
     path("api/cookie-consent/", cookie_consent_view, name="cookie_consent"),
     # SEO / Crawlers
     path("robots.txt", robots_txt, name="robots_txt"),

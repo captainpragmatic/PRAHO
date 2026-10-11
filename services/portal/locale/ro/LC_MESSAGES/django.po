@@ -6771,7 +6771,7 @@ msgstr "Exportați datele dvs. într-un format care poate fi citit automat"
 
 #: services/portal/templates/users/privacy_dashboard.html:134
 msgid "Right to Object"
-msgstr "Dreptul de a face obiecții"
+msgstr "Dreptul la opoziție"
 
 #: services/portal/templates/users/privacy_dashboard.html:135
 msgid "Object to processing for direct marketing"
@@ -7903,3 +7903,7 @@ msgstr "(se deschide într-o filă nouă)"
 #: apps/users/views.py
 msgid "The Terms of Service are being updated. Please try again in a few minutes."
 msgstr "Termenii de Serviciu sunt în curs de actualizare. Vă rugăm să încercați din nou peste câteva minute."
+
+#: apps/common/views.py
+msgid "Go to your Privacy Dashboard"
+msgstr "Mergeți la panoul de confidențialitate"

@@ -5396,7 +5396,7 @@ msgstr "Persoană fizică, companie, PFA sau ONG"
 #: apps/customers/forms.py:529 apps/customers/forms.py:852
 #: templates/legal/privacy_policy.html:68
 msgid "Company Name"
-msgstr "Nume Companie"
+msgstr "Denumirea companiei"
 
 #: apps/customers/forms.py:530
 msgid "Required for companies, PFA, and NGOs"
@@ -16189,7 +16189,7 @@ msgstr "Exportați datele personale"
 #: templates/audit/gdpr_dashboard.html:110
 #: templates/legal/privacy_policy.html:233
 msgid "Right to Rectification"
-msgstr "Drept de rectificare"
+msgstr "Dreptul la rectificare"
 
 #: templates/audit/gdpr_dashboard.html:111
 msgid "Update your information"
@@ -16198,7 +16198,7 @@ msgstr "Actualizați informațiile dvs."
 #: templates/audit/gdpr_dashboard.html:118
 #: templates/legal/privacy_policy.html:237
 msgid "Right to Erasure"
-msgstr "Drept de ștergere"
+msgstr "Dreptul la ștergere"
 
 #: templates/audit/gdpr_dashboard.html:119
 msgid "Request data deletion"
@@ -17217,7 +17217,7 @@ msgstr "Modul de întreținere este activ — clienții primesc eroare 503. Deza
 #: templates/legal/privacy_policy.html:455
 #: templates/legal/terms_of_service.html:367
 msgid "Cookie Policy"
-msgstr "Politica de Cookie-uri"
+msgstr "Politica de cookie-uri"
 
 #: templates/base.html:286 templates/legal/cookie_policy.html:345
 #: templates/legal/privacy_policy.html:456
@@ -19989,7 +19989,7 @@ msgstr "Profilul meu"
 #: templates/provisioning/virtualmin/restore_form.html:186
 #: templates/users/profile.html:99
 msgid "Account Information"
-msgstr "Informații Cont"
+msgstr "Informații despre cont"
 
 #: templates/dashboard.html:378
 msgid "Customer name"
@@ -21706,7 +21706,7 @@ msgstr ""
 #: templates/legal/privacy_policy.html:34
 #: templates/legal/privacy_policy.html:403
 msgid "Contact Us"
-msgstr "Contact"
+msgstr "Contactați-ne"
 
 #: templates/legal/cookie_policy.html:328
 msgid ""
@@ -22452,7 +22452,7 @@ msgstr "Primiți datele dvs. într-un format ușor de citit de mașini."
 
 #: templates/legal/privacy_policy.html:249
 msgid "Right to Object"
-msgstr "Dreptul de a vă opune"
+msgstr "Dreptul la opoziție"
 
 #: templates/legal/privacy_policy.html:250
 msgid "Object to processing based on legitimate interests or for marketing."
