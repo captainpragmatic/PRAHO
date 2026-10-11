@@ -66,7 +66,11 @@ class PortalAuthenticationMiddleware:
     ]
 
     # Public leaf pages, matched exactly: a later route under them stays private.
-    PUBLIC_EXACT_URLS: ClassVar[frozenset[str]] = frozenset({"/terms/", "/privacy-policy/"})
+    # The slash-less forms are listed too. This middleware answers before routing, and
+    # CommonMiddleware adds the slash only for a 404, so they would otherwise get the login redirect.
+    PUBLIC_EXACT_URLS: ClassVar[frozenset[str]] = frozenset(
+        {"/terms/", "/terms", "/privacy-policy/", "/privacy-policy", "/cookie-policy"}
+    )
 
     # Validation timing configuration
     REVALIDATE_EVERY = 600  # 10 minutes base interval
