@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **e-Factura states a buyer VAT identifier only for a VAT-registered buyer.**
+  - **The bug.** The XML gave the buyer a VAT identifier (BT-48) whenever the invoice carried any tax ID, as "RO" plus that ID. A company with a CUI but no VAT registration was declared VAT-registered. SmartBill marked every buyer with a company name as a taxpayer.
+  - **Now.** BT-48 is the VAT number frozen on the document at issuance, with its country prefix, and is left out when there is none. The legal ID (BT-47) still carries the CUI. SmartBill's taxpayer flag follows the same VAT number.
+  - Reverse-charge evidence without the buyer's VAT number is refused instead of producing an invoice ANAF would reject.
+  - A tax profile created with only a CUI starts as not VAT-registered, through every path that creates one.
+  - VAT numbers entered through the customer API are stored with their country prefix, as staff forms already stored them. Staff proformas record no VAT evidence, and their invoices state the stored number.
+- **A CUI is stored as its digits, and checked with ANAF's algorithm.** (#665)
+  - **The bug.** Staff forms required an "RO" prefix, other paths stored whatever was typed, and every CUI was displayed as "RO …", which claims VAT registration. The check digit used the wrong weights: it rejected real CUIs such as `14399840` and accepted invalid ones, and CUIs under 8 digits were never checked.
+  - **Now.** Every path stores the digits; "RO14399840" is still accepted from staff and stored as `14399840`. VAT numbers keep their prefix. Staff search finds a CUI typed either way, and staff orders record the buyer's VAT number, never the CUI, as the VAT ID.
+  - Trade registry numbers such as `J40/1234/2020` are no longer checked as CUIs.
 - **Platform's log files no longer lose lines when several processes write them.**
   - **The bug.** The gunicorn workers and the qcluster workers each rotated `app.log`, `security.log`, `audit.log` and `error.log` themselves.
     - One process renamed a file under the others, and a rename of a file another process had already moved failed: that record was dropped, with a "Logging error" on stderr.

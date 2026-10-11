@@ -87,7 +87,9 @@ class TaxProfileEvidenceAPITests(HMACTestMixin, TestCase):
         )
         self.assertEqual(response.status_code, 200, response.content)
         self.profile.refresh_from_db()
-        self.assertEqual(self.profile.vat_number, "136695976")
+        # Stored with the prefix of the billing country it was validated against: a bare number
+        # reads as a CUI, and an invoice without VAT evidence would state no VAT identifier.
+        self.assertEqual(self.profile.vat_number, "DE136695976")
 
     def test_billing_address_rejects_invalid_eu_vat_before_writes(self) -> None:
         original_name = self.customer.company_name

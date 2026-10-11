@@ -32,10 +32,12 @@ class ProfileService:
 
         from .profile_models import CustomerTaxProfile
 
-        # A CUI alone does not make a VAT payer; the model default (True) would.
+        # A new profile with only a CUI is not a VAT payer; the model default (True) would say so.
+        # An existing profile keeps its flag unless the caller sets it.
         tax_profile, _ = CustomerTaxProfile.objects.update_or_create(
             customer=customer,
-            defaults={"cui": cui, "is_vat_payer": bool(kwargs.get("vat_number")), **kwargs},
+            defaults={"cui": cui, **kwargs},
+            create_defaults={"cui": cui, "is_vat_payer": bool(kwargs.get("vat_number")), **kwargs},
         )
 
         logger.info(

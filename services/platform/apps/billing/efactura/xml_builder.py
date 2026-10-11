@@ -366,7 +366,10 @@ class BaseUBLBuilder:
             prefix, body = vat_identity(decision.vat_number, decision.country)
             return f"{prefix}{body}"
         tax_id = "".join((customer.tax_id or "").split()).upper()
-        return tax_id if tax_id[:2].isalpha() else ""
+        if not tax_id[:2].isalpha():
+            return ""
+        prefix, body = vat_identity(tax_id, customer.country_code)
+        return f"{prefix}{body}"
 
     def _get_tax_category(self) -> str:
         """Use recorded decisions on new documents, retaining legacy presentation."""

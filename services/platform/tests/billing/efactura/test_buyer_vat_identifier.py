@@ -17,14 +17,16 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 from lxml import etree
 
-from apps.billing.efactura.xml_builder import UBLInvoiceBuilder
+from apps.billing.efactura.xml_builder import UBLCreditNoteBuilder, UBLInvoiceBuilder
 from apps.billing.fiscal_identity import get_customer_fiscal_identity
 from apps.billing.issuers.smartbill.mapper import SmartBillAccountConfig, build_invoice_payload
 from apps.billing.services import _build_customer_vat_info
 from apps.billing.tax_evidence import TaxEvidenceError, capture_vat_evidence, read_vat_evidence
 from apps.common.tax_service import TaxService
 from apps.customers.models import Customer, CustomerTaxProfile
+from apps.users.models import CustomerMembership, User
 from tests.factories.billing_factories import CurrencyFactory, InvoiceFactory, InvoiceLineFactory
+from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
 
 NS = {
     "cac": "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2",
@@ -177,3 +179,93 @@ class ReverseChargeEvidenceTests(TestCase):
         invoice = InvoiceFactory(vat_evidence={**evidence, "vat_number": ""})
         with self.assertRaises(TaxEvidenceError):
             read_vat_evidence(invoice)
+
+
+@override_settings(
+    COMPANY_NAME="Supplier SRL",
+    EFACTURA_COMPANY_CUI="12345678",
+    COMPANY_REGISTRATION_NUMBER="J40/1234/2020",
+    COMPANY_STREET="Supplier Street 1",
+    COMPANY_CITY="Bucharest",
+    COMPANY_POSTAL_CODE="010101",
+    COMPANY_COUNTRY_CODE="RO",
+    COMPANY_BANK_ACCOUNT="RO49AAAA1B31007593840000",
+    COMPANY_BANK_NAME="Supplier Bank",
+)
+class CreditNoteBuyerVATIdentifierTests(TestCase):
+    def credit_note_party(self, invoice) -> etree._Element:
+        root = etree.fromstring(UBLCreditNoteBuilder(invoice, invoice).build().encode())
+        return root.find(BUYER, NS)
+
+    def test_a_credit_note_states_the_vat_identifier_only_for_a_vat_registered_buyer(self) -> None:
+        self.assertIsNone(self.credit_note_party(issued_invoice(company())).find("./cac:PartyTaxScheme", NS))
+        party = self.credit_note_party(issued_invoice(company(vat_number=f"RO{CUI}")))
+        self.assertEqual(party.findtext("./cac:PartyTaxScheme/cbc:CompanyID", namespaces=NS), f"RO{CUI}")
+
+    def test_without_evidence_the_stated_number_is_normalised_like_the_evidence(self) -> None:
+        party = buyer_party(issued_invoice(company(), with_evidence=False, bill_to_tax_id="GR 123-456.789"))
+        self.assertEqual(party.findtext("./cac:PartyTaxScheme/cbc:CompanyID", namespaces=NS), "EL123456789")
+
+
+@override_settings(
+    PLATFORM_API_SECRET=HMAC_TEST_SECRET,
+    MIDDLEWARE=HMAC_TEST_MIDDLEWARE,
+    COMPANY_NAME="Supplier SRL",
+    EFACTURA_COMPANY_CUI="12345678",
+    COMPANY_REGISTRATION_NUMBER="J40/1234/2020",
+    COMPANY_STREET="Supplier Street 1",
+    COMPANY_CITY="Bucharest",
+    COMPANY_POSTAL_CODE="010101",
+    COMPANY_COUNTRY_CODE="RO",
+    COMPANY_BANK_ACCOUNT="RO49AAAA1B31007593840000",
+    COMPANY_BANK_NAME="Supplier Bank",
+)
+class VATNumberStorageTests(HMACTestMixin, TestCase):
+    """A VAT number is stored with its prefix by every writer, so a document without evidence keeps it."""
+
+    def setUp(self) -> None:
+        self.owner = User.objects.create_user(email="vat-owner@example.test")
+        self.customer = Customer.objects.create(
+            name="Storage SRL", company_name="Storage SRL", customer_type="company", status="active"
+        )
+        CustomerMembership.objects.create(customer=self.customer, user=self.owner, role="owner", is_active=True)
+
+    def post(self, path: str, **data: object) -> None:
+        response = self.portal_post(path, {"customer_id": self.customer.pk, "user_id": self.owner.pk, **data})
+        self.assertEqual(response.status_code, 200, response.content)
+
+    def test_the_tax_profile_api_stores_the_prefix(self) -> None:
+        self.post("/api/customers/tax-profile/", vat_number=CUI, is_vat_payer=True)
+        self.assertEqual(CustomerTaxProfile.objects.get(customer=self.customer).vat_number, f"RO{CUI}")
+
+    def test_the_billing_address_api_stores_the_prefix_of_the_billing_country(self) -> None:
+        self.post(
+            "/api/customers/billing-address/",
+            country="DE",
+            vat_number="136695976",
+            address_line1="Teststrasse 1",
+            city="Berlin",
+        )
+        self.assertEqual(CustomerTaxProfile.objects.get(customer=self.customer).vat_number, "DE136695976")
+
+    def test_a_vat_payer_keeps_the_vat_identifier_on_a_document_without_evidence(self) -> None:
+        # Staff proformas record no VAT evidence; their invoices state the stored tax ID.
+        self.post("/api/customers/tax-profile/", vat_number=CUI, is_vat_payer=True)
+        customer = Customer.objects.get(pk=self.customer.pk)  # As the proforma view loads it
+        party = buyer_party(issued_invoice(customer, with_evidence=False))
+        self.assertEqual(party.findtext("./cac:PartyTaxScheme/cbc:CompanyID", namespaces=NS), f"RO{CUI}")
+
+    def test_a_profile_the_billing_address_api_creates_with_only_a_cui_is_not_a_vat_payer(self) -> None:
+        self.post("/api/customers/billing-address/", fiscal_code=CUI, address_line1="Str. 1", city="Cluj-Napoca")
+        self.assertIs(CustomerTaxProfile.objects.get(customer=self.customer).is_vat_payer, False)
+
+    def test_a_profile_the_tax_profile_api_creates_with_only_a_cui_is_not_a_vat_payer(self) -> None:
+        self.post("/api/customers/tax-profile/", cui=CUI)
+        self.assertIs(CustomerTaxProfile.objects.get(customer=self.customer).is_vat_payer, False)
+
+    def test_the_profile_service_keeps_an_existing_vat_payer_flag(self) -> None:
+        from apps.customers.profile_service import ProfileService  # noqa: PLC0415
+
+        CustomerTaxProfile.objects.create(customer=self.customer, vat_number=f"RO{CUI}", is_vat_payer=True)
+        profile = ProfileService.create_tax_profile(self.customer, self.owner, cui=CUI)
+        self.assertIs(profile.is_vat_payer, True)
