@@ -17,6 +17,7 @@ from apps.billing.efactura.xml_builder import (
     UBLInvoiceBuilder,
     XMLBuilderError,
 )
+from apps.billing.invoice_models import Invoice
 from apps.settings.models import SystemSetting
 from apps.settings.services import SettingsService
 from tests.factories import CurrencyFactory, CustomerFactory, InvoiceFactory, InvoiceLineFactory
@@ -1255,6 +1256,25 @@ class UBLInvoiceBuilderTestCase(TestCase):
         )
         self.assertIsNotNone(legal_identifier)
         self.assertEqual(legal_identifier.text, "1850101123451")
+
+    def test_romanian_b2c_cnp_survives_the_database_round_trip(self):
+        """The CNP is stored encrypted (ADR-0040); the XML is built from the decrypted value."""
+        self.invoice.bill_to_country = "RO"
+        self.invoice.bill_to_tax_id = ""
+        self.invoice.bill_to_cnp = "1850101123451"
+        self.invoice.save()
+
+        doc = etree.fromstring(UBLInvoiceBuilder(Invoice.objects.get(pk=self.invoice.pk)).build().encode())
+        identifier = doc.find(
+            f".//{{{NAMESPACES['cac']}}}AccountingCustomerParty/"
+            f"{{{NAMESPACES['cac']}}}Party/"
+            f"{{{NAMESPACES['cac']}}}PartyIdentification/"
+            f"{{{NAMESPACES['cbc']}}}ID"
+        )
+
+        self.assertIsNotNone(identifier)
+        self.assertEqual(identifier.text, "1850101123451")
+        self.assertEqual(identifier.get("schemeID"), "RO:CNP")
 
     def test_romanian_b2c_invalid_cnp_uses_statutory_identifier_for_both_buyer_fields(self):
         self.invoice.bill_to_country = "RO"

@@ -1453,49 +1453,78 @@ class GDPRDeletionService:
     def _anonymize_user_data(cls, user: User) -> Result[str, str]:
         """Anonymize user data while preserving business relationships"""
 
+        original_email = user.email
         try:
-            # Store original email for logging
-            original_email = user.email
-
-            # Anonymize core user fields
-            user.email = cls.ANONYMIZATION_MAP["email"]()
-            user.first_name = cls.ANONYMIZATION_MAP["first_name"]()
-            user.last_name = cls.ANONYMIZATION_MAP["last_name"]()
-            user.phone = cls.ANONYMIZATION_MAP["phone"]()
-            user.is_active = False
-            user.accepts_marketing = False
-            user.gdpr_consent_date = None
-            user.last_privacy_policy_accepted = None
-            user.terms_accepted_at = None
-            user.terms_version = ""
-
-            # Clear sensitive fields
-            # The unusable password revokes sessions independently of the MFA credential version.
-            user.set_unusable_password()
-            if hasattr(user, "two_factor_enabled"):
-                user.two_factor_enabled = False
-                user.two_factor_secret = ""
-                user.backup_tokens = []
-
-            user.save()
-
-            # Sibling of #226: the send audience reads Customer.marketing_consent, so an
-            # anonymized user's suppression must reach their customers too — an erased user
-            # whose address is the customer contact must not keep receiving marketing.
-            GDPRConsentService._propagate_marketing_consent(user, consent=False)
-
-            # Anonymize audit logs (IP addresses only)
-            with audit_mutation_allowed("gdpr_anonymization"):
-                AuditEvent.objects.filter(user=user).update(
-                    ip_address=cls.ANONYMIZATION_MAP["ip_address"](), user_agent="Anonymized"
-                )
-
+            # One savepoint for the whole erasure: an exception rolls every step back before it
+            # becomes an Err, so the caller cannot commit a half-anonymised user.
+            with transaction.atomic():
+                cls._anonymize_user_records(user)
             logger.info(f"✅ [GDPR Anonymization] User {original_email} anonymized successfully")
             return Ok("User data anonymized successfully")
 
         except Exception as e:
-            logger.error(f"🔥 [GDPR Anonymization] Failed to anonymize user {user.email}: {e}")
+            logger.error(f"🔥 [GDPR Anonymization] Failed to anonymize user {original_email}: {e}")
             return Err(f"Anonymization failed: {e!s}")
+
+    @classmethod
+    def _anonymize_user_records(cls, user: User) -> None:
+        """The anonymisation writes; `_anonymize_user_data` runs them in one savepoint."""
+        from apps.customers.profile_models import CustomerTaxProfile  # noqa: PLC0415  # Deferred: import cycle
+        from apps.users.models import CustomerMembership  # noqa: PLC0415  # Deferred: import cycle
+
+        # Anonymize core user fields
+        user.email = cls.ANONYMIZATION_MAP["email"]()
+        user.first_name = cls.ANONYMIZATION_MAP["first_name"]()
+        user.last_name = cls.ANONYMIZATION_MAP["last_name"]()
+        user.phone = cls.ANONYMIZATION_MAP["phone"]()
+        user.is_active = False
+        user.accepts_marketing = False
+        user.gdpr_consent_date = None
+        user.last_privacy_policy_accepted = None
+        user.terms_accepted_at = None
+        user.terms_version = ""
+
+        # Clear sensitive fields
+        # The unusable password revokes sessions independently of the MFA credential version.
+        user.set_unusable_password()
+        if hasattr(user, "two_factor_enabled"):
+            user.two_factor_enabled = False
+            user.two_factor_secret = ""
+            user.backup_tokens = []
+
+        user.save()
+
+        # Sibling of #226: the send audience reads Customer.marketing_consent, so an
+        # anonymized user's suppression must reach their customers too — an erased user
+        # whose address is the customer contact must not keep receiving marketing.
+        GDPRConsentService._propagate_marketing_consent(user, consent=False)
+
+        # Anonymize audit logs (IP addresses only)
+        with audit_mutation_allowed("gdpr_anonymization"):
+            AuditEvent.objects.filter(user=user).update(
+                ip_address=cls.ANONYMIZATION_MAP["ip_address"](), user_agent="Anonymized"
+            )
+
+        # An individual customer's CNP is the person's national identification number. The tax
+        # profile's copy is cleared; issued invoices keep their own snapshot for the legal
+        # retention period. A queryset update needs no decryption, so an unreadable CNP cannot
+        # block the erasure, and all_objects includes soft-deleted profiles.
+        owned_individuals = CustomerMembership.objects.filter(
+            user=user, role="owner", customer__customer_type="individual"
+        ).values("customer_id")
+        profiles = list(
+            CustomerTaxProfile.all_objects.filter(customer_id__in=owned_individuals, cnp__isnull=False).values_list(
+                "pk", "customer_id"
+            )
+        )
+        CustomerTaxProfile.all_objects.filter(pk__in=[pk for pk, _customer_id in profiles]).update(cnp=None)
+        for profile_id, customer_id in profiles:
+            AuditService.log_simple_event(
+                "data_anonymization_completed",
+                description="CNP cleared from the customer tax profile (GDPR erasure)",
+                metadata={"field": "cnp", "tax_profile_id": profile_id, "customer_id": str(customer_id)},
+                actor_type="system",
+            )
 
     @classmethod
     def _delete_user_data(cls, user: User) -> Result[str, str]:

@@ -738,15 +738,9 @@ def _get_or_create_credit_note(original: Invoice, correction: FiscalCorrection) 
         exchange_rate_source=original.exchange_rate_source,
         exchange_rate_source_reference=original.exchange_rate_source_reference,
         # The reversal inherits the original's fiscal identity: it is a correction
-        # to that document, not a new commercial event.
-        bill_to_name=original.bill_to_name,
-        bill_to_tax_id=original.bill_to_tax_id,
-        bill_to_email=original.bill_to_email,
-        bill_to_address1=original.bill_to_address1,
-        bill_to_city=original.bill_to_city,
-        bill_to_region=original.bill_to_region,
-        bill_to_postal=original.bill_to_postal,
-        bill_to_country=original.bill_to_country,
+        # to that document, not a new commercial event. Every snapshot field, so the
+        # CNP and trade registry number are carried too.
+        **{field: getattr(original, field) for field in sorted(Invoice._BILLING_SNAPSHOT_FIELDS)},
         # The correction's own decision record (version 3): the original's decision restated with
         # this note's signed amounts. A copy of the original's would claim the note charged VAT.
         vat_evidence=capture_credit_note_evidence(

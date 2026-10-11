@@ -6,6 +6,7 @@ Romanian compliant invoice model with address snapshots and immutable ledger.
 from __future__ import annotations
 
 import logging
+import uuid
 from collections.abc import Iterable
 from datetime import date, datetime
 from decimal import Decimal
@@ -30,6 +31,7 @@ from apps.billing.validators import (
     validate_financial_text_field,
 )
 from apps.common.cnp_validator import validate_cnp
+from apps.common.fields import EncryptedTextField
 from apps.common.financial_arithmetic import HasLineTotals, calculate_document_totals, calculate_line_totals
 from apps.common.validators import log_security_event
 
@@ -255,8 +257,14 @@ class Invoice(models.Model):
     # Billing address snapshot (immutable once issued)
     bill_to_name = models.CharField(max_length=255, default="")
     bill_to_tax_id = models.CharField(max_length=50, blank=True)
-    bill_to_cnp = models.CharField(
+    # Binds the encrypted CNP to this row (ADR-0040). Set before INSERT, and immutable: a database
+    # trigger refuses any change.
+    encryption_context_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    bill_to_cnp = EncryptedTextField(
+        aad_context_field="encryption_context_id",
+        require_v2=True,
         max_length=13,
+        null=True,
         blank=True,
         validators=[validate_cnp],
         help_text=_("Romanian personal fiscal identifier snapshotted when the invoice is created"),
@@ -370,7 +378,7 @@ class Invoice(models.Model):
                 name="invoice_status_valid_values",
             ),
             models.CheckConstraint(
-                condition=models.Q(bill_to_tax_id="") | models.Q(bill_to_cnp=""),
+                condition=models.Q(bill_to_tax_id="") | models.Q(bill_to_cnp__isnull=True),
                 name="invoice_one_fiscal_id",
             ),
         ]
