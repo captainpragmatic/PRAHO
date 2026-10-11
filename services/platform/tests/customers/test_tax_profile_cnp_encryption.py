@@ -27,6 +27,7 @@ from apps.audit.services import GDPRDeletionService, gdpr_deletion_service
 from apps.billing.invoice_models import Invoice
 from apps.billing.proforma_models import ProformaInvoice, ProformaLine
 from apps.billing.services import ProformaConversionService
+from apps.billing.usage_invoice_service import UsageInvoiceService
 from apps.common.encryption import EncryptionError
 from apps.customers.models import Customer
 from apps.customers.profile_models import CustomerTaxProfile
@@ -210,6 +211,20 @@ class GDPRErasureCNPTests(TestCase):
         self.anonymize()
 
         self.assertEqual(ProformaInvoice.objects.get(pk=proforma.pk).bill_to_cnp, "")
+
+    def test_an_invoice_issued_from_a_copy_loaded_before_erasure_keeps_no_cnp(self) -> None:
+        """Issuance reloads its draft under lock; a copy read before the erasure cannot write it back."""
+        draft = self.invoice(self.customer, issue=False)
+        stale = Invoice.objects.get(pk=draft.pk)
+        self.anonymize()
+
+        with patch.object(Invoice.objects, "get", return_value=stale):
+            result = UsageInvoiceService().issue_invoice(str(draft.pk))
+
+        self.assertTrue(result.is_ok(), result)
+        issued = Invoice.objects.filter(pk=draft.pk).values_list("locked_at", flat=True).get()
+        self.assertIsNotNone(issued)
+        self.assertEqual(Invoice.objects.filter(pk=draft.pk).first().bill_to_cnp, "")
 
     def test_a_proforma_converted_after_erasure_bills_without_a_cnp(self) -> None:
         proforma = self.proforma(self.customer, subtotal_cents=10000, tax_cents=2100, total_cents=12100)
