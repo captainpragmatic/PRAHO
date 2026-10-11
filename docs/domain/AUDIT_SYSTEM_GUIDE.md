@@ -507,7 +507,7 @@ The audit module stands alone — no SIEM is required. Integration surface (ADR-
 - **Structured log stream**: `SIEMJSONFormatter` (`apps/audit/logging_formatters.py`) is wired
   into prod/staging `LOGGING`; point any log shipper (Vector, Filebeat, …) at it to feed
   Splunk/QRadar/Elastic.
-- **On-demand export**: `manage.py audit_compliance export-events --format cef|leef|json|syslog|ocsf`
+- **On-demand export**: `manage.py audit_compliance export-siem --output <path> --format cef|leef|json|syslog|ocsf`
   renders `AuditEvent`s to a file via `apps/audit/siem.py`'s format renderers.
 - **Deliberately not implemented**: real-time network push. There is no in-app transport;
   delivery guarantees belong to the log-shipping layer.

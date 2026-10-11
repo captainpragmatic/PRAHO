@@ -409,48 +409,21 @@ TEMPLATE_LOADERS = [
 # SIEM INTEGRATION CONFIGURATION 🔐
 # ===============================================================================
 
-# SIEM (Security Information and Event Management) configuration
-# Supports: Splunk, IBM QRadar, Elastic SIEM, Graylog, Microsoft Sentinel
+# SIEM (Security Information and Event Management) formatting. ADR-0043 §6: the app writes
+# SIEM-formatted logs and exports on demand (`audit_compliance export-siem --output <path>`); it
+# pushes nothing to a SIEM itself, so there is no transport, buffering or filter configuration.
 SIEM_CONFIG = {
-    # Enable/disable SIEM integration
-    "ENABLED": os.environ.get("SIEM_ENABLED", "false").lower() == "true",
     # Log format: cef, leef, json, syslog, ocsf
     # CEF = ArcSight/Splunk, LEEF = IBM QRadar, JSON = Elastic/Graylog
     "FORMAT": os.environ.get("SIEM_FORMAT", "json"),
-    # Transport: tcp, udp, https, file
-    "PROTOCOL": os.environ.get("SIEM_PROTOCOL", "tcp"),
-    "HOST": os.environ.get("SIEM_HOST", "localhost"),
-    "PORT": int(os.environ.get("SIEM_PORT", "514")),
-    "USE_TLS": os.environ.get("SIEM_USE_TLS", "true").lower() == "true",
-    # Authentication for HTTPS endpoints (e.g., Splunk HEC)
-    "API_KEY": os.environ.get("SIEM_API_KEY", ""),
-    "CERTIFICATE_PATH": os.environ.get("SIEM_CERTIFICATE_PATH", ""),
-    # Buffering configuration
-    "BUFFER_SIZE": int(os.environ.get("SIEM_BUFFER_SIZE", "1000")),
-    "BATCH_SIZE": int(os.environ.get("SIEM_BATCH_SIZE", "100")),
-    "FLUSH_INTERVAL": int(os.environ.get("SIEM_FLUSH_INTERVAL", "5")),
-    # Retry configuration
-    "MAX_RETRIES": int(os.environ.get("SIEM_MAX_RETRIES", "3")),
-    "RETRY_DELAY": int(os.environ.get("SIEM_RETRY_DELAY", "1")),
-    # Filtering - minimum severity to forward
-    # Options: low, medium, high, critical
-    "MIN_SEVERITY": os.environ.get("SIEM_MIN_SEVERITY", "low"),
-    # Category filtering (comma-separated)
-    "INCLUDE_CATEGORIES": [c.strip() for c in os.environ.get("SIEM_INCLUDE_CATEGORIES", "").split(",") if c.strip()],
-    "EXCLUDE_CATEGORIES": [c.strip() for c in os.environ.get("SIEM_EXCLUDE_CATEGORIES", "").split(",") if c.strip()],
-    # Tamper-proof hash chain
-    "ENABLE_HASH_CHAIN": os.environ.get("SIEM_ENABLE_HASH_CHAIN", "true").lower() == "true",
-    "HASH_ALGORITHM": os.environ.get("SIEM_HASH_ALGORITHM", "sha256"),
     # Vendor information for CEF/LEEF formats
     "VENDOR": os.environ.get("SIEM_VENDOR", "PRAHO"),
     "PRODUCT": os.environ.get("SIEM_PRODUCT", "PlatformAudit"),
     "VERSION": os.environ.get("SIEM_VERSION", "1.0"),
 }
 
-# Log directory for file-based SIEM integration
-SIEM_LOG_DIR = os.environ.get("SIEM_LOG_DIR", "/var/log/praho/siem")
-
-if SIEM_CONFIG.get("ENABLE_HASH_CHAIN") and not os.environ.get("SIEM_HASH_CHAIN_SECRET"):
+# The audit hash chain is always on; its key falls back to one derived from SECRET_KEY.
+if not os.environ.get("SIEM_HASH_CHAIN_SECRET"):
     import warnings
 
     warnings.warn(

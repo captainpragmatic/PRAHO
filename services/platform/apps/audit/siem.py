@@ -74,38 +74,13 @@ class SIEMSeverity(int, Enum):
 
 @dataclass
 class SIEMConfig:
-    """SIEM connection and logging configuration"""
+    """How SIEM records are rendered: the format and the vendor fields CEF, LEEF, syslog and OCSF carry.
 
-    enabled: bool = False
+    The app formats and exports; it does not push to a SIEM (ADR-0043 §6), so there is no
+    transport, buffering, retry or filter configuration.
+    """
+
     format: SIEMFormat = SIEMFormat.JSON
-
-    # Transport configuration
-    protocol: str = "tcp"  # tcp, udp, https, file
-    host: str = "localhost"
-    port: int = 514
-    use_tls: bool = True
-
-    # Authentication
-    api_key: str = ""
-    certificate_path: str = ""
-
-    # Buffering and batching
-    buffer_size: int = 1000
-    batch_size: int = 100
-    flush_interval: int = 5  # seconds
-
-    # Retry configuration
-    max_retries: int = 3
-    retry_delay: int = 1  # seconds
-
-    # Filtering
-    min_severity: str = "low"
-    include_categories: list[str] = field(default_factory=list)
-    exclude_categories: list[str] = field(default_factory=list)
-
-    # Hash chain for tamper-proofing
-    enable_hash_chain: bool = True
-    hash_algorithm: str = "sha256"
 
     # Vendor info for CEF format
     vendor: str = "PRAHO"
@@ -118,24 +93,7 @@ def get_siem_config() -> SIEMConfig:
     siem_settings = getattr(settings, "SIEM_CONFIG", {})
 
     return SIEMConfig(
-        enabled=siem_settings.get("ENABLED", False),
         format=SIEMFormat(siem_settings.get("FORMAT", "json")),
-        protocol=siem_settings.get("PROTOCOL", "tcp"),
-        host=siem_settings.get("HOST", "localhost"),
-        port=siem_settings.get("PORT", 514),
-        use_tls=siem_settings.get("USE_TLS", True),
-        api_key=siem_settings.get("API_KEY", ""),
-        certificate_path=siem_settings.get("CERTIFICATE_PATH", ""),
-        buffer_size=siem_settings.get("BUFFER_SIZE", 1000),
-        batch_size=siem_settings.get("BATCH_SIZE", 100),
-        flush_interval=siem_settings.get("FLUSH_INTERVAL", 5),
-        max_retries=siem_settings.get("MAX_RETRIES", 3),
-        retry_delay=siem_settings.get("RETRY_DELAY", 1),
-        min_severity=siem_settings.get("MIN_SEVERITY", "low"),
-        include_categories=siem_settings.get("INCLUDE_CATEGORIES", []),
-        exclude_categories=siem_settings.get("EXCLUDE_CATEGORIES", []),
-        enable_hash_chain=siem_settings.get("ENABLE_HASH_CHAIN", True),
-        hash_algorithm=siem_settings.get("HASH_ALGORITHM", "sha256"),
         vendor=siem_settings.get("VENDOR", "PRAHO"),
         product=siem_settings.get("PRODUCT", "PlatformAudit"),
         version=siem_settings.get("VERSION", "1.0"),
@@ -618,7 +576,7 @@ class SIEMService:
 
     The audit module stands alone: SIEM integration is the structured JSON log
     stream (logging_formatters.SIEMJSONFormatter, wired in prod/staging LOGGING)
-    plus the manual `audit_compliance export-events` file export this class
+    plus the manual `audit_compliance export-siem` file export this class
     supports. Real-time network push is deliberately not implemented.
 
     Features: format renderers (CEF, LEEF, JSON, Syslog, OCSF), compliance

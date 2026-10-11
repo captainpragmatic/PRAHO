@@ -66,20 +66,7 @@ def _make_log_entry(**overrides: object) -> SIEMLogEntry:
 
 
 def _make_siem_config(**overrides: object) -> SIEMConfig:
-    defaults = {
-        "enabled": True,
-        "format": SIEMFormat.JSON,
-        "protocol": "tcp",
-        "host": "localhost",
-        "port": 514,
-        "use_tls": False,
-        "buffer_size": 10,
-        "batch_size": 5,
-        "flush_interval": 1,
-        "max_retries": 1,
-        "retry_delay": 0,
-        "enable_hash_chain": True,
-    }
+    defaults: dict[str, object] = {"format": SIEMFormat.JSON}
     defaults.update(overrides)
     return SIEMConfig(**defaults)
 
@@ -134,64 +121,17 @@ class TestSIEMFormat(TestCase):
 class TestSIEMConfig(TestCase):
     def test_defaults(self):
         cfg = SIEMConfig()
-        assert cfg.enabled is False
         assert cfg.format == SIEMFormat.JSON
-        assert cfg.protocol == "tcp"
-        assert cfg.buffer_size == 1000
-        assert cfg.enable_hash_chain is True
+        assert (cfg.vendor, cfg.product, cfg.version) == ("PRAHO", "PlatformAudit", "1.0")
 
-    @override_settings(
-        SIEM_CONFIG={
-            "ENABLED": True,
-            "FORMAT": "cef",
-            "PROTOCOL": "udp",
-            "HOST": "siem.example.com",
-            "PORT": 6514,
-            "USE_TLS": False,
-            "API_KEY": "test-key",
-            "CERTIFICATE_PATH": "/etc/cert.pem",
-            "BUFFER_SIZE": 500,
-            "BATCH_SIZE": 50,
-            "FLUSH_INTERVAL": 10,
-            "MAX_RETRIES": 5,
-            "RETRY_DELAY": 2,
-            "MIN_SEVERITY": "high",
-            "INCLUDE_CATEGORIES": ["authentication"],
-            "EXCLUDE_CATEGORIES": ["system_admin"],
-            "ENABLE_HASH_CHAIN": False,
-            "HASH_ALGORITHM": "sha512",
-            "VENDOR": "TestVendor",
-            "PRODUCT": "TestProduct",
-            "VERSION": "2.0",
-        }
-    )
+    @override_settings(SIEM_CONFIG={"FORMAT": "cef", "VENDOR": "TestVendor", "PRODUCT": "TestProduct", "VERSION": "2.0"})
     def test_get_siem_config_from_settings(self):
         cfg = get_siem_config()
-        assert cfg.enabled is True
         assert cfg.format == SIEMFormat.CEF
-        assert cfg.protocol == "udp"
-        assert cfg.host == "siem.example.com"
-        assert cfg.port == 6514
-        assert cfg.use_tls is False
-        assert cfg.api_key == "test-key"
-        assert cfg.certificate_path == "/etc/cert.pem"
-        assert cfg.buffer_size == 500
-        assert cfg.batch_size == 50
-        assert cfg.flush_interval == 10
-        assert cfg.max_retries == 5
-        assert cfg.retry_delay == 2
-        assert cfg.min_severity == "high"
-        assert cfg.include_categories == ["authentication"]
-        assert cfg.exclude_categories == ["system_admin"]
-        assert cfg.enable_hash_chain is False
-        assert cfg.hash_algorithm == "sha512"
-        assert cfg.vendor == "TestVendor"
-        assert cfg.product == "TestProduct"
-        assert cfg.version == "2.0"
+        assert (cfg.vendor, cfg.product, cfg.version) == ("TestVendor", "TestProduct", "2.0")
 
     def test_get_siem_config_defaults(self):
         cfg = get_siem_config()
-        assert cfg.enabled is False
         assert cfg.format == SIEMFormat.JSON
 
 
