@@ -278,6 +278,9 @@ class RegistrationConfirmSerializer(serializers.Serializer):
     password_confirm = serializers.CharField(min_length=12, write_only=True, trim_whitespace=False)
     data_processing_consent = serializers.BooleanField()
     marketing_consent = serializers.BooleanField(default=False)
+    # The Terms of Service accepted, and the version the confirmer was shown (from the preview).
+    terms_accepted = serializers.BooleanField(default=False)
+    terms_version = serializers.CharField(max_length=20, required=False, allow_blank=True, default="")
 
     def validate_data_processing_consent(self, value: bool) -> bool:
         if not value:

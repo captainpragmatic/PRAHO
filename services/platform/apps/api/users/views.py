@@ -876,7 +876,8 @@ def registration_confirm_api(request: HttpRequest) -> Response:
 
     201 on success. 400 `invalid_link` for a link that is wrong, used or expired; 400
     `validation_failed` for the form or a rejected password; 409 `details_unavailable` when the
-    email or company was taken meanwhile; 503 when the account could not be created now.
+    email or company was taken meanwhile; 409 `terms_changed` when the accepted Terms of Service
+    version is no longer current; 503 when the account could not be created now.
     """
     from apps.users import registration_confirmation  # noqa: PLC0415  # Deferred: users services import cycle
 
@@ -894,6 +895,8 @@ def registration_confirm_api(request: HttpRequest) -> Response:
             data["password"],
             accepts_marketing=data["marketing_consent"],
             data_processing_consent=data["data_processing_consent"],
+            terms_accepted=data["terms_accepted"],
+            terms_version=data["terms_version"],
             request_ip=forwarded_client_ip(request),
             user_agent=request.META.get("HTTP_USER_AGENT", ""),
         )
@@ -929,6 +932,20 @@ def registration_confirm_api(request: HttpRequest) -> Response:
             {
                 "code": "details_unavailable",
                 "error": _("These details are no longer available. Please register again."),
+            },
+        ),
+        "terms_changed": (
+            status.HTTP_409_CONFLICT,
+            {
+                "code": "terms_changed",
+                "error": _("The Terms of Service have changed. Please read them again before confirming."),
+            },
+        ),
+        "terms_required": (
+            status.HTTP_400_BAD_REQUEST,
+            {
+                "code": "validation_failed",
+                "errors": {"terms_accepted": [_("You must accept the Terms of Service.")]},
             },
         ),
         "unavailable": (

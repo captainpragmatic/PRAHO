@@ -1239,6 +1239,8 @@ class GDPRExportService:
                 "last_privacy_policy_accepted": user.last_privacy_policy_accepted.isoformat()
                 if user.last_privacy_policy_accepted
                 else None,
+                "terms_accepted_at": user.terms_accepted_at.isoformat() if user.terms_accepted_at else None,
+                "terms_version": user.terms_version,
                 "account_status": "active" if user.is_active else "inactive",
             }
 
@@ -1464,6 +1466,8 @@ class GDPRDeletionService:
             user.accepts_marketing = False
             user.gdpr_consent_date = None
             user.last_privacy_policy_accepted = None
+            user.terms_accepted_at = None
+            user.terms_version = ""
 
             # Clear sensitive fields
             # The unusable password revokes sessions independently of the MFA credential version.

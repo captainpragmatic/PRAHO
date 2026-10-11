@@ -11,6 +11,7 @@ from django_q.models import Schedule
 
 from apps.audit.models import AuditEvent
 from apps.common import counters
+from apps.common.legal import TERMS_OF_SERVICE_VERSION
 from apps.common.types import Err
 from apps.customers.models import Customer
 from apps.settings.models import SystemSetting
@@ -408,6 +409,8 @@ class RegistrationConfirmAPITests(HMACTestMixin, TestCase):
                 # The company identifiers the confirmer checks; never the CNP.
                 "cui": "",
                 "registration_number": "",
+                # The terms version the confirmer accepts.
+                "terms_version": TERMS_OF_SERVICE_VERSION,
             },
         )
         self.assertIsNone(PendingRegistration.objects.get(pk=self.row.pk).consumed_at)

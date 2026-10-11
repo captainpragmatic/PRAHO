@@ -435,6 +435,9 @@ class SecureUserRegistrationService:
                     phone=user_data.get("phone", ""),  # Romanian format validated
                     accepts_marketing=user_data.get("accepts_marketing", False),
                     gdpr_consent_date=consent_date,
+                    # Set at creation: a later save would audit as a profile update.
+                    terms_accepted_at=user_data.get("terms_accepted_at"),
+                    terms_version=user_data.get("terms_version", ""),
                     # Security: No admin fields can be injected due to validation
                 )
 
