@@ -1,51 +1,19 @@
 """Register on the public Portal, follow the emailed link, choose a password and sign in."""
 
 import re
-from email import policy
-from email.parser import BytesParser
-from pathlib import Path
 from uuid import uuid4
 
 from playwright.sync_api import Page, expect
 
-from tests.e2e.helpers import BASE_URL, ensure_fresh_session, login_user
-
-MAIL_DIRECTORY = Path(__file__).resolve().parents[3] / "logs" / "e2e-mail"
-DELIVER = "apps.users.tasks.deliver_registration"
-
-
-def delivered_to(email: str, before: set[Path]) -> list:
-    delivered = set(MAIL_DIRECTORY.glob("*.log")) - before
-    messages = [BytesParser(policy=policy.default).parsebytes(path.read_bytes()) for path in delivered]
-    return [message for message in messages if message["To"] == email]
-
-
-def submit_registration(page: Page, email: str, company: str) -> None:
-    ensure_fresh_session(page)
-    page.goto(f"{BASE_URL}/register/")
-    expect(page.locator('input[type="password"]')).to_have_count(0)
-    page.locator('input[name="email"]').fill(email)
-    page.locator('input[name="first_name"]').fill("Ana")
-    page.locator('input[name="last_name"]').fill("Pop")
-    page.locator('select[name="customer_type"]').select_option("srl")
-    page.locator('input[name="company_name"]').fill(company)
-    page.locator('input[name="cui"]').fill("14399840")  # A Romanian company gives a VAT number or a CUI
-    page.locator('input[name="address_line1"]').fill("Str. Victoriei 10")
-    page.locator('input[name="city"]').fill("București")
-    page.locator('input[name="county"]').fill("București")
-    page.locator('input[name="postal_code"]').fill("010061")
-    page.locator('input[name="data_processing_consent"]').check()
-    page.locator('input[name="terms_accepted"]').check()
-    page.locator('form button[type="submit"]').click()
-    expect(page).to_have_url(f"{BASE_URL}/login/")
-    expect(page.get_by_text("Check your email for a message with the next step.")).to_be_visible()
+from tests.e2e.helpers import BASE_URL, login_user
+from tests.e2e.helpers.registration import DELIVER, delivered_to, mailbox, submit_registration
 
 
 def test_registration_is_finished_from_the_emailed_link(page: Page, run_queued_tasks) -> None:
     key = uuid4().hex[:10]
     email = f"signup-{key}@e2e.test"
     company = f"E2E Signup {key} SRL"
-    before = set(MAIL_DIRECTORY.glob("*.log"))
+    before = mailbox()
     submit_registration(page, email, company)
     assert not delivered_to(email, before), "The request queues the mail; only a worker sends it"
     assert {"sent": True, "kind": "confirm"} in run_queued_tasks(DELIVER)
@@ -81,7 +49,7 @@ def test_an_address_with_an_account_gets_the_same_page_and_a_different_mail(
     page: Page, run_queued_tasks, e2e_scenario
 ) -> None:
     account = e2e_scenario("account")
-    before = set(MAIL_DIRECTORY.glob("*.log"))
+    before = mailbox()
     submit_registration(page, account["email"], f"E2E Existing {uuid4().hex[:10]} SRL")
     assert {"sent": True, "kind": "existing_account"} in run_queued_tasks(DELIVER)
     [message] = delivered_to(account["email"], before)

@@ -19,7 +19,6 @@ import json
 import re
 import secrets
 import string
-from uuid import uuid4
 
 import pytest
 from playwright.sync_api import Error as PlaywrightError
@@ -36,6 +35,18 @@ from tests.e2e.helpers import (
     run_responsive_breakpoints_test,
 )
 from tests.e2e.helpers.orders import add_product, bank_checkout
+from tests.e2e.helpers.registration import (
+    CUI,
+    confirmation_link,
+    delivered_to,
+    fill_confirmation,
+    fill_registration,
+    mailbox,
+    new_identity,
+    open_confirmation,
+    register_customer,
+    submit_registration,
+)
 
 # ===============================================================================
 # TEST DATA GENERATORS
@@ -46,26 +57,6 @@ def generate_test_email() -> str:
     """Generate a unique test email address"""
     random_suffix = "".join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8))
     return f"e2e_signup_test_{random_suffix}@test.praho.local"
-
-
-def generate_test_phone() -> str:
-    """Generate a random Romanian phone number"""
-    # Romanian mobile format: +40.7XX.XXX.XXX
-    return f"+40.7{secrets.randbelow(10)}{secrets.randbelow(10)}.{secrets.randbelow(1000):03d}.{secrets.randbelow(1000):03d}"
-
-
-def generate_test_company_name() -> str:
-    """Generate a unique test company name"""
-    prefixes = ["Test", "E2E", "Auto", "QA"]
-    suffixes = ["Solutions", "Tech", "Services", "Digital"]
-    random_num = secrets.randbelow(9999) + 1
-    return f"{secrets.choice(prefixes)} {secrets.choice(suffixes)} {random_num} SRL"
-
-
-def generate_test_password() -> str:
-    """Generate a secure test password meeting requirements"""
-    # Password requirements: minimum 12 characters
-    return f"TestPass123!{secrets.randbelow(9999):04d}"
 
 
 # ===============================================================================
@@ -80,7 +71,7 @@ def test_signup_page_loads_correctly(page: Page) -> None:
     This test verifies:
     1. Signup page is accessible at the register URL
     2. Page title and heading are correct
-    3. All form sections are visible (Personal, Business, Address, Security, Privacy)
+    3. All form sections are visible (Personal, Business, Address, Privacy)
     4. Required form fields are present
     5. Submit button is visible and enabled
     """
@@ -118,7 +109,6 @@ def test_signup_page_loads_correctly(page: Page) -> None:
             ("Personal Information", "Personal info section"),
             ("Business Information", "Business info section"),
             ("Address Information", "Address info section"),
-            ("Account Security", "Security section"),
             ("Privacy & Consent", "Privacy section"),
         ]
 
@@ -138,15 +128,21 @@ def test_signup_page_loads_correctly(page: Page) -> None:
             ('input[name="city"]', "City field"),
             ('input[name="county"]', "County field"),
             ('input[name="postal_code"]', "Postal code field"),
-            ('input[name="password1"]', "Password field"),
-            ('input[name="password2"]', "Confirm password field"),
+            ('input[name="vat_number"]', "VAT number field"),
+            ('input[name="cui"]', "CUI field"),
+            ('input[name="trade_registry_number"]', "Trade registry number field"),
+            ('input[name="cnp"]', "CNP field"),
             ('input[name="data_processing_consent"]', "GDPR consent checkbox"),
+            ('input[name="terms_accepted"]', "Terms of Service checkbox"),
         ]
 
         for selector, field_name in required_fields:
             field = page.locator(selector)
             assert field.count() > 0, f"{field_name} should be present"
         print("    All required form fields are present")
+
+        # Registration asks for no password: it is chosen on the emailed confirmation page.
+        expect(page.locator('input[type="password"]')).to_have_count(0)
 
         # Verify submit button is present and enabled
         submit_button = page.locator('button:has-text("Create Account")')
@@ -233,8 +229,18 @@ def test_signup_form_validation_required_fields(page: Page) -> None:
     page.get_by_role("button", name="Create Account", exact=True).click()
     expect(page).to_have_url(f"{BASE_URL}{REGISTER_URL}")
     assert page.locator('input[name="first_name"]').evaluate("el => el.validity.valueMissing")
-    for field in ("email", "password1", "password2", "data_processing_consent", "terms_accepted"):
+    for field in ("email", "company_name", "address_line1", "data_processing_consent", "terms_accepted"):
         expect(page.locator(f'input[name="{field}"]')).to_have_attribute("required", "")
+    expect(page.locator('input[type="password"]')).to_have_count(0)
+
+
+def test_signup_requires_a_vat_number_or_cui_for_a_romanian_company(page: Page) -> None:
+    identity = new_identity()
+    fill_registration(page, identity.email, identity.company)
+    page.locator('input[name="cui"]').fill("")
+    page.get_by_role("button", name="Create Account", exact=True).click()
+    expect(page).to_have_url(f"{BASE_URL}{REGISTER_URL}")
+    expect(page.locator("body")).to_contain_text("Enter the company's VAT number or CUI.")
 
 
 def test_signup_form_email_validation(page: Page) -> None:
@@ -284,11 +290,14 @@ def test_signup_form_email_validation(page: Page) -> None:
         print("  Email validation works correctly")
 
 
-def test_signup_form_password_validation(page: Page) -> None:
-    _fill_registration(page, generate_test_email(), "Mismatched Passwords SRL")
-    page.locator('[name="password2"]').fill("A-different-password123!")
-    page.get_by_role("button", name="Create Account", exact=True).click()
-    expect(page).to_have_url(f"{BASE_URL}{REGISTER_URL}")
+def test_signup_form_password_validation(page: Page, run_queued_tasks) -> None:
+    """The password is chosen on the confirmation page, which refuses a mismatched confirmation."""
+    identity = new_identity()
+    before = mailbox()
+    submit_registration(page, identity.email, identity.company)
+    open_confirmation(page, confirmation_link(identity.email, before, run_queued_tasks), identity.company)
+    fill_confirmation(page, identity.password, confirm_password="A-different-password123!")
+    expect(page).to_have_url(f"{BASE_URL}/register/confirm/")
     expect(page.locator("body")).to_contain_text(re.compile("password.*match", re.I))
 
 
@@ -298,21 +307,22 @@ def test_signup_form_password_validation(page: Page) -> None:
 
 
 def test_signup_form_successful_submission(page: Page) -> None:
-    """Registration creates a login-capable account with its own persisted company."""
-    account = _register_customer(page)
-    ensure_fresh_session(page)
-    assert login_user(page, account["email"], account["password"])
-    page.goto(f"{BASE_URL}/company/")
-    expect(page.locator("#main-content")).to_contain_text(account["company"])
+    """Submitting asks the visitor to check their email; nothing is sent until a worker runs."""
+    identity = new_identity()
+    before = mailbox()
+    submit_registration(page, identity.email, identity.company)
+    assert not delivered_to(identity.email, before), "The request queues the mail; only a worker sends it"
+    page.goto(f"{BASE_URL}/dashboard/")
+    expect(page).to_have_url(re.compile("/login/"))
 
 
-def test_signup_then_login_flow(page: Page) -> None:
-    """Registration creates a login-capable account with its own persisted company."""
-    account = _register_customer(page)
-    ensure_fresh_session(page)
-    assert login_user(page, account["email"], account["password"])
+def test_signup_then_login_flow(page: Page, run_queued_tasks) -> None:
+    """A confirmed registration signs in to its own company, with the CUI it registered."""
+    identity = register_customer(page, run_queued_tasks)
     page.goto(f"{BASE_URL}/company/")
-    expect(page.locator("#main-content")).to_contain_text(account["company"])
+    expect(page.locator("#main-content")).to_contain_text(identity.company)
+    page.goto(f"{BASE_URL}/company/tax/")
+    expect(page.locator('[name="cui"]')).to_have_value(CUI)
 
 
 # ===============================================================================
@@ -348,35 +358,9 @@ def test_customer_order_confirmation_is_private(account_page, e2e_baseline) -> N
 # ===============================================================================
 
 
-def _journey_fill_registration_form(page: Page, test_email: str, test_password: str, test_company: str) -> None:
-    """Step 2: Fill all fields in the customer registration form."""
-    page.locator('input[name="first_name"]').fill("Journey")
-    page.locator('input[name="last_name"]').fill("TestUser")
-    page.locator('input[name="email"]').fill(test_email)
-    page.locator('input[name="phone"]').fill(generate_test_phone())
-    page.locator('select[name="customer_type"]').select_option("srl")
-    page.locator('input[name="company_name"]').fill(test_company)
-    page.locator('input[name="vat_number"]').fill("RO12345678")
-    page.locator('input[name="address_line1"]').fill("Bulevardul Test Nr. 100")
-    page.locator('input[name="city"]').fill("Bucuresti")
-    page.locator('input[name="county"]').fill("Bucuresti")
-    page.locator('input[name="postal_code"]').fill("010001")
-    page.locator('input[name="password1"]').fill(test_password)
-    page.locator('input[name="password2"]').fill(test_password)
-    page.locator('input[name="data_processing_consent"]').check()
-    page.locator('input[name="terms_accepted"]').check()
-
-    marketing_checkbox = page.locator('input[name="marketing_consent"]')
-    if marketing_checkbox.is_visible():
-        marketing_checkbox.check()
-
-    print("    Step 2: Registration form filled")
-
-
-def test_complete_new_customer_journey(page: Page) -> None:
+def test_complete_new_customer_journey(page: Page, run_queued_tasks) -> None:
     """Public registration supplies enough billing data to submit a real bank order."""
-
-    _register_customer(page)
+    register_customer(page, run_queued_tasks)
     add_product(page)
     bank_checkout(page)
 
@@ -389,7 +373,7 @@ def test_complete_new_customer_journey(page: Page) -> None:
 def test_signup_page_mobile_responsiveness(page: Page) -> None:
     page.set_viewport_size({"width": 375, "height": 812})
     page.goto(f"{BASE_URL}{REGISTER_URL}")
-    for field in ("first_name", "email", "password1"):
+    for field in ("first_name", "email", "company_name"):
         expect(page.locator(f'input[name="{field}"]')).to_be_visible()
     expect(page.get_by_role("button", name="Create Account", exact=True)).to_be_visible()
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
@@ -454,18 +438,17 @@ def test_signup_across_responsive_breakpoints(page: Page) -> None:
 
 
 def test_duplicate_registration_preserves_existing_account(page: Page, e2e_baseline) -> None:
-    """Registration reports failure generically; it does not promise indistinguishable success."""
+    """Registering an address that has an account says "check your email" like any other (#662),
+    and changes nothing about that account."""
     customer = e2e_baseline["customers"][0]
-    _fill_registration(page, customer["email"], "Attempted replacement company")
-    page.get_by_role("button", name="Create Account", exact=True).click()
-    expect(page).to_have_url(f"{BASE_URL}{REGISTER_URL}")
-    expect(page.locator("body")).to_contain_text("Registration failed")
+    attempted = new_identity().company
+    submit_registration(page, customer["email"], attempted)
     page.goto(f"{BASE_URL}/dashboard/")
     expect(page).to_have_url(re.compile("/login/"))
     assert login_user(page, customer["email"], "test123")
     page.goto(f"{BASE_URL}/company/")
     expect(page.locator("#main-content")).to_contain_text(customer["name"])
-    expect(page.locator("#main-content")).not_to_contain_text("Attempted replacement company")
+    expect(page.locator("#main-content")).not_to_contain_text(attempted)
 
 
 # ===============================================================================
@@ -473,9 +456,11 @@ def test_duplicate_registration_preserves_existing_account(page: Page, e2e_basel
 # ===============================================================================
 
 
-def test_signup_with_special_characters_in_company_name(page: Page) -> None:
-    """Romanian diacritics survive registration, API transport and display."""
-    _register_customer(page, company_suffix="Știință și Tehnică")
+def test_signup_with_special_characters_in_company_name(page: Page, run_queued_tasks) -> None:
+    """Romanian diacritics survive registration, the confirmation page, API transport and display."""
+    identity = register_customer(page, run_queued_tasks, company_suffix="Știință și Tehnică")
+    page.goto(f"{BASE_URL}/company/")
+    expect(page.locator("#main-content")).to_contain_text(identity.company)
 
 
 # ===============================================================================
@@ -649,59 +634,3 @@ def test_checkout_preflight_slug_only_path_no_uuid_error(monitored_customer_page
     expect(page.locator("#checkout-submit")).to_be_enabled()
     expect(page.locator("#main-content")).to_contain_text("E2E Hosting")
     expect(page.locator("#main-content")).to_contain_text("121,00")
-
-
-def _register_customer(page: Page, *, company_suffix: str = "") -> dict[str, str]:
-
-    key = uuid4().hex[:12]
-    account = {
-        "email": f"signup-{key}@e2e.test",
-        "password": "Registration-E2E123!",
-        "company": f"E2E {key} {company_suffix} SRL",
-    }
-    ensure_fresh_session(page)
-    page.goto(f"{BASE_URL}{REGISTER_URL}")
-    for field, value in {
-        "email": account["email"],
-        "first_name": "Elena",
-        "last_name": "Pop",
-        "phone": "+40722123456",
-        "company_name": account["company"],
-        "address_line1": "Str. Victoriei nr. 10",
-        "city": "București",
-        "county": "București",
-        "postal_code": "010061",
-        "password1": account["password"],
-        "password2": account["password"],
-    }.items():
-        page.locator(f'input[name="{field}"]').fill(value)
-    page.locator('select[name="customer_type"]').select_option("srl")
-    page.locator('input[name="data_processing_consent"]').check()
-    page.locator('input[name="terms_accepted"]').check()
-    page.get_by_role("button", name="Create Account", exact=True).click()
-    expect(page).to_have_url(f"{BASE_URL}/login/")
-    assert login_user(page, account["email"], account["password"])
-    page.goto(f"{BASE_URL}/company/")
-    expect(page.locator("#main-content")).to_contain_text(account["company"])
-    return account
-
-
-def _fill_registration(page: Page, email: str, company: str) -> None:
-    ensure_fresh_session(page)
-    page.goto(f"{BASE_URL}{REGISTER_URL}")
-    for field, value in {
-        "first_name": "Test",
-        "last_name": "User",
-        "email": email,
-        "company_name": company,
-        "address_line1": "Str. Victoriei nr. 10",
-        "city": "București",
-        "county": "București",
-        "postal_code": "010061",
-        "password1": "Registration-E2E123!",
-        "password2": "Registration-E2E123!",
-    }.items():
-        page.locator(f'input[name="{field}"]').fill(value)
-    page.locator('[name="customer_type"]').select_option("srl")
-    page.locator('[name="data_processing_consent"]').check()
-    page.locator('[name="terms_accepted"]').check()
