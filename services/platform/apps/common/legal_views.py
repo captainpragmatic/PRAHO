@@ -10,7 +10,7 @@ Cookie consent recording is now via Portal → Platform GDPR API
 """
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
@@ -31,7 +31,7 @@ def privacy_policy(request: HttpRequest) -> HttpResponse:
 
 def terms_of_service(request: HttpRequest) -> HttpResponse:
     """Terms of Service page. The text is shared with the portal's /terms/ page."""
-    effective_date = datetime.fromisoformat(TERMS_OF_SERVICE_VERSION).replace(tzinfo=UTC)
+    effective_date = date.fromisoformat(TERMS_OF_SERVICE_VERSION)  # A calendar date, in every timezone
     context = {
         "last_updated": effective_date,
         "effective_date": effective_date,

@@ -63,6 +63,24 @@ class TermsPageTests(SimpleTestCase):
         html = Client().get("/cookie-policy/").content.decode()
         self.assertIn(f'href="{reverse("terms_of_service")}"', html)
 
+    def test_the_effective_date_is_the_version_date_in_any_timezone(self) -> None:
+        payload = {
+            "success": True,
+            "localisation": {**LocalisationDefaults().customer_payload(), "timezone": "America/New_York"},
+            "company": IDENTITY,
+        }
+        with patch.object(api_client, "get_localisation_defaults", return_value=payload):
+            cache.clear()
+            html = Client().get("/terms/").content.decode()
+        self.assertIn("27.12.2024", html)
+        self.assertNotIn("26.12.2024", html)
+
+    def test_only_the_page_itself_is_public(self) -> None:
+        # A later /terms/<something>/ route must not become public by sharing the prefix.
+        response = Client().get("/terms/accept/")
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response["Location"].startswith("/login/"))
+
     def test_the_terms_read_in_romanian(self) -> None:
         # The text moved into the shared catalog; the portal must find its translations there.
         # The request activates Romanian for the thread; override() puts the previous language back.

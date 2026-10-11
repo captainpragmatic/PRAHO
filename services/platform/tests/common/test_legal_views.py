@@ -51,4 +51,4 @@ class TermsOfServiceVersionTests(TestCase):
 
         response = self.client.get(reverse("terms_of_service"))
         self.assertContains(response, TERMS_OF_SERVICE_VERSION)
-        self.assertEqual(response.context["effective_date"].date().isoformat(), TERMS_OF_SERVICE_VERSION)
+        self.assertEqual(response.context["effective_date"].isoformat(), TERMS_OF_SERVICE_VERSION)
