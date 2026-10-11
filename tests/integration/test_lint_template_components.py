@@ -501,3 +501,106 @@ class TemplateReviewRegressionTests(SimpleTestCase):
                 path = self.seed("components/unconditional_json.html", markup)
                 findings = [finding for finding in self.lint.scan_file(path) if finding.code == "TMPL007"]
                 self.assertEqual(findings, [])
+
+
+# ===============================================================================
+# Platform and shared templates are scanned too (#622)
+# ===============================================================================
+#
+# The scanner knew only the portal's template root. A Platform or shared template, whether
+# found by the walk or passed explicitly by the pre-commit hook, was "neither a feature
+# template nor a component" and was skipped with no output, so 422 blockers in Platform
+# templates never reached any gate.
+
+
+def _three_roots(tmp_path: Path, lint, monkeypatch) -> tuple[Path, Path, Path]:
+    portal = tmp_path / "services" / "portal" / "templates"
+    platform = tmp_path / "services" / "platform" / "templates"
+    shared = tmp_path / "shared" / "ui" / "templates"
+    monkeypatch.setattr(lint, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(lint, "PORTAL_TEMPLATES", portal)
+    monkeypatch.setattr(lint, "COMPONENT_DIR", portal / "components")
+    # raising=False: on a scanner that predates these roots the test fails on its assertions,
+    # which is the behaviour under test, rather than on a missing attribute.
+    monkeypatch.setattr(lint, "PLATFORM_TEMPLATES", platform, raising=False)
+    monkeypatch.setattr(lint, "SHARED_TEMPLATES", shared, raising=False)
+    return portal, platform, shared
+
+
+def _write(path: Path, content: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
+def test_platform_feature_template_with_a_raw_button_is_a_blocker(tmp_path, lint, monkeypatch):
+    _, platform, _ = _three_roots(tmp_path, lint, monkeypatch)
+    page = _write(platform / "billing" / "invoice_detail.html", '<button type="submit">Pay</button>\n')
+
+    blockers = [v for v in lint.scan_file(page) if v.code == "TMPL002"]
+
+    assert [(v.severity, v.line, v.exempted) for v in blockers] == [(lint.SEVERITY_BLOCKER, 1, False)]
+
+
+def test_platform_component_is_checked_as_a_component(tmp_path, lint, monkeypatch):
+    _, platform, _ = _three_roots(tmp_path, lint, monkeypatch)
+    component = _write(platform / "components" / "widget.html", "<style>.a { color: red; }</style>\n<button>Go</button>\n")
+
+    codes = {v.code for v in lint.scan_file(component)}
+
+    assert "TMPL006" in codes  # component rule applies
+    assert "TMPL002" not in codes  # components may render raw form elements
+
+
+def test_shared_component_is_checked_as_a_component(tmp_path, lint, monkeypatch):
+    _, _, shared = _three_roots(tmp_path, lint, monkeypatch)
+    component = _write(shared / "components" / "field.html", '<input type="text">\n<div onclick="go()"></div>\n')
+
+    codes = {v.code for v in lint.scan_file(component)}
+
+    assert "TMPL007" in codes
+    assert "TMPL001" not in codes
+
+
+def test_shared_feature_template_is_a_feature_template(tmp_path, lint, monkeypatch):
+    _, _, shared = _three_roots(tmp_path, lint, monkeypatch)
+    page = _write(shared / "legal" / "terms.html", "<select name='lang'></select>\n")
+
+    assert [v.code for v in lint.scan_file(page)] == ["TMPL003"]
+
+
+def test_main_without_arguments_scans_every_root(tmp_path, lint, monkeypatch, capsys):
+    portal, platform, shared = _three_roots(tmp_path, lint, monkeypatch)
+    expected = {
+        _write(portal / "dashboard.html", "<p>ok</p>\n"),
+        _write(platform / "customers" / "list.html", "<p>ok</p>\n"),
+        _write(shared / "legal" / "privacy.html", "<textarea></textarea>\n"),  # the last root walked
+    }
+    scanned: list[Path] = []
+    real_scan_file = lint.scan_file
+
+    def recording_scan_file(path: Path):
+        scanned.append(path)
+        return real_scan_file(path)
+
+    monkeypatch.setattr(lint, "scan_file", recording_scan_file)
+    monkeypatch.setattr(sys, "argv", ["lint_template_components.py"])
+
+    exit_code = lint.main()
+
+    assert len(scanned) == 3, scanned
+    assert set(scanned) == expected
+    assert exit_code == 1
+    assert "shared/ui/templates/legal/privacy.html" in capsys.readouterr().out
+
+
+def test_an_explicit_platform_path_is_scanned(tmp_path, lint, monkeypatch, capsys):
+    """The pre-commit hook passes staged files explicitly; a Platform one must not be skipped."""
+    _, platform, _ = _three_roots(tmp_path, lint, monkeypatch)
+    page = _write(platform / "orders" / "order_form.html", '<input type="number" name="qty">\n')
+    monkeypatch.setattr(sys, "argv", ["lint_template_components.py", str(page)])
+
+    exit_code = lint.main()
+
+    assert exit_code == 1
+    assert "services/platform/templates/orders/order_form.html:1 [TMPL001]" in capsys.readouterr().out

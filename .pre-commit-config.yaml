@@ -255,7 +255,8 @@ repos:
         args: [scripts/lint_template_components.py]
         language: system
         files: \.html$
-        exclude: ^(services/platform/templates/|services/portal/static/)
+        # Platform and shared/ui templates are scanned too since #622.
+        exclude: ^services/portal/static/
         pass_filenames: true
       - id: audit-accessibility
         name: "Design System: Accessibility audit (critical, serious)"

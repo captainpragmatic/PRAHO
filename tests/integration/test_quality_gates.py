@@ -51,8 +51,10 @@ class TestQualityGates(SimpleTestCase):
         for module in (self.a11y, self.dm, self.tmpl):
             self.enterContext(patch.object(module, "REPO_ROOT", self.root))
             self.enterContext(patch.object(module, "PORTAL_TEMPLATES", portal))
-        for module in (self.a11y, self.dm):
+        for module in (self.a11y, self.dm, self.tmpl):
             self.enterContext(patch.object(module, "PLATFORM_TEMPLATES", platform))
+        # The template linter also walks shared/ui since #622; keep it inside the temporary tree.
+        self.enterContext(patch.object(self.tmpl, "SHARED_TEMPLATES", self.root / "shared" / "ui" / "templates"))
         self.enterContext(patch.object(self.tmpl, "COMPONENT_DIR", portal / "components"))
         self.enterContext(
             patch.object(self.tmpl, "COMPONENT_SVG_ALLOWLIST_FILE", self.root / ".component-svg-allowlist")
