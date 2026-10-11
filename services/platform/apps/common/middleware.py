@@ -795,7 +795,6 @@ class SessionSecurityMiddleware:
     Features:
     - Dynamic timeout adjustment based on user role/context
     - Suspicious activity detection and logging
-    - Session activity tracking
     - Shared device mode handling
     """
 
@@ -825,13 +824,10 @@ class SessionSecurityMiddleware:
             # Update session timeout based on current context
             SessionSecurityService.update_session_timeout(request)
 
-            # Detect and log suspicious activity
-            is_suspicious = SessionSecurityService.detect_suspicious_activity(request)
-
-            # Log session activity for important paths
-            if self._should_log_activity(request):
-                activity_type = self._get_activity_type(request)
-                SessionSecurityService.log_session_activity(request, activity_type, is_suspicious=is_suspicious)
+            # Detect and audit a session used from several addresses. Ordinary requests are not
+            # audited: the request log (AuditMiddleware) records each one, and every change writes
+            # its own audit event (#622).
+            SessionSecurityService.detect_suspicious_activity(request)
 
             # Handle shared device mode expiry
             if request.session.get("shared_device_mode"):
@@ -860,24 +856,6 @@ class SessionSecurityMiddleware:
                     "security check — the session is still valid: %s",
                     flush_error,
                 )
-
-    def _should_log_activity(self, request: HttpRequest) -> bool:
-        """Determine if this request should be logged for activity tracking"""
-        sensitive_paths = ["/users/", "/billing/", "/customers/", "/admin/", "/api/", "/settings/", "/tickets/"]
-        return any(request.path.startswith(path) for path in sensitive_paths)
-
-    def _get_activity_type(self, request: HttpRequest) -> str:
-        """Get activity type based on request path and method"""
-        if request.path.startswith("/admin/"):
-            return "admin_access"
-        elif request.path.startswith("/billing/"):
-            return "billing_access"
-        elif request.path.startswith("/api/"):
-            return "api_access"
-        elif request.method in ["POST", "PUT", "PATCH", "DELETE"]:
-            return "data_modification"
-        else:
-            return "page_access"
 
     def _check_shared_device_expiry(self, request: HttpRequest) -> None:
         """Check if shared device mode should expire based on inactivity"""

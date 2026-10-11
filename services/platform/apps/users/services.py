@@ -174,6 +174,10 @@ class APITokenService:
 # {{ expiry_hours }} value rendered into the welcome email templates.
 SECONDS_PER_HOUR = 3600
 
+# How often SessionSecurityService.detect_suspicious_activity rewrites a known address's
+# last-seen time; its one-hour window needs no finer timing.
+SUSPICIOUS_ACTIVITY_REFRESH_SECONDS = 60
+
 
 def _render_and_send_welcome_email(user: User, customer: Customer, request_ip: str | None = None) -> bool:
     """🔒 Render & send the customer welcome / password-reset invite email.
@@ -1400,34 +1404,40 @@ class SessionSecurityService:
 
         user_id = request.user.id
         current_ip = get_safe_client_ip(request)
+        now = time.time()
 
-        # Check for rapid IP changes (simplified detection)
+        # One last-seen time per address, not one entry per request: this runs on every
+        # authenticated request, and a page that polls every two seconds would otherwise add
+        # about 1,800 entries an hour (#622). Anything else in the cache is an older format.
         cache_key = f"recent_ips:{user_id}"
-        recent_ips = cache.get(cache_key, [])
-
-        # Add current IP
-        recent_ips.append({"ip": current_ip, "timestamp": time.time()})
-
-        # Keep only last hour of IPs
-        one_hour_ago = time.time() - 3600
-        recent_ips = [ip_data for ip_data in recent_ips if ip_data["timestamp"] > one_hour_ago]
+        stored = cache.get(cache_key)
+        one_hour_ago = now - 3600
+        last_seen: dict[str, float] = {
+            ip: seen
+            for ip, seen in (stored.items() if isinstance(stored, dict) else ())
+            if isinstance(seen, int | float) and seen > one_hour_ago
+        }
+        previously_seen = last_seen.get(current_ip)
+        last_seen[current_ip] = now
 
         # Check for suspicious pattern (configurable threshold of different IPs in 1 hour)
-        unique_ips = {ip_data["ip"] for ip_data in recent_ips}
         suspicious_threshold = SettingsService.get_integer_setting("security.suspicious_ip_threshold", 3)
-        is_suspicious = len(unique_ips) >= suspicious_threshold
+        is_suspicious = len(last_seen) >= suspicious_threshold
 
-        if is_suspicious:
+        # Audit the address that joins the pattern, not every request while it lasts.
+        if is_suspicious and previously_seen is None:
             log_security_event(
                 "suspicious_activity_detected",
-                {"user_id": user_id, "ip_count": len(unique_ips), "current_ip": current_ip, "pattern": "multiple_ips"},
+                {"user_id": user_id, "ip_count": len(last_seen), "current_ip": current_ip, "pattern": "multiple_ips"},
                 current_ip,
             )
 
-            logger.warning(f"🚨 [SessionSecurity] Suspicious IP pattern for {request.user.email}: {unique_ips}")
+            logger.warning(f"🚨 [SessionSecurity] Suspicious IP pattern for {request.user.email}: {set(last_seen)}")
 
-        # Update cache
-        cache.set(cache_key, recent_ips, timeout=3600)
+        # A known address needs its time refreshed at most once a minute: the hour window does
+        # not need finer timing, and skipping the write keeps most requests to a cache read.
+        if previously_seen is None or now - previously_seen > SUSPICIOUS_ACTIVITY_REFRESH_SECONDS:
+            cache.set(cache_key, last_seen, timeout=3600)
 
         return bool(is_suspicious)
 
