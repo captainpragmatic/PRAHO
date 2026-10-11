@@ -28556,3 +28556,7 @@ msgstr "Trebuie să acceptați Termenii de Serviciu."
 #: apps/api/users/serializers.py
 msgid "Send the Terms of Service version accepted."
 msgstr "Trimiteți versiunea Termenilor de Serviciu acceptată."
+
+#: apps/api/customers/serializers.py
+msgid "Enter the company's VAT number or CUI."
+msgstr "Introduceți codul de TVA sau CUI-ul firmei."

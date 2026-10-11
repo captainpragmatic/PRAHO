@@ -56,6 +56,7 @@ class RegistrationRateLimitViewTests(SimpleTestCase):
             "phone": "",
             "customer_type": "srl",
             "company_name": "FX Signup SRL",
+            "cui": "14399840",  # A Romanian company gives a VAT number or a CUI
             "address_line1": "Str. Test 1",
             "city": "București",
             "county": "București",

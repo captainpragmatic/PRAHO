@@ -55,6 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Portal registration asks each customer for the fiscal identity they have.** Companies give a CUI and trade registry number next to the VAT number, and a Romanian company must give a VAT number or a CUI. A CNP is asked only of individuals billed in Romania. When Platform refuses a value (a CNP or CUI that fails its check digit, a VAT number for another CUI), the reason is shown on that field instead of a generic "registration failed". **Deploy the portal with or before Platform.**
 - **Total time limit on Platform calls.** A portal call to Platform now has a total time budget, `PLATFORM_API_TOTAL_BUDGET_SECONDS` (default and maximum 45 s, minimum 5 s). It covers retries and backoff, and the response body is read in chunks with the budget checked between them, so a slow Platform no longer holds a portal worker for minutes.
 - **Startup checks.** `PLATFORM_API_TIMEOUT` is now checked at startup: it must be between 1 s and the budget. Its default follows the budget when that is lower.
 - **Upgrade note (native installs).** A `.env` that sets `PLATFORM_API_TIMEOUT` above 45, or to a non-number, now stops the portal from starting. Fix the value before upgrading.

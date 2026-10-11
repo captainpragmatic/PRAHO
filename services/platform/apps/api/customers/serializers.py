@@ -125,6 +125,7 @@ class CustomerRegistrationDataSerializer(serializers.Serializer):
     CNP_INVALID = _("Enter a valid CNP.")
     CUI_INVALID = _("Enter a valid CUI.")
     VAT_CUI_MISMATCH = _("The VAT number does not match the CUI.")
+    VAT_OR_CUI_REQUIRED = _("Enter the company's VAT number or CUI.")
 
     def validate_cui(self, value: str) -> str:
         """Store a CUI as its digits, check digit verified; an RO prefix is accepted."""
@@ -169,6 +170,9 @@ class CustomerRegistrationDataSerializer(serializers.Serializer):
         vat_number, cui = attrs.get("vat_number", ""), attrs.get("cui", "")
         if vat_number and cui and vat_number.removeprefix("RO") != cui:
             raise serializers.ValidationError({"cui": [self.VAT_CUI_MISMATCH]})
+        if not vat_number and not cui and self._in_romania(attrs.get("country")):
+            # A Romanian company is invoiced with a fiscal identifier: its VAT number or its CUI.
+            raise serializers.ValidationError({"cui": [self.VAT_OR_CUI_REQUIRED]})
         return attrs
 
     def _in_romania(self, country: object) -> bool:

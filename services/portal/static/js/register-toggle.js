@@ -1,7 +1,8 @@
 // ===============================================================================
 // REGISTRATION FORM — Company/Individual Field Toggle
 // ===============================================================================
-// Toggles VAT/CNP fields and auto-fills company name for individuals.
+// Toggles the company identifiers (VAT, CUI, trade registry) and the CNP, and auto-fills the
+// company name for individuals.
 // Loaded by register.html via <script src="{% static 'js/register-toggle.js' %}">
 
 document.addEventListener('DOMContentLoaded', function () {
@@ -12,6 +13,8 @@ document.addEventListener('DOMContentLoaded', function () {
   const vatField = document.getElementById('vat-field');
   const cnpField = document.getElementById('cnp-field');
   const vatInput = document.getElementById('id_vat_number');
+  const cuiInput = document.getElementById('id_cui');
+  const tradeRegistryInput = document.getElementById('id_trade_registry_number');
   const cnpInput = document.getElementById('id_cnp');
 
   if (!customerTypeField) return;
@@ -35,6 +38,8 @@ document.addEventListener('DOMContentLoaded', function () {
       if (cnpField) cnpField.style.display = 'block';
       updateIndividualCompanyName();
       if (vatInput) vatInput.value = '';
+      if (cuiInput) cuiInput.value = '';
+      if (tradeRegistryInput) tradeRegistryInput.value = '';
     } else {
       if (vatField) vatField.style.display = 'block';
       if (cnpField) cnpField.style.display = 'none';

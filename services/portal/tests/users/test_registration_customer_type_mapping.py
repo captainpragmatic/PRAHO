@@ -27,6 +27,7 @@ class TestRegistrationCustomerTypeMapping(SimpleTestCase):
             "password2": "CorrectHorse12!",
             "customer_type": customer_type,
             "company_name": "Test Entity",
+            "cui": "14399840",  # A Romanian company gives a VAT number or a CUI
             "address_line1": "Str. Test 1",
             "city": "Bucuresti",
             "county": "Bucuresti",
