@@ -737,7 +737,8 @@ DEFAULT_THROTTLE_RATES = {
     "auth_register_confirm_ip": "5/minute",
     "sustained": "2000/hour",
     "api_burst": "120/min",
-    # Built-in DRF classes used directly by decorators
+    # No throttle class uses this scope: it is validated at startup (apps.common.apps) so DRF's
+    # built-in AnonRateThrottle would have a rate if a view attached it.
     "anon": "40/minute",
     # Order API scoped throttles (apps.api.orders.views)
     "order_create": "20/min",

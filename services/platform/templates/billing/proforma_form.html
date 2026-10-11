@@ -133,7 +133,7 @@
               </label>
               {% trans 'Auto-generated (PRO-XXXXXX)' as auto_number_label %}
               {% trans 'Proforma Number' as proforma_number_label %}
-              {% input_field "" html_id="proforma-number" readonly=True value=auto_number_label aria_label=proforma_number_label %}
+              {% input_field "" html_id="proforma-number" readonly=True css_class="read-only:bg-slate-600 read-only:text-slate-300" value=auto_number_label aria_label=proforma_number_label %}
             </div>
             <div>
               <label for="proforma-valid-until" class="block text-sm font-medium text-slate-300 mb-2">
@@ -160,7 +160,7 @@
               </label>
               {% trans 'Draft' as draft_status_label %}
               {% trans 'Status' as proforma_status_label %}
-              {% input_field "" html_id="proforma-status" readonly=True value=draft_status_label aria_label=proforma_status_label %}
+              {% input_field "" html_id="proforma-status" readonly=True css_class="read-only:bg-slate-600 read-only:text-slate-300" value=draft_status_label aria_label=proforma_status_label %}
             </div>
           </div>
         </div>

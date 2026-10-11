@@ -277,8 +277,8 @@ def _authenticate_token_request(request: HttpRequest) -> User | Response:
     # Timing is NOT uniform past this point. With the correct password, a staff account with
     # 2FA goes on to verify the code, and an 8-digit code is checked against every stored
     # backup-code hash, so a slow refusal can confirm the password even though the body
-    # is the same. A locked account and a customer are refused before that, after writing the
-    # failed-login audit row a wrong password writes. That is narrower than before #565, when
+    # is the same. A locked account and a customer are refused before that, after writing a
+    # failed-login audit row as a wrong password does. That is narrower than before #565, when
     # the correct password simply returned a token, and TokenRequestAccountThrottle caps
     # sampling at 5/min per address. ADR-0031 "What a bare token can reach" records it.
     user = authenticate(request, username=email, password=password)
@@ -327,8 +327,9 @@ def _authenticate_token_request(request: HttpRequest) -> User | Response:
 def _audit_refusal_after_correct_password(request: HttpRequest, user: User, failure_reason: str) -> None:
     """Record a token request refused although its password was right.
 
-    authenticate() succeeded, so user_login_failed never fired. Writing the failed-login audit row
-    a wrong password writes leaves a trace, and keeps the work the same as that refusal. The staff
+    authenticate() succeeded, so user_login_failed never fired. Writing a failed-login audit row, as
+    a wrong password does, leaves a trace and keeps the work alike. The reason (`not_staff`,
+    `account_locked`, `account_changed`) is in its metadata. The staff
     web login does the same for a locked account (apps.users.views._record_locked_login).
     """
     with best_effort_atomic(logger=logger, scope="Auth", message="Could not audit a refused token request"):

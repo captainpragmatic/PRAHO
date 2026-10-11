@@ -268,7 +268,7 @@ Residual on the issuance endpoint after #565: refusals all share the wrong-passw
 and body, but not its timing. With the correct password, a staff account with 2FA goes on to
 verify the code, and an 8-digit code is checked against every stored backup-code hash, so a
 slow refusal can confirm the password. A locked account and a customer are refused before the
-second factor, after writing the failed-login audit row a wrong password writes (#621), so
+second factor, after writing a failed-login audit row as a wrong password does (#621), so
 those refusals cost about what a wrong password costs. Before #565 the correct password simply
 returned a token, so this is narrower, and `TokenRequestAccountThrottle` limits sampling to 5
 per minute per address. Equalising the 2FA timing is open work.
@@ -282,8 +282,8 @@ accepts (a staff role, the Django staff flag, or superuser), the same test the
 status and body:
 
 - **Before the second factor**, so the refusal neither spends a code nor counts toward the
-  lockout. It writes the same failed-login audit row as a wrong password, with
-  `failure_reason: not_staff`.
+  lockout. Like a wrong password it writes a failed-login audit event: `login_failed`, with
+  `failure_reason: not_staff` (a wrong password records `login_failed_password`).
 - **Again on the locked user row**, before the second factor, so a demotion between the
   password check and issuance is not skipped.
 
