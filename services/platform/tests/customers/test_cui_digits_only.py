@@ -165,3 +165,17 @@ class CUIDisplayAndValidationTests(SimpleTestCase):
         self.assertEqual(validated["cui"], CUI)
         with self.assertRaises(ValidationError):
             SecureInputValidator.validate_customer_data_dict({"company_name": "Digits SRL", "cui": BAD_CHECK_DIGIT})
+
+
+class CUIFollowUpTests(TestCase):
+    def test_a_partial_save_stores_the_normalised_cui_it_reports(self) -> None:
+        customer = Customer.objects.create(name="Legacy SRL", customer_type="company", status="active")
+        profile = CustomerTaxProfile.objects.create(customer=customer, cui="14399840")
+        CustomerTaxProfile.objects.filter(pk=profile.pk).update(cui="RO14399840")  # Written before #665
+        profile.refresh_from_db()
+        profile.is_vat_payer = False
+        profile.save(update_fields=["is_vat_payer"])
+        self.assertEqual(CustomerTaxProfile.objects.values_list("cui", flat=True).get(pk=profile.pk), "14399840")
+
+    def test_the_secure_validator_takes_a_prefixed_ten_digit_cui(self) -> None:
+        self.assertEqual(SecureInputValidator.validate_cui_romanian("RO1234567897"), "1234567897")

@@ -872,6 +872,8 @@ def update_customer_billing_address(  # noqa: C901, PLR0912, PLR0915  # Complexi
                 tax_fields["cui"] = cui_result.digits
             if validated_data.get("vat_number"):
                 tax_fields["vat_number"] = validated_data["vat_number"]
+                # Giving a VAT number states VAT registration, also for a profile that began CUI-only.
+                tax_fields["is_vat_payer"] = True
             if validated_data.get("registration_number"):
                 tax_fields["registration_number"] = validated_data["registration_number"]
 
@@ -1388,6 +1390,11 @@ def customer_tax_profile_update(  # noqa: C901, PLR0912  # Validate each permitt
             setattr(tax_profile, field, value)
 
             update_fields.append(field)
+
+    if tax_profile.vat_number and "vat_number" in update_fields and "is_vat_payer" not in data:
+        # Giving a VAT number states VAT registration, also for a profile that began CUI-only.
+        tax_profile.is_vat_payer = True
+        update_fields.append("is_vat_payer")
 
     if update_fields:
         with transaction.atomic():

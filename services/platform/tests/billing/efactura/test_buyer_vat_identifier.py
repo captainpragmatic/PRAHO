@@ -269,3 +269,19 @@ class VATNumberStorageTests(HMACTestMixin, TestCase):
         CustomerTaxProfile.objects.create(customer=self.customer, vat_number=f"RO{CUI}", is_vat_payer=True)
         profile = ProfileService.create_tax_profile(self.customer, self.owner, cui=CUI)
         self.assertIs(profile.is_vat_payer, True)
+
+    def test_adding_a_vat_number_later_makes_the_profile_a_vat_payer(self) -> None:
+        # A CUI-only profile starts as a non-payer; a VAT number given later must not stay ignored.
+        for path, first, then in (
+            ("/api/customers/billing-address/", {"fiscal_code": CUI}, {"vat_number": f"RO{CUI}"}),
+            ("/api/customers/tax-profile/", {"cui": CUI}, {"vat_number": f"RO{CUI}"}),
+        ):
+            with self.subTest(path=path):
+                CustomerTaxProfile.objects.filter(customer=self.customer).delete()
+                address = {"address_line1": "Str. 1", "city": "Cluj-Napoca"} if "billing" in path else {}
+                self.post(path, **first, **address)
+                self.assertIs(CustomerTaxProfile.objects.get(customer=self.customer).is_vat_payer, False)
+                self.post(path, **then, **address)
+                profile = CustomerTaxProfile.objects.get(customer=self.customer)
+                self.assertEqual(profile.vat_number, f"RO{CUI}")
+                self.assertIs(profile.is_vat_payer, True)
