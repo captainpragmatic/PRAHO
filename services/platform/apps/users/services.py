@@ -26,10 +26,6 @@ from django.utils.http import urlsafe_base64_encode
 from django.utils.translation import gettext_lazy as _
 
 from apps.common import counters
-from apps.common.constants import (
-    IDENTIFIER_MAX_LENGTH,
-    MIN_RESPONSE_TIME_SECONDS,
-)
 from apps.common.localisation import country_name
 from apps.common.localisation_services import get_localisation_defaults
 from apps.common.request_ip import get_safe_client_ip
@@ -328,29 +324,6 @@ class SecureUserRegistrationService:
 
     @classmethod
     @secure_user_registration()
-    def register_new_customer_owner(
-        cls,
-        user_data: dict[str, Any],
-        customer_data: dict[str, Any],
-        request_ip: str | None = None,
-        user_agent: str | None = None,
-        **kwargs: Any,
-    ) -> Result[tuple[User, Customer], str]:
-        """
-        🔒 Secure registration of new user as owner of NEW customer organization
-
-        Security Enhancements:
-        - Comprehensive input validation
-        - Race condition prevention with distributed locking
-        - Romanian business compliance validation
-        - Audit logging with request tracking
-        - Rate limiting per IP and email
-        - Timing attack prevention
-        """
-        return cls.create_customer_owner_unchecked(user_data, customer_data, request_ip, user_agent)
-
-    @classmethod
-    @secure_user_registration()
     def submit_pending_registration(  # noqa: PLR0913  # The CNP travels apart from customer_data
         cls,
         user_data: dict[str, Any],
@@ -406,7 +379,7 @@ class SecureUserRegistrationService:
     ) -> Result[tuple[User, Customer], str]:
         """Create the user, the customer and the owner membership, without the decorator's checks.
 
-        Callers validate first. `register_new_customer_owner` does so through its decorator, which
+        Callers validate first. `submit_pending_registration` does so through its decorator, which
         also charges the per-IP registration budget. Confirming a pending registration validates
         itself and must not charge that budget a second time.
         """
@@ -414,19 +387,9 @@ class SecureUserRegistrationService:
             # Business writes get their own savepoint: a failure discards a partial user and
             # customer, while the security event logged below still commits with the caller.
             with transaction.atomic():
-                # Input validation is handled by @secure_user_registration decorator
-                # At this point, user_data and customer_data are already validated
-
-                # Step 1: Additional business logic validation
-                # (Company uniqueness check is done in decorator with proper locking)
-
-                # Both registration entry points record affirmative consent; the onboarding
-                # form carries the checkbox in customer_data instead of a user timestamp.
                 consent_date = user_data.get("gdpr_consent_date")
-                if consent_date is None and customer_data.get("data_processing_consent") is True:
-                    consent_date = timezone.now()
 
-                # Step 2: Create the user account with security measures
+                # Step 1: Create the user account with security measures
                 user = User.objects.create_user(
                     email=user_data["email"],  # Validated email
                     password=user_data["password"],  # Validated (min length) by the registration serializer
@@ -441,7 +404,7 @@ class SecureUserRegistrationService:
                     # Security: No admin fields can be injected due to validation
                 )
 
-                # Step 3: Create customer organization with validated data
+                # Step 2: Create customer organization with validated data
                 customer = Customer.objects.create(
                     name=customer_data["company_name"],
                     company_name=customer_data["company_name"],  # Sanitized
@@ -454,7 +417,7 @@ class SecureUserRegistrationService:
                     created_by=user,
                 )
 
-                # Step 4: Create tax profile with Romanian compliance
+                # Step 3: Create tax profile with Romanian compliance
                 vat_number = (customer_data.get("vat_number", "") or "").strip()
                 cnp = (customer_data.get("cnp", "") or "").strip()
                 cui = (customer_data.get("cui", "") or "").strip()
@@ -485,7 +448,7 @@ class SecureUserRegistrationService:
                         request_ip,
                     )
 
-                # Step 5: Create billing profile (secure defaults)
+                # Step 4: Create billing profile (secure defaults)
                 CustomerBillingProfile.objects.update_or_create(
                     customer=customer,
                     defaults={
@@ -494,7 +457,7 @@ class SecureUserRegistrationService:
                     },
                 )
 
-                # Step 6: Create billing address with validated data
+                # Step 5: Create billing address with validated data
                 CustomerAddress.objects.create(
                     customer=customer,
                     is_billing=True,
@@ -507,7 +470,7 @@ class SecureUserRegistrationService:
                     is_current=True,
                 )
 
-                # Step 7: Associate user as OWNER with security checks
+                # Step 6: Associate user as OWNER with security checks
                 CustomerMembership.objects.create(
                     user=user,
                     customer=customer,
@@ -515,7 +478,7 @@ class SecureUserRegistrationService:
                     is_primary=True,
                 )
 
-                # Step 8: Security audit logging
+                # Step 7: Security audit logging
                 log_security_event(
                     "customer_registration_success",
                     {
@@ -546,179 +509,6 @@ class SecureUserRegistrationService:
             )
 
             return Err(SecureErrorHandler.safe_error_response(e, "user_registration"))
-
-    @classmethod
-    def request_join_existing_customer(
-        cls,
-        user_data: dict[str, Any],
-        company_identifier: str,
-        identification_type: str,  # 'name', 'vat_number', 'registration_number'
-        request_ip: str | None = None,
-        **kwargs: Any,
-    ) -> Result[dict[str, Any], str]:
-        """
-        🔒 Secure request to join existing customer with enumeration prevention
-        """
-
-        try:
-            # Input validation handled by decorator
-
-            # Step 1: Secure company lookup (timing-safe)
-            existing_customer = cls._find_customer_by_identifier_secure(
-                company_identifier, identification_type, request_ip
-            )
-
-            if not existing_customer:
-                # Generic error message (no enumeration)
-                log_security_event(
-                    "join_request_invalid_company",
-                    {
-                        "identifier_type": identification_type,
-                        "identifier_hash": hashlib.sha256(company_identifier.encode()).hexdigest()[:16],
-                    },
-                    request_ip,
-                )
-                return Err(SecureErrorHandler.safe_error_response(Exception("Company not found"), "validation"))
-
-            # Step 2: Create user in pending state
-            user = User.objects.create_user(
-                email=user_data["email"],
-                first_name=user_data["first_name"],
-                last_name=user_data["last_name"],
-                phone=user_data.get("phone", ""),
-                accepts_marketing=user_data.get("accepts_marketing", False),
-                gdpr_consent_date=user_data.get("gdpr_consent_date"),
-                is_active=False,  # 🚨 Pending approval
-            )
-
-            # Step 3: Create pending membership request
-            membership = CustomerMembership.objects.create(
-                user=user,
-                customer=existing_customer,
-                role="viewer",  # Default safe role
-                is_primary=False,
-            )
-
-            # Step 4: Secure notification to owners
-            cls._notify_owners_of_join_request_secure(existing_customer, user, request_ip)
-
-            log_security_event(
-                "join_request_created",
-                {"user_id": user.id, "customer_id": existing_customer.id, "pending_approval": True},
-                request_ip,
-            )
-
-            return Ok(
-                {"user": user, "customer": existing_customer, "membership": membership, "status": "pending_approval"}
-            )
-
-        except Exception as e:
-            return Err(SecureErrorHandler.safe_error_response(e, "join_request"))
-
-    @classmethod
-    def _send_welcome_email_secure(cls, user: User, customer: Customer, request_ip: str | None = None) -> bool:
-        """🔒 Secure welcome email — delegates to shared module-level helper."""
-        return _render_and_send_welcome_email(user, customer, request_ip)
-
-    @classmethod
-    def _find_customer_by_identifier_secure(
-        cls, identifier: str, identification_type: str, request_ip: str | None = None
-    ) -> Customer | None:
-        """
-        🔒 Timing-safe customer lookup preventing enumeration attacks
-        """
-        start_time = time.time()
-
-        try:
-            # Input validation
-            if not identifier or len(identifier) > IDENTIFIER_MAX_LENGTH:
-                return None
-
-            try:
-                SecureInputValidator._check_malicious_patterns(identifier)
-            except ValidationError:
-                # Malicious pattern detected, return None without revealing details
-                return None
-
-            # Rate limit lookups
-            cache_key = f"customer_lookup:{request_ip or 'unknown'}"
-            lookups = cache.get(cache_key, 0)
-            if lookups >= SettingsService.get_integer_setting(
-                "security.max_customer_lookups_per_hour", 20
-            ):  # lookups per hour per IP
-                return None
-            cache.set(cache_key, lookups + 1, timeout=3600)
-
-            # Perform lookup based on type
-            customer = None
-            if identification_type == "name":
-                customer = Customer.objects.filter(company_name__iexact=identifier).first()
-            elif identification_type == "vat_number":
-                # Validate VAT format first
-                try:
-                    validated_vat = SecureInputValidator.validate_vat_number_romanian(identifier)
-                    tax_profile_manager = cast(Any, CustomerTaxProfile.objects)
-                    tax_profile = tax_profile_manager.filter(vat_number=validated_vat).first()
-                    customer = tax_profile.customer if tax_profile else None
-                except ValidationError:
-                    pass
-            elif identification_type == "registration_number":
-                # Validate CUI format first
-                try:
-                    validated_cui = SecureInputValidator.validate_cui_romanian(identifier)
-                    tax_profile_manager = cast(Any, CustomerTaxProfile.objects)
-                    tax_profile = tax_profile_manager.filter(registration_number=validated_cui).first()
-                    customer = tax_profile.customer if tax_profile else None
-                except ValidationError:
-                    pass
-
-            return customer
-
-        finally:
-            # Ensure consistent timing (prevent timing attacks)
-            elapsed = time.time() - start_time
-            if elapsed < MIN_RESPONSE_TIME_SECONDS:  # Minimum response time
-                time.sleep(MIN_RESPONSE_TIME_SECONDS - elapsed)
-
-    @classmethod
-    def _notify_owners_of_join_request_secure(
-        cls, customer: Customer, requesting_user: User, request_ip: str | None = None
-    ) -> None:
-        """
-        🔒 Secure notification to owners with rate limiting
-        """
-        try:
-            # Rate limit notifications
-            cache_key = f"join_notifications:{customer.id}"
-            notifications = cache.get(cache_key, 0)
-            if notifications >= SettingsService.get_integer_setting(
-                "security.join_request_notification_limit_per_customer_per_hour", 10
-            ):  # Max notifications per hour per customer
-                return
-            cache.set(cache_key, notifications + 1, timeout=3600)
-
-            # Get owners securely
-            owners = User.objects.filter(
-                customer_memberships__customer=customer, customer_memberships__role="owner", is_active=True
-            ).distinct()
-
-            for owner in owners:
-                send_mail(
-                    subject=_("[PRAHO] New Access Request for {company}").format(company=customer.company_name),
-                    message=_("A user has requested access to your organization. Please review in your dashboard."),
-                    from_email=get_default_from_email(),
-                    recipient_list=[owner.email],
-                    fail_silently=True,  # Don't fail the whole process if email fails
-                )
-
-            log_security_event(
-                "join_request_notifications_sent",
-                {"customer_id": customer.id, "requesting_user_id": requesting_user.id, "owners_notified": len(owners)},
-                request_ip,
-            )
-
-        except Exception as e:
-            logger.error(f"📧 [Secure Notification] Failed to notify owners: {e!s}")
 
 
 # ===============================================================================
@@ -1003,66 +793,6 @@ class SecureCustomerUserService:
     # ===============================================================================
 
     @classmethod
-    def _find_customer_by_identifier_secure(
-        cls, identifier: str, identification_type: str, request_ip: str | None = None
-    ) -> Customer | None:
-        """
-        🔒 Timing-safe customer lookup preventing enumeration attacks
-        """
-        start_time = time.time()
-
-        try:
-            # Input validation
-            if not identifier or len(identifier) > IDENTIFIER_MAX_LENGTH:
-                return None
-
-            try:
-                SecureInputValidator._check_malicious_patterns(identifier)
-            except ValidationError:
-                # Malicious pattern detected, return None without revealing details
-                return None
-
-            # Rate limit lookups
-            cache_key = f"customer_lookup:{request_ip or 'unknown'}"
-            lookups = cache.get(cache_key, 0)
-            if lookups >= SettingsService.get_integer_setting(
-                "security.max_customer_lookups_per_hour", 20
-            ):  # lookups per hour per IP
-                return None
-            cache.set(cache_key, lookups + 1, timeout=3600)
-
-            # Perform lookup based on type
-            customer = None
-            if identification_type == "name":
-                customer = Customer.objects.filter(company_name__iexact=identifier).first()
-            elif identification_type == "vat_number":
-                # Validate VAT format first
-                try:
-                    validated_vat = SecureInputValidator.validate_vat_number_romanian(identifier)
-                    tax_profile_manager = cast(Any, CustomerTaxProfile.objects)
-                    tax_profile = tax_profile_manager.filter(vat_number=validated_vat).first()
-                    customer = tax_profile.customer if tax_profile else None
-                except ValidationError:
-                    pass
-            elif identification_type == "registration_number":
-                # Validate CUI format first
-                try:
-                    validated_cui = SecureInputValidator.validate_cui_romanian(identifier)
-                    tax_profile_manager = cast(Any, CustomerTaxProfile.objects)
-                    tax_profile = tax_profile_manager.filter(registration_number=validated_cui).first()
-                    customer = tax_profile.customer if tax_profile else None
-                except ValidationError:
-                    pass
-
-            return customer
-
-        finally:
-            # Ensure consistent timing (prevent timing attacks)
-            elapsed = time.time() - start_time
-            if elapsed < MIN_RESPONSE_TIME_SECONDS:  # Minimum response time
-                time.sleep(MIN_RESPONSE_TIME_SECONDS - elapsed)
-
-    @classmethod
     def _send_welcome_email_secure(cls, user: User, customer: Customer, request_ip: str | None = None) -> bool:
         """🔒 Secure welcome email — delegates to shared module-level helper."""
         return _render_and_send_welcome_email(user, customer, request_ip)
@@ -1104,46 +834,6 @@ class SecureCustomerUserService:
         except Error:
             logger.error("🔥 [Welcome Invite] Counter store unavailable", exc_info=True)
             return False
-
-    @classmethod
-    def _notify_owners_of_join_request_secure(
-        cls, customer: Customer, requesting_user: User, request_ip: str | None = None
-    ) -> None:
-        """
-        🔒 Secure notification to owners with rate limiting
-        """
-        try:
-            # Rate limit notifications
-            cache_key = f"join_notifications:{customer.id}"
-            notifications = cache.get(cache_key, 0)
-            if notifications >= SettingsService.get_integer_setting(
-                "security.join_request_notification_limit_per_customer_per_hour", 10
-            ):  # Max notifications per hour per customer
-                return
-            cache.set(cache_key, notifications + 1, timeout=3600)
-
-            # Get owners securely
-            owners = User.objects.filter(
-                customer_memberships__customer=customer, customer_memberships__role="owner", is_active=True
-            ).distinct()
-
-            for owner in owners:
-                send_mail(
-                    subject=_("[PRAHO] New Access Request for {company}").format(company=customer.company_name),
-                    message=_("A user has requested access to your organization. Please review in your dashboard."),
-                    from_email=get_default_from_email(),
-                    recipient_list=[owner.email],
-                    fail_silently=True,  # Don't fail the whole process if email fails
-                )
-
-            log_security_event(
-                "join_request_notifications_sent",
-                {"customer_id": customer.id, "requesting_user_id": requesting_user.id, "owners_notified": len(owners)},
-                request_ip,
-            )
-
-        except Exception as e:
-            logger.error(f"📧 [Secure Notification] Failed to notify owners: {e!s}")
 
     @classmethod
     def _send_invitation_email_secure(

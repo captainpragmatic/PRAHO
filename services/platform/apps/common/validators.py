@@ -12,23 +12,15 @@ from datetime import datetime
 from functools import wraps
 from typing import Any, TypeVar, cast
 
-from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from apps.common.constants import COMPANY_NAME_MIN_LENGTH
 from apps.common.types import (
-    CUIString,
     EmailAddress,
-    Err,
-    VATString,
-    validate_romanian_cui,
 )
-from apps.customers.customer_models import Customer
-from apps.customers.profile_models import CustomerTaxProfile
 from apps.users.models import CustomerMembership, User
 
 logger = logging.getLogger(__name__)
@@ -36,10 +28,6 @@ logger = logging.getLogger(__name__)
 # ===============================================================================
 # SECURITY CONSTANTS
 # ===============================================================================
-
-# Rate limiting thresholds — defaults; authoritative source is SettingsService
-_DEFAULT_RATE_LIMIT_COMPANY_CHECK_PER_IP = 30  # per hour
-
 
 # Registration resolves its live limit through SecurityConfig in security_decorators.
 
@@ -204,55 +192,6 @@ class SecureInputValidator:
         return name
 
     @staticmethod
-    def validate_vat_number_romanian(vat_number: str) -> VATString:
-        """Romanian VAT number validation"""
-        if not vat_number:
-            return VATString("")  # VAT is optional for some business types
-
-        if not isinstance(vat_number, str):
-            raise ValidationError(_("Invalid input format"))
-
-        # Length check
-        if len(vat_number) > MAX_VAT_NUMBER_LENGTH:
-            raise ValidationError(_("Input too long"))
-
-        # XSS/injection check
-        SecureInputValidator._check_malicious_patterns(vat_number)
-
-        # Normalize
-        vat_number = vat_number.strip().upper()
-
-        # Romanian VAT format validation
-        if not re.match(ROMANIAN_VAT_PATTERN, vat_number):
-            raise ValidationError(_("Invalid Romanian VAT number format"))
-
-        return VATString(vat_number)
-
-    @staticmethod
-    def validate_cui_romanian(cui: str) -> CUIString:
-        """Romanian CUI (Company Unique Identifier) validation - delegating to types module"""
-        if not cui:
-            return CUIString("")  # CUI might be optional for some business types
-
-        if not isinstance(cui, str):
-            raise ValidationError(_("Invalid input format"))
-
-        # Length check: up to 10 digits, after an optional RO prefix
-        if len(cui.removeprefix("RO").removeprefix("ro")) > MAX_CUI_LENGTH:
-            raise ValidationError(_("Input too long"))
-
-        # XSS/injection check
-        SecureInputValidator._check_malicious_patterns(cui)
-
-        # Use centralized validation from types module
-        result = validate_romanian_cui(cui.strip())
-        if result.is_err():
-            error_result = cast(Err[str], result)
-            raise ValidationError(_(error_result.error))
-
-        return result.unwrap()
-
-    @staticmethod
     def validate_trade_registry_number(value: str) -> str:
         """A trade registry number (ONRC), e.g. J40/1234/2020: uppercase, letters, digits and / . - space.
 
@@ -268,47 +207,6 @@ class SecureInputValidator:
             raise ValidationError(_("Enter a valid trade registry number."))
         SecureInputValidator._check_malicious_patterns(normalized)
         return normalized
-
-    @staticmethod
-    def validate_cnp_romanian(cnp: str) -> str:
-        """Romanian CNP (Cod Numeric Personal) validation with security checks."""
-        if not cnp:
-            return ""
-        if not isinstance(cnp, str):
-            raise ValidationError(_("Invalid input format"))
-        if len(cnp) > MAX_PHONE_LENGTH:  # Reuse existing size limit constant
-            raise ValidationError(_("Input too long"))
-        SecureInputValidator._check_malicious_patterns(cnp)
-        from apps.common.cnp_validator import CNPValidator  # noqa: PLC0415  # Deferred: avoids circular import
-
-        result = CNPValidator.validate(cnp.strip())
-        if not result.is_valid:
-            raise ValidationError(_(result.error_message))
-        return cnp.strip()
-
-    @staticmethod
-    def validate_company_name(company_name: str) -> str:
-        """Company name validation with business logic"""
-        if not company_name or not isinstance(company_name, str):
-            raise ValidationError(_("Invalid input format"))
-
-        # Length check
-        if len(company_name) > MAX_COMPANY_NAME_LENGTH:
-            raise ValidationError(_("Company name too long"))
-
-        # XSS/injection check
-        SecureInputValidator._check_malicious_patterns(company_name)
-
-        # Business logic checks
-        if len(company_name.strip()) < COMPANY_NAME_MIN_LENGTH:
-            raise ValidationError(_("Company name too short"))
-
-        # Check for highly suspicious administrative patterns only
-        admin_patterns = [r"\badmin\b", r"\broot\b", r"\bsystem\b", r"\bsuperuser\b"]
-        if any(re.search(pattern, company_name.lower()) for pattern in admin_patterns):
-            raise ValidationError(_("Invalid company name"))
-
-        return company_name.strip()
 
     @staticmethod
     def validate_safe_url(url: str, return_pinned_ips: bool = False) -> str | tuple[str, list[str]]:
@@ -535,64 +433,6 @@ class SecureInputValidator:
         return validated_data
 
     @staticmethod
-    def validate_customer_data_dict(customer_data: dict[str, Any]) -> dict[str, Any]:
-        """
-        Comprehensive customer data validation for Romanian businesses
-        """
-        if not isinstance(customer_data, dict):
-            raise ValidationError(_("Invalid input format"))
-
-        validated_data: dict[str, Any] = {}
-
-        # Company name (required)
-        if "company_name" not in customer_data:
-            raise ValidationError(_("Required field missing"))
-        validated_data["company_name"] = SecureInputValidator.validate_company_name(customer_data["company_name"])
-
-        # Customer type validation
-        if "customer_type" in customer_data:
-            allowed_types = ["individual", "company", "srl", "pfa", "sa", "ngo", "other"]
-            customer_type = customer_data["customer_type"].lower()
-            if customer_type not in allowed_types:
-                raise ValidationError(_("Invalid customer type"))
-            validated_data["customer_type"] = customer_type
-
-        # VAT number (optional but validated if provided)
-        if "vat_number" in customer_data:
-            validated_data["vat_number"] = SecureInputValidator.validate_vat_number_romanian(
-                customer_data["vat_number"]
-            )
-
-        # Trade registry number (Nr. registrul comerțului, e.g. J40/1234/2020): not a CUI
-        if "registration_number" in customer_data:
-            validated_data["registration_number"] = SecureInputValidator.validate_trade_registry_number(
-                customer_data["registration_number"]
-            )
-
-        # CUI, stored as its digits (an RO prefix is accepted and dropped)
-        if customer_data.get("cui"):
-            from apps.common.cui_validator import normalize_cui_digits  # noqa: PLC0415
-
-            try:
-                validated_data["cui"] = normalize_cui_digits(str(customer_data["cui"]))
-            except ValueError as exc:
-                raise ValidationError(_("Enter a valid CUI.")) from exc
-
-        # CNP (personal numeric code), checksum verified
-        if customer_data.get("cnp"):
-            validated_data["cnp"] = SecureInputValidator.validate_cnp_romanian(str(customer_data["cnp"]))
-
-        # Address fields (optional)
-        address_fields = ["billing_address", "billing_city", "billing_postal_code"]
-        for field in address_fields:
-            if customer_data.get(field):
-                value = customer_data[field].strip()
-                SecureInputValidator._check_malicious_patterns(value)
-                validated_data[field] = value
-
-        return validated_data
-
-    @staticmethod
     def first_malicious_pattern(input_string: str) -> str | None:
         """Return the first suspicious pattern the string matches, or None. Logs nothing."""
         for pattern in SUSPICIOUS_PATTERNS:
@@ -618,59 +458,6 @@ class SecureInputValidator:
 
 class BusinessLogicValidator:
     """Business logic validation with race condition prevention"""
-
-    @staticmethod
-    @timing_safe_validator
-    def check_company_uniqueness(company_data: dict[str, Any], request_ip: str | None = None) -> None:
-        """
-        Check company uniqueness with race condition prevention
-        """
-        # Rate limiting for enumeration prevention
-        cache_key = f"company_check:{request_ip or 'unknown'}"
-        current_checks = cache.get(cache_key, 0)
-        from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
-            SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
-        )
-
-        if current_checks >= SettingsService.get_integer_setting(
-            "security.company_check_rate_limit_per_ip", _DEFAULT_RATE_LIMIT_COMPANY_CHECK_PER_IP
-        ):
-            raise ValidationError(_("Service temporarily unavailable"))
-        cache.set(cache_key, current_checks + 1, timeout=3600)
-
-        company_name = company_data.get("company_name", "").strip()
-        vat_number = company_data.get("vat_number", "").strip()
-        registration_number = company_data.get("registration_number", "").strip()
-
-        # Create deterministic hash for atomic checking
-        check_hash = hashlib.sha256(f"{company_name}:{vat_number}:{registration_number}".encode()).hexdigest()
-
-        # Atomic check with database transaction
-        with transaction.atomic():
-            # Check with SELECT FOR UPDATE to prevent race conditions
-            existing_company: Customer | None = None
-            existing_vat: CustomerTaxProfile | None = None
-            existing_reg: CustomerTaxProfile | None = None
-
-            if company_name:
-                existing_company = (
-                    Customer.objects.select_for_update().filter(company_name__iexact=company_name).first()
-                )
-
-            if vat_number:
-                existing_vat = CustomerTaxProfile.objects.select_for_update().filter(vat_number=vat_number).first()
-
-            if registration_number:
-                existing_reg = (
-                    CustomerTaxProfile.objects.select_for_update()
-                    .filter(registration_number=registration_number)
-                    .first()
-                )
-
-            # Generic error message (no enumeration)
-            if existing_company or existing_vat or existing_reg:
-                logger.warning(f"🚨 [Security] Company registration conflict: {check_hash[:16]}")
-                raise ValidationError(_("Registration validation failed"))
 
     @staticmethod
     def validate_user_permissions(user: Any, customer: Any, required_role: str = "owner") -> None:

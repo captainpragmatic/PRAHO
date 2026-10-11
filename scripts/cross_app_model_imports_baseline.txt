@@ -26,8 +26,6 @@ services/platform/apps/billing/views.py|apps.tickets.models|SupportCategory
 services/platform/apps/billing/views.py|apps.tickets.models|Ticket
 services/platform/apps/billing/views.py|apps.users.models|User
 services/platform/apps/common/decorators.py|apps.users.models|User
-services/platform/apps/common/validators.py|apps.customers.customer_models|Customer
-services/platform/apps/common/validators.py|apps.customers.profile_models|CustomerTaxProfile
 services/platform/apps/common/validators.py|apps.users.models|CustomerMembership
 services/platform/apps/common/validators.py|apps.users.models|User
 services/platform/apps/common/views.py|apps.billing.models|Invoice

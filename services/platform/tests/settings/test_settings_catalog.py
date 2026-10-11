@@ -150,7 +150,6 @@ class CatalogIntegrityTests(TestCase):
         expected_defaults = {
             "security.membership_invitation_limit_per_inviter_per_hour": 10,
             "security.welcome_invite_limit_per_target_per_hour": 3,
-            "security.join_request_notification_limit_per_customer_per_hour": 10,
         }
 
         for key, expected_default in expected_defaults.items():

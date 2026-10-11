@@ -4,175 +4,15 @@ Tests critical Romanian business compliance and security validation.
 """
 
 from decimal import Decimal
-from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 
 from apps.common.tax_service import calculate_romanian_vat
-from apps.common.types import CUIString, EmailAddress, VATString
 from apps.common.validators import (
-    MAX_CUI_LENGTH,
     MAX_EMAIL_LENGTH,
-    MAX_VAT_NUMBER_LENGTH,
     SecureInputValidator,
 )
-
-
-class TestRomanianCUIValidation(TestCase):
-    """Test Romanian CUI (Company Unique Identifier) validation"""
-
-    def test_valid_cui_formats(self):
-        """Test valid Romanian CUI formats"""
-        valid_cuis = [
-            '12345678',      # 8 digits
-            '123456789',     # 9 digits
-            '1234567890',    # 10 digits
-            '12',            # Two digits (minimum)
-        ]
-
-        for cui in valid_cuis:
-            result = SecureInputValidator.validate_cui_romanian(cui)
-            self.assertEqual(result, cui)
-            self.assertIsInstance(result, str)
-
-    def test_invalid_cui_formats(self):
-        """Test invalid Romanian CUI formats"""
-        invalid_cuis_and_errors = [
-            ('1', ['CUI must have 2-10 digits']),                    # Too short (1 digit)
-            ('12345678901', ['Input too long']),                     # Too long (11 digits) - length check happens first
-            ('abc123', ['CUI must contain only digits']),            # Contains letters
-            ('123-456', ['CUI must contain only digits']),           # Contains dash
-            ('123 456', ['CUI must contain only digits']),           # Contains space
-            ('<script>alert("xss")</script>', ['Input too long']),   # XSS attempt (length check first)
-            ('DROP TABLE customers;--', ['Input too long']),         # SQL injection (length check first)
-        ]
-
-        for cui, expected_errors in invalid_cuis_and_errors:
-            with self.subTest(cui=cui):
-                with self.assertRaises(ValidationError) as context:
-                    SecureInputValidator.validate_cui_romanian(cui)
-                self.assertEqual(context.exception.messages, expected_errors)
-
-    def test_an_ro_prefix_is_accepted_and_dropped(self):
-        """A CUI is stored as its digits; an RO prefix is accepted on input and dropped."""
-        self.assertEqual(SecureInputValidator.validate_cui_romanian("RO12345678"), "12345678")
-
-    def test_cui_length_limits(self):
-        """Test CUI length validation"""
-        # Test maximum length
-        long_cui = '1' * (MAX_CUI_LENGTH + 1)
-        with self.assertRaises(ValidationError):
-            SecureInputValidator.validate_cui_romanian(long_cui)
-
-        # Test empty string (should return empty CUIString)
-        result = SecureInputValidator.validate_cui_romanian('')
-        self.assertEqual(result, CUIString(''))
-
-    def test_cui_type_validation(self):
-        """Test CUI input type validation"""
-        # Test non-string input - integers should raise ValidationError
-        with self.assertRaises(ValidationError) as context:
-            SecureInputValidator.validate_cui_romanian(12345678)  # type: ignore
-        self.assertEqual(context.exception.messages, ['Invalid input format'])
-
-        # Test None input - this should be allowed and return empty string
-        result = SecureInputValidator.validate_cui_romanian(None)  # type: ignore
-        self.assertEqual(result, CUIString(''))
-
-    def test_cui_security_patterns(self):
-        """Test CUI validation against malicious patterns"""
-        malicious_cuis = [
-            '<script>',
-            'javascript:alert(1)',
-            'SELECT * FROM',
-            'UNION SELECT',
-            'DROP TABLE',
-            '/* comment */',
-            'eval(',
-            'exec(',
-        ]
-
-        for cui in malicious_cuis:
-            with self.assertRaises(ValidationError):
-                SecureInputValidator.validate_cui_romanian(cui)
-
-
-class TestRomanianVATValidation(TestCase):
-    """Test Romanian VAT number validation"""
-
-    def test_valid_vat_formats(self):
-        """Test valid Romanian VAT formats"""
-        valid_vats = [
-            'RO12345678',      # Standard format
-            'RO123456789',     # 9 digits
-            'RO1234567890',    # 10 digits
-            'ro12345678',      # Lowercase (should be normalized)
-        ]
-
-        expected_results = [
-            'RO12345678',
-            'RO123456789',
-            'RO1234567890',
-            'RO12345678',
-        ]
-
-        for vat, expected in zip(valid_vats, expected_results):
-            result = SecureInputValidator.validate_vat_number_romanian(vat)
-            self.assertEqual(result, expected)
-            self.assertIsInstance(result, str)
-
-    def test_invalid_vat_formats(self):
-        """Test invalid Romanian VAT formats"""
-        invalid_vats = [
-            '12345678',                       # Missing RO prefix
-            'RO1',                           # Too short
-            'RO12345678901',                 # Too long
-            'DE12345678',                    # Wrong country code
-            'ROABC12345',                    # Contains letters in number
-            'RO 12345678',                   # Contains space
-            'RO-12345678',                   # Contains dash
-            '<script>alert("xss")</script>', # XSS attempt
-            'RO; DROP TABLE customers;--',   # SQL injection
-        ]
-
-        for vat in invalid_vats:
-            with self.assertRaises(ValidationError):
-                SecureInputValidator.validate_vat_number_romanian(vat)
-
-    def test_vat_length_limits(self):
-        """Test VAT number length validation"""
-        # Test maximum length
-        long_vat = 'RO' + '1' * (MAX_VAT_NUMBER_LENGTH)
-        with self.assertRaises(ValidationError):
-            SecureInputValidator.validate_vat_number_romanian(long_vat)
-
-        # Test empty string (should return empty VATString)
-        result = SecureInputValidator.validate_vat_number_romanian('')
-        self.assertEqual(result, VATString(''))
-
-    def test_vat_type_validation(self):
-        """Test VAT input type validation"""
-        # Test non-string input - integers should raise ValidationError
-        with self.assertRaises(ValidationError) as context:
-            SecureInputValidator.validate_vat_number_romanian(12345678)  # type: ignore
-        self.assertEqual(context.exception.messages, ['Invalid input format'])
-
-        # Test None input - this should be allowed and return empty string
-        result = SecureInputValidator.validate_vat_number_romanian(None)  # type: ignore
-        self.assertEqual(result, VATString(''))
-
-    def test_vat_case_normalization(self):
-        """Test VAT number case normalization"""
-        test_cases = [
-            ('ro12345678', 'RO12345678'),
-            ('Ro12345678', 'RO12345678'),
-            ('RO12345678', 'RO12345678'),
-        ]
-
-        for input_vat, expected in test_cases:
-            result = SecureInputValidator.validate_vat_number_romanian(input_vat)
-            self.assertEqual(result, expected)
 
 
 class TestEmailValidation(TestCase):
@@ -298,40 +138,6 @@ class TestNameValidation(TestCase):
             self.assertEqual(result, name)
 
 
-class TestCompanyNameValidation(TestCase):
-    """Test company name validation"""
-
-    def test_valid_company_names(self):
-        """Test valid Romanian company names"""
-        valid_names = [
-            'SC Test SRL',
-            'ACME Corp & Co.',
-            'Măceșul Roșu SA',
-            'IT Solutions "Alpha"',
-            'Compania Națională de Drumuri SA',
-            'S.C. PRAHO Platform S.R.L.',
-        ]
-
-        for name in valid_names:
-            result = SecureInputValidator.validate_company_name(name)
-            self.assertEqual(result, name.strip())
-
-    def test_invalid_company_names(self):
-        """Test invalid company names"""
-        invalid_names_and_errors = [
-            ('', ['Invalid input format']),                        # Empty
-            ('A', ['Company name too short']),                     # Too short
-            ('<script>alert("xss")</script>', ['Invalid input detected']),  # XSS
-            ('Company; DROP TABLE customers;--', ['Invalid input detected']),  # SQL injection
-            ('Test\nCompany', ['Invalid input detected']),         # Newlines
-            # Note: Tabs are apparently allowed, so we remove that test case
-        ]
-
-        for name, expected_errors in invalid_names_and_errors:
-            with self.subTest(name=name):
-                with self.assertRaises(ValidationError) as context:
-                    SecureInputValidator.validate_company_name(name)
-                self.assertEqual(context.exception.messages, expected_errors)
 
 
 class TestRoleValidation(TestCase):

@@ -250,6 +250,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **Three security settings that changed nothing:** "Company check rate limit per ip", "Join-request notification limit" and "Max customer lookups per hour". They were read only by a join-request and company-lookup path that no page, API endpoint or task called. That path is removed too, along with a staff onboarding form nothing rendered. The lookup also had a bug that would have mattered if anything called it: it searched trade registry numbers with a CUI.
 - The Ansible Docker role (`deploy/ansible/roles/praho` and `roles/docker`), its playbooks
   (`single-server.yml`, `two-servers.yml`, and `rollback.yml`, which only worked with it),
   `inventory/two-servers.yml`, and the `make deploy-dev` and `make ansible-two-servers` targets. It
