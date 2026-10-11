@@ -201,7 +201,6 @@ FILE_SIZE_CONVERSION_FACTOR_FLOAT: Final[float] = 1024.0  # Float version for pr
 # Display limits for admin interfaces
 ADMIN_DISPLAY_ITEM_LIMIT: Final[int] = 5  # Items shown before truncation
 USER_AGENT_DISPLAY_LIMIT: Final[int] = 50  # Characters shown for user agent
-IDENTIFIER_MAX_LENGTH: Final[int] = 200  # Maximum identifier length
 
 # ===============================================================================
 # SUCCESS RATES & THRESHOLDS 📊
@@ -222,19 +221,12 @@ HTTP_CLIENT_ERROR_THRESHOLD: Final[int] = 400  # Start of 4xx client errors
 # RATE LIMITING & SECURITY THRESHOLDS 🚨
 # ===============================================================================
 
-# Customer service rate limits
-MAX_CUSTOMER_LOOKUPS_PER_HOUR: Final[int] = (
-    20  # DEPRECATED: use SettingsService.get_integer_setting("security.max_customer_lookups_per_hour")
-)
-MAX_JOIN_NOTIFICATIONS_PER_HOUR: Final[int] = 10  # Join notifications per customer per hour
-
 # Suspicious activity detection
 SUSPICIOUS_IP_THRESHOLD: Final[int] = (
     3  # DEPRECATED: use SettingsService.get_integer_setting("security.suspicious_ip_threshold")
 )
 
 # Timing attack prevention
-MIN_RESPONSE_TIME_SECONDS: Final[float] = 0.1  # Minimum response time to prevent timing attacks
 
 # Backup code management
 BACKUP_CODE_LENGTH: Final[int] = 8  # Standard backup code length
@@ -256,7 +248,6 @@ ROMANIAN_PLURAL_MANY_MIN: Final[int] = 20  # Start of "many" plural form
 
 # Security decorator function argument positions (implementation details)
 USER_DATA_ARG_POSITION: Final[int] = 2  # args[1] - user data dictionary position
-CUSTOMER_DATA_ARG_POSITION: Final[int] = 3  # args[2] - customer data dictionary position
 INVITER_ARG_POSITION: Final[int] = 1  # args[0] - inviter position
 INVITEE_EMAIL_ARG_POSITION: Final[int] = 2  # args[1] - invitee email position
 INVITATION_CUSTOMER_ARG_POSITION: Final[int] = 3  # args[2] - customer position in invitations
@@ -267,7 +258,6 @@ INVITATION_ROLE_ARG_POSITION: Final[int] = 4  # args[3] - role position in invit
 # ===============================================================================
 
 # Company and business validation
-COMPANY_NAME_MIN_LENGTH: Final[int] = 2  # Minimum company name length
 SEARCH_QUERY_MIN_LENGTH: Final[int] = 2  # Minimum search query length
 
 # Email format validation

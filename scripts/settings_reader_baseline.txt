@@ -117,7 +117,6 @@ billing.fx.pairs|_compute_fx_freshness|1
 billing.fx.stale_after_days|_compute_fx_freshness|1
 
 @ services/platform/apps/common/validators.py
-security.company_check_rate_limit_per_ip|BusinessLogicValidator.check_company_uniqueness|1
 
 @ services/platform/apps/customers/credit_service.py
 billing.credit_consecutive_bonus_12|CustomerCreditService.update_credit_score|1
@@ -303,9 +302,6 @@ tickets.max_file_size_bytes|_is_file_size_valid|1
 tickets.max_file_size_bytes|_process_ticket_attachments|1
 
 @ services/platform/apps/users/services.py
-security.join_request_notification_limit_per_customer_per_hour|SecureCustomerUserService._notify_owners_of_join_request_secure|1
-security.max_customer_lookups_per_hour|SecureCustomerUserService._find_customer_by_identifier_secure|1
-security.max_customer_lookups_per_hour|SecureUserRegistrationService._find_customer_by_identifier_secure|1
 security.suspicious_ip_threshold|SessionSecurityService.detect_suspicious_activity|1
 
 @ services/platform/apps/users/tasks.py

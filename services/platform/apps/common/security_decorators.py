@@ -18,7 +18,6 @@ from django.utils.translation import gettext_lazy as _
 
 from apps.common import counters
 from apps.common.constants import (
-    CUSTOMER_DATA_ARG_POSITION,
     INVITATION_CUSTOMER_ARG_POSITION,
     INVITATION_ROLE_ARG_POSITION,
     INVITEE_EMAIL_ARG_POSITION,
@@ -177,14 +176,6 @@ def secure_user_registration(
     )
 
 
-def secure_customer_operation(requires_owner: bool = False) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    """Security decorator for customer-related operations"""
-    permission = "owner" if requires_owner else "viewer"
-    return secure_service_method(
-        validation_type="customer_data", requires_permission=permission, log_attempts=True, prevent_timing_attacks=True
-    )
-
-
 def secure_invitation_system() -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Security decorator for invitation system"""
     return secure_service_method(
@@ -294,8 +285,6 @@ def _execute_security_checks(
     # 2. Input Validation
     if config.validation_type == "user_registration":
         _validate_user_registration_input(args, kwargs)
-    elif config.validation_type == "customer_data":
-        _validate_customer_data_input(args, kwargs)
     elif config.validation_type == "invitation":
         _validate_invitation_input(args, kwargs)
 
@@ -422,23 +411,6 @@ def _validate_user_registration_input(args: tuple[Any, ...], kwargs: dict[str, A
         SecureInputValidator.validate_user_data_dict(user_data)
         # Validation is complete - the service method will use the original args
         # Don't modify kwargs to avoid positional/keyword argument conflicts
-
-
-def _validate_customer_data_input(args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
-    """Validate customer data input"""
-    customer_data = None
-    if len(args) >= CUSTOMER_DATA_ARG_POSITION and isinstance(args[2], dict):
-        customer_data = args[2]
-    elif "customer_data" in kwargs:
-        customer_data = kwargs["customer_data"]
-
-    if customer_data:
-        validated_customer_data = SecureInputValidator.validate_customer_data_dict(customer_data)
-        # Validation is complete - the service method will use the original args
-        # Don't modify kwargs to avoid positional/keyword argument conflicts
-
-        # Also check business logic constraints
-        BusinessLogicValidator.check_company_uniqueness(validated_customer_data, kwargs.get("request_ip"))
 
 
 def _validate_invitation_input(args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:

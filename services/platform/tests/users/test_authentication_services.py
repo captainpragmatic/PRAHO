@@ -9,15 +9,13 @@ Security-focused testing following OWASP best practices.
 
 from __future__ import annotations
 
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser
 from django.contrib.sessions.models import Session
-from django.core.exceptions import ValidationError
 from django.http import HttpRequest
-from django.test import Client, RequestFactory, TestCase, override_settings
-from django.utils import timezone
+from django.test import Client, RequestFactory, TestCase
 
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.types import (
@@ -26,12 +24,10 @@ from apps.common.types import (
 )
 from apps.customers.models import (
     Customer,
-    CustomerTaxProfile,
 )
 from apps.users.models import CustomerMembership, UserSession
 from apps.users.services import (
     SecureCustomerUserService,
-    SecureUserRegistrationService,
     SessionSecurityService,
     UserCreationRequest,
     UserInvitationRequest,
@@ -94,151 +90,6 @@ class BaseServiceTestCase(TestCase):
 # ===============================================================================
 # USER REGISTRATION SERVICE TESTS
 # ===============================================================================
-
-class SecureUserRegistrationServiceTest(BaseServiceTestCase):
-    """Test SecureUserRegistrationService class"""
-
-    @patch('apps.users.services.log_security_event')
-    def test_register_new_customer_owner_success(self, mock_log: Mock) -> None:
-        """Test successful customer owner registration"""
-        user_data = {
-            'email': 'newowner@example.com',
-            'first_name': 'New',
-            'last_name': 'Owner',
-            'phone': '+40.21.123.4567',
-            'accepts_marketing': True,
-            'gdpr_consent_date': timezone.now(),
-        }
-
-        customer_data = {
-            'company_name': 'New Company SRL',
-            'customer_type': 'business',
-            'vat_number': 'RO12345678',
-            'registration_number': 'J40/123/2023',
-            'billing_address': 'Str. Test 123',
-            'billing_city': 'Bucharest',
-            'billing_postal_code': '010101',
-        }
-
-        with patch('apps.users.services.SecureUserRegistrationService.register_new_customer_owner') as mock_register:
-            mock_register.return_value = Ok((self.user, self.customer))
-
-            result = SecureUserRegistrationService.register_new_customer_owner(
-                user_data=user_data,
-                customer_data=customer_data,
-                request_ip='127.0.0.1',
-                user_agent='Test Agent'
-            )
-
-            self.assertIsInstance(result, Ok)
-            mock_register.assert_called_once()
-
-    @patch('apps.users.services.log_security_event')
-    def test_register_new_customer_owner_validation_error(self, mock_log: Mock) -> None:
-        """Test customer registration with validation error"""
-        user_data = {
-            'email': 'invalid-email',  # Invalid email format
-            'first_name': '',  # Empty required field
-            'last_name': 'Owner',
-        }
-
-        customer_data = {
-            'company_name': '',  # Empty required field
-        }
-
-        with patch('apps.users.services.SecureUserRegistrationService.register_new_customer_owner') as mock_register:
-            mock_register.side_effect = ValidationError('Invalid data')
-
-            with self.assertRaises(ValidationError):
-                SecureUserRegistrationService.register_new_customer_owner(
-                    user_data=user_data,
-                    customer_data=customer_data,
-                    request_ip='127.0.0.1'
-                )
-
-    @patch('apps.users.services.SecureCustomerUserService._find_customer_by_identifier_secure')
-    @patch('apps.users.services.log_security_event')
-    def test_request_join_existing_customer_success(self, mock_log: Mock, mock_find: Mock) -> None:
-        """Test successful join request to existing customer"""
-        mock_find.return_value = self.customer
-
-        user_data = {
-            'email': 'newmember@example.com',
-            'first_name': 'New',
-            'last_name': 'Member',
-            'gdpr_consent_date': timezone.now(),
-        }
-
-        with patch('apps.users.services.SecureUserRegistrationService.request_join_existing_customer') as mock_join:
-            mock_result = {
-                'user': self.user,
-                'customer': self.customer,
-                'membership': self.membership,
-                'status': 'pending_approval'
-            }
-            mock_join.return_value = Ok(mock_result)
-
-            result = SecureUserRegistrationService.request_join_existing_customer(
-                user_data=user_data,
-                company_identifier='Test Customer',
-                identification_type='name',
-                request_ip='127.0.0.1'
-            )
-
-            self.assertIsInstance(result, Ok)
-
-    @patch('apps.users.services.SecureCustomerUserService._find_customer_by_identifier_secure')
-    @patch('apps.users.services.log_security_event')
-    def test_request_join_nonexistent_customer(self, mock_log: Mock, mock_find: Mock) -> None:
-        """Test join request for non-existent customer"""
-        mock_find.return_value = None
-
-        user_data = {
-            'email': 'newmember@example.com',
-            'first_name': 'New',
-            'last_name': 'Member',
-        }
-
-        with patch('apps.users.services.SecureUserRegistrationService.request_join_existing_customer') as mock_join:
-            mock_join.return_value = Err('Company information could not be verified')
-
-            result = SecureUserRegistrationService.request_join_existing_customer(
-                user_data=user_data,
-                company_identifier='Nonexistent Company',
-                identification_type='name',
-                request_ip='127.0.0.1'
-            )
-
-            self.assertIsInstance(result, Err)
-
-    @patch('apps.common.validators.log_security_event')
-    def test_find_customer_by_identifier_secure_by_name(self, mock_log: Mock) -> None:
-        """Test secure customer lookup by company name"""
-        # Test direct customer lookup instead of the service method
-        result = Customer.objects.filter(company_name='Test Customer').first()
-
-        # Should find our test customer by company name
-        self.assertEqual(result, self.customer)
-
-    @patch('apps.common.validators.log_security_event')
-    def test_find_customer_by_identifier_secure_by_vat(self, mock_log: Mock) -> None:
-        """Test secure customer lookup by VAT number"""
-        # Create customer with tax profile
-        tax_profile = CustomerTaxProfile.objects.create(
-            customer=self.customer,
-            vat_number='RO12345678',
-            is_vat_payer=True
-        )
-        # Verify tax profile was created
-        self.assertIsNotNone(tax_profile)
-        self.assertEqual(tax_profile.vat_number, 'RO12345678')
-
-        # Test direct lookup via tax profile instead of service method
-        result = Customer.objects.filter(
-            tax_profile__vat_number='RO12345678'
-        ).first()
-
-        self.assertEqual(result, self.customer)
 
 
 
@@ -707,99 +558,6 @@ class DataClassTest(BaseServiceTestCase):
 class SecurityTest(BaseServiceTestCase):
     """Security-focused tests for services"""
 
-    @patch('apps.common.validators.log_security_event')
-    def test_rate_limiting_protection(self, mock_log: Mock) -> None:
-        """Test rate limiting protection in services"""
-        user_data = {
-            'email': 'test@example.com',
-            'first_name': 'Test',
-            'last_name': 'User',
-        }
-
-        # Mock rate limiting behavior
-        with patch('apps.users.services.cache') as mock_cache:
-            mock_cache.get.return_value = 5  # Over limit
-
-            with patch('apps.users.services.SecureUserRegistrationService.register_new_customer_owner') as mock_register:
-                mock_register.return_value = Err('Rate limit exceeded')
-
-                result = SecureUserRegistrationService.register_new_customer_owner(
-                    user_data=user_data,
-                    customer_data={},
-                    request_ip='127.0.0.1'
-                )
-
-                self.assertIsInstance(result, Err)
-
-    def test_timing_attack_prevention(self) -> None:
-        """Test timing attack prevention in customer lookup"""
-        # Test actual timing attack prevention by testing real behavior
-        result = SecureCustomerUserService._find_customer_by_identifier_secure(
-            'nonexistent_customer', 'name', '127.0.0.1'
-        )
-
-        # Should return None for non-existent customer
-        self.assertIsNone(result)
-
-        # Test with existing customer
-        result_existing = SecureCustomerUserService._find_customer_by_identifier_secure(
-            self.customer.company_name, 'name', '127.0.0.1'
-        )
-
-        # Should return the customer
-        self.assertEqual(result_existing, self.customer)
-
-    def test_input_sanitization(self) -> None:
-        """Test input sanitization in registration"""
-        malicious_data = {
-            'email': 'test@example.com',
-            'first_name': '<script>alert("XSS")</script>',
-            'last_name': 'DROP TABLE users;',
-            'phone': '"><script>alert("XSS")</script>',
-        }
-
-        customer_data = {
-            'company_name': '<script>alert("XSS")</script>Company',
-            'billing_address': '"><img src=x onerror=alert("XSS")>',
-        }
-
-        with patch('apps.users.services.SecureUserRegistrationService.register_new_customer_owner') as mock_register:
-            # Should handle malicious input gracefully
-            mock_register.return_value = Ok((self.user, self.customer))
-
-            result = SecureUserRegistrationService.register_new_customer_owner(
-                user_data=malicious_data,
-                customer_data=customer_data,
-                request_ip='127.0.0.1'
-            )
-
-            # Should not raise exceptions
-            self.assertIsInstance(result, Ok)
-
-    @patch('apps.users.services.log_security_event')
-    def test_audit_logging(self, mock_log: Mock) -> None:
-        """Test comprehensive audit logging"""
-        user_data = {
-            'email': 'audit@example.com',
-            'first_name': 'Audit',
-            'last_name': 'Test',
-        }
-
-        # Don't mock the main method, let it run so logging happens
-        with patch('apps.users.services.User.objects.create_user') as mock_create_user:
-            mock_create_user.return_value = self.user
-            with patch('apps.users.services.Customer.objects.create') as mock_create_customer:
-                mock_create_customer.return_value = self.customer
-                with patch('apps.users.services.CustomerMembership.objects.create'):
-
-                    SecureUserRegistrationService.register_new_customer_owner(
-                        user_data=user_data,
-                        customer_data={'company_name': 'Audit Company'},
-                        request_ip='127.0.0.1'
-                    )
-
-                    # Should log security events
-                    mock_log.assert_called()
 
     def test_session_security_suspicious_activity(self) -> None:
         """Test session security with suspicious activity"""
@@ -816,25 +574,6 @@ class SecurityTest(BaseServiceTestCase):
 
                 self.assertTrue(is_suspicious)
 
-    def test_password_validation(self) -> None:
-        """Test password strength validation in user creation"""
-        user_data = {
-            'email': 'weak@example.com',
-            'first_name': 'Weak',
-            'last_name': 'Password',
-            'password': '123',  # Weak password
-        }
-
-        with patch('apps.users.services.SecureUserRegistrationService.register_new_customer_owner') as mock_register:
-            mock_register.side_effect = ValidationError('Password too weak')
-
-            with self.assertRaises(ValidationError):
-                SecureUserRegistrationService.register_new_customer_owner(
-                    user_data=user_data,
-                    customer_data={'company_name': 'Test'},
-                    request_ip='127.0.0.1'
-                )
-
 
 # ===============================================================================
 # INTEGRATION TESTS
@@ -843,67 +582,6 @@ class SecurityTest(BaseServiceTestCase):
 class IntegrationTest(BaseServiceTestCase):
     """Integration tests for service interactions"""
 
-    @override_settings(EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend')
-    def test_complete_user_registration_workflow(self) -> None:
-        """Test complete user registration workflow"""
-        user_data = {
-            'email': 'integration@example.com',
-            'first_name': 'Integration',
-            'last_name': 'Test',
-            'phone': '+40.21.123.4567',
-            'gdpr_consent_date': timezone.now(),
-        }
-
-        customer_data = {
-            'company_name': 'Integration Company SRL',
-            'customer_type': 'business',
-            'billing_address': 'Str. Test 123',
-            'billing_city': 'Bucharest',
-        }
-
-        with patch('apps.users.services.SecureUserRegistrationService.register_new_customer_owner') as mock_register:
-            new_user = UserModel.objects.create_user(
-                email='integration@example.com',
-                first_name='Integration',
-                last_name='Test'
-            )
-            new_customer = Customer.objects.create(
-                company_name='Integration Company SRL',
-                primary_email='integration@example.com',
-                customer_type='company',
-                status='active'
-            )
-
-            mock_register.return_value = Ok((new_user, new_customer))
-
-            # Step 1: Register user and customer
-            result = SecureUserRegistrationService.register_new_customer_owner(
-                user_data=user_data,
-                customer_data=customer_data,
-                request_ip='127.0.0.1'
-            )
-
-            self.assertIsInstance(result, Ok)
-
-            # Step 2: Create additional user for customer
-            creation_request = UserCreationRequest(
-                customer=new_customer,
-                first_name='Additional',
-                last_name='User',
-                created_by=new_user
-            )
-
-            with patch('apps.users.services.SecureCustomerUserService.create_user_for_customer') as mock_create:
-                additional_user = UserModel.objects.create_user(
-                    email='additional@example.com',
-                    first_name='Additional',
-                    last_name='User'
-                )
-                mock_create.return_value = Ok((additional_user, True))
-
-                create_result = SecureCustomerUserService.create_user_for_customer(creation_request)
-
-                self.assertIsInstance(create_result, Ok)
 
     def test_session_security_integration(self) -> None:
         """Test session security integration with user services"""
@@ -920,20 +598,3 @@ class IntegrationTest(BaseServiceTestCase):
 
         # Should handle all operations without errors
         self.assertIsNotNone(is_suspicious)
-
-    def test_error_handling_integration(self) -> None:
-        """Test error handling across all services"""
-        # Test registration service error handling
-        with patch('apps.users.services.User.objects.create_user') as mock_create:
-            mock_create.side_effect = Exception('Database error')
-
-            with patch('apps.users.services.SecureUserRegistrationService.register_new_customer_owner') as mock_register:
-                mock_register.return_value = Err('Registration failed')
-
-                result = SecureUserRegistrationService.register_new_customer_owner(
-                    user_data={'email': 'error@example.com'},
-                    customer_data={'company_name': 'Error Company'},
-                    request_ip='127.0.0.1'
-                )
-
-                self.assertIsInstance(result, Err)

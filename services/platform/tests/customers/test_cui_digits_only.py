@@ -13,7 +13,6 @@ from django.test import SimpleTestCase, TestCase
 from apps.audit.models import ComplianceLog
 from apps.audit.services import CustomersAuditService
 from apps.common.cui_validator import CUIValidator
-from apps.common.validators import SecureInputValidator
 from apps.customers.customer_service import CustomerService
 from apps.customers.forms import CustomerCreationForm, CustomerEditForm, CustomerTaxProfileForm
 from apps.customers.models import Customer, CustomerTaxProfile
@@ -157,15 +156,6 @@ class CUIDisplayAndValidationTests(SimpleTestCase):
     def test_the_one_normaliser_returns_digits(self) -> None:
         self.assertEqual(CUIValidator.normalize(f"ro{CUI}"), CUI)
 
-    def test_customer_data_validation_tells_the_cui_from_the_trade_registry_number(self) -> None:
-        validated = SecureInputValidator.validate_customer_data_dict(
-            {"company_name": "Digits SRL", "registration_number": "J40/1234/2020", "cui": f"RO{CUI}"}
-        )
-        self.assertEqual(validated["registration_number"], "J40/1234/2020")
-        self.assertEqual(validated["cui"], CUI)
-        with self.assertRaises(ValidationError):
-            SecureInputValidator.validate_customer_data_dict({"company_name": "Digits SRL", "cui": BAD_CHECK_DIGIT})
-
 
 class CUIFollowUpTests(TestCase):
     def test_a_partial_save_stores_the_normalised_cui_it_reports(self) -> None:
@@ -176,6 +166,3 @@ class CUIFollowUpTests(TestCase):
         profile.is_vat_payer = False
         profile.save(update_fields=["is_vat_payer"])
         self.assertEqual(CustomerTaxProfile.objects.values_list("cui", flat=True).get(pk=profile.pk), "14399840")
-
-    def test_the_secure_validator_takes_a_prefixed_ten_digit_cui(self) -> None:
-        self.assertEqual(SecureInputValidator.validate_cui_romanian("RO1234567897"), "1234567897")

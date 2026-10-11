@@ -12,7 +12,6 @@ from apps.settings.services import SettingsService
 from apps.users.models import CustomerMembership, User
 from apps.users.services import (
     SecureCustomerUserService,
-    SecureUserRegistrationService,
     _render_and_send_welcome_email,
 )
 
@@ -55,15 +54,6 @@ class UserEmailSenderTests(TestCase):
     def test_welcome_sender_uses_runtime_identity(self) -> None:
         self.assert_sender(lambda: _render_and_send_welcome_email(self.user, self.customer))
 
-    def test_registration_join_request_sender_uses_runtime_identity(self) -> None:
-        self.assert_sender(
-            lambda: SecureUserRegistrationService._notify_owners_of_join_request_secure(self.customer, self.user)
-        )
-
-    def test_customer_join_request_sender_uses_runtime_identity(self) -> None:
-        self.assert_sender(
-            lambda: SecureCustomerUserService._notify_owners_of_join_request_secure(self.customer, self.user)
-        )
 
     def test_invitation_sender_uses_runtime_identity(self) -> None:
         self.assert_sender(lambda: SecureCustomerUserService._send_invitation_email_secure(self.membership, self.owner))

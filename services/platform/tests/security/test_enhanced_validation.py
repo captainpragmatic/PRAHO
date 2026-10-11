@@ -25,6 +25,7 @@ from apps.common.validators import (
 )
 from apps.customers.models import Customer, CustomerTaxProfile
 from apps.users.models import CustomerMembership
+from apps.users.pending_registration import PendingRegistration
 from apps.users.services import SecureCustomerUserService, SecureUserRegistrationService
 
 User = get_user_model()
@@ -89,81 +90,6 @@ class TestSecureInputValidator(TestCase):
             result = SecureInputValidator.validate_name_secure(name)
             self.assertEqual(result, name.strip())
 
-    def test_vat_validation_romanian_format(self):
-        """Test Romanian VAT number validation"""
-        valid_vat_numbers = [
-            'RO12345678',
-            'RO123456789',
-            'RO1234567890'
-        ]
-
-        invalid_vat_numbers = [
-            '12345678',       # Missing RO prefix
-            'RO1',           # Too short
-            'RO12345678901', # Too long
-            'DE12345678',    # Wrong country
-            '<script>alert("xss")</script>',
-            'RO; DROP TABLE customers;--'
-        ]
-
-        for vat in valid_vat_numbers:
-            result = SecureInputValidator.validate_vat_number_romanian(vat)
-            self.assertEqual(result, vat.upper())
-
-        for vat in invalid_vat_numbers:
-            with self.assertRaises(ValidationError):
-                SecureInputValidator.validate_vat_number_romanian(vat)
-
-    def test_cui_validation_romanian_format(self):
-        """Test Romanian CUI validation"""
-        valid_cuis = [
-            '12345678',
-            '123456789',
-            '1234567890'
-        ]
-
-        invalid_cuis = [
-            '1',              # Too short
-            '12345678901',    # Too long
-            '<script>alert("xss")</script>',
-            '12345678; DROP TABLE customers;--'
-        ]
-
-        for cui in valid_cuis:
-            result = SecureInputValidator.validate_cui_romanian(cui)
-            self.assertEqual(result, cui)
-
-        for cui in invalid_cuis:
-            with self.assertRaises(ValidationError):
-                SecureInputValidator.validate_cui_romanian(cui)
-
-        # An RO prefix is accepted and dropped: a CUI is stored as its digits.
-        self.assertEqual(SecureInputValidator.validate_cui_romanian('RO12345678'), '12345678')
-
-    def test_company_name_validation(self):
-        """Test company name validation"""
-        valid_names = [
-            'SC Test SRL',
-            'ACME Corp & Co.',
-            'Măceșul Roșu SA',
-            'IT Solutions "Alpha"'
-        ]
-
-        invalid_names = [
-            '',               # Empty
-            'A',             # Too short
-            '<script>alert("xss")</script>',
-            'Company; DROP TABLE customers;--',
-            'Test\nCompany'  # Newlines
-        ]
-
-        for name in valid_names:
-            result = SecureInputValidator.validate_company_name(name)
-            self.assertEqual(result, name.strip())
-
-        for name in invalid_names:
-            with self.assertRaises(ValidationError):
-                SecureInputValidator.validate_company_name(name)
 
     def test_role_validation_prevents_injection(self):
         """Test role validation prevents privilege injection"""
@@ -251,49 +177,6 @@ class TestBusinessLogicValidator(TestCase):
             registration_number='12345678'
         )
 
-    def test_company_uniqueness_check_prevents_duplicates(self):
-        """Test company uniqueness validation"""
-        duplicate_data = {
-            'company_name': 'Existing Company SRL',  # Exact match
-            'vat_number': 'RO12345678',              # Exact match
-            'registration_number': '12345678'        # Exact match
-        }
-
-        # Should raise ValidationError for all fields
-        with self.assertRaises(ValidationError):
-            BusinessLogicValidator.check_company_uniqueness(duplicate_data)
-
-        # Test case-insensitive matching
-        case_variant_data = {
-            'company_name': 'EXISTING COMPANY SRL',  # Case different
-        }
-
-        with self.assertRaises(ValidationError):
-            BusinessLogicValidator.check_company_uniqueness(case_variant_data)
-
-    def test_company_uniqueness_allows_unique_data(self):
-        """Test that unique companies are allowed"""
-        unique_data = {
-            'company_name': 'New Unique Company SRL',
-            'vat_number': 'RO87654321',
-            'registration_number': '87654321'
-        }
-
-        # Should not raise ValidationError
-        try:
-            BusinessLogicValidator.check_company_uniqueness(unique_data)
-        except ValidationError:
-            self.fail("Unique company data should be allowed")
-
-    @patch('apps.common.validators.cache')
-    def test_company_check_rate_limiting(self, mock_cache):
-        """Test rate limiting for company existence checks"""
-        mock_cache.get.return_value = 35  # Over the limit (30)
-
-        with self.assertRaises(ValidationError):
-            BusinessLogicValidator.check_company_uniqueness({
-                'company_name': 'Test Company'
-            }, '192.168.1.1')
 
     def test_user_permissions_validation(self):
         """Test user permission validation"""
@@ -401,11 +284,11 @@ class TestSecureUserRegistrationService(TestCase):
     def setUp(self):
         cache.clear()
 
-    @patch('apps.common.security_decorators.log_security_event')
+    @patch('apps.users.services.log_security_event')
     def test_registration_sets_usable_password(self, mock_log):
         """The submitted password must be set on the new user so they can authenticate.
 
-        Regression: register_new_customer_owner created the user without passing the
+        Regression: the registration core created the user without passing the
         password to create_user(), so set_password(None) left every registered user
         with an unusable password (they could never log in). #499.
         """
@@ -429,8 +312,8 @@ class TestSecureUserRegistrationService(TestCase):
             'billing_postal_code': '010101',
         }
 
-        result = SecureUserRegistrationService.register_new_customer_owner(
-            user_data=user_data, customer_data=customer_data, request_ip='192.168.1.1'
+        result = SecureUserRegistrationService.create_customer_owner_unchecked(
+            user_data, customer_data, '192.168.1.1'
         )
 
         self.assertTrue(result.is_ok(), f"registration failed: {result}")
@@ -442,7 +325,7 @@ class TestSecureUserRegistrationService(TestCase):
             "registered user cannot authenticate with the submitted password",
         )
 
-    @patch('apps.common.security_decorators.log_security_event')
+    @patch('apps.users.services.log_security_event')
     def test_secure_registration_with_valid_data(self, mock_log):
         """Test secure registration with valid Romanian business data"""
         user_data = {
@@ -465,10 +348,8 @@ class TestSecureUserRegistrationService(TestCase):
             'billing_postal_code': '010101'
         }
 
-        result = SecureUserRegistrationService.register_new_customer_owner(
-            user_data=user_data,
-            customer_data=customer_data,
-            request_ip='192.168.1.1'
+        result = SecureUserRegistrationService.create_customer_owner_unchecked(
+            user_data, customer_data, '192.168.1.1'
         )
 
         self.assertTrue(result.is_ok())
@@ -493,8 +374,8 @@ class TestSecureUserRegistrationService(TestCase):
         self.assertEqual(membership.role, 'owner')
         self.assertTrue(membership.is_primary)
 
-        # Verify security logging via decorator
-        self.assertTrue(mock_log.called)
+        # Verify the registration is logged as a security event
+        self.assertIn("customer_registration_success", [c.args[0] for c in mock_log.call_args_list])
 
     def test_registration_prevents_xss_attacks(self):
         """Test XSS prevention in registration"""
@@ -511,7 +392,7 @@ class TestSecureUserRegistrationService(TestCase):
             'customer_type': 'srl'
         }
 
-        result = SecureUserRegistrationService.register_new_customer_owner(
+        result = SecureUserRegistrationService.submit_pending_registration(
             user_data=malicious_user_data,
             customer_data=customer_data,
             request_ip='192.168.1.1'
@@ -519,6 +400,7 @@ class TestSecureUserRegistrationService(TestCase):
 
         # Decorator validates input and rejects XSS patterns
         self.assertTrue(result.is_err())
+        self.assertFalse(PendingRegistration.objects.exists())
 
     def test_registration_prevents_privilege_escalation(self):
         """Test privilege escalation prevention"""
@@ -537,7 +419,7 @@ class TestSecureUserRegistrationService(TestCase):
             'customer_type': 'srl'
         }
 
-        result = SecureUserRegistrationService.register_new_customer_owner(
+        result = SecureUserRegistrationService.submit_pending_registration(
             user_data=malicious_user_data,
             customer_data=customer_data,
             request_ip='192.168.1.1'
@@ -545,31 +427,7 @@ class TestSecureUserRegistrationService(TestCase):
 
         # Decorator detects restricted fields (is_staff, is_superuser, staff_role) and rejects
         self.assertTrue(result.is_err())
-
-    @patch('apps.common.security_decorators.cache')
-    def test_registration_rate_limiting(self, mock_cache):
-        """Test registration rate limiting"""
-        mock_cache.get.return_value = 10  # Over the limit (5)
-
-        user_data = {
-            'email': 'test@example.com',
-            'first_name': 'Test',
-            'last_name': 'User'
-        }
-
-        customer_data = {
-            'company_name': 'Test Company',
-            'customer_type': 'srl'
-        }
-
-        result = SecureUserRegistrationService.register_new_customer_owner(
-            user_data=user_data,
-            customer_data=customer_data,
-            request_ip='192.168.1.1'
-        )
-
-        # Decorator enforces rate limiting — returns error when limit exceeded
-        self.assertTrue(result.is_err())
+        self.assertFalse(PendingRegistration.objects.exists())
 
 
 class TestSecureCustomerUserService(TestCase):

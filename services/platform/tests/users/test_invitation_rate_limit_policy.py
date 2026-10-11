@@ -10,7 +10,7 @@ from django.test import TestCase, override_settings
 from apps.customers.models import Customer
 from apps.settings.services import SettingsService
 from apps.users.models import CustomerMembership, User
-from apps.users.services import SecureCustomerUserService, SecureUserRegistrationService, UserInvitationRequest
+from apps.users.services import SecureCustomerUserService, UserInvitationRequest
 
 LOCMEM_TEST_CACHE = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
 
@@ -83,20 +83,3 @@ class InvitationRateLimitPolicyTests(TestCase):
         self.assertTrue(SecureCustomerUserService.send_welcome_invite(invitee, self.customer))
         self.assertFalse(SecureCustomerUserService.send_welcome_invite(invitee, self.customer))
         self.assertEqual(mock_send.call_count, 1)
-
-    @patch("apps.users.services.send_mail")
-    def test_zero_join_request_notification_limit_blocks_owner_email(self, mock_send_mail) -> None:
-        requester = User.objects.create_user(email="requester@example.test")
-        result = SettingsService.update_setting(
-            "security.join_request_notification_limit_per_customer_per_hour",
-            0,
-        )
-        self.assertTrue(result.is_ok(), result)
-
-        SecureUserRegistrationService._notify_owners_of_join_request_secure(
-            self.customer,
-            requester,
-            request_ip="192.0.2.20",
-        )
-
-        mock_send_mail.assert_not_called()
