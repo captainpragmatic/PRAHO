@@ -835,7 +835,8 @@ def _load_registration(
     Fetched once per link and kept with it in the session, so revisiting the page or a rejected
     password does not ask Platform again. None with no notice means the link is gone.
     """
-    if isinstance(link.get("details"), dict):
+    if isinstance(link.get("details"), dict) and "terms_version" in link["details"]:
+        # Details without the terms version to accept are fetched again (Platform before #670).
         return link["details"], "", 200, None
     try:
         details = api_client.get_pending_registration(
@@ -882,6 +883,9 @@ def _confirm_registration(
                 key: value for key, value in link.items() if key != "details"
             }
             form.add_error(None, _("The Terms of Service have changed. Please read them again before confirming."))
+            # The tick was for the previous version: ask for it again.
+            form.data = form.data.copy()
+            form.data.pop("terms_accepted", None)
             return None, 409, None, ""
         if exc.status_code == HTTPStatus.BAD_REQUEST:
             errors = payload.get("errors")

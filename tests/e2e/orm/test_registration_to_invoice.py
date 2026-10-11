@@ -10,6 +10,7 @@ from django.test import override_settings
 from lxml import etree
 
 from apps.billing.efactura.xml_builder import UBLInvoiceBuilder
+from apps.orders.services import OrderService
 from tests.e2e.orm.test_signup_workflow import RegistrationCase
 from tests.e2e.orm.workflow import WorkflowCase
 
@@ -40,16 +41,10 @@ class RegistrationToInvoiceTests(RegistrationCase, WorkflowCase):
         WorkflowCase.setUp(self)
         RegistrationCase.setUp(self)
 
-    def invoice_for(self, customer, **address):
+    def invoice_for(self, customer):
+        """Order and pay as the registered customer, with the billing address the order flow builds."""
         self.customer = customer
-        self.address = {
-            **self.address,
-            "company_name": customer.company_name,
-            "fiscal_code": "",
-            "registration_number": "",
-            "vat_number": "",
-            **address,
-        }
+        self.address = dict(OrderService.build_billing_address_from_customer(customer))
         return self.pay(self.create_order())
 
     def buyer(self, invoice):
@@ -72,6 +67,6 @@ class RegistrationToInvoiceTests(RegistrationCase, WorkflowCase):
         _user, customer = self.register()
         self.assertEqual(customer.tax_profile.cui, CUI)
         self.assertFalse(customer.tax_profile.is_vat_payer)
-        party = self.buyer(self.invoice_for(customer, fiscal_code=CUI))
+        party = self.buyer(self.invoice_for(customer))
         self.assertIsNone(party.find("./cac:PartyTaxScheme", NS))
         self.assertEqual(party.findtext("./cac:PartyLegalEntity/cbc:CompanyID", namespaces=NS), CUI)

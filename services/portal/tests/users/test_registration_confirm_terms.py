@@ -5,6 +5,7 @@ Platform records the version the confirmer accepted and refuses one that is no l
 `terms_changed` forgets those details, so the next submit sends the current version.
 """
 
+import re
 from unittest.mock import patch
 
 from django.core.cache import cache
@@ -86,3 +87,23 @@ class ConfirmTermsTests(TestCase):
         self.client.post(PAGE, form(terms_accepted="on"))
         self.assertEqual(self.api.get_pending_registration.call_count, 2)
         self.assertEqual(self.api.confirm_registration.call_args.kwargs["terms_version"], NEW_VERSION)
+
+    def test_after_changed_terms_the_box_must_be_ticked_again(self) -> None:
+        self.client.get(PAGE)
+        self.api.confirm_registration.side_effect = PlatformAPIError(
+            "changed", status_code=409, response_data={"code": "terms_changed"}
+        )
+        html = self.client.post(PAGE, form(terms_accepted="on")).content.decode()
+        [checkbox] = re.findall(r"<input[^>]*name=\"terms_accepted\"[^>]*>", html, re.S)
+        self.assertNotIn("checked", checkbox)
+
+    def test_details_without_a_version_are_fetched_again_before_submitting(self) -> None:
+        # Details a Platform without terms acceptance returned: they name no version to accept.
+        stale = details()
+        del stale["registration"]["terms_version"]
+        self.api.get_pending_registration.return_value = stale
+        self.client.get(PAGE)
+        self.api.get_pending_registration.return_value = details()
+        self.api.confirm_registration.return_value = {"success": True}
+        self.client.post(PAGE, form(terms_accepted="on"))
+        self.assertEqual(self.api.confirm_registration.call_args.kwargs["terms_version"], VERSION)

@@ -20,6 +20,7 @@ DETAILS = {
         "last_name": "Marlowe",
         "company_name": "Quill Lantern SRL",
         "vat_number": "RO12345678",
+        "terms_version": "2024-12-27",  # Platform names the version to accept (#670)
     }
 }
 
@@ -79,7 +80,7 @@ class RegistrationConfirmViewTests(TestCase):
             data_processing_consent=True,
             marketing_consent=True,
             terms_accepted=True,
-            terms_version="",  # These details name no version; Platform refuses that as changed terms
+            terms_version="2024-12-27",
             client_ip="127.0.0.1",
         )
         self.assertTrue(any("can sign in now" in str(m) for m in get_messages(response.wsgi_request)))

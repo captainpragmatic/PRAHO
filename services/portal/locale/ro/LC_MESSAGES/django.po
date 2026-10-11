@@ -7895,3 +7895,7 @@ msgstr "Citiți Termenii de Serviciu"
 #: apps/users/views.py
 msgid "The Terms of Service have changed. Please read them again before confirming."
 msgstr "Termenii de Serviciu s-au modificat. Vă rugăm să îi citiți din nou înainte de confirmare."
+
+#: templates/users/register_confirm.html
+msgid "(opens in a new tab)"
+msgstr "(se deschide într-o filă nouă)"
