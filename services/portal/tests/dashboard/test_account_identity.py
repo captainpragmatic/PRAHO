@@ -26,10 +26,10 @@ class AccountIdentityContracts(SimpleTestCase):
                 self.assertNotIn(">Active<", html)
 
     def test_account_overview_unwraps_the_customer_and_tax_profile(self):
-        customer = {"id": 1, "company_name": "Știință SRL", "tax_profile": {"cui": "RO14399847"}}
+        customer = {"id": 1, "company_name": "Știință SRL", "tax_profile": {"cui": "RO14399840"}}
         with patch(
             "apps.dashboard.views.api_client.get_customer_details", return_value={"success": True, "customer": customer}
         ):
             response = account_overview_view(_authenticated_request("/dashboard/account/"))
         self.assertContains(response, "Știință SRL")
-        self.assertContains(response, "RO14399847")
+        self.assertContains(response, "RO14399840")

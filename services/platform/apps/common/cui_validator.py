@@ -4,8 +4,9 @@ Romanian CUI (Cod Unic de Identificare) validator.
 Extracted to apps.common for reuse across customers, billing, and audit apps.
 Pure Python — no Django dependencies in the core validator.
 
-CUI format: 2-10 digits, optionally prefixed with "RO" (for VAT-registered entities).
-The model field stores the RO-prefixed form (e.g., "RO12345678").
+CUI format: 2-10 digits. Input may carry an "RO" prefix, but a CUI is stored as its digits
+("12345678"): the prefix asserts VAT registration, which a CUI alone does not. The VAT number
+(CustomerTaxProfile.vat_number) carries the prefix.
 """
 
 from __future__ import annotations
@@ -19,7 +20,6 @@ CUI_CONTROL_DIVISOR = 11
 CUI_CONTROL_THRESHOLD = 10
 CUI_MIN_DIGITS = 2
 CUI_MAX_DIGITS = 10
-CUI_CHECK_DIGIT_MIN_LEN = 8  # Check digit validation applies to CUIs with 8+ digits
 
 
 @dataclass
@@ -98,24 +98,25 @@ class CUIValidator:
 
     @classmethod
     def normalize(cls, cui: str) -> str:
-        """Normalize CUI to RO-prefixed uppercase form (e.g., 'ro12345678' -> 'RO12345678')."""
+        """The stored form of a CUI: its digits ('ro12345678' -> '12345678'). Invalid input is returned as is."""
         result = cls.validate(cui)
         if not result.is_valid:
             return cui
-        return f"RO{result.digits}"
+        return result.digits
 
     @staticmethod
     def _compute_check_digit(digits_without_check: str) -> int:
-        """Compute Romanian CUI check digit using official ANAF algorithm."""
-        padded = digits_without_check.zfill(8)  # Pad body to 8 digits (weights are 9 long, last is check)
-        # zip intentionally stops at len(padded)=8; the 9th weight in CUI_WEIGHTS is for the check digit (not the body)
-        total = sum(int(d) * w for d, w in zip(padded, CUI_WEIGHTS))  # noqa: B905  # Lengths differ by design: body=8, weights=9 (9th is for check digit)
+        """ANAF check digit: the body left-padded to 9 digits, weighted by the key 753217532,
+        summed, times 10, modulo 11; a remainder of 10 gives 0.
+        """
+        padded = digits_without_check.zfill(len(CUI_WEIGHTS))
+        total = sum(int(d) * w for d, w in zip(padded, CUI_WEIGHTS, strict=True))
         remainder = (total * 10) % CUI_CONTROL_DIVISOR
-        return 0 if remainder >= CUI_CONTROL_THRESHOLD else remainder
+        return 0 if remainder == CUI_CONTROL_THRESHOLD else remainder
 
     @classmethod
     def validate_strict(cls, cui: str) -> CUIValidationResult:
-        """Validate CUI with check digit verification (for CUIs with 8+ digits).
+        """Validate CUI with ANAF check digit verification, at every length.
 
         The default validate() method stays lenient (no check digit check).
         This method is opt-in for callers that need ANAF-level correctness.
@@ -123,7 +124,7 @@ class CUIValidator:
         result = cls.validate(cui)
         if not result.is_valid:
             return result
-        if len(result.digits) >= CUI_CHECK_DIGIT_MIN_LEN:
+        if result.digits:
             body, check = result.digits[:-1], int(result.digits[-1])
             expected = cls._compute_check_digit(body)
             if check != expected:
@@ -134,6 +135,28 @@ class CUIValidator:
                     has_ro_prefix=result.has_ro_prefix,
                 )
         return result
+
+
+_ROMANIAN_CUI_SHAPE = re.compile(r"^(RO)?[0-9]{2,10}$", re.IGNORECASE)
+
+
+def is_romanian_cui(value: str | None) -> bool:
+    """Whether a stored tax ID is a Romanian CUI (digits, optionally RO-prefixed), valid or not.
+
+    The same field holds foreign tax IDs (e.g. DE999999999), so "has a value" is not "Romanian".
+    """
+    return bool(value) and bool(_ROMANIAN_CUI_SHAPE.match(str(value).strip()))
+
+
+def normalize_cui_digits(value: str) -> str:
+    """The digits of a valid CUI, check digit verified, with or without an RO prefix.
+
+    Raises ValueError with the validator's reason for anything else.
+    """
+    result = CUIValidator.validate_strict(value.strip())
+    if not result.is_valid:
+        raise ValueError(result.error_message)
+    return result.digits
 
 
 def validate_cui(value: str) -> None:

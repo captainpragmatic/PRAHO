@@ -103,16 +103,16 @@ class TestCUIValidatorBasic(TestCase):
 
 
 class TestCUIValidatorNormalize(TestCase):
-    """CUIValidator.normalize() — always produces RO-prefixed uppercase form."""
+    """CUIValidator.normalize() — the stored form: the CUI's digits, without an RO prefix."""
 
     def test_normalize_bare_digits(self) -> None:
-        self.assertEqual(CUIValidator.normalize("18189442"), "RO18189442")
+        self.assertEqual(CUIValidator.normalize("18189442"), "18189442")
 
     def test_normalize_lowercase_ro(self) -> None:
-        self.assertEqual(CUIValidator.normalize("ro18189442"), "RO18189442")
+        self.assertEqual(CUIValidator.normalize("ro18189442"), "18189442")
 
     def test_normalize_already_normalized(self) -> None:
-        self.assertEqual(CUIValidator.normalize("RO18189442"), "RO18189442")
+        self.assertEqual(CUIValidator.normalize("RO18189442"), "18189442")
 
     def test_normalize_invalid_returns_original(self) -> None:
         """Invalid CUI is returned unchanged (no crash)."""
@@ -152,10 +152,16 @@ class TestCUIValidatorStrict(TestCase):
         self.assertFalse(result.is_valid)
         self.assertIn("check digit", result.error_message.lower())
 
-    def test_short_cui_skips_check_digit(self) -> None:
-        """CUIs shorter than 8 digits skip check digit validation even in strict mode."""
-        result = CUIValidator.validate_strict("12345")
-        self.assertTrue(result.is_valid)
+    def test_short_cuis_are_checked_too(self) -> None:
+        """ANAF's check digit applies at every length: the body is left-padded to 9 digits."""
+        self.assertTrue(CUIValidator.validate_strict("12340").is_valid)
+        self.assertFalse(CUIValidator.validate_strict("12345").is_valid)
+
+    def test_published_cuis_pass(self) -> None:
+        """Pinned to real CUIs, so the formula cannot drift unnoticed."""
+        for cui in ("14399840", "18189442"):
+            with self.subTest(cui=cui):
+                self.assertTrue(CUIValidator.validate_strict(cui).is_valid)
 
     def test_strict_invalid_format_propagated(self) -> None:
         """Format failures from validate() are propagated before check digit step."""

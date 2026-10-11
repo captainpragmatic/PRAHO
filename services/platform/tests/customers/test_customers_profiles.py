@@ -53,7 +53,7 @@ class CustomerTaxProfileTestCase(TestCase):
             vat_rate=Decimal("19.00"),
         )
 
-        self.assertEqual(tax_profile.cui, "RO12345678")
+        self.assertEqual(tax_profile.cui, "12345678")  # stored as digits: an RO prefix would assert VAT registration
         self.assertEqual(tax_profile.vat_number, "RO12345678")
         self.assertTrue(tax_profile.is_vat_payer)
         self.assertEqual(tax_profile.vat_rate, Decimal("19.00"))
@@ -65,7 +65,7 @@ class CustomerTaxProfileTestCase(TestCase):
             customer=self.customer, cui="RO12345678", vat_number="RO12345678", is_vat_payer=True
         )
 
-        self.assertEqual(tax_profile.cui, "RO12345678")
+        self.assertEqual(tax_profile.cui, "12345678")  # stored as digits: an RO prefix would assert VAT registration
 
     def test_tax_profile_str_representation(self):
         """Test string representation of tax profile"""
@@ -101,7 +101,7 @@ class CustomerTaxProfileTestCase(TestCase):
 
         # Test Romanian VAT registration requirements
         self.assertTrue(tax_profile.is_vat_payer)
-        self.assertEqual(tax_profile.cui, "RO12345678")
+        self.assertEqual(tax_profile.cui, "12345678")  # stored as digits: an RO prefix would assert VAT registration
         self.assertEqual(tax_profile.vat_number, "RO12345678")
         self.assertTrue(tax_profile.validate_cui())
 
@@ -222,9 +222,7 @@ class TaxProfileAuditGatingTestCase(TestCase):
         )
 
         self.assertEqual(
-            ComplianceLog.objects.filter(
-                compliance_type="romanian_tax_registration", reference_id="RO12345678"
-            ).count(),
+            ComplianceLog.objects.filter(compliance_type="romanian_tax_registration", reference_id="12345678").count(),
             1,
         )
         self.assertEqual(self._audit_events_for(profile).count(), 0)

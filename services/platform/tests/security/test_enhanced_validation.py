@@ -125,7 +125,6 @@ class TestSecureInputValidator(TestCase):
         invalid_cuis = [
             '1',              # Too short
             '12345678901',    # Too long
-            'RO12345678',     # Has prefix (should be removed first)
             '<script>alert("xss")</script>',
             '12345678; DROP TABLE customers;--'
         ]
@@ -137,6 +136,9 @@ class TestSecureInputValidator(TestCase):
         for cui in invalid_cuis:
             with self.assertRaises(ValidationError):
                 SecureInputValidator.validate_cui_romanian(cui)
+
+        # An RO prefix is accepted and dropped: a CUI is stored as its digits.
+        self.assertEqual(SecureInputValidator.validate_cui_romanian('RO12345678'), '12345678')
 
     def test_company_name_validation(self):
         """Test company name validation"""

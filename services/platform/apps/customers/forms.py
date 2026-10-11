@@ -17,6 +17,7 @@ from django.db import transaction
 from django.forms.models import ModelChoiceField  # For form field type checking
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.cui_validator import normalize_cui_digits
 from apps.common.localisation import country_name
 from apps.common.localisation_forms import CountryDefaultsMixin
 from apps.common.localisation_services import get_localisation_defaults
@@ -39,6 +40,21 @@ else:
 
 # Constants
 MAX_RO_PREFIXED_ID_LENGTH = 12  # 'RO' + up to 10 digits
+
+
+def clean_cui_value(cui: str | None) -> str:
+    """A staff-entered CUI as its digits, with or without an RO prefix, check digit verified."""
+    if not cui:
+        return ""
+    # Security: bound the input before any parsing (ReDoS).
+    if len(cui) > MAX_RO_PREFIXED_ID_LENGTH:
+        raise ValidationError(_("CUI too long"))
+    try:
+        return normalize_cui_digits(cui)
+    except ValueError as exc:
+        raise ValidationError(_("Enter a valid CUI.")) from exc
+
+
 MAX_EU_VAT_NUMBER_LENGTH = 20  # longest EU format (country prefix included) with room for separators
 
 
@@ -231,7 +247,7 @@ class CustomerTaxProfileForm(forms.ModelForm):
             "cui": forms.TextInput(
                 attrs={
                     "class": "w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500",
-                    "placeholder": _("RO12345678"),
+                    "placeholder": "12345678",
                 }
             ),
             "vat_number": forms.TextInput(
@@ -257,22 +273,8 @@ class CustomerTaxProfileForm(forms.ModelForm):
         }
 
     def clean_cui(self) -> str:
-        """🔒 Validate Romanian CUI format with ReDoS protection and check digit validation"""
-        cui: str | None = self.cleaned_data.get("cui")
-        if cui:
-            # Security: Prevent ReDoS attacks with strict input length validation
-            if len(cui) > MAX_RO_PREFIXED_ID_LENGTH:  # RO + max 10 digits
-                raise ValidationError(_("CUI too long"))
-            # Security: Use [0-9] instead of \d to prevent unicode digit bypass
-            if not re.match(r"^RO[0-9]{6,10}$", cui):  # Romanian CUI is typically 6-10 digits
-                raise ValidationError(_("CUI must be in format RO followed by 6-10 digits"))
-            # Validate check digit for compliance
-            from apps.common.cui_validator import CUIValidator  # noqa: PLC0415
-
-            result = CUIValidator.validate_strict(cui)
-            if not result.is_valid:
-                raise ValidationError(_(result.error_message))
-        return cui or ""
+        """🔒 The CUI as its digits, check digit verified (an RO prefix is accepted and dropped)."""
+        return clean_cui_value(self.cleaned_data.get("cui"))
 
     def clean_vat_number(self) -> str:
         """🔒 Validate the VAT number: Romanian check digits, or EU format for another member state."""
@@ -564,11 +566,11 @@ class CustomerCreationForm(CountryDefaultsMixin, forms.Form):
         max_length=20,
         required=False,
         label=_("CUI/CIF"),
-        help_text=_("Format: RO12345678 (6-10 digits after RO)"),
+        help_text=_("Digits only; an RO prefix is accepted and removed."),
         widget=forms.TextInput(
             attrs={
                 "class": "w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500",
-                "placeholder": _("RO12345678"),
+                "placeholder": "12345678",
             }
         ),
     )
@@ -709,6 +711,10 @@ class CustomerCreationForm(CountryDefaultsMixin, forms.Form):
         ),
     )
 
+    def clean_cui(self) -> str:
+        """🔒 The CUI as its digits, check digit verified (an RO prefix is accepted and dropped)."""
+        return clean_cui_value(self.cleaned_data.get("cui"))
+
     def clean(self) -> dict[str, Any]:
         """Cross-field validation"""
         cleaned_data = super().clean()
@@ -717,7 +723,6 @@ class CustomerCreationForm(CountryDefaultsMixin, forms.Form):
         company_name: str | None = cleaned_data.get("company_name")
         vat_number: str | None = cleaned_data.get("vat_number")
         is_vat_payer: bool | None = cleaned_data.get("is_vat_payer")
-        cui: str | None = cleaned_data.get("cui")
         user_action: str | None = cleaned_data.get("user_action")
         existing_user: User | None = cleaned_data.get("existing_user")
         email: str | None = cleaned_data.get("email")
@@ -728,10 +733,6 @@ class CustomerCreationForm(CountryDefaultsMixin, forms.Form):
             and not company_name
         ):
             raise ValidationError(_("Company name is required for companies, PFA, and NGOs"))
-
-        # Validate CUI format
-        if cui and not re.match(r"^RO\d{6,10}$", cui):
-            raise ValidationError(_("CUI must be in format RO followed by 6-10 digits"))
 
         # Validate VAT number format and requirement
         if is_vat_payer and not vat_number:
@@ -906,11 +907,11 @@ class CustomerEditForm(CountryDefaultsMixin, forms.Form):
         max_length=20,
         required=False,
         label=_("CUI/CIF"),
-        help_text=_("Format: RO12345678 (6-10 digits after RO)"),
+        help_text=_("Digits only; an RO prefix is accepted and removed."),
         widget=forms.TextInput(
             attrs={
                 "class": "w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500",
-                "placeholder": _("RO12345678"),
+                "placeholder": "12345678",
             }
         ),
     )
@@ -1282,22 +1283,8 @@ class CustomerEditForm(CountryDefaultsMixin, forms.Form):
         return company_name or ""
 
     def clean_cui(self) -> str:
-        """🔒 Validate Romanian CUI format with ReDoS protection and check digit validation"""
-        cui: str | None = self.cleaned_data.get("cui")
-        if cui:
-            # Security: Prevent ReDoS attacks with strict input length validation
-            if len(cui) > MAX_RO_PREFIXED_ID_LENGTH:  # RO + max 10 digits
-                raise ValidationError(_("CUI too long"))
-            # Security: Use [0-9] instead of \d to prevent unicode digit bypass
-            if not re.match(r"^RO[0-9]{6,10}$", cui):  # Romanian CUI is typically 6-10 digits
-                raise ValidationError(_("CUI must be in format RO followed by 6-10 digits"))
-            # Validate check digit for compliance
-            from apps.common.cui_validator import CUIValidator  # noqa: PLC0415
-
-            result = CUIValidator.validate_strict(cui)
-            if not result.is_valid:
-                raise ValidationError(_(result.error_message))
-        return cui or ""
+        """🔒 The CUI as its digits, check digit verified (an RO prefix is accepted and dropped)."""
+        return clean_cui_value(self.cleaned_data.get("cui"))
 
     def clean_vat_number(self) -> str:
         """🔒 Validate the VAT number: Romanian check digits, or EU format for another member state."""

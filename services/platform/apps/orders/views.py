@@ -635,7 +635,7 @@ def order_create(request: HttpRequest) -> HttpResponse:
                     order.customer_email = customer.primary_email
                     order.customer_name = customer.get_display_name()
                     order.customer_company = customer.company_name
-                    order.customer_vat_id = tax_profile.cui if tax_profile else ""
+                    order.customer_vat_id = tax_profile.vat_number if tax_profile else ""
 
                     # Set billing address snapshot from customer
                     if billing_address:
@@ -647,7 +647,7 @@ def order_create(request: HttpRequest) -> HttpResponse:
                             "county": billing_address.county,
                             "postal_code": billing_address.postal_code,
                             "country": billing_address.country,
-                            "vat_id": tax_profile.cui if tax_profile else "",
+                            "vat_id": tax_profile.vat_number if tax_profile else "",
                             "contact_person": customer.get_display_name(),
                             "contact_email": customer.primary_email,
                             "contact_phone": customer.primary_phone,
@@ -662,7 +662,7 @@ def order_create(request: HttpRequest) -> HttpResponse:
                             "county": "",
                             "postal_code": "",
                             "country": "România",  # Default to Romania
-                            "vat_id": tax_profile.cui if tax_profile else "",
+                            "vat_id": tax_profile.vat_number if tax_profile else "",
                             "contact_person": customer.get_display_name(),
                             "contact_email": customer.primary_email,
                             "contact_phone": customer.primary_phone,
@@ -808,7 +808,8 @@ def order_create_preview(request: HttpRequest) -> HttpResponse:
         billing = customer.get_billing_address()
         tax_profile = customer.get_tax_profile()
         country = billing_country_code(billing.country if billing else None)
-        vat_number = getattr(tax_profile, "vat_number", None) or getattr(tax_profile, "cui", None)
+        # The VAT number, never the CUI: a company can hold a CUI without being VAT-registered.
+        vat_number = getattr(tax_profile, "vat_number", None)
         is_business = bool(getattr(customer, "company_name", ""))
 
         customer_vat_info: CustomerVATInfo = {
@@ -896,7 +897,7 @@ def order_create_with_item(request: HttpRequest) -> HttpResponse:
             order.customer_email = customer.primary_email
             order.customer_name = customer.get_display_name()
             order.customer_company = customer.company_name
-            order.customer_vat_id = tax_profile.cui if tax_profile else ""
+            order.customer_vat_id = tax_profile.vat_number if tax_profile else ""
 
             if billing_address:
                 order.billing_address = {
@@ -907,7 +908,7 @@ def order_create_with_item(request: HttpRequest) -> HttpResponse:
                     "county": billing_address.county,
                     "postal_code": billing_address.postal_code,
                     "country": billing_address.country,
-                    "vat_id": tax_profile.cui if tax_profile else "",
+                    "vat_id": tax_profile.vat_number if tax_profile else "",
                     "contact_person": customer.get_display_name(),
                     "contact_email": customer.primary_email,
                     "contact_phone": customer.primary_phone,
@@ -921,7 +922,7 @@ def order_create_with_item(request: HttpRequest) -> HttpResponse:
                     "county": "",
                     "postal_code": "",
                     "country": "România",
-                    "vat_id": tax_profile.cui if tax_profile else "",
+                    "vat_id": tax_profile.vat_number if tax_profile else "",
                     "contact_person": customer.get_display_name(),
                     "contact_email": customer.primary_email,
                     "contact_phone": customer.primary_phone,

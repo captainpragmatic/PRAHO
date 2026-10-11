@@ -46,7 +46,6 @@ class TestRomanianCUIValidation(TestCase):
             ('123 456', ['CUI must contain only digits']),           # Contains space
             ('<script>alert("xss")</script>', ['Input too long']),   # XSS attempt (length check first)
             ('DROP TABLE customers;--', ['Input too long']),         # SQL injection (length check first)
-            ('RO12345678', ['CUI should not have RO prefix']),       # Contains RO prefix
         ]
 
         for cui, expected_errors in invalid_cuis_and_errors:
@@ -54,6 +53,10 @@ class TestRomanianCUIValidation(TestCase):
                 with self.assertRaises(ValidationError) as context:
                     SecureInputValidator.validate_cui_romanian(cui)
                 self.assertEqual(context.exception.messages, expected_errors)
+
+    def test_an_ro_prefix_is_accepted_and_dropped(self):
+        """A CUI is stored as its digits; an RO prefix is accepted on input and dropped."""
+        self.assertEqual(SecureInputValidator.validate_cui_romanian("RO12345678"), "12345678")
 
     def test_cui_length_limits(self):
         """Test CUI length validation"""

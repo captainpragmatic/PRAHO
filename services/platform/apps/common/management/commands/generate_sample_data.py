@@ -1113,9 +1113,9 @@ class Command(BaseCommand):
         # value survives the tax-profile save endpoint's strict Romanian CUI validation.
         CustomerTaxProfile.objects.create(
             customer=customer,
-            cui="RO14399847",
+            cui="14399840",
             is_vat_payer=True,
-            vat_number="RO14399847",
+            vat_number="RO14399840",
             registration_number="J40/1234/2020",
             reverse_charge_eligible=True,
         )

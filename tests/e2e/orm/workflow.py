@@ -31,7 +31,7 @@ class WorkflowCase(TestCase):
             data_processing_consent=True,
         )
         CustomerTaxProfile.objects.create(
-            customer=self.customer, cui="RO14399847", vat_number="RO14399847", is_vat_payer=True, vat_rate=Decimal("21")
+            customer=self.customer, cui="RO14399840", vat_number="RO14399840", is_vat_payer=True, vat_rate=Decimal("21")
         )
         CustomerBillingProfile.objects.create(customer=self.customer, preferred_currency="RON")
         self.plan = ServicePlan.objects.create(
@@ -56,9 +56,9 @@ class WorkflowCase(TestCase):
             "county": "București",
             "postal_code": "010061",
             "country": "RO",
-            "fiscal_code": "RO14399847",
+            "fiscal_code": "RO14399840",
             "registration_number": "J40/1234/2020",
-            "vat_number": "RO14399847",
+            "vat_number": "RO14399840",
         }
 
     def create_order(self, *, items=None, submit=True):

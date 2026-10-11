@@ -861,7 +861,7 @@ def update_customer_billing_address(  # noqa: C901, PLR0912, PLR0915  # Complexi
                         {"success": False, "error": f"Invalid CUI: {cui_result.error_message}"},
                         status=status.HTTP_400_BAD_REQUEST,
                     )
-                tax_fields["cui"] = validated_data["fiscal_code"]
+                tax_fields["cui"] = cui_result.digits
             if validated_data.get("vat_number"):
                 tax_fields["vat_number"] = validated_data["vat_number"]
             if validated_data.get("registration_number"):
@@ -1362,6 +1362,7 @@ def customer_tax_profile_update(  # noqa: C901, PLR0912  # Validate each permitt
                             {"success": False, "error": f"Invalid CUI: {result.error_message}"},
                             status=status.HTTP_400_BAD_REQUEST,
                         )
+                    value = result.digits
                 if field == "vat_number" and value:
                     billing_address = customer.get_billing_address()
                     vat_error = _vat_number_error(value, billing_address.country if billing_address else None)

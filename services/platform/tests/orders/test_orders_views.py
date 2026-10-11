@@ -335,7 +335,8 @@ class OrderDetailViewTestCase(TestCase):
         self.assertContains(response, "Test Company SRL")
         self.assertContains(response, "Web Hosting Plan")
         self.assertContains(response, "121,00 RON")  # Total with VAT
-        self.assertContains(response, "RO12345678")  # Fiscal code
+        self.assertContains(response, "12345678")  # Fiscal code, stored as digits
+        self.assertNotContains(response, "RO12345678")
         self.assertContains(response, "Test order for detail view")  # Notes
 
         # Check staff-specific features

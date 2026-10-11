@@ -228,7 +228,8 @@ document.addEventListener('DOMContentLoaded', function() {
     cuiField.addEventListener('blur', function () {
       const cui = this.value;
       if (cui && cui.length > 3) {
-        const isValid = /^RO\d{6,10}$/.test(cui);
+        // A CUI is 2-10 digits; an RO prefix is accepted (it is stored as digits).
+        const isValid = /^(RO)?\d{2,10}$/i.test(cui.trim());
         this.className = this.className.replace(/(border-red-500|border-green-500)/g, '');
         this.className += isValid ? ' border-green-500' : ' border-red-500';
       }

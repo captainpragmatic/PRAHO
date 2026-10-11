@@ -315,7 +315,7 @@ def test_customer_company_profile_view(monitored_customer_page: Page, e2e_baseli
     page.goto(f"{BASE_URL}/company/")
     expect(page.get_by_role("heading", name="Company Profile", exact=True)).to_be_visible()
     expect(page.locator("#main-content")).to_contain_text(e2e_baseline["customers"][0]["name"])
-    expect(page.locator("#main-content")).to_contain_text("RO14399847")
+    expect(page.locator("#main-content")).to_contain_text("RO14399840")
     expect(page.locator("#main-content")).to_contain_text("Str. Victoriei nr. 10")
     expect(page.get_by_role("link", name="Edit Company Profile")).to_be_visible()
 

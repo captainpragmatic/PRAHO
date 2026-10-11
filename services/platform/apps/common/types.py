@@ -209,7 +209,7 @@ HTMXHandler = Callable[[HttpRequest], HttpResponse]
 # BUSINESS TYPES
 # ===============================================================================
 
-CUIString = str  # Romanian CUI format: "RO12345678"
+CUIString = str  # Romanian CUI, stored as digits: "12345678"
 VATString = str  # Romanian VAT format: "RO12345678"
 EmailAddress = str  # Validated email address
 InvoiceNumber = str  # Sequential invoice number: "2024-0001"
@@ -341,40 +341,13 @@ class CurrencyCode(StrEnum):
 # ===============================================================================
 
 
-@dataclass(frozen=True)
-class CUI:
-    """Romanian CUI (Company Unique Identifier)"""
-
-    value: CUIString
-
-    def __post_init__(self) -> None:
-        if not self.is_valid():
-            raise ValueError(f"Invalid Romanian CUI: {self.value}")
-
-    def is_valid(self) -> bool:
-        """Validate Romanian CUI format"""
-        if not self.value.startswith("RO"):
-            return False
-
-        digits = self.value[2:]
-        if not digits.isdigit():
-            return False
-
-        return len(digits) >= CUI_MIN_LENGTH and len(digits) <= CUI_MAX_LENGTH
-
-    def __str__(self) -> str:
-        return self.value
-
-
 # ===============================================================================
 # VALIDATION HELPERS
 # ===============================================================================
 
 
 def validate_romanian_cui(cui: str) -> Result[CUIString, str]:
-    """Validate Romanian CUI (company ID) - accepts only numeric format (no RO prefix)."""
-    if cui.upper().startswith("RO"):
-        return Err("CUI should not have RO prefix")
+    """Validate a Romanian CUI's format and return its digits (an RO prefix is accepted and dropped)."""
     result = CUIValidator.validate(cui)
     if not result.is_valid:
         return Err(result.error_message)

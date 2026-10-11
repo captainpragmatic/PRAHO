@@ -129,6 +129,10 @@ def timing_safe_validator[F: Callable[..., Any]](func: F) -> F:
 # ===============================================================================
 
 
+# Trade registry numbers (ONRC): 3-50 of letters, digits, "/", ".", "-" and spaces.
+TRADE_REGISTRY_NUMBER_PATTERN = re.compile(r"[A-Z0-9/.\- ]{3,50}")
+
+
 class SecureInputValidator:
     """Comprehensive input validation with security focus"""
 
@@ -247,6 +251,23 @@ class SecureInputValidator:
             raise ValidationError(_(error_result.error))
 
         return result.unwrap()
+
+    @staticmethod
+    def validate_trade_registry_number(value: str) -> str:
+        """A trade registry number (ONRC), e.g. J40/1234/2020: uppercase, letters, digits and / . - space.
+
+        Deliberately lenient: the format differs between companies (J), PFAs (F) and associations,
+        and ONRC numbers have changed form over time.
+        """
+        if not value:
+            return ""
+        if not isinstance(value, str):
+            raise ValidationError(_("Invalid input format"))
+        normalized = " ".join(value.upper().split())
+        if not TRADE_REGISTRY_NUMBER_PATTERN.fullmatch(normalized):
+            raise ValidationError(_("Enter a valid trade registry number."))
+        SecureInputValidator._check_malicious_patterns(normalized)
+        return normalized
 
     @staticmethod
     def validate_cnp_romanian(cnp: str) -> str:
@@ -542,11 +563,24 @@ class SecureInputValidator:
                 customer_data["vat_number"]
             )
 
-        # Registration number/CUI (optional but validated if provided)
+        # Trade registry number (Nr. registrul comerțului, e.g. J40/1234/2020): not a CUI
         if "registration_number" in customer_data:
-            validated_data["registration_number"] = SecureInputValidator.validate_cui_romanian(
+            validated_data["registration_number"] = SecureInputValidator.validate_trade_registry_number(
                 customer_data["registration_number"]
             )
+
+        # CUI, stored as its digits (an RO prefix is accepted and dropped)
+        if customer_data.get("cui"):
+            from apps.common.cui_validator import normalize_cui_digits  # noqa: PLC0415
+
+            try:
+                validated_data["cui"] = normalize_cui_digits(str(customer_data["cui"]))
+            except ValueError as exc:
+                raise ValidationError(_("Enter a valid CUI.")) from exc
+
+        # CNP (personal numeric code), checksum verified
+        if customer_data.get("cnp"):
+            validated_data["cnp"] = SecureInputValidator.validate_cnp_romanian(str(customer_data["cnp"]))
 
         # Address fields (optional)
         address_fields = ["billing_address", "billing_city", "billing_postal_code"]

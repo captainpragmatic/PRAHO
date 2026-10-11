@@ -83,6 +83,6 @@ def test_account_overview_shows_customer_data(monitored_customer_page: Page, e2e
     page = monitored_customer_page
     page.goto(f"{BASE_URL}/dashboard/account/")
     expect(page.locator("#main-content")).to_contain_text(e2e_baseline["customers"][0]["name"])
-    expect(page.locator("#main-content")).to_contain_text("RO14399847")
+    expect(page.locator("#main-content")).to_contain_text("RO14399840")
     page.reload()
     expect(page.locator("#main-content")).to_contain_text(e2e_baseline["customers"][0]["name"])

@@ -27655,6 +27655,18 @@ msgstr "Resetați-o aici"
 msgid "Thank you. Check your email for a message with the next step."
 msgstr "Vă mulțumim. Verificați-vă e-mailul pentru un mesaj cu pasul următor."
 
+#: apps/customers/forms.py
+msgid "Enter a valid CUI."
+msgstr "Introduceți un CUI valid."
+
+#: apps/common/validators.py
+msgid "Enter a valid trade registry number."
+msgstr "Introduceți un număr de înregistrare la Registrul Comerțului valid."
+
+#: apps/customers/forms.py
+msgid "Digits only; an RO prefix is accepted and removed."
+msgstr "Doar cifre; prefixul RO este acceptat și eliminat."
+
 #~ msgid "Process payment gateway refund"
 #~ msgstr "Procesează rambursare din gateway-ul de plată"
 

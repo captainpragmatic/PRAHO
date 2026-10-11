@@ -105,7 +105,7 @@ class ProfileService:
             result = CUIValidator.validate_strict(new_cui)
             if not result.is_valid:
                 raise ValueError(f"Invalid CUI format: {result.error_message}")
-            tax_profile.cui = new_cui
+            tax_profile.cui = result.digits
             changed_fields.append("cui")
 
         for field, value in safe_updates.items():

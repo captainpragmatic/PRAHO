@@ -6,7 +6,7 @@ Tax compliance and billing profile models for customer business data.
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from django.db import models
 from django.utils.translation import gettext_lazy as _
@@ -136,6 +136,12 @@ class CustomerTaxProfile(SoftDeleteModel):
         return AuditEvent.objects.filter(
             action="vies_evidence_refused", metadata__customer_id=str(self.customer_id)
         ).order_by("-timestamp")[:10]
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        # A CUI is stored as its digits: an RO prefix would assert VAT registration (see cui_validator).
+        if self.cui:
+            self.cui = CUIValidator.normalize(self.cui)
+        super().save(*args, **kwargs)
 
     def validate_cui(self) -> bool:
         """Validate Romanian CUI format (accepts both 'RO12345678' and '12345678')."""

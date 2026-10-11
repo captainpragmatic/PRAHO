@@ -23,6 +23,7 @@ from django.db import models, transaction
 from django.db.models import Q
 from django.utils import timezone
 
+from apps.common.cui_validator import is_romanian_cui
 from apps.common.localisation import normalize_country_code
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.types import EmailAddress, Err, Ok, Result
@@ -2388,7 +2389,8 @@ class CustomersAuditService:
             "vat_rate": float(tax_profile.vat_rate) if tax_profile.vat_rate is not None else None,
             "reverse_charge_eligible": tax_profile.reverse_charge_eligible,
             "cui_valid": tax_profile.validate_cui() if tax_profile.cui else None,
-            "is_romanian_entity": tax_profile.cui.startswith("RO") if tax_profile.cui else False,
+            # A Romanian CUI is stored as digits, without an RO prefix; foreign tax IDs keep theirs.
+            "is_romanian_entity": is_romanian_cui(tax_profile.cui),
             "created_at": tax_profile.created_at.isoformat(),
             "updated_at": tax_profile.updated_at.isoformat(),
             **context.metadata,

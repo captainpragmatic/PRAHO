@@ -158,7 +158,7 @@ class CustomerTaxProfileTestCase(TestCase):
             vat_rate=Decimal('19.00')
         )
 
-        self.assertEqual(tax_profile.cui, 'RO12345678')
+        self.assertEqual(tax_profile.cui, '12345678')  # stored as digits: an RO prefix would assert VAT registration
         self.assertTrue(tax_profile.is_vat_payer)
         self.assertEqual(tax_profile.vat_rate, Decimal('19.00'))
 
@@ -177,7 +177,7 @@ class CustomerTaxProfileTestCase(TestCase):
         # Should return the tax profile
         retrieved_profile = self.customer.get_tax_profile()
         self.assertEqual(retrieved_profile, tax_profile)
-        self.assertEqual(retrieved_profile.cui, 'RO87654321')
+        self.assertEqual(retrieved_profile.cui, '87654321')  # stored as digits: an RO prefix would assert VAT registration
 
 
 # ===============================================================================
