@@ -23,6 +23,7 @@ from django.views.decorators.debug import sensitive_variables
 
 from apps.common import counters
 from apps.common.encryption import DecryptionError
+from apps.common.legal import TERMS_OF_SERVICE_VERSION
 from apps.common.types import Err, Ok, Result
 from apps.common.validators import SecureInputValidator, log_security_event
 from apps.settings.services import get_default_from_email
@@ -45,7 +46,13 @@ RECIPIENT_COOLDOWN_SECONDS = 10 * 60
 RECIPIENT_DAILY_LIMIT = 5
 
 ConfirmRefusalCode = Literal[
-    "invalid_link", "consent_required", "password_rejected", "details_unavailable", "unavailable"
+    "invalid_link",
+    "consent_required",
+    "password_rejected",
+    "details_unavailable",
+    "unavailable",
+    "terms_changed",
+    "terms_required",
 ]
 
 
@@ -155,6 +162,8 @@ def preview(registration_id: str, token: str) -> dict[str, str] | None:
         "cui": str(row.customer_data.get("cui", "")),
         "registration_number": str(row.customer_data.get("registration_number", "")),
         # Never the CNP, not even masked: the portal keeps these details in its session.
+        # The terms the confirmer accepts; confirming with another version is refused.
+        "terms_version": TERMS_OF_SERVICE_VERSION,
     }
 
 
@@ -194,6 +203,8 @@ def confirm(  # noqa: PLR0913  # One argument per value the mailbox holder suppl
     *,
     accepts_marketing: bool,
     data_processing_consent: bool,
+    terms_accepted: bool = False,
+    terms_version: str = "",
     request_ip: str | None = None,
     user_agent: str | None = None,
 ) -> Result[tuple[User, Customer], ConfirmRefusal]:
@@ -202,11 +213,18 @@ def confirm(  # noqa: PLR0913  # One argument per value the mailbox holder suppl
     The row is locked, so two confirmations of one link create one account. A refusal before the
     account is created leaves the row usable, except that a used or expired link stays refused,
     and a row whose CNP cannot be read is spent: that refusal commits on purpose.
+
+    Accepting the terms records the version the confirmer saw (from preview()) and when. A version
+    that is no longer current is refused as `terms_changed`, before anything is written, so the
+    confirmer can read the new terms and use the same link. The acceptance is audited in the same
+    transaction as the account: if the audit write fails, no account is created.
     """
     with transaction.atomic():
         row = PendingRegistration.objects.select_for_update().filter(pk=registration_id).first()
         if row is None or not row.token_matches(token) or not row.is_usable():
             return Err(ConfirmRefusal("invalid_link"))
+        if terms_accepted and terms_version != TERMS_OF_SERVICE_VERSION:
+            return Err(ConfirmRefusal("terms_changed"))
 
         try:
             cnp = row.cnp()
@@ -225,6 +243,8 @@ def confirm(  # noqa: PLR0913  # One argument per value the mailbox holder suppl
             "accepts_marketing": accepts_marketing,
             "gdpr_consent_date": timezone.now(),
         }
+        if terms_accepted:
+            user_data.update(terms_accepted_at=timezone.now(), terms_version=terms_version)
         refusal = _refusal_before_creating(row, user_data, data_processing_consent=data_processing_consent)
         if refusal is not None:
             return Err(refusal)
@@ -241,6 +261,8 @@ def confirm(  # noqa: PLR0913  # One argument per value the mailbox holder suppl
             return Err(ConfirmRefusal("unavailable"))
 
         user, customer = result.unwrap()
+        if terms_accepted:
+            _audit_terms_acceptance(user, row, request_ip)
         _spend(row)
         log_security_event(
             "pending_registration_confirmed",
@@ -248,6 +270,24 @@ def confirm(  # noqa: PLR0913  # One argument per value the mailbox holder suppl
             request_ip,
         )
         return Ok((user, customer))
+
+
+def _audit_terms_acceptance(user: User, row: PendingRegistration, request_ip: str | None) -> None:
+    """Record the acceptance; raises on failure, which rolls the account back with it."""
+    from apps.audit.services import AuditService  # noqa: PLC0415  # ADR-0007: cross-app service at call time
+
+    AuditService.log_simple_event(
+        "terms_of_service_accepted",
+        user=user,
+        content_object=user,
+        description="Terms of Service accepted at registration",
+        metadata={
+            "terms_version": user.terms_version,
+            "accepted_at": user.terms_accepted_at.isoformat() if user.terms_accepted_at else None,
+            "registration_id": str(row.pk),
+        },
+        ip_address=request_ip,
+    )
 
 
 def _spend(row: PendingRegistration) -> None:

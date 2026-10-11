@@ -28544,3 +28544,15 @@ msgstr "Introduceți un CNP valid."
 #: apps/api/customers/serializers.py
 msgid "The VAT number does not match the CUI."
 msgstr "Codul de TVA nu corespunde CUI-ului."
+
+#: apps/api/users/views.py
+msgid "The Terms of Service have changed. Please read them again before confirming."
+msgstr "Termenii de Serviciu s-au modificat. Vă rugăm să îi citiți din nou înainte de confirmare."
+
+#: apps/api/users/views.py
+msgid "You must accept the Terms of Service."
+msgstr "Trebuie să acceptați Termenii de Serviciu."
+
+#: apps/api/users/serializers.py
+msgid "Send the Terms of Service version accepted."
+msgstr "Trimiteți versiunea Termenilor de Serviciu acceptată."
