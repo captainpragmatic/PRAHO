@@ -25,6 +25,7 @@ from django.utils import timezone
 from apps.audit.models import AuditEvent
 from apps.audit.services import GDPRDeletionService, gdpr_deletion_service
 from apps.billing.invoice_models import Invoice
+from apps.billing.invoice_querysets import InvoiceQuerySet
 from apps.billing.proforma_models import ProformaInvoice, ProformaLine
 from apps.billing.services import ProformaConversionService
 from apps.billing.usage_invoice_service import UsageInvoiceService
@@ -225,6 +226,55 @@ class GDPRErasureCNPTests(TestCase):
         issued = Invoice.objects.filter(pk=draft.pk).values_list("locked_at", flat=True).get()
         self.assertIsNotNone(issued)
         self.assertEqual(Invoice.objects.filter(pk=draft.pk).first().bill_to_cnp, "")
+
+    def test_a_proforma_edited_from_a_copy_loaded_before_erasure_keeps_no_cnp(self) -> None:
+        """The staff edit reloads its proforma under lock; a copy read before the erasure cannot write it back."""
+        proforma = self.proforma(self.customer)
+        stale = ProformaInvoice.objects.get(pk=proforma.pk)
+        self.anonymize()
+        staff = User.objects.create_user(
+            email="edit-staff@example.test", password="pass12345", is_staff=True, staff_role="billing"
+        )
+        self.client.force_login(staff)
+        data = {
+            "customer": self.customer.pk,
+            "valid_until": (timezone.localdate() + timedelta(days=30)).isoformat(),
+            "line_0_description": "Hosting",
+            "line_0_quantity": "1",
+            "line_0_unit_price": "10.00",
+            "line_0_vat_rate": "21",
+        }
+
+        with patch("apps.billing.views.get_object_or_404", return_value=stale):
+            response = self.client.post(reverse("billing:proforma_edit", args=[proforma.pk]), data)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(ProformaInvoice.objects.get(pk=proforma.pk).bill_to_cnp, "")
+
+    def test_an_invoice_issued_during_the_erasure_is_not_audited_as_cleared(self) -> None:
+        racing = self.invoice(self.customer, issue=False)
+        other = self.invoice(self.customer, issue=False)
+        original_update = InvoiceQuerySet.update
+
+        def issue_first(queryset: InvoiceQuerySet, **kwargs: object) -> int:
+            if "bill_to_cnp" in kwargs:
+                issued = Invoice.objects.get(pk=racing.pk)
+                issued.due_at = timezone.now() + timedelta(days=30)
+                issued.issue()
+                issued.save()
+            return original_update(queryset, **kwargs)
+
+        with patch.object(InvoiceQuerySet, "update", issue_first):
+            self.anonymize()
+
+        self.assertEqual(Invoice.objects.get(pk=racing.pk).bill_to_cnp, CNP)
+        self.assertEqual(Invoice.objects.get(pk=other.pk).bill_to_cnp, "")
+        audited = [
+            event.metadata["invoice_id"]
+            for event in AuditEvent.objects.filter(action="data_anonymization_completed", metadata__field="bill_to_cnp")
+            if "invoice_id" in event.metadata
+        ]
+        self.assertEqual(audited, [other.pk])
 
     def test_a_proforma_converted_after_erasure_bills_without_a_cnp(self) -> None:
         proforma = self.proforma(self.customer, subtotal_cents=10000, tax_cents=2100, total_cents=12100)

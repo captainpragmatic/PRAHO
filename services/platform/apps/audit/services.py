@@ -1537,9 +1537,19 @@ class GDPRDeletionService:
     @staticmethod
     def _clear_cnp(rows: models.QuerySet[Any], field: str, *, id_key: str, where: str) -> None:
         """Clear the CNP `field` on `rows`, and audit each cleared row without the value."""
-        cleared = list(rows.filter(**{f"{field}__isnull": False}).values_list("pk", "customer_id"))
-        rows.filter(pk__in=[pk for pk, _customer_id in cleared]).update(**{field: None})
-        for pk, customer_id in cleared:
+        selected = list(rows.filter(**{f"{field}__isnull": False}).values_list("pk", "customer_id"))
+        selected_pks = [pk for pk, _customer_id in selected]
+        rows.filter(pk__in=selected_pks).update(**{field: None})
+        # Audit only what the update cleared. A row that left `rows` in between (an invoice issued
+        # meanwhile) was not updated and keeps its CNP, so it must not be recorded as cleared.
+        now_clear = set(
+            rows.model._base_manager.filter(pk__in=selected_pks, **{f"{field}__isnull": True}).values_list(
+                "pk", flat=True
+            )
+        )
+        for pk, customer_id in selected:
+            if pk not in now_clear:
+                continue
             AuditService.log_simple_event(
                 "data_anonymization_completed",
                 description=f"CNP cleared from {where} (GDPR erasure)",
