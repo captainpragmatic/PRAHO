@@ -29,39 +29,49 @@
     <div class="flex items-center gap-2">
       {% if row.definition.input_kind == 'toggle' %}
       <label class="relative inline-flex items-center cursor-pointer">
+        {# tmpl-allow TMPL001: x-init and @change Alpine bindings plus data-setting-field data-* attributes; components accept no executable attributes (apps/ui/attributes.py) #}
         <input type="checkbox" id="field-{{ row.key }}" {% if row.current %}checked{% endif %} data-setting-field data-key="{{ row.key }}"{% if row.definition.critical %} data-critical="1"{% endif %} data-kind="toggle" data-baseline="{{ row.baseline }}" data-default="{{ row.definition.default|yesno:'true,false' }}" x-init="initField($el)" @change="syncField($el)" class="sr-only peer">
         {# dm-allow DM001: Toggle knob stays white for contrast against both track states #}
         <div class="w-12 h-6 bg-slate-700 rounded-full peer peer-checked:bg-blue-600 peer-focus:ring-2 peer-focus:ring-blue-500 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-6"></div>
       </label>
       {% elif row.definition.input_kind == 'select' %}
+      {# tmpl-allow TMPL003: x-init and @change Alpine bindings plus data-setting-field data-* attributes, with options rendered inline from row.choices; components accept no executable attributes (apps/ui/attributes.py) #}
       <select id="field-{{ row.key }}" data-setting-field data-key="{{ row.key }}"{% if row.definition.critical %} data-critical="1"{% endif %} data-kind="select" data-baseline="{{ row.baseline }}" data-default='{{ row.default_json }}' x-init="initField($el)" @change="syncField($el)" class="w-full px-3 py-2 bg-slate-900/60 border border-slate-600 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
         {% for choice, label in row.choices %}
         <option value="{{ choice }}" {% if choice == row.current %}selected{% endif %}>{{ label }}</option>
         {% endfor %}
       </select>
       {% elif row.definition.input_kind == 'number' %}
+      {# tmpl-allow TMPL001: x-init and @input Alpine bindings plus data-setting-field data-* attributes; components accept no executable attributes (apps/ui/attributes.py) #}
       <input type="number" step="any" id="field-{{ row.key }}" value="{{ row.current }}" data-setting-field data-key="{{ row.key }}"{% if row.definition.critical %} data-critical="1"{% endif %} data-kind="number" data-baseline="{{ row.baseline }}" data-default='"{{ row.definition.default }}"' x-init="initField($el)" @input="syncField($el)" class="w-full px-3 py-2 bg-slate-900/60 border border-slate-600 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
       {% elif row.definition.input_kind == 'chips' %}
+      {# tmpl-allow TMPL001: x-init and @input Alpine bindings plus data-setting-field data-* attributes; components accept no executable attributes (apps/ui/attributes.py) #}
       <input type="text" id="field-{{ row.key }}" value="{{ row.current|join:', ' }}" placeholder="{% trans 'Comma-separated values' %}" data-setting-field data-key="{{ row.key }}"{% if row.definition.critical %} data-critical="1"{% endif %} data-kind="list" data-baseline="{{ row.baseline }}" data-default='{{ row.default_json }}' x-init="initField($el)" @input="syncField($el)" class="w-full px-3 py-2 bg-slate-900/60 border border-slate-600 rounded-lg text-sm text-white font-mono focus:outline-none focus:ring-2 focus:ring-blue-500">
       {% elif row.definition.input_kind == 'json' %}
+      {# tmpl-allow TMPL004: x-init and @input Alpine bindings plus data-setting-field data-* attributes; components accept no executable attributes (apps/ui/attributes.py) #}
       <textarea id="field-{{ row.key }}" rows="4" data-setting-field data-key="{{ row.key }}"{% if row.definition.critical %} data-critical="1"{% endif %} data-kind="json" data-baseline="{{ row.baseline }}" data-default='{{ row.default_json }}' x-init="initField($el)" @input="syncField($el)" class="w-full px-3 py-2 bg-slate-900/60 border border-slate-600 rounded-lg text-xs text-white font-mono focus:outline-none focus:ring-2 focus:ring-blue-500">{{ row.current_json }}</textarea>
       {% else %}
+      {# tmpl-allow TMPL001: x-init and @input Alpine bindings plus data-setting-field data-* attributes; components accept no executable attributes (apps/ui/attributes.py) #}
       <input type="text" id="field-{{ row.key }}" value="{{ row.current|default_if_none:'' }}" data-setting-field data-key="{{ row.key }}"{% if row.definition.critical %} data-critical="1"{% endif %} data-kind="text" data-baseline="{{ row.baseline }}" data-default='"{{ row.definition.default|escapejs }}"' x-init="initField($el)" @input="syncField($el)" class="w-full px-3 py-2 bg-slate-900/60 border border-slate-600 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
       {% endif %}
       {% if row.definition.unit %}
       <span class="text-xs text-slate-500 whitespace-nowrap">{{ row.definition.unit }}</span>
       {% endif %}
       {% if row.definition.deployment_fallback %}
+      {# tmpl-allow TMPL002: @click Alpine binding; components accept no executable attributes (apps/ui/attributes.py) #}
       <button type="button" @click="overrideField('{{ row.key }}')" class="text-sm text-blue-400 hover:text-blue-300">
         {% trans "Save as override" %}
       </button>
+      {# tmpl-allow TMPL002: @click Alpine binding; components accept no executable attributes (apps/ui/attributes.py) #}
       <button type="button" @click="inheritField('{{ row.key }}')" class="text-sm text-blue-400 hover:text-blue-300">
         {% trans "Use deployment value" %}
       </button>
       {% else %}
+      {# tmpl-allow TMPL002: @click Alpine binding; components accept no executable attributes (apps/ui/attributes.py) #}
       <button type="button" @click="resetField('{{ row.key }}')" title="{% trans 'Reset to default' %}" class="text-slate-500 hover:text-blue-400 transition-colors">↺</button>
       {% endif %}
-      <button type="button" title="{% trans 'History' %}" class="text-slate-500 hover:text-blue-400 transition-colors" hx-get="{% url 'settings:setting_history' row.key %}" hx-target="#history-drawer" hx-swap="innerHTML">🕘</button>
+      {# tmpl-allow TMPL002: icon-only history control (a clock icon named by its title); the button tag renders a variant-coloured padded button with a visible text label #}
+      <button type="button" title="{% trans 'History' %}" class="text-slate-500 hover:text-blue-400 transition-colors" hx-get="{% url 'settings:setting_history' row.key %}" hx-target="#history-drawer" hx-swap="innerHTML">{% icon "clock" size="sm" %}</button>
     </div>
     {% if row.definition.default != '' %}
     <p class="mt-1 text-xs text-slate-500">{% trans "Default:" %} {{ row.definition.default|default_if_none:"—" }}</p>

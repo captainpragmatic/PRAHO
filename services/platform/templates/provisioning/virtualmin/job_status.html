@@ -219,6 +219,7 @@
                 <div class="px-6 py-4 border-b border-slate-700">
                     <h3 class="text-lg font-medium text-slate-100 flex items-center">
                         {% icon "clipboard" %} {% trans "Live Logs" %}
+                        {# tmpl-allow TMPL002: polls every 2s via hx-trigger; the button tag adds hx-indicator="this" and a spinner to every hx-get button, which would flash on each poll #}
                         <button class="ml-2 text-xs bg-blue-600 px-2 py-1 rounded"
                                 hx-get="{% url 'provisioning:virtualmin_job_logs' job.id %}"
                                 hx-target="#job-logs"

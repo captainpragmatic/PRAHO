@@ -29,12 +29,8 @@
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <!-- Email Address -->
                     <div class="md:col-span-2">
-                        <label for="email" class="block text-sm font-medium text-slate-300 mb-2">
-                            {% icon "mail" %} {% trans 'Email Address' %} <span class="text-red-400">*</span>
-                        </label>
-                        <input type="email" name="email" id="email" required
-                               class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                               placeholder="user@example.com">
+                        {% trans 'Email Address' as email_label %}
+                        {% input_field "email" input_type="email" html_id="email" label=email_label required=True placeholder="user@example.com" %}
                         <p class="mt-1 text-xs text-slate-500">
                             {% trans 'The user will use this email address to log in to their account.' %}
                         </p>
@@ -42,22 +38,16 @@
 
                     <!-- First Name -->
                     <div>
-                        <label for="first_name" class="block text-sm font-medium text-slate-300 mb-2">
-                            {% icon "user" %} {% trans 'First Name' %}
-                        </label>
-                        <input type="text" name="first_name" id="first_name"
-                               class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                               placeholder="{% trans 'First name' %}">
+                        {% trans 'First Name' as first_name_label %}
+                        {% trans 'First name' as first_name_placeholder %}
+                        {% input_field "first_name" html_id="first_name" label=first_name_label placeholder=first_name_placeholder %}
                     </div>
 
                     <!-- Last Name -->
                     <div>
-                        <label for="last_name" class="block text-sm font-medium text-slate-300 mb-2">
-                            {% icon "user" %} {% trans 'Last Name' %}
-                        </label>
-                        <input type="text" name="last_name" id="last_name"
-                               class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                               placeholder="{% trans 'Last name' %}">
+                        {% trans 'Last Name' as last_name_label %}
+                        {% trans 'Last name' as last_name_placeholder %}
+                        {% input_field "last_name" html_id="last_name" label=last_name_label placeholder=last_name_placeholder %}
                     </div>
                 </div>
 
@@ -66,6 +56,7 @@
                     <label for="role" class="block text-sm font-medium text-slate-300 mb-2">
                         {% icon "user" %} {% trans 'User Role' %}
                     </label>
+                    {# tmpl-allow TMPL003: options rendered inline from a loop over role_choices with a preselected default; select components take a view-built options list #}
                     <select name="role" id="role" required
                             class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
                         {% for role_value, role_display in role_choices %}

@@ -1,5 +1,5 @@
 """
-Lint portal templates for design-system violations.
+Lint Portal, Platform and shared (shared/ui) templates for design-system violations.
 
 Checks:
   TMPL001  Raw <input> element in feature template (should use {% input_field %})
@@ -42,6 +42,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PORTAL_TEMPLATES = REPO_ROOT / "services" / "portal" / "templates"
 COMPONENT_DIR = PORTAL_TEMPLATES / "components"
+PLATFORM_TEMPLATES = REPO_ROOT / "services" / "platform" / "templates"
+SHARED_TEMPLATES = REPO_ROOT / "shared" / "ui" / "templates"
 COMPONENT_SVG_ALLOWLIST_FILE = REPO_ROOT / ".component-svg-allowlist"
 
 # Severity levels
@@ -138,22 +140,36 @@ _RAW_SVG_RE = re.compile(r"<svg\b", re.IGNORECASE)
 # ===============================================================================
 
 
-def is_component_template(path: Path) -> bool:
-    """True if the template lives under components/."""
+def template_roots() -> tuple[tuple[Path, Path], ...]:
+    """Each scanned template root with its components directory.
+
+    Read at call time, not import time, so tests can point the roots at a temporary tree. Platform
+    and shared templates were once outside the scan entirely: a path under neither portal root was
+    "neither a feature template nor a component" and was skipped without a word (#622).
+    """
+    return (
+        (PORTAL_TEMPLATES, COMPONENT_DIR),
+        (PLATFORM_TEMPLATES, PLATFORM_TEMPLATES / "components"),
+        (SHARED_TEMPLATES, SHARED_TEMPLATES / "components"),
+    )
+
+
+def _is_under(path: Path, directory: Path) -> bool:
     try:
-        path.relative_to(COMPONENT_DIR)
+        path.relative_to(directory)
         return True
     except ValueError:
         return False
 
 
+def is_component_template(path: Path) -> bool:
+    """True if the template lives under a root's components/."""
+    return any(_is_under(path, components) for _, components in template_roots())
+
+
 def is_feature_template(path: Path) -> bool:
-    """True if a template outside components/ (i.e., a feature template)."""
-    try:
-        path.relative_to(PORTAL_TEMPLATES)
-        return not is_component_template(path)
-    except ValueError:
-        return False
+    """True if a template under a root but outside its components/ (i.e., a feature template)."""
+    return not is_component_template(path) and any(_is_under(path, root) for root, _ in template_roots())
 
 
 @lru_cache(maxsize=1)
@@ -552,12 +568,14 @@ def scan_file(path: Path) -> list[Violation]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Lint portal templates for design-system violations.")
+    parser = argparse.ArgumentParser(
+        description="Lint Portal, Platform and shared templates for design-system violations."
+    )
     parser.add_argument(
         "files",
         nargs="*",
         type=Path,
-        help="Template files to scan. Defaults to all portal templates.",
+        help="Template files to scan. Defaults to every Portal, Platform and shared template.",
     )
     parser.add_argument(
         "--fail-on",
@@ -596,8 +614,8 @@ def main() -> int:
         # ⚡ PERFORMANCE: O(N) where N = number of explicitly provided files
         target_files = [f for f in args.files if f.suffix == ".html" and f.exists()]
     else:
-        # ⚡ PERFORMANCE: O(T) where T = total template count (~200 in portal)
-        target_files = sorted(PORTAL_TEMPLATES.rglob("*.html"))
+        # ⚡ PERFORMANCE: O(T) where T = total template count (~470 across the three roots)
+        target_files = sorted(path for root, _ in template_roots() for path in root.rglob("*.html"))
 
     # ── Scan ─────────────────────────────────────────────────────────────────
     all_violations: list[Violation] = []

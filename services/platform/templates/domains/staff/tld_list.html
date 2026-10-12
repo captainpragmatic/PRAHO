@@ -72,26 +72,24 @@
                 <label for="search" class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                     {% trans "Search" %}
                 </label>
-                <input type="text" id="search" name="search" value="{{ search_query }}"
-                       placeholder=".ro, .com, eu"
-                       class="w-full sm:w-64 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-3 py-2 text-sm" />
+                {% trans "Search" as search_label %}
+                {% input_field "search" html_id="search" value=search_query placeholder=".ro, .com, eu" aria_label=search_label css_class="sm:w-64 text-sm" %}
             </div>
             <div>
                 <label for="status" class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                     {% trans "Status" %}
                 </label>
+                {# tmpl-allow TMPL003: options rendered inline from literal TLD statuses with selected from request.GET.status; select components take a view-built options list #}
                 <select name="status" id="status"
                         class="block w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-3 py-2 text-sm">
                     <option value="">{% trans "All" %}</option>
-                    <option value="active" {% if request.GET.status == 'active' %}selected{% endif %}>🟢 {% trans "Active" %}</option>
-                    <option value="inactive" {% if request.GET.status == 'inactive' %}selected{% endif %}>🔴 {% trans "Inactive" %}</option>
-                    <option value="featured" {% if request.GET.status == 'featured' %}selected{% endif %}>⭐ {% trans "Featured" %}</option>
+                    <option value="active" {% if request.GET.status == 'active' %}selected{% endif %}>{% trans "Active" %}</option>
+                    <option value="inactive" {% if request.GET.status == 'inactive' %}selected{% endif %}>{% trans "Inactive" %}</option>
+                    <option value="featured" {% if request.GET.status == 'featured' %}selected{% endif %}>{% trans "Featured" %}</option>
                 </select>
             </div>
             <div>
-                <button type="submit" class="inline-flex items-center px-4 py-2 rounded-md bg-slate-900 text-white text-sm hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600">
-                    {% icon "search" %} {% trans "Filter" %}
-                </button>
+                {% trans "Filter" as filter_label %}{% button filter_label type="submit" variant="secondary" icon="search" %}
             </div>
         </form>
     </div>

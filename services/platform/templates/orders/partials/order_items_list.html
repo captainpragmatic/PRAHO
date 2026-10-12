@@ -112,6 +112,7 @@
               {% if request.resolver_match.url_name == 'order_edit' and can_edit and order.can_edit_items %}
                 {% comment %}Edit mode - expandable row controls{% endcomment %}
                 <div class="flex flex-col sm:flex-row space-y-1 sm:space-y-0 sm:space-x-2">
+                  {# tmpl-allow TMPL002: holds an icon span plus two responsive label spans (block sm:hidden / hidden sm:block); the button tag renders one text and one icon #}
                   <button type="button"
                           data-action="invoke" data-invoke="toggleExpandableEditAction" data-item-id="{{ item.id }}"
                           class="inline-flex items-center justify-center px-2 py-1.5 text-xs font-medium rounded border border-blue-500 text-blue-400 hover:bg-blue-500 hover:text-white transition-colors min-h-[32px] sm:min-h-[28px]"
@@ -121,6 +122,7 @@
                     <span class="block sm:hidden">{% trans "Edit" %}</span>
                     <span class="hidden sm:block">{% trans "Edit" %}</span>
                   </button>
+                  {# tmpl-allow TMPL002: holds an icon span plus two responsive label spans (block sm:hidden / hidden sm:block); the button tag renders one text and one icon #}
                   <button type="button"
                           data-action="invoke" data-invoke="deleteOrderItemAction" data-item-id="{{ item.id }}"
                           class="inline-flex items-center justify-center px-2 py-1.5 text-xs font-medium rounded border border-red-500 text-red-400 hover:bg-red-500 hover:text-white transition-colors min-h-[32px] sm:min-h-[28px]"
@@ -154,11 +156,11 @@
                   <h4 class="text-sm font-medium text-white">
                     <span class="mr-2">{% icon "document" %}</span>{% trans "Edit Item" %}: {{ item.product.name|default:"Custom Item" }}
                   </h4>
-                  <button type="button"
-                          data-action="invoke" data-invoke="cancelExpandableEditAction" data-item-id="{{ item.id }}"
-                          class="text-slate-400 hover:text-white text-sm">
-                    <span class="mr-1">{% icon "x" %}</span>{% trans "Cancel" %}
-                  </button>
+                  {% trans "Cancel" as cancel_label %}
+                  {# stringformat first: add returns "" when joining a string and a UUID #}
+                  {% with item_id=item.id|stringformat:"s" %}{% with item_attrs='data-item-id="'|add:item_id|add:'"' %}
+                    {% button cancel_label variant="secondary" size="sm" icon="x" data_action="invoke" data_invoke="cancelExpandableEditAction" attrs=item_attrs %}
+                  {% endwith %}{% endwith %}
                 </div>
 
                 {% comment %}Inline edit form container - will be populated via HTMX{% endcomment %}
@@ -201,7 +203,7 @@
               </span>
             </div>
             <div class="text-xs text-slate-500 flex items-center justify-end">
-              <span class="mr-1">🇷🇴</span>
+              <span class="mr-1">{% icon "shield-check" size="sm" %}</span>
               {% trans "Romanian VAT compliant" %}
             </div>
           </div>
@@ -217,12 +219,7 @@
             <p class="text-xs text-slate-400">{% trans "Add products or services to this order" %}</p>
           </div>
           <div id="add-item-container">
-            <button type="button"
-                    data-action="invoke" data-invoke="toggleAddItemForm"
-                    id="add-item-btn"
-                    class="inline-flex items-center px-3 py-2 text-sm font-medium rounded-lg border border-green-600 text-green-400 hover:bg-green-600 hover:text-white transition-colors">
-              <span class="mr-1">{% icon "plus" %}</span> {% trans "Add Item" %}
-            </button>
+            {% trans "Add Item" as add_item_label %}{% button add_item_label variant="success" size="sm" icon="plus" button_id="add-item-btn" data_action="invoke" data_invoke="toggleAddItemForm" %}
           </div>
         </div>
 
@@ -233,11 +230,7 @@
               <h4 class="text-sm font-medium text-white">
                 <span class="mr-2">{% icon "plus" %}</span>{% trans "Add New Item" %}
               </h4>
-              <button type="button"
-                      data-action="invoke" data-invoke="cancelAddItemForm"
-                      class="text-slate-400 hover:text-white text-sm">
-                <span class="mr-1">{% icon "x" %}</span>{% trans "Cancel" %}
-              </button>
+              {% trans "Cancel" as cancel_label %}{% button cancel_label variant="secondary" size="sm" icon="x" data_action="invoke" data_invoke="cancelAddItemForm" %}
             </div>
 
             <div id="add-item-form-container" class="space-y-4">
@@ -260,11 +253,7 @@
         <p class="text-sm">{% trans "Order items will appear here once added" %}</p>
         {% if request.resolver_match.url_name == 'order_edit' and order.status == "draft" or request.resolver_match.url_name == 'order_edit' and order.status == "awaiting_payment" %}
           <div class="mt-4">
-            <button type="button"
-                    data-action="invoke" data-invoke="toggleAddItemForm"
-                    class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg border border-transparent bg-blue-600 text-white hover:bg-blue-700 focus:ring-2 focus:ring-blue-500">
-              <span class="mr-1">{% icon "plus" %}</span> {% trans "Add First Item" %}
-            </button>
+            {% trans "Add First Item" as add_first_item_label %}{% button add_first_item_label variant="primary" icon="plus" data_action="invoke" data_invoke="toggleAddItemForm" %}
           </div>
         {% endif %}
       </div>
@@ -277,11 +266,7 @@
             <h4 class="text-sm font-medium text-white">
               <span class="mr-2">{% icon "plus" %}</span>{% trans "Add First Item" %}
             </h4>
-            <button type="button"
-                    data-action="invoke" data-invoke="cancelAddItemForm"
-                    class="text-slate-400 hover:text-white text-sm">
-              <span class="mr-1">{% icon "x" %}</span>{% trans "Cancel" %}
-            </button>
+            {% trans "Cancel" as cancel_label %}{% button cancel_label variant="secondary" size="sm" icon="x" data_action="invoke" data_invoke="cancelAddItemForm" %}
           </div>
 
           <div id="add-item-form-container-empty" class="space-y-4">

@@ -140,16 +140,16 @@ class SessionSecurityServiceTestCase(TestCase):
         """Test detection of suspicious activity with multiple IPs"""
         request = self._get_authenticated_request()
 
-        # Mock cache to simulate storing/retrieving IP history
-        stored_ips = []
+        # Mock cache to simulate storing/retrieving IP history, whatever shape the service stores
+        stored: dict[str, object] = {}
         def mock_cache_get(key, default=None):
             if key.startswith('recent_ips:'):
-                return stored_ips.copy()
+                return stored.get(key, default)
             return default
 
         def mock_cache_set(key, value, timeout=None):
             if key.startswith('recent_ips:'):
-                stored_ips[:] = value  # Update the stored list in place
+                stored[key] = value
 
         mock_cache.get.side_effect = mock_cache_get
         mock_cache.set.side_effect = mock_cache_set
@@ -347,63 +347,38 @@ class SessionSecurityMiddlewareTestCase(TestCase):
     @patch('apps.users.services.SessionSecurityService.detect_suspicious_activity')
     @patch('apps.users.services.SessionSecurityService.log_session_activity')
     def test_middleware_processes_session_security(self, mock_log, mock_detect, mock_timeout):
-        """Test middleware processes session security for authenticated users"""
+        """The timeout and the multiple-address check run on each request; activity is not logged (#622)."""
         request = self._get_authenticated_request('/users/profile/')
         mock_detect.return_value = False
 
         self.middleware(request)
 
-        # Check that all security functions were called
         mock_timeout.assert_called_once_with(request)
         mock_detect.assert_called_once_with(request)
-        mock_log.assert_called_once()
+        mock_log.assert_not_called()
 
-    def test_should_log_activity_sensitive_paths(self):
-        """Test activity logging for sensitive paths"""
-        sensitive_paths = [
-            '/users/profile/', '/billing/invoices/', '/customers/list/',
-            '/admin/users/', '/api/customers/', '/settings/security/',
-            '/tickets/create/'
+    @patch('apps.users.services.SessionSecurityService.log_session_activity')
+    def test_no_path_or_method_logs_session_activity(self, mock_log):
+        """Replaces the tests of the removed path and activity-type helpers (#622).
+
+        Those helpers chose which requests wrote a `session_activity_*` audit row. Every path
+        they matched, and the public ones they skipped, now pass without one, for any method.
+        """
+        paths = [
+            '/users/profile/', '/billing/invoices/', '/customers/list/', '/admin/users/',
+            '/api/customers/', '/settings/security/', '/tickets/create/', '/', '/pricing/',
         ]
+        for path in paths:
+            for method in ('get', 'post', 'put', 'patch', 'delete'):
+                with self.subTest(path=path, method=method):
+                    request = getattr(self.factory, method)(path)
+                    request.user = self.user
+                    SessionMiddleware(lambda r: None).process_request(request)
+                    request.session.save()
 
-        for path in sensitive_paths:
-            request = self.factory.get(path)
-            should_log = self.middleware._should_log_activity(request)
-            self.assertTrue(should_log, f"Should log activity for {path}")
+                    self.middleware(request)
 
-    def test_should_not_log_activity_public_paths(self):
-        """Test activity logging is skipped for public paths"""
-        public_paths = [
-            '/', '/about/', '/contact/', '/pricing/', '/legal/'
-        ]
-
-        for path in public_paths:
-            request = self.factory.get(path)
-            should_log = self.middleware._should_log_activity(request)
-            self.assertFalse(should_log, f"Should not log activity for {path}")
-
-    def test_get_activity_type(self):
-        """Test activity type detection"""
-        test_cases = [
-            ('/admin/users/', 'admin_access'),
-            ('/billing/invoices/', 'billing_access'),
-            ('/api/customers/', 'api_access'),
-            ('/users/profile/', 'page_access'),
-        ]
-
-        for path, expected_type in test_cases:
-            request = self.factory.get(path)
-            activity_type = self.middleware._get_activity_type(request)
-            self.assertEqual(activity_type, expected_type)
-
-    def test_get_activity_type_data_modification(self):
-        """Test activity type for data modification requests"""
-        methods = ['POST', 'PUT', 'PATCH', 'DELETE']
-
-        for method in methods:
-            request = getattr(self.factory, method.lower())('/some/path/')
-            activity_type = self.middleware._get_activity_type(request)
-            self.assertEqual(activity_type, 'data_modification')
+        mock_log.assert_not_called()
 
     @patch('apps.users.services.SessionSecurityService.log_session_activity')
     def test_shared_device_auto_expiry(self, mock_log):

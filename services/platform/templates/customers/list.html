@@ -77,20 +77,15 @@
           hx-indicator="#loading-indicator"
           class="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
       <div class="flex-1">
-        <label for="search" class="sr-only">{% trans 'Search' %}</label>
-        <div class="relative">
-          <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-            {% icon "search" css_class="text-slate-400" %}
-          </div>
-          <input type="text" id="search" name="q" value="{{ search_query|default:'' }}" autocomplete="off"
-            class="block w-full pl-10 pr-3 py-2 border border-slate-600 rounded-lg bg-slate-700 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-            placeholder="{% trans 'Search by name, CUI, email...' %}">
-        </div>
+        {% trans 'Search' as search_label %}
+        {% trans 'Search by name, CUI, email...' as search_placeholder %}
+        {% input_field "q" html_id="search" aria_label=search_label value=search_query|default:'' autocomplete="off" placeholder=search_placeholder icon_left="search" %}
       </div>
 
       <!-- Status Filter Tabs -->
       <div class="flex flex-wrap gap-1">
         {% for tab in status_tabs %}
+        {# tmpl-allow TMPL002: the active tab is marked by per-tab text and border colour classes chosen at render time; the button tag renders every tab in one variant colour #}
         <button type="button"
           data-action="filter-tab" data-select-name="status" data-select-value="{{ tab.value }}"
           class="px-3 py-1.5 text-sm rounded-md transition-colors {% if filter_active_tab == tab.value %}bg-slate-600 {{ tab.text_class }} border border-{{ tab.border_class|default:'slate-500' }}{% else %}text-slate-400 hover:text-white hover:bg-slate-700{% endif %}">
@@ -100,6 +95,7 @@
       </div>
 
       <!-- Hidden status select (driven by tab buttons) -->
+      {# tmpl-allow TMPL003: options rendered inline from five literal customer statuses; select components take a view-built options list #}
       <select aria-label="{% trans 'Customer status' %}" name="status" class="hidden">
         <option value=""{% if not status_filter %} selected{% endif %}>{% trans 'All' %}</option>
         <option value="active"{% if status_filter == 'active' %} selected{% endif %}>{% trans 'Active' %}</option>

@@ -1,11 +1,16 @@
 {% load i18n %}
+{% load ui_components %}
 <aside class="col-span-12 lg:col-span-3" x-data="settingsSidebar">
   <div class="bg-slate-800 rounded-lg border border-slate-700 p-4 lg:sticky lg:top-4">
+    {# tmpl-allow TMPL002: @click Alpine binding and an x-text open/closed indicator span; components accept no executable attributes (apps/ui/attributes.py) #}
     <button type="button" class="lg:hidden w-full flex items-center justify-between text-sm font-medium text-white mb-3" @click="navOpen = !navOpen">
-      <span>☰ {% trans "Settings menu" %}</span>
+      <span>{% icon "menu" size="sm" %} {% trans "Settings menu" %}</span>
       <span x-text="navOpen ? '−' : '+'"></span>
     </button>
-    <input type="search" aria-label="{% trans 'Search settings' %}" name="q" placeholder="{% trans 'Search settings…' %}" autocomplete="off" class="w-full px-3 py-2 mb-4 bg-slate-900/60 border border-slate-600 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500" hx-get="{% url 'settings:search' %}" hx-trigger="input changed delay:300ms" hx-target="#search-results" hx-swap="innerHTML">
+    {% trans 'Search settings' as search_settings_label %}
+    {% trans 'Search settings…' as search_settings_placeholder %}
+    {% url 'settings:search' as settings_search_url %}
+    {% input_field "q" input_type="search" aria_label=search_settings_label placeholder=search_settings_placeholder autocomplete="off" container_class="mb-4" hx_get=settings_search_url hx_trigger="input changed delay:300ms" hx_target="#search-results" hx_swap="innerHTML" %}
     <div id="search-results"></div>
     <nav class="space-y-5" x-show="navOpen" x-cloak x-transition.opacity>
       {% for zone in nav_zones %}

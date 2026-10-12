@@ -180,7 +180,7 @@
 
             <!-- Romanian Compliance -->
             <div class="md:col-span-2">
-              <h4 class="text-sm font-semibold text-slate-300 mb-3">🇷🇴 {% trans "Romanian Compliance" %}</h4>
+              <h4 class="text-sm font-semibold text-slate-300 mb-3">{% trans "Romanian Compliance" %}</h4>
               <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
                 {% if order.billing_fiscal_code %}
                 <div>
@@ -328,36 +328,37 @@
             <label for="new_status" class="block text-sm font-medium text-slate-400 mb-2">
               {% trans "New Status" %}
             </label>
+            {# tmpl-allow TMPL003: options rendered inline per order status, with data-destructive/data-confirm-word flags the modal script reads; select components take a view-built options list #}
             <select id="new_status" name="status" required
                     class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500">
               <option value="">{% trans "Select new status..." %}</option>
               {% if order.status == "draft" %}
-                <option value="awaiting_payment" {% if not preflight_ok %}disabled{% endif %}>⏳ {% trans "Submit for Payment" %}</option>
-                <option value="cancelled" data-destructive="true" data-confirm-word="CANCEL">❌ {% trans "Cancelled" %}</option>
+                <option value="awaiting_payment" {% if not preflight_ok %}disabled{% endif %}>{% trans "Submit for Payment" %}</option>
+                <option value="cancelled" data-destructive="true" data-confirm-word="CANCEL">{% trans "Cancelled" %}</option>
               {% elif order.status == "awaiting_payment" %}
                 {# "Mark as Paid" removed — payment must go through the proforma flow #}
                 {# (Record Payment on proforma → auto-converts to invoice → order transitions to paid) #}
                 {% if order.proforma %}
-                <option value="" disabled>💡 {% trans "Record payment on proforma to mark as paid" %}</option>
+                <option value="" disabled>{% trans "Record payment on proforma to mark as paid" %}</option>
                 {% else %}
-                <option value="paid">✅ {% trans "Mark as Paid" %}</option>
+                <option value="paid">{% trans "Mark as Paid" %}</option>
                 {% endif %}
-                <option value="cancelled" data-destructive="true" data-confirm-word="CANCEL">❌ {% trans "Cancelled" %}</option>
-                <option value="failed" data-destructive="true" data-confirm-word="FAILED">🔥 {% trans "Failed" %}</option>
+                <option value="cancelled" data-destructive="true" data-confirm-word="CANCEL">{% trans "Cancelled" %}</option>
+                <option value="failed" data-destructive="true" data-confirm-word="FAILED">{% trans "Failed" %}</option>
               {% elif order.status == "paid" %}
-                <option value="provisioning">⚙️ {% trans "Start Provisioning" %}</option>
-                <option value="in_review">🔍 {% trans "Flag for Review" %}</option>
-                <option value="cancelled" data-destructive="true" data-confirm-word="CANCEL">❌ {% trans "Cancelled" %}</option>
+                <option value="provisioning">{% trans "Start Provisioning" %}</option>
+                <option value="in_review">{% trans "Flag for Review" %}</option>
+                <option value="cancelled" data-destructive="true" data-confirm-word="CANCEL">{% trans "Cancelled" %}</option>
               {% elif order.status == "in_review" %}
-                <option value="provisioning">✅ {% trans "Approve & Provision" %}</option>
-                <option value="cancelled" data-destructive="true" data-confirm-word="CANCEL">❌ {% trans "Reject & Cancel" %}</option>
+                <option value="provisioning">{% trans "Approve & Provision" %}</option>
+                <option value="cancelled" data-destructive="true" data-confirm-word="CANCEL">{% trans "Reject & Cancel" %}</option>
               {% elif order.status == "provisioning" %}
-                <option value="completed">✅ {% trans "Completed" %}</option>
-                <option value="failed" data-destructive="true" data-confirm-word="FAILED">🔥 {% trans "Failed" %}</option>
-                <option value="cancelled" data-destructive="true" data-confirm-word="CANCEL">❌ {% trans "Cancelled" %}</option>
+                <option value="completed">{% trans "Completed" %}</option>
+                <option value="failed" data-destructive="true" data-confirm-word="FAILED">{% trans "Failed" %}</option>
+                <option value="cancelled" data-destructive="true" data-confirm-word="CANCEL">{% trans "Cancelled" %}</option>
               {% elif order.status == "failed" %}
-                <option value="awaiting_payment">⏳ {% trans "Retry" %}</option>
-                <option value="cancelled" data-destructive="true" data-confirm-word="CANCEL">❌ {% trans "Cancelled" %}</option>
+                <option value="awaiting_payment">{% trans "Retry" %}</option>
+                <option value="cancelled" data-destructive="true" data-confirm-word="CANCEL">{% trans "Cancelled" %}</option>
               {% endif %}
             </select>
           </div>
@@ -378,9 +379,9 @@
             <label for="notes" class="block text-sm font-medium text-slate-400 mb-2">
               {% trans "Notes" %} <span class="text-slate-500">({% trans "optional" %})</span>
             </label>
-            <textarea id="notes" name="notes" rows="3"
-                      class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
-                      placeholder="{% trans 'Add a note about this status change...' %}"></textarea>
+            {% trans 'Add a note about this status change...' as notes_placeholder %}
+            {% trans "Notes" as notes_label %}
+            {% input_field "notes" input_type="textarea" html_id="notes" rows=3 placeholder=notes_placeholder aria_label=notes_label %}
           </div>
 
           <!-- Destructive action confirmation (hidden by default) -->
@@ -388,9 +389,10 @@
             <label id="destructiveConfirmLabel" for="confirmInput" class="block text-red-300 text-sm mb-2">
               {% trans "This action is irreversible. Type" %} <strong id="confirmWord" class="font-mono">CANCEL</strong> {% trans "to confirm." %}
             </label>
-            <input id="confirmInput" type="text" autocomplete="off"
-                   class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-red-500"
-                   placeholder="{% trans 'Type here to confirm...' %}">
+            {% trans 'Type here to confirm...' as confirm_placeholder %}
+            {# No name: the typed confirmation word stays out of the status form's POST #}
+            {# a11y-allow A11Y003: named by label for=confirmInput, which embeds the live confirm word (confirmWord, set from the selected status); an aria_label would override that name and hide the word #}
+            {% input_field "" html_id="confirmInput" autocomplete="off" placeholder=confirm_placeholder css_class="text-sm" %}
           </div>
 
           <!-- Error display (populated by JS on failed submit) -->
@@ -398,14 +400,8 @@
         </div>
 
         <div class="px-6 py-4 bg-slate-900 flex justify-end space-x-3">
-          <button type="button" data-action="invoke" data-invoke="hideStatusModal"
-                  class="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white">
-            {% trans "Cancel" %}
-          </button>
-          <button type="submit" id="statusSubmitBtn"
-                  class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg border border-transparent bg-blue-600 text-white hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed">
-            {% icon "refresh" %} {% trans "Change Status" %}
-          </button>
+          {% trans "Cancel" as cancel_label %}{% button cancel_label variant="secondary" data_action="invoke" data_invoke="hideStatusModal" %}
+          {% trans "Change Status" as change_status_label %}{% button change_status_label type="submit" variant="primary" button_id="statusSubmitBtn" icon="refresh" %}
         </div>
       </form>
     </div>
@@ -621,12 +617,13 @@ document.addEventListener('DOMContentLoaded', function() {
             <label for="refund_type" class="block text-sm font-medium text-slate-400 mb-2">
               {% trans "Refund Type" %}
             </label>
+            {# tmpl-allow TMPL003: options rendered inline as literal refund types, partial gated on order status; select components take a view-built options list #}
             <select id="refund_type" name="refund_type" required
                     class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500">
               <option value="">{% trans "Select refund type..." %}</option>
-              <option value="full">💰 {% trans "Full Refund" %}</option>
+              <option value="full">{% trans "Full Refund" %}</option>
               {% if order.status == "completed" %}
-                <option value="partial">💸 {% trans "Partial Refund" %}</option>
+                <option value="partial">{% trans "Partial Refund" %}</option>
               {% endif %}
             </select>
           </div>
@@ -636,10 +633,8 @@ document.addEventListener('DOMContentLoaded', function() {
               {% trans "Refund Amount" %}
             </label>
             <div class="relative">
-              <input type="number" id="refund_amount" name="refund_amount" step="0.01" min="0.01"
-                     max="{{ order.total_cents|cents_to_currency }}"
-                     class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 pr-16 focus:ring-2 focus:ring-blue-500"
-                     placeholder="0.00">
+              {% trans "Refund Amount" as refund_amount_label %}
+              {% input_field "refund_amount" input_type="number" html_id="refund_amount" step="0.01" min="0.01" max=order.total_cents|cents_to_currency placeholder="0.00" css_class="pr-16" aria_label=refund_amount_label %}
               <div class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
                 <span class="text-slate-400 text-sm">{{ order.currency }}</span>
               </div>
@@ -653,19 +648,20 @@ document.addEventListener('DOMContentLoaded', function() {
             <label for="refund_reason" class="block text-sm font-medium text-slate-400 mb-2">
               {% trans "Refund Reason" %}
             </label>
+            {# tmpl-allow TMPL003: options rendered inline as the literal staff refund-reason vocabulary (pinned by tests.billing.test_refund_reason_vocabulary); select components take a view-built options list #}
             <select id="refund_reason" name="refund_reason" required
                     class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500">
               <option value="">{% trans "Select reason..." %}</option>
-              <option value="customer_request">🙋 {% trans "Customer Request" %}</option>
-              <option value="error_correction">🔧 {% trans "Error Correction" %}</option>
-              <option value="dispute">⚖️ {% trans "Dispute Resolution" %}</option>
-              <option value="service_failure">❌ {% trans "Service Failure" %}</option>
-              <option value="duplicate_payment">📋 {% trans "Duplicate Order" %}</option>
-              <option value="cancellation">🚫 {% trans "Cancellation Request" %}</option>
-              <option value="quality_issue">🔍 {% trans "Quality Issue" %}</option>
-              <option value="policy_violation">📜 {% trans "Policy Violation" %}</option>
-              <option value="technical_issue">⚙️ {% trans "Technical Issue" %}</option>
-              <option value="other">❓ {% trans "Other" %}</option>
+              <option value="customer_request">{% trans "Customer Request" %}</option>
+              <option value="error_correction">{% trans "Error Correction" %}</option>
+              <option value="dispute">{% trans "Dispute Resolution" %}</option>
+              <option value="service_failure">{% trans "Service Failure" %}</option>
+              <option value="duplicate_payment">{% trans "Duplicate Order" %}</option>
+              <option value="cancellation">{% trans "Cancellation Request" %}</option>
+              <option value="quality_issue">{% trans "Quality Issue" %}</option>
+              <option value="policy_violation">{% trans "Policy Violation" %}</option>
+              <option value="technical_issue">{% trans "Technical Issue" %}</option>
+              <option value="other">{% trans "Other" %}</option>
             </select>
           </div>
 
@@ -673,22 +669,16 @@ document.addEventListener('DOMContentLoaded', function() {
             <label for="refund_notes" class="block text-sm font-medium text-slate-400 mb-2">
               {% trans "Notes" %} <span class="text-slate-500">({% trans "required" %})</span>
             </label>
-            <textarea id="refund_notes" name="refund_notes" rows="3" required
-                      class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
-                      placeholder="{% trans 'Please explain the reason for this refund...' %}"></textarea>
+            {% trans 'Please explain the reason for this refund...' as refund_notes_placeholder %}
+            {% trans "Notes" as refund_notes_label %}
+            {% input_field "refund_notes" input_type="textarea" html_id="refund_notes" rows=3 required=True placeholder=refund_notes_placeholder aria_label=refund_notes_label %}
           </div>
 
         </div>
 
         <div class="px-6 py-4 bg-slate-900 flex justify-end space-x-3">
-          <button type="button" data-action="invoke" data-invoke="hideRefundModal"
-                  class="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white">
-            {% trans "Cancel" %}
-          </button>
-          <button type="submit"
-                  class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg border border-transparent bg-green-600 text-white hover:bg-green-700 focus:ring-2 focus:ring-green-500">
-            {% icon "currency" %} {% trans "Process Refund" %}
-          </button>
+          {% trans "Cancel" as cancel_label %}{% button cancel_label variant="secondary" data_action="invoke" data_invoke="hideRefundModal" %}
+          {% trans "Process Refund" as process_refund_label %}{% button process_refund_label type="submit" variant="success" icon="currency" %}
         </div>
       </form>
     </div>
@@ -790,19 +780,20 @@ document.getElementById('refundForm').addEventListener('submit', function(e) {
             <label for="refund_request_reason" class="block text-sm font-medium text-slate-400 mb-2">
               {% trans "Refund Reason" %} <span class="text-red-400">*</span>
             </label>
+            {# tmpl-allow TMPL003: options rendered inline as the literal refund-request reason vocabulary (pinned by tests.billing.test_refund_reason_vocabulary); select components take a view-built options list #}
             <select id="refund_request_reason" name="refund_reason" required
                     class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500">
               <option value="">{% trans "Please select a reason..." %}</option>
-              <option value="customer_request">🙋 {% trans "General Customer Request" %}</option>
-              <option value="service_failure">❌ {% trans "Service Not Working" %}</option>
-              <option value="quality_issue">🔍 {% trans "Quality Not As Expected" %}</option>
-              <option value="technical_issue">⚙️ {% trans "Technical Problems" %}</option>
-              <option value="cancellation_request">🚫 {% trans "Want to Cancel Service" %}</option>
-              <option value="duplicate_order">📋 {% trans "Duplicate Order" %}</option>
-              <option value="billing_error">💳 {% trans "Billing Error" %}</option>
-              <option value="policy_violation">📜 {% trans "Service Policy Issue" %}</option>
-              <option value="unsatisfied_service">😞 {% trans "Not Satisfied with Service" %}</option>
-              <option value="other">❓ {% trans "Other Reason" %}</option>
+              <option value="customer_request">{% trans "General Customer Request" %}</option>
+              <option value="service_failure">{% trans "Service Not Working" %}</option>
+              <option value="quality_issue">{% trans "Quality Not As Expected" %}</option>
+              <option value="technical_issue">{% trans "Technical Problems" %}</option>
+              <option value="cancellation_request">{% trans "Want to Cancel Service" %}</option>
+              <option value="duplicate_order">{% trans "Duplicate Order" %}</option>
+              <option value="billing_error">{% trans "Billing Error" %}</option>
+              <option value="policy_violation">{% trans "Service Policy Issue" %}</option>
+              <option value="unsatisfied_service">{% trans "Not Satisfied with Service" %}</option>
+              <option value="other">{% trans "Other Reason" %}</option>
             </select>
           </div>
 
@@ -810,9 +801,9 @@ document.getElementById('refundForm').addEventListener('submit', function(e) {
             <label for="refund_request_notes" class="block text-sm font-medium text-slate-400 mb-2">
               {% trans "Details" %} <span class="text-red-400">*</span>
             </label>
-            <textarea id="refund_request_notes" name="refund_notes" rows="4" required
-                      class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
-                      placeholder="{% trans 'Please provide details about your refund request. The more information you provide, the faster we can process your request.' %}"></textarea>
+            {% trans 'Please provide details about your refund request. The more information you provide, the faster we can process your request.' as refund_request_placeholder %}
+            {% trans "Details" as refund_request_notes_label %}
+            {% input_field "refund_notes" input_type="textarea" html_id="refund_request_notes" rows=4 required=True placeholder=refund_request_placeholder aria_label=refund_request_notes_label %}
             <p class="text-xs text-slate-500 mt-1">
               {% trans "Include details like what went wrong, when the issue occurred, or any relevant information." %}
             </p>
@@ -834,14 +825,8 @@ document.getElementById('refundForm').addEventListener('submit', function(e) {
         </div>
 
         <div class="px-6 py-4 bg-slate-900 flex justify-end space-x-3">
-          <button type="button" data-action="invoke" data-invoke="hideOrderRefundRequestModal"
-                  class="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white">
-            {% trans "Cancel" %}
-          </button>
-          <button type="submit"
-                  class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg border border-transparent bg-blue-600 text-white hover:bg-blue-700 focus:ring-2 focus:ring-blue-500">
-            {% icon "tickets" %} {% trans "Submit Request" %}
-          </button>
+          {% trans "Cancel" as cancel_label %}{% button cancel_label variant="secondary" data_action="invoke" data_invoke="hideOrderRefundRequestModal" %}
+          {% trans "Submit Request" as submit_request_label %}{% button submit_request_label type="submit" variant="primary" icon="tickets" %}
         </div>
       </form>
     </div>

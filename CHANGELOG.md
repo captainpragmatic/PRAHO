@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Platform no longer writes an audit row for every page a staff member opens.** (#622)
+  - **The bug.** Every signed-in request under `/users/`, `/billing/`, `/customers/`, `/admin/`, `/api/`, `/settings/` or `/tickets/` wrote a `session_activity_*` audit event. The rows had no user attached, only the user's id, the path and the IP in their details, so GDPR export and erasure never found them, and retention kept them for two years. The request log already records each request.
+  - **The same path's multiple-address check** stored one cache entry per request, about 1,800 an hour for a page that refreshes itself, and once three addresses were seen it wrote a `suspicious_activity_detected` row on every request for up to an hour. It now keeps one entry per address and records an address once, when it joins the pattern.
+- **The staff proforma form shows each customer's VAT number.** The option's variable tag was split across two lines, which Django does not read as a tag, so every customer with a VAT number was listed with the literal text `({{ customer.tax_profile.vat_number }})`.
+- **The security docs list the rate limits the code applies.** (#622) Both listed an `EndpointThrottle` with login, 2FA and provisioning rates; that class and four others in the table no longer existed, and every other rate was wrong. `docs/security/SECURITY_CONFIGURATION.md` now lists all 18 throttles with their scope, default rate and key, and a test fails if it drifts from the code.
 - **The legal pages open from their addresses without a trailing slash.** On the portal, `/terms`, `/privacy-policy` and `/cookie-policy` sent a visitor who was not signed in to the login page, because sign-in was checked before the missing slash was added. They now redirect to the page.
 - **Media is backed up, and native installs can write it.** Media holds what the database cannot rebuild: ANAF's e-Factura response archives, issued invoice PDFs, ticket attachments and GDPR exports.
   - **The bugs.** Neither backup script saved it. Production and staging settings also ignored `MEDIA_ROOT`. Docker was unaffected, because the image links that directory to its `media_files` volume. On native installs the files went under the code tree, which the services' `ProtectSystem=strict` makes read-only, so writing them failed.
@@ -67,6 +72,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Platform templates are held to the design-system template lint.** (#622) The linter checked only portal templates, so Platform's raw form elements and emoji went unchecked. It now scans Platform and `shared/ui` templates too, and the pre-commit hook no longer skips them. The findings are fixed: 133 raw form elements now use the shared components; 194 keep their markup with a `tmpl-allow` marker naming what the components cannot express (Alpine bindings, option lists built in the template, rows a script clones); and all 95 emoji are gone. A crawl of 143 staff pages found every form control with the same name, type, value, state and htmx wiring as before.
 - **Portal registration asks each customer for the fiscal identity they have.** Companies give a CUI and trade registry number next to the VAT number, and a Romanian company must give a VAT number or a CUI. A CNP is asked only of individuals billed in Romania. When Platform refuses a value (a CNP or CUI that fails its check digit, a VAT number for another CUI), the reason is shown on that field instead of a generic "registration failed". **Deploy the portal with or before Platform.**
 - **Total time limit on Platform calls.** A portal call to Platform now has a total time budget, `PLATFORM_API_TOTAL_BUDGET_SECONDS` (default and maximum 45 s, minimum 5 s). It covers retries and backoff, and the response body is read in chunks with the budget checked between them, so a slow Platform no longer holds a portal worker for minutes.
 - **Startup checks.** `PLATFORM_API_TIMEOUT` is now checked at startup: it must be between 1 s and the budget. Its default follows the budget when that is lower.
@@ -74,6 +80,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **API tokens are issued to staff accounts only.** (#621)
+  - **The bug.** `POST /api/users/token/` checked the email, the password and the second factor, but not whether the account was staff, so any customer could mint a token. ADR-0031 and the settings page treat tokens as staff automation. A customer's token reached only `token/me/` and `token/revoke/`, because every business route requires the portal's signature, but the gap would have widened the day a route accepted a bare token.
+  - **Now.** A customer gets the wrong-password answer, before the second factor, so the refusal neither spends a code nor counts toward the lockout. The check runs again on the locked account row, so a demotion during the request is not missed. Every refusal that follows a correct password (a customer, a locked account, or an account changed during the request) writes a failed-login audit event, as a wrong password does, with the reason in its details; before, it left no trace.
+  - **Removed `GET /api/users/token/verify/`.** It answered with the first member of the signed customer, not the caller, reporting another person's email and staff flag. Nothing called it, and `token/me/` describes the caller's token.
 - **A GDPR export includes the person's billing data.** The export had a billing section and an "include billing" option, but the section was always empty.
   - **Now.** For each individual customer the person owns, the export holds the tax profile (with the CNP) and the invoices and proformas, each reduced to a fixed list of fields. Issued invoices keep the CNP for the retention period, so the person gets that too.
   - **Not exported to members:** a company's invoices. They are the company's records, not the member's personal data.

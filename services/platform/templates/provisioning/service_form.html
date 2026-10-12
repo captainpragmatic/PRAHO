@@ -59,6 +59,7 @@
               <label for="customer_id" class="block text-sm font-medium text-slate-300 mb-1">
                 {% icon "user" %} {% trans 'Customer' %}
               </label>
+              {# tmpl-allow TMPL003: options rendered inline from customers; select components take a view-built options list #}
               <select id="customer_id" name="customer_id" required class="w-full rounded-md border border-slate-600 bg-slate-700 text-white px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
                 <option value="">{% trans 'Select customer' %}</option>
                 {% for customer in customers %}
@@ -72,6 +73,7 @@
               <label for="plan_id" class="block text-sm font-medium text-slate-300 mb-1">
                 {% icon "orders" %} {% trans 'Service Plan' %}
               </label>
+              {# tmpl-allow TMPL003: options rendered inline from plan_options; select components take a view-built options list #}
               <select id="plan_id" name="plan_id" required class="w-full rounded-md border border-slate-600 bg-slate-700 text-white px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
                 <option value="">{% trans 'Select plan' %}</option>
                 {% for plan in plan_options %}

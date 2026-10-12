@@ -35,15 +35,14 @@
                     <form method="post" action="{% url 'infrastructure:deployment_reboot' deployment.id %}" class="inline"
                           data-confirm="{% trans "Reboot this node? Active connections will be interrupted." %}">
                         {% csrf_token %}
-                        <button type="submit" class="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition-colors">
-                            {% icon "refresh" css_class="inline mr-1" %}
-                            {% trans "Reboot" %}
-                        </button>
+                        {% trans "Reboot" as reboot_label %}{% button reboot_label type="submit" variant="warning" icon="refresh" %}
                     </form>
                     <form method="post" action="{% url 'infrastructure:deployment_stop' deployment.id %}" class="inline"
                           data-confirm="{% trans "Power off this node? All services will be stopped." %}">
                         {% csrf_token %}
+                        {# tmpl-allow TMPL001: component wrapper breaks inline layout; checkbox sits in an inline form inside the header's flex action row #}
                         <label><input type="checkbox" name="force"> {% trans "Force stop even with undrained accounts" %}</label>
+                        {# tmpl-allow TMPL002: holds an inline stop-icon SVG with no _ICON_PATHS key; the button tag renders only named icons #}
                         <button type="submit" class="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg transition-colors">
                             <svg class="w-5 h-5 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
@@ -55,6 +54,7 @@
                     {% elif deployment.status == "stopped" %}
                     <form method="post" action="{% url 'infrastructure:deployment_start' deployment.id %}" class="inline">
                         {% csrf_token %}
+                        {# tmpl-allow TMPL002: holds an inline play-icon SVG with no _ICON_PATHS key; the button tag renders only named icons #}
                         <button type="submit" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors">
                             <svg class="w-5 h-5 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path>
@@ -68,10 +68,7 @@
                 {% if can_retry %}
                 <form method="post" action="{% url 'infrastructure:deployment_retry' deployment.id %}" class="inline">
                     {% csrf_token %}
-                    <button type="submit" class="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg transition-colors">
-                        {% icon "refresh" css_class="inline mr-1" %}
-                        {% trans "Retry" %}
-                    </button>
+                    {% trans "Retry" as retry_label %}{% button retry_label type="submit" variant="warning" icon="refresh" %}
                 </form>
                 {% endif %}
                 {% if can_destroy %}

@@ -113,6 +113,7 @@ Professional interface for staff to manage all user GDPR requests
                         <label for="gdpr-status" class="block text-sm font-medium text-slate-300 mb-2">
                             {% trans "Status" %}
                         </label>
+                        {# tmpl-allow TMPL003: options rendered inline from five literal export statuses; select components take a view-built options list #}
                         <select class="bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white text-sm w-full focus:ring-2 focus:ring-blue-500 focus:border-transparent relative z-10"
                                 id="gdpr-status" name="status">
                             <option value="all">{% trans "All Statuses" %}</option>
@@ -125,13 +126,9 @@ Professional interface for staff to manage all user GDPR requests
 
                     <!-- User Email Search -->
                     <div>
-                        <label for="gdpr-user-email" class="block text-sm font-medium text-slate-300 mb-2">
-                            {% trans "User Email" %}
-                        </label>
-                        <input type="text"
-                               id="gdpr-user-email" name="user_email"
-                               placeholder="{% trans 'Search by user email...' %}"
-                               class="bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white text-sm w-full focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                        {% trans "User Email" as user_email_label %}
+                        {% trans 'Search by user email...' as user_email_placeholder %}
+                        {% input_field "user_email" html_id="gdpr-user-email" label=user_email_label placeholder=user_email_placeholder %}
                     </div>
 
                     <!-- Export Type Filter -->
@@ -139,6 +136,7 @@ Professional interface for staff to manage all user GDPR requests
                         <label for="gdpr-export-type" class="block text-sm font-medium text-slate-300 mb-2">
                             {% trans "Export Type" %}
                         </label>
+                        {# tmpl-allow TMPL003: options rendered inline from four literal export types; select components take a view-built options list #}
                         <select class="bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white text-sm w-full focus:ring-2 focus:ring-blue-500 focus:border-transparent relative z-10"
                                 id="gdpr-export-type" name="export_type">
                             <option value="">{% trans "All Types" %}</option>
@@ -157,12 +155,10 @@ Professional interface for staff to manage all user GDPR requests
                             {% trans "Date Range" %}
                         </label>
                         <div class="flex gap-2">
-                            <input type="date"
-                                   name="start_date" aria-label="{% trans 'Start date' %}"
-                                   class="bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white text-sm flex-1 focus:ring-2 focus:ring-blue-500 focus:border-transparent">
-                            <input type="date"
-                                   name="end_date" aria-label="{% trans 'End date' %}"
-                                   class="bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white text-sm flex-1 focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                            {% trans 'Start date' as start_date_label %}
+                            {% input_field "start_date" input_type="date" aria_label=start_date_label container_class="flex-1" %}
+                            {% trans 'End date' as end_date_label %}
+                            {% input_field "end_date" input_type="date" aria_label=end_date_label container_class="flex-1" %}
                         </div>
                     </div>
 
@@ -171,6 +167,7 @@ Professional interface for staff to manage all user GDPR requests
                         <label for="gdpr-expired" class="block text-sm font-medium text-slate-300 mb-2">
                             {% trans "Expiration Status" %}
                         </label>
+                        {# tmpl-allow TMPL003: options rendered inline from three literal expiration states; select components take a view-built options list #}
                         <select class="bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white text-sm w-full focus:ring-2 focus:ring-blue-500 focus:border-transparent relative z-10"
                                 id="gdpr-expired" name="expired">
                             <option value="">{% trans "All Exports" %}</option>
@@ -220,7 +217,7 @@ Professional interface for staff to manage all user GDPR requests
         <!-- Romanian Compliance Notice -->
         <div class="mt-6 bg-slate-800 border border-slate-700 rounded-lg p-4">
             <div class="flex items-center space-x-2">
-                <span class="text-blue-400">🇷🇴</span>
+                <span class="text-blue-400">{% icon "flag" size="sm" %}</span>
                 <p class="text-slate-400 text-sm">
                     {% trans "This GDPR management system complies with Romanian Law 190/2018 and EU Regulation 2016/679. All data processing activities are logged for audit purposes." %}
                 </p>

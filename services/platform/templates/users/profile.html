@@ -35,18 +35,18 @@
             <label for="id_first_name" class="block text-sm font-medium text-slate-300 mb-1">
               {% trans 'First Name' %}
             </label>
-            <input type="text" name="first_name" id="id_first_name" value="{{ user.first_name }}"
-                   class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500"
-                   placeholder="{% trans 'Your first name' %}">
+            {% trans 'Your first name' as first_name_placeholder %}
+            {% trans 'First Name' as first_name_label %}
+            {% input_field "first_name" html_id="id_first_name" value=user.first_name placeholder=first_name_placeholder aria_label=first_name_label %}
           </div>
 
           <div>
             <label for="id_last_name" class="block text-sm font-medium text-slate-300 mb-1">
               {% trans 'Last Name' %}
             </label>
-            <input type="text" name="last_name" id="id_last_name" value="{{ user.last_name }}"
-                   class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500"
-                   placeholder="{% trans 'Your last name' %}">
+            {% trans 'Your last name' as last_name_placeholder %}
+            {% trans 'Last Name' as last_name_label %}
+            {% input_field "last_name" html_id="id_last_name" value=user.last_name placeholder=last_name_placeholder aria_label=last_name_label %}
           </div>
         </div>
 
@@ -55,8 +55,8 @@
             <label for="id_email" class="block text-sm font-medium text-slate-300 mb-1">
               {% trans 'Email Address' %}
             </label>
-            <input type="email" name="email" id="id_email" value="{{ user.email }}" disabled
-                   class="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded-md text-slate-300 cursor-not-allowed">
+            {% trans 'Email Address' as email_label %}
+            {% input_field "email" input_type="email" html_id="id_email" value=user.email disabled=True aria_label=email_label %}
             <p class="mt-1 text-xs text-slate-400">
               {% trans 'Contact an administrator to change your email address' %}
             </p>
@@ -66,9 +66,8 @@
             <label for="id_phone" class="block text-sm font-medium text-slate-300 mb-1">
               {% trans 'Phone Number' %}
             </label>
-            <input type="text" name="phone" id="id_phone" value="{{ user.phone|default:'' }}"
-                   class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500"
-                   placeholder="+40 721 123 456">
+            {% trans 'Phone Number' as phone_label %}
+            {% input_field "phone" html_id="id_phone" value=user.phone|default:'' placeholder="+40 721 123 456" aria_label=phone_label %}
           </div>
         </div>
 
@@ -283,7 +282,7 @@
           <!-- Legal compliance note -->
           <div class="mt-4 p-3 bg-slate-900 border border-slate-600 rounded-lg">
             <p class="text-xs text-slate-400">
-              🇷🇴 {% trans 'GDPR compliant according to Romanian Law 190/2018 and EU Regulation 2016/679' %}
+              {% trans 'GDPR compliant according to Romanian Law 190/2018 and EU Regulation 2016/679' %}
             </p>
           </div>
         </div>

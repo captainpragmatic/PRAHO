@@ -235,7 +235,11 @@ class ObtainTokenTests(TestCase):
         self.client = APIClient()
         self.password = "StrongPass123!"
         self.user = User.objects.create_user(
-            email="obtain@test.com", password=self.password, first_name="Obtain", last_name="Test"
+            email="obtain@test.com",
+            password=self.password,
+            first_name="Obtain",
+            last_name="Test",
+            staff_role="support",  # tokens are for staff (ADR-0031)
         )
         self.url = "/api/users/token/"
 
@@ -436,7 +440,7 @@ class ObtainTokenExpiryTests(TestCase):
     def setUp(self) -> None:
         self.client = APIClient()
         self.password = "StrongPass123!"
-        self.user = User.objects.create_user(email="ttl@test.com", password=self.password)
+        self.user = User.objects.create_user(email="ttl@test.com", password=self.password, staff_role="support")
         self.url = "/api/users/token/"
 
     def test_default_ttl_applied_when_not_requested(self) -> None:
@@ -489,7 +493,7 @@ class ObtainTokenLimitExpiredTests(TestCase):
     def setUp(self) -> None:
         self.client = APIClient()
         self.password = "StrongPass123!"
-        self.user = User.objects.create_user(email="limit@test.com", password=self.password)
+        self.user = User.objects.create_user(email="limit@test.com", password=self.password, staff_role="support")
         self.url = "/api/users/token/"
 
     @override_settings(API_TOKEN_MAX_ACTIVE_PER_USER=2)
@@ -537,7 +541,7 @@ class ObtainTokenInputValidationTests(TestCase):
     def setUp(self) -> None:
         self.client = APIClient()
         self.password = "StrongPass123!"
-        self.user = User.objects.create_user(email="validate@test.com", password=self.password)
+        self.user = User.objects.create_user(email="validate@test.com", password=self.password, staff_role="support")
         self.url = "/api/users/token/"
 
     def _post(self, **extra: object) -> object:
@@ -605,7 +609,7 @@ class APITokenAuditTests(TestCase):
     def setUp(self) -> None:
         self.client = APIClient()
         self.password = "StrongPass123!"
-        self.user = User.objects.create_user(email="audit@test.com", password=self.password)
+        self.user = User.objects.create_user(email="audit@test.com", password=self.password, staff_role="support")
         self.url = "/api/users/token/"
 
     def test_obtain_token_emits_created_audit_event(self) -> None:
@@ -756,7 +760,7 @@ class StrayAuthorizationHeaderTests(TestCase):
     def setUp(self) -> None:
         self.client = APIClient()
         self.password = "StrongPass123!"
-        self.user = User.objects.create_user(email="stray@test.com", password=self.password)
+        self.user = User.objects.create_user(email="stray@test.com", password=self.password, staff_role="support")
 
     def test_health_check_ignores_stray_bearer_header(self) -> None:
         response = self.client.get("/api/users/health/", HTTP_AUTHORIZATION="Bearer stray-garbage")

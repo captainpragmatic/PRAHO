@@ -52,6 +52,7 @@ AuditEventReview companion model, so AuditEvent stays append-only.
             <form method="get" class="flex flex-wrap items-end gap-4">
                 <div>
                     <label for="status" class="block text-sm font-medium text-slate-400 mb-1">{% trans "Status" %}</label>
+                    {# tmpl-allow TMPL003: options rendered inline from three literal review states; select components take a view-built options list #}
                     <select name="status" id="status" class="bg-slate-900 border border-slate-600 text-white rounded px-3 py-2">
                         <option value="unreviewed" {% if status_filter == 'unreviewed' %}selected{% endif %}>{% trans "Awaiting review" %}</option>
                         <option value="reviewed" {% if status_filter == 'reviewed' %}selected{% endif %}>{% trans "Reviewed" %}</option>
@@ -60,6 +61,7 @@ AuditEventReview companion model, so AuditEvent stays append-only.
                 </div>
                 <div>
                     <label for="severity" class="block text-sm font-medium text-slate-400 mb-1">{% trans "Severity" %}</label>
+                    {# tmpl-allow TMPL003: options rendered inline from a loop over severity_choices; select components take a view-built options list #}
                     <select name="severity" id="severity" class="bg-slate-900 border border-slate-600 text-white rounded px-3 py-2">
                         <option value="">{% trans "All severities" %}</option>
                         {% for value, label in severity_choices %}
@@ -67,9 +69,7 @@ AuditEventReview companion model, so AuditEvent stays append-only.
                         {% endfor %}
                     </select>
                 </div>
-                <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white font-medium py-2 px-4 rounded-lg transition-colors">
-                    {% trans "Apply" %}
-                </button>
+                {% trans "Apply" as apply_label %}{% button apply_label variant="primary" type="submit" %}
             </form>
         </div>
 
@@ -107,12 +107,11 @@ AuditEventReview companion model, so AuditEvent stays append-only.
                                         {% else %}
                                             <form method="post" action="{% url 'audit:mark_event_reviewed' event.id %}" class="flex items-center gap-2">
                                                 {% csrf_token %}
+                                                {# tmpl-allow TMPL001: sits in a table cell's inline flex form beside its submit button, one per row; component wrapper breaks inline layout #}
                                                 <input type="text" name="notes" maxlength="500" aria-label="{% trans 'Review notes' %}"
                                                        placeholder="{% trans 'Optional notes' %}"
                                                        class="bg-slate-900 border border-slate-600 text-white text-sm rounded px-2 py-1">
-                                                <button type="submit" class="bg-green-600 hover:bg-green-500 text-white text-sm font-medium py-1 px-3 rounded transition-colors">
-                                                    {% trans "Mark reviewed" %}
-                                                </button>
+                                                {% trans "Mark reviewed" as mark_reviewed_label %}{% button mark_reviewed_label variant="success" size="sm" type="submit" %}
                                             </form>
                                         {% endif %}
                                     </td>

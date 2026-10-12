@@ -11,6 +11,7 @@
         <h2 class="text-xl font-semibold mb-4">{% trans "Alert Filters" %}</h2>
 
         <div class="flex flex-wrap gap-4 mb-4">
+            {# tmpl-allow TMPL003: options rendered inline from three literal alert statuses; select components take a view-built options list #}
             <select aria-label="{% trans 'Alert status' %}" name="status" class="bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded px-3 py-2">
                 <option value="active" {% if status_filter == 'active' %}selected{% endif %}>{% trans "Active" %}</option>
                 <option value="resolved" {% if status_filter == 'resolved' %}selected{% endif %}>{% trans "Resolved" %}</option>
@@ -18,6 +19,7 @@
             </select>
 
             {% if alert_types %}
+                {# tmpl-allow TMPL003: options rendered inline from a loop over alert_types; select components take a view-built options list #}
                 <select aria-label="{% trans 'Alert type' %}" name="alert_type" class="bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded px-3 py-2">
                     <option value="">{% trans "All Types" %}</option>
                     {% for alert_type in alert_types %}

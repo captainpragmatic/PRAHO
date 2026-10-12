@@ -492,7 +492,7 @@ def archive_old_events():
 5. **Monitoring**: Track audit system performance metrics
 
 ### Compliance Requirements
-1. **Data Minimization**: Only log necessary information
+1. **Data Minimization**: Only log necessary information. Ordinary requests are not audited: the request log (`AuditMiddleware`) records each one's method, path, user and IP, and every change writes its own audit event. Per-request `session_activity_*` rows were removed (#622); they carried no user, so GDPR export and erasure never found them.
 2. **Purpose Limitation**: Use audit data only for stated purposes
 3. **Access Logging**: Audit access to audit logs themselves
 4. **Retention Limits**: Respect legal retention requirements

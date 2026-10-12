@@ -172,7 +172,8 @@ def test_tax_profile_save(account_page) -> None:
     page.locator('[name="is_vat_payer"]').check()
     page.get_by_role("button", name="Save Tax Profile").click()
     page.reload()
-    expect(page.locator('[name="cui"]')).to_have_value("RO14399840")
+    # A CUI is stored as its digits (#665); the VAT number keeps its country prefix.
+    expect(page.locator('[name="cui"]')).to_have_value("14399840")
     expect(page.locator('[name="vat_number"]')).to_have_value("RO14399840")
     expect(page.locator('[name="is_vat_payer"]')).to_be_checked()
 

@@ -25,9 +25,7 @@
             <!-- Reopen button for closed tickets -->
             <form method="post" action="{% url 'tickets:reopen' pk=ticket.pk %}" class="inline-block">
                 {% csrf_token %}
-                <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
-                    {% icon "refresh" %} {% trans 'Reopen Ticket' %}
-                </button>
+                {% trans 'Reopen Ticket' as reopen_label %}{% button reopen_label type="submit" variant="primary" icon="refresh" %}
             </form>
         {% endif %}
     </div>
@@ -149,6 +147,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     <span class="text-slate-200">${file.name}</span>
                     <span class="ml-2 text-xs text-slate-400">(${formatFileSize(file.size)})</span>
                 </div>
+                {# tmpl-allow TMPL002: built client-side inside a JS template literal (fileItem.innerHTML) with a per-file data-index; icon-only remove button with inline SVG, which the server-rendered button tag cannot produce #}
                 <button type="button" class="text-red-400 hover:text-red-300" data-action="invoke" data-invoke="removeFileAction" data-index="${index}">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>

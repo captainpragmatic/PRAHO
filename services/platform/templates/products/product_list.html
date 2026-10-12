@@ -85,9 +85,9 @@
         <label for="id_search" class="block text-sm font-medium text-slate-300 mb-2">
           {% trans 'Search' %}
         </label>
-        <input type="text" id="id_search" name="search" value="{{ search_query }}"
-               placeholder="{% trans 'Product name, slug, description...' %}"
-               class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
+        {% trans 'Product name, slug, description...' as search_placeholder %}
+        {% trans 'Search' as search_label %}
+        {% input_field "search" html_id="id_search" value=search_query placeholder=search_placeholder aria_label=search_label %}
       </div>
 
       <!-- Product Type Filter -->
@@ -95,6 +95,7 @@
         <label for="id_product_type" class="block text-sm font-medium text-slate-300 mb-2">
           {% trans 'Product Type' %}
         </label>
+        {# tmpl-allow TMPL003: options rendered inline from product_type_choices; select components take a view-built options list #}
         <select id="id_product_type" name="product_type" class="w-full sm:w-auto px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
           <option value="all" {% if product_type_filter == 'all' %}selected{% endif %}>{% trans 'All Types' %}</option>
           {% for value, label in product_type_choices %}
@@ -108,6 +109,7 @@
         <label for="id_is_active" class="block text-sm font-medium text-slate-300 mb-2">
           {% trans 'Active Status' %}
         </label>
+        {# tmpl-allow TMPL003: options rendered inline from literal active-status filters with selected from is_active_filter; select components take a view-built options list #}
         <select id="id_is_active" name="is_active" class="w-full sm:w-auto px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
           <option value="" {% if not is_active_filter %}selected{% endif %}>{% trans 'All Status' %}</option>
           <option value="true" {% if is_active_filter == 'true' %}selected{% endif %}>{% trans 'Active Only' %}</option>
@@ -120,6 +122,7 @@
         <label for="id_is_public" class="block text-sm font-medium text-slate-300 mb-2">
           {% trans 'Public Status' %}
         </label>
+        {# tmpl-allow TMPL003: options rendered inline from literal visibility filters with selected from is_public_filter; select components take a view-built options list #}
         <select id="id_is_public" name="is_public" class="w-full sm:w-auto px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
           <option value="" {% if not is_public_filter %}selected{% endif %}>{% trans 'All Visibility' %}</option>
           <option value="true" {% if is_public_filter == 'true' %}selected{% endif %}>{% trans 'Public Only' %}</option>

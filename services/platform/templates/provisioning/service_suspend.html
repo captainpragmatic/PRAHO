@@ -80,10 +80,7 @@
             {% trans 'Cancel' %}
           </a>
 
-          <button type="submit"
-                  class="bg-yellow-600 hover:bg-yellow-700 text-white px-6 py-2 rounded-md transition-colors">
-            {% icon "clock" %} {% trans 'Suspend Service' %}
-          </button>
+          {% trans 'Suspend Service' as suspend_label %}{% button suspend_label type="submit" variant="warning" icon="clock" %}
         </div>
       </form>
     </div>

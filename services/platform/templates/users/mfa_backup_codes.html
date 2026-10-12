@@ -55,23 +55,11 @@
 
         <!-- Action Buttons -->
         <div class="mt-6 space-y-3">
-          <button data-action="invoke" data-invoke="downloadCodes"
-                  class="w-full flex items-center justify-center px-4 py-3 border border-green-600 text-sm font-medium rounded-lg text-green-200 bg-green-900 bg-opacity-50 hover:bg-opacity-75 focus:outline-none focus:ring-2 focus:ring-green-500 transition-all">
-            <span class="mr-2">{% icon "check" %}</span>
-            {% trans 'Download as Text File' %}
-          </button>
+          {% trans 'Download as Text File' as download_codes_label %}{% button download_codes_label variant="success" size="lg" icon="check" class="w-full" data_action="invoke" data_invoke="downloadCodes" %}
 
-          <button data-action="invoke" data-invoke="printCodes"
-                  class="w-full flex items-center justify-center px-4 py-3 border border-blue-600 text-sm font-medium rounded-lg text-blue-200 bg-blue-900 bg-opacity-50 hover:bg-opacity-75 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
-            <span class="mr-2">{% icon "document" %}</span>
-            {% trans 'Print Codes' %}
-          </button>
+          {% trans 'Print Codes' as print_codes_label %}{% button print_codes_label variant="info" size="lg" icon="document" class="w-full" data_action="invoke" data_invoke="printCodes" %}
 
-          <button data-action="invoke" data-invoke="copyAllCodes"
-                  class="w-full flex items-center justify-center px-4 py-3 border border-purple-600 text-sm font-medium rounded-lg text-purple-200 bg-purple-900 bg-opacity-50 hover:bg-opacity-75 focus:outline-none focus:ring-2 focus:ring-purple-500 transition-all">
-            <span class="mr-2">{% icon "clipboard" %}</span>
-            {% trans 'Copy All Codes' %}
-          </button>
+          {% trans 'Copy All Codes' as copy_codes_label %}{% button copy_codes_label variant="secondary" size="lg" icon="clipboard" class="w-full" data_action="invoke" data_invoke="copyAllCodes" %}
         </div>
       </div>
 
@@ -98,6 +86,7 @@
             <div class="bg-slate-900 rounded-lg p-4 border border-slate-600 hover:border-green-500 transition-colors group">
               <div class="flex items-center justify-between">
                 <code class="text-lg font-mono text-green-400 select-all">{{ code }}</code>
+                {# tmpl-allow TMPL002: icon-only copy button (clipboard icon, no text) whose data-code comes from the loop variable; the button tag renders a text label and its attrs cannot interpolate #}
                 <button data-action="invoke" data-invoke="copyCodeAction" data-code="{{ code }}"
                         class="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-green-400 transition-all ml-2">
                   {% icon "clipboard" %}

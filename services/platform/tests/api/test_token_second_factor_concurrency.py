@@ -28,7 +28,7 @@ class TokenSecondFactorPostgresConcurrencyTests(TransactionTestCase):
     def setUp(self) -> None:
         if connection.vendor != "postgresql":
             self.skipTest("row-lock guarantees require PostgreSQL")
-        self.user = User.objects.create_user(email="mfa-race@example.test", password=PASSWORD)
+        self.user = User.objects.create_user(email="mfa-race@example.test", password=PASSWORD, staff_role="support")
         self.user.two_factor_enabled = True
         self.user.save(update_fields=["two_factor_enabled"])
         self.code = self.user.generate_backup_codes()[0]

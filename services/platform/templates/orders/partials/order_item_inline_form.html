@@ -22,6 +22,7 @@ Simplified version of the full form for better UX in table context
       <label for="id_product_inline" class="block text-sm font-medium text-slate-400 mb-2">
         {% trans "Product/Service" %} <span class="text-red-400">*</span>
       </label>
+      {# tmpl-allow TMPL003: options carry data-product-type/data-requires-domain/data-prices for the inline script; the select component renders option.data keys verbatim (data-requires_domain), which dataset.requiresDomain does not read #}
       <select id="id_product_inline" name="product" required
               class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500">
         <option value="">{% trans "Select product..." %}</option>
@@ -45,9 +46,8 @@ Simplified version of the full form for better UX in table context
       <label for="id_quantity_inline" class="block text-sm font-medium text-slate-400 mb-2">
         {% trans "Quantity" %} <span class="text-red-400">*</span>
       </label>
-      <input type="number" id="id_quantity_inline" name="quantity"
-             value="{{ form.quantity.value|default:'1' }}" min="1" required
-             class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500">
+      {% trans "Quantity" as quantity_label %}
+      {% input_field "quantity" input_type="number" html_id="id_quantity_inline" value=form.quantity.value|default:'1' min="1" required=True css_class="text-sm" aria_label=quantity_label %}
       {% if form.quantity.errors %}
         <p class="mt-1 text-xs text-red-400">{{ form.quantity.errors.0 }}</p>
       {% endif %}
@@ -58,15 +58,9 @@ Simplified version of the full form for better UX in table context
       <label for="id_billing_period_inline" class="block text-sm font-medium text-slate-400 mb-2">
         {% trans "Billing Period" %} <span class="text-red-400">*</span>
       </label>
-      <select id="id_billing_period_inline" name="billing_period" required
-              class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500">
-        <option value="">{% trans "Select period..." %}</option>
-        {% for option in billing_period_options %}
-          <option value="{{ option.value }}" {% if form.billing_period.value == option.value %}selected{% endif %}>
-            {{ option.label }}
-          </option>
-        {% endfor %}
-      </select>
+      {% trans "Select period..." as period_placeholder %}
+      {% trans "Billing Period" as billing_period_label %}
+      {% input_field "billing_period" input_type="select" html_id="id_billing_period_inline" options=billing_period_options value=form.billing_period.value placeholder=period_placeholder required=True css_class="text-sm" aria_label=billing_period_label %}
       {% if form.billing_period.errors %}
         <p class="mt-1 text-xs text-red-400">{{ form.billing_period.errors.0 }}</p>
       {% endif %}
@@ -81,9 +75,8 @@ Simplified version of the full form for better UX in table context
         {% trans "Unit Price" %} ({{ order.currency }}) <span class="text-red-400">*</span>
       </label>
       <div class="relative">
-        <input type="number" id="id_unit_price_cents_inline" name="unit_price_cents"
-               value="{{ form.unit_price_cents.value|default:'' }}" min="0" step="1" required
-               class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 pr-16 text-sm focus:ring-2 focus:ring-blue-500">
+        {% trans "Unit Price" as unit_price_label %}
+        {% input_field "unit_price_cents" input_type="number" html_id="id_unit_price_cents_inline" value=form.unit_price_cents.value|default:'' min="0" step="1" required=True css_class="pr-16 text-sm" aria_label=unit_price_label %}
         <div class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
           <span class="text-slate-400 text-xs">{% trans "cents" %}</span>
         </div>
@@ -102,9 +95,8 @@ Simplified version of the full form for better UX in table context
         {% trans "Setup Fee" %} ({{ order.currency }})
       </label>
       <div class="relative">
-        <input type="number" id="id_setup_cents_inline" name="setup_cents"
-               value="{{ form.setup_cents.value|default:'0' }}" min="0" step="1"
-               class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 pr-16 text-sm focus:ring-2 focus:ring-blue-500">
+        {% trans "Setup Fee" as setup_fee_label %}
+        {% input_field "setup_cents" input_type="number" html_id="id_setup_cents_inline" value=form.setup_cents.value|default:'0' min="0" step="1" css_class="pr-16 text-sm" aria_label=setup_fee_label %}
         <div class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
           <span class="text-slate-400 text-xs">{% trans "cents" %}</span>
         </div>
@@ -123,9 +115,8 @@ Simplified version of the full form for better UX in table context
     <label for="id_domain_name_inline" class="block text-sm font-medium text-slate-400 mb-2">
       {% trans "Domain Name" %}
     </label>
-    <input type="text" id="id_domain_name_inline" name="domain_name"
-           value="{{ form.domain_name.value|default:'' }}" placeholder="example.com"
-           class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500">
+    {% trans "Domain Name" as domain_name_label %}
+    {% input_field "domain_name" html_id="id_domain_name_inline" value=form.domain_name.value|default:'' placeholder="example.com" css_class="text-sm" aria_label=domain_name_label %}
     {% if form.domain_name.errors %}
       <p class="mt-1 text-xs text-red-400">{{ form.domain_name.errors.0 }}</p>
     {% endif %}
@@ -141,9 +132,9 @@ Simplified version of the full form for better UX in table context
         <span class="mr-2">{% icon "settings" %}</span>{% trans "Advanced Configuration" %}
       </summary>
       <div class="mt-3">
-        <textarea id="id_config_inline" aria-label="{% trans 'Advanced Configuration' %}" name="config" rows="3"
-                  placeholder='{"cpu": 2, "memory": "4GB", "disk": "50GB"}'
-                  class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500">{{ form.config.value|default:'' }}</textarea>
+        {% trans 'Advanced Configuration' as config_label %}
+        {# force_escape: a template string literal is marked safe, so its quotes would close the placeholder attribute #}
+        {% input_field "config" input_type="textarea" html_id="id_config_inline" aria_label=config_label rows=3 placeholder='{"cpu": 2, "memory": "4GB", "disk": "50GB"}'|force_escape value=form.config.value|default:'' css_class="text-sm" %}
         {% if form.config.errors %}
           <p class="mt-1 text-xs text-red-400">{{ form.config.errors.0 }}</p>
         {% endif %}
@@ -178,26 +169,20 @@ Simplified version of the full form for better UX in table context
 
   <!-- Action Buttons -->
   <div class="flex justify-end space-x-3 pt-4 border-t border-slate-700">
-    <button type="button"
-            {% if action == 'create' %}
-              data-action="invoke" data-invoke="cancelAddItemForm"
-            {% else %}
-              data-action="invoke" data-invoke="cancelExpandableEditAction" data-item-id="{{ item.id }}"
-            {% endif %}
-            class="inline-flex items-center px-3 py-2 text-sm font-medium rounded border border-slate-600 text-slate-400 hover:text-white hover:border-slate-500">
-      <span class="mr-1">{% icon "x" %}</span>{% trans "Cancel" %}
-    </button>
+    {% trans "Cancel" as cancel_label %}
+    {% if action == 'create' %}
+      {% button cancel_label variant="secondary" size="sm" icon="x" data_action="invoke" data_invoke="cancelAddItemForm" %}
+    {% else %}
+      {# stringformat first: add returns "" when joining a string and a UUID #}
+      {% with item_id=item.id|stringformat:"s" %}{% with item_attrs='data-item-id="'|add:item_id|add:'"' %}
+        {% button cancel_label variant="secondary" size="sm" icon="x" data_action="invoke" data_invoke="cancelExpandableEditAction" attrs=item_attrs %}
+      {% endwith %}{% endwith %}
+    {% endif %}
 
     {% if action == 'create' %}
-      <button type="submit"
-              class="inline-flex items-center px-3 py-2 text-sm font-medium rounded border border-green-600 bg-green-600 text-white hover:bg-green-700 focus:ring-2 focus:ring-green-500">
-        <span class="mr-1">{% icon "plus" %}</span>{% trans "Add Item" %}
-      </button>
+      {% trans "Add Item" as add_item_label %}{% button add_item_label type="submit" variant="success" size="sm" icon="plus" %}
     {% else %}
-      <button type="submit"
-              class="inline-flex items-center px-3 py-2 text-sm font-medium rounded border border-blue-600 bg-blue-600 text-white hover:bg-blue-700 focus:ring-2 focus:ring-blue-500">
-        <span class="mr-1">{% icon "check" %}</span>{% trans "Save Changes" %}
-      </button>
+      {% trans "Save Changes" as save_changes_label %}{% button save_changes_label type="submit" variant="primary" size="sm" icon="check" %}
     {% endif %}
   </div>
 </form>

@@ -56,6 +56,7 @@ Dark theme interface for staff/admin audit log monitoring
                         <label for="audit-user" class="block text-sm font-medium text-slate-300 mb-2">
                             {% trans "User" %}
                         </label>
+                        {# tmpl-allow TMPL003: options rendered inline from a loop over users; select components take a view-built options list #}
                         <select class="bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white text-sm w-full focus:ring-2 focus:ring-blue-500 focus:border-transparent relative z-10"
                                 id="audit-user" name="user">
                             <option value="">{% trans "All Users" %}</option>
@@ -70,6 +71,7 @@ Dark theme interface for staff/admin audit log monitoring
                         <label for="audit-action" class="block text-sm font-medium text-slate-300 mb-2">
                             {% trans "Action Type" %}
                         </label>
+                        {# tmpl-allow TMPL003: options rendered inline from a loop over action_choices; select components take a view-built options list #}
                         <select class="bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white text-sm w-full focus:ring-2 focus:ring-blue-500 focus:border-transparent relative z-10"
                                 id="audit-action" name="action">
                             <option value="">{% trans "All Actions" %}</option>
@@ -87,6 +89,7 @@ Dark theme interface for staff/admin audit log monitoring
                         <label for="audit-content-type" class="block text-sm font-medium text-slate-300 mb-2">
                             {% trans "Content Type" %}
                         </label>
+                        {# tmpl-allow TMPL003: options rendered inline from a loop over content_types; select components take a view-built options list #}
                         <select class="bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white text-sm w-full focus:ring-2 focus:ring-blue-500 focus:border-transparent relative z-10"
                                 id="audit-content-type" name="content_type">
                             <option value="">{% trans "All Types" %}</option>
@@ -139,9 +142,8 @@ Dark theme interface for staff/admin audit log monitoring
           <form method="post" action="{% url 'audit:save_search_query' %}" id="save-search-form" class="flex flex-wrap items-end gap-3">
             {% csrf_token %}
             {% include 'components/input.html' with label='Name' name='name' html_id='save-search-name' container_class='flex-1 min-w-48' %}
-            <label class="flex items-center gap-2 text-sm text-slate-300 pb-2">
-              <input type="checkbox" name="is_shared" class="rounded border-slate-600 bg-slate-700"> {% trans "Share with staff" %}
-            </label>
+            {% trans "Share with staff" as share_label %}
+            {% checkbox_field "is_shared" label=share_label container_class="flex items-center gap-2 pb-2" %}
             {% trans "Save Current Filters" as save_label %}{% button save_label variant="secondary" type="submit" %}
           </form>
         </div>

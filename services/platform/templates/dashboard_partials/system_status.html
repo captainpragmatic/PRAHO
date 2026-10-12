@@ -32,6 +32,7 @@
     <p class="text-slate-400 text-xs">
       {% trans 'Last update' %}: {% localised_date current_time "datetime" %}
     </p>
+    {# tmpl-allow TMPL002: holds the #status-spinner htmx-indicator span its hx-indicator targets; the button tag renders one text and one icon #}
     <button hx-post="{% url 'system_status_refresh' %}" hx-target="#system-status-widget" hx-swap="innerHTML" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' hx-indicator="#status-spinner" class="text-xs text-slate-500 hover:text-blue-400 transition-colors">
       <span id="status-spinner" class="htmx-indicator">
         {% icon "loading" size="sm" css_class="animate-spin mr-1" %}
@@ -43,6 +44,7 @@
   {% else %}
   <div class="text-center py-4">
     <p class="text-slate-400 text-sm mb-2">{% trans 'Checking system status...' %}</p>
+    {# tmpl-allow TMPL002: holds the #status-spinner-init htmx-indicator span its hx-indicator targets; the button tag renders one text and one icon #}
     <button hx-post="{% url 'system_status_refresh' %}" hx-target="#system-status-widget" hx-swap="innerHTML" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' hx-indicator="#status-spinner-init" class="text-xs text-blue-400 hover:text-blue-300 transition-colors">
       <span id="status-spinner-init" class="htmx-indicator">
         {% icon "loading" size="sm" css_class="animate-spin mr-1" %}

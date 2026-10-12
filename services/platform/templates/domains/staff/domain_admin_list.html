@@ -86,30 +86,32 @@
                 <label for="search" class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                     {% trans "Search" %}
                 </label>
-                <input type="text" id="search" name="search" value="{{ search_query }}"
-                       placeholder="{% trans 'Domain name or customer...' %}"
-                       class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-3 py-2 text-sm text-slate-900 dark:text-slate-100" />
+                {% trans 'Domain name or customer...' as search_placeholder %}
+                {% trans "Search" as search_label %}
+                {% input_field "search" html_id="search" value=search_query placeholder=search_placeholder aria_label=search_label css_class="text-sm" %}
             </div>
             <div>
                 <label for="status" class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                     {% trans "Status" %}
                 </label>
+                {# tmpl-allow TMPL003: options rendered inline from literal domain statuses with selected from status_filter; select components take a view-built options list #}
                 <select name="status" id="status"
                         class="block w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-3 py-2 text-sm text-slate-900 dark:text-slate-100">
                     <option value="all">{% trans "All Statuses" %}</option>
-                    <option value="active" {% if status_filter == 'active' %}selected{% endif %}>🟢 {% trans "Active" %}</option>
-                    <option value="pending" {% if status_filter == 'pending' %}selected{% endif %}>🟡 {% trans "Pending" %}</option>
-                    <option value="expired" {% if status_filter == 'expired' %}selected{% endif %}>🔴 {% trans "Expired" %}</option>
-                    <option value="suspended" {% if status_filter == 'suspended' %}selected{% endif %}>⏸️ {% trans "Suspended" %}</option>
-                    <option value="cancelled" {% if status_filter == 'cancelled' %}selected{% endif %}>❌ {% trans "Cancelled" %}</option>
-                    <option value="transfer_in" {% if status_filter == 'transfer_in' %}selected{% endif %}>📥 {% trans "Transfer In" %}</option>
-                    <option value="transfer_out" {% if status_filter == 'transfer_out' %}selected{% endif %}>📤 {% trans "Transfer Out" %}</option>
+                    <option value="active" {% if status_filter == 'active' %}selected{% endif %}>{% trans "Active" %}</option>
+                    <option value="pending" {% if status_filter == 'pending' %}selected{% endif %}>{% trans "Pending" %}</option>
+                    <option value="expired" {% if status_filter == 'expired' %}selected{% endif %}>{% trans "Expired" %}</option>
+                    <option value="suspended" {% if status_filter == 'suspended' %}selected{% endif %}>{% trans "Suspended" %}</option>
+                    <option value="cancelled" {% if status_filter == 'cancelled' %}selected{% endif %}>{% trans "Cancelled" %}</option>
+                    <option value="transfer_in" {% if status_filter == 'transfer_in' %}selected{% endif %}>{% trans "Transfer In" %}</option>
+                    <option value="transfer_out" {% if status_filter == 'transfer_out' %}selected{% endif %}>{% trans "Transfer Out" %}</option>
                 </select>
             </div>
             <div>
                 <label for="registrar" class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                     {% trans "Registrar" %}
                 </label>
+                {# tmpl-allow TMPL003: options rendered inline from the registrars queryset; select components take a view-built options list #}
                 <select name="registrar" id="registrar"
                         class="block w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-3 py-2 text-sm text-slate-900 dark:text-slate-100">
                     <option value="">{% trans "All Registrars" %}</option>
@@ -124,17 +126,16 @@
                 <label for="expiry" class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                     {% trans "Expiry" %}
                 </label>
+                {# tmpl-allow TMPL003: options rendered inline from literal expiry filters with selected from expiry_filter; select components take a view-built options list #}
                 <select name="expiry" id="expiry"
                         class="block w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-3 py-2 text-sm text-slate-900 dark:text-slate-100">
                     <option value="">{% trans "All" %}</option>
-                    <option value="expiring" {% if expiry_filter == 'expiring' %}selected{% endif %}>⚠️ {% trans "Expiring (30 days)" %}</option>
-                    <option value="auto_renew" {% if expiry_filter == 'auto_renew' %}selected{% endif %}>🔄 {% trans "Auto-Renew Candidates" %}</option>
+                    <option value="expiring" {% if expiry_filter == 'expiring' %}selected{% endif %}>{% trans "Expiring (30 days)" %}</option>
+                    <option value="auto_renew" {% if expiry_filter == 'auto_renew' %}selected{% endif %}>{% trans "Auto-Renew Candidates" %}</option>
                 </select>
             </div>
             <div class="flex gap-2">
-                <button type="submit" class="inline-flex items-center px-4 py-2 rounded-md bg-slate-900 text-white text-sm hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600">
-                    {% icon "search" %} {% trans "Filter" %}
-                </button>
+                {% trans "Filter" as filter_label %}{% button filter_label type="submit" variant="secondary" icon="search" %}
                 <a href="{% url 'domains:admin_list' %}" class="inline-flex items-center px-4 py-2 rounded-md border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 text-sm hover:bg-slate-50 dark:hover:bg-slate-700">
                     {% trans "Clear" %}
                 </a>

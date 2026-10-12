@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% load i18n %}
 {% load formatting %}
+{% load ui_components %}
 
 {% block title %}{% trans "VAT Report" %} - PRAHO Platform{% endblock %}
 
@@ -25,24 +26,20 @@
         <label for="start_date" class="block text-sm font-medium text-slate-400 mb-2">
           {% trans "Start Date" %}
         </label>
-        <input type="date" id="start_date" name="start_date"
-               value="{{ request.GET.start_date }}"
-               class="bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2">
+        {% trans "Start Date" as start_date_label %}
+        {% input_field "start_date" input_type="date" html_id="start_date" value=request.GET.start_date aria_label=start_date_label %}
       </div>
 
       <div>
         <label for="end_date" class="block text-sm font-medium text-slate-400 mb-2">
           {% trans "End Date" %}
         </label>
-        <input type="date" id="end_date" name="end_date"
-               value="{{ request.GET.end_date }}"
-               class="bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2">
+        {% trans "End Date" as end_date_label %}
+        {% input_field "end_date" input_type="date" html_id="end_date" value=request.GET.end_date aria_label=end_date_label %}
       </div>
 
-      <button type="submit"
-              class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-        {% trans "Filter" %}
-      </button>
+      {% trans "Filter" as filter_label %}
+      {% button filter_label variant="primary" type="submit" %}
     </form>
   </div>
 

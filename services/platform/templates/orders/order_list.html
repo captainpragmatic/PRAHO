@@ -34,7 +34,7 @@
   <div class="bg-blue-900 border border-blue-700 rounded-lg p-4 mb-6">
     <div class="flex items-start">
       <div class="flex-shrink-0">
-        <span class="text-blue-300 text-xl">🇷🇴</span>
+        <span class="text-blue-300 text-xl">{% icon "info" %}</span>
       </div>
       <div class="ml-3">
         <h3 class="text-sm font-medium text-blue-200">{% trans 'Romanian Hosting Business' %}</h3>
@@ -160,16 +160,17 @@
           <label for="status" class="block text-sm font-medium text-slate-300 mb-1 sm:hidden">
             {% icon "chart" %} {% trans "Filter by Status" %}
           </label>
+          {# tmpl-allow TMPL003: options rendered inline as literal order statuses, each with its own selected check; select components take a view-built options list #}
           <select id="status" name="status" class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
             <option value="">{% trans "All Statuses" %}</option>
-            <option value="draft" {% if current_status == "draft" %}selected{% endif %}>📝 {% trans "Draft" %}</option>
-            <option value="awaiting_payment" {% if current_status == "awaiting_payment" %}selected{% endif %}>⏳ {% trans "Awaiting Payment" %}</option>
-            <option value="paid" {% if current_status == "paid" %}selected{% endif %}>✅ {% trans "Paid" %}</option>
-            <option value="in_review" {% if current_status == "in_review" %}selected{% endif %}>🔍 {% trans "In Review" %}</option>
-            <option value="provisioning" {% if current_status == "provisioning" %}selected{% endif %}>⚙️ {% trans "Provisioning" %}</option>
-            <option value="completed" {% if current_status == "completed" %}selected{% endif %}>✅ {% trans "Completed" %}</option>
-            <option value="cancelled" {% if current_status == "cancelled" %}selected{% endif %}>❌ {% trans "Cancelled" %}</option>
-            <option value="failed" {% if current_status == "failed" %}selected{% endif %}>🔥 {% trans "Failed" %}</option>
+            <option value="draft" {% if current_status == "draft" %}selected{% endif %}>{% trans "Draft" %}</option>
+            <option value="awaiting_payment" {% if current_status == "awaiting_payment" %}selected{% endif %}>{% trans "Awaiting Payment" %}</option>
+            <option value="paid" {% if current_status == "paid" %}selected{% endif %}>{% trans "Paid" %}</option>
+            <option value="in_review" {% if current_status == "in_review" %}selected{% endif %}>{% trans "In Review" %}</option>
+            <option value="provisioning" {% if current_status == "provisioning" %}selected{% endif %}>{% trans "Provisioning" %}</option>
+            <option value="completed" {% if current_status == "completed" %}selected{% endif %}>{% trans "Completed" %}</option>
+            <option value="cancelled" {% if current_status == "cancelled" %}selected{% endif %}>{% trans "Cancelled" %}</option>
+            <option value="failed" {% if current_status == "failed" %}selected{% endif %}>{% trans "Failed" %}</option>
           </select>
         </div>
 

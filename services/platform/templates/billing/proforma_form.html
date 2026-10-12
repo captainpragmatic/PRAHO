@@ -43,7 +43,7 @@
   <div class="bg-blue-900 border border-blue-700 rounded-lg p-4 mb-6">
     <div class="flex items-start">
       <div class="flex-shrink-0">
-        <span class="text-blue-300 text-xl">🇷🇴</span>
+        <span class="text-blue-300 text-xl">{% icon "flag" size="sm" %}</span>
       </div>
       <div class="ml-3">
         <h3 class="text-sm font-medium text-blue-200">{% trans 'Romanian Business Practice' %}</h3>
@@ -77,6 +77,7 @@
               <label for="proforma-customer-select" class="block text-sm font-medium text-slate-300 mb-2">
                 {% trans 'Select Customer' %} <span class="text-red-500">*</span>
               </label>
+              {# tmpl-allow TMPL003: options rendered inline from a customers loop, each carrying data-company/data-vat/data-email/data-terms read by the preview script; select components take a view-built options list #}
               <select name="customer" required
                 class="w-full rounded-md border border-slate-600 bg-slate-700 px-3 py-2 text-white focus:ring-2 focus:ring-blue-500"
                 id="proforma-customer-select">
@@ -87,8 +88,7 @@
                   data-vat="{{ customer.tax_profile.vat_number|default:'N/A' }}"
                   data-email="{{ customer.billing_profile.email|default:customer.primary_email|default:'N/A' }}"
                   data-terms="{{ customer.billing_profile.payment_terms|default:'14' }} days">
-                  {{ customer.company_name|default:customer.name }}{% if customer.tax_profile.vat_number %} ({{
-                  customer.tax_profile.vat_number }}){% endif %}
+                  {{ customer.company_name|default:customer.name }}{% if customer.tax_profile.vat_number %} ({{ customer.tax_profile.vat_number }}){% endif %}
                 </option>
                 {% empty %}
                 <option value="" disabled>{% trans 'No customers available' %}</option>
@@ -131,17 +131,17 @@
               <label for="proforma-number" class="block text-sm font-medium text-slate-300 mb-2">
                 {% trans 'Proforma Number' %}
               </label>
-              <input id="proforma-number" type="text" readonly
-                class="w-full px-3 py-2 bg-slate-600 border border-slate-600 rounded-md text-slate-300"
-                value="{% trans 'Auto-generated (PRO-XXXXXX)' %}">
+              {% trans 'Auto-generated (PRO-XXXXXX)' as auto_number_label %}
+              {% trans 'Proforma Number' as proforma_number_label %}
+              {% input_field "" html_id="proforma-number" readonly=True css_class="read-only:bg-slate-600 read-only:text-slate-300" value=auto_number_label aria_label=proforma_number_label %}
             </div>
             <div>
               <label for="proforma-valid-until" class="block text-sm font-medium text-slate-300 mb-2">
                 {% trans 'Valid Until' %} <span class="text-red-500">*</span>
               </label>
-              <input id="proforma-valid-until" type="date" name="valid_until" required
-                {% if proforma %}value="{{ proforma.valid_until|date:'Y-m-d' }}"{% elif posted.valid_until %}value="{{ posted.valid_until }}"{% endif %}
-                class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
+              {% if proforma %}{% firstof proforma.valid_until|date:'Y-m-d' as valid_until_value %}{% else %}{% firstof posted.valid_until as valid_until_value %}{% endif %}
+              {% trans 'Valid Until' as valid_until_label %}
+              {% input_field "valid_until" input_type="date" html_id="proforma-valid-until" required=True value=valid_until_value aria_label=valid_until_label %}
             </div>
           </div>
 
@@ -150,6 +150,7 @@
               <label for="proforma-currency" class="block text-sm font-medium text-slate-300 mb-2">
                 {% trans 'Currency' %} <span class="text-red-500">*</span>
               </label>
+              {# tmpl-allow TMPL001: tests.billing.test_proformas_views pins the literal attribute sequence name="currency" readonly value="…", which input_field (value before readonly) cannot reproduce #}
               <input id="proforma-currency" type="text" name="currency" readonly value="{{ selected_currency }}"
                 class="w-full rounded-md border border-slate-600 bg-slate-700 px-3 py-2 text-white">
             </div>
@@ -157,9 +158,9 @@
               <label for="proforma-status" class="block text-sm font-medium text-slate-300 mb-2">
                 {% trans 'Status' %}
               </label>
-              <input id="proforma-status" type="text" readonly
-                class="w-full px-3 py-2 bg-slate-600 border border-slate-600 rounded-md text-slate-300"
-                value="{% trans 'Draft' %}">
+              {% trans 'Draft' as draft_status_label %}
+              {% trans 'Status' as proforma_status_label %}
+              {% input_field "" html_id="proforma-status" readonly=True css_class="read-only:bg-slate-600 read-only:text-slate-300" value=draft_status_label aria_label=proforma_status_label %}
             </div>
           </div>
         </div>
@@ -188,19 +189,24 @@
                 <div class="proforma-line grid grid-cols-2 md:grid-cols-12 gap-3 items-center border border-slate-700 md:border-0 rounded-lg md:rounded-none p-3 md:p-0" data-line="{{ forloop.counter0 }}">
                   <div class="col-span-2 md:col-span-4">
                     <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Description' %}</label>
+                    {# tmpl-allow TMPL001: line-item row markup is mirrored in the addLineItem() script template below, which cannot call the tag; kept raw so server-rendered and script-added rows stay identical #}
                     <input type="text" name="line_{{ forloop.counter0 }}_description" aria-label="{% trans 'Description' %}" value="{{ line.description }}" placeholder="{% trans 'e.g. Web hosting package' %}" class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
+                    {# tmpl-allow TMPL001: line-item row markup is mirrored in the addLineItem() script template below, which cannot call the tag; kept raw so server-rendered and script-added rows stay identical #}
                     <input type="text" name="line_{{ forloop.counter0 }}_domain_name" aria-label="{% trans 'Domain name' %}" value="{{ line.domain_name }}" placeholder="{% trans 'e.g. example.com' %}" class="line-domain w-full mt-1 px-3 py-1.5 bg-slate-700/50 border border-slate-600/50 rounded-md text-blue-400 text-xs placeholder-slate-500 focus:ring-2 focus:ring-blue-500">
                   </div>
                   <div class="col-span-1 md:col-span-2">
                     <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Qty' %}</label>
+                    {# tmpl-allow TMPL001: line-item row markup is mirrored in the addLineItem() script template below, which cannot call the tag; kept raw so server-rendered and script-added rows stay identical #}
                     <input type="number" name="line_{{ forloop.counter0 }}_quantity" aria-label="{% trans 'Quantity' %}" value="{{ line.quantity }}" class="line-quantity w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
                   </div>
                   <div class="col-span-1 md:col-span-2">
                     <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Unit Price' %}</label>
+                    {# tmpl-allow TMPL001: line-item row markup is mirrored in the addLineItem() script template below, which cannot call the tag; kept raw so server-rendered and script-added rows stay identical #}
                     <input type="number" name="line_{{ forloop.counter0 }}_unit_price" aria-label="{% trans 'Unit Price' %}" step="0.01" value="{{ line.unit_price }}" class="line-price w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
                   </div>
                   <div class="col-span-1 md:col-span-2">
                     <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'VAT Rate' %}</label>
+                    {# tmpl-allow TMPL003: options rendered inline from literal VAT rates; select components take a view-built options list #}
                     <select name="line_{{ forloop.counter0 }}_vat_rate" aria-label="{% trans 'VAT Rate' %}" class="line-vat w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
                       <option value="21" {% if line.tax_rate|floatformat:4 == "0.2100" %}selected{% endif %}>21% ({% trans 'Standard' %})</option>
                       <option value="11" {% if line.tax_rate|floatformat:4 == "0.1100" %}selected{% endif %}>11% ({% trans 'Reduced' %})</option>
@@ -212,6 +218,7 @@
                     <div class="line-total px-3 py-2 bg-slate-600 rounded-md text-white font-medium text-right">{{ line.line_total }} <span class="currency-label">{{ selected_currency }}</span></div>
                   </div>
                   <div class="col-span-2 md:col-span-1 flex md:block justify-end">
+                    {# tmpl-allow TMPL002: icon-only remove button (x icon, no text label) wired by class remove-line; the button tag always renders a text label span #}
                     <button type="button" class="remove-line bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-md font-medium transition-colors">{% icon "x" %}</button>
                   </div>
                 </div>
@@ -221,19 +228,24 @@
                 <div class="proforma-line grid grid-cols-2 md:grid-cols-12 gap-3 items-center border border-slate-700 md:border-0 rounded-lg md:rounded-none p-3 md:p-0" data-line="0">
                   <div class="col-span-2 md:col-span-4">
                     <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Description' %}</label>
+                    {# tmpl-allow TMPL001: line-item row markup is mirrored in the addLineItem() script template below, which cannot call the tag; kept raw so server-rendered and script-added rows stay identical #}
                     <input type="text" name="line_0_description" aria-label="{% trans 'Description' %}" placeholder="{% trans 'e.g. Web hosting package' %}" class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
+                    {# tmpl-allow TMPL001: line-item row markup is mirrored in the addLineItem() script template below, which cannot call the tag; kept raw so server-rendered and script-added rows stay identical #}
                     <input type="text" name="line_0_domain_name" aria-label="{% trans 'Domain name' %}" placeholder="{% trans 'e.g. example.com' %}" class="line-domain w-full mt-1 px-3 py-1.5 bg-slate-700/50 border border-slate-600/50 rounded-md text-blue-400 text-xs placeholder-slate-500 focus:ring-2 focus:ring-blue-500">
                   </div>
                   <div class="col-span-1 md:col-span-2">
                     <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Qty' %}</label>
+                    {# tmpl-allow TMPL001: line-item row markup is mirrored in the addLineItem() script template below, which cannot call the tag; kept raw so server-rendered and script-added rows stay identical #}
                     <input type="number" name="line_0_quantity" aria-label="{% trans 'Quantity' %}" value="1" class="line-quantity w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
                   </div>
                   <div class="col-span-1 md:col-span-2">
                     <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Unit Price' %}</label>
+                    {# tmpl-allow TMPL001: line-item row markup is mirrored in the addLineItem() script template below, which cannot call the tag; kept raw so server-rendered and script-added rows stay identical #}
                     <input type="number" name="line_0_unit_price" aria-label="{% trans 'Unit Price' %}" step="0.01" placeholder="0.00" class="line-price w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
                   </div>
                   <div class="col-span-1 md:col-span-2">
                     <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'VAT Rate' %}</label>
+                    {# tmpl-allow TMPL003: options rendered inline from literal VAT rates; select components take a view-built options list #}
                     <select name="line_0_vat_rate" aria-label="{% trans 'VAT Rate' %}" class="line-vat w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
                       <option value="21">21% ({% trans 'Standard' %})</option>
                       <option value="11">11% ({% trans 'Reduced' %})</option>
@@ -245,6 +257,7 @@
                     <div class="line-total px-3 py-2 bg-slate-600 rounded-md text-white font-medium text-right">0.00 <span class="currency-label">{{ selected_currency }}</span></div>
                   </div>
                   <div class="col-span-2 md:col-span-1 flex md:block justify-end">
+                    {# tmpl-allow TMPL002: icon-only remove button (x icon, no text label) wired by class remove-line; the button tag always renders a text label span; starts disabled and the script toggles disabled plus opacity classes #}
                     <button type="button" class="remove-line bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-md font-medium transition-colors opacity-50 cursor-not-allowed" disabled>{% icon "x" %}</button>
                   </div>
                 </div>
@@ -311,7 +324,7 @@
         <!-- Romanian Compliance Info -->
         <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
           <h3 class="text-lg font-semibold text-white border-b border-slate-600 pb-3 mb-4">
-            🇷🇴 {% trans 'Proforma Benefits' %}
+            {% icon "flag" size="sm" %} {% trans 'Proforma Benefits' %}
           </h3>
 
           <div class="space-y-3 text-sm">
@@ -425,27 +438,32 @@
         <div class="proforma-line grid grid-cols-2 md:grid-cols-12 gap-3 items-center border border-slate-700 md:border-0 rounded-lg md:rounded-none p-3 md:p-0" data-line="${lineCounter}">
             <div class="col-span-2 md:col-span-4">
                 <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Description' %}</label>
+                {# tmpl-allow TMPL001: element is built client-side inside the addLineItem() JavaScript template literal (name uses ${lineCounter}); a server-side tag cannot render it #}
                 <input type="text" name="line_${lineCounter}_description"
                        aria-label="{% trans 'Description' %}" placeholder="{% trans 'e.g. Web hosting package' %}"
                        class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
+                {# tmpl-allow TMPL001: element is built client-side inside the addLineItem() JavaScript template literal (name uses ${lineCounter}); a server-side tag cannot render it #}
                 <input type="text" name="line_${lineCounter}_domain_name"
                        aria-label="{% trans 'Domain name' %}" placeholder="{% trans 'e.g. example.com' %}"
                        class="line-domain w-full mt-1 px-3 py-1.5 bg-slate-700/50 border border-slate-600/50 rounded-md text-blue-400 text-xs placeholder-slate-500 focus:ring-2 focus:ring-blue-500">
             </div>
             <div class="col-span-1 md:col-span-2">
                 <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Qty' %}</label>
+                {# tmpl-allow TMPL001: element is built client-side inside the addLineItem() JavaScript template literal (name uses ${lineCounter}); a server-side tag cannot render it #}
                 <input type="number" name="line_${lineCounter}_quantity"
                        aria-label="{% trans 'Quantity' %}" value="1" min="0" step="1"
                        class="line-quantity w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
             </div>
             <div class="col-span-1 md:col-span-2">
                 <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Unit Price' %}</label>
+                {# tmpl-allow TMPL001: element is built client-side inside the addLineItem() JavaScript template literal (name uses ${lineCounter}); a server-side tag cannot render it #}
                 <input type="number" name="line_${lineCounter}_unit_price"
                        aria-label="{% trans 'Unit Price' %}" step="0.01" min="0" placeholder="0.00"
                        class="line-price w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
             </div>
             <div class="col-span-1 md:col-span-2">
                 <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'VAT Rate' %}</label>
+                {# tmpl-allow TMPL003: element is built client-side inside the addLineItem() JavaScript template literal (name uses ${lineCounter}); a server-side tag cannot render it #}
                 <select name="line_${lineCounter}_vat_rate" aria-label="{% trans 'VAT Rate' %}"
                        class="line-vat w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
                     <option value="21">21% ({% trans 'Standard' %})</option>
@@ -458,6 +476,7 @@
                 <div class="line-total px-3 py-2 bg-slate-600 rounded-md text-white font-medium text-right">0.00 <span class="currency-label">${currency}</span></div>
             </div>
             <div class="col-span-2 md:col-span-1 flex md:block justify-end">
+                {# tmpl-allow TMPL002: element is built client-side inside the addLineItem() JavaScript template literal (name uses ${lineCounter}); a server-side tag cannot render it #}
                 <button type="button" class="remove-line bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-md font-medium transition-colors">{% icon "x" %}</button>
             </div>
         </div>`;

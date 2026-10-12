@@ -31,27 +31,27 @@ such as operator scripts, future CLI tools, and future mobile clients.
 Three endpoints are registered at `services/platform/apps/api/users/urls.py`:
 
 ```
-POST   /api/users/token/        obtain_token   — exchange credentials for a token
+POST   /api/users/token/        obtain_token   — exchange a staff account's credentials for a token
+GET    /api/users/token/me/     token_info     — describe the token that authenticated the request
 DELETE /api/users/token/revoke/ revoke_token   — delete the caller's own token
-GET    /api/users/token/verify/ verify_token   — ⚠️  broken for token consumers (see gaps)
 ```
+
+`GET /api/users/token/verify/` was removed (#621). It answered with the first member of the
+signed customer rather than the caller, nothing called it, and `token/me/` covers it.
 
 ### Token Model
 
-Uses DRF's built-in `rest_framework.authtoken.Token`:
-
-```python
-class Token(models.Model):
-    key     = CharField(max_length=40, primary_key=True)  # 40-char hex, stored plaintext
-    user    = OneToOneField(User)                          # one token per user, ever
-    created = DateTimeField(auto_now_add=True)
-```
+Tokens are `APIToken` rows (see "Implemented: Custom `APIToken` model" below): only the
+SHA-256 hash of the key is stored, a user may hold several, and each has a name, a description,
+an expiry and `last_used_at`. This replaced DRF's `rest_framework.authtoken.Token`, which kept
+the 40-character key in plaintext with one token per user.
 
 ### `obtain_token` — What Works
 
 - Accepts `POST` with `{"email": "...", "password": "..."}` body, plus `"mfa_token"` (a
   current TOTP code or an unused backup code) when the account has 2FA enabled (#565)
 - Calls `authenticate()` — runs through Django auth backends
+- Issues tokens to staff accounts only (#621); see "Who may hold a token"
 - Account lockout: rejects if `user.is_account_locked()` returns `True` and resets the
   counter on success. Since #568 a wrong password does **not** increment
   `User.failed_login_attempts`: the endpoint is public, so that let anyone lock any account
@@ -64,10 +64,10 @@ class Token(models.Model):
 ### `revoke_token` — What Works
 
 - Accepts `DELETE` only (405 on any other verb)
-- Requires `Authorization: Token <key>` header (`TokenAuthentication + IsAuthenticated`)
+- Requires `Authorization: Token <key>` or `Bearer <key>` (`HashedTokenAuthentication + IsAuthenticated`)
 - Deletes `request.auth` — the token that authenticated the request
 - Self-revocation only: the body is ignored; you cannot revoke another user's token
-- No throttle (low risk — requires a valid token to call)
+- Throttled per user by `BurstAPIThrottle` (`api_burst`) and `StandardAPIThrottle` (`sustained`)
 
 ### Intended Script / CLI Usage
 
@@ -235,7 +235,7 @@ reaches exactly three routes:
 
 | Route | What it touches |
 |---|---|
-| `POST /api/users/token/` | Issues a key after password and, when enrolled, the second factor |
+| `POST /api/users/token/` | Issues a key to a staff account after password and, when enrolled, the second factor |
 | `GET /api/users/token/me/` | Reads the token that authenticated the request |
 | `DELETE /api/users/token/revoke/` | Deletes the token that authenticated the request; the `APIToken` `pre_delete` signal audits it |
 
@@ -264,12 +264,34 @@ token is rate-limited at no layer; only valid tokens hit the per-user `api_burst
 `sustained` throttles. Keys are 160-bit random values looked up by one indexed hash, so
 guessing is not a practical attack.
 
-Residual on the issuance endpoint after #565: refusals all share the wrong-password body,
-but not its timing. With the correct password, a 2FA account goes on to verify the code,
-and an 8-digit code is checked against every stored backup-code hash, so a slow refusal
-can confirm the password. Before #565 the correct password simply returned a token, so
-this is narrower, and `TokenRequestAccountThrottle` limits sampling to 5 per minute per
-address. Equalising the timing is open work.
+Residual on the issuance endpoint after #565: refusals all share the wrong-password status
+and body, but not its timing. With the correct password, a staff account with 2FA goes on to
+verify the code, and an 8-digit code is checked against every stored backup-code hash, so a
+slow refusal can confirm the password. A locked account and a customer are refused before the
+second factor, after writing a failed-login audit row as a wrong password does (#621), so
+those refusals cost about what a wrong password costs. Before #565 the correct password simply
+returned a token, so this is narrower, and `TokenRequestAccountThrottle` limits sampling to 5
+per minute per address. Equalising the 2FA timing is open work.
+
+### Who may hold a token (#621)
+
+Tokens are for staff automation: operator scripts and CLI tools running as dedicated staff
+service accounts. `obtain_token` issues one only to an account that `User.is_staff_user`
+accepts (a staff role, the Django staff flag, or superuser), the same test the
+`/settings/api-tokens/` page applies. A customer account is refused with the wrong-password
+status and body:
+
+- **Before the second factor**, so the refusal neither spends a code nor counts toward the
+  lockout. Like a wrong password it writes a failed-login audit event: `login_failed`, with
+  `failure_reason: not_staff` (a wrong password records `login_failed_password`).
+- **Again on the locked user row**, before the second factor, so a demotion between the
+  password check and issuance is not skipped.
+
+Issuance is the only gate. `HashedTokenAuthentication` checks that the owner is active and
+the token unexpired, not that the owner is still staff, so a token whose owner is later
+demoted keeps working for the routes a bare token reaches: `token/me/` and `token/revoke/`.
+That is acceptable while every business route requires the Portal's signature. The day a
+business route accepts a bare token, the authenticator must refuse non-staff owners as well.
 
 ### Second factor at issuance (#565)
 
@@ -367,3 +389,5 @@ auth).
 | 6 | No token name or description | Closed | `name` and bounded `description` accepted and returned by the API and staff UI |
 | 7 | No web UI for token management | Closed | Owner-scoped `/settings/api-tokens/` list/create/revoke UI with one-time raw-key display |
 | 8 | `Authorization: Token` vs RFC 6750 `Bearer` | Closed | `HashedTokenAuthentication` accepts both schemes |
+| — | `token/verify/` answered with the customer's first member, not the caller | Closed | Route and view removed (#621); `token/me/` covers introspection |
+| — | Any active account, customers included, could mint a token | Closed | Issuance refuses non-staff accounts before the second factor and again under the lock (#621). Open: the authenticator does not re-check staff status; see "Who may hold a token" |

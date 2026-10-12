@@ -24,6 +24,7 @@
         {% endif %}
 
         <!-- Protection Toggle -->
+        {# tmpl-allow TMPL002: @click.prevent="confirmProtectionToggle()" binding; components accept no executable attributes (apps/ui/attributes.py) #}
         <button class="w-full px-4 py-2 text-sm font-medium rounded-lg transition-colors {% if account.protected_from_deletion %}text-orange-400 bg-orange-500/10 border border-orange-500/20 hover:bg-orange-500/20{% else %}text-blue-400 bg-blue-500/10 border border-blue-500/20 hover:bg-blue-500/20{% endif %}"
                 @click.prevent="confirmProtectionToggle()">
             {% if account.protected_from_deletion %}
@@ -35,11 +36,13 @@
 
         <!-- Delete Account -->
         {% if account.can_be_deleted %}
+        {# tmpl-allow TMPL002: @click.prevent="confirmAccountDelete()" binding; components accept no executable attributes (apps/ui/attributes.py) #}
         <button class="w-full px-4 py-2 text-sm font-medium text-red-400 bg-red-500/10 border border-red-500/20 hover:bg-red-500/20 rounded-lg transition-colors"
                 @click.prevent="confirmAccountDelete()">
             {% icon "x" %} {% trans "Delete Account" %}
         </button>
         {% else %}
+        {# tmpl-allow TMPL002: holds a second (Protected) span beside its label; the button tag renders one text and one icon #}
         <button class="w-full px-4 py-2 text-sm font-medium text-slate-500 bg-slate-500/10 border border-slate-500/20 rounded-lg cursor-not-allowed"
                 disabled>
             {% icon "x" %} {% trans "Delete Account" %} <span class="text-xs">({% trans "Protected" %})</span>

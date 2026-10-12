@@ -22,7 +22,9 @@ class APITokenPostgresConcurrencyTests(TransactionTestCase):
         if connection.vendor != "postgresql":
             self.skipTest("API token concurrency guarantees require PostgreSQL")
         self.password = "StrongPass123!"
-        self.user = User.objects.create_user(email="api-token-race@example.test", password=self.password)
+        self.user = User.objects.create_user(
+            email="api-token-race@example.test", password=self.password, staff_role="support"
+        )
 
     def _obtain_token(self) -> Response:
         close_old_connections()

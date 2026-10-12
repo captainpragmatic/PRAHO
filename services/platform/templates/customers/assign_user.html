@@ -69,6 +69,7 @@
                     <!-- Create new user option -->
                     <label class="flex items-start p-4 rounded-lg border border-slate-600 hover:border-green-500 transition-colors cursor-pointer"
                            :class="{ 'border-green-500 bg-green-900/10': userAction === 'create' }">
+                        {# tmpl-allow TMPL001: x-model binding; components accept no executable attributes (apps/ui/attributes.py) #}
                         <input type="radio" name="user_action" value="create" x-model="userAction"
                                class="mt-1 text-green-600 focus:ring-green-500 border-slate-500 bg-slate-700">
                         <div class="ml-3 flex-1">
@@ -92,6 +93,7 @@
                     <!-- Link existing user option -->
                     <label class="flex items-start p-4 rounded-lg border border-slate-600 hover:border-blue-500 transition-colors cursor-pointer"
                            :class="{ 'border-blue-500 bg-blue-900/10': userAction === 'link' }">
+                        {# tmpl-allow TMPL001: x-model binding; components accept no executable attributes (apps/ui/attributes.py) #}
                         <input type="radio" name="user_action" value="link" x-model="userAction"
                                class="mt-1 text-blue-600 focus:ring-blue-500 border-slate-500 bg-slate-700">
                         <div class="ml-3 flex-1">
@@ -110,6 +112,7 @@
                     <!-- Skip user assignment option -->
                     <label class="flex items-start p-4 rounded-lg border border-slate-600 hover:border-yellow-500 transition-colors cursor-pointer"
                            :class="{ 'border-yellow-500 bg-yellow-900/10': userAction === 'skip' }">
+                        {# tmpl-allow TMPL001: x-model binding; components accept no executable attributes (apps/ui/attributes.py) #}
                         <input type="radio" name="user_action" value="skip" x-model="userAction"
                                class="mt-1 text-yellow-600 focus:ring-yellow-500 border-slate-500 bg-slate-700">
                         <div class="ml-3 flex-1">
