@@ -639,7 +639,34 @@ PLATFORM_DOMAIN, PORTAL_DOMAIN
 PORTAL_TRUSTED_PROXY_CIDRS                 # the provider's load balancer range
 PLATFORM_API_BASE_URL=https://platform.praho.example.com/api
 PLATFORM_API_AUTH_MIN_DURATION_SECONDS     # optional, portal: login timing floor, default 1.0 (1 <= s <= 10)
+MEDIA_STORAGE=s3, MEDIA_S3_BUCKET, MEDIA_S3_ACCESS_KEY_ID, MEDIA_S3_SECRET_ACCESS_KEY   # platform media
+MEDIA_S3_ENDPOINT_URL, MEDIA_S3_REGION, MEDIA_S3_SERVER_SIDE_ENCRYPTION                # optional
 ```
+
+**Media in a private bucket.** The platform and task-worker containers share no volume, and a
+container's disk is lost when it is replaced, so media (invoice PDFs, e-Factura archives, ticket
+attachments, GDPR exports) goes to an S3-compatible bucket with `MEDIA_STORAGE=s3` (ADR-0057). The
+other deployment options keep the filesystem default. Django reads every file and returns it
+itself; nothing links to the bucket. Set the bucket up as follows:
+
+- **Private:** Block Public Access on, object ownership "bucket owner enforced" (ACLs disabled), no
+  public bucket policy. PRAHO sends no ACLs.
+- **Its own key:** an access key allowed only `s3:GetObject`, `s3:PutObject` and `s3:DeleteObject`
+  on `<bucket>/media/*`, and `s3:ListBucket` on the bucket, limited to the `media/` prefix. Don't
+  reuse the SES key.
+- **Backup:** versioning on, with a lifecycle rule that expires noncurrent versions (30 days, like
+  the dump retention). That rule also bounds how long a deleted file survives: GDPR erasure and
+  export cleanup delete the current version only.
+- **Encryption at rest:** the provider's default encryption, or `MEDIA_S3_SERVER_SIDE_ENCRYPTION`.
+  GDPR exports are encrypted by PRAHO before upload as well.
+  - `aws:kms` uses the account's AWS-managed `aws/s3` key; this setting cannot name a
+    customer-managed key. The access key also needs `kms:GenerateDataKey` (uploads) and
+    `kms:Decrypt` (reads) on that key unless its key policy already allows use through S3 for the
+    account, as the `aws/s3` default policy does. Without them every media operation is `AccessDenied`.
+- **TLS:** `MEDIA_S3_ENDPOINT_URL` must be `https://`. Leave it unset for AWS itself.
+
+The platform refuses to start with `MEDIA_STORAGE=s3` and a missing bucket or key, rather than
+falling back to the container's disk.
 
 `PLATFORM_API_AUTH_MIN_DURATION_SECONDS` makes every portal login take at least that long, so the
 time a failed login takes gives no sign of whether the email has an account. Production and
@@ -793,6 +820,7 @@ Each backup also archives the media directory (`MEDIA_ROOT`) next to its dump, a
 - **Retention:** expires an archive with its dump.
 - **A failed archive** fails the backup run, but keeps the complete dump.
 - **Downloads:** `make ansible-backup FETCH=true` downloads the dump only; copy the media archive from the server's backup directory when you need it.
+- **With `MEDIA_STORAGE=s3`** the media directory is empty, and the bucket's versioning is the media backup (Option 3).
 - **Not encrypted:** backups are plain files; see "Known gap — backups are not encrypted" in `docs/security/SECURITY_COMPLIANCE_ASSESSMENT.md` before storing them anywhere shared.
 
 ### Restoring from Backup
