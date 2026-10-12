@@ -138,11 +138,13 @@ class OperatorResetCommandTests(TestCase):
         self.assertIn(self.person.email, output.getvalue())
 
     def test_the_command_needs_a_known_enrolled_account_and_a_reason(self) -> None:
-        with self.assertRaises(CommandError):
+        # Each refusal names its reason: an unknown command raises CommandError too.
+        with self.assertRaisesMessage(CommandError, "No account with the email nobody@example.ro."):
             call_command("reset_two_factor", email="nobody@example.ro", reason="x", stdout=StringIO())
-        with self.assertRaises(CommandError):
+        with self.assertRaisesMessage(CommandError, "Give a reason"):
             call_command("reset_two_factor", email=self.person.email, reason="  ", stdout=StringIO())
         unenrolled = User.objects.create_user(email="no-2fa@example.ro", password=PASSWORD)
-        with self.assertRaises(CommandError):
+        with self.assertRaisesMessage(CommandError, "has no two-factor authentication to reset"):
             call_command("reset_two_factor", email=unenrolled.email, reason="x", stdout=StringIO())
+        self.assertTrue(User.objects.get(pk=self.person.pk).two_factor_enabled)
         self.assertFalse(AuditEvent.objects.filter(action="2fa_admin_reset").exists())
