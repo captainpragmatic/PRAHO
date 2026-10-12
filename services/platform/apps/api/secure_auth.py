@@ -16,6 +16,7 @@ from rest_framework.response import Response
 
 from apps.common.constants import HMAC_NTP_SKEW_SECONDS, HMAC_TIMESTAMP_WINDOW_SECONDS
 from apps.customers.models import Customer
+from apps.users.mfa import staff_must_enrol
 from apps.users.models import CustomerMembership, User
 
 logger = logging.getLogger(__name__)
@@ -135,6 +136,9 @@ def _validate_user_membership(
     except User.DoesNotExist:
         logger.warning(f"🚨 [API Security] User not found or inactive: {resolved_user_id}")
         return None, _uniform_error_response("Authentication required", 401)
+    if staff_must_enrol(user):
+        logger.warning("🚨 [API Security] Staff account %s without 2FA refused while the policy is on", user.pk)
+        return None, _uniform_error_response("Authentication required", 401)
 
     membership = CustomerMembership.objects.filter(user=user, customer=customer, is_active=True).first()
 
@@ -244,6 +248,9 @@ def get_authenticated_user(request: HttpRequest) -> tuple[User | None, Response 
 
         user_id = int(user_id_field)
         user = User.objects.get(id=user_id, is_active=True)
+        if staff_must_enrol(user):
+            logger.warning("🚨 [API Security] Staff account %s without 2FA refused while the policy is on", user.pk)
+            return None, _uniform_error_response()
 
         logger.debug(f"✅ [API Security] User {user.email} authenticated for session validation")
         return user, None

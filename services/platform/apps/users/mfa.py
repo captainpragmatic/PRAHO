@@ -34,6 +34,7 @@ from django.utils import timezone
 
 from apps.audit.services import AuditContext, AuditService, TwoFactorAuditRequest  # For MFA audit logging
 from apps.common.constants import MAX_LOGIN_ATTEMPTS
+from apps.common.request_ip import get_safe_client_ip
 
 # Educational Example: This demonstrates different type annotation patterns
 # Pattern 1: Using TYPE_CHECKING (RECOMMENDED) - Fixed for most functions
@@ -72,6 +73,37 @@ else:
 # encounter when adding type safety to existing Django codebases.
 # ===============================================================================
 logger = logging.getLogger(__name__)
+
+# ===============================================================================
+# STAFF 2FA POLICY
+# ===============================================================================
+
+STAFF_MFA_SETTING = "users.mfa_required_for_staff"
+
+
+def staff_mfa_required() -> bool:
+    """Whether staff accounts must have 2FA: the `users.mfa_required_for_staff` setting, off by default."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415 -- users and settings import each other
+
+    return SettingsService.get_boolean_setting(STAFF_MFA_SETTING, False)
+
+
+def staff_must_enrol(user: object) -> bool:
+    """True while the policy is on for a staff account with no second factor.
+
+    The account checks come first, so an enrolled or customer account never reads the setting.
+    """
+    return (
+        bool(getattr(user, "is_staff_user", False))
+        and not getattr(user, "two_factor_enabled", False)
+        and staff_mfa_required()
+    )
+
+
+def staff_cannot_disable_mfa(user: object) -> bool:
+    """True while the policy is on for a staff account: its second factor stays."""
+    return bool(getattr(user, "is_staff_user", False)) and staff_mfa_required()
+
 
 # Optional WebAuthn library shim for tests that patch it
 try:  # pragma: no cover - presence is test-patched
@@ -685,15 +717,18 @@ class MFAService:
         admin_user: Union["User", None] = None,
         reason: str | None = None,
         request: HttpRequest | None = None,
+        *,
+        by_operator: bool = False,
     ) -> bool:
         """
         🔓 Disable TOTP/2FA with audit trail
 
         Args:
             user: User to disable TOTP for
-            admin_user: Admin performing the action (if any)
+            admin_user: Admin performing the action (if any); recorded as the event's actor
             reason: Reason for disabling
             request: HTTP request for context
+            by_operator: A server-side reset (`manage.py reset_two_factor`), recorded with no actor
         """
         try:
             if not user.two_factor_enabled:
@@ -707,16 +742,25 @@ class MFAService:
 
             event_type = "2fa_disabled"
             description = f"TOTP/2FA disabled for user {user.email}"
+            actor: User | None = None
+            actor_type = "user"
 
             if admin_user and admin_user != user:
                 metadata.update(
                     {
                         "admin_id": str(admin_user.id),
                         "admin_email": admin_user.email,
+                        "reason": reason or "Admin reset",
                     }
                 )
                 event_type = "2fa_admin_reset"
                 description = f"TOTP/2FA disabled by admin {admin_user.email} for user {user.email}"
+                actor = admin_user
+            elif by_operator:
+                metadata.update({"reset_by": "operator_command", "reason": reason or "Operator reset"})
+                event_type = "2fa_admin_reset"
+                description = f"TOTP/2FA disabled by an operator command for user {user.email}"
+                actor_type = "system"
 
             MFAService.apply_state_change(
                 user,
@@ -725,11 +769,13 @@ class MFAService:
                     event_type=event_type,
                     user=user,
                     context=AuditContext(
-                        ip_address=request.META.get("REMOTE_ADDR") if request else None,
+                        ip_address=get_safe_client_ip(request) if request else None,
                         user_agent=request.META.get("HTTP_USER_AGENT") if request else None,
                         metadata=metadata,
+                        actor_type=actor_type,
                     ),
                     description=description,
+                    actor=actor,
                 ),
             )
 

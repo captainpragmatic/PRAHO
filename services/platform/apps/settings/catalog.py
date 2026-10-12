@@ -2616,6 +2616,21 @@ CATALOG: tuple[SettingDef, ...] = (
         critical=True,
     ),
     SettingDef(
+        key="users.mfa_required_for_staff",
+        data_type="boolean",
+        default=False,
+        group="platform",
+        section=_("Staff access"),
+        label=_("Require two-factor authentication for staff"),
+        help_text=_(
+            "When enabled, a staff account without two-factor authentication must set it up before "
+            "using the platform, and gets no API token or customer portal session until it does. "
+            "Staff cannot disable it while this is on."
+        ),
+        input_kind="toggle",
+        critical=True,
+    ),
+    SettingDef(
         key="system.maintenance_mode",
         data_type="boolean",
         default=False,

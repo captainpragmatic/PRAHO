@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% load i18n %}
+{% load ui_components %}
 
 {% block title %}{% trans 'User Detail' %} - PRAHO Platform{% endblock %}
 
@@ -16,6 +17,25 @@
     <div><strong>{% trans 'Customer' %}:</strong> {% trans 'Member' %} ({{ user_detail.customer_memberships.count }} {% trans 'organizations' %})</div>
     {% endif %}
     <div><strong>{% trans 'Login' %}:</strong> {% trans 'Activity' %} — {% trans 'Last login' %}: {{ user_detail.last_login|default:"-" }}</div>
+    <div>
+      <strong>{% trans 'Two-factor authentication' %}:</strong>
+      {% if user_detail.two_factor_enabled %}{% trans 'Enabled' %}{% else %}{% trans 'Not set up' %}{% endif %}
+    </div>
   </div>
+
+  {% if can_reset_mfa and user_detail.two_factor_enabled %}
+  <div class="mt-6 bg-slate-800 rounded-lg p-4 text-slate-200">
+    <h2 class="text-lg font-semibold text-white mb-2">{% trans 'Reset two-factor authentication' %}</h2>
+    <p class="text-sm text-slate-400 mb-4">
+      {% trans 'For someone who has lost both their authenticator and their backup codes. Their sessions end, and they set up two-factor authentication again at their next sign-in.' %}
+    </p>
+    <form method="post" action="{% url 'users:mfa_admin_reset' pk=user_detail.pk %}">
+      {% csrf_token %}
+      {% trans 'Reset two-factor authentication' as reset_label %}
+      {% trans "Reset this person's two-factor authentication? Their sessions end and they must set it up again." as reset_confirm %}
+      {% button reset_label type="submit" variant="danger" icon="warning" data_confirm=reset_confirm %}
+    </form>
+  </div>
+  {% endif %}
 </div>
 {% endblock %}

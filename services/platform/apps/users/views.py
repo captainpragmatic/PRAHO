@@ -27,18 +27,19 @@ from django.db import models, transaction
 from django.db.models import QuerySet
 from django.forms import Form
 from django.http import HttpRequest, HttpResponse, HttpResponseBase, JsonResponse
-from django.shortcuts import redirect, render, resolve_url
+from django.shortcuts import get_object_or_404, redirect, render, resolve_url
 from django.urls import reverse, reverse_lazy
 from django.utils.crypto import constant_time_compare
 from django.utils.decorators import method_decorator
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy
-from django.views.decorators.http import require_http_methods
+from django.views.decorators.http import require_http_methods, require_POST
 from django.views.generic import DetailView, ListView
 
 from apps.audit.services import AuthenticationAuditService, LoginFailureEventData, LogoutEventData
 from apps.common.constants import BACKUP_CODE_LOW_WARNING_THRESHOLD
+from apps.common.decorators import admin_required
 from apps.common.rate_limiting import rate_limit
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.transactions import best_effort_atomic
@@ -49,7 +50,13 @@ from .forms import (
     TwoFactorVerifyForm,
     UserProfileForm,
 )
-from .mfa import LOGIN_METHOD_REQUEST_ATTR, MFAService, TOTPService, verify_login_second_factor
+from .mfa import (
+    LOGIN_METHOD_REQUEST_ATTR,
+    MFAService,
+    TOTPService,
+    staff_cannot_disable_mfa,
+    verify_login_second_factor,
+)
 from .models import CustomerMembership, User, UserLoginLog, UserProfile
 from .services import SessionSecurityService
 
@@ -918,11 +925,19 @@ def mfa_disable(request: HttpRequest) -> HttpResponse:
     if not user.two_factor_enabled:
         messages.info(request, _("Two-factor authentication is already disabled."))
         return redirect("users:user_profile")
+    staff_mfa_kept = _("Two-factor authentication is required for staff accounts, so it cannot be disabled.")
+    if staff_cannot_disable_mfa(user):
+        messages.error(request, staff_mfa_kept)
+        return redirect("users:user_profile")
 
     if request.method == "POST":
         # The password and a current second factor, as the API requires (#595)
         with transaction.atomic():
             locked_user = User.objects.select_for_update().get(pk=user.pk)
+            # Re-checked on the locked row, before a code is checked and spent.
+            if staff_cannot_disable_mfa(locked_user):
+                messages.error(request, staff_mfa_kept)
+                return redirect("users:user_profile")
             error = _confirm_both_factors(request, locked_user)
             if error is None:
                 MFAService.disable_totp(locked_user, request=request)
@@ -946,6 +961,40 @@ def mfa_disable(request: HttpRequest) -> HttpResponse:
         return redirect("users:user_profile")
 
     return render(request, "users/mfa_disable.html")
+
+
+@admin_required
+@require_POST
+def mfa_admin_reset(request: HttpRequest, pk: int) -> HttpResponse:
+    """Reset another person's 2FA: the recovery path when they lose their device and codes.
+
+    The audit event names the administrator as the actor. The person's sessions end, so their next
+    sign-in asks for a new enrolment (and the staff policy, when it is on, requires one). No one can
+    reset their own 2FA this way, which would get round the rule that staff keep theirs.
+    """
+    admin = cast(User, request.user)
+    target = get_object_or_404(User, pk=pk)
+    detail = redirect("users:user_detail", pk=pk)
+    if target.pk == admin.pk:
+        messages.error(request, _("You cannot reset your own two-factor authentication."))
+        return detail
+
+    with transaction.atomic():
+        locked_target = User.objects.select_for_update().get(pk=target.pk)
+        if not locked_target.two_factor_enabled:
+            messages.info(request, _("This account has no two-factor authentication to reset."))
+            return detail
+        MFAService.disable_totp(locked_target, admin_user=admin, request=request)
+
+    # Platform sessions end now. The Portal ends its session at its next check of the
+    # changed credential, as after any credential change.
+    SessionSecurityService.invalidate_all_sessions_for_user(target.pk)
+    messages.success(
+        request,
+        _("Two-factor authentication was reset for %(email)s. They set it up again at their next sign-in.")
+        % {"email": target.email},
+    )
+    return detail
 
 
 # ===============================================================================
@@ -994,6 +1043,8 @@ def user_profile(request: HttpRequest) -> HttpResponse:
         "user": user_with_memberships,
         "accessible_customers": user_with_memberships.get_accessible_customers(),
         "recent_logins": UserLoginLog.objects.filter(user=user, status="success").order_by("-timestamp")[:5],
+        # Staff cannot disable 2FA while the staff policy is on, so the link is not offered.
+        "can_disable_mfa": not staff_cannot_disable_mfa(user),
     }
 
     return render(request, "users/profile.html", context)
@@ -1043,6 +1094,11 @@ class UserListView(LoginRequiredMixin, ListView):
         return queryset
 
 
+def _is_administrator(user: Any) -> bool:
+    """The same rule as `admin_required`."""
+    return bool(getattr(user, "is_superuser", False) or getattr(user, "staff_role", "") == "admin")
+
+
 class UserDetailView(LoginRequiredMixin, DetailView):
     """User detail view (admin only)"""
 
@@ -1055,8 +1111,7 @@ class UserDetailView(LoginRequiredMixin, DetailView):
         if queryset is None:
             queryset = self.get_queryset()
 
-        obj: User = queryset.prefetch_related("customer_memberships__customer").get(pk=self.kwargs["pk"])
-        return obj
+        return get_object_or_404(queryset.prefetch_related("customer_memberships__customer"), pk=self.kwargs["pk"])
 
     def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         if not request.user.is_authenticated or not getattr(request.user, "is_staff_user", False):
@@ -1074,6 +1129,8 @@ class UserDetailView(LoginRequiredMixin, DetailView):
                 "accessible_customers": user.get_accessible_customers(),
                 "recent_logins": UserLoginLog.objects.filter(user=user).order_by("-timestamp")[:10],
                 "customer_memberships": CustomerMembership.objects.filter(user=user).select_related("customer"),
+                # The recovery path for a lost device: administrators, for someone else's account.
+                "can_reset_mfa": _is_administrator(self.request.user) and user.pk != self.request.user.pk,
             }
         )
 

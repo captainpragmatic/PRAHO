@@ -34,6 +34,7 @@ urlpatterns = [
     # User management (admin)
     path("users/", views.UserListView.as_view(), name="user_list"),
     path("users/<int:pk>/", views.UserDetailView.as_view(), name="user_detail"),
+    path("users/<int:pk>/mfa/reset/", views.mfa_admin_reset, name="mfa_admin_reset"),
     # Password reset
     path("password-reset/", views.password_reset_view, name="password_reset"),
     path("password-reset/done/", views.password_reset_done_view, name="password_reset_done"),

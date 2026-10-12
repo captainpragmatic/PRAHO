@@ -87,7 +87,6 @@ RETIRED_KEYS = frozenset(
         "users.backup_code_count",
         "users.login_rate_limit_per_hour",
         "users.max_login_attempts",
-        "users.mfa_required_for_staff",
         "users.session_timeout_minutes",
         "users.shared_device_timeout_minutes",
         "virtualmin.api_endpoint_path",

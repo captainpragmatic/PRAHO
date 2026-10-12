@@ -54,7 +54,7 @@ from apps.common.request_ip import get_safe_client_ip
 from apps.common.transactions import best_effort_atomic
 from apps.common.validators import log_security_event
 from apps.customers.models import Customer
-from apps.users.mfa import MFAService, verify_login_second_factor
+from apps.users.mfa import MFAService, staff_cannot_disable_mfa, staff_must_enrol, verify_login_second_factor
 from apps.users.models import APIToken, CustomerMembership, User, UserProfile
 from apps.users.services import APITokenService, SessionSecurityService
 
@@ -169,6 +169,9 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911 -- 
             if user.password != authenticated.password or user.is_account_locked() or not user.is_active:
                 # Same generic error for locked/inactive — attacker cannot distinguish
                 refusal = "credentials"
+            # While the staff 2FA policy is on, a staff account without a second factor gets no session.
+            elif staff_must_enrol(user):
+                refusal = "mfa_not_enrolled"
             # A password alone must never establish a session for an enrolled user.
             elif (
                 user.two_factor_enabled
@@ -181,14 +184,8 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911 -- 
                 user.save(update_fields=["failed_login_attempts", "account_locked_until"])
                 session_auth_hash = user.get_session_auth_hash()
 
-        if refusal == "credentials":
-            reason = "locked" if user.is_account_locked() else "inactive or changed"
-            logger.warning("⚠️ [Portal API Auth] Login rejected (%s) — ip=%s", reason, forwarded_ip or client_ip)
-            _charge_login_failure(forwarded_ip)
-            return JsonResponse({"success": False, "error": "Invalid email or password"}, status=401)
-        if refusal == "second_factor":
-            _charge_login_failure(forwarded_ip)
-            return JsonResponse({"success": False, "error": "Invalid authentication code"}, status=401)
+        if refusal is not None:
+            return _portal_login_refusal(request, user, refusal, forwarded_ip or client_ip, forwarded_ip)
 
         logger.info("✅ [Portal API Auth] User authenticated successfully — ip=%s", forwarded_ip or client_ip)
 
@@ -324,12 +321,31 @@ def _authenticate_token_request(request: HttpRequest) -> User | Response:
     return user
 
 
-def _audit_refusal_after_correct_password(request: HttpRequest, user: User, failure_reason: str) -> None:
-    """Record a token request refused although its password was right.
+def _portal_login_refusal(
+    request: HttpRequest, user: User, refusal: str, client_ip: str | None, forwarded_ip: str | None
+) -> JsonResponse:
+    """Answer a Portal login refused on the locked row, and charge it to the forwarded IP."""
+    _charge_login_failure(forwarded_ip)
+    if refusal == "second_factor":
+        return JsonResponse({"success": False, "error": "Invalid authentication code"}, status=401)
+    if refusal == "mfa_not_enrolled":
+        logger.warning("⚠️ [Portal API Auth] Login refused, staff account without 2FA — ip=%s", client_ip)
+        _audit_refusal_after_correct_password(request, user, "mfa_not_enrolled", login_method="portal")
+    else:
+        reason = "locked" if user.is_account_locked() else "inactive or changed"
+        logger.warning("⚠️ [Portal API Auth] Login rejected (%s) — ip=%s", reason, client_ip)
+    # The same answer as a wrong password: anything more specific would confirm the password.
+    return JsonResponse({"success": False, "error": "Invalid email or password"}, status=401)
+
+
+def _audit_refusal_after_correct_password(
+    request: HttpRequest, user: User, failure_reason: str, *, login_method: str = "api_token"
+) -> None:
+    """Record a login refused although its password was right.
 
     authenticate() succeeded, so user_login_failed never fired. Writing a failed-login audit row, as
     a wrong password does, leaves a trace and keeps the work alike. The reason (`not_staff`,
-    `account_locked`, `account_changed`) is in its metadata. The staff
+    `account_locked`, `account_changed`, `mfa_not_enrolled`) is in its metadata. The staff
     web login does the same for a locked account (apps.users.views._record_locked_login).
     """
     with best_effort_atomic(logger=logger, scope="Auth", message="Could not audit a refused token request"):
@@ -339,7 +355,7 @@ def _audit_refusal_after_correct_password(request: HttpRequest, user: User, fail
                 user=user,
                 failure_reason=failure_reason,
                 request=request,
-                metadata={"login_method": "api_token", "password_correct": True},
+                metadata={"login_method": login_method, "password_correct": True},
             )
         )
 
@@ -369,6 +385,13 @@ def _issue_token_under_lock(
                 "[Auth] Token request refused, account changed during the request — ip=%s", client_ip
             )
             _audit_refusal_after_correct_password(request, user, "account_changed")
+            return refused
+        # While the staff 2FA policy is on, a staff account without a second factor gets no token.
+        if staff_must_enrol(user):
+            logger.warning(  # nosemgrep: python-logger-credential-disclosure — literal log message, no secrets
+                "[Auth] Token request refused, staff account without 2FA — ip=%s", client_ip
+            )
+            _audit_refusal_after_correct_password(request, user, "mfa_not_enrolled")
             return refused
         # A password alone must never yield a token for an enrolled account (#565).
         if (
@@ -615,6 +638,9 @@ def validate_session_secure(request: HttpRequest) -> Response:  # noqa: PLR0911 
         try:
             # Joined: the hash below reads credential_version on every Portal request (#553).
             user = User.objects.select_related("credential_version").get(id=user_id, is_active=True)
+            if staff_must_enrol(user):
+                logger.warning("🚨 [Security] Portal %s session of a staff account without 2FA refused", portal_id)
+                return _uniform_session_error(security_headers)
             current_auth_hash = user.get_session_auth_hash()
             if not isinstance(session_auth_hash, str) or not (
                 constant_time_compare(session_auth_hash, current_auth_hash)
@@ -721,6 +747,11 @@ def mfa_disable_api(request: HttpRequest, user: User) -> Response:
     """Require current password and a second factor before removing MFA."""
     with transaction.atomic():
         user = User.objects.select_for_update().get(pk=user.pk)
+        if staff_cannot_disable_mfa(user):
+            return Response(
+                {"success": False, "error": str(_("Two-factor authentication is required for staff accounts."))},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         serializer = MFADisableSerializer(data=request.data, context={"request": request, "user": user})
         serializer.is_valid(raise_exception=True)
         result = serializer.save()

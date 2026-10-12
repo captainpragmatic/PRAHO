@@ -136,7 +136,11 @@ class APITokenService:
         max_active_tokens = int(getattr(settings, "API_TOKEN_MAX_ACTIVE_PER_USER", 20))
 
         with transaction.atomic():
-            User.objects.select_for_update().get(pk=user.pk)
+            locked_user = User.objects.select_for_update().get(pk=user.pk)
+            from .mfa import staff_must_enrol  # noqa: PLC0415 -- mfa imports this module
+
+            if staff_must_enrol(locked_user):
+                return Err(str(_("Set up two-factor authentication before creating an API token.")))
             active_count = (
                 APIToken.objects.filter(user=user).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now)).count()
             )
