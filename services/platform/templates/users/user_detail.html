@@ -33,7 +33,7 @@
       {% csrf_token %}
       {% trans 'Reset two-factor authentication' as reset_label %}
       {% trans "Reset this person's two-factor authentication? Their sessions end and they must set it up again." as reset_confirm %}
-      {% button reset_label type="submit" variant="danger" icon="warning" data_confirm=reset_confirm %}
+      {% button reset_label type="submit" variant="danger" icon="warning" data_action="confirm-submit" data_confirm=reset_confirm %}
     </form>
   </div>
   {% endif %}

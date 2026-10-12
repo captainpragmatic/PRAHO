@@ -101,7 +101,9 @@ class AdminResetTests(TestCase):
         self.client.force_login(self.admin)
         page = self.client.get(detail_url)
         self.assertContains(page, reset_url)
-        self.assertContains(page, 'data-confirm="')  # a destructive action asks first
+        # A destructive action asks first: ui-actions.js confirms only a confirm-submit button.
+        self.assertContains(page, 'data-action="confirm-submit"')
+        self.assertContains(page, 'data-confirm="')
 
         self.client.force_login(self.colleague)
         self.assertNotContains(self.client.get(detail_url), reset_url)
