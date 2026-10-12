@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **CSS and JS changes reach returning visitors after a deploy.** Django 5.1 removed the `STATICFILES_STORAGE` setting and 5.2 ignores it, so static files were deployed under their plain names while the reverse proxy tells browsers to cache them for a year. Both services now configure `STORAGES`: production and staging content-hash every file name, local settings keep plain names. The checkout's card logos no longer hardcode a `/static/` URL.
 - **Platform no longer writes an audit row for every page a staff member opens.** (#622)
   - **The bug.** Every signed-in request under `/users/`, `/billing/`, `/customers/`, `/admin/`, `/api/`, `/settings/` or `/tickets/` wrote a `session_activity_*` audit event. The rows had no user attached, only the user's id, the path and the IP in their details, so GDPR export and erasure never found them, and retention kept them for two years. The request log already records each request.
   - **The same path's multiple-address check** stored one cache entry per request, about 1,800 an hour for a page that refreshes itself, and once three addresses were seen it wrote a `suspicious_activity_detected` row on every request for up to an hour. It now keeps one entry per address and records an address once, when it joins the pattern.

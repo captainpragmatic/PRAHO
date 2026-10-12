@@ -312,6 +312,8 @@ CACHES["default"].update(
 
 # Static files — env-driven for deployment flexibility (native, Docker)
 STATIC_ROOT = Path(os.environ.get("STATIC_ROOT", str(BASE_DIR / "staticfiles")))
+# Content-hashed names (app.3f2a9c.css): the reverse proxy caches /static/ as immutable for a year.
+STORAGES = {**STORAGES, "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.ManifestStaticFilesStorage"}}
 # Uploads and generated documents: the deployment's media volume or directory, which backups include.
 MEDIA_ROOT = Path(os.environ.get("MEDIA_ROOT", str(BASE_DIR / "media")))
 
