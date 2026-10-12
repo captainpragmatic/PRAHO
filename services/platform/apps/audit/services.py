@@ -11,14 +11,13 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, TypedDict
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.contenttypes.models import ContentType
-from django.core.files.base import ContentFile
-from django.core.files.storage import default_storage
 from django.db import models, transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -30,6 +29,7 @@ from apps.common.types import EmailAddress, Err, Ok, Result
 from apps.settings.services import SettingsService
 from apps.tickets.models import Ticket  # Import for GDPR data export
 
+from .export_files import delete_export_file, write_export_file
 from .models import (
     AuditAlert,
     AuditEvent,
@@ -352,6 +352,9 @@ class BusinessEventData:
 
 
 logger = logging.getLogger(__name__)
+
+# A completed GDPR export can be downloaded for this many days, then its file is deleted.
+EXPORT_DOWNLOAD_DAYS = 7
 
 
 class AuthenticationAuditService:
@@ -1062,7 +1065,7 @@ class AuditService:
 
 class GDPRExportService:
     """
-    🔒 Comprehensive GDPR data export service (Article 20 - Right to data portability)
+    🔒 Comprehensive GDPR data export service (Article 15 - Right of access, Article 20 - Right to data portability)
 
     Features:
     - Complete user data collection across all related models
@@ -1092,25 +1095,32 @@ class GDPRExportService:
                     "format": "json",
                 }
 
-            export_request = DataExport.objects.create(
-                requested_by=user,
-                export_type="gdpr",
-                scope=export_scope,
-                status="pending",
-                expires_at=timezone.now() + timedelta(days=7),  # 7 days to download
-            )
+            with transaction.atomic():
+                # Locked and re-read, as erasure locks it: an erased (anonymised) person has no
+                # export to request, even through a User instance loaded before the erasure, and the
+                # request is logged with the person as they are now.
+                current = User.objects.select_for_update().filter(pk=user.pk, is_active=True).first()
+                if current is None:
+                    return Err("Account is not active")
+                export_request = DataExport.objects.create(
+                    requested_by=current,
+                    export_type="gdpr",
+                    scope=export_scope,
+                    status="pending",
+                    expires_at=timezone.now() + timedelta(days=EXPORT_DOWNLOAD_DAYS),  # Restarted at completion
+                )
 
-            # Log GDPR export request
-            compliance_request = ComplianceEventRequest(
-                compliance_type="gdpr_consent",
-                reference_id=f"export_{export_request.id}",
-                description=f"GDPR data export requested by {user.email}",
-                user=user,
-                status="initiated",
-                evidence={"export_id": str(export_request.id), "scope": export_scope},
-                metadata={"ip_address": request_ip},
-            )
-            AuditService.log_compliance_event(compliance_request)
+                # Log GDPR export request
+                compliance_request = ComplianceEventRequest(
+                    compliance_type="gdpr_consent",
+                    reference_id=f"export_{export_request.id}",
+                    description=f"GDPR data export requested by {current.email}",
+                    user=current,
+                    status="initiated",
+                    evidence={"export_id": str(export_request.id), "scope": export_scope},
+                    metadata={"ip_address": request_ip},
+                )
+                AuditService.log_compliance_event(compliance_request)
 
             logger.info(f"🔒 [GDPR Export] Request created for {user.email}: {export_request.id}")
             return Ok(export_request)
@@ -1122,55 +1132,71 @@ class GDPRExportService:
     @classmethod
     @transaction.atomic
     def process_data_export(cls, export_request: DataExport) -> Result[str, str]:
-        """Process and generate the actual data export file"""
+        """Generate the export file, encrypted for this export (apps.audit.export_files).
+
+        The row is locked and only a pending or failed export is processed, so one export never
+        gets a second file. The download window starts at completion. A failure after the file is
+        written deletes it, so no file outlives a failed export.
+        """
+        # Locks in erasure's order - the person, then the export - so the two take turns without
+        # deadlocking: an export processed first is revoked by the erasure, and one processed after
+        # it finds the person erased.
+        requester_id = DataExport.objects.filter(pk=export_request.pk).values_list("requested_by_id", flat=True).first()
+        user = User.objects.select_for_update().filter(pk=requester_id).first() if requester_id else None
+        list(DataExport.objects.select_for_update().filter(pk=export_request.pk).values_list("pk", flat=True))
+        export_request.refresh_from_db()
+        if export_request.status not in ("pending", "failed"):
+            return Err("Export has already been processed")
+
+        if user is None:
+            # Orphaned request: the requester was deleted before processing (W7)
+            export_request.status = "failed"
+            export_request.error_message = "Requesting user was deleted before the export was processed"
+            export_request.save(update_fields=["status", "error_message"])
+            return Err("Requesting user no longer exists")
+        if not user.is_active:
+            export_request.status = "failed"
+            export_request.error_message = "Requesting user was erased before the export was processed"
+            export_request.save(update_fields=["status", "error_message"])
+            return Err("Requesting user is no longer active")
+
+        saved_path = ""
         try:
-            user = export_request.requested_by
-            if user is None:
-                # Orphaned request: the requester was deleted before processing (W7)
-                export_request.status = "failed"
-                export_request.error_message = "Requesting user was deleted before the export was processed"
-                export_request.save(update_fields=["status", "error_message"])
-                return Err("Requesting user no longer exists")
-            export_request.status = "processing"
-            export_request.started_at = timezone.now()
-            export_request.save(update_fields=["status", "started_at"])
+            with transaction.atomic():
+                if export_request.file_path:
+                    delete_export_file(export_request.file_path)
+                    export_request.file_path = ""
+                export_request.status = "processing"
+                export_request.started_at = timezone.now()
+                export_request.save(update_fields=["status", "started_at", "file_path"])
 
-            # Collect all user data
-            user_data = cls._collect_user_data(user, export_request.scope)
+                user_data = cls._collect_user_data(user, export_request.scope)
+                export_content = json.dumps(user_data, indent=2, default=str, ensure_ascii=False)
+                saved_path = write_export_file(export_request, export_content)
 
-            # Generate export file
-            export_content = json.dumps(user_data, indent=2, default=str, ensure_ascii=False)
+                export_request.status = "completed"
+                export_request.completed_at = timezone.now()
+                export_request.expires_at = export_request.completed_at + timedelta(days=EXPORT_DOWNLOAD_DAYS)
+                export_request.file_path = saved_path
+                export_request.file_size = len(export_content.encode("utf-8"))
+                export_request.record_count = cls._count_records(user_data)
+                export_request.save(
+                    update_fields=["status", "completed_at", "expires_at", "file_path", "file_size", "record_count"]
+                )
 
-            # Generate secure filename
-            file_hash = hashlib.sha256(export_content.encode()).hexdigest()[:16]
-            filename = f"gdpr_export_{user.id}_{file_hash}.json"
-
-            # Save to secure storage
-            file_path = f"gdpr_exports/{filename}"
-            saved_path = default_storage.save(file_path, ContentFile(export_content.encode("utf-8")))
-
-            # Update export request
-            export_request.status = "completed"
-            export_request.completed_at = timezone.now()
-            export_request.file_path = saved_path
-            export_request.file_size = len(export_content.encode("utf-8"))
-            export_request.record_count = cls._count_records(user_data)
-            export_request.save(update_fields=["status", "completed_at", "file_path", "file_size", "record_count"])
-
-            # Log completion
-            compliance_request = ComplianceEventRequest(
-                compliance_type="gdpr_consent",
-                reference_id=f"export_{export_request.id}",
-                description=f"GDPR data export completed for {user.email}",
-                user=user,
-                status="completed",
-                evidence={
-                    "file_size_bytes": export_request.file_size,
-                    "record_count": export_request.record_count,
-                    "completion_time": export_request.completed_at.isoformat(),
-                },
-            )
-            AuditService.log_compliance_event(compliance_request)
+                compliance_request = ComplianceEventRequest(
+                    compliance_type="gdpr_consent",
+                    reference_id=f"export_{export_request.id}",
+                    description=f"GDPR data export completed for {user.email}",
+                    user=user,
+                    status="completed",
+                    evidence={
+                        "file_size_bytes": export_request.file_size,
+                        "record_count": export_request.record_count,
+                        "completion_time": export_request.completed_at.isoformat(),
+                    },
+                )
+                AuditService.log_compliance_event(compliance_request)
 
             logger.info(
                 f"✅ [GDPR Export] Completed for {user.email}: {export_request.file_size} bytes, {export_request.record_count} records"
@@ -1178,10 +1204,12 @@ class GDPRExportService:
             return Ok(saved_path)
 
         except Exception as e:
-            # Mark as failed
+            if saved_path:
+                delete_export_file(saved_path)
             export_request.status = "failed"
             export_request.error_message = str(e)
-            export_request.save(update_fields=["status", "error_message"])
+            export_request.file_path = ""
+            export_request.save(update_fields=["status", "error_message", "file_path"])
 
             logger.error(f"🔥 [GDPR Export] Processing failed for export {export_request.id}: {e}")
             return Err(f"Export processing failed: {e!s}")
@@ -1214,8 +1242,8 @@ class GDPRExportService:
                 "user_id": user.id,
                 "export_type": "gdpr_data_portability",
                 "praho_platform_version": "1.0.0",
-                "gdpr_article": "Article 20 - Right to data portability",
-                "legal_basis": "Romanian Law 190/2018, GDPR Article 20",
+                "gdpr_article": "Articles 15 and 20 - Right of access and right to data portability",
+                "legal_basis": "Romanian Law 190/2018, GDPR Articles 15 and 20",
             },
             "user_profile": {},
             "customers": [],
@@ -1263,6 +1291,10 @@ class GDPRExportService:
             except AttributeError:
                 data["customers"] = {"note": "Customer relationships not available"}
 
+        # Billing data the person is the subject of, independent of include_customers
+        if scope.get("include_billing", True):
+            data["billing_data"] = cls._collect_billing_data(user)
+
         # Support tickets
         if scope.get("include_tickets", True):
             try:
@@ -1298,12 +1330,83 @@ class GDPRExportService:
 
         return data
 
+    @staticmethod
+    def _collect_billing_data(user: User) -> list[dict[str, Any]]:
+        """The tax profile, invoices and proformas of the individual customers the user owns.
+
+        An individual customer's billing records are the person's own data (GDPR Art. 15),
+        including the CNP kept on issued invoices for the retention period. A company's documents
+        are the company's records, not its members' personal data, and are not exported here.
+        Each document is reduced to an explicit allowlist of fields. A CNP that cannot be decrypted
+        fails the export (ADR-0040): the person would otherwise get an incomplete copy.
+        """
+        from apps.billing.invoice_models import Invoice  # noqa: PLC0415  # Deferred: import cycle
+        from apps.billing.proforma_models import ProformaInvoice  # noqa: PLC0415  # Deferred: import cycle
+        from apps.customers.profile_models import CustomerTaxProfile  # noqa: PLC0415  # Deferred: import cycle
+        from apps.users.models import CustomerMembership  # noqa: PLC0415  # Deferred: import cycle
+
+        snapshot_fields = sorted(Invoice._BILLING_SNAPSHOT_FIELDS)
+
+        def snapshot(document: Invoice | ProformaInvoice) -> dict[str, Any]:
+            return {field: getattr(document, field) for field in snapshot_fields}
+
+        billing_data: list[dict[str, Any]] = []
+        customer_ids = CustomerMembership.objects.filter(
+            user=user, role="owner", is_active=True, customer__customer_type="individual"
+        ).values_list("customer_id", flat=True)
+        for customer_id in customer_ids:
+            # all_objects: a soft-deleted profile still holds the person's data, as erasure knows.
+            profile = CustomerTaxProfile.all_objects.filter(customer_id=customer_id).first()
+            invoices = Invoice.objects.filter(customer_id=customer_id).select_related("currency").order_by("pk")
+            proformas = (
+                ProformaInvoice.objects.filter(customer_id=customer_id).select_related("currency").order_by("pk")
+            )
+            billing_data.append(
+                {
+                    "customer_id": customer_id,
+                    "tax_profile": (
+                        {"cnp": profile.cnp, "cui": profile.cui, "vat_number": profile.vat_number} if profile else None
+                    ),
+                    "invoices": [
+                        {
+                            "number": invoice.number,
+                            "document_kind": invoice.document_kind,
+                            "status": invoice.status,
+                            "issued_at": invoice.issued_at,
+                            "due_at": invoice.due_at,
+                            "currency": invoice.currency.code,
+                            "subtotal_cents": invoice.subtotal_cents,
+                            "tax_cents": invoice.tax_cents,
+                            "total_cents": invoice.total_cents,
+                            **snapshot(invoice),
+                        }
+                        for invoice in invoices
+                    ],
+                    "proformas": [
+                        {
+                            "number": proforma.number,
+                            "status": proforma.status,
+                            "valid_until": proforma.valid_until,
+                            "currency": proforma.currency.code,
+                            "subtotal_cents": proforma.subtotal_cents,
+                            "tax_cents": proforma.tax_cents,
+                            "total_cents": proforma.total_cents,
+                            **snapshot(proforma),
+                        }
+                        for proforma in proformas
+                    ],
+                }
+            )
+        return billing_data
+
     @classmethod
     def _count_records(cls, user_data: dict[str, Any]) -> int:
         """Count total records in the export"""
         count = 1  # User profile
         count += len(user_data.get("customers", []))
-        count += len(user_data.get("billing_data", []))
+        # Each billing entry counts its tax profile and every document, not just the customer.
+        for entry in user_data.get("billing_data", []):
+            count += (1 if entry.get("tax_profile") else 0) + len(entry["invoices"]) + len(entry["proformas"])
         count += len(user_data.get("support_tickets", []))
         count += len(user_data.get("audit_summary", {}).get("recent_activities", []))
         return count
@@ -1409,6 +1512,10 @@ class GDPRDeletionService:
             else:
                 result = cls._delete_user_data(user)
                 action_taken = "deleted"
+                if result.is_ok():
+                    # The database set this request's user to NULL (SET_NULL); the instance still
+                    # holds the deleted user, whose save Django refuses as an unsaved relation.
+                    deletion_request.user = None
 
             if result.is_err():
                 deletion_request.status = "failed"
@@ -1459,6 +1566,7 @@ class GDPRDeletionService:
             # becomes an Err, so the caller cannot commit a half-anonymised user.
             with transaction.atomic():
                 cls._anonymize_user_records(user)
+                cls._revoke_user_exports(user)
             logger.info(f"✅ [GDPR Anonymization] User {original_email} anonymized successfully")
             return Ok("User data anonymized successfully")
 
@@ -1469,6 +1577,8 @@ class GDPRDeletionService:
     @classmethod
     def _anonymize_user_records(cls, user: User) -> None:
         """The anonymisation writes; `_anonymize_user_data` runs them in one savepoint."""
+        from apps.billing.invoice_models import Invoice  # noqa: PLC0415  # Deferred: import cycle
+        from apps.billing.proforma_models import ProformaInvoice  # noqa: PLC0415  # Deferred: import cycle
         from apps.customers.profile_models import CustomerTaxProfile  # noqa: PLC0415  # Deferred: import cycle
         from apps.users.models import CustomerMembership  # noqa: PLC0415  # Deferred: import cycle
 
@@ -1505,24 +1615,53 @@ class GDPRDeletionService:
                 ip_address=cls.ANONYMIZATION_MAP["ip_address"](), user_agent="Anonymized"
             )
 
-        # An individual customer's CNP is the person's national identification number. The tax
-        # profile's copy is cleared; issued invoices keep their own snapshot for the legal
-        # retention period. A queryset update needs no decryption, so an unreadable CNP cannot
-        # block the erasure, and all_objects includes soft-deleted profiles.
+        # An individual customer's CNP is the person's national identification number. It is
+        # cleared wherever it is not a fiscal record: the tax profile, every proforma (a proforma
+        # is not a fiscal document) and every invoice not yet issued. Issued invoices keep their
+        # snapshot for the legal retention period. Queryset updates need no decryption, so an
+        # unreadable CNP cannot block the erasure; all_objects includes soft-deleted profiles.
         owned_individuals = CustomerMembership.objects.filter(
-            user=user, role="owner", customer__customer_type="individual"
+            user=user, role="owner", is_active=True, customer__customer_type="individual"
         ).values("customer_id")
-        profiles = list(
-            CustomerTaxProfile.all_objects.filter(customer_id__in=owned_individuals, cnp__isnull=False).values_list(
-                "pk", "customer_id"
+        cls._clear_cnp(
+            CustomerTaxProfile.all_objects.filter(customer_id__in=owned_individuals),
+            "cnp",
+            id_key="tax_profile_id",
+            where="the customer tax profile",
+        )
+        cls._clear_cnp(
+            ProformaInvoice.objects.filter(customer_id__in=owned_individuals),
+            "bill_to_cnp",
+            id_key="proforma_id",
+            where="a proforma",
+        )
+        cls._clear_cnp(
+            Invoice.objects.filter(customer_id__in=owned_individuals, locked_at__isnull=True),
+            "bill_to_cnp",
+            id_key="invoice_id",
+            where="an invoice not yet issued",
+        )
+
+    @staticmethod
+    def _clear_cnp(rows: models.QuerySet[Any], field: str, *, id_key: str, where: str) -> None:
+        """Clear the CNP `field` on `rows`, and audit each cleared row without the value."""
+        selected = list(rows.filter(**{f"{field}__isnull": False}).values_list("pk", "customer_id"))
+        selected_pks = [pk for pk, _customer_id in selected]
+        rows.filter(pk__in=selected_pks).update(**{field: None})
+        # Audit only what the update cleared. A row that left `rows` in between (an invoice issued
+        # meanwhile) was not updated and keeps its CNP, so it must not be recorded as cleared.
+        now_clear = set(
+            rows.model._base_manager.filter(pk__in=selected_pks, **{f"{field}__isnull": True}).values_list(
+                "pk", flat=True
             )
         )
-        CustomerTaxProfile.all_objects.filter(pk__in=[pk for pk, _customer_id in profiles]).update(cnp=None)
-        for profile_id, customer_id in profiles:
+        for pk, customer_id in selected:
+            if pk not in now_clear:
+                continue
             AuditService.log_simple_event(
                 "data_anonymization_completed",
-                description="CNP cleared from the customer tax profile (GDPR erasure)",
-                metadata={"field": "cnp", "tax_profile_id": profile_id, "customer_id": str(customer_id)},
+                description=f"CNP cleared from {where} (GDPR erasure)",
+                metadata={"field": field, id_key: pk, "customer_id": str(customer_id)},
                 actor_type="system",
             )
 
@@ -1530,22 +1669,52 @@ class GDPRDeletionService:
     def _delete_user_data(cls, user: User) -> Result[str, str]:
         """Complete data deletion (only when legally permitted)"""
 
+        original_email = user.email
         try:
-            original_email = user.email
+            # One savepoint, as for anonymisation: a protected row refusing user.delete() rolls the
+            # audit-event deletion and the export revocation back instead of committing them.
+            with transaction.atomic():
+                cls._revoke_user_exports(user)
 
-            # Delete related data that can be safely removed
-            with audit_mutation_allowed("gdpr_erasure"):
-                AuditEvent.objects.filter(user=user).delete()
+                # Delete related data that can be safely removed
+                with audit_mutation_allowed("gdpr_erasure"):
+                    AuditEvent.objects.filter(user=user).delete()
 
-            # Delete user account
-            user.delete()
+                # Delete user account
+                user.delete()
 
             logger.info(f"✅ [GDPR Deletion] User {original_email} deleted successfully")
             return Ok("User data deleted successfully")
 
         except Exception as e:
-            logger.error(f"🔥 [GDPR Deletion] Failed to delete user {user.email}: {e}")
+            logger.error(f"🔥 [GDPR Deletion] Failed to delete user {original_email}: {e}")
             return Err(f"Deletion failed: {e!s}")
+
+    @staticmethod
+    def _revoke_user_exports(user: User) -> None:
+        """Close the user's GDPR exports now, and delete their files once the erasure commits.
+
+        The rows are locked (an export being generated finishes first), expired and, if not yet
+        done, cancelled, so nothing more is downloaded or written. File deletes are not
+        transactional, so they run after commit: a rolled-back erasure deletes no file. A delete
+        that fails is retried by the daily cleanup, because the row keeps its path and is expired.
+        """
+        from .export_files import untrack_export_file  # noqa: PLC0415  # Deferred: import cycle
+
+        # The person's row first, as export processing locks it: an export being generated
+        # finishes before this runs, and one requested meanwhile is refused once this commits.
+        list(User.objects.select_for_update().filter(pk=user.pk).values_list("pk", flat=True))
+        exports = list(DataExport.objects.select_for_update().filter(requested_by=user).values_list("pk", "file_path"))
+        if not exports:
+            return
+        export_ids = [export_id for export_id, _path in exports]
+        DataExport.objects.filter(pk__in=export_ids).update(expires_at=timezone.now())
+        DataExport.objects.filter(pk__in=export_ids, status__in=("pending", "processing")).update(
+            status="failed", error_message="Cancelled by GDPR erasure"
+        )
+        for export_id, path in exports:
+            if path:
+                transaction.on_commit(partial(untrack_export_file, export_id, path), robust=True)
 
 
 class GDPRConsentService:

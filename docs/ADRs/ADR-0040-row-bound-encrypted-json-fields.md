@@ -172,10 +172,19 @@ not an `EncryptedJSONField`, and binds each value to its row the same way:
 - **Readers.** The staff customer list defers the CNP and shows only whether one is on file.
   Everything else reads the decrypted string unchanged: the fiscal-identity snapshot, e-Factura,
   the ROTLD registrant data.
-- **GDPR erasure.** Anonymisation clears the profile CNP of the individual customers the user
-  owns, through a queryset update (no decryption, soft-deleted rows included), and records one
-  audit event per profile without the value. Issued invoices keep their snapshot for the 10-year
-  retention period. Proforma snapshots are not cleared; that is an open decision.
+- **GDPR erasure.** Anonymisation clears the CNP of the individual customers the user owns
+  wherever it is not a fiscal record: the tax profile, every proforma (a proforma is not a fiscal
+  document, whatever its status) and every invoice not yet issued. It uses queryset updates (no
+  decryption, soft-deleted profiles included) and records one audit event per cleared row without
+  the value. Issued invoices keep their snapshot for the legal retention period. A proforma
+  converted after erasure produces an invoice without a CNP, so e-Factura states ANAF's
+  placeholder for a Romanian individual, as it does for any customer whose CNP is unknown.
+  Erasure audits only the rows its update cleared. It holds against writers that load the row
+  under lock: invoice issuance, proforma conversion, provider finalisation and the staff proforma
+  edit. A full save of a draft invoice from a copy loaded without a lock, if it is in flight while
+  the erasure commits, can write the CNP back for that one request's window; the value stays
+  encrypted. A document created from a tax profile read just before the erasure commits can carry
+  the CNP the same way.
 - **Not covered.** The issued e-Factura XML holds the CNP in plain text, in
   `billing_efactura_documents.xml_content` and in the stored XML file. It is the legal record sent
   to ANAF and kept for the retention period.
@@ -187,6 +196,33 @@ not an `EncryptedJSONField`, and binds each value to its row the same way:
 - **SQLite rebuilds.** A migration that alters one of these tables on SQLite drops its trigger
   and must create it again, after the change. `tests/common/test_migration_db_objects.py` turns
   red when a trigger is missing.
+
+## Addendum (2026-10-12): GDPR export files
+
+A GDPR export is a file, not a column: `apps.audit.export_files` writes it to media as v2
+ciphertext bound to its export,
+
+    audit_data_exports:file:<export id>
+
+and is the only code that reads or writes those bytes.
+
+- **Why the file and not a column.** Media reaches every backup (#674) and the staff network's
+  direct `/media` route, which does not pass through Django's authorisation or expiry checks.
+  Encrypted files make both ciphertext only, with no deployment change. The key is not in the
+  backups.
+- **Reads always pass the expected AAD and require a v2 envelope.** `decrypt_sensitive_data`
+  returns "" for empty input and decrypts a v1 blob under whatever AAD it is given, so a
+  plaintext, empty, truncated or repackaged file, or one copied from another export, raises
+  `DecryptionError`. The views never serve it, and do not count or log it as downloaded.
+- **One owner.** An export is processed only from `pending` or `failed`, under a row lock, so it
+  never gets a second file. A failure after the write deletes the file. The download window
+  starts at completion.
+- **Lifetime.** A file is deleted by the daily `delete_expired_data_exports` once the export's
+  7-day window closes, and after commit when its owner is erased. Every path deletes the file
+  first and blanks the row's path only if it still points at that file; the row stays.
+- **Key rotation.** `reencrypt_with_aad` does not find these files. A retired key must stay in the
+  keyring until every export file encrypted under it has been deleted: 7 days plus a day of
+  cleanup, provided the cleanup task has reported no failures.
 
 ## Related
 

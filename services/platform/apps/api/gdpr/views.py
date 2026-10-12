@@ -108,7 +108,7 @@ def consent_history_api(request: Request, request_data: dict[str, Any]) -> Respo
 @require_portal_service_authentication
 def data_export_api(request: Request, request_data: dict[str, Any]) -> Response:
     """
-    GDPR data export (Article 20 - Right to data portability).
+    GDPR data export (Article 15 - Right of access, Article 20 - Right to data portability).
 
     action="status": return recent exports for user.
     action="request" (default): create a new export request.

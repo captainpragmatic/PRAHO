@@ -30,10 +30,12 @@ from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_POST
 
 from apps.common.decorators import staff_required_strict
+from apps.common.encryption import DecryptionError
 from apps.common.pagination import pagination_query
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.types import Err, Ok
 
+from .export_files import read_export_file, untrack_export_file
 from .models import (
     AuditAlert,
     AuditEvent,
@@ -139,12 +141,12 @@ def _handle_immediate_download(request: HttpRequest, export_request: "DataExport
         return None
 
     try:
-        # Read the file content
-        file_content = default_storage.open(export_request.file_path).read()
+        file_content = read_export_file(export_request)
 
         # Create HTTP response with file download
         response = HttpResponse(file_content, content_type="application/json")
         response["Content-Disposition"] = f'attachment; filename="gdpr-export-{export_request.id}.json"'
+        response["Cache-Control"] = "no-store"
 
         # Log the download
         export_request.download_count += 1
@@ -159,7 +161,7 @@ def _handle_immediate_download(request: HttpRequest, export_request: "DataExport
             status="success",
             evidence={
                 "export_id": str(export_request.id),
-                "file_size_bytes": len(file_content),
+                "file_size_bytes": len(file_content.encode("utf-8")),
                 "download_count": export_request.download_count,
                 "immediate_download": True,
             },
@@ -172,6 +174,11 @@ def _handle_immediate_download(request: HttpRequest, export_request: "DataExport
 
         return response
 
+    except DecryptionError:
+        # Never served, and not "still processing": the file is not this export's ciphertext.
+        logger.error(f"🔥 [GDPR Export] Export file {export_request.id} could not be decrypted", exc_info=True)
+        messages.error(request, _("Failed to download export file. Please try again."))
+        return redirect("audit:gdpr_dashboard")
     except Exception as e:
         logger.error(f"🔥 [GDPR Export] Error reading export file: {e}")
         return None
@@ -289,6 +296,9 @@ def download_data_export(request: HttpRequest, export_id: uuid.UUID) -> HttpResp
             messages.error(request, _("Export file not found. Please contact support."))
             return redirect("audit:gdpr_dashboard")
 
+        # Read before recording: a file that is refused is neither counted nor logged as downloaded.
+        file_content = read_export_file(export_request).encode("utf-8")
+
         # Increment download count
         export_request.download_count += 1
         export_request.save(update_fields=["download_count"])
@@ -311,10 +321,10 @@ def download_data_export(request: HttpRequest, export_id: uuid.UUID) -> HttpResp
         )
 
         # Serve file
-        file_content = default_storage.open(export_request.file_path).read()
         response = HttpResponse(file_content, content_type="application/json")
-        response["Content-Disposition"] = f'attachment; filename="gdpr_export_{user.id}.json"'
+        response["Content-Disposition"] = f'attachment; filename="gdpr_export_{export_request.id}.json"'
         response["Content-Length"] = len(file_content)
+        response["Cache-Control"] = "no-store"
 
         return response
 
@@ -983,11 +993,10 @@ def process_export_request(request: HttpRequest, export_id: uuid.UUID) -> HttpRe
 
         elif action == "delete_expired":
             if export_request.status == "completed" and timezone.now() > export_request.expires_at:
-                # Delete the file if it exists
-                if export_request.file_path and default_storage.exists(export_request.file_path):
-                    default_storage.delete(export_request.file_path)
+                # The file goes; the row stays as the record that the export existed (W7).
+                if export_request.file_path:
+                    untrack_export_file(export_request.pk, export_request.file_path)
 
-                # Log the staff action before deletion
                 AuditService.log_simple_event(
                     event_type="delete",
                     user=request.user,
@@ -996,7 +1005,6 @@ def process_export_request(request: HttpRequest, export_id: uuid.UUID) -> HttpRe
                     ip_address=get_safe_client_ip(request),
                 )
 
-                export_request.delete()
                 messages.success(request, _("Expired export deleted successfully."))
             else:
                 messages.error(request, _("Can only delete expired completed exports."))
@@ -1039,10 +1047,17 @@ def download_user_export(request: HttpRequest, export_id: uuid.UUID) -> HttpResp
     try:
         export_request = get_object_or_404(DataExport, id=export_id)
 
+        if timezone.now() > export_request.expires_at:
+            messages.error(request, _("This export has expired and is no longer available for download."))
+            return redirect("audit:gdpr_management_dashboard")
+
         # Check if file exists
         if not export_request.file_path or not default_storage.exists(export_request.file_path):
             messages.error(request, _("Export file not found."))
             return redirect("audit:gdpr_management_dashboard")
+
+        # Read before recording: a file that is refused is not logged as downloaded.
+        file_content = read_export_file(export_request).encode("utf-8")
 
         # Log the staff download
         AuditService.log_simple_event(
@@ -1054,10 +1069,10 @@ def download_user_export(request: HttpRequest, export_id: uuid.UUID) -> HttpResp
         )
 
         # Serve file
-        file_content = default_storage.open(export_request.file_path).read()
         response = HttpResponse(file_content, content_type="application/json")
         response["Content-Disposition"] = f'attachment; filename="gdpr_export_{export_request.id}.json"'
         response["Content-Length"] = len(file_content)
+        response["Cache-Control"] = "no-store"
 
         return response
 

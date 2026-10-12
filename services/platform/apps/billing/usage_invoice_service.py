@@ -419,15 +419,17 @@ class UsageInvoiceService:
         """
         Issue a draft invoice (change status from draft to issued).
         """
-        try:
-            invoice = Invoice.objects.get(id=invoice_id)
-        except Invoice.DoesNotExist:
-            return Err(f"Invoice not found: {invoice_id}")
-
-        if invoice.status != "draft":
-            return Err(f"Invoice is not in draft status: {invoice.status}")
-
         with transaction.atomic():
+            # Loaded under lock: issue() saves every field, so a copy read before a concurrent
+            # write (a GDPR erasure clearing the CNP, a staff edit) would put the old values back.
+            try:
+                invoice = Invoice.objects.select_for_update().get(id=invoice_id)
+            except Invoice.DoesNotExist:
+                return Err(f"Invoice not found: {invoice_id}")
+
+            if invoice.status != "draft":
+                return Err(f"Invoice is not in draft status: {invoice.status}")
+
             try:
                 invoice.issue()
             except TransitionNotAllowed:

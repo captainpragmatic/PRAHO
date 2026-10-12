@@ -154,10 +154,12 @@
             </div>
             <div class="flex items-center space-x-2">
               <!-- Status Badge -->
-              {% if export.status == 'completed' %}
+              {% if export.is_downloadable %}
                 {% trans "Ready" as bt8 %}{% badge bt8 variant="success" icon="check" %}
                 {% url 'audit:download_data_export' export_id=export.id as download_url %}
                 {% trans "Download" as bt9 %}{% button bt9 variant="success" size="xs" href=download_url %}
+              {% elif export.status == 'completed' %}
+                {% trans "Expired" as bt_expired %}{% badge bt_expired variant="secondary" icon="clock" %}
               {% elif export.status == 'processing' %}
                 {% trans "Processing" as bt10 %}{% badge bt10 variant="warning" icon="clock" %}
               {% elif export.status == 'failed' %}

@@ -274,9 +274,9 @@ class HandleImmediateDownloadTests(AuditViewsBaseTestCase):
         result = _handle_immediate_download(request, export, self.regular_user)
         self.assertIsNone(result)
 
-    @patch("apps.audit.views.default_storage")
+    @patch("apps.audit.views.read_export_file", return_value='{"test": true}')
     @patch("apps.audit.views.AuditService")
-    def test_htmx_completed_with_file(self, mock_audit_svc, mock_storage):
+    def test_htmx_completed_with_file(self, mock_audit_svc, mock_read):
         from django.test import RequestFactory  # noqa: PLC0415
 
         from apps.audit.views import _handle_immediate_download  # noqa: PLC0415
@@ -288,14 +288,13 @@ class HandleImmediateDownloadTests(AuditViewsBaseTestCase):
 
         export = self._create_data_export(status="completed", file_path="exports/test.json")
 
-        mock_file = MagicMock()
-        mock_file.read.return_value = b'{"test": true}'
-        mock_storage.open.return_value = mock_file
-
         result = _handle_immediate_download(request, export, self.regular_user)
         self.assertIsNotNone(result)
         self.assertEqual(result.status_code, 200)
         self.assertEqual(result["Content-Type"], "application/json")
+        self.assertEqual(result["Cache-Control"], "no-store")
+        self.assertEqual(result.content, b'{"test": true}')
+        mock_read.assert_called_once_with(export)
 
     def test_htmx_not_completed_returns_none(self):
         from django.test import RequestFactory  # noqa: PLC0415
@@ -308,8 +307,8 @@ class HandleImmediateDownloadTests(AuditViewsBaseTestCase):
         result = _handle_immediate_download(request, export, self.regular_user)
         self.assertIsNone(result)
 
-    @patch("apps.audit.views.default_storage")
-    def test_htmx_file_read_exception(self, mock_storage):
+    @patch("apps.audit.views.read_export_file", side_effect=Exception("File not found"))
+    def test_htmx_file_read_exception(self, mock_read):
         from django.test import RequestFactory  # noqa: PLC0415
 
         from apps.audit.views import _handle_immediate_download  # noqa: PLC0415
@@ -318,10 +317,10 @@ class HandleImmediateDownloadTests(AuditViewsBaseTestCase):
         request = factory.get("/", HTTP_HX_REQUEST="true")
 
         export = self._create_data_export(status="completed", file_path="exports/test.json")
-        mock_storage.open.side_effect = Exception("File not found")
 
         result = _handle_immediate_download(request, export, self.regular_user)
         self.assertIsNone(result)
+        mock_read.assert_called_once_with(export)
 
 
 # =============================================================================
@@ -375,34 +374,34 @@ class DownloadDataExportTests(AuditViewsBaseTestCase):
         resp = self.client.get(reverse("audit:download_data_export", args=[export.id]))
         self.assertRedirects(resp, reverse("audit:gdpr_dashboard"))
 
+    @patch("apps.audit.views.read_export_file", return_value='{"data": "test"}')
     @patch("apps.audit.views.default_storage")
     @patch("apps.audit.views.AuditService")
-    def test_download_success(self, mock_audit, mock_storage):
+    def test_download_success(self, mock_audit, mock_storage, mock_read):
         export = self._create_data_export(
             status="completed",
             file_path="exports/test.json",
         )
         mock_storage.exists.return_value = True
-        mock_file = MagicMock()
-        mock_file.read.return_value = b'{"data": "test"}'
-        mock_storage.open.return_value = mock_file
 
         self.client.login(email="user@example.com", password="testpass123")
         resp = self.client.get(reverse("audit:download_data_export", args=[export.id]))
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp["Content-Type"], "application/json")
+        self.assertEqual(resp["Cache-Control"], "no-store")
+        self.assertEqual(resp.content, b'{"data": "test"}')
         export.refresh_from_db()
         self.assertEqual(export.download_count, 1)
 
+    @patch("apps.audit.views.read_export_file", side_effect=Exception("Storage error"))
     @patch("apps.audit.views.default_storage")
     @patch("apps.audit.views.AuditService")
-    def test_download_exception(self, mock_audit, mock_storage):
+    def test_download_exception(self, mock_audit, mock_storage, mock_read):
         export = self._create_data_export(
             status="completed",
             file_path="exports/test.json",
         )
         mock_storage.exists.return_value = True
-        mock_storage.open.side_effect = Exception("Storage error")
 
         self.client.login(email="user@example.com", password="testpass123")
         resp = self.client.get(reverse("audit:download_data_export", args=[export.id]))
@@ -1224,7 +1223,9 @@ class ProcessExportRequestTests(AuditViewsBaseTestCase):
             {"action": "delete_expired"},
         )
         self.assertRedirects(resp, reverse("audit:gdpr_management_dashboard"))
-        self.assertFalse(DataExport.objects.filter(id=export.id).exists())
+        # The file is deleted; the row stays as the record that the export existed (W7).
+        export.refresh_from_db()
+        self.assertEqual(export.file_path, "")
 
     def test_delete_not_expired(self):
         export = self._create_data_export(status="completed")
@@ -1319,19 +1320,33 @@ class DownloadUserExportTests(AuditViewsBaseTestCase):
         resp = self.client.get(reverse("audit:download_user_export", args=[uuid.uuid4()]))
         self.assertEqual(resp.status_code, 403)
 
+    @patch("apps.audit.views.read_export_file", return_value='{"data": "test"}')
     @patch("apps.audit.views.default_storage")
     @patch("apps.audit.views.AuditService")
-    def test_download_success(self, mock_audit, mock_storage):
+    def test_download_success(self, mock_audit, mock_storage, mock_read):
         export = self._create_data_export(status="completed", file_path="exports/test.json")
         mock_storage.exists.return_value = True
-        mock_file = MagicMock()
-        mock_file.read.return_value = b'{"data": "test"}'
-        mock_storage.open.return_value = mock_file
 
         self.client.login(email="staff@example.com", password="testpass123")
         resp = self.client.get(reverse("audit:download_user_export", args=[export.id]))
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp["Content-Type"], "application/json")
+        self.assertEqual(resp["Cache-Control"], "no-store")
+        self.assertEqual(resp.content, b'{"data": "test"}')
+
+    @patch("apps.audit.views.read_export_file")
+    @patch("apps.audit.views.default_storage")
+    def test_an_expired_export_is_not_served_to_staff(self, mock_storage, mock_read):
+        export = self._create_data_export(
+            status="completed", file_path="exports/test.json", expires_at=timezone.now() - timedelta(minutes=1)
+        )
+        mock_storage.exists.return_value = True
+
+        self.client.login(email="staff@example.com", password="testpass123")
+        resp = self.client.get(reverse("audit:download_user_export", args=[export.id]))
+
+        self.assertRedirects(resp, reverse("audit:gdpr_management_dashboard"))
+        mock_read.assert_not_called()
 
     @patch("apps.audit.views.default_storage")
     def test_download_missing_file(self, mock_storage):
@@ -1348,12 +1363,12 @@ class DownloadUserExportTests(AuditViewsBaseTestCase):
         resp = self.client.get(reverse("audit:download_user_export", args=[export.id]))
         self.assertRedirects(resp, reverse("audit:gdpr_management_dashboard"))
 
+    @patch("apps.audit.views.read_export_file", side_effect=Exception("Error"))
     @patch("apps.audit.views.default_storage")
     @patch("apps.audit.views.AuditService")
-    def test_download_exception(self, mock_audit, mock_storage):
+    def test_download_exception(self, mock_audit, mock_storage, mock_read):
         export = self._create_data_export(status="completed", file_path="exports/test.json")
         mock_storage.exists.return_value = True
-        mock_storage.open.side_effect = Exception("Error")
 
         self.client.login(email="staff@example.com", password="testpass123")
         resp = self.client.get(reverse("audit:download_user_export", args=[export.id]))
