@@ -16,7 +16,6 @@ import traceback
 import urllib.parse
 import uuid
 from collections.abc import Callable
-from datetime import datetime, timedelta
 
 from django.conf import settings
 from django.contrib import messages
@@ -25,7 +24,6 @@ from django.db import DatabaseError, InterfaceError
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
 from django.urls import Resolver404, resolve
-from django.utils import timezone
 from django.utils.translation import gettext as _
 
 from apps.common import counters, portal_hmac
@@ -795,7 +793,6 @@ class SessionSecurityMiddleware:
     Features:
     - Dynamic timeout adjustment based on user role/context
     - Suspicious activity detection and logging
-    - Shared device mode handling
     """
 
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]):
@@ -829,10 +826,6 @@ class SessionSecurityMiddleware:
             # its own audit event (#622).
             SessionSecurityService.detect_suspicious_activity(request)
 
-            # Handle shared device mode expiry
-            if request.session.get("shared_device_mode"):
-                self._check_shared_device_expiry(request)
-
         except Exception as e:
             logger.critical(
                 "🔥 [SessionSecurityMiddleware] Session security check failed — invalidating session for safety: %s", e
@@ -857,38 +850,11 @@ class SessionSecurityMiddleware:
                     flush_error,
                 )
 
-    def _check_shared_device_expiry(self, request: HttpRequest) -> None:
-        """Check if shared device mode should expire based on inactivity"""
-        enabled_at_str = request.session.get("shared_device_enabled_at")
-        if not enabled_at_str:
-            return
-
-        try:
-            enabled_at = datetime.fromisoformat(enabled_at_str)
-            max_shared_duration = timedelta(hours=2)  # Max 2 hours in shared mode
-
-            if timezone.now() - enabled_at > max_shared_duration:
-                # Auto-disable shared device mode after extended use
-                request.session.pop("shared_device_mode", None)
-                request.session.pop("shared_device_enabled_at", None)
-
-                if SessionSecurityService is not None:
-                    SessionSecurityService.log_session_activity(
-                        request, "shared_device_auto_expired", reason="max_duration_exceeded"
-                    )
-
-        except Exception as e:
-            logger.error(f"🔥 [SessionSecurity] Error checking shared device expiry: {e}")
-
     def _add_security_headers(self, request: HttpRequest, response: HttpResponse) -> None:
         """Add session security headers to response"""
         # Add session timeout info for client-side warnings
         if hasattr(request, "session") and request.session.get_expiry_age():
             response["X-Session-Timeout"] = str(request.session.get_expiry_age())
-
-        # Add shared device mode indicator
-        if request.session.get("shared_device_mode"):
-            response["X-Shared-Device-Mode"] = "true"
 
 
 # ===============================================================================

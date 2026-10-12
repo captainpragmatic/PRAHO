@@ -893,14 +893,12 @@ class SessionSecurityService:
     - Session rotation on security events
     - 2FA secret cleanup during recovery
     - Activity tracking and suspicious behavior detection
-    - Shared device mode with enhanced timeouts
     """
 
     # Default session timeout policies (seconds) — used as fallbacks when SettingsService unavailable
     _DEFAULT_TIMEOUT_POLICIES: ClassVar[dict[str, int]] = {
         "standard": 3600,  # 1 hour for regular users
         "sensitive": 1800,  # 30 min for admin/billing staff
-        "shared_device": 900,  # 15 min for shared device mode
         "remember_me": 86400 * 7,  # 7 days for remember me
     }
 
@@ -908,11 +906,9 @@ class SessionSecurityService:
     def _get_timeout_policies(cls) -> dict[str, int]:
         """Get timeout policies from SettingsService with defaults."""
         admin_timeout_min = SettingsService.get_integer_setting("users.admin_session_timeout_minutes", 30)
-        shared_device_min = SettingsService.get_integer_setting("users.shared_device_timeout_minutes", 15)
         return {
             "standard": 3600,  # 1 hour for regular users
             "sensitive": admin_timeout_min * 60,  # admin/billing staff
-            "shared_device": shared_device_min * 60,  # shared device mode
             "remember_me": 86400 * 7,  # 7 days for remember me
         }
 
@@ -1040,17 +1036,13 @@ class SessionSecurityService:
 
     @classmethod
     def get_appropriate_timeout(cls, request: HttpRequest) -> int:
-        """Get appropriate timeout based on user role and device context"""
+        """Get the session timeout for the user's role and "remember me" choice."""
         policies = cls._get_timeout_policies()
 
         if not request.user.is_authenticated:
             return policies["standard"]
 
         user = request.user
-
-        # Shared device mode (shorter timeout)
-        if request.session.get("shared_device_mode", False):
-            return policies["shared_device"]
 
         # Sensitive staff roles get shorter timeouts
         if hasattr(user, "staff_role") and user.staff_role in ["admin", "billing"]:
@@ -1061,30 +1053,6 @@ class SessionSecurityService:
             return policies["remember_me"]
 
         return policies["standard"]
-
-    @classmethod
-    def enable_shared_device_mode(cls, request: HttpRequest) -> None:
-        """🔒 Enable shared device mode with enhanced security"""
-        if not request.user.is_authenticated:
-            return
-
-        request.session["shared_device_mode"] = True
-        request.session["shared_device_enabled_at"] = timezone.now().isoformat()
-
-        # Set shorter timeout immediately
-        timeout = cls._get_timeout_policies()["shared_device"]
-        request.session.set_expiry(timeout)
-
-        # Clear any remember me settings
-        request.session.pop("remember_me", None)
-
-        log_security_event(
-            "shared_device_mode_enabled",
-            {"user_id": request.user.id, "timeout_seconds": timeout},
-            get_safe_client_ip(request),
-        )
-
-        logger.info(f"📱 [SessionSecurity] Shared device mode enabled for {request.user.email}")
 
     @classmethod
     def detect_suspicious_activity(cls, request: HttpRequest) -> bool:
@@ -1132,27 +1100,6 @@ class SessionSecurityService:
             cache.set(cache_key, last_seen, timeout=3600)
 
         return bool(is_suspicious)
-
-    @classmethod
-    def log_session_activity(cls, request: HttpRequest, activity_type: str, **extra_data: Any) -> None:
-        """🔒 Log session activity using existing security event system"""
-        if not request.user.is_authenticated:
-            return
-
-        activity_data = {
-            "user_id": request.user.id,
-            "session_key": request.session.session_key[:8] + "..." if request.session.session_key else None,
-            "activity_type": activity_type,
-            "request_path": request.path,
-            **extra_data,
-        }
-
-        # Use existing security logging
-        log_security_event(f"session_activity_{activity_type}", activity_data, get_safe_client_ip(request))
-
-        # Log critical activities with warning level
-        if activity_type in ["login", "logout", "password_changed", "2fa_disabled"]:
-            logger.warning(f"🔐 [SessionActivity] {activity_type.upper()}: {request.user.email}")
 
     # ===============================================================================
     # PRIVATE HELPER METHODS

@@ -18,7 +18,6 @@ from datetime import timedelta
 from django.conf import settings
 from django.core.cache import cache
 from django.test import RequestFactory, TestCase, override_settings
-from django.utils import timezone
 from freezegun import freeze_time
 
 from apps.audit.models import AuditEvent
@@ -43,27 +42,16 @@ class SessionActivityAuditThroughMiddlewareTests(TestCase):
 
     def test_authenticated_requests_write_no_session_activity_rows(self) -> None:
         """FAILS on master: each of these requests inserted a `session_activity_*` row."""
-        self.client.get("/customers/")
+        response = self.client.get("/customers/")
         self.client.get("/billing/")
         self.client.get("/tickets/")
         self.client.post("/customers/", {})
 
         self.assertEqual(self.rows(), 0)
-
-    def test_an_expired_shared_device_session_is_still_audited(self) -> None:
-        """Guard: the rare shared-device expiry stays in the audit trail.
-
-        It also proves the middleware ran in this test class, so the zero above is not vacuous.
-        """
-        session = self.client.session
-        session["shared_device_mode"] = True
-        session["shared_device_enabled_at"] = (timezone.now() - timedelta(hours=3)).isoformat()
-        session.save()
-
-        self.client.get("/customers/")
-
-        self.assertEqual(self.rows(f"{SESSION_ACTIVITY}shared_device_auto_expired"), 1)
-        self.assertNotIn("shared_device_mode", self.client.session)
+        # Positive control: only SessionSecurityMiddleware gives an admin the 30-minute window and
+        # says so in this header, so the zero above comes from requests the middleware processed.
+        self.assertEqual(response["X-Session-Timeout"], "1800")
+        self.assertEqual(AuditEvent.objects.filter(action="session_timeout_updated").count(), 1)
 
 
 @override_settings(CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}})

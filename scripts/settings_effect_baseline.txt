@@ -172,7 +172,6 @@ tickets.auto_close_inactive_hours
 tickets.max_file_size_bytes
 tickets.security_alert_threshold
 users.admin_session_timeout_minutes
-users.shared_device_timeout_minutes
 virtualmin.auth_fallback_enabled
 virtualmin.bandwidth_quota_default_mb
 virtualmin.domain_quota_default_mb

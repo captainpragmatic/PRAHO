@@ -2699,17 +2699,6 @@ CATALOG: tuple[SettingDef, ...] = (
         validation={"min": 0},
     ),
     SettingDef(
-        key="users.shared_device_timeout_minutes",
-        data_type="integer",
-        default=15,
-        group="security",
-        section=_("Sessions"),
-        label=_("Shared device timeout"),
-        unit="minutes",
-        input_kind="number",
-        validation={"min": 0},
-    ),
-    SettingDef(
         key="virtualmin.auth_fallback_enabled",
         data_type="boolean",
         default=True,
