@@ -20,7 +20,7 @@ Media storage is chosen by `MEDIA_STORAGE` in production and staging settings (`
   - **Private.** Block Public Access and bucket-owner-enforced ownership. PRAHO sends no object ACLs (`default_acl=None`), because such buckets reject them.
   - **Read through Django only.** No template or view links to media. A URL the storage could mint is signed and expires in 300 s; `custom_domain` stays unset, since it would produce unsigned URLs.
   - **Never overwritten.** `file_overwrite=False`: a clashing name gets a suffix, so an archived document is never replaced in place.
-  - **Its own credentials** (`MEDIA_S3_*`), not the SES key. The endpoint must be `https://`; `MEDIA_S3_SERVER_SIDE_ENCRYPTION` optionally requests `AES256` or `aws:kms`.
+  - **Its own credentials** (`MEDIA_S3_*`), not the SES key. The endpoint must be `https://`; `MEDIA_S3_SERVER_SIDE_ENCRYPTION` optionally requests `AES256` or `aws:kms` (the account's AWS-managed `aws/s3` key; no customer-managed key id is sent).
   - **Fails closed.** A missing bucket or key, an unknown choice or a plain-HTTP endpoint is `ImproperlyConfigured` at startup, never a silent fallback to the container's disk.
 - **No local paths.** Media code reads and writes through the storage (`FieldFile.open()`, `default_storage`). A test scans `apps/` for `.path` on media fields, `storage.path(` and `settings.MEDIA_ROOT`; another runs the ticket download and the GDPR export lifecycle on a storage whose `path()` raises, the S3 contract.
 

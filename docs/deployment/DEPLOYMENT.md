@@ -659,6 +659,10 @@ itself; nothing links to the bucket. Set the bucket up as follows:
   export cleanup delete the current version only.
 - **Encryption at rest:** the provider's default encryption, or `MEDIA_S3_SERVER_SIDE_ENCRYPTION`.
   GDPR exports are encrypted by PRAHO before upload as well.
+  - `aws:kms` uses the account's AWS-managed `aws/s3` key; this setting cannot name a
+    customer-managed key. The access key also needs `kms:GenerateDataKey` (uploads) and
+    `kms:Decrypt` (reads) on that key unless its key policy already allows use through S3 for the
+    account, as the `aws/s3` default policy does. Without them every media operation is `AccessDenied`.
 - **TLS:** `MEDIA_S3_ENDPOINT_URL` must be `https://`. Leave it unset for AWS itself.
 
 The platform refuses to start with `MEDIA_STORAGE=s3` and a missing bucket or key, rather than
