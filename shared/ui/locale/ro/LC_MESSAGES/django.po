@@ -499,8 +499,8 @@ msgid "Legitimate interest / Consent"
 msgstr "Interes legitim / Consimțământ"
 
 #: templates/legal/privacy_policy_content.html:158
-msgid "Financial record retention (10 years)"
-msgstr "Păstrarea înregistrărilor financiare (10 ani)"
+msgid "Financial record retention (5 years after the financial year)"
+msgstr "Păstrarea înregistrărilor financiare (5 ani după exercițiul financiar)"
 
 #: templates/legal/privacy_policy_content.html:159
 msgid "Legal obligation (Romanian Law)"
@@ -753,8 +753,8 @@ msgid "Financial records (invoices)"
 msgstr "Înregistrări financiare (facturi)"
 
 #: templates/legal/privacy_policy_content.html:304
-msgid "10 years"
-msgstr "10 ani"
+msgid "5 years from 1 July of the year after the financial year"
+msgstr "5 ani de la 1 iulie a anului următor exercițiului financiar"
 
 #: templates/legal/privacy_policy_content.html:305
 msgid "Romanian fiscal law"

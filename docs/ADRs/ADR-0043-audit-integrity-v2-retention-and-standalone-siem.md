@@ -105,8 +105,17 @@ default that fits every deployment (ADR-0047).
   policy per scope) plus model guards against deactivation/demotion/deletion.
   The action *executes* — mandatory protects the policy, not the data from
   the policy.
-- Financial guard is an effective cutoff: per event
-  `max(policy retention, 10-year legal minimum)`.
+- Financial guard is an effective cutoff: a financial event is removable only once both the
+  policy window and the legal cutoff (`AuditRetentionService.financial_retention_cutoff`) have
+  passed it. Amended 2026-10-12: Legea contabilității 82/1991 art. 25, as amended by Legea
+  36/2023 (in force 2023-01-15), keeps records 5 years counted from 1 July of the year after the
+  financial year (2026 records until 2032-07-01), replacing the earlier 10-year term. The cutoff is
+  computed in Romanian time, not as a day count. The business-operations policy is 2,374 days
+  (6.5 years, the latest any record from a calendar year must be kept), so no business event
+  expires before its legal date whatever its classification. The anonymisation branch and
+  full GDPR erasure hold the same evidence (financial and within its legal period); erasure keeps
+  it with its content and scrubs only the network identity, and deletes the person's other events,
+  business ones included.
 - Anonymization is an explicit invariant: identity fields cleared,
   person-bearing object references replaced with a sentinel, evidence
   stubbed, metadata reduced to an **allowlist**, then re-stamped with a fresh

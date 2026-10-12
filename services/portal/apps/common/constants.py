@@ -138,7 +138,6 @@ GDPR_LOG_RETENTION_MONTHS: Final[int] = 12  # Log retention period
 GDPR_EXPORT_RETENTION_DAYS: Final[int] = 30  # GDPR export file retention
 
 # Audit trail
-AUDIT_LOG_RETENTION_YEARS: Final[int] = 10  # Audit log retention for compliance
 FAILED_LOGIN_LOG_RETENTION_MONTHS: Final[int] = 6  # Failed login attempt retention
 
 # ===============================================================================

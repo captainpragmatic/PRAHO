@@ -596,9 +596,9 @@ AUDIT_LOG_RETENTION = {
     },
     # Business operations (billing, orders)
     "business_operation": {
-        "retention_days": 3650,  # 10 years (tax requirement)
+        "retention_days": 2374,  # 6.5 years: 5 years from 1 July after the financial year, at the latest
         "action": "archive",
-        "legal_basis": "Romanian Fiscal Code Art. 25",
+        "legal_basis": "Legea contabilitatii 82/1991 art. 25 (Legea 36/2023)",
     },
     # Data protection/GDPR events
     "data_protection": {
@@ -632,9 +632,9 @@ AUDIT_LOG_RETENTION = {
     },
     # Compliance events
     "compliance": {
-        "retention_days": 3650,  # 10 years
+        "retention_days": 2374,  # 6.5 years: 5 years from 1 July after the financial year, at the latest
         "action": "archive",
-        "legal_basis": "Romanian Fiscal Code, e-Factura Regulation",
+        "legal_basis": "Legea contabilitatii 82/1991 art. 25 (Legea 36/2023), e-Factura records",
     },
 }
 

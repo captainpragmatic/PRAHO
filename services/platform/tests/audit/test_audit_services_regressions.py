@@ -941,8 +941,9 @@ class TestAuditRetentionService(TestCase):
             action="delete",
             is_active=True,
         )
+        past_legal_cutoff = (timezone.now() - AuditRetentionService.financial_retention_cutoff()).days + 2
         self._create_old_event(
-            days_ago=AuditRetentionService.FINANCIAL_RETENTION_MINIMUM_DAYS + 30,
+            days_ago=past_legal_cutoff,
             action="invoice_created",
             category="business_operation",
         )

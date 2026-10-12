@@ -14,6 +14,7 @@ from decimal import Decimal
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, TypedDict
+from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -1676,12 +1677,24 @@ class GDPRDeletionService:
             with transaction.atomic():
                 cls._revoke_user_exports(user)
 
-                # Delete related data that can be safely removed
+                # The person's audit events go, except evidence the law still requires (GDPR
+                # Art. 17(3)(b)): financial records within their legal period keep their content,
+                # lose the network identity, and are detached from the person when the user row
+                # goes (AuditEvent.user is SET_NULL). Other business events are the person's data.
+                now = timezone.now()
+                held_ids = [
+                    event.id
+                    for event in AuditEvent.objects.filter(user=user)
+                    if AuditRetentionService.is_held(event, now)
+                ]
                 with audit_mutation_allowed("gdpr_erasure"):
-                    AuditEvent.objects.filter(user=user).delete()
+                    AuditEvent.objects.filter(user=user).exclude(id__in=held_ids).delete()
+                    AuditEvent.objects.filter(id__in=held_ids).update(
+                        ip_address=cls.ANONYMIZATION_MAP["ip_address"](), user_agent="Anonymized"
+                    )
 
-                # Delete user account
-                user.delete()
+                    # Delete user account
+                    user.delete()
 
             logger.info(f"✅ [GDPR Deletion] User {original_email} deleted successfully")
             return Ok("User data deleted successfully")
@@ -4600,14 +4613,88 @@ class AuditRetentionService:
 
     Policy-driven (AuditRetentionPolicy rows), with two enforced invariants:
     - financial evidence survives at least the Romanian legal minimum regardless of
-      what a policy says (effective cutoff = max(policy retention, legal minimum));
+      what a policy says: it is held until `financial_retention_cutoff()` passes it;
     - anonymization is a full identity scrub with an explicit post-state, re-stamped
       with a fresh v2 MAC, idempotent across runs.
     """
 
-    # Legea contabilității: financial/tax records keep 10 years. A policy may demand
-    # MORE retention, never less - the guard applies max(policy, this) per event.
-    FINANCIAL_RETENTION_MINIMUM_DAYS = 3653
+    # Legea contabilității 82/1991 art. 25 (as amended by Legea 36/2023, in force 2023-01-15):
+    # registers and supporting documents are kept 5 years counted from 1 July of the year after
+    # the financial year they were drawn up in. A record from 2026 is kept until 2032-07-01.
+    # Assumes a calendar financial year.
+    FINANCIAL_RETENTION_YEARS = 5
+
+    # Actions that are financial evidence whatever their name's prefix.
+    FINANCIAL_ACTIONS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "invoice_created",
+            "invoice_paid",
+            "invoice_issued",
+            "invoice_voided",
+            "payment_succeeded",
+            "payment_failed",
+            "payment_refunded",
+            "vat_calculation_applied",
+            "order_refund",
+            "order_payment_failed",
+        }
+    )
+    FINANCIAL_PREFIXES: ClassVar[tuple[str, ...]] = (
+        "invoice_",
+        "payment_",
+        "proforma_",
+        "credit_",
+        "efactura_",
+        "refund_",
+        "order_refund_",
+        "fiscal_correction_",
+        "recurring_payment_",
+        "subscription_payment_",
+        "usage_invoice_",
+        "vat_validation_",
+        "provider_issuance_",
+        "currency_conversion_",
+        "tax_rule_",
+    )
+    # Matched by a financial prefix but not accounting evidence: saved-card administration
+    # (which can carry the person's name and card digits) and reminder scheduling.
+    NON_FINANCIAL_PREFIXES: ClassVar[tuple[str, ...]] = ("payment_method_", "payment_reminders_")
+    # Events about these records are financial evidence whatever their action: generic
+    # create/update/delete events on billing documents and money ledgers.
+    FINANCIAL_PROMOTIONS_MODELS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "giftcard",
+            "giftcardtransaction",
+            "giftcardpurchase",
+            "giftcardfundingattempt",
+            "giftcardfundingrefund",
+            "giftcardreservation",
+            "couponredemption",
+            "tenderrefundcommand",
+            "tenderrefundleg",
+        }
+    )
+
+    @classmethod
+    def financial_retention_cutoff(cls, now: datetime | None = None) -> datetime:
+        """The instant before which financial evidence may be removed.
+
+        A record drawn up in year Y is kept until 1 July of Y+1+5, Romanian time. So from 1 July
+        of year N, records from N-6 and earlier are past it (cutoff 1 January of N-5); before
+        1 July, records from N-7 and earlier (cutoff 1 January of N-6). The configured time zone
+        is used explicitly, not the active one, which a request or task may have changed.
+        """
+        zone = ZoneInfo(settings.TIME_ZONE)
+        local = (now or timezone.now()).astimezone(zone)
+        years_back = (
+            cls.FINANCIAL_RETENTION_YEARS if (local.month, local.day) >= (7, 1) else cls.FINANCIAL_RETENTION_YEARS + 1
+        )
+        return datetime(local.year - years_back, 1, 1, tzinfo=zone)
+
+    @classmethod
+    def is_held(cls, event: AuditEvent, now: datetime) -> bool:
+        """Whether the law still requires this event: financial and newer than the cutoff."""
+        return cls._is_financial_record(event) and event.timestamp >= cls.financial_retention_cutoff(now)
 
     # Content types whose object_id identifies a person; anonymization replaces the
     # reference with a sentinel so the row stops pointing at the data subject.
@@ -4630,9 +4717,10 @@ class AuditRetentionService:
     )
 
     @classmethod
-    def apply_retention_policies(cls) -> Result[dict[str, Any], str]:
-        """Apply all active retention policies to audit data."""
+    def apply_retention_policies(cls, now: datetime | None = None) -> Result[dict[str, Any], str]:
+        """Apply all active retention policies to audit data, as of one instant `now`."""
 
+        now = now or timezone.now()
         try:
             policies = AuditRetentionPolicy.objects.filter(is_active=True)
             results: dict[str, Any] = {
@@ -4645,7 +4733,7 @@ class AuditRetentionService:
 
             for policy in policies:
                 try:
-                    result = cls._apply_single_policy(policy)
+                    result = cls._apply_single_policy(policy, now)
                     results["policies_applied"] += 1
                     results["events_processed"] += result.get("processed", 0)
                     results["events_deleted"] += result.get("deleted", 0)
@@ -4677,11 +4765,12 @@ class AuditRetentionService:
 
     @classmethod
     @transaction.atomic
-    def _apply_single_policy(cls, policy: AuditRetentionPolicy) -> dict[str, int]:
+    def _apply_single_policy(cls, policy: AuditRetentionPolicy, now: datetime | None = None) -> dict[str, int]:
         """Apply a single retention policy. The action EXECUTES after retention_days;
         mandatory policies protect against weaker replacement, not against running."""
 
-        cutoff_date = timezone.now() - timedelta(days=policy.retention_days)
+        now = now or timezone.now()
+        cutoff_date = now - timedelta(days=policy.retention_days)
 
         queryset = AuditEvent.objects.filter(timestamp__lt=cutoff_date, category=policy.category)
         if policy.severity:
@@ -4700,9 +4789,17 @@ class AuditRetentionService:
             return result
 
         if policy.action == "delete":
-            result["deleted"] = cls._delete_events(events_to_process, policy)
+            result["deleted"] = cls._delete_events(events_to_process, policy, now)
         elif policy.action == "anonymize":
-            result["anonymized"] = cls._anonymize_events(events_to_process)
+            # Anonymisation blanks the evidence (descriptions, old/new values), so financial
+            # records the law still requires are held here too.
+            held = [event for event in events_to_process if cls.is_held(event, now)]
+            if held:
+                logger.info(
+                    f"✅ [Retention] Held {len(held)} financial records from anonymisation (policy {policy.name})"
+                )
+            held_ids = {event.id for event in held}
+            result["anonymized"] = cls._anonymize_events([e for e in events_to_process if e.id not in held_ids])
         else:
             # A stale row with a removed action (e.g. "archive") must surface as a
             # per-policy error, never quietly process zero events.
@@ -4711,29 +4808,27 @@ class AuditRetentionService:
         return result
 
     @classmethod
-    def _delete_events(cls, events: list[AuditEvent], policy: AuditRetentionPolicy) -> int:
+    def _delete_events(cls, events: list[AuditEvent], policy: AuditRetentionPolicy, now: datetime | None = None) -> int:
         """Delete events, holding financial evidence to the legal minimum (W5).
 
-        Effective cutoff per financial event = max(policy retention, legal minimum):
-        financial records OLDER than the minimum are deletable; younger are protected
-        even when the policy window has passed.
+        A financial record is deletable once both the policy window and the legal cutoff
+        (`financial_retention_cutoff`) have passed it; until then it is held, even when the
+        policy window has passed.
         """
-        financial_cutoff = timezone.now() - timedelta(
-            days=max(policy.retention_days, cls.FINANCIAL_RETENTION_MINIMUM_DAYS)
-        )
-
+        now = now or timezone.now()
         deletable_ids = []
         blocked = 0
         for event in events:
-            if cls._is_financial_record(event) and event.timestamp >= financial_cutoff:
+            if cls.is_held(event, now):
                 blocked += 1
                 continue
             deletable_ids.append(event.id)
 
         if blocked:
-            logger.warning(
-                f"⚠️ [Retention] Held {blocked} financial records under the "
-                f"{cls.FINANCIAL_RETENTION_MINIMUM_DAYS}-day legal minimum (policy {policy.name})"
+            # Holding records the law requires is the normal case, not a problem.
+            logger.info(
+                f"✅ [Retention] Held {blocked} financial records until 5 years after 1 July following "
+                f"their financial year (policy {policy.name})"
             )
 
         deleted_count = 0
@@ -4814,22 +4909,20 @@ class AuditRetentionService:
     def _is_financial_record(cls, event: AuditEvent) -> bool:
         """Financial evidence requiring the legal retention minimum.
 
-        Explicit actions and document prefixes only - the old category catch-all
-        made EVERY business_operation event "financial" and blocked all deletion.
+        Explicit actions, financial prefixes and events about billing records or money ledgers -
+        the old category catch-all made EVERY business_operation event "financial" and blocked
+        all deletion.
         """
-        financial_actions = {
-            "invoice_created",
-            "invoice_paid",
-            "invoice_issued",
-            "invoice_voided",
-            "payment_succeeded",
-            "payment_failed",
-            "payment_refunded",
-            "vat_calculation_applied",
-        }
-        financial_prefixes = ("invoice_", "payment_", "proforma_", "credit_", "efactura_")
-
-        return event.action in financial_actions or event.action.startswith(financial_prefixes)
+        if event.action.startswith(cls.NON_FINANCIAL_PREFIXES):
+            return False
+        if event.action in cls.FINANCIAL_ACTIONS or event.action.startswith(cls.FINANCIAL_PREFIXES):
+            return True
+        if not event.content_type_id:
+            return False
+        content_type = ContentType.objects.get_for_id(event.content_type_id)
+        return content_type.app_label == "billing" or (
+            content_type.app_label == "promotions" and content_type.model in cls.FINANCIAL_PROMOTIONS_MODELS
+        )
 
     @classmethod
     def get_retention_status(cls) -> dict[str, Any]:

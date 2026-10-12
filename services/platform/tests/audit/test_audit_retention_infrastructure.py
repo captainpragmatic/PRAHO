@@ -36,7 +36,8 @@ class RetentionPolicySeedingTestCase(TestCase):
         business = AuditRetentionPolicy.objects.get(category="business_operation", is_active=True)
         self.assertTrue(business.is_mandatory)
         self.assertEqual(business.action, "delete")
-        self.assertGreaterEqual(business.retention_days, 3653)
+        # The latest any record must be kept: 5 years from 1 July after its (calendar) financial year.
+        self.assertGreaterEqual(business.retention_days, 2374)
 
         privacy = AuditRetentionPolicy.objects.get(category="privacy", is_active=True)
         self.assertTrue(privacy.is_mandatory)
@@ -336,7 +337,8 @@ class RetentionJurisdictionGateTestCase(TestCase):
         business = AuditRetentionPolicy.objects.get(category="business_operation", is_active=True)
         self.assertTrue(business.is_mandatory)
         self.assertEqual(business.action, "delete")
-        self.assertGreaterEqual(business.retention_days, 3653)
+        # The latest any record must be kept: 5 years from 1 July after its (calendar) financial year.
+        self.assertGreaterEqual(business.retention_days, 2374)
 
     def test_no_seeded_policy_cites_gdpr_article_7(self) -> None:
         """Art. 7(1) governs the conditions for consent; it prescribes no
