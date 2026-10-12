@@ -35,17 +35,8 @@ logger = logging.getLogger(__name__)
 # Input size limits (DoS prevention)
 MAX_EMAIL_LENGTH = 254
 MAX_NAME_LENGTH = 100
-MAX_COMPANY_NAME_LENGTH = 200
-MAX_PHONE_LENGTH = 20
-MAX_VAT_NUMBER_LENGTH = 15
-MAX_CUI_LENGTH = 10
-MAX_DESCRIPTION_LENGTH = 1000
 MAX_URL_LENGTH = 2048  # Standard URL length limit
 MAX_BANK_DETAIL_LENGTH = 100  # Bank detail field length limit
-
-# Romanian specific patterns
-ROMANIAN_VAT_PATTERN = r"^RO[0-9]{2,10}$"
-ROMANIAN_CUI_PATTERN = r"^[0-9]{2,10}$"
 
 # Suspicious input patterns (injection attempts)
 SUSPICIOUS_PATTERNS = [
