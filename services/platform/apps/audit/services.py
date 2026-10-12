@@ -11,6 +11,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, TypedDict
 
@@ -1420,6 +1421,10 @@ class GDPRDeletionService:
             else:
                 result = cls._delete_user_data(user)
                 action_taken = "deleted"
+                if result.is_ok():
+                    # The database set this request's user to NULL (SET_NULL); the instance still
+                    # holds the deleted user, whose save Django refuses as an unsaved relation.
+                    deletion_request.user = None
 
             if result.is_err():
                 deletion_request.status = "failed"
@@ -1470,6 +1475,7 @@ class GDPRDeletionService:
             # becomes an Err, so the caller cannot commit a half-anonymised user.
             with transaction.atomic():
                 cls._anonymize_user_records(user)
+                cls._revoke_user_exports(user)
             logger.info(f"✅ [GDPR Anonymization] User {original_email} anonymized successfully")
             return Ok("User data anonymized successfully")
 
@@ -1572,22 +1578,49 @@ class GDPRDeletionService:
     def _delete_user_data(cls, user: User) -> Result[str, str]:
         """Complete data deletion (only when legally permitted)"""
 
+        original_email = user.email
         try:
-            original_email = user.email
+            # One savepoint, as for anonymisation: a protected row refusing user.delete() rolls the
+            # audit-event deletion and the export revocation back instead of committing them.
+            with transaction.atomic():
+                cls._revoke_user_exports(user)
 
-            # Delete related data that can be safely removed
-            with audit_mutation_allowed("gdpr_erasure"):
-                AuditEvent.objects.filter(user=user).delete()
+                # Delete related data that can be safely removed
+                with audit_mutation_allowed("gdpr_erasure"):
+                    AuditEvent.objects.filter(user=user).delete()
 
-            # Delete user account
-            user.delete()
+                # Delete user account
+                user.delete()
 
             logger.info(f"✅ [GDPR Deletion] User {original_email} deleted successfully")
             return Ok("User data deleted successfully")
 
         except Exception as e:
-            logger.error(f"🔥 [GDPR Deletion] Failed to delete user {user.email}: {e}")
+            logger.error(f"🔥 [GDPR Deletion] Failed to delete user {original_email}: {e}")
             return Err(f"Deletion failed: {e!s}")
+
+    @staticmethod
+    def _revoke_user_exports(user: User) -> None:
+        """Close the user's GDPR exports now, and delete their files once the erasure commits.
+
+        The rows are locked (an export being generated finishes first), expired and, if not yet
+        done, cancelled, so nothing more is downloaded or written. File deletes are not
+        transactional, so they run after commit: a rolled-back erasure deletes no file. A delete
+        that fails is retried by the daily cleanup, because the row keeps its path and is expired.
+        """
+        from .export_files import untrack_export_file  # noqa: PLC0415  # Deferred: import cycle
+
+        exports = list(DataExport.objects.select_for_update().filter(requested_by=user).values_list("pk", "file_path"))
+        if not exports:
+            return
+        export_ids = [export_id for export_id, _path in exports]
+        DataExport.objects.filter(pk__in=export_ids).update(expires_at=timezone.now())
+        DataExport.objects.filter(pk__in=export_ids, status__in=("pending", "processing")).update(
+            status="failed", error_message="Cancelled by GDPR erasure"
+        )
+        for export_id, path in exports:
+            if path:
+                transaction.on_commit(partial(untrack_export_file, export_id, path), robust=True)
 
 
 class GDPRConsentService:

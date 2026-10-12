@@ -217,8 +217,12 @@ and is the only code that reads or writes those bytes.
 - **One owner.** An export is processed only from `pending` or `failed`, under a row lock, so it
   never gets a second file. A failure after the write deletes the file. The download window
   starts at completion.
+- **Lifetime.** A file is deleted by the daily `delete_expired_data_exports` once the export's
+  7-day window closes, and after commit when its owner is erased. Every path deletes the file
+  first and blanks the row's path only if it still points at that file; the row stays.
 - **Key rotation.** `reencrypt_with_aad` does not find these files. A retired key must stay in the
-  keyring until every export file encrypted under it has been deleted.
+  keyring until every export file encrypted under it has been deleted: 7 days plus a day of
+  cleanup, provided the cleanup task has reported no failures.
 
 ## Related
 

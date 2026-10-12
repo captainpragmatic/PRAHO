@@ -11,6 +11,8 @@ export file encrypted under it has been deleted.
 
 from __future__ import annotations
 
+import logging
+import uuid
 from typing import TYPE_CHECKING
 
 from django.core.files.base import ContentFile
@@ -20,6 +22,8 @@ from apps.common.encryption import VERSIONED_V2_PREFIX, DecryptionError, decrypt
 
 if TYPE_CHECKING:
     from .models import DataExport
+
+logger = logging.getLogger(__name__)
 
 EXPORT_DIRECTORY = "gdpr_exports"
 
@@ -52,3 +56,19 @@ def read_export_file(export: DataExport) -> str:
 def delete_export_file(path: str) -> None:
     """Delete a stored export file; a file that is already gone is not an error."""
     default_storage.delete(path)
+
+
+def untrack_export_file(export_id: uuid.UUID, path: str) -> bool:
+    """Delete an export's file, then stop tracking it - only if the export still points at that file.
+
+    The storage delete comes first: if it fails, the row keeps its path and the daily cleanup tries
+    again. The compare-and-set never blanks a path written after `path` was read. Returns whether
+    the row was untracked. The row itself stays, as the record that the export existed.
+    """
+    from .models import DataExport  # noqa: PLC0415  # Deferred: models import this module's callers
+
+    if default_storage.exists(path):
+        default_storage.delete(path)
+    else:
+        logger.warning("⚠️ [GDPR Export] File %s of export %s was already gone", path, export_id)
+    return DataExport.objects.filter(pk=export_id, file_path=path).update(file_path="") == 1

@@ -74,6 +74,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **GDPR export files are deleted when they expire and when their owner is erased.** Files stayed in media, and so in every backup, until staff deleted them by hand.
+  - **Now.** A daily task deletes the files of exports past their 7-day window and keeps each row as the record. Erasing a person (anonymisation or full deletion) closes their exports and deletes the files once the erasure commits. Staff "delete expired" keeps the row too.
+  - **The privacy dashboard** offers a download only for an export that can still be downloaded.
+- **A full GDPR deletion completes.** It never did: after deleting the user, saving the deletion request failed on the deleted user, and everything rolled back. A deletion refused part way (a record that must keep the user) now changes nothing, instead of committing the audit events it had already deleted.
 - **GDPR export files are encrypted.** An export was written to media as plain JSON, though its code said it was encrypted. From media it reached every backup and the staff network's direct `/media` route.
   - **Now.** The file is AES-256-GCM ciphertext bound to its export (ADR-0040). Every download decrypts it, and refuses a file that is not that export's ciphertext instead of serving it.
   - **Downloads are not cached** (`Cache-Control: no-store`). Staff can no longer download an expired export.

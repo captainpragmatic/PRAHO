@@ -1223,7 +1223,9 @@ class ProcessExportRequestTests(AuditViewsBaseTestCase):
             {"action": "delete_expired"},
         )
         self.assertRedirects(resp, reverse("audit:gdpr_management_dashboard"))
-        self.assertFalse(DataExport.objects.filter(id=export.id).exists())
+        # The file is deleted; the row stays as the record that the export existed (W7).
+        export.refresh_from_db()
+        self.assertEqual(export.file_path, "")
 
     def test_delete_not_expired(self):
         export = self._create_data_export(status="completed")
