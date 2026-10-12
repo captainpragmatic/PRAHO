@@ -72,7 +72,10 @@ class TOTPSetupTests(StaffTestBase):
         self.assertEqual(self.user.two_factor_secret, secret)
 
     def test_starting_over_gives_a_new_secret(self) -> None:
-        secret = self.setup_page().context["secret"]
+        page = self.setup_page()
+        secret = page.context["secret"]
+        # The page offers it: someone whose app holds a different secret needs a way out.
+        self.assertContains(page, 'href="/auth/mfa/setup/totp/?restart=1"')
 
         self.assertNotEqual(self.client.get(self.url, {"restart": "1"}).context["secret"], secret)
 

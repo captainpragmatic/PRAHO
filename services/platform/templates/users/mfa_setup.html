@@ -129,6 +129,11 @@
                 </div>
               </div>
             </details>
+            {# The secret stays the same until enrolment succeeds; this is the way to a fresh one. #}
+            <p class="mt-4 text-xs text-slate-400">
+              {% trans "Your app shows codes for a different account?" %}
+              <a href="{{ restart_url }}" class="text-blue-400 hover:text-blue-300 underline">{% trans "Start over with a new code" %}</a>
+            </p>
           </div>
         </div>
 

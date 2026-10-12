@@ -28695,3 +28695,11 @@ msgid_plural "Your %(counter)s backup codes"
 msgstr[0] "%(counter)s cod de rezervă"
 msgstr[1] "%(counter)s coduri de rezervă"
 msgstr[2] "%(counter)s de coduri de rezervă"
+
+#: templates/users/mfa_setup.html
+msgid "Your app shows codes for a different account?"
+msgstr "Aplicația afișează coduri pentru alt cont?"
+
+#: templates/users/mfa_setup.html
+msgid "Start over with a new code"
+msgstr "Începeți din nou cu un cod nou"
