@@ -11,6 +11,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, TypedDict
 
@@ -1094,25 +1095,32 @@ class GDPRExportService:
                     "format": "json",
                 }
 
-            export_request = DataExport.objects.create(
-                requested_by=user,
-                export_type="gdpr",
-                scope=export_scope,
-                status="pending",
-                expires_at=timezone.now() + timedelta(days=EXPORT_DOWNLOAD_DAYS),  # Restarted at completion
-            )
+            with transaction.atomic():
+                # Locked and re-read, as erasure locks it: an erased (anonymised) person has no
+                # export to request, even through a User instance loaded before the erasure, and the
+                # request is logged with the person as they are now.
+                current = User.objects.select_for_update().filter(pk=user.pk, is_active=True).first()
+                if current is None:
+                    return Err("Account is not active")
+                export_request = DataExport.objects.create(
+                    requested_by=current,
+                    export_type="gdpr",
+                    scope=export_scope,
+                    status="pending",
+                    expires_at=timezone.now() + timedelta(days=EXPORT_DOWNLOAD_DAYS),  # Restarted at completion
+                )
 
-            # Log GDPR export request
-            compliance_request = ComplianceEventRequest(
-                compliance_type="gdpr_consent",
-                reference_id=f"export_{export_request.id}",
-                description=f"GDPR data export requested by {user.email}",
-                user=user,
-                status="initiated",
-                evidence={"export_id": str(export_request.id), "scope": export_scope},
-                metadata={"ip_address": request_ip},
-            )
-            AuditService.log_compliance_event(compliance_request)
+                # Log GDPR export request
+                compliance_request = ComplianceEventRequest(
+                    compliance_type="gdpr_consent",
+                    reference_id=f"export_{export_request.id}",
+                    description=f"GDPR data export requested by {current.email}",
+                    user=current,
+                    status="initiated",
+                    evidence={"export_id": str(export_request.id), "scope": export_scope},
+                    metadata={"ip_address": request_ip},
+                )
+                AuditService.log_compliance_event(compliance_request)
 
             logger.info(f"🔒 [GDPR Export] Request created for {user.email}: {export_request.id}")
             return Ok(export_request)
@@ -1130,18 +1138,27 @@ class GDPRExportService:
         gets a second file. The download window starts at completion. A failure after the file is
         written deletes it, so no file outlives a failed export.
         """
+        # Locks in erasure's order - the person, then the export - so the two take turns without
+        # deadlocking: an export processed first is revoked by the erasure, and one processed after
+        # it finds the person erased.
+        requester_id = DataExport.objects.filter(pk=export_request.pk).values_list("requested_by_id", flat=True).first()
+        user = User.objects.select_for_update().filter(pk=requester_id).first() if requester_id else None
         list(DataExport.objects.select_for_update().filter(pk=export_request.pk).values_list("pk", flat=True))
         export_request.refresh_from_db()
         if export_request.status not in ("pending", "failed"):
             return Err("Export has already been processed")
 
-        user = export_request.requested_by
         if user is None:
             # Orphaned request: the requester was deleted before processing (W7)
             export_request.status = "failed"
             export_request.error_message = "Requesting user was deleted before the export was processed"
             export_request.save(update_fields=["status", "error_message"])
             return Err("Requesting user no longer exists")
+        if not user.is_active:
+            export_request.status = "failed"
+            export_request.error_message = "Requesting user was erased before the export was processed"
+            export_request.save(update_fields=["status", "error_message"])
+            return Err("Requesting user is no longer active")
 
         saved_path = ""
         try:
@@ -1420,6 +1437,10 @@ class GDPRDeletionService:
             else:
                 result = cls._delete_user_data(user)
                 action_taken = "deleted"
+                if result.is_ok():
+                    # The database set this request's user to NULL (SET_NULL); the instance still
+                    # holds the deleted user, whose save Django refuses as an unsaved relation.
+                    deletion_request.user = None
 
             if result.is_err():
                 deletion_request.status = "failed"
@@ -1470,6 +1491,7 @@ class GDPRDeletionService:
             # becomes an Err, so the caller cannot commit a half-anonymised user.
             with transaction.atomic():
                 cls._anonymize_user_records(user)
+                cls._revoke_user_exports(user)
             logger.info(f"✅ [GDPR Anonymization] User {original_email} anonymized successfully")
             return Ok("User data anonymized successfully")
 
@@ -1572,22 +1594,52 @@ class GDPRDeletionService:
     def _delete_user_data(cls, user: User) -> Result[str, str]:
         """Complete data deletion (only when legally permitted)"""
 
+        original_email = user.email
         try:
-            original_email = user.email
+            # One savepoint, as for anonymisation: a protected row refusing user.delete() rolls the
+            # audit-event deletion and the export revocation back instead of committing them.
+            with transaction.atomic():
+                cls._revoke_user_exports(user)
 
-            # Delete related data that can be safely removed
-            with audit_mutation_allowed("gdpr_erasure"):
-                AuditEvent.objects.filter(user=user).delete()
+                # Delete related data that can be safely removed
+                with audit_mutation_allowed("gdpr_erasure"):
+                    AuditEvent.objects.filter(user=user).delete()
 
-            # Delete user account
-            user.delete()
+                # Delete user account
+                user.delete()
 
             logger.info(f"✅ [GDPR Deletion] User {original_email} deleted successfully")
             return Ok("User data deleted successfully")
 
         except Exception as e:
-            logger.error(f"🔥 [GDPR Deletion] Failed to delete user {user.email}: {e}")
+            logger.error(f"🔥 [GDPR Deletion] Failed to delete user {original_email}: {e}")
             return Err(f"Deletion failed: {e!s}")
+
+    @staticmethod
+    def _revoke_user_exports(user: User) -> None:
+        """Close the user's GDPR exports now, and delete their files once the erasure commits.
+
+        The rows are locked (an export being generated finishes first), expired and, if not yet
+        done, cancelled, so nothing more is downloaded or written. File deletes are not
+        transactional, so they run after commit: a rolled-back erasure deletes no file. A delete
+        that fails is retried by the daily cleanup, because the row keeps its path and is expired.
+        """
+        from .export_files import untrack_export_file  # noqa: PLC0415  # Deferred: import cycle
+
+        # The person's row first, as export processing locks it: an export being generated
+        # finishes before this runs, and one requested meanwhile is refused once this commits.
+        list(User.objects.select_for_update().filter(pk=user.pk).values_list("pk", flat=True))
+        exports = list(DataExport.objects.select_for_update().filter(requested_by=user).values_list("pk", "file_path"))
+        if not exports:
+            return
+        export_ids = [export_id for export_id, _path in exports]
+        DataExport.objects.filter(pk__in=export_ids).update(expires_at=timezone.now())
+        DataExport.objects.filter(pk__in=export_ids, status__in=("pending", "processing")).update(
+            status="failed", error_message="Cancelled by GDPR erasure"
+        )
+        for export_id, path in exports:
+            if path:
+                transaction.on_commit(partial(untrack_export_file, export_id, path), robust=True)
 
 
 class GDPRConsentService:

@@ -35,7 +35,7 @@ from apps.common.pagination import pagination_query
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.types import Err, Ok
 
-from .export_files import read_export_file
+from .export_files import read_export_file, untrack_export_file
 from .models import (
     AuditAlert,
     AuditEvent,
@@ -993,11 +993,10 @@ def process_export_request(request: HttpRequest, export_id: uuid.UUID) -> HttpRe
 
         elif action == "delete_expired":
             if export_request.status == "completed" and timezone.now() > export_request.expires_at:
-                # Delete the file if it exists
-                if export_request.file_path and default_storage.exists(export_request.file_path):
-                    default_storage.delete(export_request.file_path)
+                # The file goes; the row stays as the record that the export existed (W7).
+                if export_request.file_path:
+                    untrack_export_file(export_request.pk, export_request.file_path)
 
-                # Log the staff action before deletion
                 AuditService.log_simple_event(
                     event_type="delete",
                     user=request.user,
@@ -1006,7 +1005,6 @@ def process_export_request(request: HttpRequest, export_id: uuid.UUID) -> HttpRe
                     ip_address=get_safe_client_ip(request),
                 )
 
-                export_request.delete()
                 messages.success(request, _("Expired export deleted successfully."))
             else:
                 messages.error(request, _("Can only delete expired completed exports."))

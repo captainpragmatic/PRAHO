@@ -851,6 +851,11 @@ class DataExport(models.Model):
     def requested_by_display(self) -> str:
         return self.requested_by.email if self.requested_by else "deleted user"
 
+    @property
+    def is_downloadable(self) -> bool:
+        """Completed, with its file, and inside the download window."""
+        return self.status == "completed" and bool(self.file_path) and timezone.now() <= self.expires_at
+
 
 class AuditIntegrityCheck(models.Model):
     """Track audit data integrity verification for tamper detection."""

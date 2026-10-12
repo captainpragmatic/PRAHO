@@ -341,6 +341,31 @@ def publish_chain_anchor() -> dict[str, Any]:
     return results
 
 
+def delete_expired_data_exports() -> dict[str, int]:
+    """Delete the files of GDPR exports past their download window; keep each row as the record.
+
+    Any status: a failed export cancelled by erasure is expired too. A row whose delete fails keeps
+    its path, so the next run tries again.
+    """
+    from apps.audit.export_files import untrack_export_file  # noqa: PLC0415  # Deferred: import cycle
+    from apps.audit.models import DataExport  # noqa: PLC0415  # Deferred: import cycle
+
+    expired = list(
+        DataExport.objects.filter(expires_at__lt=timezone.now()).exclude(file_path="").values_list("pk", "file_path")
+    )
+    results = {"deleted": 0, "failed": 0}
+    for export_id, path in expired:
+        try:
+            if untrack_export_file(export_id, path):
+                results["deleted"] += 1
+        except Exception:
+            results["failed"] += 1
+            logger.exception("🔥 [GDPR Export] Could not delete the file of expired export %s", export_id)
+    if expired:
+        logger.info(f"✅ [GDPR Export] Expired export files: {results['deleted']} deleted, {results['failed']} failed")
+    return results
+
+
 def setup_audit_scheduled_tasks() -> dict[str, str]:
     """Register the audit module's schedules (M6: the single scheduling vehicle).
 
@@ -379,6 +404,11 @@ def setup_audit_scheduled_tasks() -> dict[str, str]:
         },
         "audit-file-integrity-daily": {
             "func": "apps.audit.tasks.run_file_integrity_check",
+            "schedule_type": Schedule.DAILY,
+            "repeats": -1,
+        },
+        "audit-expired-exports-daily": {
+            "func": "apps.audit.tasks.delete_expired_data_exports",
             "schedule_type": Schedule.DAILY,
             "repeats": -1,
         },
