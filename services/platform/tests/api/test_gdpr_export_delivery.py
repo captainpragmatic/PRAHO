@@ -154,6 +154,18 @@ class ExportDownloadTests(ExportDeliveryTestCase):
                 self.assertEqual(export.download_count, 0)
             DataExport.objects.filter(pk=export.pk).update(status="failed")
 
+    def test_a_broken_export_makes_way_for_a_new_request(self) -> None:
+        export = self.completed_export()
+        (self.media / export.file_path).unlink()
+
+        self.assertEqual(self.download(export.id).status_code, 404)
+
+        export.refresh_from_db()
+        self.assertEqual(export.status, "failed")
+        with patch("apps.api.gdpr.views.async_task"), self.captureOnCommitCallbacks(execute=True):
+            response = self.request_export()
+        self.assertNotEqual(response.data["export_id"], str(export.id))
+
     def test_an_export_too_large_for_the_portal_is_refused(self) -> None:
         export = self.completed_export()
         DataExport.objects.filter(pk=export.pk).update(file_size=EXPORT_API_MAX_BYTES + 1)

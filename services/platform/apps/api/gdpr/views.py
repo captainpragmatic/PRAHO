@@ -191,6 +191,11 @@ def data_export_download_api(request: Request, request_data: dict[str, Any], exp
         content = read_export_file(export).encode("utf-8")
     except (OSError, DecryptionError):
         logger.error(f"🔥 [GDPR API] Export {export.id} could not be read", exc_info=True)
+        # A completed export with no readable file would be handed back by every new request
+        # until it expires; failing it lets the next request generate a fresh one.
+        DataExport.objects.filter(pk=export.pk).update(
+            status="failed", error_message="Export file missing or unreadable"
+        )
         return _uniform_error_response("Export not available", 404)
 
     DataExport.objects.filter(pk=export.pk).update(download_count=F("download_count") + 1)

@@ -60,6 +60,20 @@ class DataExportDownloadTests(TestCase):
         text = " ".join(str(m) for m in get_messages(response.wsgi_request))
         self.assertIn("not available to download", text)
 
+    @patch(
+        "apps.users.views.api_client.download_data_export",
+        side_effect=PlatformAPIError("Platform service timeout", is_unavailable=True),
+    )
+    def test_an_outage_is_not_reported_as_an_unavailable_export(self, _download: MagicMock) -> None:
+        self.sign_in()
+
+        response = self.client.get(reverse("users:data_export_download", args=[EXPORT_ID]))
+
+        self.assertRedirects(response, reverse("users:data_export"), fetch_redirect_response=False)
+        text = " ".join(str(m) for m in get_messages(response.wsgi_request))
+        self.assertIn("temporarily unavailable", text)
+        self.assertNotIn("Request a new one", text)
+
     @patch("apps.users.views.api_client.get_data_export_status")
     def test_only_downloadable_exports_get_a_download_button(self, status: MagicMock) -> None:
         ready, expired = uuid.uuid4(), uuid.uuid4()
