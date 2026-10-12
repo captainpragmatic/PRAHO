@@ -201,6 +201,13 @@ def seed_baseline() -> dict[str, Any]:
             gettext("E2E registration limit could not be seeded: %(error)s")
             % {"error": registration_limit.unwrap_err()}
         )
+    # A browser test switches the staff 2FA policy on for its own accounts. Whatever a previous run
+    # left behind, every stack starts with it off: e2e-admin has no second factor.
+    staff_mfa_policy = SettingsService.update_setting("users.mfa_required_for_staff", False)
+    if staff_mfa_policy.is_err():
+        raise CommandError(
+            gettext("E2E staff 2FA policy could not be reset: %(error)s") % {"error": staff_mfa_policy.unwrap_err()}
+        )
     demo = DemoCommand(stdout=StringIO())
     demo.create_service_plans()
     demo.create_support_categories()
@@ -343,6 +350,48 @@ def validate_baseline() -> dict[str, Any]:
     return result
 
 
+def _staff_mfa_scenario(key: str) -> dict[str, Any]:
+    """An administrator enrolled with a known secret, and a support member with no second factor.
+
+    Only the administrator switches the staff 2FA policy: a middleware never stops an enrolled
+    account, so it can always switch the policy off again, and its backup codes let a fresh
+    sign-in do so if its session is lost.
+    """
+    from apps.users.mfa import TOTPService  # noqa: PLC0415 -- cross-domain fixture orchestration
+    from apps.users.models import User  # noqa: PLC0415 -- cross-domain fixture orchestration
+
+    admin = _user(f"mfa-admin-{key}@e2e.test", staff=True)
+    secret = TOTPService.generate_secret()
+    admin.two_factor_secret = secret
+    admin.two_factor_enabled = True
+    admin.save()
+    backup_codes = admin.generate_backup_codes()
+
+    staff, _ = User.objects.update_or_create(
+        email=f"mfa-staff-{key}@e2e.test",
+        defaults={
+            "first_name": "E2E",
+            "last_name": "Staff",
+            "is_active": True,
+            "is_staff": False,
+            "is_superuser": False,
+            "staff_role": "support",
+            "two_factor_enabled": False,
+        },
+    )
+    staff.set_password(PASSWORD)
+    staff.save(update_fields=["password"])
+    return {
+        "admin_id": admin.pk,
+        "admin_email": admin.email,
+        "admin_totp_secret": secret,
+        "admin_backup_codes": backup_codes,
+        "staff_id": staff.pk,
+        "staff_email": staff.email,
+        "password": PASSWORD,
+    }
+
+
 def _order_edit_scenario(key: str) -> dict[str, Any]:
     """A draft order the staff edit page can change, and two products priced in its currency."""
     from apps.billing.models import Currency  # noqa: PLC0415 -- cross-domain fixture orchestration
@@ -405,6 +454,8 @@ def seed_scenario(scenario: str, key: str) -> dict[str, Any]:
         return {"product_id": str(product.pk), "product_slug": product.slug, "name": product.name}
     if scenario == "order_edit":
         return _order_edit_scenario(key)
+    if scenario == "staff_mfa":
+        return _staff_mfa_scenario(key)
     customer = _customer(f"scenario-{key}", name=f"E2E billing {key}")
     if scenario in {"account", "service_request"}:
         user = _user(f"account-{key}@e2e.test")

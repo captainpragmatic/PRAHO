@@ -107,6 +107,35 @@ class E2EFixtureTests(TestCase):
             self.assertIsNotNone(product.get_price_for_currency(order.currency.code))
         self.assertEqual(fixture["domain_product_name"], hosting.name)
 
+    def test_staff_mfa_scenario_gives_an_enrolled_admin_and_an_unenrolled_staff_member(self) -> None:
+        import pyotp  # noqa: PLC0415
+
+        from apps.users.models import User  # noqa: PLC0415
+
+        seed_baseline()
+        fixture = seed_scenario("staff_mfa", "staffmfa01")
+
+        admin = User.objects.get(pk=fixture["admin_id"])
+        self.assertTrue(admin.two_factor_enabled and admin.is_superuser)
+        self.assertTrue(pyotp.TOTP(fixture["admin_totp_secret"]).verify(pyotp.TOTP(admin.two_factor_secret).now()))
+        self.assertEqual(len(fixture["admin_backup_codes"]), 8)
+        self.assertTrue(admin.verify_backup_code(fixture["admin_backup_codes"][-1]))
+        staff = User.objects.get(pk=fixture["staff_id"])
+        self.assertEqual((staff.staff_role, staff.two_factor_enabled, staff.is_superuser), ("support", False, False))
+        self.assertTrue(staff.check_password(fixture["password"]))
+
+    def test_every_stack_starts_with_the_staff_2fa_policy_off(self) -> None:
+        """A run killed while the policy was on must not leave e2e-admin able only to enrol."""
+        SystemSetting.objects.update_or_create(
+            key="users.mfa_required_for_staff",
+            defaults={"name": "Staff 2FA", "category": "platform", "data_type": "boolean", "value": True,
+                      "default_value": False},
+        )
+
+        seed_baseline()
+
+        self.assertIs(SystemSetting.objects.get(key="users.mfa_required_for_staff").get_typed_value(), False)
+
     def test_baseline_seeds_a_registration_allowance_for_a_full_browser_run(self) -> None:
         seed_baseline()
 
