@@ -207,13 +207,13 @@
                 <td class="px-4 py-4 text-right text-sm text-white">
                   {{ line.quantity|floatformat:0 }}
                 </td>
-                <td class="px-4 py-4 text-right text-sm text-white">
+                <td class="px-4 py-4 text-right text-sm text-white whitespace-nowrap">
                   {{ line.unit_price|floatformat:2 }} {{ proforma.currency }}
                 </td>
                 <td class="px-4 py-4 text-right text-sm text-white">
                   {{ line.tax_rate|multiply:100|floatformat:1 }}%
                 </td>
-                <td class="px-4 py-4 text-right text-sm font-medium text-white">
+                <td class="px-4 py-4 text-right text-sm font-medium text-white whitespace-nowrap">
                   {{ line.line_total|floatformat:2 }} {{ proforma.currency }}
                 </td>
               </tr>

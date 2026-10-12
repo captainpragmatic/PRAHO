@@ -175,7 +175,7 @@
             <!-- Header Row (hidden on mobile — fields have labels instead) -->
             <div class="hidden md:grid grid-cols-12 gap-3 text-sm font-medium text-slate-400 border-b border-slate-600 pb-2">
               <div class="col-span-4">{% trans 'Description' %}</div>
-              <div class="col-span-2">{% trans 'Qty' %}</div>
+              <div class="col-span-1">{% trans 'Qty' %}</div>
               <div class="col-span-2">{% trans 'Unit Price' %}</div>
               <div class="col-span-2">{% trans 'VAT Rate' %}</div>
               <div class="col-span-2">{% trans 'Total' %}</div>
@@ -194,7 +194,7 @@
                     {# tmpl-allow TMPL001: line-item row markup is mirrored in the addLineItem() script template below, which cannot call the tag; kept raw so server-rendered and script-added rows stay identical #}
                     <input type="text" name="line_{{ forloop.counter0 }}_domain_name" aria-label="{% trans 'Domain name' %}" value="{{ line.domain_name }}" placeholder="{% trans 'e.g. example.com' %}" class="line-domain w-full mt-1 px-3 py-1.5 bg-slate-700/50 border border-slate-600/50 rounded-md text-blue-400 text-xs placeholder-slate-500 focus:ring-2 focus:ring-blue-500">
                   </div>
-                  <div class="col-span-1 md:col-span-2">
+                  <div class="col-span-1 md:col-span-1">
                     <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Qty' %}</label>
                     {# tmpl-allow TMPL001: line-item row markup is mirrored in the addLineItem() script template below, which cannot call the tag; kept raw so server-rendered and script-added rows stay identical #}
                     <input type="number" name="line_{{ forloop.counter0 }}_quantity" aria-label="{% trans 'Quantity' %}" value="{{ line.quantity }}" class="line-quantity w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
@@ -213,9 +213,9 @@
                       <option value="0" {% if line.tax_rate|floatformat:4 == "0.0000" %}selected{% endif %}>0% ({% trans 'Exempt' %})</option>
                     </select>
                   </div>
-                  <div class="col-span-1 md:col-span-1">
+                  <div class="col-span-1 md:col-span-2">
                     <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Total' %}</label>
-                    <div class="line-total px-3 py-2 bg-slate-600 rounded-md text-white font-medium text-right">{{ line.line_total }} <span class="currency-label">{{ selected_currency }}</span></div>
+                    <div class="line-total whitespace-nowrap px-3 py-2 bg-slate-600 rounded-md text-white font-medium text-right">{{ line.line_total }} <span class="currency-label">{{ selected_currency }}</span></div>
                   </div>
                   <div class="col-span-2 md:col-span-1 flex md:block justify-end">
                     {# tmpl-allow TMPL002: icon-only remove button (x icon, no text label) wired by class remove-line; the button tag always renders a text label span #}
@@ -233,7 +233,7 @@
                     {# tmpl-allow TMPL001: line-item row markup is mirrored in the addLineItem() script template below, which cannot call the tag; kept raw so server-rendered and script-added rows stay identical #}
                     <input type="text" name="line_0_domain_name" aria-label="{% trans 'Domain name' %}" placeholder="{% trans 'e.g. example.com' %}" class="line-domain w-full mt-1 px-3 py-1.5 bg-slate-700/50 border border-slate-600/50 rounded-md text-blue-400 text-xs placeholder-slate-500 focus:ring-2 focus:ring-blue-500">
                   </div>
-                  <div class="col-span-1 md:col-span-2">
+                  <div class="col-span-1 md:col-span-1">
                     <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Qty' %}</label>
                     {# tmpl-allow TMPL001: line-item row markup is mirrored in the addLineItem() script template below, which cannot call the tag; kept raw so server-rendered and script-added rows stay identical #}
                     <input type="number" name="line_0_quantity" aria-label="{% trans 'Quantity' %}" value="1" class="line-quantity w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
@@ -252,9 +252,9 @@
                       <option value="0">0% ({% trans 'Exempt' %})</option>
                     </select>
                   </div>
-                  <div class="col-span-1 md:col-span-1">
+                  <div class="col-span-1 md:col-span-2">
                     <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Total' %}</label>
-                    <div class="line-total px-3 py-2 bg-slate-600 rounded-md text-white font-medium text-right">0.00 <span class="currency-label">{{ selected_currency }}</span></div>
+                    <div class="line-total whitespace-nowrap px-3 py-2 bg-slate-600 rounded-md text-white font-medium text-right">0.00 <span class="currency-label">{{ selected_currency }}</span></div>
                   </div>
                   <div class="col-span-2 md:col-span-1 flex md:block justify-end">
                     {# tmpl-allow TMPL002: icon-only remove button (x icon, no text label) wired by class remove-line; the button tag always renders a text label span; starts disabled and the script toggles disabled plus opacity classes #}
@@ -447,7 +447,7 @@
                        aria-label="{% trans 'Domain name' %}" placeholder="{% trans 'e.g. example.com' %}"
                        class="line-domain w-full mt-1 px-3 py-1.5 bg-slate-700/50 border border-slate-600/50 rounded-md text-blue-400 text-xs placeholder-slate-500 focus:ring-2 focus:ring-blue-500">
             </div>
-            <div class="col-span-1 md:col-span-2">
+            <div class="col-span-1 md:col-span-1">
                 <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Qty' %}</label>
                 {# tmpl-allow TMPL001: element is built client-side inside the addLineItem() JavaScript template literal (name uses ${lineCounter}); a server-side tag cannot render it #}
                 <input type="number" name="line_${lineCounter}_quantity"
@@ -471,9 +471,9 @@
                     <option value="0">0% ({% trans 'Exempt' %})</option>
                 </select>
             </div>
-            <div class="col-span-1 md:col-span-1">
+            <div class="col-span-1 md:col-span-2">
                 <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Total' %}</label>
-                <div class="line-total px-3 py-2 bg-slate-600 rounded-md text-white font-medium text-right">0.00 <span class="currency-label">${currency}</span></div>
+                <div class="line-total whitespace-nowrap px-3 py-2 bg-slate-600 rounded-md text-white font-medium text-right">0.00 <span class="currency-label">${currency}</span></div>
             </div>
             <div class="col-span-2 md:col-span-1 flex md:block justify-end">
                 {# tmpl-allow TMPL002: element is built client-side inside the addLineItem() JavaScript template literal (name uses ${lineCounter}); a server-side tag cannot render it #}

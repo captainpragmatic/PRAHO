@@ -120,6 +120,19 @@ class WebMFADisableTests(EnrolledStaffTestCase):
         self.assertContains(page, 'name="token" maxlength="8"')
         self.assertNotContains(page, "substring(0, 6)")
 
+    def test_page_renders_one_form_and_closes_only_its_own_elements(self) -> None:
+        """An old copy of the page's tail rendered after the real one.
+
+        It added a second "Disable" button outside any form, which did nothing when clicked, a
+        duplicate help box, a stray </form>, and two </div> that closed the layout's wrappers early.
+        """
+        html = self.client.get(reverse("users:mfa_disable")).content.decode()
+
+        self.assertNotIn("Yes, Disable Two-Factor Authentication", html)
+        self.assertNotIn("Lost your authenticator app?", html)
+        self.assertEqual(html.count("<form"), html.count("</form>"))
+        self.assertEqual(html.count("<div"), html.count("</div>"))
+
 
 class WebBackupCodeRegenerationTests(EnrolledStaffTestCase):
     def setUp(self) -> None:

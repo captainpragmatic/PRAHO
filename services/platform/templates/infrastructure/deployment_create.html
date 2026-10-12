@@ -141,14 +141,13 @@
                     </div>
                 </div>
 
+                {# Optional: the node this deployment replaces, recorded as failover provenance (#496). #}
+                <div class="mb-6">
+                    {% form_field form.source_node %}
+                </div>
+
                 {% trans "Enable automatic backups (local storage, 7-day retention)" as backup_enabled_label %}
                 {% checkbox_field "backup_enabled" html_id="backup_enabled" checked=True label=backup_enabled_label %}
-            </div>
-
-            <div>
-              {{ form.source_node.label_tag }}
-              {{ form.source_node }}
-              {{ form.source_node.errors }}
             </div>
 
             <!-- Hostname Preview -->
