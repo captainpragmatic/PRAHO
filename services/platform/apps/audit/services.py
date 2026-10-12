@@ -1065,7 +1065,7 @@ class AuditService:
 
 class GDPRExportService:
     """
-    🔒 Comprehensive GDPR data export service (Article 20 - Right to data portability)
+    🔒 Comprehensive GDPR data export service (Article 15 - Right of access, Article 20 - Right to data portability)
 
     Features:
     - Complete user data collection across all related models
@@ -1242,8 +1242,8 @@ class GDPRExportService:
                 "user_id": user.id,
                 "export_type": "gdpr_data_portability",
                 "praho_platform_version": "1.0.0",
-                "gdpr_article": "Article 20 - Right to data portability",
-                "legal_basis": "Romanian Law 190/2018, GDPR Article 20",
+                "gdpr_article": "Articles 15 and 20 - Right of access and right to data portability",
+                "legal_basis": "Romanian Law 190/2018, GDPR Articles 15 and 20",
             },
             "user_profile": {},
             "customers": [],
@@ -1291,6 +1291,10 @@ class GDPRExportService:
             except AttributeError:
                 data["customers"] = {"note": "Customer relationships not available"}
 
+        # Billing data the person is the subject of, independent of include_customers
+        if scope.get("include_billing", True):
+            data["billing_data"] = cls._collect_billing_data(user)
+
         # Support tickets
         if scope.get("include_tickets", True):
             try:
@@ -1325,6 +1329,74 @@ class GDPRExportService:
             }
 
         return data
+
+    @staticmethod
+    def _collect_billing_data(user: User) -> list[dict[str, Any]]:
+        """The tax profile, invoices and proformas of the individual customers the user owns.
+
+        An individual customer's billing records are the person's own data (GDPR Art. 15),
+        including the CNP kept on issued invoices for the retention period. A company's documents
+        are the company's records, not its members' personal data, and are not exported here.
+        Each document is reduced to an explicit allowlist of fields. A CNP that cannot be decrypted
+        fails the export (ADR-0040): the person would otherwise get an incomplete copy.
+        """
+        from apps.billing.invoice_models import Invoice  # noqa: PLC0415  # Deferred: import cycle
+        from apps.billing.proforma_models import ProformaInvoice  # noqa: PLC0415  # Deferred: import cycle
+        from apps.customers.profile_models import CustomerTaxProfile  # noqa: PLC0415  # Deferred: import cycle
+        from apps.users.models import CustomerMembership  # noqa: PLC0415  # Deferred: import cycle
+
+        snapshot_fields = sorted(Invoice._BILLING_SNAPSHOT_FIELDS)
+
+        def snapshot(document: Invoice | ProformaInvoice) -> dict[str, Any]:
+            return {field: getattr(document, field) for field in snapshot_fields}
+
+        billing_data: list[dict[str, Any]] = []
+        customer_ids = CustomerMembership.objects.filter(
+            user=user, role="owner", customer__customer_type="individual"
+        ).values_list("customer_id", flat=True)
+        for customer_id in customer_ids:
+            profile = CustomerTaxProfile.objects.filter(customer_id=customer_id).first()
+            invoices = Invoice.objects.filter(customer_id=customer_id).select_related("currency").order_by("pk")
+            proformas = (
+                ProformaInvoice.objects.filter(customer_id=customer_id).select_related("currency").order_by("pk")
+            )
+            billing_data.append(
+                {
+                    "customer_id": customer_id,
+                    "tax_profile": (
+                        {"cnp": profile.cnp, "cui": profile.cui, "vat_number": profile.vat_number} if profile else None
+                    ),
+                    "invoices": [
+                        {
+                            "number": invoice.number,
+                            "document_kind": invoice.document_kind,
+                            "status": invoice.status,
+                            "issued_at": invoice.issued_at,
+                            "due_at": invoice.due_at,
+                            "currency": invoice.currency.code,
+                            "subtotal_cents": invoice.subtotal_cents,
+                            "tax_cents": invoice.tax_cents,
+                            "total_cents": invoice.total_cents,
+                            **snapshot(invoice),
+                        }
+                        for invoice in invoices
+                    ],
+                    "proformas": [
+                        {
+                            "number": proforma.number,
+                            "status": proforma.status,
+                            "valid_until": proforma.valid_until,
+                            "currency": proforma.currency.code,
+                            "subtotal_cents": proforma.subtotal_cents,
+                            "tax_cents": proforma.tax_cents,
+                            "total_cents": proforma.total_cents,
+                            **snapshot(proforma),
+                        }
+                        for proforma in proformas
+                    ],
+                }
+            )
+        return billing_data
 
     @classmethod
     def _count_records(cls, user_data: dict[str, Any]) -> int:
