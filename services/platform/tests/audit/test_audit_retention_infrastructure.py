@@ -132,7 +132,7 @@ class MandatoryPolicyEnforcementTestCase(TestCase):
 
 
 class AuditSchedulerTestCase(TestCase):
-    def test_creates_all_five_schedules_and_is_idempotent(self) -> None:
+    def test_creates_all_six_schedules_and_is_idempotent(self) -> None:
         from django_q.models import Schedule  # noqa: PLC0415  # Deferred: optional dependency
 
         first = setup_audit_scheduled_tasks()
@@ -144,13 +144,14 @@ class AuditSchedulerTestCase(TestCase):
                 "audit-integrity-cleanup-weekly",
                 "audit-file-integrity-daily",
                 "audit-expired-exports-daily",
+                "audit-pending-exports-every-15-min",
             },
         )
         self.assertTrue(all(outcome == "created" for outcome in first.values()))
 
         second = setup_audit_scheduled_tasks()
         self.assertTrue(all(outcome == "already_exists" for outcome in second.values()))
-        self.assertEqual(Schedule.objects.filter(name__startswith="audit-").count(), 5)
+        self.assertEqual(Schedule.objects.filter(name__startswith="audit-").count(), 6)
 
     def test_retires_pre_consolidation_schedule_names(self) -> None:
         from django_q.models import Schedule  # noqa: PLC0415  # Deferred: optional dependency

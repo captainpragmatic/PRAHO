@@ -180,7 +180,8 @@ class DataExportRealAPITests(TestCase):
 
         response = client.post('/data-export/')
         self.assertEqual(response.status_code, 302)  # PRG redirect
-        mock_client.request_data_export_secure.assert_called_once_with(42)
+        # The session's user, plus the client IP for the compliance log.
+        mock_client.request_data_export_secure.assert_called_once_with(42, ip_address='127.0.0.1')
 
     @patch('apps.users.views.api_client')
     def test_data_export_handles_platform_error(self, mock_client: MagicMock) -> None:

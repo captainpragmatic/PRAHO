@@ -2308,8 +2308,8 @@ msgid "Authentication required."
 msgstr "Autentificare obligatorie."
 
 #: services/portal/apps/users/views.py:918
-msgid "Data export request submitted successfully. You will receive an email with download instructions within 48 hours."
-msgstr "Cererea de export de date a fost trimisă cu succes. Veți primi un e-mail cu instrucțiuni de descărcare în termen de 48 de ore."
+msgid "Your data export is being prepared. Refresh this page in a few minutes to download it."
+msgstr "Exportul datelor dvs. este în pregătire. Reîncărcați această pagină în câteva minute pentru a-l descărca."
 
 #: services/portal/apps/users/views.py:922
 msgid "Failed to create export request. Please try again."
@@ -6301,16 +6301,16 @@ msgid "Export Process"
 msgstr "Procesul de export"
 
 #: services/portal/templates/users/data_export.html:82
-msgid "Your request will be processed within 48 hours"
-msgstr "Solicitarea dvs. va fi procesată în termen de 48 de ore"
+msgid "Your export is prepared within a few minutes"
+msgstr "Exportul este pregătit în câteva minute"
 
 #: services/portal/templates/users/data_export.html:83
-msgid "You will receive an email with a secure download link"
-msgstr "Veți primi un email cu un link de descărcare securizat"
+msgid "Download it from this page once it is ready"
+msgstr "Descărcați-l de pe această pagină când este gata"
 
 #: services/portal/templates/users/data_export.html:84
-msgid "The download link expires after 7 days for security"
-msgstr "Link-ul de descărcare expiră după 7 zile din motive de securitate"
+msgid "Each export can be downloaded for 7 days"
+msgstr "Fiecare export poate fi descărcat timp de 7 zile"
 
 #: services/portal/templates/users/data_export.html:85
 msgid "Data will be provided in JSON format"
@@ -7907,3 +7907,16 @@ msgstr "Termenii de Serviciu sunt în curs de actualizare. Vă rugăm să încer
 #: apps/common/views.py
 msgid "Go to your Privacy Dashboard"
 msgstr "Mergeți la panoul de confidențialitate"
+
+#: services/portal/apps/users/views.py
+msgid "This export is not available to download. Request a new one below."
+msgstr "Acest export nu poate fi descărcat. Solicitați unul nou mai jos."
+
+#: services/portal/apps/users/views.py
+#: services/portal/templates/users/data_export.html
+msgid "This export is too large to download here. Contact support to receive it."
+msgstr "Acest export este prea mare pentru a fi descărcat aici. Contactați suportul pentru a-l primi."
+
+#: services/portal/templates/users/data_export.html
+msgid "Download"
+msgstr "Descarcă"

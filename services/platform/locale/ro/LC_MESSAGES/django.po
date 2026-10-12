@@ -377,8 +377,8 @@ msgstr " și încă %(count)s"
 
 #: apps/audit/views.py:220
 #, python-brace-format
-msgid "Your data export request has been created. You will receive an email when it is ready for download. Request ID: {}"
-msgstr "Solicitarea dvs. de export al datelor a fost creată. Veți primi un e-mail când va fi gata pentru descărcare. ID solicitare: {}"
+msgid "Your data export request has been created. Request ID: {}"
+msgstr "Solicitarea dvs. de export al datelor a fost creată. ID solicitare: {}"
 
 #: apps/audit/views.py:246
 msgid "Export is still being processed. Please check back in a few minutes."
