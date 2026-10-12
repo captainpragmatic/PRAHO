@@ -92,6 +92,37 @@ apps/users/mfa.py
 - **Time Windows**: ±30 seconds tolerance for clock drift
 - **Audit Trail**: Complete GDPR-compliant logging
 
+### Staff enforcement and recovery (2026-10)
+
+2FA is opt-in unless an administrator switches on `users.mfa_required_for_staff` (off by
+default, in the admin-only platform zone of the settings). While it is on, a staff account
+without 2FA can only enrol:
+
+- `StaffMFAEnrollmentMiddleware` sends a staff session without 2FA to TOTP setup on every
+  Platform page, so sessions that already exist are caught as well as new sign-ins. It is
+  registered in base, prod and staging, which each define `MIDDLEWARE`.
+- API token issuance (both the API and the staff token page), the Portal login, and the
+  Portal's signed identity checks refuse such an account; an existing Portal session ends at
+  its next check.
+- Staff cannot disable 2FA, on Platform or through the Portal.
+
+`staff_mfa_required()` in `apps/users/mfa.py` is the setting's only reader; the checks use
+`two_factor_enabled` and `User.is_staff_user`.
+
+Enrolment asks for the current password, checked on the locked row in the transaction that
+enables 2FA, and keeps one secret until it succeeds or the person starts over. Setup, disable
+and backup-code regeneration allow 15 attempts an hour per user and answer a wrong password
+and a wrong code alike.
+
+**Recovery.** An administrator resets another person's 2FA from their user page
+(`users:mfa_admin_reset`: admin only, POST, confirmed, never your own account). The audit
+event `2fa_admin_reset` names the administrator as its actor. The person's Platform sessions
+end at once; their Portal session ends at its next session check (at most about 12 minutes),
+as after any credential change. When no administrator can sign in, for example a sole
+administrator who has lost both their authenticator and their backup codes,
+`manage.py reset_two_factor --email … --reason …` does the same from the server and is
+audited as an operator action with no actor.
+
 ### Testing Strategy
 - Unit tests: `tests/users/test_mfa_services.py`
 - Security tests: `tests/integration-tests/test_mfa_security.py`

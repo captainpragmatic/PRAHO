@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Staff can add, edit and delete items on the order edit page.**
+  - **The bugs.** The order edit page passed no payment methods, so saving a draft posted an empty method over the one it had, and no `can_edit`, so the item script never loaded. That script sent every request to `/app/orders/…`, which does not exist. Opening "Add item" crashed for any product priced in the order's currency. The item form's own script never ran, so the domain field and price fill were dead. The billing period was dropped on save, so every item was saved monthly. And after an add, the list lost its Edit and Delete buttons until a reload.
+  - **Now.** The page keeps the payment method, the form offers the catalog price the server accepts for each period, the domain field appears for a product that needs one, the chosen period is saved, and a refusal shows in the form.
+- **Romanian pages count years, items and domains correctly.** They read "2 ans" and "3 articols": English `pluralize` added an "s" to the translated word. Counted translations now give "1 an, 2 ani, 20 de ani".
+- **A template tag split across lines no longer reaches the page as text.** Django reads a tag only on one line. The portal checkout showed customers a developer note in its list of validation errors, and the shared table header sent a request from every sortable column. A new lint check, TMPL011, fails on a split tag.
+- **The 2FA disable page renders one form.** An old copy of its tail added a second "Disable" button that did nothing and closed the page layout early.
+- **The node deployment form shows Source Node inside its step**, styled like the other fields, instead of as a bare select between the cards.
+- **Proforma line totals stay on one line**, in the staff form and on the proforma pages.
 - **Platform no longer writes an audit row for every page a staff member opens.** (#622)
   - **The bug.** Every signed-in request under `/users/`, `/billing/`, `/customers/`, `/admin/`, `/api/`, `/settings/` or `/tickets/` wrote a `session_activity_*` audit event. The rows had no user attached, only the user's id, the path and the IP in their details, so GDPR export and erasure never found them, and retention kept them for two years. The request log already records each request.
   - **The same path's multiple-address check** stored one cache entry per request, about 1,800 an hour for a page that refreshes itself, and once three addresses were seen it wrote a `suspicious_activity_detected` row on every request for up to an hour. It now keeps one entry per address and records an address once, when it joins the pattern.
@@ -80,6 +88,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Staff can be required to use two-factor authentication.** A new setting, `users.mfa_required_for_staff`, off by default and switched only by administrators.
+  - **The gap.** Two-factor authentication was opt-in for staff: only staff who had enrolled were asked for a code, and an unenrolled staff account got API tokens and Portal sessions with a password alone. The setting existed once but nothing read it, so #377 retired it.
+  - **Now.** While it is on, a staff account without 2FA can only enrol: every Platform page sends it to setup (sessions that already exist too), it gets no API token, the Portal refuses its login and its existing session, and staff cannot disable 2FA.
+  - **Recovery.** An administrator can reset another person's 2FA from their user page, after confirming; the audit event names the administrator. Their Platform sessions end at once and their Portal session at its next check. When no administrator can sign in, `manage.py reset_two_factor --email … --reason …` does the same, audited as an operator action.
+- **The staff 2FA flow works from enrolment to recovery codes.**
+  - **Setup** made a new secret on every render, including after a mistyped code, so the app just scanned could never be verified. One secret now lasts until enrolment succeeds or the person starts over. Setup also asks for the current password, so a hijacked session cannot enrol its own authenticator.
+  - **Disable and regenerate** told a wrong password apart from a wrong code, with no limit on tries, on Platform and in the Portal API. They give one answer now, and setup, disable and regenerate allow 15 attempts an hour per user.
+  - **Audit.** Regenerating backup codes was not audited, on Platform or through the Portal; a code attempt refused by the attempt budget was not audited; and 2FA events recorded the proxy's address instead of the client's.
+  - **Pages.** The method page offered Passkeys, which are unfinished, as "recommended". The setup and backup-code pages could be cached. The profile and regenerate pages closed their containers early, the copy buttons lost their icon, and the disable page suggested features that do not exist.
 - **API tokens are issued to staff accounts only.** (#621)
   - **The bug.** `POST /api/users/token/` checked the email, the password and the second factor, but not whether the account was staff, so any customer could mint a token. ADR-0031 and the settings page treat tokens as staff automation. A customer's token reached only `token/me/` and `token/revoke/`, because every business route requires the portal's signature, but the gap would have widened the day a route accepted a bare token.
   - **Now.** A customer gets the wrong-password answer, before the second factor, so the refusal neither spends a code nor counts toward the lockout. The check runs again on the locked account row, so a demotion during the request is not missed. Every refusal that follows a correct password (a customer, a locked account, or an account changed during the request) writes a failed-login audit event, as a wrong password does, with the reason in its details; before, it left no trace.
@@ -280,6 +297,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **Shared-device session mode and its `users.shared_device_timeout_minutes` setting.** Nothing ever switched the mode on, so the setting changed nothing, and its two-hour expiry loosened the session instead of ending it. The `X-Shared-Device-Mode` response header goes with it.
 - **Three security settings that changed nothing:** "Company check rate limit per ip", "Join-request notification limit" and "Max customer lookups per hour". They were read only by a join-request and company-lookup path that no page, API endpoint or task called. That path is removed too, along with a staff onboarding form nothing rendered. The lookup also had a bug that would have mattered if anything called it: it searched trade registry numbers with a CUI.
 - The Ansible Docker role (`deploy/ansible/roles/praho` and `roles/docker`), its playbooks
   (`single-server.yml`, `two-servers.yml`, and `rollback.yml`, which only worked with it),
