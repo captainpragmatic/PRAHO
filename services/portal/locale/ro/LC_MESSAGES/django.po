@@ -4397,8 +4397,8 @@ msgid "By requesting immediate service activation, you acknowledge and agree to 
 msgstr "Prin solicitarea activării imediate a serviciului, recunoașteți și sunteți de acord să renunțați la dreptul de retragere de 14 zile odată ce serviciul este activat, în conformitate cu Directiva UE 2011/83/UE."
 
 #: services/portal/templates/orders/checkout.html:196
-msgid "Your order data will be retained for the duration required by Romanian fiscal law (minimum 10 years). For details, see our"
-msgstr "Datele comenzii dvs. vor fi reținute pentru durata prevăzută de legislația fiscală română (minim 10 ani). Pentru detalii, consultați"
+msgid "Your order data will be retained for the period required by Romanian accounting law (5 years from 1 July of the year after the financial year). For details, see our"
+msgstr "Datele comenzii dvs. vor fi păstrate pe durata prevăzută de legislația contabilă română (5 ani de la 1 iulie a anului următor exercițiului financiar). Pentru detalii, consultați"
 
 #: services/portal/templates/orders/checkout.html:205
 msgid "Back to cart"

@@ -793,6 +793,7 @@ Each backup also archives the media directory (`MEDIA_ROOT`) next to its dump, a
 - **Retention:** expires an archive with its dump.
 - **A failed archive** fails the backup run, but keeps the complete dump.
 - **Downloads:** `make ansible-backup FETCH=true` downloads the dump only; copy the media archive from the server's backup directory when you need it.
+- **Not encrypted:** backups are plain files; see "Known gap — backups are not encrypted" in `docs/security/SECURITY_COMPLIANCE_ASSESSMENT.md` before storing them anywhere shared.
 
 ### Restoring from Backup
 

@@ -200,6 +200,14 @@ Both systems use **AES-256-GCM** (NIST SP 800-38D). For full standards mapping, 
 | Credential access audit log | Implemented | `CredentialAccessLog` model, 365-day retention |
 | HKDF domain key separation | Implemented | `apps/common/key_derivation.py` — RFC 5869 HKDF-SHA256 with NIST SP 800-57 §5.2 domain separation |
 
+**Known gap — backups are not encrypted (decision 2026-10-12: left as is; review before the first
+production deployment).** Docker backups are a gzip SQL dump plus a gzip tar of the media volume;
+native backups are a `pg_dump` custom-format file plus a gzip tar of `/opt/praho/media`. Neither is
+encrypted. Inside them, only the designated encrypted fields (payment bank details, the CNP columns)
+and GDPR export files are ciphertext, and the key is not in the backup. Everything else is plain,
+including names, addresses and emails, and the CNP inside issued e-Factura XML (stored in the
+database and in media). Anyone holding a backup file can read that data.
+
 ### 3.2 Password & Backup Code Security
 
 | Feature | Status |
@@ -327,7 +335,7 @@ Code exists (`apps/audit/siem.py` + `apps/audit/siem.py (format renderers + on-d
 
 | Policy | Duration | Location |
 |--------|----------|----------|
-| Audit Logs | 10 years | `apps/common/constants.py` — `AUDIT_LOG_RETENTION_YEARS` |
+| Audit Logs (financial evidence) | 5 years from 1 July after the financial year (Legea 82/1991 art. 25, Legea 36/2023) | `AuditRetentionService.financial_retention_cutoff()`; per-category policies in `setup_audit_retention_policies` |
 | GDPR Logs | 12 months | `apps/common/constants.py` — `GDPR_LOG_RETENTION_MONTHS` |
 | Failed Login Logs | 6 months | `apps/common/constants.py` — `FAILED_LOGIN_LOG_RETENTION_MONTHS` |
 | Credential Access Logs | 365 days | `apps/common/credential_vault.py` — `ACCESS_LOG_RETENTION_DAYS` |
