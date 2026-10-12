@@ -4656,6 +4656,9 @@ class AuditRetentionService:
         "currency_conversion_",
         "tax_rule_",
     )
+    # Matched by a financial prefix but not accounting evidence: saved-card administration
+    # (which can carry the person's name and card digits) and reminder scheduling.
+    NON_FINANCIAL_PREFIXES: ClassVar[tuple[str, ...]] = ("payment_method_", "payment_reminders_")
     # Events about these records are financial evidence whatever their action: generic
     # create/update/delete events on billing documents and money ledgers.
     FINANCIAL_PROMOTIONS_MODELS: ClassVar[frozenset[str]] = frozenset(
@@ -4910,6 +4913,8 @@ class AuditRetentionService:
         the old category catch-all made EVERY business_operation event "financial" and blocked
         all deletion.
         """
+        if event.action.startswith(cls.NON_FINANCIAL_PREFIXES):
+            return False
         if event.action in cls.FINANCIAL_ACTIONS or event.action.startswith(cls.FINANCIAL_PREFIXES):
             return True
         if not event.content_type_id:

@@ -120,6 +120,7 @@ class RetentionHoldTests(TestCase):
         login = self.event("login_success", "authentication", timezone.now())
         # A business event that is not financial evidence is the person's data, not a legal record.
         profile_edit = self.event("profile_updated", "business_operation", timezone.now())
+        card = self.event("payment_method_added", "business_operation", timezone.now())
         request = GDPRDeletionService.create_deletion_request(user=self.user, deletion_type="delete").unwrap()
 
         self.assertTrue(GDPRDeletionService.process_deletion_request(request).is_ok())
@@ -127,6 +128,7 @@ class RetentionHoldTests(TestCase):
         self.assertFalse(User.objects.filter(email="retention@example.test").exists())
         self.assertFalse(AuditEvent.objects.filter(pk=login.pk).exists())
         self.assertFalse(AuditEvent.objects.filter(pk=profile_edit.pk).exists())
+        self.assertFalse(AuditEvent.objects.filter(pk=card.pk).exists())
         held.refresh_from_db()
         self.assertIsNone(held.user)
         self.assertNotEqual(held.ip_address, "198.51.100.7")
@@ -167,5 +169,9 @@ class FinancialClassifierTests(TestCase):
         self.assertTrue(self.classify("update", Invoice))
         self.assertTrue(self.classify("delete", GiftCard))
         self.assertFalse(self.classify("update", Coupon))
+        # Saved-card administration and reminder scheduling are not accounting evidence.
+        for action in ("payment_method_added", "payment_method_updated", "payment_method_removed", "payment_reminders_scheduled"):
+            with self.subTest(action=action):
+                self.assertFalse(self.classify(action))
         self.assertFalse(self.classify("login_success"))
         self.assertFalse(self.classify("random_action"))
