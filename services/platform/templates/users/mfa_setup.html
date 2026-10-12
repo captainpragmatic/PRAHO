@@ -153,6 +153,12 @@
               {% input_field name=form.token.name aria_label=token_label input_type="text" placeholder=token_placeholder required=True html_id=form.token.id_for_label error=form.token.errors.0 css_class="text-center text-lg font-mono tracking-wider" maxlength="6" pattern="[0-9]{6}" autocomplete="one-time-code" %}
             </div>
 
+            <div>
+              {% trans "Current password" as password_label %}
+              {% trans "Your current password confirms that it is you setting this up." as password_help %}
+              {% input_field name=form.password.name label=password_label input_type="password" required=True html_id="id_setup_password" autocomplete="current-password" help_text=password_help %}
+            </div>
+
             {% form_error_summary form %}
 
             <div class="flex gap-3">
@@ -189,11 +195,12 @@ function copySecret(el) {
     // inside the promise.
     const button = el || document.querySelector('[data-action="invoke"][data-invoke="copySecret"]');
     if (!button) { return; }
-    const originalText = button.textContent;
+    // innerHTML, not textContent: the button holds an icon, which textContent would drop for good.
+    const originalHtml = button.innerHTML;
     button.textContent = '[OK]';
 
     setTimeout(() => {
-      button.textContent = originalText;
+      button.innerHTML = originalHtml;
     }, 2000);
   }).catch(function(err) {
     console.error('Could not copy text: ', err);

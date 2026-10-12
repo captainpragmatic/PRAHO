@@ -52,7 +52,7 @@
         <!-- One field takes either a 6-digit app code or an 8-digit backup code -->
         {% trans 'Authentication or backup code' as token_label %}
         {% trans 'Enter the 6-digit code from your authenticator app, or one of your 8-digit backup codes' as token_help %}
-        {% input_field name=form.token.name label=token_label placeholder="123456" required=True html_id=form.token.id_for_label error=form.token.errors.0 help_text=token_help css_class="text-center text-2xl font-mono tracking-widest" %}
+        {% input_field name=form.token.name label=token_label placeholder="123456" required=True html_id=form.token.id_for_label error=form.token.errors.0 help_text=token_help css_class="text-center text-2xl font-mono tracking-widest" autocomplete="one-time-code" autofocus=True %}
 
         <div>
           {% trans 'Verify & Continue' as verify_label %}

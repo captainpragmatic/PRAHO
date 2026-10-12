@@ -342,7 +342,7 @@ class TwoFactorViewsTest(BaseViewTestCase):
         totp = pyotp.TOTP("TESTBASE32SECRET")
         valid_token = totp.now()
 
-        response = self.client.post(reverse("users:mfa_setup_totp"), {"token": valid_token})
+        response = self.client.post(reverse("users:mfa_setup_totp"), {"token": valid_token, "password": "testpass123"})
 
         self.assertEqual(response.status_code, 302)  # Success redirect
 
@@ -773,7 +773,8 @@ class IntegrationTest(BaseViewTestCase):
         valid_token = totp.now()
 
         response = self.client.post(
-            reverse("users:mfa_setup_totp"), {"token": valid_token, "secret": "TESTBASE32SECRET"}
+            reverse("users:mfa_setup_totp"),
+            {"token": valid_token, "secret": "TESTBASE32SECRET", "password": "testpass123"},
         )
 
         self.assertEqual(response.status_code, 302)

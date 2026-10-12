@@ -348,6 +348,14 @@ class UserProfileForm(forms.ModelForm):
 class TwoFactorSetupForm(forms.Form):
     """Two-factor authentication setup form"""
 
+    # Not required by the form: an empty password gets the same answer as a wrong one.
+    password = forms.CharField(
+        label=_("Current password"),
+        required=False,
+        strip=False,
+        widget=forms.PasswordInput(attrs={"autocomplete": "current-password"}),
+    )
+
     token = forms.CharField(
         label=_("Verification code"),
         max_length=6,

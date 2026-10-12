@@ -27,7 +27,6 @@
     cancelAddItemOrModal: true,
     cancelEditItemOrModal: true,
     cancelExpandableEditAction: true,
-    checkWebAuthnSupport: true,
     closeEventDetail: true,
     closeModal: true,
     confirmAccountDeleteAction: true,

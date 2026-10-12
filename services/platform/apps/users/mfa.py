@@ -696,7 +696,7 @@ class MFAService:
                     event_type="2fa_enabled",
                     user=user,
                     context=AuditContext(
-                        ip_address=request.META.get("REMOTE_ADDR") if request else None,
+                        ip_address=get_safe_client_ip(request) if request else None,
                         user_agent=request.META.get("HTTP_USER_AGENT") if request else None,
                         metadata=metadata,
                     ),
@@ -798,15 +798,16 @@ class MFAService:
                 raise ValueError("TOTP/2FA must be enabled to generate backup codes")
 
             codes = BackupCodeService.generate_codes(user)
-            user.save()
+            # Only the codes: a full save of this instance would write back every other column.
+            user.save(update_fields=["backup_tokens"])
 
             # 📊 Audit log generation
-            AuditService.log_2fa_event(
+            MFAService._log_2fa_event_isolated(
                 TwoFactorAuditRequest(
                     event_type="2fa_backup_codes_generated",
                     user=user,
                     context=AuditContext(
-                        ip_address=request.META.get("REMOTE_ADDR") if request else None,
+                        ip_address=get_safe_client_ip(request) if request else None,
                         user_agent=request.META.get("HTTP_USER_AGENT") if request else None,
                         metadata={
                             "count": len(codes),
@@ -864,10 +865,21 @@ class MFAService:
             if not user.two_factor_enabled:
                 raise ValueError("MFA is not enabled for this user")
 
-            # Rate limiting check
+            # Rate limiting check: refused without checking the code, and audited as a failure
             if not MFAService._check_rate_limit(user):
                 result["rate_limited"] = True
                 logger.warning(f"⚠️ [MFA] Rate limit exceeded for user {user.email}")
+                MFAService._log_2fa_event_isolated(
+                    TwoFactorAuditRequest(
+                        event_type="2fa_verification_failed",
+                        user=user,
+                        context=AuditContext(
+                            ip_address=get_safe_client_ip(request) if request else None,
+                            user_agent=request.META.get("HTTP_USER_AGENT") if request else None,
+                            metadata={"method": None, "timestamp": timezone.now().isoformat(), "rate_limited": True},
+                        ),
+                    )
+                )
                 return result
 
             # Check if it's a TOTP code (6 digits)
@@ -894,7 +906,7 @@ class MFAService:
                             event_type="2fa_backup_code_used",
                             user=user,
                             context=AuditContext(
-                                ip_address=request.META.get("REMOTE_ADDR") if request else None,
+                                ip_address=get_safe_client_ip(request) if request else None,
                                 user_agent=request.META.get("HTTP_USER_AGENT") if request else None,
                                 metadata={
                                     "remaining_codes": result["remaining_backup_codes"],
@@ -911,7 +923,7 @@ class MFAService:
                     event_type=event_type,
                     user=user,
                     context=AuditContext(
-                        ip_address=request.META.get("REMOTE_ADDR") if request else None,
+                        ip_address=get_safe_client_ip(request) if request else None,
                         user_agent=request.META.get("HTTP_USER_AGENT") if request else None,
                         metadata={
                             "method": result["method"],

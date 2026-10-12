@@ -1251,5 +1251,5 @@ def mfa_regenerate_backup_codes_api(request: HttpRequest, user: User) -> Respons
         # Reuse the credential validation, without executing the disable operation.
         serializer = MFADisableSerializer(data=request.data, context={"request": request, "user": user})
         serializer.is_valid(raise_exception=True)
-        codes = user.generate_backup_codes()
+        codes = MFAService.generate_backup_codes(user, request)
     return Response({"success": True, "backup_codes": codes})
