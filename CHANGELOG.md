@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Media can live in a private S3-compatible bucket.** For container platforms, where the platform and task-worker containers share no volume and lose their disks on every deploy, `MEDIA_STORAGE=s3` stores invoice PDFs, e-Factura archives, ticket attachments and GDPR exports in a bucket (ADR-0057). The bucket stays private: Django reads every file, and a half-configured bucket stops the start instead of falling back to the container's disk. Every other deployment keeps the filesystem. The staff ticket-attachment download no longer needs a local file path.
+
 ### Fixed
 
 - **A GDPR data export requested in the portal is generated and can be downloaded.** The request created an export that nothing ever processed, while the page promised an email that was never sent.

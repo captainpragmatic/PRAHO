@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import logging
 import mimetypes
-import os
 from dataclasses import dataclass
 from typing import cast
 
@@ -720,17 +719,12 @@ def download_attachment(request: HttpRequest, attachment_id: int) -> HttpRespons
     if not attachment.file or not attachment.file.name:
         raise Http404("File not found")
 
-    # Get the file path as string to handle Path type properly
-    file_path = str(attachment.file.path)
-    if not os.path.exists(file_path):
-        raise Http404("File not found")
-
-    # Return file response
+    # Read through the storage, never a local path: media may live in a bucket (ADR-0057).
     try:
-        with open(file_path, "rb") as f:
+        with attachment.file.open("rb") as f:
             response = HttpResponse(f.read(), content_type=attachment.content_type)
-            response["Content-Disposition"] = f'attachment; filename="{attachment.filename}"'
-            response["Content-Length"] = attachment.file_size
-            return response
     except OSError:
         raise Http404("File could not be read") from None
+    response["Content-Disposition"] = f'attachment; filename="{attachment.filename}"'
+    response["Content-Length"] = attachment.file_size
+    return response

@@ -86,6 +86,7 @@ providing a historical record of why the system is built the way it is.
 | [ADR-0054](ADR-0054-supported-deployment-paths.md) | Two Supported Deployment Paths, Native Ansible and Docker Compose | Accepted | 2026-10-07 |
 | [ADR-0055](ADR-0055-portal-sessions-merge-concurrent-writes.md) | Portal Sessions Merge Concurrent Writes | Accepted | 2026-10-10 |
 | [ADR-0056](ADR-0056-portal-serves-requests-on-threads.md) | The Portal Serves Requests on Threads | Accepted | 2026-10-10 |
+| [ADR-0057](ADR-0057-media-storage-filesystem-or-private-bucket.md) | Media Lives on the Filesystem, or in a Private Bucket on Container Platforms | Accepted | 2026-10-12 |
 
 ### 🟡 Partially Superseded
 
@@ -193,6 +194,7 @@ Billing Ownership
 - [ADR-0054](ADR-0054-supported-deployment-paths.md) — native Ansible for servers, Docker Compose for Docker hosts, one operator env file; the Ansible Docker role is retired
 - [ADR-0055](ADR-0055-portal-sessions-merge-concurrent-writes.md) — portal session saves merge concurrent writes by compare-and-swap; key groups, record maps, revocation preserved
 - [ADR-0056](ADR-0056-portal-serves-requests-on-threads.md) — gunicorn gthread, 2 processes × 4 threads, so one customer waiting on Platform does not make the others wait; sync is the rollback
+- [ADR-0057](ADR-0057-media-storage-filesystem-or-private-bucket.md) — `MEDIA_STORAGE=s3` puts media in a private bucket for container platforms; filesystem stays the default; reads only through Django, fails closed
 
 ### 💰 Business & Domain
 - [ADR-0019](ADR-0019-virtualmin-automatic-provisioning.md) — VirtualMin provisioning
@@ -209,8 +211,8 @@ Billing Ownership
 
 ## Statistics
 
-- **Total ADRs**: 56 (ADR-0001 through ADR-0056)
-- **Active**: 50 (in the Active Decisions table: Accepted, Active, Implemented or Proposed)
+- **Total ADRs**: 57 (ADR-0001 through ADR-0057)
+- **Active**: 51 (in the Active Decisions table: Accepted, Active, Implemented or Proposed)
 - **Partially Superseded**: 1
 - **Superseded / Historical**: 5
-- **Next available**: ADR-0057
+- **Next available**: ADR-0058
