@@ -161,6 +161,7 @@ def _portal_env(directory: Path, platform_url: str, server: dict[str, str]) -> d
             "PLATFORM_API_SECRET": secrets.token_hex(32),
             "PLATFORM_TO_PORTAL_WEBHOOK_SECRET": secrets.token_hex(32),
             "SESSION_DB_PATH": str(directory / "portal.sqlite3"),
+            "STATIC_ROOT": str(directory / "static"),
             "PORTAL_LOG_DIR": str(directory / "logs"),
             # macOS: a forked worker that looks up system proxy settings can crash; there is none here.
             "NO_PROXY": "*",
@@ -195,9 +196,11 @@ def running_portal(platform_url: str, **server: str) -> Iterator[Portal]:
         directory = Path(name)
         (directory / "logs").mkdir()
         env = _portal_env(directory, platform_url, server)
-        for app in ("sessions", "common"):
+        # The entrypoint's start sequence: production settings serve static names from the manifest
+        # that collectstatic writes, so without it every page with a {% static %} tag is a 500.
+        for command in (["migrate", "sessions"], ["migrate", "common"], ["collectstatic"]):
             subprocess.run(  # noqa: S603 -- a fixed command.
-                [sys.executable, "manage.py", "migrate", app, "--noinput"],
+                [sys.executable, "manage.py", *command, "--noinput"],
                 cwd=PORTAL,
                 env=env,
                 check=True,

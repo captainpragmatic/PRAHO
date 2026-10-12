@@ -376,6 +376,8 @@ MONITORING = {
 # Use local static file serving for staging
 STATIC_URL = "/static/"
 STATIC_ROOT = Path(_os.environ.get("STATIC_ROOT", "/opt/praho/static"))
+# Content-hashed names (app.3f2a9c.css): the reverse proxy caches /static/ as immutable for a year.
+STORAGES = {**STORAGES, "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.ManifestStaticFilesStorage"}}
 # Uploads and generated documents: the deployment's media volume or directory, which backups include.
 MEDIA_ROOT = Path(_os.environ.get("MEDIA_ROOT", str(BASE_DIR / "media")))
 

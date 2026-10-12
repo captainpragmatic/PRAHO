@@ -272,6 +272,12 @@ STATICFILES_DIRS = [
     REPO_ROOT / "shared" / "ui" / "static",  # Shared JS components (modal.js, toast.js)
 ]
 STATIC_ROOT = BASE_DIR / "staticfiles"
+# Plain names locally; prod and staging switch staticfiles to the manifest storage, which
+# content-hashes names so the year-long immutable cache on /static/ never serves stale files.
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+}
 
 # ===============================================================================
 # SECURITY SETTINGS

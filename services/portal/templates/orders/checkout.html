@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n ui_components formatting %}
+{% load i18n static ui_components formatting %}
 
 {% block title %}{% trans "Checkout" %}{% endblock %}
 
@@ -94,8 +94,8 @@
                   </div>
                   <p class="text-slate-400 text-sm mt-1">{% trans "Pay securely with Visa, Mastercard, or other cards" %}</p>
                   <div class="flex items-center gap-2 mt-2">
-                    <img src="/static/images/visa.svg" alt="Visa" class="h-6">
-                    <img src="/static/images/mastercard.svg" alt="Mastercard" class="h-6">
+                    <img src="{% static 'images/visa.svg' %}" alt="Visa" class="h-6">
+                    <img src="{% static 'images/mastercard.svg' %}" alt="Mastercard" class="h-6">
                     <span class="text-slate-500 text-xs">{% trans "Powered by Stripe" %}</span>
                   </div>
                 </div>

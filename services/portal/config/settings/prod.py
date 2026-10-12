@@ -144,7 +144,8 @@ SECURE_HSTS_PRELOAD = False  # Preloading is a deliberate submission per domain;
 
 # Static files - served by reverse proxy in production
 STATIC_ROOT = Path(os.environ.get("STATIC_ROOT", str(BASE_DIR / "staticfiles")))
-STATICFILES_STORAGE = "django.contrib.staticfiles.storage.ManifestStaticFilesStorage"
+# Content-hashed names (app.3f2a9c.css): the reverse proxy caches /static/ as immutable for a year.
+STORAGES = {**STORAGES, "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.ManifestStaticFilesStorage"}}
 
 # Cache configuration for production
 CACHES = {

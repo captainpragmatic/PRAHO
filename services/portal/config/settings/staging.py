@@ -138,7 +138,8 @@ SECURE_HSTS_PRELOAD = False
 
 # Static files — env-driven for deployment flexibility
 STATIC_ROOT = Path(os.environ.get("STATIC_ROOT", str(BASE_DIR / "staticfiles")))
-STATICFILES_STORAGE = "django.contrib.staticfiles.storage.ManifestStaticFilesStorage"
+# Content-hashed names (app.3f2a9c.css): the reverse proxy caches /static/ as immutable for a year.
+STORAGES = {**STORAGES, "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.ManifestStaticFilesStorage"}}
 
 # Cache configuration for staging
 CACHES = {
