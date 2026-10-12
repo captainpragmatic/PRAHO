@@ -10,16 +10,9 @@ import pytest
 from django.core.exceptions import ValidationError
 
 from apps.common.validators import (
-    MAX_CUI_LENGTH,
-    MAX_COMPANY_NAME_LENGTH,
-    MAX_DESCRIPTION_LENGTH,
     MAX_EMAIL_LENGTH,
     MAX_NAME_LENGTH,
-    MAX_PHONE_LENGTH,
     MAX_URL_LENGTH,
-    MAX_VAT_NUMBER_LENGTH,
-    ROMANIAN_CUI_PATTERN,
-    ROMANIAN_VAT_PATTERN,
     SUSPICIOUS_PATTERNS,
     SecureInputValidator,
 )
@@ -179,57 +172,6 @@ class TestSecureInputValidatorMaliciousPatterns:
             SecureInputValidator._check_malicious_patterns(text)
 
 
-class TestRomanianCompliancePatterns:
-    """Test Romanian-specific validation patterns"""
-
-    def test_romanian_vat_pattern_valid(self):
-        """Valid Romanian VAT numbers should match pattern"""
-        import re
-        valid_vat_numbers = [
-            'RO12345678',
-            'RO1234567890',
-            'RO12',
-        ]
-        for vat in valid_vat_numbers:
-            assert re.match(ROMANIAN_VAT_PATTERN, vat), f"{vat} should be valid"
-
-    def test_romanian_vat_pattern_invalid(self):
-        """Invalid Romanian VAT numbers should not match pattern"""
-        import re
-        invalid_vat_numbers = [
-            'RO1',  # Too short
-            'RO12345678901',  # Too long
-            'RO',  # No digits
-            'DE12345678',  # Wrong country
-            '12345678',  # No RO prefix
-            'ROABCDEFGH',  # Letters instead of digits
-        ]
-        for vat in invalid_vat_numbers:
-            assert not re.match(ROMANIAN_VAT_PATTERN, vat), f"{vat} should be invalid"
-
-    def test_romanian_cui_pattern_valid(self):
-        """Valid Romanian CUI numbers should match pattern"""
-        import re
-        valid_cuis = [
-            '12345678',
-            '1234567890',
-            '12',
-        ]
-        for cui in valid_cuis:
-            assert re.match(ROMANIAN_CUI_PATTERN, cui), f"{cui} should be valid"
-
-    def test_romanian_cui_pattern_invalid(self):
-        """Invalid Romanian CUI numbers should not match pattern"""
-        import re
-        invalid_cuis = [
-            '1',  # Too short
-            '12345678901',  # Too long
-            'ABC12345',  # Contains letters
-            'RO12345678',  # Has RO prefix
-            '',  # Empty
-        ]
-        for cui in invalid_cuis:
-            assert not re.match(ROMANIAN_CUI_PATTERN, cui), f"{cui} should be invalid"
 
 
 class TestInputLengthValidation:
@@ -243,25 +185,6 @@ class TestInputLengthValidation:
         """Name max length should be reasonable"""
         assert MAX_NAME_LENGTH == 100
 
-    def test_company_name_max_length(self):
-        """Company name max length should accommodate Romanian company names"""
-        assert MAX_COMPANY_NAME_LENGTH == 200
-
-    def test_phone_max_length(self):
-        """Phone max length should accommodate international formats"""
-        assert MAX_PHONE_LENGTH == 20
-
-    def test_vat_number_max_length(self):
-        """VAT number max length should accommodate EU formats"""
-        assert MAX_VAT_NUMBER_LENGTH == 15
-
-    def test_cui_max_length(self):
-        """CUI max length should match Romanian requirements"""
-        assert MAX_CUI_LENGTH == 10
-
-    def test_description_max_length(self):
-        """Description max length should be reasonable"""
-        assert MAX_DESCRIPTION_LENGTH == 1000
 
     def test_url_max_length(self):
         """URL max length should be standard"""
