@@ -62,7 +62,7 @@ This template is dynamically loaded and contains only the results section.
                   </div>
                   <div class="flex items-center">
                     <span class="mr-1">{% icon "orders" %}</span>
-                    {{ order.items.count }} {% trans "item" %}{{ order.items.count|pluralize }}
+                    {% blocktrans trimmed count counter=order.items.count %}{{ counter }} item{% plural %}{{ counter }} items{% endblocktrans %}
                   </div>
                 </div>
 

@@ -112,20 +112,18 @@
 
                     <!-- Renewal Period Selection -->
                     <div class="space-y-4">
-                        {% trans "year" as year_word %}
                         {% for option in renewal_costs %}
+                            {# One counted label for the card, its accessible name and the summary: Romanian has three plural forms. #}
+                            {% blocktrans trimmed count counter=option.years asvar period_label %}{{ counter }} year{% plural %}{{ counter }} years{% endblocktrans %}
                             <label class="relative block cursor-pointer">
-                                {# The accessible name repeats the card's visible "N year(s)" line #}
-                                {% with year_key=option.years|stringformat:"s" plural_suffix=option.years|pluralize %}
-                                {% with year_aria=year_key|add:" "|add:year_word|add:plural_suffix %}
-                                {% input_field "years" input_type="radio" value=option.years checked=forloop.first css_class="sr-only peer" html_id="renewal-years-"|add:year_key aria_label=year_aria %}
-                                {% endwith %}
+                                {% with year_key=option.years|stringformat:"s" %}
+                                {% input_field "years" input_type="radio" value=option.years checked=forloop.first css_class="sr-only peer" html_id="renewal-years-"|add:year_key aria_label=period_label %}
                                 {% endwith %}
                                 <div class="border-2 border-slate-200 dark:border-slate-700 rounded-lg p-4 transition-all peer-checked:border-primary-500 peer-checked:bg-primary-50 dark:peer-checked:bg-primary-900/20 hover:border-slate-300 dark:hover:border-slate-600">
                                     <div class="flex items-center justify-between">
                                         <div>
                                             <p class="text-lg font-semibold text-slate-900 dark:text-white">
-                                                {{ option.years }} {% trans "year" %}{{ option.years|pluralize }}
+                                                {{ period_label }}
                                             </p>
                                             <p class="text-sm text-slate-500 dark:text-slate-400">
                                                 {% trans "New expiry:" %}
@@ -260,9 +258,9 @@ document.addEventListener('DOMContentLoaded', function() {
     // Renewal costs data from Django
     const renewalCosts = {
         {% for option in renewal_costs %}
-            {% trans "year" as year_word %}
+            {% blocktrans trimmed count counter=option.years asvar period_label %}{{ counter }} year{% plural %}{{ counter }} years{% endblocktrans %}
             {{ option.years }}: {
-                periodLabel: '{{ option.years }} {{ year_word|escapejs }}{{ option.years|pluralize|escapejs }}',
+                periodLabel: '{{ period_label|escapejs }}',
                 newExpiryLabel: '{{ option.new_expiry|romanian_date:"long"|escapejs }}',
                 {% if option.cost_cents is not None %}
                   displayCost: '{{ option.cost_cents|cents_to_currency|romanian_currency:option.currency|escapejs }}'

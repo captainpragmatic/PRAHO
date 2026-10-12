@@ -7,7 +7,7 @@
         <div class="space-y-3 text-sm">
             <!-- Subtotal -->
             <div class="flex justify-between text-slate-300">
-                <span>Subtotal ({{ cart_order.items.count }} item{{ cart_order.items.count|pluralize }}):</span>
+                <span>{% blocktrans trimmed count counter=cart_order.items.count asvar item_count %}{{ counter }} item{% plural %}{{ counter }} items{% endblocktrans %}{% trans "Subtotal" %} ({{ item_count }}):</span>
                 <span>{{ cart_order.subtotal|floatformat:2 }} {{ cart_order.currency }}</span>
             </div>
 

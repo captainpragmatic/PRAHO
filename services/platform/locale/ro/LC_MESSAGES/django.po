@@ -28564,3 +28564,29 @@ msgstr "Introduceți codul de TVA sau CUI-ul firmei."
 #: templates/customers/partials/customer_table.html
 msgid "CNP on file"
 msgstr "CNP înregistrat"
+
+#: templates/domains/domain_detail.html templates/domains/domain_register.html
+#: templates/domains/domain_renew.html
+#, python-format
+msgid "%(counter)s year"
+msgid_plural "%(counter)s years"
+msgstr[0] "%(counter)s an"
+msgstr[1] "%(counter)s ani"
+msgstr[2] "%(counter)s de ani"
+
+#: templates/orders/cart/cart_summary_partial.html templates/orders/order_list.html
+#: templates/orders/partials/order_list.html
+#, python-format
+msgid "%(counter)s item"
+msgid_plural "%(counter)s items"
+msgstr[0] "%(counter)s articol"
+msgstr[1] "%(counter)s articole"
+msgstr[2] "%(counter)s de articole"
+
+#: templates/provisioning/virtualmin/partials/accounts_table.html
+#, python-format
+msgid "%(counter)s domain"
+msgid_plural "%(counter)s domains"
+msgstr[0] "%(counter)s domeniu"
+msgstr[1] "%(counter)s domenii"
+msgstr[2] "%(counter)s de domenii"
