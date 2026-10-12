@@ -95,6 +95,7 @@ class ExpiredExportCleanupTests(ExportLifecycleTestCase):
 
     def test_a_path_rewritten_meanwhile_is_not_untracked(self) -> None:
         export = self.completed_export()
+        self.expire(export)
         stale_path = export.file_path
         DataExport.objects.filter(pk=export.pk).update(file_path="gdpr_exports/rewritten.enc")
 
@@ -103,6 +104,17 @@ class ExpiredExportCleanupTests(ExportLifecycleTestCase):
         export.refresh_from_db()
         self.assertEqual(export.file_path, "gdpr_exports/rewritten.enc")
         self.assertTrue(self.on_disk(stale_path), "a file the row no longer tracks is not this call's to delete")
+
+
+    def test_an_export_regenerated_at_the_same_path_is_not_untracked(self) -> None:
+        # Regeneration reuses the deterministic path with a fresh window; the new file is kept.
+        export = self.completed_export()
+
+        self.assertFalse(untrack_export_file(export.pk, export.file_path))
+
+        self.assertTrue(self.on_disk(export.file_path))
+        export.refresh_from_db()
+        self.assertTrue(export.file_path)
 
 
 class ErasureDeletesExportFilesTests(ExportLifecycleTestCase):
@@ -128,6 +140,16 @@ class ErasureDeletesExportFilesTests(ExportLifecycleTestCase):
         self.assertLessEqual(export.expires_at, timezone.now())
         pending.refresh_from_db()
         self.assertEqual(pending.status, "failed")
+
+    def test_a_user_instance_loaded_before_the_erasure_cannot_request_an_export(self) -> None:
+        stale = User.objects.get(pk=self.user.pk)
+        with self.captureOnCommitCallbacks(execute=True):
+            self.assertTrue(self.erase("anonymize").is_ok())
+        before = DataExport.objects.count()
+
+        self.assertTrue(GDPRExportService.create_data_export_request(stale).is_err())
+
+        self.assertEqual(DataExport.objects.count(), before)
 
     def test_an_erased_person_cannot_request_or_receive_an_export(self) -> None:
         with self.captureOnCommitCallbacks(execute=True):

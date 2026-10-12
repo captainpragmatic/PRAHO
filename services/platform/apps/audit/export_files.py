@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.db import transaction
+from django.utils import timezone
 
 from apps.common.encryption import VERSIONED_V2_PREFIX, DecryptionError, decrypt_sensitive_data, encrypt_sensitive_data
 
@@ -62,8 +63,9 @@ def delete_export_file(path: str) -> None:
 def untrack_export_file(export_id: uuid.UUID, path: str) -> bool:
     """Delete an export's file and stop tracking it, if the export still points at that file.
 
-    The row is locked first and its path checked: processing holds the same lock while it writes,
-    so this never deletes or untracks a file from a generation it did not read. The file is deleted
+    The row is locked first and its path and expiry checked: processing holds the same lock while
+    it writes, so this never deletes or untracks a file from a generation it did not read. Every
+    caller means an expired export; erasure expires its exports before it calls this. The file is deleted
     before the path is blanked: if the delete fails, the row keeps its path and the daily cleanup
     tries again. Returns whether the row was untracked. The row stays, as the record that the
     export existed.
@@ -71,7 +73,12 @@ def untrack_export_file(export_id: uuid.UUID, path: str) -> bool:
     from .models import DataExport  # noqa: PLC0415  # Deferred: models import this module's callers
 
     with transaction.atomic():
-        if not DataExport.objects.select_for_update().filter(pk=export_id, file_path=path).exists():
+        # Still this file, and still expired: an export regenerated meanwhile reuses the path with a
+        # fresh window, and its new file is not this call's to delete.
+        locked = DataExport.objects.select_for_update().filter(
+            pk=export_id, file_path=path, expires_at__lte=timezone.now()
+        )
+        if not locked.exists():
             return False
         if default_storage.exists(path):
             default_storage.delete(path)

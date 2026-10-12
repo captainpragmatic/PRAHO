@@ -1082,10 +1082,6 @@ class GDPRExportService:
     ) -> Result[DataExport, str]:
         """Create a new GDPR data export request"""
 
-        if not user.is_active:
-            # An erased (anonymised) person has no export to request (see _revoke_user_exports).
-            return Err("Account is not active")
-
         try:
             # Default export scope - comprehensive user data
             if not export_scope:
@@ -1099,25 +1095,32 @@ class GDPRExportService:
                     "format": "json",
                 }
 
-            export_request = DataExport.objects.create(
-                requested_by=user,
-                export_type="gdpr",
-                scope=export_scope,
-                status="pending",
-                expires_at=timezone.now() + timedelta(days=EXPORT_DOWNLOAD_DAYS),  # Restarted at completion
-            )
+            with transaction.atomic():
+                # Locked and re-read, as erasure locks it: an erased (anonymised) person has no
+                # export to request, even through a User instance loaded before the erasure, and the
+                # request is logged with the person as they are now.
+                current = User.objects.select_for_update().filter(pk=user.pk, is_active=True).first()
+                if current is None:
+                    return Err("Account is not active")
+                export_request = DataExport.objects.create(
+                    requested_by=current,
+                    export_type="gdpr",
+                    scope=export_scope,
+                    status="pending",
+                    expires_at=timezone.now() + timedelta(days=EXPORT_DOWNLOAD_DAYS),  # Restarted at completion
+                )
 
-            # Log GDPR export request
-            compliance_request = ComplianceEventRequest(
-                compliance_type="gdpr_consent",
-                reference_id=f"export_{export_request.id}",
-                description=f"GDPR data export requested by {user.email}",
-                user=user,
-                status="initiated",
-                evidence={"export_id": str(export_request.id), "scope": export_scope},
-                metadata={"ip_address": request_ip},
-            )
-            AuditService.log_compliance_event(compliance_request)
+                # Log GDPR export request
+                compliance_request = ComplianceEventRequest(
+                    compliance_type="gdpr_consent",
+                    reference_id=f"export_{export_request.id}",
+                    description=f"GDPR data export requested by {current.email}",
+                    user=current,
+                    status="initiated",
+                    evidence={"export_id": str(export_request.id), "scope": export_scope},
+                    metadata={"ip_address": request_ip},
+                )
+                AuditService.log_compliance_event(compliance_request)
 
             logger.info(f"🔒 [GDPR Export] Request created for {user.email}: {export_request.id}")
             return Ok(export_request)
