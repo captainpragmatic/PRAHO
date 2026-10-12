@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
+from django.db import transaction
 
 from apps.common.encryption import VERSIONED_V2_PREFIX, DecryptionError, decrypt_sensitive_data, encrypt_sensitive_data
 
@@ -59,16 +60,21 @@ def delete_export_file(path: str) -> None:
 
 
 def untrack_export_file(export_id: uuid.UUID, path: str) -> bool:
-    """Delete an export's file, then stop tracking it - only if the export still points at that file.
+    """Delete an export's file and stop tracking it, if the export still points at that file.
 
-    The storage delete comes first: if it fails, the row keeps its path and the daily cleanup tries
-    again. The compare-and-set never blanks a path written after `path` was read. Returns whether
-    the row was untracked. The row itself stays, as the record that the export existed.
+    The row is locked first and its path checked: processing holds the same lock while it writes,
+    so this never deletes or untracks a file from a generation it did not read. The file is deleted
+    before the path is blanked: if the delete fails, the row keeps its path and the daily cleanup
+    tries again. Returns whether the row was untracked. The row stays, as the record that the
+    export existed.
     """
     from .models import DataExport  # noqa: PLC0415  # Deferred: models import this module's callers
 
-    if default_storage.exists(path):
-        default_storage.delete(path)
-    else:
-        logger.warning("⚠️ [GDPR Export] File %s of export %s was already gone", path, export_id)
-    return DataExport.objects.filter(pk=export_id, file_path=path).update(file_path="") == 1
+    with transaction.atomic():
+        if not DataExport.objects.select_for_update().filter(pk=export_id, file_path=path).exists():
+            return False
+        if default_storage.exists(path):
+            default_storage.delete(path)
+        else:
+            logger.warning("⚠️ [GDPR Export] File %s of export %s was already gone", path, export_id)
+        return DataExport.objects.filter(pk=export_id, file_path=path).update(file_path="") == 1

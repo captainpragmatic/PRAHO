@@ -102,6 +102,7 @@ class ExpiredExportCleanupTests(ExportLifecycleTestCase):
 
         export.refresh_from_db()
         self.assertEqual(export.file_path, "gdpr_exports/rewritten.enc")
+        self.assertTrue(self.on_disk(stale_path), "a file the row no longer tracks is not this call's to delete")
 
 
 class ErasureDeletesExportFilesTests(ExportLifecycleTestCase):
@@ -127,6 +128,22 @@ class ErasureDeletesExportFilesTests(ExportLifecycleTestCase):
         self.assertLessEqual(export.expires_at, timezone.now())
         pending.refresh_from_db()
         self.assertEqual(pending.status, "failed")
+
+    def test_an_erased_person_cannot_request_or_receive_an_export(self) -> None:
+        with self.captureOnCommitCallbacks(execute=True):
+            self.assertTrue(self.erase("anonymize").is_ok())
+        self.user.refresh_from_db()
+
+        self.assertTrue(GDPRExportService.create_data_export_request(self.user).is_err())
+        # A request that slipped in alongside the erasure is refused when processed.
+        late = DataExport.objects.create(
+            requested_by=self.user, export_type="gdpr", scope={}, status="pending",
+            expires_at=timezone.now() + timedelta(days=7),
+        )
+        self.assertTrue(GDPRExportService.process_data_export(late).is_err())
+        late.refresh_from_db()
+        self.assertEqual((late.status, late.file_path), ("failed", ""))
+        self.assertFalse((self.media / "gdpr_exports").exists() and any((self.media / "gdpr_exports").iterdir()))
 
     def test_full_deletion_deletes_the_files_and_keeps_the_rows(self) -> None:
         export = self.completed_export()

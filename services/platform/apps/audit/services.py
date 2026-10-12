@@ -1082,6 +1082,10 @@ class GDPRExportService:
     ) -> Result[DataExport, str]:
         """Create a new GDPR data export request"""
 
+        if not user.is_active:
+            # An erased (anonymised) person has no export to request (see _revoke_user_exports).
+            return Err("Account is not active")
+
         try:
             # Default export scope - comprehensive user data
             if not export_scope:
@@ -1131,18 +1135,27 @@ class GDPRExportService:
         gets a second file. The download window starts at completion. A failure after the file is
         written deletes it, so no file outlives a failed export.
         """
+        # Locks in erasure's order - the person, then the export - so the two take turns without
+        # deadlocking: an export processed first is revoked by the erasure, and one processed after
+        # it finds the person erased.
+        requester_id = DataExport.objects.filter(pk=export_request.pk).values_list("requested_by_id", flat=True).first()
+        user = User.objects.select_for_update().filter(pk=requester_id).first() if requester_id else None
         list(DataExport.objects.select_for_update().filter(pk=export_request.pk).values_list("pk", flat=True))
         export_request.refresh_from_db()
         if export_request.status not in ("pending", "failed"):
             return Err("Export has already been processed")
 
-        user = export_request.requested_by
         if user is None:
             # Orphaned request: the requester was deleted before processing (W7)
             export_request.status = "failed"
             export_request.error_message = "Requesting user was deleted before the export was processed"
             export_request.save(update_fields=["status", "error_message"])
             return Err("Requesting user no longer exists")
+        if not user.is_active:
+            export_request.status = "failed"
+            export_request.error_message = "Requesting user was erased before the export was processed"
+            export_request.save(update_fields=["status", "error_message"])
+            return Err("Requesting user is no longer active")
 
         saved_path = ""
         try:
@@ -1610,6 +1623,9 @@ class GDPRDeletionService:
         """
         from .export_files import untrack_export_file  # noqa: PLC0415  # Deferred: import cycle
 
+        # The person's row first, as export processing locks it: an export being generated
+        # finishes before this runs, and one requested meanwhile is refused once this commits.
+        list(User.objects.select_for_update().filter(pk=user.pk).values_list("pk", flat=True))
         exports = list(DataExport.objects.select_for_update().filter(requested_by=user).values_list("pk", "file_path"))
         if not exports:
             return
