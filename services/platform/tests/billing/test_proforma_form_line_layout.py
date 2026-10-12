@@ -1,9 +1,11 @@
 """The proforma form's line total fits its column on one line.
 
 The total sat in a one-twelfth column with no `nowrap`, so the amount and the currency broke onto
-two lines, while the quantity, a short number, took two twelfths. The row exists three times (a
-saved line, the empty first line and the script's template for added lines), and all three must
-keep the same layout, under a header whose columns line up with them.
+two lines. Measured in a browser at 800 and 1280 pixels, a one-twelfth column is about 45 pixels:
+too narrow for the total and for a three-digit quantity alike. The description gives up a column,
+so the quantity, unit price, VAT rate and total each get two, and the total is set a size smaller.
+The row exists three times (a saved line, the empty first line and the script's template for added
+lines), and all three must keep the same layout, under a header whose columns line up with them.
 """
 
 from __future__ import annotations
@@ -30,6 +32,7 @@ class ProformaLineLayoutTests(SimpleTestCase):
         self.assertEqual(len(totals), 3)
         for classes in totals:
             self.assertIn("whitespace-nowrap", classes.split())
+            self.assertIn("text-sm", classes.split())
 
     def test_every_row_copy_has_the_same_columns_and_fills_the_grid(self) -> None:
         starts = [match.start() for match in re.finditer(re.escape(ROW_START), self.source)]
@@ -39,11 +42,11 @@ class ProformaLineLayoutTests(SimpleTestCase):
         self.assertEqual(len(rows), 3)
         # Description, quantity, unit price, VAT rate, total, remove.
         for columns in rows:
-            self.assertEqual([int(span) for span in columns], [4, 1, 2, 2, 2, 1])
+            self.assertEqual([int(span) for span in columns], [3, 2, 2, 2, 2, 1])
 
     def test_the_header_lines_up_with_the_row(self) -> None:
         header = re.search(r'<div class="hidden md:grid grid-cols-12[^"]*">(.*?)</div>\n\s*\n', self.source, re.S)
         assert header is not None
         spans = [int(span) for span in re.findall(r'<div class="col-span-(\d+)">', header.group(1))]
 
-        self.assertEqual(spans, [4, 1, 2, 2, 2])
+        self.assertEqual(spans, [3, 2, 2, 2, 2])
