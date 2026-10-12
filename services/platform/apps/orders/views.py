@@ -222,6 +222,32 @@ def _catalog_reference_cents(product_price: ProductPrice | None, billing_period:
 _ITEM_PRICE_FIELDS = frozenset({"unit_price_cents", "setup_cents"})
 
 
+def _apply_posted_billing_period(item: OrderItem, request: HttpRequest) -> None:
+    """Store the item form's billing period in the item's config, where the model keeps it.
+
+    The item ModelForm has no billing period field (the period lives in ``config``), so the
+    select's value was dropped and every item was priced and saved as monthly. An unknown or
+    empty value keeps whatever the item already has.
+    """
+    period = request.POST.get("billing_period", "")
+    if period in OrderItem.BILLING_PERIOD_CHOICES:
+        item.billing_period = period
+
+
+def _payment_method_options() -> list[dict[str, str]]:
+    choices = Order._meta.get_field("payment_method").choices or []
+    return [{"value": value, "label": str(label)} for value, label in choices]
+
+
+_TERMINAL_ORDER_STATUSES = frozenset({"completed", "cancelled"})
+
+
+def _staff_can_edit(user: Any, order: Order, editable_fields: list[str]) -> bool:
+    """The staff UI may edit an order with editable fields that is not completed or cancelled."""
+    is_staff = bool(getattr(user, "is_staff_user", False))
+    return is_staff and bool(editable_fields) and order.status not in _TERMINAL_ORDER_STATUSES
+
+
 def _validate_item_price_overrides(
     item: OrderItem,
     reference: tuple[int | None, int],
@@ -537,10 +563,7 @@ def order_detail(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
     is_staff = getattr(request.user, "is_staff_user", False)
     editable_fields = order.get_editable_fields()
 
-    # Determine if order can be edited based on status and user permissions
-    can_edit = (
-        is_staff and len(editable_fields) > 0 and order.status not in ["completed", "cancelled"]  # Terminal states
-    )
+    can_edit = _staff_can_edit(request.user, order, editable_fields)
 
     # Preflight validation (only for draft orders)
     preflight_errors: list[str] = []
@@ -733,11 +756,6 @@ def _render_order_create(
         vat_display = tax_profile.cui if tax_profile else "No CUI"
         customer_options.append({"value": customer.id, "label": f"{customer.get_display_name()} ({vat_display})"})
 
-    payment_method_choices = Order._meta.get_field("payment_method").choices
-    payment_method_options = [
-        {"value": choice[0], "label": str(choice[1])} for choice in (payment_method_choices or [])
-    ]
-
     context = {
         "form": form,
         "action": "create",
@@ -745,7 +763,7 @@ def _render_order_create(
         "products": products,
         "customer_options": customer_options,
         **policy.as_dict(),
-        "payment_method_options": payment_method_options,
+        "payment_method_options": _payment_method_options(),
         "is_staff_user": True,
     }
 
@@ -1057,6 +1075,12 @@ def order_edit(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
         "order": order,
         "editable_fields": editable_fields,
         "can_edit_all": editable_fields == ["*"],
+        # Without the options the select held only its placeholder and saving posted "".
+        "payment_method_options": _payment_method_options(),
+        # The items section and its script are gated on these, as on the detail page.
+        "is_staff": getattr(request.user, "is_staff_user", False),
+        "can_edit": _staff_can_edit(request.user, order, editable_fields),
+        "edit_mode": True,
     }
 
     return render(request, "orders/order_form.html", context)
@@ -1371,20 +1395,15 @@ def order_items_list(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
     # Calculate totals for display
     order.calculate_totals()
 
-    # Basic staff access for viewing and general management
     is_staff = request.user.is_staff_user
-    editable_fields = order.get_editable_fields()
-
-    # Use consistent can_edit logic with order_detail view
-    can_edit = (
-        is_staff and len(editable_fields) > 0 and order.status not in ["completed", "cancelled"]  # Terminal states
-    )
-
     context = {
         "order": order,
         "items": items,
-        "can_edit": can_edit,
+        "can_edit": _staff_can_edit(request.user, order, order.get_editable_fields()),
         "is_staff": is_staff,
+        # The edit page refetches this list after an add or edit and asks to keep its controls.
+        # It only chooses which buttons render; every item endpoint checks access itself.
+        "edit_mode": request.GET.get("mode") == "edit",
     }
 
     # Return partial template for HTMX requests
@@ -1404,6 +1423,7 @@ def _process_order_item_creation(
             # Create order item
             item = form.save(commit=False)
             item.order = order
+            _apply_posted_billing_period(item, request)
 
             # Get product and pricing information
             product = item.product
@@ -1521,15 +1541,15 @@ def _render_order_item_form(
     # Create product options with pricing data for auto-population
     product_options = []
     for product in products:
-        # Get all available prices for this product in the order's currency
+        # The catalog price per period, computed as the server computes it when the item is
+        # saved, so an automatically filled price is never judged an override. A period the
+        # product has no price for is left out and needs a manual price.
+        product_price = product.get_price_for_currency(order.currency.code)
         prices_data = {}
-        for price in product.get_active_prices().filter(currency=order.currency):
-            prices_data[price.billing_period] = {
-                "unit_cents": price.amount_cents,
-                "setup_cents": price.setup_cents,
-                "amount_display": f"{order.currency.code} {price.amount}",
-                "setup_display": f"{order.currency.code} {price.setup_fee}",
-            }
+        for period, _label in billing_period_choices:
+            unit_cents, setup_cents = _catalog_reference_cents(product_price, period)
+            if unit_cents is not None:
+                prices_data[period] = {"unit_cents": unit_cents, "setup_cents": setup_cents}
 
         product_options.append(
             {
@@ -1537,7 +1557,8 @@ def _render_order_item_form(
                 "label": f"{product.name} ({product.get_product_type_display()})",
                 "data": {
                     "product_type": product.product_type,
-                    "requires_domain": product.requires_domain,
+                    # The script compares strings: a Python bool would render "True".
+                    "requires_domain": "true" if product.requires_domain else "false",
                     "prices": json.dumps(prices_data),  # JSON-encoded pricing data for auto-population
                 },
             }
@@ -1550,6 +1571,7 @@ def _render_order_item_form(
         "products": products,
         "product_options": product_options,
         "billing_period_options": billing_period_options,
+        "selected_billing_period": item.billing_period if item else "monthly",
         "action": action,
     }
 
@@ -1609,6 +1631,7 @@ def _process_order_item_update(form: ModelForm[Any], order: Order, pk: uuid.UUID
                 return json_error("This order's confirmed prices cannot be changed. Cancel it and create a new order.")
             # Update order item
             updated_item = form.save(commit=False)
+            _apply_posted_billing_period(updated_item, request)
 
             # Get product and pricing information
             product = updated_item.product

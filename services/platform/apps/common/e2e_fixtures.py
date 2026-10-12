@@ -343,6 +343,50 @@ def validate_baseline() -> dict[str, Any]:
     return result
 
 
+def _order_edit_scenario(key: str) -> dict[str, Any]:
+    """A draft order the staff edit page can change, and two products priced in its currency."""
+    from apps.billing.models import Currency  # noqa: PLC0415 -- cross-domain fixture orchestration
+    from apps.orders.models import Order  # noqa: PLC0415 -- cross-domain fixture orchestration
+    from apps.products.models import Product, ProductPrice  # noqa: PLC0415 -- cross-domain fixture orchestration
+
+    customer = _customer(f"scenario-{key}", name=f"E2E order edit {key}")
+    currency = Currency.objects.get(code="RON")
+    products = {}
+    for kind, product_type, requires_domain, monthly, setup in (
+        ("hosting", "shared_hosting", True, 1_500, 500),
+        ("addon", "addon", False, 300, 0),
+    ):
+        product = Product.objects.create(
+            name=f"E2E {kind} {key}",
+            slug=f"e2e-{kind}-{key}",
+            product_type=product_type,
+            requires_domain=requires_domain,
+            is_active=True,
+            meta={"fixture_owner": OWNER, "fixture_name": key},
+        )
+        ProductPrice.objects.create(
+            product=product, currency=currency, monthly_price_cents=monthly, setup_cents=setup, is_active=True
+        )
+        products[kind] = product
+    # Created directly, not through OrderService: a submitted order has a frozen quote, and the
+    # staff item form refuses to change a frozen quote.
+    order = Order.objects.create(
+        customer=customer,
+        currency=currency,
+        status="draft",
+        payment_method="bank_transfer",
+        meta={"fixture_owner": OWNER, "fixture_name": key},
+    )
+    return {
+        "order_id": str(order.pk),
+        "order_number": order.order_number,
+        "domain_product_id": str(products["hosting"].pk),
+        "domain_product_name": products["hosting"].name,
+        "plain_product_id": str(products["addon"].pk),
+        "plain_product_name": products["addon"].name,
+    }
+
+
 @transaction.atomic
 def seed_scenario(scenario: str, key: str) -> dict[str, Any]:
     from apps.customers.models import CustomerAddress  # noqa: PLC0415 -- cross-domain fixture orchestration
@@ -359,6 +403,8 @@ def seed_scenario(scenario: str, key: str) -> dict[str, Any]:
             meta={"fixture_owner": OWNER, "fixture_name": key},
         )
         return {"product_id": str(product.pk), "product_slug": product.slug, "name": product.name}
+    if scenario == "order_edit":
+        return _order_edit_scenario(key)
     customer = _customer(f"scenario-{key}", name=f"E2E billing {key}")
     if scenario in {"account", "service_request"}:
         user = _user(f"account-{key}@e2e.test")

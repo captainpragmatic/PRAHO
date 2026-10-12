@@ -19,12 +19,119 @@
   function ic(key) {
     return (cfg().icons && cfg().icons[key]) || "";
   }
+  // The server emits the order URL; a hard-coded "/app/orders/" prefix made every item
+  // request 404, since orders are served under /orders/.
   function base() {
-    return "/app/orders/" + cfg().orderId;
+    return (cfg().orderUrl || "").replace(/\/$/, "");
+  }
+  // The edit page's list keeps its item controls when it is refetched.
+  function itemsUrl() {
+    return base() + "/items/?mode=edit";
   }
 
   // Global state for tracking open edit forms
   var activeEditRowId = null;
+
+  // ── Item form behaviour ───────────────────────────────────────────────────
+  // The item form arrives by fetch()+innerHTML, which never runs the scripts it carries, so
+  // its domain field, automatic prices and price preview live here. The add form and an open
+  // edit row share element ids, so everything works on the form the event came from.
+
+  function itemForm(el) {
+    return el && el.closest ? el.closest("form[data-order-item-form]") : null;
+  }
+  function field(form, name) {
+    return form.querySelector('[name="' + name + '"]');
+  }
+  function integerValue(input, fallback) {
+    var n = parseInt((input && input.value) || "", 10);
+    return isNaN(n) ? fallback : n;
+  }
+  function selectedProduct(form) {
+    var select = field(form, "product");
+    return select && select.selectedIndex >= 0 ? select.options[select.selectedIndex] : null;
+  }
+
+  function updatePricePreview(form) {
+    var currency = form.dataset.currency || "";
+    var unit = integerValue(field(form, "unit_price_cents"), 0);
+    var setup = integerValue(field(form, "setup_cents"), 0);
+    var quantity = integerValue(field(form, "quantity"), 1);
+    var amounts = { unit: unit, setup: setup, total: (unit + setup) * quantity };
+    Object.keys(amounts).forEach(function (key) {
+      var el = form.querySelector('[data-preview="' + key + '"]');
+      if (el) { el.textContent = currency + " " + (amounts[key] / 100).toFixed(2); }
+    });
+  }
+
+  function toggleDomainSection(form) {
+    var section = form.querySelector("[data-domain-section]");
+    if (!section) { return; }
+    var option = selectedProduct(form);
+    var required = !!option && option.dataset.requiresDomain === "true";
+    section.classList.toggle("hidden", !required);
+    var domain = field(form, "domain_name");
+    if (domain) { domain.required = required; }
+  }
+
+  function autoPopulatePricing(form) {
+    var option = selectedProduct(form);
+    var period = field(form, "billing_period");
+    var unit = field(form, "unit_price_cents");
+    var setup = field(form, "setup_cents");
+    if (!option || !option.value || !period || !period.value || !unit || !setup) { return; }
+    var prices;
+    try { prices = JSON.parse(option.dataset.prices || "{}"); } catch (e) { return; }
+    var price = prices[period.value];
+    // A price someone typed is kept; otherwise the catalog price for the period, or nothing
+    // when the product has none, so a stale automatic price is never submitted as an override.
+    if (!unit.dataset.manualOverride) { unit.value = price ? price.unit_cents : ""; }
+    if (!setup.dataset.manualOverride) { setup.value = price ? price.setup_cents : "0"; }
+    updatePricePreview(form);
+  }
+
+  function initItemForm(container) {
+    var form = container && container.querySelector("form[data-order-item-form]");
+    if (!form) { return; }
+    // Only the domain field and the preview: an item being edited keeps the prices it has.
+    toggleDomainSection(form);
+    updatePricePreview(form);
+  }
+
+  function showFormError(form, message) {
+    var box = form.querySelector("[data-form-error]");
+    if (!box) {
+      box = document.createElement("p");
+      box.setAttribute("data-form-error", "");
+      box.setAttribute("role", "alert");
+      box.className = "text-sm text-red-400";
+      form.insertBefore(box, form.firstChild);
+    }
+    box.textContent = message;
+  }
+
+  document.addEventListener("change", function (e) {
+    var form = itemForm(e.target);
+    if (!form) { return; }
+    if (e.target.name === "product") {
+      toggleDomainSection(form);
+      autoPopulatePricing(form);
+    } else if (e.target.name === "billing_period") {
+      autoPopulatePricing(form);
+    }
+  });
+
+  document.addEventListener("input", function (e) {
+    var form = itemForm(e.target);
+    if (!form) { return; }
+    var name = e.target.name;
+    if (name === "unit_price_cents" || name === "setup_cents") {
+      e.target.dataset.manualOverride = "true";
+      updatePricePreview(form);
+    } else if (name === "quantity") {
+      updatePricePreview(form);
+    }
+  });
 
   function toggleExpandableEdit(itemId) {
     var editRow = document.getElementById("edit-row-" + itemId);
@@ -53,6 +160,7 @@
         .then(function (response) { return response.text(); })
         .then(function (html) {
           formContainer.innerHTML = html;
+          initItemForm(formContainer);
           var firstInput = formContainer.querySelector("input, select, textarea");
           if (firstInput) { firstInput.focus(); }
         })
@@ -114,6 +222,7 @@
         .then(function (response) { return response.text(); })
         .then(function (html) {
           formContainer.innerHTML = html;
+          initItemForm(formContainer);
           var firstInput = formContainer.querySelector("input, select, textarea");
           if (firstInput) { firstInput.focus(); }
         })
@@ -187,7 +296,7 @@
   function refreshOrderItemsSection() {
     var orderItemsSection = document.getElementById("order-items-section");
     if (!orderItemsSection) { return; }
-    fetch(base() + "/items/", {
+    fetch(itemsUrl(), {
       method: "GET",
       headers: { "HX-Request": "true", "X-Requested-With": "XMLHttpRequest" },
     })
@@ -202,7 +311,7 @@
   function refreshOrderItemsSmart() {
     var tableBody = document.querySelector("#order-items-section tbody");
     if (!tableBody) { refreshOrderItemsSection(); return; }
-    fetch(base() + "/items/", {
+    fetch(itemsUrl(), {
       method: "GET",
       headers: { "HX-Request": "true", "X-Requested-With": "XMLHttpRequest" },
     })
@@ -288,11 +397,23 @@
         body: new FormData(form),
         headers: { "HX-Request": "true", "X-Requested-With": "XMLHttpRequest" },
       })
-        .then(function (response) { return response.text(); })
-        .then(function (html) {
-          if (html.indexOf("error") !== -1 || html.indexOf("<form") !== -1) {
+        .then(function (response) {
+          var isJson = (response.headers.get("Content-Type") || "").indexOf("application/json") !== -1;
+          return response.text().then(function (body) { return { isJson: isJson, body: body }; });
+        })
+        .then(function (result) {
+          var html = result.body;
+          if (result.isJson) {
+            // A refusal (validation, price override) answers JSON; keep the form and say why.
+            var data = {};
+            try { data = JSON.parse(html); } catch (err) { data = {}; }
+            showFormError(form, data.message || t("unknownError"));
+          } else if (html.indexOf("data-order-item-form") !== -1) {
             var formContainer = form.closest('[id*="form-container"]');
-            if (formContainer) { formContainer.innerHTML = html; }
+            if (formContainer) {
+              formContainer.innerHTML = html;
+              initItemForm(formContainer);
+            }
           } else {
             updateOrderTotals();
             cancelAddItemForm();

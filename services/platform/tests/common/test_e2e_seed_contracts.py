@@ -92,6 +92,21 @@ class E2EFixtureTests(TestCase):
         self.assertEqual(product.meta["fixture_name"], "pricing001")
         self.assertFalse(product.prices.exists())
 
+    def test_order_edit_scenario_is_an_editable_draft_with_two_priced_products(self) -> None:
+        seed_baseline()
+        fixture = seed_scenario("order_edit", "orderedit01")
+
+        order = Order.objects.get(pk=fixture["order_id"])
+        self.assertEqual((order.status, order.payment_method), ("draft", "bank_transfer"))
+        self.assertTrue(order.can_edit_items)  # not frozen: the staff item form can change it
+        hosting = Product.objects.get(pk=fixture["domain_product_id"])
+        addon = Product.objects.get(pk=fixture["plain_product_id"])
+        self.assertEqual((hosting.requires_domain, addon.requires_domain), (True, False))
+        for product in (hosting, addon):
+            self.assertEqual(product.meta["fixture_name"], "orderedit01")
+            self.assertIsNotNone(product.get_price_for_currency(order.currency.code))
+        self.assertEqual(fixture["domain_product_name"], hosting.name)
+
     def test_baseline_seeds_a_registration_allowance_for_a_full_browser_run(self) -> None:
         seed_baseline()
 
