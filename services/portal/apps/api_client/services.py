@@ -1337,13 +1337,21 @@ class PlatformAPIClient:
             data={"user_id": user_id, "action": "get_consent_history"},
         )
 
-    def request_data_export_secure(self, user_id: int) -> dict[str, Any]:
-        """🔒 Request GDPR data export (Article 20) — HMAC BODY"""
+    def request_data_export_secure(self, user_id: int, ip_address: str | None = None) -> dict[str, Any]:
+        """🔒 Request GDPR data export (Articles 15 and 20) — HMAC BODY"""
         return self._make_request(
             "POST",
             "/gdpr/data-export/",
             user_id=user_id,
-            data={"user_id": user_id, "action": "request"},
+            data={"user_id": user_id, "action": "request", "ip_address": ip_address},
+        )
+
+    def download_data_export(self, user_id: int, export_id: str, ip_address: str | None = None) -> bytes:
+        """🔒 The file of the user's own GDPR export, relayed as Platform sends it — HMAC BODY"""
+        return self._make_binary_request(
+            "POST",
+            f"/gdpr/data-export/{export_id}/download/",
+            data={"user_id": user_id, "ip_address": ip_address},
         )
 
     def get_data_export_status(self, user_id: int) -> dict[str, Any]:

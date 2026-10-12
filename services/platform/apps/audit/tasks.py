@@ -366,6 +366,47 @@ def delete_expired_data_exports() -> dict[str, int]:
     return results
 
 
+# A pending export older than this was never picked up (lost queue message, worker restart, or
+# a request made before exports were queued); the sweeper processes it.
+STALE_PENDING_EXPORT_MINUTES = 10
+
+
+def process_data_export_task(export_id: str) -> str:
+    """Generate one GDPR export file, queued when the export is requested."""
+    from apps.audit.models import DataExport  # noqa: PLC0415  # Deferred: import cycle
+    from apps.audit.services import GDPRExportService  # noqa: PLC0415  # Deferred: import cycle
+
+    export = DataExport.objects.filter(pk=export_id).first()
+    if export is None:
+        return "missing"
+    result = GDPRExportService.process_data_export(export)
+    if result.is_err():
+        logger.warning(f"⚠️ [GDPR Export] Export {export_id} not generated: {result.unwrap_err()}")
+        return "failed"
+    return "completed"
+
+
+def process_pending_data_exports() -> dict[str, int]:
+    """Generate exports still pending after STALE_PENDING_EXPORT_MINUTES."""
+    from apps.audit.models import DataExport  # noqa: PLC0415  # Deferred: import cycle
+
+    stale_before = timezone.now() - timedelta(minutes=STALE_PENDING_EXPORT_MINUTES)
+    pending = list(
+        DataExport.objects.filter(status="pending", requested_at__lt=stale_before).values_list("pk", flat=True)
+    )
+    results = {"completed": 0, "failed": 0}
+    for export_id in pending:
+        try:
+            outcome = process_data_export_task(str(export_id))
+        except Exception:
+            outcome = "failed"
+            logger.exception(f"🔥 [GDPR Export] Sweeper could not process export {export_id}")
+        results["completed" if outcome == "completed" else "failed"] += 1
+    if pending:
+        logger.info(f"✅ [GDPR Export] Pending exports: {results['completed']} generated, {results['failed']} failed")
+    return results
+
+
 def setup_audit_scheduled_tasks() -> dict[str, str]:
     """Register the audit module's schedules (M6: the single scheduling vehicle).
 
@@ -410,6 +451,12 @@ def setup_audit_scheduled_tasks() -> dict[str, str]:
         "audit-expired-exports-daily": {
             "func": "apps.audit.tasks.delete_expired_data_exports",
             "schedule_type": Schedule.DAILY,
+            "repeats": -1,
+        },
+        "audit-pending-exports-every-15-min": {
+            "func": "apps.audit.tasks.process_pending_data_exports",
+            "schedule_type": Schedule.MINUTES,
+            "minutes": 15,
             "repeats": -1,
         },
     }

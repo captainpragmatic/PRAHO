@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A GDPR data export requested in the portal is generated and can be downloaded.** The request created an export that nothing ever processed, while the page promised an email that was never sent.
+  - **Now.** Platform generates the export in the background, and a sweep picks up any request left waiting, including those made before this fix. The portal page lists each export with a Download button while it can be downloaded (7 days). The file is relayed straight from Platform and not stored on the portal.
+  - **One at a time.** A new request while one is being prepared or can still be downloaded returns that one.
+  - **The pages say what happens:** no email promise, on the portal or on Platform's own privacy page.
+  - **Deploy** Platform with or before the portal.
 - **Platform no longer writes an audit row for every page a staff member opens.** (#622)
   - **The bug.** Every signed-in request under `/users/`, `/billing/`, `/customers/`, `/admin/`, `/api/`, `/settings/` or `/tickets/` wrote a `session_activity_*` audit event. The rows had no user attached, only the user's id, the path and the IP in their details, so GDPR export and erasure never found them, and retention kept them for two years. The request log already records each request.
   - **The same path's multiple-address check** stored one cache entry per request, about 1,800 an hour for a page that refreshes itself, and once three addresses were seen it wrote a `suspicious_activity_detected` row on every request for up to an hour. It now keeps one entry per address and records an address once, when it joins the pattern.
