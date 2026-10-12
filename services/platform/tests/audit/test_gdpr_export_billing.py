@@ -94,6 +94,27 @@ class ExportBillingDataTests(TestCase):
 
         self.assertEqual(self.billing(), [])
 
+    def test_a_soft_deleted_tax_profile_is_still_exported(self) -> None:
+        customer = self.customer("individual", "owner", cnp=CNP)
+        CustomerTaxProfile.objects.get(customer=customer).soft_delete()
+
+        [entry] = self.billing()
+
+        self.assertEqual(entry["tax_profile"]["cnp"], CNP)
+
+    def test_each_profile_and_document_counts_as_a_record(self) -> None:
+        customer = self.customer("individual", "owner", cnp=CNP)
+        self.documents(customer, cnp=CNP)
+        self.documents(customer, cnp=CNP)
+        only_billing = {
+            "include_profile": False, "include_customers": False, "include_billing": True,
+            "include_tickets": False, "include_audit_logs": False,
+        }
+        data = GDPRExportService._collect_user_data(self.user, only_billing)
+
+        # The user profile (always counted), then one tax profile, two invoices and two proformas.
+        self.assertEqual(GDPRExportService._count_records(data), 1 + 1 + 2 + 2)
+
     def test_a_former_owner_gets_no_billing_data(self) -> None:
         customer = self.customer("individual", "owner", cnp=CNP)
         self.documents(customer, cnp=CNP)

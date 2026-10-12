@@ -1355,7 +1355,8 @@ class GDPRExportService:
             user=user, role="owner", is_active=True, customer__customer_type="individual"
         ).values_list("customer_id", flat=True)
         for customer_id in customer_ids:
-            profile = CustomerTaxProfile.objects.filter(customer_id=customer_id).first()
+            # all_objects: a soft-deleted profile still holds the person's data, as erasure knows.
+            profile = CustomerTaxProfile.all_objects.filter(customer_id=customer_id).first()
             invoices = Invoice.objects.filter(customer_id=customer_id).select_related("currency").order_by("pk")
             proformas = (
                 ProformaInvoice.objects.filter(customer_id=customer_id).select_related("currency").order_by("pk")
@@ -1403,7 +1404,9 @@ class GDPRExportService:
         """Count total records in the export"""
         count = 1  # User profile
         count += len(user_data.get("customers", []))
-        count += len(user_data.get("billing_data", []))
+        # Each billing entry counts its tax profile and every document, not just the customer.
+        for entry in user_data.get("billing_data", []):
+            count += (1 if entry.get("tax_profile") else 0) + len(entry["invoices"]) + len(entry["proformas"])
         count += len(user_data.get("support_tickets", []))
         count += len(user_data.get("audit_summary", {}).get("recent_activities", []))
         return count
