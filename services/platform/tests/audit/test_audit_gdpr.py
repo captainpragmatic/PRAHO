@@ -111,7 +111,9 @@ class GDPRExportServiceTestCase(TestCase):
         # Check Romanian compliance metadata (updated field name)
         self.assertIn("metadata", data)
         self.assertIn("gdpr_article", data["metadata"])
-        self.assertEqual(data["metadata"]["gdpr_article"], "Article 20 - Right to data portability")
+        self.assertEqual(
+            data["metadata"]["gdpr_article"], "Articles 15 and 20 - Right of access and right to data portability"
+        )
 
         # Check user data
         self.assertIn("user_profile", data)

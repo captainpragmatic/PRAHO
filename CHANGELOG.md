@@ -74,6 +74,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **A GDPR export includes the person's billing data.** The export had a billing section and an "include billing" option, but the section was always empty.
+  - **Now.** For each individual customer the person owns, the export holds the tax profile (with the CNP) and the invoices and proformas, each reduced to a fixed list of fields. Issued invoices keep the CNP for the retention period, so the person gets that too.
+  - **Not exported to members:** a company's invoices. They are the company's records, not the member's personal data.
+  - **An unreadable CNP fails the export** instead of producing an incomplete copy. The export now cites GDPR Article 15 (right of access) as well as Article 20.
 - **GDPR export files are deleted when they expire and when their owner is erased.** Files stayed in media, and so in every backup, until staff deleted them by hand.
   - **Now.** A daily task deletes the files of exports past their 7-day window and keeps each row as the record. Erasing a person (anonymisation or full deletion) closes their exports and deletes the files once the erasure commits. Staff "delete expired" keeps the row too.
   - **The privacy dashboard** offers a download only for an export that can still be downloaded.
