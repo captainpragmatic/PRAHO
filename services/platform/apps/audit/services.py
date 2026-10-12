@@ -1103,6 +1103,19 @@ class GDPRExportService:
                 current = User.objects.select_for_update().filter(pk=user.pk, is_active=True).first()
                 if current is None:
                     return Err("Account is not active")
+                # One export at a time: a queued, running or still-downloadable export is returned
+                # instead of a new one, so repeated requests cannot pile up work and files.
+                existing = (
+                    DataExport.objects.filter(requested_by=current)
+                    .filter(
+                        Q(status__in=("pending", "processing"))
+                        | (Q(status="completed", expires_at__gt=timezone.now()) & ~Q(file_path=""))
+                    )
+                    .order_by("-requested_at")
+                    .first()
+                )
+                if existing is not None:
+                    return Ok(existing)
                 export_request = DataExport.objects.create(
                     requested_by=current,
                     export_type="gdpr",
@@ -1225,6 +1238,7 @@ class GDPRExportService:
             {
                 "id": str(e.id),
                 "status": e.status,
+                "downloadable": e.is_downloadable,
                 "requested_at": e.requested_at.isoformat(),
                 "completed_at": e.completed_at.isoformat() if e.completed_at else None,
                 "expires_at": e.expires_at.isoformat(),

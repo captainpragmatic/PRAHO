@@ -1064,14 +1064,12 @@ def data_export_view(request: HttpRequest) -> HttpResponse:
                 messages.error(request, _("Authentication required."))
                 return redirect("users:data_export")
 
-            result = api_client.request_data_export_secure(user_id)
+            result = api_client.request_data_export_secure(user_id, ip_address=get_safe_client_ip(request))
             if result.get("success"):
                 logger.info(f"✅ [Portal Data Export] Request created: export_id={result.get('export_id')}")
                 messages.success(
                     request,
-                    _(
-                        "Data export request submitted successfully. You will receive an email with download instructions within 48 hours."
-                    ),
+                    _("Your data export is being prepared. Refresh this page in a few minutes to download it."),
                 )
             else:
                 messages.error(request, _("Failed to create export request. Please try again."))
@@ -1108,6 +1106,28 @@ def data_export_view(request: HttpRequest) -> HttpResponse:
     }
 
     return render(request, "users/data_export.html", context)
+
+
+@never_cache
+@require_http_methods(["GET"])
+def data_export_download_view(request: HttpRequest, export_id: UUID) -> HttpResponse:
+    """Relay the signed-in user's own GDPR export file from Platform; nothing is kept here."""
+    user_id = request.session.get("user_id")
+    if not request.session.get("customer_id") or not user_id:
+        return redirect("/login/")
+
+    try:
+        content = api_client.download_data_export(user_id, str(export_id), ip_address=get_safe_client_ip(request))
+    except PlatformAPIError as e:
+        if is_rate_limited_error(e):
+            raise
+        logger.warning(f"⚠️ [Portal Data Export] Export {export_id} not available (status {e.status_code})")
+        messages.error(request, _("This export is not available to download. Request a new one below."))
+        return redirect("users:data_export")
+
+    response = HttpResponse(content, content_type="application/json")
+    response["Content-Disposition"] = f'attachment; filename="gdpr-export-{export_id}.json"'
+    return response  # @never_cache marks it no-store
 
 
 @never_cache

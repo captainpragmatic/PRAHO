@@ -60,6 +60,8 @@ CALLS = (
     "binary-with-headers",
     "payment-intent",
     "stripe-config",
+    "data-export-request",
+    "data-export-download",
     *(f"invoice-{name}" for name in INVOICE_NUMBERS),
     *(f"document-{name}" for name in DOCUMENT_NUMBERS),
 )
@@ -132,6 +134,10 @@ def calls(client):
     yield "binary-with-headers", lambda: client.download_ticket_attachment(1, 1, 2, 3)
     yield "payment-intent", lambda: client.post_billing("create-payment-intent/", data={"order_id": "o-1"}, user_id=1)
     yield "stripe-config", lambda: client.get_billing("stripe-config/")
+    yield "data-export-request", lambda: client.request_data_export_secure(1, ip_address="203.0.113.9")
+    yield "data-export-download", lambda: client.download_data_export(
+        1, "6f1c2a3b-4d5e-4f60-8a71-92b3c4d5e6f7", ip_address="203.0.113.9"
+    )
     for name, number in INVOICE_NUMBERS.items():
         yield f"invoice-{name}", lambda number=number: client._make_request(
             "GET", f"/billing/invoices/{number}/", user_id=1

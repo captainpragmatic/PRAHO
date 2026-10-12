@@ -33,7 +33,7 @@ from apps.common.decorators import staff_required_strict
 from apps.common.encryption import DecryptionError
 from apps.common.pagination import pagination_query
 from apps.common.request_ip import get_safe_client_ip
-from apps.common.types import Err, Ok
+from apps.common.types import Err, Ok, Result
 
 from .export_files import read_export_file, untrack_export_file
 from .models import (
@@ -127,6 +127,14 @@ def gdpr_dashboard(request: HttpRequest) -> HttpResponse:
     }
 
     return render(request, "audit/gdpr_dashboard.html", context)
+
+
+def _generate_unless_ready(export_request: "DataExport") -> Result[str, str]:
+    """Generate the export, unless a repeat request returned one that is already complete."""
+    if export_request.status in ("pending", "failed"):
+        logger.info("🔍 [GDPR Export] Processing export immediately...")
+        return gdpr_export_service.process_data_export(export_request)
+    return Ok(export_request.file_path)
 
 
 def _handle_immediate_download(request: HttpRequest, export_request: "DataExport", user: Any) -> HttpResponse | None:
@@ -223,16 +231,12 @@ def request_data_export(request: HttpRequest) -> HttpResponse:
                 logger.info(f"✅ [GDPR Export] Export request created: {export_request.id}")
                 messages.success(
                     request,
-                    _(
-                        "Your data export request has been created. You will receive an email "
-                        "when it is ready for download. Request ID: {}"
-                    ).format(str(export_request.id)[:8]),
+                    _("Your data export request has been created. Request ID: {}").format(str(export_request.id)[:8]),
                 )
 
-                # Process export asynchronously using Django-Q2
-                # For now, process immediately for demo
-                logger.info("🔍 [GDPR Export] Processing export immediately...")
-                processing_result = gdpr_export_service.process_data_export(export_request)
+                # This page generates the export at once and offers it straight away; portal requests
+                # are queued instead (apps.api.gdpr).
+                processing_result = _generate_unless_ready(export_request)
                 logger.info(f"🔍 [GDPR Export] Processing result type: {type(processing_result)}")
 
                 match processing_result:

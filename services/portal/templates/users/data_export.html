@@ -79,9 +79,9 @@
             <div class="text-sm text-blue-200"> {# tmpl-allow TMPL005: needs alert nested_content #}
               <p class="font-medium mb-1">{% trans 'Export Process' %}</p>
               <ul class="text-xs space-y-1 text-blue-300"> {# tmpl-allow TMPL005: needs alert nested_content #}
-                <li>• {% trans 'Your request will be processed within 48 hours' %}</li>
-                <li>• {% trans 'You will receive an email with a secure download link' %}</li>
-                <li>• {% trans 'The download link expires after 7 days for security' %}</li>
+                <li>• {% trans 'Your export is prepared within a few minutes' %}</li>
+                <li>• {% trans 'Download it from this page once it is ready' %}</li>
+                <li>• {% trans 'Each export can be downloaded for 7 days' %}</li>
                 <li>• {% trans 'Data will be provided in JSON format' %}</li>
               </ul>
             </div>
@@ -142,7 +142,13 @@
               </div>
             </div>
           </div>
-          {% badge export.status|status_label variant=export.status|status_variant size="xs" rounded="full" %}
+          <div class="flex items-center gap-2">
+            {% if export.downloadable %}
+              {% url 'users:data_export_download' export_id=export.id as export_download_url %}
+              {% trans "Download" as export_download_label %}{% button export_download_label variant="success" size="xs" icon="download" href=export_download_url %}
+            {% endif %}
+            {% badge export.status|status_label variant=export.status|status_variant size="xs" rounded="full" %}
+          </div>
         </div>
         {% endfor %}
       </div>
