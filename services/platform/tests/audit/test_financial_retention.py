@@ -118,12 +118,15 @@ class RetentionHoldTests(TestCase):
     def test_full_erasure_keeps_held_evidence_with_its_content(self) -> None:
         held = self.event("invoice_issued", "business_operation", timezone.now(), ip_address="198.51.100.7")
         login = self.event("login_success", "authentication", timezone.now())
+        # A business event that is not financial evidence is the person's data, not a legal record.
+        profile_edit = self.event("profile_updated", "business_operation", timezone.now())
         request = GDPRDeletionService.create_deletion_request(user=self.user, deletion_type="delete").unwrap()
 
         self.assertTrue(GDPRDeletionService.process_deletion_request(request).is_ok())
 
         self.assertFalse(User.objects.filter(email="retention@example.test").exists())
         self.assertFalse(AuditEvent.objects.filter(pk=login.pk).exists())
+        self.assertFalse(AuditEvent.objects.filter(pk=profile_edit.pk).exists())
         held.refresh_from_db()
         self.assertIsNone(held.user)
         self.assertNotEqual(held.ip_address, "198.51.100.7")

@@ -113,8 +113,9 @@ default that fits every deployment (ADR-0047).
   computed in Romanian time, not as a day count. The business-operations policy is 2,374 days
   (6.5 years, the latest any record from a calendar year must be kept), so no business event
   expires before its legal date whatever its classification. The anonymisation branch and
-  full GDPR erasure hold the same evidence; erasure keeps it with its content and scrubs only the
-  network identity.
+  full GDPR erasure hold the same evidence (financial and within its legal period); erasure keeps
+  it with its content and scrubs only the network identity, and deletes the person's other events,
+  business ones included.
 - Anonymization is an explicit invariant: identity fields cleared,
   person-bearing object references replaced with a sentinel, evidence
   stubbed, metadata reduced to an **allowlist**, then re-stamped with a fresh
