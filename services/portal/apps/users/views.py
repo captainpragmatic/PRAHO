@@ -1125,6 +1125,9 @@ def data_export_download_view(request: HttpRequest, export_id: UUID) -> HttpResp
             logger.warning(f"⚠️ [Portal Data Export] Platform unavailable for export {export_id} download")
             messages.error(request, _("Service temporarily unavailable. Please try again later."))
             return redirect("users:data_export")
+        if e.status_code == HTTPStatus.REQUEST_ENTITY_TOO_LARGE:
+            messages.error(request, _("This export is too large to download here. Contact support to receive it."))
+            return redirect("users:data_export")
         logger.warning(f"⚠️ [Portal Data Export] Export {export_id} not available (status {e.status_code})")
         messages.error(request, _("This export is not available to download. Request a new one below."))
         return redirect("users:data_export")

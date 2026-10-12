@@ -146,6 +146,8 @@
             {% if export.downloadable %}
               {% url 'users:data_export_download' export_id=export.id as export_download_url %}
               {% trans "Download" as export_download_label %}{% button export_download_label variant="success" size="xs" icon="download" href=export_download_url %}
+            {% elif export.too_large %}
+              <span class="text-xs text-slate-400">{% trans "This export is too large to download here. Contact support to receive it." %}</span>
             {% endif %}
             {% badge export.status|status_label variant=export.status|status_variant size="xs" rounded="full" %}
           </div>

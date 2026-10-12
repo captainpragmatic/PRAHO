@@ -79,6 +79,13 @@ class ExportRequestTests(ExportDeliveryTestCase):
         self.assertEqual(first.data["export_id"], second.data["export_id"])
         self.assertEqual(DataExport.objects.filter(requested_by=self.user).count(), 1)
 
+    def test_a_repeat_request_is_not_queued_again(self) -> None:
+        with patch("apps.api.gdpr.views.async_task") as enqueue, self.captureOnCommitCallbacks(execute=True):
+            self.request_export()
+            self.request_export()
+
+        enqueue.assert_called_once()
+
     def test_the_queued_task_generates_the_export(self) -> None:
         export = GDPRExportService.create_data_export_request(self.user).unwrap()
 
@@ -166,11 +173,14 @@ class ExportDownloadTests(ExportDeliveryTestCase):
             response = self.request_export()
         self.assertNotEqual(response.data["export_id"], str(export.id))
 
-    def test_an_export_too_large_for_the_portal_is_refused(self) -> None:
+    def test_an_export_too_large_for_the_portal_is_refused_and_not_offered(self) -> None:
         export = self.completed_export()
         DataExport.objects.filter(pk=export.pk).update(file_size=EXPORT_API_MAX_BYTES + 1)
 
         self.assertEqual(self.download(export.id).status_code, 413)
+        status = data_export_api(self.signed("/api/gdpr/data-export/", {"user_id": self.user.id, "action": "status"}))
+        [entry] = status.data["exports"]
+        self.assertEqual((entry["downloadable"], entry["too_large"]), (False, True))
 
     def test_only_a_uuid_reaches_the_endpoint(self) -> None:
         with self.assertRaises(Resolver404):

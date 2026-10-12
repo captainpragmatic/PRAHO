@@ -7912,6 +7912,11 @@ msgstr "Mergeți la panoul de confidențialitate"
 msgid "This export is not available to download. Request a new one below."
 msgstr "Acest export nu poate fi descărcat. Solicitați unul nou mai jos."
 
+#: services/portal/apps/users/views.py
+#: services/portal/templates/users/data_export.html
+msgid "This export is too large to download here. Contact support to receive it."
+msgstr "Acest export este prea mare pentru a fi descărcat aici. Contactați suportul pentru a-l primi."
+
 #: services/portal/templates/users/data_export.html
 msgid "Download"
 msgstr "Descarcă"
