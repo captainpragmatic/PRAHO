@@ -94,6 +94,13 @@ class ExportBillingDataTests(TestCase):
 
         self.assertEqual(self.billing(), [])
 
+    def test_a_former_owner_gets_no_billing_data(self) -> None:
+        customer = self.customer("individual", "owner", cnp=CNP)
+        self.documents(customer, cnp=CNP)
+        CustomerMembership.objects.filter(user=self.user, customer=customer).update(is_active=False)
+
+        self.assertEqual(self.billing(), [])
+
     def test_billing_follows_its_own_scope_flag(self) -> None:
         self.documents(self.customer("individual", "owner", cnp=CNP), cnp=CNP)
 

@@ -166,6 +166,16 @@ class GDPRErasureCNPTests(TestCase):
             **fields,
         )
 
+    def test_erasing_a_former_owner_leaves_the_customer_s_cnp(self) -> None:
+        former_customer, former_profile = individual("Former Owner Of")
+        CustomerMembership.objects.create(user=self.user, customer=former_customer, role="owner", is_active=False)
+        proforma = self.proforma(former_customer)
+
+        self.anonymize()
+
+        self.assertEqual(CustomerTaxProfile.objects.get(pk=former_profile.pk).cnp, CNP)
+        self.assertEqual(ProformaInvoice.objects.get(pk=proforma.pk).bill_to_cnp, CNP)
+
     def test_erasure_keeps_the_cnp_on_issued_invoices(self) -> None:
         issued = self.invoice(self.customer, issue=True)
 

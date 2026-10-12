@@ -1352,7 +1352,7 @@ class GDPRExportService:
 
         billing_data: list[dict[str, Any]] = []
         customer_ids = CustomerMembership.objects.filter(
-            user=user, role="owner", customer__customer_type="individual"
+            user=user, role="owner", is_active=True, customer__customer_type="individual"
         ).values_list("customer_id", flat=True)
         for customer_id in customer_ids:
             profile = CustomerTaxProfile.objects.filter(customer_id=customer_id).first()
@@ -1618,7 +1618,7 @@ class GDPRDeletionService:
         # snapshot for the legal retention period. Queryset updates need no decryption, so an
         # unreadable CNP cannot block the erasure; all_objects includes soft-deleted profiles.
         owned_individuals = CustomerMembership.objects.filter(
-            user=user, role="owner", customer__customer_type="individual"
+            user=user, role="owner", is_active=True, customer__customer_type="individual"
         ).values("customer_id")
         cls._clear_cnp(
             CustomerTaxProfile.all_objects.filter(customer_id__in=owned_individuals),
