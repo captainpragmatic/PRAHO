@@ -520,13 +520,11 @@ class MFAServiceTestCase(TestCase):
 
         self.assertTrue(result)
 
-        # Verify audit log includes admin info
-        audit_logs = AuditEvent.objects.filter(
-            user=self.user,
-            action="2fa_admin_reset",  # Should be 2fa_admin_reset, not 2fa_disabled
-        )
-        audit_log = audit_logs.first()
-        self.assertIsNotNone(audit_log)
+        # The administrator is the actor and the account is the subject; the event used to
+        # name the account as its own actor, hiding who reset it.
+        audit_log = AuditEvent.objects.get(action="2fa_admin_reset")  # not 2fa_disabled
+        self.assertEqual(audit_log.user, admin_user)
+        self.assertEqual(audit_log.object_id, str(self.user.pk))
         self.assertIn("admin@example.com", audit_log.description)
         self.assertIn("Security incident", str(audit_log.metadata))
 

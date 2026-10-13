@@ -62,7 +62,7 @@
                                     {% else %}
                                         {{ account.domain }}
                                     {% endif %}
-                                    <span class="ml-2 text-slate-500">({{ account.domains|length|default:1 }} domain{{ account.domains|length|default:1|pluralize }})</span>
+                                    <span class="ml-2 text-slate-500">({% blocktrans trimmed count counter=account.domains|length|default:1 %}{{ counter }} domain{% plural %}{{ counter }} domains{% endblocktrans %})</span>
                                 </div>
                             </div>
                         </div>

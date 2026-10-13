@@ -4,11 +4,10 @@
 order_items_list partial (a fragment's inline <script> is blocked under the nonce CSP,
 and fetch()+innerHTML never runs inserted scripts). This block emits the per-request
 data on the FULL page (nonce'd, runs once on load); the static module reads it lazily.
-Include it once per order page, OUTSIDE any fetch-replaced container. Gated to the
-same condition the old inline script used (order_edit + can_edit), so the read-only
-detail page keeps loading no order-items JS.
+Include it once per order page, OUTSIDE any fetch-replaced container. Gated on the
+edit page's edit_mode + can_edit, so the read-only detail page loads no order-items JS.
 {% endcomment %}
-{% if request.resolver_match.url_name == 'order_edit' and can_edit %}
+{% if edit_mode and can_edit %}
 {% icon 'document' as oiIcondocument %}
 {% icon 'x' as oiIconx %}
 {% icon 'clock' as oiIconclock %}
@@ -16,6 +15,7 @@ detail page keeps loading no order-items JS.
 <script nonce="{{ csp_nonce }}">
 window.PRAHO_ORDER_ITEMS = {
   orderId: "{{ order.id|escapejs }}",
+  orderUrl: "{% filter escapejs %}{% url 'orders:order_detail' pk=order.id %}{% endfilter %}",
   i18n: {
     editing: "{% filter escapejs %}{% trans 'Editing...' %}{% endfilter %}",
     loading: "{% filter escapejs %}{% trans 'Loading...' %}{% endfilter %}",

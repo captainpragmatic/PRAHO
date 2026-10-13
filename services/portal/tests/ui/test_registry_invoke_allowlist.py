@@ -19,7 +19,7 @@ TEMPLATE_ROOTS = (
 UI_ACTIONS = REPO_ROOT / "shared" / "ui" / "static" / "js" / "ui-actions.js"
 CSP_ACTIONS = REPO_ROOT / "services" / "portal" / "static" / "js" / "csp-actions.js"
 
-EXPECTED_INVOKE_NAMES = 39
+EXPECTED_INVOKE_NAMES = 38  # checkWebAuthnSupport left with the unfinished Passkeys card
 TEMPLATE_INVOKE_RE = re.compile(
     r"(?:data_invoke|data-invoke)\s*=\s*(?P<quote>['\"])(?P<name>[A-Za-z_$][\w$]*)(?P=quote)"
 )

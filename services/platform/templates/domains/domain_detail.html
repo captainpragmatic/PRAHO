@@ -164,7 +164,7 @@
                                     <div>
                                         <p class="text-sm font-medium text-slate-900 dark:text-white">
                                             {% if item.action == 'register' %}{% icon "plus" %}{% elif item.action == 'renew' %}{% icon "refresh" %}{% elif item.action == 'transfer' %}{% icon "download" %}{% endif %}
-                                            {{ item.get_action_display }} - {{ item.years }} {% trans "year" %}{{ item.years|pluralize }}
+                                            {% blocktrans trimmed count counter=item.years asvar period_label %}{{ counter }} year{% plural %}{{ counter }} years{% endblocktrans %}{{ item.get_action_display }} - {{ period_label }}
                                         </p>
                                         <p class="text-sm text-slate-500 dark:text-slate-400">
                                             {{ item.created_at|romanian_date:"datetime" }}

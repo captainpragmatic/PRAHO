@@ -23,7 +23,11 @@ class OrderPaginationQueryTests(TestCase):
         parameters = {"q": SEARCH, "search": SEARCH, "status": "draft", "facet": ["one", "two"], "page": "1"}
         response = self.client.get(reverse(route), parameters)
         assert_next_query(
-            self, response, {"q": [SEARCH], "search": [SEARCH], "status": ["draft"], "facet": ["one", "two"]}
+            self,
+            response,
+            {"q": [SEARCH], "search": [SEARCH], "status": ["draft"], "facet": ["one", "two"]},
+            # The full page pages with plain links; the HTMX list pages through its own route.
+            htmx_view="orders:order_list_htmx" if route == "orders:order_list_htmx" else None,
         )
 
     def test_full_list_next_link_round_trips_filters(self) -> None:

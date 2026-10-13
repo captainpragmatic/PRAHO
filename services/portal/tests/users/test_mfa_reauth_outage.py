@@ -26,6 +26,11 @@ SIGNATURE_REFUSED = PlatformAPIError(
     is_unavailable=True,
 )
 CREDENTIALS_REJECTED = PlatformAPIError("Rejected credentials", status_code=403)
+STAFF_MFA_REQUIRED = PlatformAPIError(
+    "Two-factor authentication is required for staff accounts.",
+    status_code=403,
+    response_data={"success": False, "code": "staff_mfa_required"},
+)
 
 
 @override_settings(
@@ -73,3 +78,14 @@ class MFAReauthenticationOutageTests(SimpleTestCase):
                 response = self._post(view, CREDENTIALS_REJECTED)
                 self.assertContains(response, "Check your password")
                 self.assertEqual(getattr(response.wsgi_request, "_portal_auth_outcome", None), "failure")
+
+    def test_the_staff_2fa_policy_is_named_and_counts_no_attempt(self) -> None:
+        """Platform refuses a staff member's disable while its staff 2FA policy is on.
+
+        The password and code were right, so the page must not say otherwise or charge an attempt.
+        """
+        response = self._post("users:mfa_disable", STAFF_MFA_REQUIRED)
+
+        self.assertContains(response, "required for staff accounts")
+        self.assertNotContains(response, "Check your password")
+        self.assertNotEqual(getattr(response.wsgi_request, "_portal_auth_outcome", None), "failure")

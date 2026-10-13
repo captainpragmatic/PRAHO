@@ -28564,3 +28564,142 @@ msgstr "Introduceți codul de TVA sau CUI-ul firmei."
 #: templates/customers/partials/customer_table.html
 msgid "CNP on file"
 msgstr "CNP înregistrat"
+
+#: templates/domains/domain_detail.html templates/domains/domain_register.html
+#: templates/domains/domain_renew.html
+#, python-format
+msgid "%(counter)s year"
+msgid_plural "%(counter)s years"
+msgstr[0] "%(counter)s an"
+msgstr[1] "%(counter)s ani"
+msgstr[2] "%(counter)s de ani"
+
+#: templates/orders/cart/cart_summary_partial.html templates/orders/order_list.html
+#: templates/orders/partials/order_list.html
+#, python-format
+msgid "%(counter)s item"
+msgid_plural "%(counter)s items"
+msgstr[0] "%(counter)s articol"
+msgstr[1] "%(counter)s articole"
+msgstr[2] "%(counter)s de articole"
+
+#: templates/provisioning/virtualmin/partials/accounts_table.html
+#, python-format
+msgid "%(counter)s domain"
+msgid_plural "%(counter)s domains"
+msgstr[0] "%(counter)s domeniu"
+msgstr[1] "%(counter)s domenii"
+msgstr[2] "%(counter)s de domenii"
+
+#: apps/settings/catalog.py
+msgid "Staff access"
+msgstr "Accesul personalului"
+
+#: apps/settings/catalog.py
+msgid "Require two-factor authentication for staff"
+msgstr "Autentificare în doi pași obligatorie pentru personal"
+
+#: apps/settings/catalog.py
+msgid "When enabled, a staff account without two-factor authentication must set it up before using the platform, and gets no API token or customer portal session until it does. Staff cannot disable it while this is on."
+msgstr "Când este activată, un cont de personal fără autentificare în doi pași trebuie să o configureze înainte de a folosi platforma și nu primește token API sau sesiune în portalul clienților până nu o face. Personalul nu o poate dezactiva cât timp setarea este activă."
+
+#: apps/common/middleware.py
+msgid "Two-factor authentication is required for staff accounts. Set it up first."
+msgstr "Autentificarea în doi pași este obligatorie pentru conturile de personal. Configurați-o mai întâi."
+
+#: apps/common/middleware.py
+msgid "Set up two-factor authentication to continue. It is required for staff accounts."
+msgstr "Configurați autentificarea în doi pași pentru a continua. Este obligatorie pentru conturile de personal."
+
+#: apps/users/services.py
+msgid "Set up two-factor authentication before creating an API token."
+msgstr "Configurați autentificarea în doi pași înainte de a crea un token API."
+
+#: apps/api/users/views.py
+msgid "Two-factor authentication is required for staff accounts."
+msgstr "Autentificarea în doi pași este obligatorie pentru conturile de personal."
+
+#: apps/users/views.py
+msgid "Two-factor authentication is required for staff accounts, so it cannot be disabled."
+msgstr "Autentificarea în doi pași este obligatorie pentru conturile de personal, deci nu poate fi dezactivată."
+
+#: apps/users/views.py
+msgid "You cannot reset your own two-factor authentication."
+msgstr "Nu vă puteți reseta propria autentificare în doi pași."
+
+#: apps/users/views.py
+msgid "This account has no two-factor authentication to reset."
+msgstr "Acest cont nu are autentificare în doi pași de resetat."
+
+#: apps/users/views.py
+#, python-format
+msgid "Two-factor authentication was reset for %(email)s. They set it up again at their next sign-in."
+msgstr "Autentificarea în doi pași a fost resetată pentru %(email)s. O va configura din nou la următoarea conectare."
+
+#: apps/users/views.py
+msgid "Too many attempts. Please wait an hour and try again."
+msgstr "Prea multe încercări. Așteptați o oră și încercați din nou."
+
+#: apps/users/views.py apps/api/users/serializers.py
+msgid "The password or the code is incorrect."
+msgstr "Parola sau codul este incorect."
+
+#: apps/users/views.py
+msgid "Your sign-in timed out. Enter your password again."
+msgstr "Conectarea a expirat. Introduceți din nou parola."
+
+#: templates/users/user_detail.html
+msgid "Two-factor authentication"
+msgstr "Autentificare în doi pași"
+
+#: templates/users/user_detail.html
+msgid "Not set up"
+msgstr "Neconfigurată"
+
+#: templates/users/user_detail.html
+msgid "Reset two-factor authentication"
+msgstr "Resetează autentificarea în doi pași"
+
+#: templates/users/user_detail.html
+msgid "For someone who has lost both their authenticator and their backup codes. Their sessions end, and they set up two-factor authentication again at their next sign-in."
+msgstr "Pentru cineva care și-a pierdut atât aplicația de autentificare, cât și codurile de rezervă. Sesiunile sale se încheie, iar la următoarea conectare va configura din nou autentificarea în doi pași."
+
+#: templates/users/user_detail.html
+msgid "Reset this person's two-factor authentication? Their sessions end and they must set it up again."
+msgstr "Resetați autentificarea în doi pași a acestei persoane? Sesiunile sale se încheie și va trebui să o configureze din nou."
+
+#: templates/users/mfa_method_selection.html
+msgid "Required for staff accounts"
+msgstr "Obligatorie pentru conturile de personal"
+
+#: templates/users/mfa_setup.html
+msgid "Your current password confirms that it is you setting this up."
+msgstr "Parola actuală confirmă că dumneavoastră faceți această configurare."
+
+#: templates/users/mfa_disable.html
+msgid "Enter your current password"
+msgstr "Introduceți parola actuală"
+
+#: templates/users/mfa_disable.html
+msgid "I understand that disabling MFA will make my account less secure and will permanently delete all backup codes"
+msgstr "Înțeleg că dezactivarea MFA îmi face contul mai puțin sigur și șterge definitiv toate codurile de rezervă"
+
+#: templates/users/mfa_regenerate_backup_codes.html
+msgid "I understand that all existing backup codes will be invalidated and I will need to store the new codes securely"
+msgstr "Înțeleg că toate codurile de rezervă existente vor fi invalidate și că va trebui să păstrez în siguranță codurile noi"
+
+#: templates/users/mfa_backup_codes.html
+#, python-format
+msgid "Your %(counter)s backup code"
+msgid_plural "Your %(counter)s backup codes"
+msgstr[0] "%(counter)s cod de rezervă"
+msgstr[1] "%(counter)s coduri de rezervă"
+msgstr[2] "%(counter)s de coduri de rezervă"
+
+#: templates/users/mfa_setup.html
+msgid "Your app shows codes for a different account?"
+msgstr "Aplicația afișează coduri pentru alt cont?"
+
+#: templates/users/mfa_setup.html
+msgid "Start over with a new code"
+msgstr "Începeți din nou cu un cod nou"

@@ -92,6 +92,8 @@ RETIRED_SETTING_KEYS: frozenset[str] = frozenset(
         "provisioning.server_overload_threshold",
         "users.credential_max_age_days",
         "users.credential_rotation_retry_limit",
+        # Shared-device mode had no caller, so its timeout changed nothing.
+        "users.shared_device_timeout_minutes",
         "virtualmin.auth_health_check_interval_seconds",
         "virtualmin.backup_compression_enabled",
         "virtualmin.backup_retention_days",

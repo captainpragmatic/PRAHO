@@ -50,11 +50,11 @@ class SessionTimeoutAuditTests(TestCase):
 
     @patch("apps.users.services.log_security_event")
     def test_a_changed_timeout_is_logged_again(self, mock_log: MagicMock) -> None:
-        """Guard: switching to shared-device mode changes the timeout, so it is logged."""
+        """Guard: choosing "remember me" changes the timeout, so it is logged."""
         request = self._request()
         SessionSecurityService.update_session_timeout(request)
 
-        request.session["shared_device_mode"] = True
+        request.session["remember_me"] = True
         SessionSecurityService.update_session_timeout(request)
 
         self.assertEqual(_timeout_calls(mock_log), 2)

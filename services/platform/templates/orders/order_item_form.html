@@ -48,7 +48,7 @@
 
       <!-- Billing Period -->
       <div>
-        {% input_field "billing_period" input_type="select" label="Billing Period" html_id="id_billing_period" placeholder="Select billing period" required=True options=billing_period_options value=form.billing_period.value help_text="How often this will be billed" error=form.billing_period.errors.0 %}
+        {% input_field "billing_period" input_type="select" label="Billing Period" html_id="id_billing_period" placeholder="Select billing period" required=True options=billing_period_options value=selected_billing_period help_text="How often this will be billed" error=form.billing_period.errors.0 %}
       </div>
     </div>
 
@@ -160,7 +160,7 @@ document.addEventListener('DOMContentLoaded', function() {
         // Convert cents to currency
         const unitPrice = (unitPriceCents / 100).toFixed(2);
         const setupPrice = (setupCents / 100).toFixed(2);
-        const totalPerUnit = ((unitPriceCents + setupCents) / 100).toFixed(2);
+        const totalPerUnit = (unitPriceCents / 100).toFixed(2);
 
         // Update displays
         document.getElementById('unit-price-display').textContent = `${currency} ${unitPrice}`;
@@ -168,7 +168,8 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('total-price-display').textContent = `${currency} ${totalPerUnit}`;
 
         // Update tax preview
-        const lineTotal = (unitPriceCents + setupCents) * quantity;
+        // As OrderItem computes it: the setup fee is charged once, not per unit.
+        const lineTotal = unitPriceCents * quantity + setupCents;
         const subtotal = lineTotal / 100;
         const vatAmount = subtotal * 0.21; // 21% VAT
         const total = subtotal + vatAmount;
@@ -185,7 +186,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (productSelect && domainSection) {
             const selectedOption = productSelect.options[productSelect.selectedIndex];
-            const requiresDomain = selectedOption && selectedOption.dataset.requiresDomain === 'true';
+            const requiresDomain = selectedOption && selectedOption.dataset.requires_domain === 'true';
 
             if (requiresDomain) {
                 domainSection.style.display = 'block';
@@ -239,7 +240,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
 
                 if (!setupInput.dataset.manualOverride) {
-                    setupInput.value = '0';
+                    setupInput.value = selectedOption.dataset.setup_cents || '0';
                 }
             }
         } catch (e) {

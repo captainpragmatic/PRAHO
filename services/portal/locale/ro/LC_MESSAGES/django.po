@@ -7908,6 +7908,10 @@ msgstr "Termenii de Serviciu sunt în curs de actualizare. Vă rugăm să încer
 msgid "Go to your Privacy Dashboard"
 msgstr "Mergeți la panoul de confidențialitate"
 
+#: apps/users/views.py
+msgid "Two-factor authentication is required for staff accounts, so it cannot be disabled."
+msgstr "Autentificarea în doi pași este obligatorie pentru conturile de personal, deci nu poate fi dezactivată."
+
 #: services/portal/apps/users/views.py
 msgid "This export is not available to download. Request a new one below."
 msgstr "Acest export nu poate fi descărcat. Solicitați unul nou mai jos."

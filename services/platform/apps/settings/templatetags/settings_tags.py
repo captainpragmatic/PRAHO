@@ -40,7 +40,7 @@ def get_boolean_setting(key: str, default: bool = False) -> bool:
 
     Usage:
         {% setting_bool "users.mfa_required_for_staff" %}
-        {% setting_bool "domains.registration_enabled" default=True %}
+        {% setting_bool "system.maintenance_mode" default=False %}
     """
     try:
         return SettingsService.get_boolean_setting(key, default)

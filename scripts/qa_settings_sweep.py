@@ -385,8 +385,19 @@ def multi_key_change_set() -> list[str]:
     return problems
 
 
+# Keys this sweep cannot cycle through its own session, with where they are covered instead.
+SKIPPED_KEYS = {
+    # Switching it on sends this unenrolled admin session to 2FA setup on every request, so the
+    # sweep could neither verify the change nor switch it back.
+    "users.mfa_required_for_staff": "covered end to end by tests/e2e/platform/test_staff_two_factor.py",
+}
+
 results = {}
 for definition in CATALOG:
+    if definition.key in SKIPPED_KEYS:
+        print(f"SKIP {definition.key}: {SKIPPED_KEYS[definition.key]}")
+        results[definition.key] = []
+        continue
     try:
         problems = sweep_secret(definition) if definition.sensitive else sweep_regular(definition)
     except Exception as error:
@@ -405,8 +416,9 @@ key_results = {k: v for k, v in results.items() if not k.startswith("__")}
 if len(key_results) != len(CATALOG):
     print(f"COUNT MISMATCH: swept {len(key_results)} of {len(CATALOG)} catalog keys")
     results["__count__"] = ["mismatch"]
-passed = sum(1 for problems in key_results.values() if not problems)
-print(f"\n{passed}/{len(CATALOG)} keys passed the full change→verify→audit→restore cycle")
+passed = sum(1 for key, problems in key_results.items() if not problems and key not in SKIPPED_KEYS)
+swept = len(CATALOG) - len(SKIPPED_KEYS)
+print(f"\n{passed}/{swept} keys passed the full change→verify→audit→restore cycle ({len(SKIPPED_KEYS)} skipped)")
 report_path = Path("/tmp") / "settings_sweep_results.json"  # noqa: S108  # dev-only report
 with report_path.open("w") as fh:
     json.dump(results, fh, indent=1, default=str)

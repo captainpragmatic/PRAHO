@@ -191,18 +191,17 @@ class MFADisableSerializer(serializers.Serializer):
         """Validate password and 2FA token"""
         user = self.context["user"]
 
-        # Verify password
+        # One answer for a wrong password and a wrong code, as on Platform. The code is checked
+        # only after the password, so a backup code offered with a wrong password is not spent.
+        incorrect = _("The password or the code is incorrect.")
         if not user.check_password(data["password"]):
-            raise serializers.ValidationError(_("Invalid password."))
+            raise serializers.ValidationError(incorrect)
 
-        # Verify 2FA token
-        token = data["token"]
         if not user.two_factor_enabled:
             raise serializers.ValidationError(_("2FA is not enabled for this account."))
 
-        # Verify current token
-        if not MFAService.verify_mfa_code(user, token, self.context.get("request"))["success"]:
-            raise serializers.ValidationError(_("Invalid verification code."))
+        if not MFAService.verify_mfa_code(user, data["token"], self.context.get("request"))["success"]:
+            raise serializers.ValidationError(incorrect)
 
         return data
 

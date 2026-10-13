@@ -34,6 +34,7 @@ from django.utils import timezone
 
 from apps.audit.services import AuditContext, AuditService, TwoFactorAuditRequest  # For MFA audit logging
 from apps.common.constants import MAX_LOGIN_ATTEMPTS
+from apps.common.request_ip import get_safe_client_ip
 
 # Educational Example: This demonstrates different type annotation patterns
 # Pattern 1: Using TYPE_CHECKING (RECOMMENDED) - Fixed for most functions
@@ -72,6 +73,37 @@ else:
 # encounter when adding type safety to existing Django codebases.
 # ===============================================================================
 logger = logging.getLogger(__name__)
+
+# ===============================================================================
+# STAFF 2FA POLICY
+# ===============================================================================
+
+STAFF_MFA_SETTING = "users.mfa_required_for_staff"
+
+
+def staff_mfa_required() -> bool:
+    """Whether staff accounts must have 2FA: the `users.mfa_required_for_staff` setting, off by default."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415 -- users and settings import each other
+
+    return SettingsService.get_boolean_setting(STAFF_MFA_SETTING, False)
+
+
+def staff_must_enrol(user: object) -> bool:
+    """True while the policy is on for a staff account with no second factor.
+
+    The account checks come first, so an enrolled or customer account never reads the setting.
+    """
+    return (
+        bool(getattr(user, "is_staff_user", False))
+        and not getattr(user, "two_factor_enabled", False)
+        and staff_mfa_required()
+    )
+
+
+def staff_cannot_disable_mfa(user: object) -> bool:
+    """True while the policy is on for a staff account: its second factor stays."""
+    return bool(getattr(user, "is_staff_user", False)) and staff_mfa_required()
+
 
 # Optional WebAuthn library shim for tests that patch it
 try:  # pragma: no cover - presence is test-patched
@@ -664,7 +696,7 @@ class MFAService:
                     event_type="2fa_enabled",
                     user=user,
                     context=AuditContext(
-                        ip_address=request.META.get("REMOTE_ADDR") if request else None,
+                        ip_address=get_safe_client_ip(request) if request else None,
                         user_agent=request.META.get("HTTP_USER_AGENT") if request else None,
                         metadata=metadata,
                     ),
@@ -685,15 +717,19 @@ class MFAService:
         admin_user: Union["User", None] = None,
         reason: str | None = None,
         request: HttpRequest | None = None,
+        *,
+        operator: str | None = None,
     ) -> bool:
         """
         🔓 Disable TOTP/2FA with audit trail
 
         Args:
             user: User to disable TOTP for
-            admin_user: Admin performing the action (if any)
+            admin_user: Admin performing the action (if any); recorded as the event's actor
             reason: Reason for disabling
             request: HTTP request for context
+            operator: The server account that ran `manage.py reset_two_factor`; such a reset is
+                recorded with no actor, as the operator has no account in the application
         """
         try:
             if not user.two_factor_enabled:
@@ -707,16 +743,27 @@ class MFAService:
 
             event_type = "2fa_disabled"
             description = f"TOTP/2FA disabled for user {user.email}"
+            actor: User | None = None
+            actor_type = "user"
 
             if admin_user and admin_user != user:
                 metadata.update(
                     {
                         "admin_id": str(admin_user.id),
                         "admin_email": admin_user.email,
+                        "reason": reason or "Admin reset",
                     }
                 )
                 event_type = "2fa_admin_reset"
                 description = f"TOTP/2FA disabled by admin {admin_user.email} for user {user.email}"
+                actor = admin_user
+            elif operator is not None:
+                metadata.update(
+                    {"reset_by": "operator_command", "operator": operator, "reason": reason or "Operator reset"}
+                )
+                event_type = "2fa_admin_reset"
+                description = f"TOTP/2FA disabled by an operator command for user {user.email}"
+                actor_type = "system"
 
             MFAService.apply_state_change(
                 user,
@@ -725,11 +772,13 @@ class MFAService:
                     event_type=event_type,
                     user=user,
                     context=AuditContext(
-                        ip_address=request.META.get("REMOTE_ADDR") if request else None,
+                        ip_address=get_safe_client_ip(request) if request else None,
                         user_agent=request.META.get("HTTP_USER_AGENT") if request else None,
                         metadata=metadata,
+                        actor_type=actor_type,
                     ),
                     description=description,
+                    actor=actor,
                 ),
             )
 
@@ -752,15 +801,16 @@ class MFAService:
                 raise ValueError("TOTP/2FA must be enabled to generate backup codes")
 
             codes = BackupCodeService.generate_codes(user)
-            user.save()
+            # Only the codes: a full save of this instance would write back every other column.
+            user.save(update_fields=["backup_tokens"])
 
             # 📊 Audit log generation
-            AuditService.log_2fa_event(
+            MFAService._log_2fa_event_isolated(
                 TwoFactorAuditRequest(
                     event_type="2fa_backup_codes_generated",
                     user=user,
                     context=AuditContext(
-                        ip_address=request.META.get("REMOTE_ADDR") if request else None,
+                        ip_address=get_safe_client_ip(request) if request else None,
                         user_agent=request.META.get("HTTP_USER_AGENT") if request else None,
                         metadata={
                             "count": len(codes),
@@ -818,10 +868,21 @@ class MFAService:
             if not user.two_factor_enabled:
                 raise ValueError("MFA is not enabled for this user")
 
-            # Rate limiting check
+            # Rate limiting check: refused without checking the code, and audited as a failure
             if not MFAService._check_rate_limit(user):
                 result["rate_limited"] = True
                 logger.warning(f"⚠️ [MFA] Rate limit exceeded for user {user.email}")
+                MFAService._log_2fa_event_isolated(
+                    TwoFactorAuditRequest(
+                        event_type="2fa_verification_failed",
+                        user=user,
+                        context=AuditContext(
+                            ip_address=get_safe_client_ip(request) if request else None,
+                            user_agent=request.META.get("HTTP_USER_AGENT") if request else None,
+                            metadata={"method": None, "timestamp": timezone.now().isoformat(), "rate_limited": True},
+                        ),
+                    )
+                )
                 return result
 
             # Check if it's a TOTP code (6 digits)
@@ -848,7 +909,7 @@ class MFAService:
                             event_type="2fa_backup_code_used",
                             user=user,
                             context=AuditContext(
-                                ip_address=request.META.get("REMOTE_ADDR") if request else None,
+                                ip_address=get_safe_client_ip(request) if request else None,
                                 user_agent=request.META.get("HTTP_USER_AGENT") if request else None,
                                 metadata={
                                     "remaining_codes": result["remaining_backup_codes"],
@@ -865,7 +926,7 @@ class MFAService:
                     event_type=event_type,
                     user=user,
                     context=AuditContext(
-                        ip_address=request.META.get("REMOTE_ADDR") if request else None,
+                        ip_address=get_safe_client_ip(request) if request else None,
                         user_agent=request.META.get("HTTP_USER_AGENT") if request else None,
                         metadata={
                             "method": result["method"],

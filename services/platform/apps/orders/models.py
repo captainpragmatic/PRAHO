@@ -818,10 +818,13 @@ class OrderItem(models.Model):
 
     @billing_period.setter
     def billing_period(self, value: str) -> None:
-        """Store billing period in config JSON"""
-        if not isinstance(self.config, dict):
-            self.config = {}
-        self.config["billing_period"] = value
+        """Store billing period in config JSON.
+
+        A new dict rather than an update in place: a ModelForm's `initial` holds this same dict,
+        and changing it would erase the record of the period before the edit.
+        """
+        current = self.config if isinstance(self.config, dict) else {}
+        self.config = {**current, "billing_period": value}
 
     def get_billing_period_display(self) -> str:
         """Human-readable billing period for templates"""

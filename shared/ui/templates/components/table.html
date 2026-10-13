@@ -20,10 +20,8 @@
         <th scope="col"
           class="{% if header.class %}{{ header.class }}{% else %}px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider{% endif %}">
           {% if header.sortable %}
-          <button type="button" class="group inline-flex items-center hover:text-white" {%
-            if header.sort_url %} hx-get="{{ header.sort_url }}"
-            hx-target="{{ sort_target|default:'#table-container' }}" hx-swap="{{ sort_swap|default:'outerHTML' }}" {%
-            endif %}>
+          {# Each tag stays on one line: Django outputs a tag split across lines as text. #}
+          <button type="button" class="group inline-flex items-center hover:text-white"{% if header.sort_url %} hx-get="{{ header.sort_url }}" hx-target="{{ sort_target|default:'#table-container' }}" hx-swap="{{ sort_swap|default:'outerHTML' }}"{% endif %}>
             {{ header.label }}
             {% if header.sort_direction %}
             {% if header.sort_direction == "asc" %}

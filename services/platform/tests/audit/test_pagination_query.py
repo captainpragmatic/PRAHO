@@ -34,7 +34,10 @@ class AuditPaginationQueryTests(TestCase):
             {"q": SEARCH, "search": SEARCH, "action": ["create", "update"], "page_size": "2", "page": "1"},
         )
         assert_next_query(
-            self, response, {"q": [SEARCH], "search": [SEARCH], "action": ["create", "update"], "page_size": ["2"]}
+            self,
+            response,
+            {"q": [SEARCH], "search": [SEARCH], "action": ["create", "update"], "page_size": ["2"]},
+            htmx_view="audit:logs_list",
         )
 
     def test_export_requests_next_link_round_trips_filters(self) -> None:
@@ -46,4 +49,9 @@ class AuditPaginationQueryTests(TestCase):
             reverse("audit:gdpr_export_requests_list"),
             {"q": SEARCH, "status": "pending", "facet": ["one", "two"], "page": "1"},
         )
-        assert_next_query(self, response, {"q": [SEARCH], "status": ["pending"], "facet": ["one", "two"]})
+        assert_next_query(
+            self,
+            response,
+            {"q": [SEARCH], "status": ["pending"], "facet": ["one", "two"]},
+            htmx_view="audit:gdpr_export_requests_list",
+        )

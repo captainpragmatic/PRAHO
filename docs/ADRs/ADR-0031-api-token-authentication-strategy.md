@@ -287,6 +287,13 @@ status and body:
 - **Again on the locked user row**, before the second factor, so a demotion between the
   password check and issuance is not skipped.
 
+While the staff 2FA policy (`users.mfa_required_for_staff`, ADR-0004) is on, issuance also
+refuses a staff account without a second factor: the same wrong-password answer, on the
+locked row before the second factor, with the failed-login reason `mfa_not_enrolled`. The
+staff token page goes through `APITokenService.issue_token`, which applies the same rule
+under its own lock. Tokens issued before the policy was switched on keep working, for the
+same reason as a demoted owner's below.
+
 Issuance is the only gate. `HashedTokenAuthentication` checks that the owner is active and
 the token unexpired, not that the owner is still staff, so a token whose owner is later
 demoted keeps working for the routes a bare token reaches: `token/me/` and `token/revoke/`.

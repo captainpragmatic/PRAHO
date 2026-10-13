@@ -1322,6 +1322,11 @@ def mfa_disable_view(request: HttpRequest) -> HttpResponse:
             if exc.is_unavailable:
                 # Nothing was verified, so this is not a wrong credential and spends no attempt.
                 form.add_error(None, get_degraded_message(exc))
+            elif (exc.response_data or {}).get("code") == "staff_mfa_required":
+                # Platform's staff 2FA policy, not a wrong credential: say so and charge nothing.
+                form.add_error(
+                    None, _("Two-factor authentication is required for staff accounts, so it cannot be disabled.")
+                )
             else:
                 mark_auth_failure(request, bucket="reauth")
                 form.add_error(None, _("Could not disable MFA. Check your password and authentication code."))
