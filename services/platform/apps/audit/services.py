@@ -1601,6 +1601,24 @@ class GDPRDeletionService:
             logger.error(f"🔥 [GDPR Anonymization] Failed to anonymize user {original_email}: {e}")
             return Err(f"Anonymization failed: {e!s}")
 
+    # Every column _anonymize_user_records changes, and nothing else.
+    _ANONYMIZED_USER_FIELDS: ClassVar[list[str]] = [
+        "email",
+        "first_name",
+        "last_name",
+        "phone",
+        "is_active",
+        "accepts_marketing",
+        "gdpr_consent_date",
+        "last_privacy_policy_accepted",
+        "terms_accepted_at",
+        "terms_version",
+        "password",
+        "two_factor_enabled",
+        "_two_factor_secret",
+        "backup_tokens",
+    ]
+
     @classmethod
     def _anonymize_user_records(cls, user: User) -> None:
         """The anonymisation writes; `_anonymize_user_data` runs them in one savepoint."""
@@ -1608,6 +1626,11 @@ class GDPRDeletionService:
         from apps.billing.proforma_models import ProformaInvoice  # noqa: PLC0415  # Deferred: import cycle
         from apps.customers.profile_models import CustomerTaxProfile  # noqa: PLC0415  # Deferred: import cycle
         from apps.users.models import CustomerMembership  # noqa: PLC0415  # Deferred: import cycle
+        from apps.users.pending_totp import discard as discard_pending_totp  # noqa: PLC0415  # Deferred: import cycle
+
+        # Lock the row, then write only the fields anonymisation changes: a full save of a stale
+        # instance would write back anything changed meanwhile, such as a role or a 2FA reset (#689).
+        User.objects.select_for_update().filter(pk=user.pk).first()
 
         # Anonymize core user fields
         user.email = cls.ANONYMIZATION_MAP["email"]()
@@ -1629,7 +1652,8 @@ class GDPRDeletionService:
             user.two_factor_secret = ""
             user.backup_tokens = []
 
-        user.save()
+        user.save(update_fields=cls._ANONYMIZED_USER_FIELDS)
+        discard_pending_totp(user.pk)
 
         # Sibling of #226: the send audience reads Customer.marketing_consent, so an
         # anonymized user's suppression must reach their customers too — an erased user
@@ -1834,11 +1858,16 @@ class GDPRConsentService:
             if invalid_types:
                 return Err(f"Invalid consent types: {invalid_types}")
 
+            # The locked row, not the caller's instance (request.user): every write below names its
+            # fields, so nothing changed meanwhile, such as an administrator's 2FA reset, is
+            # written back (#689).
+            user = User.objects.select_for_update().get(pk=user.pk)
             changes_made = []
 
             # Handle marketing consent withdrawal
             if "marketing" in consent_types and user.accepts_marketing:
                 user.accepts_marketing = False
+                user.save(update_fields=["accepts_marketing"])
                 # The marketing send audience filters on Customer.marketing_consent, NOT this
                 # User flag, so clearing the flag alone left the customer still receiving mail
                 # (#226). Propagate to every customer the user belongs to.
@@ -1872,7 +1901,8 @@ class GDPRConsentService:
                 changes_made.append("data_processing")
 
             if changes_made:
-                user.save()
+                # Each change above has already been written: the marketing flag by name, and the
+                # anonymisation by _anonymize_user_records on this same locked instance.
 
                 # Log consent withdrawal
                 compliance_request = ComplianceEventRequest(
