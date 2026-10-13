@@ -1028,6 +1028,10 @@ class AuditRetentionPolicy(models.Model):
         The stored row decides, not _state.adding: save(force_update=True) on a fresh instance
         updates it. Only the fields this save writes are judged. The seeder lowers a period after a
         deliberate seed change inside the escape hatch; nothing else may.
+
+        The check reads the row without a lock. Two concurrent saves both compare against the period
+        stored before either of them, so the result is never shorter than that period; only the
+        order of two racing raises is unprotected. No application code writes policies.
         """
         original = type(self)._default_manager.filter(pk=self.pk).values("is_mandatory", "retention_days").first()
         if original is None or not original["is_mandatory"]:
