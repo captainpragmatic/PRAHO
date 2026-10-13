@@ -43,6 +43,7 @@ from .virtualmin_gateway import (
     VirtualminGateway,
     explicit_rejection,
     has_explicit_success,
+    listing_attribute,
 )
 from .virtualmin_models import VirtualminAccount, VirtualminServer
 
@@ -182,6 +183,12 @@ class VirtualminBackupService:
         if validation_result.is_err():
             self._update_backup_progress(backup_id, "failed", 100)
             return Err(validation_result.unwrap_err())
+
+        # Recorded before dispatch: verification expects members only for the
+        # requested components the domain actually has (None keeps it strict).
+        domain_features = self._domain_features(account)
+        if domain_features is not None:
+            backup_metadata["domain_features"] = domain_features
 
         # Stage boundary: a superseded runner must not dispatch remote work.
         if not self._owns_execution():
@@ -926,6 +933,55 @@ class VirtualminBackupService:
 
         return Ok(None)
 
+    @staticmethod
+    def _expected_feature_members(metadata: dict[str, Any]) -> list[str]:
+        """Feature members the archive must contain.
+
+        Config-only dispatch requests virtualmin and dir. A full backup expects
+        each requested component, except one the domain does not have:
+        Virtualmin writes a member only for features enabled on the domain.
+        Without the dispatch-time feature record every requested component
+        stays required.
+        """
+        if metadata.get("backup_type") == "config_only":
+            return ["virtualmin", "dir"]
+        domain_features = metadata.get("domain_features")
+        known = set(domain_features) if isinstance(domain_features, list) else None
+        expected: list[str] = []
+        not_on_domain: list[str] = []
+        for flag, feature in (
+            ("include_email", "mail"),
+            ("include_databases", "mysql"),
+            ("include_files", "dir"),
+            ("include_ssl", "ssl"),
+        ):
+            if not metadata.get(flag):
+                continue
+            if known is not None and feature not in known:
+                not_on_domain.append(feature)
+            else:
+                expected.append(feature)
+        if not_on_domain:
+            metadata["components_not_on_domain"] = not_on_domain
+        return expected
+
+    def _domain_features(self, account: VirtualminAccount) -> list[str] | None:
+        """Features enabled on the domain, from its listing; None when unknown."""
+        gateway = VirtualminGateway(VirtualminConfig(server=self.server))
+        result = gateway.call("list-domains", {"domain": account.domain, "multiline": ""})
+        if result.is_err() or not result.unwrap().success:
+            logger.warning("⚠️ [Backup] Could not read features of %s; verifying strictly", account.domain)
+            return None
+        rows = result.unwrap().data.get("data")
+        if not isinstance(rows, list):
+            return None
+        for row in rows:
+            if isinstance(row, dict) and row.get("name") == account.domain:
+                values = row.get("values")
+                features = listing_attribute(values, "Features").split() if isinstance(values, dict) else []
+                return sorted(features) or None
+        return None
+
     def _execute_full_backup(
         self, account: VirtualminAccount, backup_id: str, metadata: dict[str, Any], config: BackupConfig
     ) -> Result[str, str]:
@@ -1066,19 +1122,7 @@ class VirtualminBackupService:
                 return Err(f"Invalid backup archive: {e}")
 
             # 5. Feature completeness: Virtualmin emits domain_feature members.
-            # Config-only dispatch explicitly requests virtualmin and dir.
-            expected_features: list[str] = []
-            if metadata.get("backup_type") == "config_only":
-                expected_features.extend(("virtualmin", "dir"))
-            else:
-                for flag, feature in (
-                    ("include_email", "mail"),
-                    ("include_databases", "mysql"),
-                    ("include_files", "dir"),
-                    ("include_ssl", "ssl"),
-                ):
-                    if metadata.get(flag):
-                        expected_features.append(feature)
+            expected_features = self._expected_feature_members(metadata)
 
             domain = str(metadata.get("domain", ""))
             feature_members: set[str] = set()
