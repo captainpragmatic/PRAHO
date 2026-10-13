@@ -112,7 +112,7 @@ Everything a node needs at runtime is already in the image. `python3` and `cron`
 
   Re-running it rotates the node passwords and keys, so run `lab.sh apply-credentials` afterwards. `make virtualmin-lab-up` does both.
 - **`virtualmin_lab_roundtrip`** is the gate.
-  - It seeds files and database rows, then runs the ordinary `manage.py virtualmin_backup backup <domain> --no-email`. That command goes through the job layer inline, which covers:
+  - It seeds files and database rows, then runs the ordinary `manage.py virtualmin_backup backup <domain>` with the default components. That command goes through the job layer inline, which covers:
     - the remote.cgi `backup-domain` call;
     - the Ansible fetch into the spool;
     - checksum and member verification;
@@ -123,7 +123,10 @@ Everything a node needs at runtime is already in the image. `python3` and `cron`
     - the Ansible push;
     - the `restore-domain` call;
     - verification.
-  - Finally it requires the file checksums and the table rows to equal the pre-backup state.
+  - It then requires the file checksums and the table rows to equal the pre-backup state.
+  - Leg 2 changes the data again and runs `restore --force-restore` over the live domain. That covers the pre-restore safety backup and the ownership re-gate.
+    - Every backed-up file and row must come back.
+    - Files created after the backup survive, because Virtualmin extracts over the live tree. The gate reports them.
 
 ### Transport adaptations (lab only)
 
@@ -137,7 +140,9 @@ Both nodes publish on 127.0.0.1, which breaks four assumptions in PRAHO's produc
 ## Limits
 
 The lab is not a production node. It does not provide:
-- **Mail.** The minimal LAMP bundle has no mail feature (`virtualmin list-features`: mail `No`). The gate therefore backs up with `--no-email`, which is still PRAHO's production path. A default backup (email included) fails PRAHO's member verification on these nodes, because Virtualmin writes no `<domain>_mail` member.
+- **Mail.** The minimal LAMP bundle has no mail feature (`virtualmin list-features`: mail `No`), and neither does a node built by PRAHO's own `virtualmin.yml`, which also installs with `--minimal`.
+  - The gate's default backup (email included) therefore also proves that verification expects only the components the domain has, which the manifest records as `domain_features`.
+  - Mail data itself is never exercised.
 - **Quotas.** There are no filesystem quotas in containers.
 - **DNS.** BIND is not installed, and `*.praho.test` resolves only inside PRAHO's lab transport.
 - **Realistic timing, disk pressure or failure modes of real hardware.**

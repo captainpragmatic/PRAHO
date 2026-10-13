@@ -8,12 +8,17 @@ Ansible push, restore-domain, and post-restore verification. Only the
 transport adaptations in `_virtualmin_lab.lab_transport` differ from a real
 node.
 
-Data assertions: file checksums under public_html and the rows of a table in
-the domain's database must equal the pre-backup state after the restore.
+The backup uses the default components (email included). The lab domain has
+no mail feature, so this also proves that verification expects only the
+components the domain has.
 
-Run state: the domain is restored onto a deleted domain, so no pre-restore
-safety backup runs. The backup excludes the mail component because the
-minimal Virtualmin install has no mail feature; see the README.
+Data assertions:
+- leg 1, restore onto the deleted domain: file checksums under public_html and
+  the rows of a table in the domain's database equal the pre-backup state;
+- leg 2, forced restore over the live domain (pre-restore safety backup and
+  ownership re-gate included): every backed-up file and row is back. Files
+  created after the backup survive, because Virtualmin extracts over the live
+  tree; they are reported.
 """
 
 from __future__ import annotations
@@ -124,14 +129,38 @@ class Command(BaseCommand):
             if domain.fingerprint() == before:
                 raise CommandError("Mutation did not change the fingerprint; the assertion would be vacuous")
 
+            # Leg 1: disaster recovery onto a deleted domain (no safety backup).
             self._delete_domain(state)
             self._restore(state, backup_id)
             after = domain.fingerprint()
+            if after != before:
+                raise CommandError(f"Restored data differs from the backed-up state:\nbefore={before}\nafter={after}")
+            self.stdout.write(f"Leg 1 OK: restore onto the deleted domain reproduced {backup_id} exactly")
 
-        if after != before:
-            raise CommandError(f"Restored data differs from the backed-up state:\nbefore={before}\nafter={after}")
-        logger.info("✅ [VirtualminLab] Round trip %s restored byte-identical files and rows", backup_id)
-        self.stdout.write(self.style.SUCCESS(f"Round trip OK: backup {backup_id} restored files and rows exactly"))
+            # Leg 2: forced restore over the live domain. The production path
+            # takes the pre-restore safety backup first and re-gates ownership.
+            domain.write_file("lab/marker.txt", "changed before the forced restore\n")
+            domain.write_file("lab/late.txt", "created before the forced restore\n")
+            domain.sql(f"DELETE FROM {_TABLE} WHERE id = 3")  # noqa: S608  # Constant table name
+            self._restore(state, backup_id, force=True)
+            forced = domain.fingerprint()
+
+        if forced["rows"] != before["rows"]:
+            raise CommandError(f"Forced restore rows differ:\nbefore={before['rows']}\nafter={forced['rows']}")
+        before_files = set(before["files"].splitlines())
+        forced_files = set(forced["files"].splitlines())
+        missing = sorted(before_files - forced_files)
+        if missing:
+            raise CommandError(f"Forced restore did not bring back the backed-up files: {missing}")
+        # Virtualmin extracts over the live tree, so files created after the
+        # backup survive a forced restore. Reported, not failed: it is
+        # Virtualmin's documented overlay behaviour.
+        survivors = sorted(line.split()[-1] for line in forced_files - before_files)
+        self.stdout.write("Leg 2 OK: forced restore over the live domain restored every backed-up file and row")
+        if survivors:
+            self.stdout.write(f"Leg 2 note: files created after the backup survive a forced restore: {survivors}")
+        logger.info("✅ [VirtualminLab] Round trip %s passed both restore legs", backup_id)
+        self.stdout.write(self.style.SUCCESS(f"Round trip OK: backup {backup_id} restored files and rows"))
 
     def _close_stale_lab_jobs(self, state: LabState) -> None:
         """A previous failed lab run may have parked a job for attention, which
@@ -193,16 +222,18 @@ class Command(BaseCommand):
 
     def _backup(self, state: LabState) -> str:
         out = io.StringIO()
-        call_command("virtualmin_backup", "backup", state.domain, "--no-email", stdout=out)
+        # Default components (email included): the ordinary full backup.
+        call_command("virtualmin_backup", "backup", state.domain, stdout=out)
         match = re.search(r"^Backup ID: (\S+)$", out.getvalue(), re.MULTILINE)
         if match is None or match.group(1) == "n/a":
             raise CommandError(f"Backup reported no backup id:\n{out.getvalue()}")
         self.stdout.write(out.getvalue().rstrip())
         return match.group(1)
 
-    def _restore(self, state: LabState, backup_id: str) -> None:
+    def _restore(self, state: LabState, backup_id: str, *, force: bool = False) -> None:
         out = io.StringIO()
-        call_command("virtualmin_backup", "restore", state.domain, backup_id, stdout=out)
+        extra = ["--force-restore"] if force else []
+        call_command("virtualmin_backup", "restore", state.domain, backup_id, *extra, stdout=out)
         self.stdout.write(out.getvalue().rstrip())
 
     def _assert_published(self, state: LabState, backup_id: str) -> None:
