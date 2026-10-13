@@ -204,15 +204,7 @@
                     <div id="quick-actions-section">
                         <h3 class="text-lg font-semibold text-slate-100 mb-4">{% trans "Quick Actions" %}</h3>
                         <div class="space-y-3">
-                            {% trans "Access Control Panel" as bt5 %}{% button bt5 href="#" variant="primary" icon="external-link" %}
-                            {% trans "Reset Password" as bt6 %}{% button bt6 href="#" variant="secondary" icon="key" %}
-                            {% trans "Change Plan" as bt7 %}{% button bt7 href="#" variant="secondary" icon="upgrade" %}
-                            {% trans "Transfer Account" as bt8 %}{% button bt8 href="#" variant="secondary" icon="transfer" %}
-                            {% if account.is_active %}
-                                {% trans "Disable Account" as bt9 %}{% button bt9 href="#" variant="danger" icon="pause" %}
-                            {% else %}
-                                {% trans "Enable Account" as bt10 %}{% button bt10 href="#" variant="success" icon="play" %}
-                            {% endif %}
+                            {% include "provisioning/virtualmin/partials/account_state_actions.html" %}
 
                             <!-- Protection Toggle -->
                             {# tmpl-allow TMPL002: seven data-* attributes carry per-account values (URL, CSRF token, domain, translated confirm texts); the button tag's attrs takes one literal string the template can't build #}

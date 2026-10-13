@@ -296,9 +296,9 @@
       {% section_card title=sc_nh_title icon="chat" %}
 
         <div class="space-y-3">
-          <a href="#" class="flex items-center space-x-3 text-slate-300 hover:text-white transition-colors">
+          <a href="{% url 'tickets:create' %}" class="flex items-center space-x-3 text-slate-300 hover:text-white transition-colors">
             {% icon "chat" size="sm" %}
-            <span>{% trans "Chat with Support" %}</span>
+            <span>{% trans "Open a Support Ticket" %}</span>
           </a>
 
           <a href="mailto:{{ company.email_support }}" class="flex items-center space-x-3 text-slate-300 hover:text-white transition-colors">
