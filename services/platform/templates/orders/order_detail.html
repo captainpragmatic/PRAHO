@@ -218,7 +218,7 @@
       {% if is_staff and order.status == 'draft' %}
       <!-- Preflight Validation Card -->
       <div id="preflight-container" class="mt-6">
-        {% include 'orders/partials/preflight_results.html' with preflight_ok=preflight_ok preflight_errors=preflight_errors preflight_warnings=preflight_warnings %}
+        {% include 'orders/partials/preflight_results.html' with preflight_ok=preflight_ok preflight_errors=preflight_errors preflight_warnings=preflight_warnings in_page=True %}
       </div>
       {% endif %}
 

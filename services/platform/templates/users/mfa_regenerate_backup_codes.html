@@ -94,8 +94,6 @@
               {% trans 'Confirm regeneration to proceed' %}
             </p>
           </div>
-      </div>
-    </div>
 
     <form method="post" class="space-y-6">
             {% csrf_token %}
@@ -142,7 +140,8 @@
 
             <!-- Confirmation Checkbox -->
             <div class="border border-yellow-600 bg-yellow-900 bg-opacity-30 rounded-lg p-4">
-              {% checkbox_field name="confirm_regenerate" label="I understand that all existing backup codes will be invalidated and I will need to store the new codes securely" required=True variant="warning" %}
+              {% trans "I understand that all existing backup codes will be invalidated and I will need to store the new codes securely" as confirm_regenerate_label %}
+              {% checkbox_field name="confirm_regenerate" label=confirm_regenerate_label required=True variant="warning" %}
             </div>
 
             <!-- Action Buttons -->
@@ -197,7 +196,8 @@ function confirmRegenerate() {
     return false;
   }
 
-  return confirm('{% trans "Are you sure you want to regenerate your backup codes? All existing codes will be invalidated." %}');
+  {% trans "Are you sure you want to regenerate your backup codes? All existing codes will be invalidated." as regenerate_confirm_msg %}
+  return confirm('{{ regenerate_confirm_msg|escapejs }}');
 }
 </script>
 

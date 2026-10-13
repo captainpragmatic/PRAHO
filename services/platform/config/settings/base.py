@@ -74,6 +74,7 @@ MIDDLEWARE: list[str] = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "apps.common.middleware.MaintenanceModeMiddleware",  # 503 for non-staff while maintenance mode is active
     "apps.common.middleware.StaffOnlyPlatformMiddleware",  # Block customer access to platform (after AuthenticationMiddleware and MessageMiddleware)
+    "apps.common.middleware.StaffMFAEnrollmentMiddleware",  # Staff without 2FA can only enrol while the policy is on (before the HMAC staff bypass)
     "apps.common.middleware.PortalServiceHMACMiddleware",  # HMAC auth for portal API requests (after AuthenticationMiddleware)
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]

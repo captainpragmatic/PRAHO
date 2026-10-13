@@ -16,11 +16,11 @@ from tests.e2e.helpers.auth import (
     _dismiss_cookie_consent,
     apply_storage_state,
     dismiss_cookie_consent,
-    wait_for_alpine,
     ensure_fresh_platform_session,
     ensure_fresh_session,
     get_test_user_credentials,
     login_platform_user,
+    login_platform_user_with_code,
     login_user,
     login_user_with_retry,
     logout_platform_user,
@@ -28,6 +28,7 @@ from tests.e2e.helpers.auth import (
     navigate_to_platform_page,
     require_authentication,
     setup_console_monitoring,
+    wait_for_alpine,
     wait_for_server_ready,
 )
 from tests.e2e.helpers.constants import (
@@ -177,6 +178,7 @@ __all__ = [
     "is_logged_in_url",
     "is_login_url",
     "login_platform_user",
+    "login_platform_user_with_code",
     "login_test_user",
     "login_user",
     "login_user_with_retry",

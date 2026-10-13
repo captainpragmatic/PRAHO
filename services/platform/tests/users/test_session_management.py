@@ -3,7 +3,6 @@ Tests for Session Security functionality in PRAHO Platform
 Comprehensive security testing for Romanian hosting provider compliance.
 """
 
-from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
@@ -11,8 +10,8 @@ from django.contrib.sessions.middleware import SessionMiddleware
 from django.contrib.sessions.models import Session
 from django.core.cache import cache
 from django.test import Client, RequestFactory, TestCase
-from django.utils import timezone
 
+from apps.audit.models import AuditEvent
 from apps.common.middleware import SessionSecurityMiddleware
 from apps.common.request_ip import get_safe_client_ip
 from apps.users.models import UserSession
@@ -64,13 +63,12 @@ class SessionSecurityServiceTestCase(TestCase):
 
         self.assertIn('standard', policies)
         self.assertIn('sensitive', policies)
-        self.assertIn('shared_device', policies)
         self.assertIn('remember_me', policies)
+        self.assertNotIn('shared_device', policies)  # the mode was removed: nothing switched it on
 
         # Verify timeout values are reasonable
         self.assertEqual(policies['standard'], 3600)  # 1 hour
         self.assertEqual(policies['sensitive'], 1800)  # 30 min
-        self.assertEqual(policies['shared_device'], 900)  # 15 min
         self.assertEqual(policies['remember_me'], 86400 * 7)  # 7 days
 
     def test_get_appropriate_timeout_standard(self):
@@ -84,14 +82,6 @@ class SessionSecurityServiceTestCase(TestCase):
         request = self._get_authenticated_request(user=self.admin_user)
         timeout = SessionSecurityService.get_appropriate_timeout(request)
         self.assertEqual(timeout, 1800)  # Admin gets shorter timeout
-
-    def test_get_appropriate_timeout_shared_device(self):
-        """Test shared device timeout"""
-        request = self._get_authenticated_request()
-        request.session['shared_device_mode'] = True
-
-        timeout = SessionSecurityService.get_appropriate_timeout(request)
-        self.assertEqual(timeout, 900)  # Shared device gets shortest timeout
 
     def test_get_appropriate_timeout_remember_me(self):
         """Test remember me timeout"""
@@ -115,24 +105,6 @@ class SessionSecurityServiceTestCase(TestCase):
         mock_log.assert_called_once()
         args = mock_log.call_args[0]
         self.assertEqual(args[0], 'session_timeout_updated')
-
-    @patch('apps.users.services.log_security_event')
-    def test_enable_shared_device_mode(self, mock_log):
-        """Test enabling shared device mode"""
-        request = self._get_authenticated_request()
-
-        SessionSecurityService.enable_shared_device_mode(request)
-
-        # Check session flags
-        self.assertTrue(request.session.get('shared_device_mode'))
-        self.assertIsNotNone(request.session.get('shared_device_enabled_at'))
-        self.assertNotIn('remember_me', request.session)
-
-        # Check timeout was updated
-        self.assertEqual(request.session.get_expiry_age(), 900)
-
-        # Check logging
-        mock_log.assert_called_once()
 
     @patch('apps.users.services.log_security_event')
     @patch('apps.users.services.cache')  # Mock the cache to control behavior
@@ -243,29 +215,6 @@ class SessionSecurityServiceTestCase(TestCase):
         args = mock_log.call_args[0]
         self.assertEqual(args[0], 'sessions_revoked_password_reset')
 
-    @patch('apps.users.services.log_security_event')
-    def test_log_session_activity(self, mock_log):
-        """Test session activity logging"""
-        request = self._get_authenticated_request('/users/profile/')
-
-        SessionSecurityService.log_session_activity(
-            request,
-            'profile_access',
-            extra_data='test'
-        )
-
-        # Check that activity was logged
-        mock_log.assert_called_once()
-        args = mock_log.call_args[0]
-        self.assertEqual(args[0], 'session_activity_profile_access')
-
-        # Check activity data
-        activity_data = args[1]
-        self.assertEqual(activity_data['user_id'], self.user.id)
-        self.assertEqual(activity_data['activity_type'], 'profile_access')
-        self.assertEqual(activity_data['request_path'], '/users/profile/')
-        self.assertEqual(activity_data['extra_data'], 'test')
-
     def testget_safe_client_ip_x_forwarded_for(self):
         """Test IP extraction from X-Forwarded-For header"""
         request = self.factory.get('/')
@@ -345,9 +294,8 @@ class SessionSecurityMiddlewareTestCase(TestCase):
 
     @patch('apps.users.services.SessionSecurityService.update_session_timeout')
     @patch('apps.users.services.SessionSecurityService.detect_suspicious_activity')
-    @patch('apps.users.services.SessionSecurityService.log_session_activity')
-    def test_middleware_processes_session_security(self, mock_log, mock_detect, mock_timeout):
-        """The timeout and the multiple-address check run on each request; activity is not logged (#622)."""
+    def test_middleware_processes_session_security(self, mock_detect, mock_timeout):
+        """The timeout and the multiple-address check run on each request (#622)."""
         request = self._get_authenticated_request('/users/profile/')
         mock_detect.return_value = False
 
@@ -355,10 +303,8 @@ class SessionSecurityMiddlewareTestCase(TestCase):
 
         mock_timeout.assert_called_once_with(request)
         mock_detect.assert_called_once_with(request)
-        mock_log.assert_not_called()
 
-    @patch('apps.users.services.SessionSecurityService.log_session_activity')
-    def test_no_path_or_method_logs_session_activity(self, mock_log):
+    def test_no_path_or_method_logs_session_activity(self):
         """Replaces the tests of the removed path and activity-type helpers (#622).
 
         Those helpers chose which requests wrote a `session_activity_*` audit row. Every path
@@ -378,59 +324,18 @@ class SessionSecurityMiddlewareTestCase(TestCase):
 
                     self.middleware(request)
 
-        mock_log.assert_not_called()
-
-    @patch('apps.users.services.SessionSecurityService.log_session_activity')
-    def test_shared_device_auto_expiry(self, mock_log):
-        """Test automatic expiry of shared device mode"""
-        request = self._get_authenticated_request()
-
-        # Set shared device mode with old timestamp (3 hours ago)
-        old_time = timezone.now() - timedelta(hours=3)
-        request.session['shared_device_mode'] = True
-        request.session['shared_device_enabled_at'] = old_time.isoformat()
-
-        self.middleware._check_shared_device_expiry(request)
-
-        # Shared device mode should be disabled
-        self.assertNotIn('shared_device_mode', request.session)
-        self.assertNotIn('shared_device_enabled_at', request.session)
-
-        # Activity should be logged
-        mock_log.assert_called_once()
-        args = mock_log.call_args[0]
-        self.assertEqual(args[1], 'shared_device_auto_expired')
-
-    def test_shared_device_no_expiry_recent(self):
-        """Test shared device mode doesn't expire if recent"""
-        request = self._get_authenticated_request()
-
-        # Set shared device mode with recent timestamp
-        recent_time = timezone.now() - timedelta(minutes=30)
-        request.session['shared_device_mode'] = True
-        request.session['shared_device_enabled_at'] = recent_time.isoformat()
-
-        self.middleware._check_shared_device_expiry(request)
-
-        # Shared device mode should still be enabled
-        self.assertTrue(request.session.get('shared_device_mode'))
-        self.assertIn('shared_device_enabled_at', request.session)
+        self.assertFalse(AuditEvent.objects.filter(action__startswith='session_activity_').exists())
 
     def test_add_security_headers(self):
         """Test addition of security headers"""
         request = self._get_authenticated_request()
-        request.session['shared_device_mode'] = True
         request.session.set_expiry(1800)  # 30 minutes
 
         response = MagicMock()
         self.middleware._add_security_headers(request, response)
 
-        # Check headers were set
-        self.assertEqual(response.__setitem__.call_count, 2)
-        # Verify the header names (can't easily check exact values due to mocking)
         header_names = [call[0][0] for call in response.__setitem__.call_args_list]
-        self.assertIn('X-Session-Timeout', header_names)
-        self.assertIn('X-Shared-Device-Mode', header_names)
+        self.assertEqual(header_names, ['X-Session-Timeout'])
 
 
 class SessionSecurityIntegrationTest(TestCase):
@@ -468,14 +373,12 @@ class SessionSecurityIntegrationTest(TestCase):
         # 1. Login (creates session)
         client.force_login(self.user)
 
-        # 2. Enable shared device mode
+        # 2. A request on that session
         request = RequestFactory().get('/')
         request.user = self.user
         middleware = SessionMiddleware(lambda r: None)
         middleware.process_request(request)
         request.session.save()
-
-        SessionSecurityService.enable_shared_device_mode(request)
 
         # 3. Detect suspicious activity
         SessionSecurityService.detect_suspicious_activity(request)
@@ -486,11 +389,10 @@ class SessionSecurityIntegrationTest(TestCase):
         # 5. Rotate session
         SessionSecurityService.rotate_session_on_2fa_change(request)
 
-        # The exact events, in order. Shared-device mode already set the 900-second
-        # timeout, so step 4 changes nothing and is not audited (#553); step 3 saw one
-        # IP, below the suspicious-activity threshold.
+        # The exact events, in order. Step 4 sets the timeout for the first time, so it is
+        # audited (#553); step 3 saw one IP, below the suspicious-activity threshold.
         logged_events = [call[0][0] for call in mock_log.call_args_list]
-        self.assertEqual(logged_events, ['shared_device_mode_enabled', 'session_rotated_2fa_change'])
+        self.assertEqual(logged_events, ['session_timeout_updated', 'session_rotated_2fa_change'])
 
 
 # Test cleanup function

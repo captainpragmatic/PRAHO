@@ -168,25 +168,15 @@ def _build_domain_table_data(domains: QuerySet[Domain] | list[Domain], user: Use
         if can_manage:
             actions = []
             if domain.status == "active":
-                actions.extend(
-                    [
-                        {
-                            "component": "button",
-                            "text": "🔄",
-                            "title": "Renew",
-                            "variant": "secondary",
-                            "size": "xs",
-                            "href": f"/app/domains/{domain.id}/renew/",
-                        },
-                        {
-                            "component": "button",
-                            "text": "⚙️",
-                            "title": "Manage DNS",
-                            "variant": "secondary",
-                            "size": "xs",
-                            "href": f"/app/domains/{domain.id}/dns/",
-                        },
-                    ]
+                actions.append(
+                    {
+                        "component": "button",
+                        "text": "🔄",
+                        "title": "Renew",
+                        "variant": "secondary",
+                        "size": "xs",
+                        "href": reverse("domains:renew", kwargs={"domain_id": domain.id}),
+                    }
                 )
 
             actions.append(
@@ -196,7 +186,7 @@ def _build_domain_table_data(domains: QuerySet[Domain] | list[Domain], user: Use
                     "title": "View Details",
                     "variant": "secondary",
                     "size": "xs",
-                    "href": f"/app/domains/{domain.id}/",
+                    "href": reverse("domains:detail", kwargs={"domain_id": domain.id}),
                 }
             )
 

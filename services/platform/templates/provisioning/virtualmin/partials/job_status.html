@@ -1,9 +1,9 @@
 {% load ui_components %}
 {% load i18n %}
 
-{# Self-replacing poll root: outerHTML swap so each response re-decides whether
+{% comment %}Self-replacing poll root: outerHTML swap so each response re-decides whether
    to keep polling. A terminal/attention job renders WITHOUT hx-trigger, which
-   stops the refresh so the resolve form's input is no longer clobbered. #}
+   stops the refresh so the resolve form's input is no longer clobbered.{% endcomment %}
 <div id="job-status-container"
      {% if not is_complete %}hx-get="{{ refresh_url }}" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %}>
 <!-- Job Status Header -->

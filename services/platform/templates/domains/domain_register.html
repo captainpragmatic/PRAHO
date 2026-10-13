@@ -88,7 +88,7 @@
                                 <p class="text-lg font-bold text-primary-600 dark:text-primary-400 mt-2">
                                     {{ tld_price.cost_cents|cents_to_currency|romanian_currency:tld_price.currency }}
                                     <span class="text-sm font-normal text-slate-500">
-                                        /{{ tld_price.years }} {% trans "year" %}{{ tld_price.years|pluralize }}
+                                        {% blocktrans trimmed count counter=tld_price.years asvar period_label %}{{ counter }} year{% plural %}{{ counter }} years{% endblocktrans %}/{{ period_label }}
                                     </span>
                                 </p>
                             </div>
@@ -256,7 +256,7 @@ document.addEventListener('DOMContentLoaded', function() {
             formData.append('domain_name', domainName);
             formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
 
-            const response = await fetch('/app/domains/check-availability/', {
+            const response = await fetch('{% url "domains:check_availability" %}', {
                 method: 'POST',
                 body: formData
             });

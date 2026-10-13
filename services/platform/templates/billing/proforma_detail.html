@@ -207,13 +207,13 @@
                 <td class="px-4 py-4 text-right text-sm text-white">
                   {{ line.quantity|floatformat:0 }}
                 </td>
-                <td class="px-4 py-4 text-right text-sm text-white">
+                <td class="px-4 py-4 text-right text-sm text-white whitespace-nowrap">
                   {{ line.unit_price|floatformat:2 }} {{ proforma.currency }}
                 </td>
                 <td class="px-4 py-4 text-right text-sm text-white">
                   {{ line.tax_rate|multiply:100|floatformat:1 }}%
                 </td>
-                <td class="px-4 py-4 text-right text-sm font-medium text-white">
+                <td class="px-4 py-4 text-right text-sm font-medium text-white whitespace-nowrap">
                   {{ line.line_total|floatformat:2 }} {{ proforma.currency }}
                 </td>
               </tr>
@@ -399,10 +399,9 @@
           {% else %}
             {% trans 'Send to Email' as send_proforma_label %}
           {% endif %}
-          {% with proforma_id=proforma.pk|stringformat:"s" %}
-            {% with send_proforma_attrs='data-proforma-id="'|add:proforma_id|add:'"' %}
-              {% button send_proforma_label variant="info" type="button" icon="mail" class_="w-full" data_action="invoke" data_invoke="sendProformaAction" attrs=send_proforma_attrs %}
-            {% endwith %}
+          {% url 'billing:proforma_send' proforma.pk as send_url %}
+          {% with send_proforma_attrs='data-send-url="'|add:send_url|add:'"' %}
+            {% button send_proforma_label variant="info" type="button" icon="mail" class_="w-full" data_action="invoke" data_invoke="sendProformaAction" attrs=send_proforma_attrs %}
           {% endwith %}
 
           {% if can_edit and proforma.status != "converted" %}
@@ -419,12 +418,12 @@
 
 <script nonce="{{ csp_nonce }}">
 function sendProformaAction(el) {
-    sendProforma(el.dataset.proformaId);
+    sendProforma(el.dataset.sendUrl);
 }
 
-function sendProforma(proformaId) {
+function sendProforma(sendUrl) {
     if (confirm('{% trans "Send this proforma to the customer via email?" %}')) {
-        fetch(`/app/billing/proformas/${proformaId}/send/`, {
+        fetch(sendUrl, {
             method: 'POST',
             headers: {
                 'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,

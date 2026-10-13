@@ -287,7 +287,9 @@ class SessionAuthHashBindingTests(HMACTestMixin, TestCase):
         self.assertEqual(setup.status_code, 200, setup.content)
         secret = browser.session["2fa_secret"]
         old_key = browser.session.session_key
-        response = browser.post(reverse("users:mfa_setup_totp"), {"token": pyotp.TOTP(secret).now()})
+        response = browser.post(
+            reverse("users:mfa_setup_totp"), {"token": pyotp.TOTP(secret).now(), "password": self.password}
+        )
         self.assertRedirects(response, reverse("users:mfa_backup_codes"), fetch_redirect_response=False)
         self.user.refresh_from_db()
         self.assertEqual(self.user.two_factor_secret, secret)

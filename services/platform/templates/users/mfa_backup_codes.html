@@ -69,7 +69,7 @@
           <div class="flex items-center justify-between mb-6">
             <div>
               <h3 class="text-lg font-medium text-white">
-                {% trans 'Your 8 Backup Codes' %}
+                {% blocktrans trimmed count counter=backup_codes|length %}Your {{ counter }} backup code{% plural %}Your {{ counter }} backup codes{% endblocktrans %}
               </h3>
               <p class="text-sm text-slate-400 mt-1">
                 {% trans 'Each code can be used only once' %}
@@ -140,12 +140,13 @@ function copyCodeAction(el) {
 // Copy individual backup code
 function copyCode(code, button) {
   navigator.clipboard.writeText(code).then(function() {
-    const originalText = button.textContent;
+    // innerHTML, not textContent: the button holds an icon, which textContent would drop for good.
+    const originalHtml = button.innerHTML;
     button.textContent = '[OK]';
     button.style.color = '#10b981';
 
     setTimeout(() => {
-      button.textContent = originalText;
+      button.innerHTML = originalHtml;
       button.style.color = '';
     }, 2000);
   }).catch(function(err) {
@@ -162,7 +163,7 @@ function copyAllCodes() {
     // Visual feedback on button
     const button = document.querySelector('[data-action="invoke"][data-invoke="copyAllCodes"]');
     const originalText = button.innerHTML;
-    button.innerHTML = '<span class="mr-2">{% icon "check" %}</span>{% trans "Copied!" %}';
+    button.innerHTML = '<span class="mr-2">{% icon "check" %}</span>{% filter escapejs %}{% trans "Copied!" %}{% endfilter %}';
     button.style.backgroundColor = '#10b981';
 
     setTimeout(() => {
@@ -208,6 +209,7 @@ function printCodes() {
   `;
 
   const printWindow = window.open('', '_blank');
+  if (!printWindow) { return; }  // the browser blocked the popup
   printWindow.document.write(`
     <html>
       <head><title>PRAHO Backup Codes</title></head>

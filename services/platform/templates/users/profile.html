@@ -89,7 +89,6 @@
       </form>
     </div>
   </div>
-</div>
 
   <!-- Account Information Card -->
   <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mt-6">
@@ -151,9 +150,11 @@
                   <a href="{% url 'users:mfa_regenerate_backup_codes' %}" class="text-blue-400 hover:text-blue-300 text-xs">
                     {% trans 'Regenerate Backup Codes' %}
                   </a>
+                  {% if can_disable_mfa %}
                   <a href="{% url 'users:mfa_disable' %}" class="text-red-400 hover:text-red-300 text-xs">
                     {% trans 'Disable MFA' %}
                   </a>
+                  {% endif %}
                 </div>
               {% else %}
                 {% trans "Disabled" as bt6 %}{% badge bt6 variant="warning" icon="warning" %}

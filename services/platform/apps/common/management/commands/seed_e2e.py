@@ -14,7 +14,9 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument(
-            "--scenario", choices=("baseline", "billing", "pricing", "account", "service_request"), default="baseline"
+            "--scenario",
+            choices=("baseline", "billing", "pricing", "account", "service_request", "order_edit", "staff_mfa"),
+            default="baseline",
         )
         parser.add_argument("--key", default="")
 

@@ -31,6 +31,8 @@ WP18_RETIRED_KEYS = (
     "provisioning.server_overload_threshold",
     "users.credential_max_age_days",
     "users.credential_rotation_retry_limit",
+    # Retired with shared-device mode, which nothing ever switched on.
+    "users.shared_device_timeout_minutes",
 )
 
 

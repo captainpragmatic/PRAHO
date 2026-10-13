@@ -16,16 +16,14 @@ import traceback
 import urllib.parse
 import uuid
 from collections.abc import Callable
-from datetime import datetime, timedelta
 
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import get_user_model, logout
 from django.db import DatabaseError, InterfaceError
-from django.http import HttpRequest, HttpResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect
-from django.urls import Resolver404, resolve
-from django.utils import timezone
+from django.urls import Resolver404, resolve, reverse
 from django.utils.translation import gettext as _
 
 from apps.common import counters, portal_hmac
@@ -795,7 +793,6 @@ class SessionSecurityMiddleware:
     Features:
     - Dynamic timeout adjustment based on user role/context
     - Suspicious activity detection and logging
-    - Shared device mode handling
     """
 
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]):
@@ -829,10 +826,6 @@ class SessionSecurityMiddleware:
             # its own audit event (#622).
             SessionSecurityService.detect_suspicious_activity(request)
 
-            # Handle shared device mode expiry
-            if request.session.get("shared_device_mode"):
-                self._check_shared_device_expiry(request)
-
         except Exception as e:
             logger.critical(
                 "🔥 [SessionSecurityMiddleware] Session security check failed — invalidating session for safety: %s", e
@@ -857,38 +850,60 @@ class SessionSecurityMiddleware:
                     flush_error,
                 )
 
-    def _check_shared_device_expiry(self, request: HttpRequest) -> None:
-        """Check if shared device mode should expire based on inactivity"""
-        enabled_at_str = request.session.get("shared_device_enabled_at")
-        if not enabled_at_str:
-            return
-
-        try:
-            enabled_at = datetime.fromisoformat(enabled_at_str)
-            max_shared_duration = timedelta(hours=2)  # Max 2 hours in shared mode
-
-            if timezone.now() - enabled_at > max_shared_duration:
-                # Auto-disable shared device mode after extended use
-                request.session.pop("shared_device_mode", None)
-                request.session.pop("shared_device_enabled_at", None)
-
-                if SessionSecurityService is not None:
-                    SessionSecurityService.log_session_activity(
-                        request, "shared_device_auto_expired", reason="max_duration_exceeded"
-                    )
-
-        except Exception as e:
-            logger.error(f"🔥 [SessionSecurity] Error checking shared device expiry: {e}")
-
     def _add_security_headers(self, request: HttpRequest, response: HttpResponse) -> None:
         """Add session security headers to response"""
         # Add session timeout info for client-side warnings
         if hasattr(request, "session") and request.session.get_expiry_age():
             response["X-Session-Timeout"] = str(request.session.get_expiry_age())
 
-        # Add shared device mode indicator
-        if request.session.get("shared_device_mode"):
-            response["X-Shared-Device-Mode"] = "true"
+
+class StaffMFAEnrollmentMiddleware:
+    """While `users.mfa_required_for_staff` is on, a staff session without 2FA can only enrol.
+
+    A middleware rather than a login check, so sessions that already exist are caught as well.
+    Enrolment, sign-in, sign-out, language switching, static files and the health check stay
+    open. It runs before PortalServiceHMACMiddleware, which lets a staff session read some
+    /api/ routes without a signature; signed Portal calls carry no session and pass through.
+    """
+
+    _OPEN_PREFIXES = (
+        "/auth/mfa/",
+        "/auth/login/",
+        "/auth/logout/",
+        "/i18n/",
+        "/static/",
+        "/media/",
+        "/settings/api/health/",
+    )
+
+    def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]):
+        self.get_response = get_response
+
+    def __call__(self, request: HttpRequest) -> HttpResponse:
+        if request.path.startswith(self._OPEN_PREFIXES) or not request.user.is_authenticated:
+            return self.get_response(request)
+
+        from apps.users.mfa import staff_must_enrol  # noqa: PLC0415 -- users imports common
+
+        if not staff_must_enrol(request.user):
+            return self.get_response(request)
+
+        setup_url = reverse("users:mfa_setup_totp")
+        if request.path.startswith("/api/"):
+            return JsonResponse(
+                {"error": str(_("Two-factor authentication is required for staff accounts. Set it up first."))},
+                status=403,
+            )
+        if request.headers.get("HX-Request"):
+            response = HttpResponse()
+            response["HX-Redirect"] = setup_url
+            return response
+        messages.info(
+            request,
+            _("Set up two-factor authentication to continue. It is required for staff accounts."),
+            fail_silently=True,  # a notice only; the redirect is what enforces
+        )
+        return redirect(setup_url)
 
 
 # ===============================================================================

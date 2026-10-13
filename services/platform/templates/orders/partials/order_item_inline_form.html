@@ -12,6 +12,7 @@ Simplified version of the full form for better UX in table context
       {% else %}
         action="{% url 'orders:order_item_edit' pk=order.id item_pk=item.id %}"
       {% endif %}
+      data-order-item-form data-currency="{{ order.currency.code }}"
       class="space-y-4">
   {% csrf_token %}
 
@@ -22,7 +23,7 @@ Simplified version of the full form for better UX in table context
       <label for="id_product_inline" class="block text-sm font-medium text-slate-400 mb-2">
         {% trans "Product/Service" %} <span class="text-red-400">*</span>
       </label>
-      {# tmpl-allow TMPL003: options carry data-product-type/data-requires-domain/data-prices for the inline script; the select component renders option.data keys verbatim (data-requires_domain), which dataset.requiresDomain does not read #}
+      {# tmpl-allow TMPL003: options carry data-requires-domain/data-prices for orders-items.js; the select component renders option.data keys verbatim (data-requires_domain), so this select keeps its own markup #}
       <select id="id_product_inline" name="product" required
               class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500">
         <option value="">{% trans "Select product..." %}</option>
@@ -31,7 +32,8 @@ Simplified version of the full form for better UX in table context
                   {% if form.product.value == option.value %}selected{% endif %}
                   data-product-type="{{ option.data.product_type }}"
                   data-requires-domain="{{ option.data.requires_domain }}"
-                  data-prices='{{ option.data.prices|default:"{}" }}'>
+                  data-prices='{{ option.data.prices|default:"{}" }}'
+                  data-setup-cents="{{ option.data.setup_cents }}">
             {{ option.label }}
           </option>
         {% endfor %}
@@ -60,7 +62,7 @@ Simplified version of the full form for better UX in table context
       </label>
       {% trans "Select period..." as period_placeholder %}
       {% trans "Billing Period" as billing_period_label %}
-      {% input_field "billing_period" input_type="select" html_id="id_billing_period_inline" options=billing_period_options value=form.billing_period.value placeholder=period_placeholder required=True css_class="text-sm" aria_label=billing_period_label %}
+      {% input_field "billing_period" input_type="select" html_id="id_billing_period_inline" options=billing_period_options value=selected_billing_period placeholder=period_placeholder required=True css_class="text-sm" aria_label=billing_period_label %}
       {% if form.billing_period.errors %}
         <p class="mt-1 text-xs text-red-400">{{ form.billing_period.errors.0 }}</p>
       {% endif %}
@@ -111,7 +113,8 @@ Simplified version of the full form for better UX in table context
   </div>
 
   <!-- Domain Name (conditional) -->
-  <div id="domain-section-inline" style="display: none;">
+  {# Shown by orders-items.js when the chosen product needs a domain. #}
+  <div id="domain-section-inline" class="hidden" data-domain-section>
     <label for="id_domain_name_inline" class="block text-sm font-medium text-slate-400 mb-2">
       {% trans "Domain Name" %}
     </label>
@@ -153,15 +156,15 @@ Simplified version of the full form for better UX in table context
     </div>
     <div class="grid grid-cols-3 gap-4 text-sm">
       <div class="text-center">
-        <div class="text-green-300" id="preview-unit-price-inline">{{ order.currency }} 0.00</div>
+        <div class="text-green-300" id="preview-unit-price-inline" data-preview="unit">{{ order.currency.code }} 0.00</div>
         <div class="text-xs text-green-400">{% trans "Unit Price" %}</div>
       </div>
       <div class="text-center">
-        <div class="text-green-300" id="preview-setup-price-inline">{{ order.currency }} 0.00</div>
+        <div class="text-green-300" id="preview-setup-price-inline" data-preview="setup">{{ order.currency.code }} 0.00</div>
         <div class="text-xs text-green-400">{% trans "Setup Fee" %}</div>
       </div>
       <div class="text-center">
-        <div class="text-green-200 font-semibold" id="preview-total-inline">{{ order.currency }} 0.00</div>
+        <div class="text-green-200 font-semibold" id="preview-total-inline" data-preview="total">{{ order.currency.code }} 0.00</div>
         <div class="text-xs text-green-400">{% trans "Line Total" %}</div>
       </div>
     </div>
@@ -186,140 +189,3 @@ Simplified version of the full form for better UX in table context
     {% endif %}
   </div>
 </form>
-
-<script nonce="{{ csp_nonce }}">
-// Real-time price calculations for inline form
-(function() {
-    function updateInlinePricePreview() {
-        const unitPriceCents = parseInt(document.getElementById('id_unit_price_cents_inline')?.value || '0');
-        const setupCents = parseInt(document.getElementById('id_setup_cents_inline')?.value || '0');
-        const quantity = parseInt(document.getElementById('id_quantity_inline')?.value || '1');
-        const currency = '{{ order.currency }}';
-
-        // Convert cents to currency
-        const unitPrice = (unitPriceCents / 100).toFixed(2);
-        const setupPrice = (setupCents / 100).toFixed(2);
-        const lineTotal = ((unitPriceCents + setupCents) * quantity / 100).toFixed(2);
-
-        // Update preview displays
-        const unitPriceEl = document.getElementById('preview-unit-price-inline');
-        const setupPriceEl = document.getElementById('preview-setup-price-inline');
-        const totalEl = document.getElementById('preview-total-inline');
-
-        if (unitPriceEl) unitPriceEl.textContent = `${currency} ${unitPrice}`;
-        if (setupPriceEl) setupPriceEl.textContent = `${currency} ${setupPrice}`;
-        if (totalEl) totalEl.textContent = `${currency} ${lineTotal}`;
-    }
-
-    function toggleInlineDomainSection() {
-        const productSelect = document.getElementById('id_product_inline');
-        const domainSection = document.getElementById('domain-section-inline');
-
-        if (productSelect && domainSection) {
-            const selectedOption = productSelect.options[productSelect.selectedIndex];
-            const requiresDomain = selectedOption && selectedOption.dataset.requiresDomain === 'true';
-
-            if (requiresDomain) {
-                domainSection.style.display = 'block';
-                document.getElementById('id_domain_name_inline').required = true;
-            } else {
-                domainSection.style.display = 'none';
-                document.getElementById('id_domain_name_inline').required = false;
-            }
-        }
-    }
-
-    function autoPopulatePricing() {
-        const productSelect = document.getElementById('id_product_inline');
-        const billingPeriodSelect = document.getElementById('id_billing_period_inline');
-        const unitPriceInput = document.getElementById('id_unit_price_cents_inline');
-        const setupInput = document.getElementById('id_setup_cents_inline');
-
-        if (!productSelect || !billingPeriodSelect || !unitPriceInput || !setupInput) {
-            return;
-        }
-
-        const selectedOption = productSelect.options[productSelect.selectedIndex];
-        const billingPeriod = billingPeriodSelect.value;
-
-        if (!selectedOption || !selectedOption.value || !billingPeriod) {
-            return;
-        }
-
-        try {
-            // Get pricing data from product option
-            const pricesData = JSON.parse(selectedOption.dataset.prices || '{}');
-            const priceForPeriod = pricesData[billingPeriod];
-
-            if (priceForPeriod) {
-                // Only auto-populate if user hasn't manually edited the field
-                if (!unitPriceInput.dataset.manualOverride) {
-                    unitPriceInput.value = priceForPeriod.unit_cents;
-                }
-
-                if (!setupInput.dataset.manualOverride) {
-                    setupInput.value = priceForPeriod.setup_cents;
-                }
-
-                // Update price preview
-                updateInlinePricePreview();
-            } else {
-                // No product pricing available - clear auto-populated prices but keep manual ones
-                if (!unitPriceInput.dataset.manualOverride) {
-                    unitPriceInput.value = '';
-                }
-
-                if (!setupInput.dataset.manualOverride) {
-                    setupInput.value = '0';
-                }
-            }
-        } catch (e) {
-            // Ignore parsing errors
-        }
-    }
-
-    function markAsManualOverride(input) {
-        input.dataset.manualOverride = 'true';
-    }
-
-    // Attach event listeners
-    const unitPriceInput = document.getElementById('id_unit_price_cents_inline');
-    const setupInput = document.getElementById('id_setup_cents_inline');
-    const quantityInput = document.getElementById('id_quantity_inline');
-    const productSelect = document.getElementById('id_product_inline');
-    const billingPeriodSelect = document.getElementById('id_billing_period_inline');
-
-    // Price calculation events
-    if (unitPriceInput) {
-        unitPriceInput.addEventListener('input', updateInlinePricePreview);
-        // Mark as manual override when user types
-        unitPriceInput.addEventListener('input', function() {
-            if (this.value) markAsManualOverride(this);
-        });
-    }
-    if (setupInput) {
-        setupInput.addEventListener('input', updateInlinePricePreview);
-        // Mark as manual override when user types
-        setupInput.addEventListener('input', function() {
-            markAsManualOverride(this);
-        });
-    }
-    if (quantityInput) quantityInput.addEventListener('input', updateInlinePricePreview);
-
-    // Auto-population events
-    if (productSelect) {
-        productSelect.addEventListener('change', function() {
-            toggleInlineDomainSection();
-            autoPopulatePricing();
-        });
-    }
-    if (billingPeriodSelect) {
-        billingPeriodSelect.addEventListener('change', autoPopulatePricing);
-    }
-
-    // Initial updates
-    updateInlinePricePreview();
-    toggleInlineDomainSection();
-    autoPopulatePricing();
-})();
-</script>

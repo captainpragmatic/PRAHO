@@ -44,6 +44,8 @@ _ORDER_PERIOD_TO_SERVICE_CYCLE = {
     # Service requires a cycle value even when the item is explicitly one-time.
     "once": "monthly",
 }
+# The periods an order item can be fulfilled with: each has a service cycle.
+ORDERABLE_BILLING_PERIODS = tuple(_ORDER_PERIOD_TO_SERVICE_CYCLE)
 _ORDER_PERIOD_TO_SUBSCRIPTION_CYCLE = {
     "monthly": "monthly",
     "quarterly": "quarterly",

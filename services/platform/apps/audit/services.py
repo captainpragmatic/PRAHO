@@ -255,12 +255,17 @@ class AuditEventData:
 
 @dataclass
 class TwoFactorAuditRequest:
-    """Parameter object for 2FA audit events"""
+    """Parameter object for 2FA audit events.
+
+    `user` is the account the event is about. `actor` is who acted, when that is someone else (an
+    administrator resetting the account); a context with actor_type "system" records no actor.
+    """
 
     event_type: str
     user: User
     context: AuditContext = field(default_factory=AuditContext)
     description: str = ""
+    actor: User | None = None
 
 
 @dataclass
@@ -1007,9 +1012,16 @@ class AuditService:
                 }
             )
 
+        # The event's user is whoever acted: the account itself, an administrator, or nobody for
+        # a server-side operator action. The account stays the event's subject below.
+        if request.context.actor_type == "system":
+            actor = None
+        else:
+            actor = request.actor if request.actor is not None else request.user
+
         # Create enhanced context with metadata (metadata will be serialized in log_event)
         enhanced_context = AuditContext(
-            user=request.user,
+            user=actor,
             ip_address=request.context.ip_address,
             user_agent=request.context.user_agent,
             request_id=request.context.request_id,

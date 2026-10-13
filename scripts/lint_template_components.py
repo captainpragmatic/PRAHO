@@ -12,6 +12,7 @@ Checks:
   TMPL008  Emoji character in template (should use {% icon %} or remove)
   TMPL009  Raw <svg> in component template not allowlisted as complex visual
   TMPL010  Malformed tmpl-allow marker (warning)
+  TMPL011  Template tag split across lines; Django outputs it as text (cannot be exempted)
 
 Exit codes:
     0 — no violations
@@ -33,6 +34,9 @@ from functools import lru_cache
 from gettext import gettext
 from html.parser import HTMLParser
 from pathlib import Path
+
+# Django's own tag pattern, so this check agrees with the template engine by construction.
+from django.template.base import tag_re as django_tag_re
 
 # ===============================================================================
 # CONFIGURATION
@@ -134,6 +138,11 @@ _EMOJI_RE = re.compile(
 
 # TMPL009: Raw SVG in component templates must be allowlisted as complex visuals
 _RAW_SVG_RE = re.compile(r"<svg\b", re.IGNORECASE)
+
+# TMPL011: an opening delimiter left in text after Django's lexer has taken every one-line tag.
+_TAG_OPENER_RE = re.compile(r"\{[%{#]")
+# Blocks whose content the engine never renders as markup: their text may contain anything.
+_RAW_BLOCK_START_RE = re.compile(r"\{%\s*(comment|verbatim)\b\s*(.*?)\s*%\}")
 
 # ===============================================================================
 # FILE ROUTING
@@ -357,6 +366,64 @@ def _exemption_for(
     return False, ""
 
 
+def _ends_raw_block(tag: str, terminator: str) -> bool:
+    """Whether a tag is the one that ends the open comment or verbatim block.
+
+    `endcomment` ends a comment whatever follows it; a verbatim block ends only at its own
+    terminator, `endverbatim` or `endverbatim <name>`, as Django reads it.
+    """
+    words = tag[2:-2].split()
+    if terminator == "endcomment":
+        return bool(words) and words[0] == "endcomment"
+    return " ".join(words) == terminator
+
+
+def _split_tag_violations(path: Path, text: str) -> list[Violation]:
+    """TMPL011: report every tag opener the lexer left in text, at the line it starts on.
+
+    Django matches a tag only within one line (``tag_re`` has no DOTALL), so ``{%`` ... newline
+    ... ``%}`` reaches the page as text and its condition never applies. Comment and verbatim
+    block bodies are skipped, as the engine never renders them as markup.
+
+    A literal opener the page really needs (in a script, say) is written with
+    ``{% templatetag openvariable %}`` (or ``openblock``/``opencomment``) or placed in a
+    ``{% verbatim %}`` block, so this check needs no exemption marker.
+    """
+    lines = text.splitlines()
+    violations: list[Violation] = []
+    raw_block_end: str | None = None
+    position = 0
+
+    def report_openers(segment: str, offset: int) -> None:
+        for opener in _TAG_OPENER_RE.finditer(segment):
+            line_no = text.count("\n", 0, offset + opener.start()) + 1
+            violations.append(
+                Violation(
+                    "TMPL011",
+                    SEVERITY_BLOCKER,
+                    path,
+                    line_no,
+                    gettext("Template tag split across lines - Django outputs it as text; keep each tag on one line"),
+                    snippet=lines[line_no - 1].strip()[:120],
+                )
+            )
+
+    for tag in django_tag_re.finditer(text):
+        if raw_block_end is None:
+            report_openers(text[position : tag.start()], position)
+            block = _RAW_BLOCK_START_RE.fullmatch(tag.group())
+            if block:
+                # A named verbatim block ends only at the same name; a comment's argument is a note.
+                name = block.group(2) if block.group(1) == "verbatim" else ""
+                raw_block_end = f"end{block.group(1)} {name}".strip()
+        elif _ends_raw_block(tag.group(), raw_block_end):
+            raw_block_end = None
+        position = tag.end()
+    if raw_block_end is None:
+        report_openers(text[position:], position)
+    return violations
+
+
 def scan_file(path: Path) -> list[Violation]:
     """Scan a single template file and return all violations found."""
     violations: list[Violation] = []
@@ -368,9 +435,12 @@ def scan_file(path: Path) -> list[Violation]:
     svg_allowed_in_component = relative_path in component_svg_allowlist
 
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return violations
+    lines = text.splitlines()
+    # Every scanned template, feature or component; no marker can exempt it.
+    violations.extend(_split_tag_violations(path, text))
 
     tmpl_allow_markers, tmpl_allow_meta_violations = _find_tmpl_allow_markers(lines, path)
     if not is_feature:
@@ -580,7 +650,7 @@ def main() -> int:
     parser.add_argument(
         "--fail-on",
         metavar="CODES",
-        default="TMPL001,TMPL002,TMPL003,TMPL004,TMPL008,TMPL_ALLOW_STALE,TMPL_ALLOW_NO_REASON",
+        default="TMPL001,TMPL002,TMPL003,TMPL004,TMPL008,TMPL011,TMPL_ALLOW_STALE,TMPL_ALLOW_NO_REASON",
         help="Comma-separated violation codes that cause non-zero exit (default: blockers only).",
     )
     parser.add_argument("--list-violations", action="store_true", help="Print all violation codes and exit.")
@@ -598,6 +668,7 @@ def main() -> int:
             ("TMPL008", SEVERITY_BLOCKER, "Emoji character in template"),
             ("TMPL009", SEVERITY_WARNING, "Raw <svg> in component template not allowlisted"),
             ("TMPL010", SEVERITY_WARNING, gettext("Malformed tmpl-allow marker")),
+            ("TMPL011", SEVERITY_BLOCKER, gettext("Template tag split across lines")),
             ("TMPL_ALLOW_STALE", SEVERITY_BLOCKER, "tmpl-allow marker with no matching violation below it"),
             ("TMPL_ALLOW_NO_REASON", SEVERITY_BLOCKER, "tmpl-allow marker with an empty reason"),
         ]

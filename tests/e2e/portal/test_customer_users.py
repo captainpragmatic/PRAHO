@@ -343,12 +343,13 @@ def test_customer_privacy_dashboard(monitored_customer_page: Page) -> None:
 
 
 def test_customer_data_export_request(account_page) -> None:
-    """Persist a queued export request; email/worker delivery is a separate integration boundary."""
+    """Persist a queued export request; generating it is the task queue's job, not this page's."""
     page, account = account_page
     page.goto(f"{BASE_URL}/data-export/")
     expect(page.get_by_role("heading", name="Export My Data", exact=True)).to_be_visible()
     page.get_by_role("button", name="Request Data Export").click()
-    expect(page.locator("body")).to_contain_text("Data export request submitted successfully")
+    # Since #685 the export is generated in the background and downloaded from this page.
+    expect(page.locator("body")).to_contain_text("Your data export is being prepared.")
     page.reload()
     expect(page.locator("#main-content")).to_contain_text("Export History")
     expect(page.locator("#main-content")).to_contain_text("Pending")

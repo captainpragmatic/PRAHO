@@ -70,6 +70,9 @@ inverted the cache order mandated by ADR-0015.
 
 - Adding a setting means adding a catalog entry **and** a consumer, or CI fails.
 - Retiring a setting is a catalog deletion plus a data migration deleting rows.
+- Re-adopting a retired key is deliberate: it leaves the retired-keys guard in the same
+  change that adds its consumer and an effect test. `users.mfa_required_for_staff`, retired
+  in #377 as a decoy, came back this way with the staff 2FA policy (ADR-0004).
 - The `advanced` group is a curated exception list, not a dumping ground: new
   engineering constants belong in deployment configuration unless they earn an
   entry with an owner and safe range.

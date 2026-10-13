@@ -362,17 +362,6 @@ class SessionSecurityServiceTest(BaseServiceTestCase):
 
             self.assertEqual(timeout, 1800)
 
-    def test_enable_shared_device_mode(self) -> None:
-        """Test enabling shared device mode"""
-        request = self.create_http_request(self.user)
-
-        with patch('apps.users.services.SessionSecurityService.enable_shared_device_mode') as mock_shared:
-            mock_shared.return_value = None
-
-            SessionSecurityService.enable_shared_device_mode(request)
-
-            mock_shared.assert_called_once_with(request)
-
     def test_detect_suspicious_activity_normal(self) -> None:
         """Test suspicious activity detection - normal activity"""
         request = self.create_http_request(self.user, ip='127.0.0.1')
@@ -394,21 +383,6 @@ class SessionSecurityServiceTest(BaseServiceTestCase):
             is_suspicious = SessionSecurityService.detect_suspicious_activity(request)
 
             self.assertTrue(is_suspicious)
-
-    def test_log_session_activity(self) -> None:
-        """Test session activity logging"""
-        request = self.create_http_request(self.user)
-
-        with patch('apps.users.services.SessionSecurityService.log_session_activity') as mock_log:
-            mock_log.return_value = None
-
-            SessionSecurityService.log_session_activity(
-                request, 'login_success', user_id=self.user.id
-            )
-
-            mock_log.assert_called_once_with(
-                request, 'login_success', user_id=self.user.id
-            )
 
     def test_invalidate_other_user_sessions(self) -> None:
         first, second = Client(), Client()

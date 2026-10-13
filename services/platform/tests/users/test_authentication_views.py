@@ -342,7 +342,7 @@ class TwoFactorViewsTest(BaseViewTestCase):
         totp = pyotp.TOTP("TESTBASE32SECRET")
         valid_token = totp.now()
 
-        response = self.client.post(reverse("users:mfa_setup_totp"), {"token": valid_token})
+        response = self.client.post(reverse("users:mfa_setup_totp"), {"token": valid_token, "password": "testpass123"})
 
         self.assertEqual(response.status_code, 302)  # Success redirect
 
@@ -553,11 +553,12 @@ class UserDetailViewTest(BaseViewTestCase):
         self.assertEqual(response.status_code, 302)
 
     def test_user_detail_nonexistent_user(self) -> None:
-        """Test user detail view for non-existent user"""
+        """An unknown user is a 404; it used to raise DoesNotExist, a 500."""
         self.client.force_login(self.staff_user)
 
-        with self.assertRaises(User.DoesNotExist):
-            self.client.get(reverse("users:user_detail", kwargs={"pk": 99999}))
+        response = self.client.get(reverse("users:user_detail", kwargs={"pk": 99999}))
+
+        self.assertEqual(response.status_code, 404)
 
 
 # ===============================================================================
@@ -772,7 +773,8 @@ class IntegrationTest(BaseViewTestCase):
         valid_token = totp.now()
 
         response = self.client.post(
-            reverse("users:mfa_setup_totp"), {"token": valid_token, "secret": "TESTBASE32SECRET"}
+            reverse("users:mfa_setup_totp"),
+            {"token": valid_token, "secret": "TESTBASE32SECRET", "password": "testpass123"},
         )
 
         self.assertEqual(response.status_code, 302)

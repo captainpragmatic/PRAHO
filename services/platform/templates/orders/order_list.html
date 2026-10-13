@@ -238,7 +238,7 @@
                   </div>
                   <div class="flex items-center">
                     <span class="mr-1">{% icon "orders" %}</span>
-                    {{ order.items.count }} {% trans "item" %}{{ order.items.count|pluralize }}
+                    {% blocktrans trimmed count counter=order.items.count %}{{ counter }} item{% plural %}{{ counter }} items{% endblocktrans %}
                   </div>
                 </div>
 
@@ -350,7 +350,7 @@
                 <h4 class="text-slate-300 font-medium text-sm mb-1">{% trans "Details" %}</h4>
                 <div class="space-y-1 text-sm text-slate-400">
                   <div>{% icon "clock" %} {% localised_date order.created_at "date" %}</div>
-                  <div>{% icon "orders" %} {{ order.items.count }} {% trans "item" %}{{ order.items.count|pluralize }}</div>
+                  <div>{% icon "orders" %} {% blocktrans trimmed count counter=order.items.count %}{{ counter }} item{% plural %}{{ counter }} items{% endblocktrans %}</div>
                 </div>
               </div>
             </div>

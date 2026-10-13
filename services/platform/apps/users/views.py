@@ -6,6 +6,7 @@ Romanian-localized authentication and profile forms.
 import logging
 import secrets
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -27,18 +28,20 @@ from django.db import models, transaction
 from django.db.models import QuerySet
 from django.forms import Form
 from django.http import HttpRequest, HttpResponse, HttpResponseBase, JsonResponse
-from django.shortcuts import redirect, render, resolve_url
+from django.shortcuts import get_object_or_404, redirect, render, resolve_url
 from django.urls import reverse, reverse_lazy
 from django.utils.crypto import constant_time_compare
 from django.utils.decorators import method_decorator
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy
-from django.views.decorators.http import require_http_methods
+from django.views.decorators.cache import never_cache
+from django.views.decorators.http import require_http_methods, require_POST
 from django.views.generic import DetailView, ListView
 
 from apps.audit.services import AuthenticationAuditService, LoginFailureEventData, LogoutEventData
 from apps.common.constants import BACKUP_CODE_LOW_WARNING_THRESHOLD
+from apps.common.decorators import admin_required
 from apps.common.rate_limiting import rate_limit
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.transactions import best_effort_atomic
@@ -49,7 +52,14 @@ from .forms import (
     TwoFactorVerifyForm,
     UserProfileForm,
 )
-from .mfa import LOGIN_METHOD_REQUEST_ATTR, MFAService, TOTPService, verify_login_second_factor
+from .mfa import (
+    LOGIN_METHOD_REQUEST_ATTR,
+    MFAService,
+    TOTPService,
+    staff_cannot_disable_mfa,
+    staff_mfa_required,
+    verify_login_second_factor,
+)
 from .models import CustomerMembership, User, UserLoginLog, UserProfile
 from .services import SessionSecurityService
 
@@ -618,77 +628,108 @@ def mfa_method_selection(request: HttpRequest) -> HttpResponse:
         messages.info(request, _("2FA is already enabled for your account."))
         return redirect("users:user_profile")
 
-    context = {"steps": TWO_FACTOR_STEPS, "current_step": 1}
+    context = {
+        "steps": TWO_FACTOR_STEPS,
+        "current_step": 1,
+        "required_for_staff": user.is_staff_user and staff_mfa_required(),
+    }
     return render(request, "users/mfa_method_selection.html", context)
 
 
+def _too_many_attempts(
+    request: HttpRequest, template: str, context: Callable[[], dict[str, Any]]
+) -> HttpResponse | None:
+    """A 429 page once the per-user hourly budget of a credential form is spent.
+
+    Unlike the login's limit, this one is not lifted for tests: tests that need it on say so. The
+    page context is built only when the budget is spent.
+    """
+    if not getattr(request, "limited", False):
+        return None
+    messages.error(request, _("Too many attempts. Please wait an hour and try again."))
+    return render(request, template, context(), status=429)
+
+
+def _enrol_totp(
+    request: HttpRequest, user: User, secret: str, form: TwoFactorSetupForm
+) -> tuple[list[str], User] | None:
+    """Enable TOTP when the password and the code are both right; return the codes and the account.
+
+    The password is checked on the locked row, inside the transaction that enables 2FA, so a
+    password changed meanwhile is not accepted. The code may be from the previous 30-second step,
+    as at sign-in. One answer covers a wrong password and a wrong code. The account returned is
+    read inside the same transaction, so the session binds to the credentials this enrolment
+    committed: a password reset landing afterwards still ends the session.
+    """
+    with transaction.atomic():
+        locked_user = User.objects.select_for_update().get(pk=user.pk)
+        if locked_user.two_factor_enabled:
+            return None
+        if not locked_user.check_password(form.cleaned_data["password"]) or not pyotp.TOTP(secret).verify(
+            form.cleaned_data["token"], valid_window=TOTPService.TIME_WINDOW_TOLERANCE
+        ):
+            form.add_error(None, _("The password or the code is incorrect."))
+            return None
+        _secret, backup_codes = MFAService.enable_totp(locked_user, request, secret=secret)
+        enrolled = User.objects.select_related("credential_version").get(pk=user.pk)
+    return backup_codes, enrolled
+
+
 @login_required
+@never_cache  # the page shows the secret
+@rate_limit(key="user", rate="15/h", method="POST")
 def mfa_setup_totp(request: HttpRequest) -> HttpResponse:
-    """Set up 2FA for user account using new MFA service"""
-    # Check if user already has 2FA enabled - user is guaranteed to be authenticated due to @login_required
+    """Set up TOTP: one secret per setup, confirmed with the password and a code from the app.
+
+    The secret stays in the session through refreshes and a wrong code, so the app the person
+    scanned can still be verified; it changes only when they ask to start over.
+    """
     user = cast(User, request.user)
     if user.two_factor_enabled:
         messages.info(request, _("2FA is already enabled for your account."))
         return redirect("users:user_profile")
 
+    if request.method == "GET" and request.GET.get("restart"):
+        # A fresh secret, then the bare URL: the setup form posts back to the address it came
+        # from, and a POST must never replace the secret the person has just scanned.
+        request.session["2fa_secret"] = TOTPService.generate_secret()
+        return redirect("users:mfa_setup_totp")
+    secret = request.session.get("2fa_secret")
+    if not secret:
+        secret = TOTPService.generate_secret()
+        request.session["2fa_secret"] = secret
+
+    form = TwoFactorSetupForm(request.POST or None)
     if request.method == "POST":
-        form = TwoFactorSetupForm(request.POST)
-        if form.is_valid():
-            token = form.cleaned_data["token"]
-            secret = request.session.get("2fa_secret")
+        if limited := _too_many_attempts(request, "users/mfa_setup.html", lambda: _setup_context(user, secret, form)):
+            return limited
+        enrolment = _enrol_totp(request, user, secret, form) if form.is_valid() else None
+        if enrolment is not None:
+            backup_codes, enrolled = enrolment
+            # 🔒 Rotate session for security after enabling 2FA
+            SessionSecurityService.rotate_session_on_2fa_change(request)
+            update_session_auth_hash(request, enrolled)
+            request.session.pop("2fa_secret", None)
+            # Shown once on the next page
+            request.session["new_backup_codes"] = backup_codes
+            messages.success(request, _("2FA has been enabled successfully!"))
+            return redirect("users:mfa_backup_codes")
 
-            # Create temporary user object with the secret to verify
-            if secret:
-                # Verify the TOTP code using pyotp directly for setup
-                totp = pyotp.TOTP(secret)
-                if totp.verify(token):
-                    try:
-                        # Enable TOTP using MFA service
-                        secret, backup_codes = MFAService.enable_totp(user, request, secret=secret)
+    return render(request, "users/mfa_setup.html", _setup_context(user, secret, form))
 
-                        # 🔒 Rotate session for security after enabling 2FA
-                        SessionSecurityService.rotate_session_on_2fa_change(request)
-                        update_session_auth_hash(request, user)
 
-                        messages.success(request, _("2FA has been enabled successfully!"))
+def _setup_context(user: User, secret: str, form: TwoFactorSetupForm) -> dict[str, Any]:
 
-                        # Store backup codes in session to display once
-                        request.session["new_backup_codes"] = backup_codes
-
-                        # Clear setup session
-                        if "2fa_secret" in request.session:
-                            del request.session["2fa_secret"]
-
-                        return redirect("users:mfa_backup_codes")
-
-                    except Exception as e:
-                        logger.error(f"🔥 [2FA] Failed to enable TOTP: {e}")
-                        messages.error(request, _("Failed to enable 2FA. Please try again."))
-                else:
-                    form.add_error("token", _("Invalid verification code. Please try again."))
-            else:
-                form.add_error(None, _("Setup session expired. Please start over."))
-    else:
-        form = TwoFactorSetupForm()
-
-    # Generate new secret and QR code for setup
-    secret = TOTPService.generate_secret()
-    request.session["2fa_secret"] = secret
-
-    # Generate QR code using the static method
-    qr_data = TOTPService.generate_qr_code(user, secret)
-
-    context = {
+    return {
         "form": form,
-        "qr_code": qr_data,
+        "qr_code": TOTPService.generate_qr_code(user, secret),
         "secret": secret,  # For manual entry
         "user": user,
         "steps": TWO_FACTOR_STEPS,
         "current_step": 2,
         "back_url": reverse("users:mfa_setup"),  # Explicit back to method selection
+        "restart_url": reverse("users:mfa_setup_totp") + "?restart=1",
     }
-
-    return render(request, "users/mfa_setup.html", context)
 
 
 @login_required
@@ -819,9 +860,12 @@ def mfa_verify(request: HttpRequest) -> HttpResponse:
         request.session.pop(PRE_2FA_SESSION_KEY, None)
         return redirect("dashboard")
 
+    had_pending_login = PRE_2FA_SESSION_KEY in request.session
     pending = _read_pending_login(request)
     pending_user = User.objects.filter(pk=pending.user_id).first() if pending else None
     if pending is None or pending_user is None:
+        if had_pending_login:
+            messages.info(request, _("Your sign-in timed out. Enter your password again."))
         return _abandon_pending_login(request)
 
     if request.method == "POST":
@@ -841,6 +885,7 @@ def mfa_verify(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
+@never_cache  # the page shows the codes
 def mfa_backup_codes(request: HttpRequest) -> HttpResponse:
     """Display backup codes after 2FA setup or regeneration"""
     backup_codes = request.session.get("new_backup_codes")
@@ -868,18 +913,23 @@ def _confirm_both_factors(request: HttpRequest, locked_user: User) -> str | None
     """Check the posted password and a current second factor; return an error, or None.
 
     Mirrors the API's MFADisableSerializer: the caller holds select_for_update on the user,
-    and a wrong code is not charged to the login lockout, as on the API.
+    and a wrong code is not charged to the login lockout, as on the API. A wrong password and a
+    wrong code get the same answer, and the per-user hourly limit on the calling view bounds
+    guessing. The code is checked only after the password, so a backup code offered with a wrong
+    password is not spent.
     """
+    incorrect = _("The password or the code is incorrect.")
     password = request.POST.get("password", "")
     if not password or not locked_user.check_password(password):
-        return _("Invalid password.")
+        return incorrect
     token = request.POST.get("token", "").strip()
     if not locked_user.two_factor_enabled or not MFAService.verify_mfa_code(locked_user, token, request)["success"]:
-        return _("Invalid verification code.")
+        return incorrect
     return None
 
 
 @login_required
+@rate_limit(key="user", rate="15/h", method="POST")
 def mfa_regenerate_backup_codes(request: HttpRequest) -> HttpResponse:
     """Regenerate backup codes for 2FA; needs the password and a current second factor (#595)."""
     # User is guaranteed to be authenticated due to @login_required
@@ -889,10 +939,14 @@ def mfa_regenerate_backup_codes(request: HttpRequest) -> HttpResponse:
         return redirect("users:user_profile")
 
     if request.method == "POST":
+        if limited := _too_many_attempts(
+            request, "users/mfa_regenerate_backup_codes.html", lambda: {"backup_count": len(user.backup_tokens)}
+        ):
+            return limited
         with transaction.atomic():
             locked_user = User.objects.select_for_update().get(pk=user.pk)
             error = _confirm_both_factors(request, locked_user)
-            backup_codes = locked_user.generate_backup_codes() if error is None else []
+            backup_codes = MFAService.generate_backup_codes(locked_user, request) if error is None else []
         if error is not None:
             messages.error(request, error)
             return render(
@@ -910,19 +964,37 @@ def mfa_regenerate_backup_codes(request: HttpRequest) -> HttpResponse:
     return render(request, "users/mfa_regenerate_backup_codes.html", {"backup_count": len(user.backup_tokens)})
 
 
+def _mfa_cannot_be_disabled(request: HttpRequest, user: User) -> HttpResponse | None:
+    """Send the browser back to the profile when there is nothing this page may disable."""
+    if not user.two_factor_enabled:
+        messages.info(request, _("Two-factor authentication is already disabled."))
+        return redirect("users:user_profile")
+    if staff_cannot_disable_mfa(user):
+        messages.error(
+            request, _("Two-factor authentication is required for staff accounts, so it cannot be disabled.")
+        )
+        return redirect("users:user_profile")
+    return None
+
+
 @login_required
+@rate_limit(key="user", rate="15/h", method="POST")
 def mfa_disable(request: HttpRequest) -> HttpResponse:
     """Disable 2FA; needs the password and a current second factor (#595)."""
     # User is guaranteed to be authenticated due to @login_required
     user = cast(User, request.user)
-    if not user.two_factor_enabled:
-        messages.info(request, _("Two-factor authentication is already disabled."))
-        return redirect("users:user_profile")
+    if refused := _mfa_cannot_be_disabled(request, user):
+        return refused
 
     if request.method == "POST":
+        if limited := _too_many_attempts(request, "users/mfa_disable.html", dict):
+            return limited
         # The password and a current second factor, as the API requires (#595)
         with transaction.atomic():
             locked_user = User.objects.select_for_update().get(pk=user.pk)
+            # Re-checked on the locked row, before a code is checked and spent.
+            if refused := _mfa_cannot_be_disabled(request, locked_user):
+                return refused
             error = _confirm_both_factors(request, locked_user)
             if error is None:
                 MFAService.disable_totp(locked_user, request=request)
@@ -946,6 +1018,40 @@ def mfa_disable(request: HttpRequest) -> HttpResponse:
         return redirect("users:user_profile")
 
     return render(request, "users/mfa_disable.html")
+
+
+@admin_required
+@require_POST
+def mfa_admin_reset(request: HttpRequest, pk: int) -> HttpResponse:
+    """Reset another person's 2FA: the recovery path when they lose their device and codes.
+
+    The audit event names the administrator as the actor. The person's sessions end, so their next
+    sign-in asks for a new enrolment (and the staff policy, when it is on, requires one). No one can
+    reset their own 2FA this way, which would get round the rule that staff keep theirs.
+    """
+    admin = cast(User, request.user)
+    target = get_object_or_404(User, pk=pk)
+    detail = redirect("users:user_detail", pk=pk)
+    if target.pk == admin.pk:
+        messages.error(request, _("You cannot reset your own two-factor authentication."))
+        return detail
+
+    with transaction.atomic():
+        locked_target = User.objects.select_for_update().get(pk=target.pk)
+        if not locked_target.two_factor_enabled:
+            messages.info(request, _("This account has no two-factor authentication to reset."))
+            return detail
+        MFAService.disable_totp(locked_target, admin_user=admin, request=request)
+
+    # Platform sessions end now. The Portal ends its session at its next check of the
+    # changed credential, as after any credential change.
+    SessionSecurityService.invalidate_all_sessions_for_user(target.pk)
+    messages.success(
+        request,
+        _("Two-factor authentication was reset for %(email)s. They set it up again at their next sign-in.")
+        % {"email": target.email},
+    )
+    return detail
 
 
 # ===============================================================================
@@ -994,6 +1100,8 @@ def user_profile(request: HttpRequest) -> HttpResponse:
         "user": user_with_memberships,
         "accessible_customers": user_with_memberships.get_accessible_customers(),
         "recent_logins": UserLoginLog.objects.filter(user=user, status="success").order_by("-timestamp")[:5],
+        # Staff cannot disable 2FA while the staff policy is on, so the link is not offered.
+        "can_disable_mfa": not staff_cannot_disable_mfa(user),
     }
 
     return render(request, "users/profile.html", context)
@@ -1043,6 +1151,11 @@ class UserListView(LoginRequiredMixin, ListView):
         return queryset
 
 
+def _is_administrator(user: Any) -> bool:
+    """The same rule as `admin_required`."""
+    return bool(getattr(user, "is_superuser", False) or getattr(user, "staff_role", "") == "admin")
+
+
 class UserDetailView(LoginRequiredMixin, DetailView):
     """User detail view (admin only)"""
 
@@ -1055,8 +1168,7 @@ class UserDetailView(LoginRequiredMixin, DetailView):
         if queryset is None:
             queryset = self.get_queryset()
 
-        obj: User = queryset.prefetch_related("customer_memberships__customer").get(pk=self.kwargs["pk"])
-        return obj
+        return get_object_or_404(queryset.prefetch_related("customer_memberships__customer"), pk=self.kwargs["pk"])
 
     def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         if not request.user.is_authenticated or not getattr(request.user, "is_staff_user", False):
@@ -1074,6 +1186,8 @@ class UserDetailView(LoginRequiredMixin, DetailView):
                 "accessible_customers": user.get_accessible_customers(),
                 "recent_logins": UserLoginLog.objects.filter(user=user).order_by("-timestamp")[:10],
                 "customer_memberships": CustomerMembership.objects.filter(user=user).select_related("customer"),
+                # The recovery path for a lost device: administrators, for someone else's account.
+                "can_reset_mfa": _is_administrator(self.request.user) and user.pk != self.request.user.pk,
             }
         )
 

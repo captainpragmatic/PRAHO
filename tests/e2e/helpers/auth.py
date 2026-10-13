@@ -89,6 +89,26 @@ def dismiss_cookie_consent(page: Page) -> None:
 # PLATFORM AUTHENTICATION
 # ===============================================================================
 
+PLATFORM_VERIFY_PATH = "/auth/mfa/verify/"
+
+
+def login_platform_user_with_code(page: Page, email: str, password: str, code: str) -> None:
+    """Sign in to Platform through both steps: the password, then an app code or a backup code.
+
+    `login_platform_user` treats the code step as a failed login, which is right for the accounts
+    it serves: none of them has a second factor. This one is for an account that has.
+    """
+    _dismiss_cookie_consent(page, PLATFORM_BASE_URL)
+    page.goto(f"{PLATFORM_BASE_URL}{PLATFORM_LOGIN_URL}")
+    page.locator('input[name="email"]').fill(email)
+    page.locator('input[name="password"]').fill(password)
+    page.locator('button[type="submit"]').click()
+    page.wait_for_url(lambda url: urlsplit(url).path == PLATFORM_VERIFY_PATH, timeout=15000)
+    page.locator('input[name="token"]').fill(code)
+    page.locator('button[type="submit"]').click()
+    page.wait_for_url(lambda url: urlsplit(url).path == PLATFORM_DASHBOARD_PATH, timeout=15000)
+
+
 def login_platform_user(page: Page, email: str | None = None, password: str | None = None) -> bool:
     """
     Login to the platform (staff backend) at :8700.

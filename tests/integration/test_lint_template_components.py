@@ -604,3 +604,130 @@ def test_an_explicit_platform_path_is_scanned(tmp_path, lint, monkeypatch, capsy
 
     assert exit_code == 1
     assert "services/platform/templates/orders/order_form.html:1 [TMPL001]" in capsys.readouterr().out
+
+
+# ===============================================================================
+# A template tag split across lines renders as text (TMPL011)
+# ===============================================================================
+#
+# Django's lexer recognises `{% %}`, `{{ }}` and `{# #}` only on one line. A tag split across
+# lines is not an error: it is output as plain text. The portal checkout showed a developer
+# comment to customers this way, and the shared table header emitted `hx-get` on every
+# column. The other checks matched tags with DOTALL patterns, so they read split tags as valid.
+
+
+def test_a_split_block_tag_is_a_blocker_at_each_opening_line(tmp_path, lint, monkeypatch):
+    _, platform, _ = _three_roots(tmp_path, lint, monkeypatch)
+    page = _write(
+        platform / "billing" / "list.html",
+        '<div class="a" {%\n  if sort_url %}hx-get="{{ sort_url }}"{%\n  endif %}>\n</div>\n',
+    )
+
+    split = [v for v in lint.scan_file(page) if v.code == "TMPL011"]
+
+    assert [(v.severity, v.line, v.exempted) for v in split] == [
+        (lint.SEVERITY_BLOCKER, 1, False),
+        (lint.SEVERITY_BLOCKER, 2, False),
+    ]
+
+
+def test_a_split_variable_and_a_split_comment_are_blockers(tmp_path, lint, monkeypatch):
+    portal, _, _ = _three_roots(tmp_path, lint, monkeypatch)
+    page = _write(portal / "orders" / "checkout.html", "<p>{{\n  name }}</p>\n{# a note\n   continued #}\n")
+
+    assert [v.line for v in lint.scan_file(page) if v.code == "TMPL011"] == [1, 3]
+
+
+def test_one_line_tags_and_comment_or_verbatim_blocks_are_not_flagged(tmp_path, lint, monkeypatch):
+    _, platform, _ = _three_roots(tmp_path, lint, monkeypatch)
+    page = _write(
+        platform / "help" / "page.html",
+        "{% if a %}<p>{{ b }}</p>{% endif %}{# one line #}\n"
+        "{% comment %}\n  write {% if %} or {{ x\n{% endcomment %}\n"
+        '{% verbatim %}\n  const t = "{{";\n{% endverbatim %}\n',
+    )
+
+    assert [v for v in lint.scan_file(page) if v.code == "TMPL011"] == []
+
+
+def test_a_literal_opener_is_written_with_templatetag_or_verbatim(tmp_path, lint, monkeypatch):
+    """The escape routes a page uses when it really needs `{{` in its output."""
+    _, platform, _ = _three_roots(tmp_path, lint, monkeypatch)
+    page = _write(
+        platform / "help" / "script.html",
+        '<script nonce="{{ csp_nonce }}">\n'
+        '  const open = "{% templatetag openvariable %}";\n'
+        "</script>\n"
+        "{% verbatim snippet %}\n  const t = `{{ name`;\n{% endverbatim snippet %}\n",
+    )
+
+    assert [v for v in lint.scan_file(page) if v.code == "TMPL011"] == []
+
+
+def test_a_named_verbatim_block_ends_only_at_its_own_terminator(tmp_path, lint, monkeypatch):
+    """Django ends `{% verbatim name %}` only at `{% endverbatim name %}`; an unnamed one is literal text."""
+    _, platform, _ = _three_roots(tmp_path, lint, monkeypatch)
+    page = _write(
+        platform / "help" / "named.html",
+        "{% verbatim example %}\n"
+        "  {% endverbatim %} is shown as text here\n"
+        '  const open = "{{";\n'
+        "{% endverbatim example %}\n"
+        "<p>{{\n  name }}</p>\n",
+    )
+
+    assert [v.line for v in lint.scan_file(page) if v.code == "TMPL011"] == [5]
+
+
+def test_a_bare_literal_opener_in_a_script_is_flagged(tmp_path, lint, monkeypatch):
+    """Django outputs it as text too, so the check cannot tell it from a split tag: write it explicitly."""
+    _, platform, _ = _three_roots(tmp_path, lint, monkeypatch)
+    page = _write(platform / "help" / "script.html", '<script>\n  const open = "{{";\n</script>\n')
+
+    assert [v.line for v in lint.scan_file(page) if v.code == "TMPL011"] == [2]
+
+
+def test_a_tmpl_allow_marker_cannot_exempt_a_split_tag(tmp_path, lint, monkeypatch):
+    _, platform, _ = _three_roots(tmp_path, lint, monkeypatch)
+    page = _write(
+        platform / "billing" / "list.html",
+        "{# tmpl-allow TMPL011: wrapped by a formatter #}\n<p>{{\n  name }}</p>\n",
+    )
+
+    violations = lint.scan_file(page)
+
+    assert [(v.line, v.exempted) for v in violations if v.code == "TMPL011"] == [(2, False)]
+    assert [v.line for v in violations if v.code == "TMPL_ALLOW_STALE"] == [1]
+
+
+def test_a_split_tag_in_a_component_is_a_blocker(tmp_path, lint, monkeypatch):
+    _, _, shared = _three_roots(tmp_path, lint, monkeypatch)
+    component = _write(shared / "components" / "table.html", "<th {%\n  if sortable %}aria-sort{% endif %}></th>\n")
+
+    assert [(v.line, v.severity) for v in lint.scan_file(component) if v.code == "TMPL011"] == [
+        (1, lint.SEVERITY_BLOCKER)
+    ]
+
+
+def test_a_split_tag_fails_the_default_gate(tmp_path, lint, monkeypatch, capsys):
+    _, platform, _ = _three_roots(tmp_path, lint, monkeypatch)
+    page = _write(platform / "billing" / "list.html", "<p>{{\n  name }}</p>\n")
+    monkeypatch.setattr(sys, "argv", ["lint_template_components.py", str(page)])
+
+    assert lint.main() == 1
+    assert "services/platform/templates/billing/list.html:1 [TMPL011]" in capsys.readouterr().out
+
+
+def test_no_template_in_the_repository_has_a_split_tag(lint):
+    templates = sorted(path for root, _ in lint.template_roots() for path in root.rglob("*.html"))
+    # The walk must reach the live case this check was written for, so a broken walk cannot pass.
+    assert any(path.as_posix().endswith("services/portal/templates/orders/checkout.html") for path in templates)
+
+    split = [
+        f"{v.file.relative_to(lint.REPO_ROOT)}:{v.line}"
+        for path in templates
+        for v in lint.scan_file(path)
+        if v.code == "TMPL011"
+    ]
+
+    assert split == []
