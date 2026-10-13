@@ -1108,17 +1108,6 @@ class PlatformAPIClient:
             },
         )
 
-    def setup_webauthn_mfa(self, customer_id: str) -> dict[str, Any] | None:
-        """Initialize WebAuthn/Passkey MFA setup"""
-        try:
-            data = self._make_request("POST", "/users/mfa/setup/webauthn/", data={"customer_id": customer_id})
-            return data if data.get("success") else None
-        except PlatformAPIError as e:
-            if e.is_degraded:
-                raise
-            logger.warning(f"⚠️ [API Client] Failed to setup WebAuthn MFA: {e}")
-            return None
-
     def regenerate_backup_codes(
         self, user_id: int, password: str, token: str, *, client_ip: str = "", user_agent: str = ""
     ) -> dict[str, Any]:
@@ -1183,28 +1172,6 @@ class PlatformAPIClient:
     def get_invoice_pdf(self, invoice_id: int, user_id: str) -> bytes:
         """Download invoice PDF."""
         return self._make_binary_request("POST", f"/api/billing/invoices/{invoice_id}/pdf/", data={"user_id": user_id})
-
-    def get_invoice_details(self, invoice_id: int, user_id: int) -> dict[str, Any]:
-        """Get invoice details"""
-        return self._make_request("GET", f"/billing/invoices/{invoice_id}/", user_id=user_id)
-
-    # ===============================================================================
-    # TICKETS API ENDPOINTS
-    # ===============================================================================
-
-    # (Legacy user-scoped GET ticket methods removed; use secure POST endpoints instead)
-
-    def get_ticket_details(self, ticket_id: int, user_id: int) -> dict[str, Any]:
-        """Get ticket details"""
-        return self._make_request("GET", f"/tickets/{ticket_id}/", user_id=user_id)
-
-    def create_ticket(self, ticket_data: dict[str, Any], user_id: int) -> dict[str, Any]:
-        """Create new support ticket"""
-        return self._make_request("POST", "/tickets/", user_id=user_id, data=ticket_data)
-
-    def add_ticket_comment(self, ticket_id: int, comment_data: dict[str, Any], user_id: int) -> dict[str, Any]:
-        """Add comment to ticket"""
-        return self._make_request("POST", f"/tickets/{ticket_id}/comments/", user_id=user_id, data=comment_data)
 
     # ===============================================================================
     # SERVICES API ENDPOINTS
@@ -1274,33 +1241,10 @@ class PlatformAPIClient:
         request_data = {"customer_id": customer_id, "action": "get_tickets", "timestamp": time.time()}
         return self._make_request("POST", "/api/tickets/", data=request_data, idempotent=True)
 
-    def get_ticket_detail_secure(self, customer_id: int, ticket_number: str) -> dict[str, Any]:
-        """🔒 Get ticket detail - SECURE HMAC BODY"""
-        request_data = {
-            "customer_id": customer_id,
-            "ticket_number": ticket_number,
-            "action": "get_ticket_detail",
-            "timestamp": time.time(),
-        }
-        return self._make_request(
-            "POST", f"/api/tickets/{quote_path_segment(ticket_number)}/", data=request_data, idempotent=True
-        )
-
     def create_ticket_secure(self, customer_id: int, ticket_data: dict[str, Any]) -> dict[str, Any]:
         """🔒 Create ticket - SECURE HMAC BODY"""
         request_data = {"customer_id": customer_id, "action": "create_ticket", "timestamp": time.time(), **ticket_data}
         return self._make_request("POST", "/api/tickets/create/", data=request_data)
-
-    def reply_to_ticket_secure(self, customer_id: int, ticket_number: str, reply_content: str) -> dict[str, Any]:
-        """🔒 Reply to ticket - SECURE HMAC BODY"""
-        request_data = {
-            "customer_id": customer_id,
-            "ticket_number": ticket_number,
-            "content": reply_content,
-            "action": "reply_to_ticket",
-            "timestamp": time.time(),
-        }
-        return self._make_request("POST", f"/api/tickets/{quote_path_segment(ticket_number)}/reply/", data=request_data)
 
     # ===============================================================================
     # SECURE SERVICES API ENDPOINTS 📦

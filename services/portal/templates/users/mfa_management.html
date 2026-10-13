@@ -39,12 +39,6 @@
                   {% trans 'Authenticator App' %}
                 </div>
                 {% endif %}
-                {% if profile.webauthn_enabled %}
-                <div class="flex items-center text-green-400"> {# tmpl-allow TMPL005: needs alert nested_content #}
-                  <span class="mr-2">{% icon "lock" size="sm" %}</span>
-                  {% trans 'Passkeys/Hardware Keys' %}
-                </div>
-                {% endif %}
               </div>
             </dd>
           </div>
