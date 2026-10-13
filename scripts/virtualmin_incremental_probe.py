@@ -317,6 +317,44 @@ class Probe:
             "backup-domain", {"domain": self.domain, "dest": self.tmp("q1_x"), "all-features": "", "differential": "1"}
         )
         self.rec.check("a value on the bare flag is rejected (`differential=1` → `--differential 1`)", not bogus_ok)
+        # The shapes PRAHO sent before the flag fix, verbatim. A rejected call
+        # touches nothing, which also answers Q3 for them.
+        before_shapes = self.file_state(self.ifile)
+        for label, program, params in (
+            (
+                "pre-fix full backup",
+                "backup-domain",
+                {
+                    "domain": self.domain,
+                    "dest": self.tmp("q1_prefix_full"),
+                    "all-features": True,
+                    "all-virtualservers": False,
+                    "newformat": True,
+                },
+            ),
+            (
+                "pre-fix config-only backup",
+                "backup-domain",
+                {
+                    "domain": self.domain,
+                    "dest": self.tmp("q1_prefix_cfg"),
+                    "only-features": "virtualmin,dir",
+                    "newformat": True,
+                },
+            ),
+            (
+                "pre-fix restore",
+                "restore-domain",
+                {"domain": self.domain, "source": self.tmp("q1_nodiff"), "all-features": True},
+            ),
+        ):
+            shape_ok, shape_output = self.api(program, params)
+            rejected = (not shape_ok) and "Unknown parameter" in shape_output
+            self.rec.check(f"{label} is rejected with 'Unknown parameter'", rejected)
+        self.rec.check(
+            "the rejected pre-fix calls left the differential base untouched",
+            self.file_state(self.ifile) == before_shapes,
+        )
         self.cleanup_tmp()
         if all(check.passed for check in self.rec.questions["Q1"].checks):
             self.rec.verdict(
@@ -447,6 +485,11 @@ class Probe:
         praho_safety()
         results["PRAHO safety"] = not self.safety_reset
         self.rec.check("PRAHO safety: base " + ("RESET" if self.safety_reset else "UNTOUCHED"), True, "(observed)")
+        # Any dir restore clears the base (feature-dir.pl: "differential file is
+        # no longer valid"), so the forced restore above leaves none. Record it,
+        # then re-establish a base for the remaining measurements.
+        self.rec.check("a restore clears the differential base", self.file_state(self.ifile) == "absent", "(observed)")
+        self.rec.check("re-establish base (plain full)", self.backup(self.tmp("q3_rebase"), {}))
         results["migration params"] = self._state_preserved(
             "migration params (virtualmin_migration_service.py _backup)", migration_params
         )
@@ -621,6 +664,31 @@ class Probe:
         self.reset_domain()
         self.cleanup_tmp()
 
+    def q8_differential_without_base(self) -> None:
+        self.rec.begin("Q8", "A differential after a restore: is there still a base?")
+        self.reset_domain()
+        self.seed("q8")
+        self.rec.check("F0: full", self.backup(self.tmp("q8_f0"), {}))
+        self.rec.check("base exists after F0", self.file_state(self.ifile) != "absent")
+        self.rec.check("restore F0 over the live domain", self.restore(self.tmp("q8_f0")))
+        cleared = self.file_state(self.ifile) == "absent"
+        self.rec.check("the restore deleted the base", cleared)
+        self.put_file("probe/change.txt", "q8 changed\n")
+        self.rec.check("D: differential", self.backup(self.tmp("q8_d"), {"differential": ""}))
+        members = self.dir_members(self.tmp("q8_d"))
+        self.rec.step(f"D dir members: {members}")
+        full = len(members) == 3
+        self.rec.check("D silently contains every file (a full)", full, str(members))
+        self.rec.check("D created a new base", self.file_state(self.ifile) != "absent")
+        self.rec.verdict(
+            "PROVEN" if cleared and full else "DISPROVEN",
+            "a restore deletes the domain's base; the next `differential` then silently runs as a full and becomes "
+            "the new base"
+            if cleared and full
+            else "see checks",
+        )
+        self.cleanup_tmp()
+
     def q4_schedule(self) -> None:
         from apps.infrastructure.ansible_service import AnsibleService
 
@@ -763,6 +831,7 @@ def main() -> int:
             probe.q3_full_backups()
             probe.q5_q6_restore_order()
             probe.q7_differential_alone()
+            probe.q8_differential_without_base()
             probe.q4_schedule()
         except Exception as error:  # Record what ran; the evidence must not vanish with the error
             failure = error
