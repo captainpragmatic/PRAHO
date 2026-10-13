@@ -38,8 +38,9 @@
   {% endif %}
 </div>
 
-
-<!-- Out-of-band update for modal summary -->
+{% if not in_page %}
+{# Out-of-band update for the status dialog's summary: only the validate endpoint's answer needs it. #}
+{# Included in the page, it would duplicate the dialog's own summary. #}
 <div id="modal-preflight" hx-swap-oob="true">
   {% if preflight_ok %}
     <div class="bg-green-900/30 border border-green-700/50 text-green-300 text-sm rounded-lg p-3 mb-3">
@@ -68,3 +69,4 @@
     {% endif %}
   {% endif %}
 </div>
+{% endif %}
