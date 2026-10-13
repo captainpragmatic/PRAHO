@@ -8,6 +8,7 @@ from django.core.cache import cache
 from django.test import TestCase, override_settings
 
 from apps.customers.models import Customer
+from apps.users.mfa import BackupCodeService
 from apps.users.models import CustomerMembership, User
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin, hmac_headers
 
@@ -97,7 +98,7 @@ class AccountSecurityWorkflows(HMACTestMixin, TestCase):
         secret = response.json()["setup_data"]["manual_entry_key"]
         self.other.refresh_from_db()
         self.assertEqual(self.other.two_factor_secret, "")
-        response = self.request_security("mfa/verify/", token=pyotp.TOTP(secret).now())
+        response = self.request_security("mfa/verify/", token=pyotp.TOTP(secret).now(), password="Original-secure123!")
         self.assertEqual(response.status_code, 200, response.content)
         self.user.refresh_from_db()
         self.assertTrue(self.user.mfa_enabled)
@@ -148,9 +149,9 @@ class AccountSecurityWorkflows(HMACTestMixin, TestCase):
 
     def test_wrong_setup_code_is_validation_error_without_enrollment(self):
         self.request_security("mfa/setup/")
-        response = self.request_security("mfa/verify/", token="11111111")
+        response = self.request_security("mfa/verify/", token="11111111", password="Original-secure123!")
         self.assertEqual(response.status_code, 400, response.content)
-        self.assertIn("Finish setup with the 6-digit code.", response.json()["token"])
+        self.assertIn("Enter the 6-digit code from your authenticator app.", response.json()["token"])
         self.user.refresh_from_db()
         self.assertFalse(self.user.mfa_enabled)
 
@@ -194,8 +195,8 @@ class AccountSecurityWorkflows(HMACTestMixin, TestCase):
         response = self.request_security("mfa/regenerate-backup-codes/", password="Original-secure123!", token=codes[0])
         self.assertEqual(response.status_code, 200, response.content)
         self.user.refresh_from_db()
-        self.assertFalse(self.user.verify_backup_code(codes[1]))
-        self.assertTrue(self.user.verify_backup_code(response.json()["backup_codes"][0]))
+        self.assertFalse(BackupCodeService.verify_and_consume_code(self.user, codes[1]))
+        self.assertTrue(BackupCodeService.verify_and_consume_code(self.user, response.json()["backup_codes"][0]))
 
     def test_password_change_requires_second_factor_if_enabled(self):
         _, codes = self.enroll()

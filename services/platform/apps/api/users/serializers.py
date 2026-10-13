@@ -26,6 +26,7 @@ from apps.common.localisation import DATE_FORMAT_CHOICES, LANGUAGE_CHOICES
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.validators import log_security_event
 from apps.users.mfa import MFAService
+from apps.users.pending_totp import get_or_create_pending
 
 if TYPE_CHECKING:
     from apps.users.models import User
@@ -85,17 +86,14 @@ class MFASetupSerializer(serializers.Serializer):
     """
 
     def create(self, validated_data: dict[str, Any]) -> dict[str, Any]:
-        """
-        Generate 2FA secret and QR code for user.
+        """The pending enrolment's secret and its QR code (ADR-0058).
+
+        The same secret comes back on every call until it is confirmed or expires, so the page
+        the Portal shows again after a mistyped code still matches the app the customer scanned.
+        Nothing is written to the user row until the enrolment is confirmed.
         """
         user = self.context["user"]
-
-        # Generate new secret
-        secret = pyotp.random_base32()
-
-        # Store secret temporarily (not enabled yet)
-        user.two_factor_secret = secret
-        user.save(update_fields=["_two_factor_secret"])
+        secret = get_or_create_pending(user)
 
         # Generate QR code
         totp = pyotp.TOTP(secret)
@@ -112,7 +110,7 @@ class MFASetupSerializer(serializers.Serializer):
         img.save(svg_io)
         svg_content = svg_io.getvalue().decode("utf-8")
 
-        logger.info(f"🔐 [2FA Setup] Secret generated for user: {user.email}")
+        logger.info(f"🔐 [2FA Setup] Pending secret offered to user: {user.email}")
 
         return {
             "secret": secret,
@@ -123,60 +121,16 @@ class MFASetupSerializer(serializers.Serializer):
 
 
 class MFAVerifySerializer(serializers.Serializer):
+    """Confirming setup: a 6-digit code from the app and the current password (#689).
+
+    Only the shape is checked here. complete_enrolment checks both values on the locked row.
     """
-    Serializer for 2FA token verification during setup.
-    """
 
-    token = serializers.CharField(max_length=8, min_length=6)
-
-    def validate_token(self, value: str) -> str:
-        """Validate token format"""
-        if not value.isdigit():
-            raise serializers.ValidationError(_("Token must contain only digits."))
-        if len(value) == BACKUP_CODE_LENGTH and not self.context["user"].two_factor_enabled:
-            raise serializers.ValidationError(_("Finish setup with the 6-digit code."))
-        return value
-
-    def create(self, validated_data: dict[str, Any]) -> dict[str, Any]:
-        """
-        Verify 2FA token and enable 2FA for user.
-        """
-        user = self.context["user"]
-        token = validated_data["token"]
-
-        if not user.two_factor_secret:
-            raise serializers.ValidationError(_("2FA setup not initialized. Please start setup first."))
-
-        # Verify token
-        totp = pyotp.TOTP(user.two_factor_secret)
-
-        # Check if it's a 6-digit TOTP token
-        if len(token) == TOTP_TOKEN_LENGTH:
-            if totp.verify(token, valid_window=1):  # Allow 30 seconds window
-                with transaction.atomic():
-                    backup_codes = user.generate_backup_codes()
-                    MFAService.apply_state_change(user, action="enable")
-
-                logger.info(f"✅ [2FA] Two-factor authentication enabled for user: {user.email}")
-
-                return {"success": True, "message": "2FA enabled successfully", "backup_codes": backup_codes}
-            else:
-                raise serializers.ValidationError(_("Invalid verification code. Please try again."))
-
-        # Check if it's an 8-digit backup code
-        elif len(token) == BACKUP_CODE_LENGTH:
-            if user.verify_backup_code(token):
-                logger.info(f"✅ [2FA] Backup code used for user: {user.email}")
-                return {
-                    "success": True,
-                    "message": "Backup code verified successfully",
-                    "backup_codes_remaining": len(user.backup_tokens),
-                }
-            else:
-                raise serializers.ValidationError(_("Invalid backup code."))
-
-        else:
-            raise serializers.ValidationError(_("Invalid token length."))
+    token = serializers.RegexField(
+        regex=rf"^\d{{{TOTP_TOKEN_LENGTH}}}$",
+        error_messages={"invalid": _("Enter the 6-digit code from your authenticator app.")},
+    )
+    password = serializers.CharField(write_only=True, trim_whitespace=False)
 
 
 class MFADisableSerializer(serializers.Serializer):
@@ -207,13 +161,11 @@ class MFADisableSerializer(serializers.Serializer):
 
     def create(self, validated_data: dict[str, Any]) -> dict[str, Any]:
         """
-        Disable 2FA for user.
+        Disable 2FA for user, audited with the browser behind the Portal call.
         """
         user = self.context["user"]
 
-        MFAService.apply_state_change(user, action="disable")
-
-        logger.warning(f"⚠️ [2FA] Two-factor authentication disabled for user: {user.email}")
+        MFAService.disable_totp(user, request=self.context.get("request"), origin=self.context.get("origin"))
 
         return {"success": True, "message": "2FA disabled successfully"}
 

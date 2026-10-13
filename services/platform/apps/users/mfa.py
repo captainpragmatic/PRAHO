@@ -206,6 +206,23 @@ class WebAuthnCredential(models.Model):
 # ===============================================================================
 
 
+@dataclass(frozen=True)
+class BrowserOrigin:
+    """Where a person's browser connected from, when the request in hand is the Portal's signed call."""
+
+    ip: str | None = None
+    user_agent: str | None = None
+
+
+def _origin_ip(request: HttpRequest | None, origin: BrowserOrigin | None) -> str | None:
+    """The browser's address: the one the Portal signed, else this request's own client address."""
+    return (origin and origin.ip) or (get_safe_client_ip(request) if request else None)
+
+
+def _origin_user_agent(request: HttpRequest | None, origin: BrowserOrigin | None) -> str | None:
+    return (origin and origin.user_agent) or (request.META.get("HTTP_USER_AGENT") if request else None)
+
+
 class TOTPService:
     """
     🔐 Time-based One-Time Password (TOTP) Service
@@ -263,6 +280,13 @@ class TOTPService:
         except Exception as e:
             logger.error(f"🔥 [TOTP] Verification error: {e}")
             return False
+
+    @staticmethod
+    def verify_enrolment_code(user: "User", secret: str, token: str) -> bool:
+        """Check a code against a secret that is not enabled yet (a pending enrolment)."""
+        if not secret or len(token) != TOTPService.TOTP_DIGITS or not token.isdigit():
+            return False
+        return bool(pyotp.TOTP(secret).verify(token, valid_window=TOTPService.TIME_WINDOW_TOLERANCE))
 
     @staticmethod
     def generate_qr_code(user: "User", secret: str) -> str:
@@ -629,6 +653,11 @@ class MFAService:
             credential_version, _created = UserCredentialVersion.objects.select_for_update().get_or_create(
                 user_id=user.pk
             )
+            if action in {"recover", "disable"}:
+                # A secret shown before a password reset or a disable must not be confirmable after it.
+                from .pending_totp import discard  # noqa: PLC0415  # Circular: pending_totp imports mfa
+
+                discard(user.pk)
             if action == "recover":
                 if not locked_user.two_factor_enabled:
                     user.two_factor_secret = ""
@@ -656,10 +685,17 @@ class MFAService:
 
     @staticmethod
     def enable_totp(
-        user: "User", request: HttpRequest | None = None, *, secret: str | None = None
+        user: "User",
+        request: HttpRequest | None = None,
+        *,
+        secret: str | None = None,
+        origin: BrowserOrigin | None = None,
     ) -> tuple[str, list[str]]:
         """
         🔐 Enable TOTP/2FA for user with audit logging
+
+        origin names the browser when the request is the Portal's signed call, whose own
+        address and agent are the Portal server's.
 
         Returns:
             Tuple of (totp_secret, backup_codes)
@@ -684,8 +720,8 @@ class MFAService:
             if request:
                 metadata.update(
                     {
-                        "session_id": request.session.session_key,
-                        "user_agent": request.META.get("HTTP_USER_AGENT", ""),
+                        "session_id": getattr(getattr(request, "session", None), "session_key", None),
+                        "user_agent": _origin_user_agent(request, origin) or "",
                     }
                 )
 
@@ -696,8 +732,8 @@ class MFAService:
                     event_type="2fa_enabled",
                     user=user,
                     context=AuditContext(
-                        ip_address=get_safe_client_ip(request) if request else None,
-                        user_agent=request.META.get("HTTP_USER_AGENT") if request else None,
+                        ip_address=_origin_ip(request, origin),
+                        user_agent=_origin_user_agent(request, origin),
                         metadata=metadata,
                     ),
                     description=f"TOTP/2FA enabled for user {user.email}",
@@ -712,13 +748,14 @@ class MFAService:
             raise
 
     @staticmethod
-    def disable_totp(
+    def disable_totp(  # noqa: PLR0913  # Who acted (admin, operator) and where from (request, origin) are separate seams
         user: "User",
         admin_user: Union["User", None] = None,
         reason: str | None = None,
         request: HttpRequest | None = None,
         *,
         operator: str | None = None,
+        origin: BrowserOrigin | None = None,
     ) -> bool:
         """
         🔓 Disable TOTP/2FA with audit trail
@@ -730,6 +767,7 @@ class MFAService:
             request: HTTP request for context
             operator: The server account that ran `manage.py reset_two_factor`; such a reset is
                 recorded with no actor, as the operator has no account in the application
+            origin: The browser behind a Portal call, whose request is the Portal server's
         """
         try:
             if not user.two_factor_enabled:
@@ -772,8 +810,8 @@ class MFAService:
                     event_type=event_type,
                     user=user,
                     context=AuditContext(
-                        ip_address=get_safe_client_ip(request) if request else None,
-                        user_agent=request.META.get("HTTP_USER_AGENT") if request else None,
+                        ip_address=_origin_ip(request, origin),
+                        user_agent=_origin_user_agent(request, origin),
                         metadata=metadata,
                         actor_type=actor_type,
                     ),
@@ -792,9 +830,11 @@ class MFAService:
             raise
 
     @staticmethod
-    def generate_backup_codes(user: "User", request: HttpRequest | None = None) -> list[str]:
+    def generate_backup_codes(
+        user: "User", request: HttpRequest | None = None, *, origin: BrowserOrigin | None = None
+    ) -> list[str]:
         """
-        🎫 Generate new backup codes with audit
+        🎫 Generate new backup codes with audit; origin names the browser behind a Portal call
         """
         try:
             if not user.two_factor_enabled:
@@ -810,8 +850,8 @@ class MFAService:
                     event_type="2fa_backup_codes_generated",
                     user=user,
                     context=AuditContext(
-                        ip_address=get_safe_client_ip(request) if request else None,
-                        user_agent=request.META.get("HTTP_USER_AGENT") if request else None,
+                        ip_address=_origin_ip(request, origin),
+                        user_agent=_origin_user_agent(request, origin),
                         metadata={
                             "count": len(codes),
                             "timestamp": timezone.now().isoformat(),

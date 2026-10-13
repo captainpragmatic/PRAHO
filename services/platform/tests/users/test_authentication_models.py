@@ -6,7 +6,7 @@ Handles the actual model structure properly.
 from django.test import TestCase, override_settings
 
 from apps.customers.models import Customer
-from apps.users.mfa import WebAuthnCredential
+from apps.users.mfa import BackupCodeService, WebAuthnCredential
 from apps.users.models import CustomerMembership, User, UserLoginLog, UserProfile
 
 
@@ -78,9 +78,9 @@ class MinimalUserModelTestCase(TestCase):
         self.assertTrue(user.has_backup_codes())
 
         # Test backup code verification
-        self.assertTrue(user.verify_backup_code(codes[0]))
-        self.assertFalse(user.verify_backup_code(codes[0]))  # Already used
-        self.assertFalse(user.verify_backup_code('invalid'))
+        self.assertTrue(BackupCodeService.verify_and_consume_code(user, codes[0]))
+        self.assertFalse(BackupCodeService.verify_and_consume_code(user, codes[0]))  # Already used
+        self.assertFalse(BackupCodeService.verify_and_consume_code(user, 'invalid'))
 
     def test_customer_relationships(self):
         """Test customer relationship methods"""

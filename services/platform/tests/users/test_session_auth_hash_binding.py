@@ -160,7 +160,8 @@ class SessionAuthHashBindingTests(HMACTestMixin, TestCase):
         self.assertEqual(setup.status_code, 200, setup.content)
         secret = setup.json()["setup_data"]["manual_entry_key"]
         response = self.portal_post(
-            "/api/users/mfa/verify/", {"user_id": self.user.pk, "token": pyotp.TOTP(secret).now()}
+            "/api/users/mfa/verify/",
+            {"user_id": self.user.pk, "token": pyotp.TOTP(secret).now(), "password": self.password},
         )
         self.assertEqual(response.status_code, 200, response.content)
         self.user.refresh_from_db()
@@ -257,9 +258,11 @@ class SessionAuthHashBindingTests(HMACTestMixin, TestCase):
         code = self.user.generate_backup_codes()[0]
         before = list(self.user.backup_tokens)
         old_hash = self.user.get_session_auth_hash()
-        response = self.portal_post("/api/users/mfa/verify/", {"user_id": self.user.pk, "token": code})
+        response = self.portal_post(
+            "/api/users/mfa/verify/", {"user_id": self.user.pk, "token": code, "password": self.password}
+        )
         self.assertEqual(response.status_code, 400, response.content)
-        self.assertIn("Finish setup with the 6-digit code.", response.json()["token"])
+        self.assertIn("Enter the 6-digit code from your authenticator app.", response.json()["token"])
         self.user.refresh_from_db()
         self.assertFalse(self.user.two_factor_enabled)
         self.assertEqual(self.user.backup_tokens, before)
@@ -285,12 +288,14 @@ class SessionAuthHashBindingTests(HMACTestMixin, TestCase):
         browser.force_login(self.user)
         setup = browser.get(reverse("users:mfa_setup_totp"))
         self.assertEqual(setup.status_code, 200, setup.content)
-        secret = browser.session["2fa_secret"]
+        secret = setup.context["secret"]
         old_key = browser.session.session_key
         response = browser.post(
             reverse("users:mfa_setup_totp"), {"token": pyotp.TOTP(secret).now(), "password": self.password}
         )
-        self.assertRedirects(response, reverse("users:mfa_backup_codes"), fetch_redirect_response=False)
+        # The recovery codes come back in this response (#689).
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.context["backup_codes"]), 8)
         self.user.refresh_from_db()
         self.assertEqual(self.user.two_factor_secret, secret)
         self.assertTrue(self.user.two_factor_enabled)

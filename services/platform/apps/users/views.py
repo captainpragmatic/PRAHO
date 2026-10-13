@@ -10,7 +10,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, cast
 
-import pyotp
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import authenticate, login, logout, update_session_auth_hash
@@ -61,6 +60,8 @@ from .mfa import (
     verify_login_second_factor,
 )
 from .models import CustomerMembership, User, UserLoginLog, UserProfile
+from .pending_totp import EnrolmentResult, complete_enrolment, get_or_create_pending
+from .pending_totp import restart as restart_pending_enrolment
 from .services import SessionSecurityService
 
 logger = logging.getLogger(__name__)
@@ -650,39 +651,46 @@ def _too_many_attempts(
     return render(request, template, context(), status=429)
 
 
-def _enrol_totp(
-    request: HttpRequest, user: User, secret: str, form: TwoFactorSetupForm
-) -> tuple[list[str], User] | None:
-    """Enable TOTP when the password and the code are both right; return the codes and the account.
+def _enrol_totp(request: HttpRequest, user: User, form: TwoFactorSetupForm) -> EnrolmentResult:
+    """Confirm the pending enrolment with the password and a code; the answer says what happened.
 
-    The password is checked on the locked row, inside the transaction that enables 2FA, so a
-    password changed meanwhile is not accepted. The code may be from the previous 30-second step,
-    as at sign-in. One answer covers a wrong password and a wrong code. The account returned is
-    read inside the same transaction, so the session binds to the credentials this enrolment
-    committed: a password reset landing afterwards still ends the session.
+    complete_enrolment checks the password on the locked row, inside the transaction that
+    enables 2FA, and returns the account read in that transaction, so the session binds to the
+    credentials this enrolment committed. One answer covers a wrong password and a wrong code.
     """
-    with transaction.atomic():
-        locked_user = User.objects.select_for_update().get(pk=user.pk)
-        if locked_user.two_factor_enabled:
-            return None
-        if not locked_user.check_password(form.cleaned_data["password"]) or not pyotp.TOTP(secret).verify(
-            form.cleaned_data["token"], valid_window=TOTPService.TIME_WINDOW_TOLERANCE
-        ):
-            form.add_error(None, _("The password or the code is incorrect."))
-            return None
-        _secret, backup_codes = MFAService.enable_totp(locked_user, request, secret=secret)
-        enrolled = User.objects.select_related("credential_version").get(pk=user.pk)
-    return backup_codes, enrolled
+    result = complete_enrolment(
+        user.pk, password=form.cleaned_data["password"], code=form.cleaned_data["token"], request=request
+    )
+    if result.status == "incorrect":
+        form.add_error(None, _("The password or the code is incorrect."))
+    elif result.status == "expired":
+        form.add_error(None, _("This setup expired. Scan the new code and try again."))
+    return result
+
+
+def _render_backup_codes(request: HttpRequest, backup_codes: list[str]) -> HttpResponse:
+    """New recovery codes, shown once in the response that made them and stored nowhere (#689)."""
+    return render(
+        request,
+        "users/mfa_backup_codes.html",
+        {
+            "backup_codes": backup_codes,
+            "steps": TWO_FACTOR_STEPS,
+            "current_step": 3,
+            "back_url": reverse("users:user_profile"),
+        },
+    )
 
 
 @login_required
-@never_cache  # the page shows the secret
+@never_cache  # the page shows the secret, and after enrolment the recovery codes
 @rate_limit(key="user", rate="15/h", method="POST")
 def mfa_setup_totp(request: HttpRequest) -> HttpResponse:
     """Set up TOTP: one secret per setup, confirmed with the password and a code from the app.
 
-    The secret stays in the session through refreshes and a wrong code, so the app the person
-    scanned can still be verified; it changes only when they ask to start over.
+    The secret waits in a pending enrolment (ADR-0058) through refreshes and a wrong code, so the
+    app the person scanned can still be verified; it changes only when they ask to start over
+    or leave it long enough to expire.
     """
     user = cast(User, request.user)
     if user.two_factor_enabled:
@@ -692,30 +700,27 @@ def mfa_setup_totp(request: HttpRequest) -> HttpResponse:
     if request.method == "GET" and request.GET.get("restart"):
         # A fresh secret, then the bare URL: the setup form posts back to the address it came
         # from, and a POST must never replace the secret the person has just scanned.
-        request.session["2fa_secret"] = TOTPService.generate_secret()
+        restart_pending_enrolment(user)
         return redirect("users:mfa_setup_totp")
-    secret = request.session.get("2fa_secret")
-    if not secret:
-        secret = TOTPService.generate_secret()
-        request.session["2fa_secret"] = secret
 
     form = TwoFactorSetupForm(request.POST or None)
     if request.method == "POST":
-        if limited := _too_many_attempts(request, "users/mfa_setup.html", lambda: _setup_context(user, secret, form)):
+        if limited := _too_many_attempts(
+            request, "users/mfa_setup.html", lambda: _setup_context(user, get_or_create_pending(user), form)
+        ):
             return limited
-        enrolment = _enrol_totp(request, user, secret, form) if form.is_valid() else None
-        if enrolment is not None:
-            backup_codes, enrolled = enrolment
+        enrolment = _enrol_totp(request, user, form) if form.is_valid() else None
+        if enrolment is not None and enrolment.status == "already_enabled":
+            messages.info(request, _("2FA is already enabled for your account."))
+            return redirect("users:user_profile")
+        if enrolment is not None and enrolment.status == "enabled" and enrolment.user is not None:
             # 🔒 Rotate session for security after enabling 2FA
             SessionSecurityService.rotate_session_on_2fa_change(request)
-            update_session_auth_hash(request, enrolled)
-            request.session.pop("2fa_secret", None)
-            # Shown once on the next page
-            request.session["new_backup_codes"] = backup_codes
+            update_session_auth_hash(request, enrolment.user)
             messages.success(request, _("2FA has been enabled successfully!"))
-            return redirect("users:mfa_backup_codes")
+            return _render_backup_codes(request, enrolment.backup_codes)
 
-    return render(request, "users/mfa_setup.html", _setup_context(user, secret, form))
+    return render(request, "users/mfa_setup.html", _setup_context(user, get_or_create_pending(user), form))
 
 
 def _setup_context(user: User, secret: str, form: TwoFactorSetupForm) -> dict[str, Any]:
@@ -885,28 +890,9 @@ def mfa_verify(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
-@never_cache  # the page shows the codes
 def mfa_backup_codes(request: HttpRequest) -> HttpResponse:
-    """Display backup codes after 2FA setup or regeneration"""
-    backup_codes = request.session.get("new_backup_codes")
-
-    if not backup_codes:
-        messages.error(request, _("No backup codes available."))
-        return redirect("users:user_profile")
-
-    # Clear from session after display
-    del request.session["new_backup_codes"]
-
-    return render(
-        request,
-        "users/mfa_backup_codes.html",
-        {
-            "backup_codes": backup_codes,
-            "steps": TWO_FACTOR_STEPS,
-            "current_step": 3,
-            "back_url": reverse("users:mfa_setup_totp"),  # Back to TOTP setup
-        },
-    )
+    """The old codes page. Codes are now shown with the response that made them, so it holds none."""
+    return redirect("users:user_profile")
 
 
 def _confirm_both_factors(request: HttpRequest, locked_user: User) -> str | None:
@@ -929,6 +915,7 @@ def _confirm_both_factors(request: HttpRequest, locked_user: User) -> str | None
 
 
 @login_required
+@never_cache  # a successful POST shows the new codes
 @rate_limit(key="user", rate="15/h", method="POST")
 def mfa_regenerate_backup_codes(request: HttpRequest) -> HttpResponse:
     """Regenerate backup codes for 2FA; needs the password and a current second factor (#595)."""
@@ -956,10 +943,9 @@ def mfa_regenerate_backup_codes(request: HttpRequest) -> HttpResponse:
         # session: the codes are not part of the session auth hash and the credential version
         # does not change, so signing out other sessions here could not be relied on.
         request.session.cycle_key()
-        request.session["new_backup_codes"] = backup_codes
 
         messages.success(request, _("New backup codes have been generated."))
-        return redirect("users:mfa_backup_codes")
+        return _render_backup_codes(request, backup_codes)
 
     return render(request, "users/mfa_regenerate_backup_codes.html", {"backup_count": len(user.backup_tokens)})
 

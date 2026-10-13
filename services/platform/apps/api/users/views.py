@@ -18,6 +18,7 @@ from django.db import transaction
 from django.http import HttpRequest, JsonResponse
 from django.utils.crypto import constant_time_compare
 from django.utils.translation import gettext as _
+from django.utils.translation import gettext_lazy
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
@@ -54,8 +55,15 @@ from apps.common.request_ip import get_safe_client_ip
 from apps.common.transactions import best_effort_atomic
 from apps.common.validators import log_security_event
 from apps.customers.models import Customer
-from apps.users.mfa import MFAService, staff_cannot_disable_mfa, staff_must_enrol, verify_login_second_factor
+from apps.users.mfa import (
+    BrowserOrigin,
+    MFAService,
+    staff_cannot_disable_mfa,
+    staff_must_enrol,
+    verify_login_second_factor,
+)
 from apps.users.models import APIToken, CustomerMembership, User, UserProfile
+from apps.users.pending_totp import complete_enrolment
 from apps.users.services import APITokenService, SessionSecurityService
 
 from .serializers import (
@@ -722,21 +730,59 @@ def mfa_setup_api(request: HttpRequest, user: User) -> Response:
     return Response({"success": True, "setup_data": result})
 
 
+_MAX_USER_AGENT_LENGTH = 512
+
+
+def _browser_origin(request: HttpRequest) -> BrowserOrigin:
+    """The customer's browser, as the Portal signed it; only a body the HMAC middleware verified counts."""
+    user_agent: str | None = None
+    if getattr(request, "_portal_authenticated", False) is True:
+        raw = getattr(request, "data", {}).get("client_user_agent")
+        if isinstance(raw, str) and raw.isprintable():
+            user_agent = raw[:_MAX_USER_AGENT_LENGTH]
+    return BrowserOrigin(ip=forwarded_client_ip(request), user_agent=user_agent)
+
+
+# Lazy: module-level gettext would freeze the messages to the import-time language.
+_ENROLMENT_REFUSALS: dict[str, tuple[str, Any]] = {
+    "already_enabled": ("mfa_already_enabled", gettext_lazy("Two-factor authentication is already enabled.")),
+    "expired": ("mfa_setup_expired", gettext_lazy("This setup expired. Scan the new code and try again.")),
+    "incorrect": ("mfa_incorrect", gettext_lazy("The password or the code is incorrect.")),
+}
+
+
 @api_view(["POST"])
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_user_authentication
 def mfa_verify_api(request: HttpRequest, user: User) -> Response:
-    """Complete enrollment and return plaintext recovery codes exactly once."""
-    with transaction.atomic():
-        user = User.objects.select_for_update().get(pk=user.pk)
-        if user.mfa_enabled:
-            return Response({"success": False, "error": "MFA is already enabled"}, status=400)
-        serializer = MFAVerifySerializer(data=request.data, context={"request": request, "user": user})
-        serializer.is_valid(raise_exception=True)
-        result = serializer.save()
-        result["session_auth_hash"] = user.get_session_auth_hash()
-    return Response(result)
+    """Confirm the pending enrolment with the password and a code; return the recovery codes once.
+
+    complete_enrolment runs its own transaction, user row first, and every refusal is answered
+    after it ends with a code the Portal can tell apart.
+    """
+    serializer = MFAVerifySerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    result = complete_enrolment(
+        user.pk,
+        password=serializer.validated_data["password"],
+        code=serializer.validated_data["token"],
+        request=request,
+        origin=_browser_origin(request),
+    )
+    if result.status != "enabled" or result.user is None:
+        code, message = _ENROLMENT_REFUSALS.get(result.status, _ENROLMENT_REFUSALS["incorrect"])
+        return Response({"success": False, "code": code, "error": str(message)}, status=status.HTTP_400_BAD_REQUEST)
+    logger.info(f"✅ [2FA] Two-factor authentication enabled for user: {result.user.email}")
+    return Response(
+        {
+            "success": True,
+            "message": "2FA enabled successfully",
+            "backup_codes": result.backup_codes,
+            "session_auth_hash": result.user.get_session_auth_hash(),
+        }
+    )
 
 
 @api_view(["POST"])
@@ -757,7 +803,9 @@ def mfa_disable_api(request: HttpRequest, user: User) -> Response:
                 },
                 status=status.HTTP_403_FORBIDDEN,
             )
-        serializer = MFADisableSerializer(data=request.data, context={"request": request, "user": user})
+        serializer = MFADisableSerializer(
+            data=request.data, context={"request": request, "user": user, "origin": _browser_origin(request)}
+        )
         if serializer.is_valid():
             result = serializer.save()
             result["session_auth_hash"] = user.get_session_auth_hash()
@@ -1260,7 +1308,7 @@ def mfa_regenerate_backup_codes_api(request: HttpRequest, user: User) -> Respons
         # Reuse the credential validation, without executing the disable operation.
         serializer = MFADisableSerializer(data=request.data, context={"request": request, "user": user})
         if serializer.is_valid():
-            codes = MFAService.generate_backup_codes(user, request)
+            codes = MFAService.generate_backup_codes(user, request, origin=_browser_origin(request))
             return Response({"success": True, "backup_codes": codes})
         errors = serializer.errors
     # As for disable: the refusal is answered outside the transaction so its audit row stays.

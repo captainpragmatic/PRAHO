@@ -162,9 +162,9 @@ class WebBackupCodeRegenerationTests(EnrolledStaffTestCase):
     def test_password_and_a_current_code_regenerate(self) -> None:
         """Positive path, a guard that the fix still lets the owner regenerate."""
         response = self.regenerate(password=PASSWORD, token=self.totp())
-        self.assertRedirects(response, reverse("users:mfa_backup_codes"), fetch_redirect_response=False)
+        self.assertEqual(len(response.context["backup_codes"]), 8)
         self.assertNotEqual(User.objects.get(pk=self.user.pk).backup_tokens, self.tokens_before)
-        self.assertEqual(len(self.client.session["new_backup_codes"]), 8)
+        self.assertNotIn("new_backup_codes", self.client.session)
 
     def test_page_asks_for_the_password_and_takes_backup_codes(self) -> None:
         page = self.client.get(reverse("users:mfa_regenerate_backup_codes"))

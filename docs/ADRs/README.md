@@ -87,6 +87,7 @@ providing a historical record of why the system is built the way it is.
 | [ADR-0055](ADR-0055-portal-sessions-merge-concurrent-writes.md) | Portal Sessions Merge Concurrent Writes | Accepted | 2026-10-10 |
 | [ADR-0056](ADR-0056-portal-serves-requests-on-threads.md) | The Portal Serves Requests on Threads | Accepted | 2026-10-10 |
 | [ADR-0057](ADR-0057-media-storage-filesystem-or-private-bucket.md) | Media Lives on the Filesystem, or in a Private Bucket on Container Platforms | Accepted | 2026-10-12 |
+| [ADR-0058](ADR-0058-pending-totp-enrolment.md) | A TOTP Secret Waiting for Its First Code Lives in Its Own Row | Accepted | 2026-10-13 |
 
 ### 🟡 Partially Superseded
 
@@ -167,6 +168,7 @@ Billing Ownership
 - [ADR-0018](ADR-0018-django-encryption-key-management.md) — Encryption key management (superseded by ADR-0033)
 - [ADR-0033](ADR-0033-encryption-architecture-consolidation.md) — Encryption architecture consolidation
 - [ADR-0040](ADR-0040-row-bound-encrypted-json-fields.md) — Exact row binding and fail-loud encrypted JSON reads
+- [ADR-0058](ADR-0058-pending-totp-enrolment.md) — a TOTP secret waiting for its first code lives encrypted in its own row, reused while fresh; recovery codes are shown once and stored nowhere
 - [ADR-0021](ADR-0021-email-enumeration-prevention.md) — Email enumeration prevention
 - [ADR-0030](ADR-0030-rate-limiting-architecture.md) — Throttle architecture and startup validation
 - [ADR-0031](ADR-0031-api-token-authentication-strategy.md) — Token auth gaps and roadmap
@@ -211,8 +213,8 @@ Billing Ownership
 
 ## Statistics
 
-- **Total ADRs**: 57 (ADR-0001 through ADR-0057)
-- **Active**: 51 (in the Active Decisions table: Accepted, Active, Implemented or Proposed)
+- **Total ADRs**: 58 (ADR-0001 through ADR-0058)
+- **Active**: 52 (in the Active Decisions table: Accepted, Active, Implemented or Proposed)
 - **Partially Superseded**: 1
 - **Superseded / Historical**: 5
-- **Next available**: ADR-0058
+- **Next available**: ADR-0059

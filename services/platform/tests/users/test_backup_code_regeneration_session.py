@@ -53,11 +53,11 @@ class BackupCodeRegenerationSessionTests(TestCase):
 
         response = self.regenerate()
 
-        self.assertRedirects(response, reverse("users:mfa_backup_codes"), fetch_redirect_response=False)
+        # The new codes come back in this response and are kept nowhere (#689).
+        self.assertEqual(len(response.context["backup_codes"]), 8)
+        self.assertNotIn("new_backup_codes", self.acting.session)
         self.assertNotEqual(self.session_key(self.acting), before, "the acting session key was not cycled")
         self.assertTrue(self.is_signed_in(self.acting), "regeneration signed the acting user out")
-        # The new codes are shown on the next page; cycling the key must carry them over.
-        self.assertEqual(len(self.acting.session["new_backup_codes"]), 8)
 
     def test_other_sessions_are_left_alone(self) -> None:
         other_key = self.session_key(self.other)

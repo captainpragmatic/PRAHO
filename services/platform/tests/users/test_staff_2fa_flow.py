@@ -92,7 +92,7 @@ class TOTPSetupTests(StaffTestBase):
 
         response = self.client.post(self.url + "?restart=1", {"token": pyotp.TOTP(secret).now(), "password": PASSWORD})
 
-        self.assertRedirects(response, reverse("users:mfa_backup_codes"), fetch_redirect_response=False)
+        self.assertEqual(len(response.context["backup_codes"]), 8)
         self.user.refresh_from_db()
         self.assertTrue(self.user.two_factor_enabled)
         self.assertEqual(self.user.two_factor_secret, secret)
@@ -144,21 +144,22 @@ class TOTPSetupTests(StaffTestBase):
         self.assertFalse(self.user.two_factor_enabled)
 
     def test_the_setup_and_backup_code_pages_are_not_cached(self) -> None:
-        self.assertIn("no-store", self.setup_page()["Cache-Control"])
-        secret = self.client.session["2fa_secret"]
+        page = self.setup_page()
+        self.assertIn("no-store", page["Cache-Control"])
+        secret = page.context["secret"]
 
-        response = self.client.post(self.url, {"token": pyotp.TOTP(secret).now(), "password": PASSWORD}, follow=True)
+        response = self.client.post(self.url, {"token": pyotp.TOTP(secret).now(), "password": PASSWORD})
 
+        # The recovery codes are in this response (#689), so it must not be cached either.
+        self.assertIn("backup_codes", response.context)
         self.assertIn("no-store", response["Cache-Control"])
 
     def test_the_backup_code_page_counts_the_codes_it_shows(self) -> None:
-        session = self.client.session
-        session["new_backup_codes"] = ["11111111", "22222222", "33333333"]
-        session.save()
+        secret = self.setup_page().context["secret"]
 
-        response = self.client.get(reverse("users:mfa_backup_codes"))
+        response = self.client.post(self.url, {"token": pyotp.TOTP(secret).now(), "password": PASSWORD})
 
-        self.assertContains(response, "Your 3 backup codes")
+        self.assertContains(response, "Your 8 backup codes")
 
 
 class GenericErrorTests(StaffTestBase):

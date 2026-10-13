@@ -2702,6 +2702,21 @@ CATALOG: tuple[SettingDef, ...] = (
         validation={"min": 0},
     ),
     SettingDef(
+        key="users.totp_enrolment_ttl_minutes",
+        data_type="integer",
+        default=15,
+        group="security",
+        section=_("Two-factor authentication"),
+        label=_("Authenticator setup lifetime"),
+        help_text=_(
+            "How long a setup code stays valid after it was last shown. Showing it again extends it, so "
+            "someone who scanned it is not handed a different one while they are still typing."
+        ),
+        unit="minutes",
+        input_kind="number",
+        validation={"min": 1},
+    ),
+    SettingDef(
         key="users.security_lockout_failure_threshold",
         data_type="integer",
         default=5,

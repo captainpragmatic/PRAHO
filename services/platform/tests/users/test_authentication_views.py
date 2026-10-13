@@ -334,10 +334,8 @@ class TwoFactorViewsTest(BaseViewTestCase):
         mock_random.return_value = "TESTBASE32SECRET"
         self.client.force_login(self.user)
 
-        # Set up session with secret (as would be done by GET request)
-        session = self.client.session
-        session["2fa_secret"] = "TESTBASE32SECRET"
-        session.save()
+        # The GET offers the secret through a pending enrolment
+        self.assertEqual(self.client.get(reverse("users:mfa_setup_totp")).context["secret"], "TESTBASE32SECRET")
 
         # Generate valid TOTP token
         totp = pyotp.TOTP("TESTBASE32SECRET")
@@ -345,7 +343,8 @@ class TwoFactorViewsTest(BaseViewTestCase):
 
         response = self.client.post(reverse("users:mfa_setup_totp"), {"token": valid_token, "password": "testpass123"})
 
-        self.assertEqual(response.status_code, 302)  # Success redirect
+        self.assertEqual(response.status_code, 200)  # The recovery codes, shown once
+        self.assertEqual(len(response.context["backup_codes"]), 8)
 
         # Verify 2FA was enabled
         self.user.refresh_from_db()
@@ -387,23 +386,11 @@ class TwoFactorViewsTest(BaseViewTestCase):
         self.assertContains(response, self.staff_user.email)
 
     def test_two_factor_backup_codes_get(self) -> None:
-        """Test backup codes view GET"""
+        """The old codes page holds none: codes come with the response that made them (#689)."""
         self.client.force_login(self.user)
 
-        # Set up session with backup codes (required for view)
-        session = self.client.session
-        session["new_backup_codes"] = ["CODE1", "CODE2", "CODE3"]
-        session.save()
-
         response = self.client.get(reverse("users:mfa_backup_codes"))
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.context["backup_codes"], ["CODE1", "CODE2", "CODE3"])
-        for code in ("CODE1", "CODE2", "CODE3"):
-            self.assertContains(response, code)
-        self.assertNotIn("new_backup_codes", self.client.session)
-
-        second = self.client.get(reverse("users:mfa_backup_codes"))
-        self.assertRedirects(second, reverse("users:user_profile"), fetch_redirect_response=False)
+        self.assertRedirects(response, reverse("users:user_profile"), fetch_redirect_response=False)
 
     def test_two_factor_regenerate_backup_codes_post(self) -> None:
         """Test regenerating backup codes (password and a current code, #595)"""
@@ -420,8 +407,8 @@ class TwoFactorViewsTest(BaseViewTestCase):
             },
         )
 
-        self.assertEqual(response.status_code, 302)  # Redirect to backup codes page
-        self.assertRedirects(response, reverse("users:mfa_backup_codes"))
+        self.assertEqual(response.status_code, 200)  # The new codes, shown once in this response
+        self.assertEqual(len(response.context["backup_codes"]), 8)
 
         # Check backup codes were generated
         self.user.refresh_from_db()
@@ -803,7 +790,8 @@ class IntegrationTest(BaseViewTestCase):
             {"token": valid_token, "secret": "TESTBASE32SECRET", "password": "testpass123"},
         )
 
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.context["backup_codes"]), 8)
 
         # Verify 2FA is enabled
         self.user.refresh_from_db()
