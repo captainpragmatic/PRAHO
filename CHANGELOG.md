@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A mandatory audit retention policy can no longer be shortened or bypassed in bulk.** Its guard refused deactivating, demoting or deleting it through `save()` and `delete()` only: a shorter `retention_days` went through, and queryset `update()`, `delete()` and upserts skipped the guard entirely. Outside the seeder's escape hatch, a mandatory period now never shrinks, and bulk writes to its period or status are refused. Nothing in the application edits policies; this closes the path for console sessions, migrations and future code. Financial records were already held by date regardless.
 - **A GDPR data export requested in the portal is generated and can be downloaded.** The request created an export that nothing ever processed, while the page promised an email that was never sent.
   - **Now.** Platform generates the export in the background, and a sweep picks up any request left waiting, including those made before this fix. The portal page lists each export with a Download button while it can be downloaded (7 days). The file is relayed straight from Platform and not stored on the portal.
   - **One at a time.** A new request while one is being prepared or can still be downloaded returns that one.

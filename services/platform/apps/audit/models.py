@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import threading
 import uuid
-from collections.abc import Iterable, Iterator
+from collections.abc import Collection, Iterable, Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, ClassVar, TypedDict
 
@@ -902,6 +902,61 @@ class AuditIntegrityCheck(models.Model):
         return f"{self.check_type} check: {self.status} ({self.issues_found} issues)"
 
 
+# What a mandatory retention policy may not lose outside the escape hatch: its period, and its
+# being active and mandatory at all. Other fields (description, legal_basis) stay editable.
+_MANDATORY_POLICY_GUARDED_FIELDS = frozenset({"retention_days", "is_active", "is_mandatory"})
+
+
+class AuditRetentionPolicyQuerySet(models.QuerySet["AuditRetentionPolicy"]):
+    """Bulk writes that could weaken a mandatory policy need the audit_mutation_allowed() escape hatch.
+
+    update() also covers bulk_update(), which Django runs as update() calls. A bulk write is not
+    compared row by row, so it needs the hatch for a guarded field of a mandatory row even when it
+    would raise the period. Non-mandatory policies and unguarded fields are free. loaddata (raw
+    save_base) and historical models in migrations bypass the ORM guards by design.
+    """
+
+    def update(self, **kwargs: Any) -> int:
+        if _MANDATORY_POLICY_GUARDED_FIELDS & kwargs.keys():
+            self._guard_mandatory("update()")
+        return super().update(**kwargs)
+
+    def delete(self) -> tuple[int, dict[str, int]]:
+        self._guard_mandatory("delete()")
+        return super().delete()
+
+    def bulk_create(  # noqa: PLR0913 - Django's signature
+        self,
+        objs: Iterable[AuditRetentionPolicy],
+        batch_size: int | None = None,
+        ignore_conflicts: bool = False,
+        update_conflicts: bool = False,
+        update_fields: Collection[str] | None = None,
+        unique_fields: Collection[str] | None = None,
+    ) -> list[AuditRetentionPolicy]:
+        # An upsert rewrites whichever row it collides with, mandatory or not.
+        if update_conflicts and _MANDATORY_POLICY_GUARDED_FIELDS & set(update_fields or ()) and not _mutation_allowed():
+            raise AuditImmutabilityError(
+                "An upsert of retention_days, is_active or is_mandatory requires the "
+                "audit_mutation_allowed() escape hatch"
+            )
+        return super().bulk_create(
+            objs,
+            batch_size=batch_size,
+            ignore_conflicts=ignore_conflicts,
+            update_conflicts=update_conflicts,
+            update_fields=update_fields,
+            unique_fields=unique_fields,
+        )
+
+    def _guard_mandatory(self, operation: str) -> None:
+        if not _mutation_allowed() and self.filter(is_mandatory=True).exists():
+            raise AuditImmutabilityError(
+                f"Mandatory retention policies cannot be changed by {operation} outside the "
+                "audit_mutation_allowed() escape hatch"
+            )
+
+
 class AuditRetentionPolicy(models.Model):
     """Define retention policies for different types of audit events."""
 
@@ -934,6 +989,8 @@ class AuditRetentionPolicy(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
 
+    objects = AuditRetentionPolicyQuerySet.as_manager()
+
     class Meta:
         db_table = "audit_retention_policies"
         ordering: ClassVar[tuple[str, ...]] = ("name",)
@@ -961,17 +1018,47 @@ class AuditRetentionPolicy(models.Model):
         return f"{self.name} ({self.retention_days} days)"
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        if not self._state.adding and not _mutation_allowed():
-            original = type(self)._default_manager.filter(pk=self.pk).first()
-            if original is not None and original.is_mandatory and (not self.is_active or not self.is_mandatory):
-                raise AuditImmutabilityError(
-                    "Mandatory retention policies cannot be deactivated or demoted outside "
-                    "the audit_mutation_allowed() escape hatch"
-                )
+        if self.pk is not None and not _mutation_allowed():
+            self._guard_mandatory_write(kwargs.get("update_fields"))
         super().save(*args, **kwargs)
 
+    def _guard_mandatory_write(self, update_fields: Iterable[str] | None) -> None:
+        """Refuse deactivating, demoting or shortening a mandatory policy.
+
+        The stored row decides, not _state.adding: save(force_update=True) on a fresh instance
+        updates it. Only the fields this save writes are judged. The seeder lowers a period after a
+        deliberate seed change inside the escape hatch; nothing else may.
+        """
+        original = type(self)._default_manager.filter(pk=self.pk).values("is_mandatory", "retention_days").first()
+        if original is None or not original["is_mandatory"]:
+            return
+        written = _MANDATORY_POLICY_GUARDED_FIELDS & (
+            _MANDATORY_POLICY_GUARDED_FIELDS if update_fields is None else set(update_fields)
+        )
+        values = {name: getattr(self, name) for name in written}
+        if any(hasattr(value, "resolve_expression") for value in values.values()):
+            raise AuditImmutabilityError(
+                "A mandatory retention policy's retention_days, is_active or is_mandatory cannot be "
+                "written as an expression outside the audit_mutation_allowed() escape hatch"
+            )
+        if ("is_active" in values and not values["is_active"]) or (
+            "is_mandatory" in values and not values["is_mandatory"]
+        ):
+            raise AuditImmutabilityError(
+                "Mandatory retention policies cannot be deactivated or demoted outside "
+                "the audit_mutation_allowed() escape hatch"
+            )
+        if "retention_days" in values and values["retention_days"] < original["retention_days"]:
+            raise AuditImmutabilityError(
+                f"Mandatory retention policies cannot be shortened (from {original['retention_days']} to "
+                f"{values['retention_days']} days) outside the audit_mutation_allowed() escape hatch"
+            )
+
     def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
-        if self.is_mandatory and not _mutation_allowed():
+        # The stored flag decides: clearing is_mandatory in memory does not make the row deletable.
+        if not _mutation_allowed() and (
+            self.is_mandatory or type(self)._default_manager.filter(pk=self.pk, is_mandatory=True).exists()
+        ):
             raise AuditImmutabilityError(
                 "Mandatory retention policies cannot be deleted outside the audit_mutation_allowed() escape hatch"
             )

@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 from django.core.management import CommandError, call_command
 from django.db import IntegrityError, transaction
+from django.db.models import F
 from django.test import TestCase
 
 from apps.audit.models import (
@@ -369,3 +370,117 @@ class RetentionJurisdictionGateTestCase(TestCase):
             business.is_active,
             "the foreign mandatory policy must be retired, not left executing behind a refusal",
         )
+
+
+class MandatoryPolicyRetentionFloorTestCase(TestCase):
+    """A mandatory policy's retention period never shrinks outside audit_mutation_allowed().
+
+    Its guard refused deactivation, demotion and deletion through save() and delete() only, so a
+    shorter retention_days, or any queryset write, went through. The seeder (inside the escape
+    hatch) is the only writer allowed to lower a mandatory period. Bulk writes to a guarded field
+    of a mandatory row need the hatch even when they would raise it.
+    """
+
+    def setUp(self) -> None:
+        self.policy = AuditRetentionPolicy.objects.create(
+            name="mandatory privacy", category="privacy", severity="",
+            retention_days=1827, action="anonymize", is_mandatory=True,
+        )
+        self.optional = AuditRetentionPolicy.objects.create(
+            name="optional integration", category="integration", severity="",
+            retention_days=1096, action="delete", is_mandatory=False,
+        )
+        self.mandatory_rows = AuditRetentionPolicy.objects.filter(pk=self.policy.pk)
+
+    def assert_days(self, days: int) -> None:
+        self.assertEqual(AuditRetentionPolicy.objects.get(pk=self.policy.pk).retention_days, days)
+
+    def test_shortening_through_save_is_refused(self) -> None:
+        self.policy.retention_days = 30
+        with self.assertRaises(AuditImmutabilityError):
+            self.policy.save()
+        self.assert_days(1827)
+
+    def test_shortening_through_update_or_create_is_refused(self) -> None:
+        with self.assertRaises(AuditImmutabilityError):
+            AuditRetentionPolicy.objects.update_or_create(name="mandatory privacy", defaults={"retention_days": 30})
+        self.assert_days(1827)
+
+    def test_shortening_with_an_expression_is_refused(self) -> None:
+        self.policy.retention_days = F("retention_days") - 1000
+        with self.assertRaises(AuditImmutabilityError):
+            self.policy.save()
+        self.assert_days(1827)
+
+    def test_a_fresh_instance_forcing_an_update_is_refused(self) -> None:
+        replacement = AuditRetentionPolicy(
+            pk=self.policy.pk, name="mandatory privacy", category="privacy", severity="",
+            retention_days=30, action="anonymize", is_mandatory=True, created_at=self.policy.created_at,
+        )
+        with self.assertRaises(AuditImmutabilityError):
+            replacement.save(force_update=True)
+        self.assert_days(1827)
+
+    def test_raising_and_unrelated_saves_are_allowed(self) -> None:
+        self.policy.retention_days = 2000
+        self.policy.save()
+        self.assert_days(2000)
+        # An in-memory change that the save does not write is not judged.
+        self.policy.retention_days = 1
+        self.policy.description = "documented"
+        self.policy.save(update_fields=["description", "updated_at"])
+        self.assert_days(2000)
+
+    def test_an_optional_policy_can_be_shortened(self) -> None:
+        self.optional.retention_days = 30
+        self.optional.save()
+        AuditRetentionPolicy.objects.filter(pk=self.optional.pk).update(retention_days=20, is_active=False)
+        self.assertEqual(AuditRetentionPolicy.objects.get(pk=self.optional.pk).retention_days, 20)
+
+    def test_queryset_writes_to_guarded_fields_are_refused(self) -> None:
+        for changes in ({"retention_days": 30}, {"retention_days": 4000}, {"is_mandatory": False}, {"is_active": False}):
+            with self.subTest(changes=changes), self.assertRaises(AuditImmutabilityError):
+                self.mandatory_rows.update(**changes)
+        self.assert_days(1827)
+        self.policy.retention_days = 30
+        self.optional.retention_days = 30
+        # bulk_update runs inside atomic(savepoint=False): outermost in production, so the whole
+        # batch rolls back; here the test transaction needs a savepoint of its own.
+        with self.assertRaises(AuditImmutabilityError), transaction.atomic():
+            AuditRetentionPolicy.objects.bulk_update([self.policy, self.optional], ["retention_days"])
+        self.assert_days(1827)
+        self.assertEqual(AuditRetentionPolicy.objects.get(pk=self.optional.pk).retention_days, 1096)
+
+    def test_an_upsert_cannot_rewrite_a_guarded_field(self) -> None:
+        clash = AuditRetentionPolicy(
+            name="mandatory privacy", category="privacy", severity="",
+            retention_days=30, action="anonymize", is_mandatory=True,
+        )
+        with self.assertRaises(AuditImmutabilityError):
+            AuditRetentionPolicy.objects.bulk_create(
+                [clash], update_conflicts=True, unique_fields=["name"], update_fields=["retention_days"]
+            )
+        self.assert_days(1827)
+
+    def test_queryset_and_stale_instance_deletes_are_refused(self) -> None:
+        with self.assertRaises(AuditImmutabilityError):
+            AuditRetentionPolicy.objects.all().delete()
+        stale = AuditRetentionPolicy.objects.get(pk=self.policy.pk)
+        stale.is_mandatory = False  # in memory only
+        with self.assertRaises(AuditImmutabilityError):
+            stale.delete()
+        self.assertTrue(AuditRetentionPolicy.objects.filter(pk=self.policy.pk).exists())
+        AuditRetentionPolicy.objects.filter(pk=self.optional.pk).delete()
+
+    def test_unguarded_queryset_writes_are_allowed(self) -> None:
+        self.mandatory_rows.update(description="legal basis reviewed")
+        self.assertEqual(AuditRetentionPolicy.objects.get(pk=self.policy.pk).description, "legal basis reviewed")
+
+    def test_the_escape_hatch_allows_every_write(self) -> None:
+        with audit_mutation_allowed("retention_policy_seed"):
+            self.policy.retention_days = 30
+            self.policy.save()
+            self.mandatory_rows.update(retention_days=20)
+            self.mandatory_rows.update(is_mandatory=False, is_active=False)  # together: the DB constraint
+            self.mandatory_rows.delete()
+        self.assertFalse(AuditRetentionPolicy.objects.filter(pk=self.policy.pk).exists())
