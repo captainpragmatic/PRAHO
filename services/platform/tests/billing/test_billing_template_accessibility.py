@@ -97,6 +97,7 @@ const context = {
   currentCurrency: () => "EUR",
   calculateTotals: () => {},
   updateRemoveButtons: () => {},
+  prepareNewLineVat: () => {},
   document: {getElementById: () => container},
 };
 vm.runInNewContext(process.argv[1], context);
