@@ -664,6 +664,21 @@ def test_a_literal_opener_is_written_with_templatetag_or_verbatim(tmp_path, lint
     assert [v for v in lint.scan_file(page) if v.code == "TMPL011"] == []
 
 
+def test_a_named_verbatim_block_ends_only_at_its_own_terminator(tmp_path, lint, monkeypatch):
+    """Django ends `{% verbatim name %}` only at `{% endverbatim name %}`; an unnamed one is literal text."""
+    _, platform, _ = _three_roots(tmp_path, lint, monkeypatch)
+    page = _write(
+        platform / "help" / "named.html",
+        "{% verbatim example %}\n"
+        "  {% endverbatim %} is shown as text here\n"
+        '  const open = "{{";\n'
+        "{% endverbatim example %}\n"
+        "<p>{{\n  name }}</p>\n",
+    )
+
+    assert [v.line for v in lint.scan_file(page) if v.code == "TMPL011"] == [5]
+
+
 def test_a_bare_literal_opener_in_a_script_is_flagged(tmp_path, lint, monkeypatch):
     """Django outputs it as text too, so the check cannot tell it from a split tag: write it explicitly."""
     _, platform, _ = _three_roots(tmp_path, lint, monkeypatch)
@@ -708,6 +723,11 @@ def test_no_template_in_the_repository_has_a_split_tag(lint):
     # The walk must reach the live case this check was written for, so a broken walk cannot pass.
     assert any(path.as_posix().endswith("services/portal/templates/orders/checkout.html") for path in templates)
 
-    split = [f"{v.file.relative_to(lint.REPO_ROOT)}:{v.line}" for path in templates for v in lint.scan_file(path) if v.code == "TMPL011"]
+    split = [
+        f"{v.file.relative_to(lint.REPO_ROOT)}:{v.line}"
+        for path in templates
+        for v in lint.scan_file(path)
+        if v.code == "TMPL011"
+    ]
 
     assert split == []

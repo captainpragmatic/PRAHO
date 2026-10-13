@@ -142,7 +142,7 @@ _RAW_SVG_RE = re.compile(r"<svg\b", re.IGNORECASE)
 # TMPL011: an opening delimiter left in text after Django's lexer has taken every one-line tag.
 _TAG_OPENER_RE = re.compile(r"\{[%{#]")
 # Blocks whose content the engine never renders as markup: their text may contain anything.
-_RAW_BLOCK_START_RE = re.compile(r"\{%\s*(comment|verbatim)\b.*%\}")
+_RAW_BLOCK_START_RE = re.compile(r"\{%\s*(comment|verbatim)\b\s*(.*?)\s*%\}")
 
 # ===============================================================================
 # FILE ROUTING
@@ -366,6 +366,18 @@ def _exemption_for(
     return False, ""
 
 
+def _ends_raw_block(tag: str, terminator: str) -> bool:
+    """Whether a tag is the one that ends the open comment or verbatim block.
+
+    `endcomment` ends a comment whatever follows it; a verbatim block ends only at its own
+    terminator, `endverbatim` or `endverbatim <name>`, as Django reads it.
+    """
+    words = tag[2:-2].split()
+    if terminator == "endcomment":
+        return bool(words) and words[0] == "endcomment"
+    return " ".join(words) == terminator
+
+
 def _split_tag_violations(path: Path, text: str) -> list[Violation]:
     """TMPL011: report every tag opener the lexer left in text, at the line it starts on.
 
@@ -401,8 +413,10 @@ def _split_tag_violations(path: Path, text: str) -> list[Violation]:
             report_openers(text[position : tag.start()], position)
             block = _RAW_BLOCK_START_RE.fullmatch(tag.group())
             if block:
-                raw_block_end = "end" + block.group(1)
-        elif re.fullmatch(r"\{%\s*" + raw_block_end + r"\b.*%\}", tag.group()):
+                # A named verbatim block ends only at the same name; a comment's argument is a note.
+                name = block.group(2) if block.group(1) == "verbatim" else ""
+                raw_block_end = f"end{block.group(1)} {name}".strip()
+        elif _ends_raw_block(tag.group(), raw_block_end):
             raw_block_end = None
         position = tag.end()
     if raw_block_end is None:
