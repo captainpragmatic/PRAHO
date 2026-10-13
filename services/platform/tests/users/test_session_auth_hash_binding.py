@@ -321,7 +321,11 @@ class SessionAuthHashBindingTests(HMACTestMixin, TestCase):
         old_key = browser.session.session_key
         response = browser.post(
             reverse("users:mfa_disable"),
-            {"password": self.password, "token": pyotp.TOTP(self.user.two_factor_secret).now()},
+            {
+                "password": self.password,
+                "token": pyotp.TOTP(self.user.two_factor_secret).now(),
+                "confirm_disable": "on",
+            },
         )
         self.assertRedirects(response, reverse("users:user_profile"), fetch_redirect_response=False)
         self.user.refresh_from_db()

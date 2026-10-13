@@ -517,3 +517,32 @@ class LockedSetPasswordForm(SetPasswordForm):
         )
         self.user = written
         return written
+
+
+# ===============================================================================
+# 2FA CHANGES THAT NEED THE PASSWORD, A CODE AND A CONFIRMATION (#689)
+# ===============================================================================
+
+
+class _MFACredentialChangeForm(forms.Form):
+    """The password and a current second factor. Both are checked on the locked row by the view.
+
+    Neither is required here: an empty password or code gets the same answer as a wrong one.
+    """
+
+    password = forms.CharField(required=False, strip=False, widget=forms.PasswordInput)
+    token = forms.CharField(required=False, max_length=8)
+
+
+class MFADisableForm(_MFACredentialChangeForm):
+    confirm_disable = forms.BooleanField(
+        required=True,
+        error_messages={"required": _("Confirm that you understand what disabling 2FA does.")},
+    )
+
+
+class MFARegenerateForm(_MFACredentialChangeForm):
+    confirm_regenerate = forms.BooleanField(
+        required=True,
+        error_messages={"required": _("Confirm that your current backup codes will stop working.")},
+    )

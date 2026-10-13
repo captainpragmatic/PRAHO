@@ -404,6 +404,7 @@ class TwoFactorViewsTest(BaseViewTestCase):
             {
                 "password": "testpass123",
                 "token": pyotp.TOTP(self.user.two_factor_secret).now(),
+                "confirm_regenerate": "on",
             },
         )
 
@@ -426,6 +427,7 @@ class TwoFactorViewsTest(BaseViewTestCase):
             {
                 "password": "testpass123",
                 "token": pyotp.TOTP("TESTBASE32SECRET").now(),
+                "confirm_disable": "on",
             },
         )
 

@@ -174,7 +174,8 @@ class GenericErrorTests(StaffTestBase):
                 {"password": PASSWORD, "token": "00000000"},
             ):
                 with self.subTest(url=url, data=data):
-                    response = self.client.post(url, data)
+                    confirmed = {**data, "confirm_disable": "on", "confirm_regenerate": "on"}
+                    response = self.client.post(url, confirmed)
                     self.assertContains(response, GENERIC_ERROR)
                     self.assertNotContains(response, "Invalid password.")
         self.user.refresh_from_db()
@@ -216,7 +217,8 @@ class RegenerateAuditTests(StaffTestBase):
         profile_events = AuditEvent.objects.filter(action="profile_updated").count()
 
         self.client.post(
-            reverse("users:mfa_regenerate_backup_codes"), {"password": PASSWORD, "token": pyotp.TOTP(secret).now()}
+            reverse("users:mfa_regenerate_backup_codes"),
+            {"password": PASSWORD, "token": pyotp.TOTP(secret).now(), "confirm_regenerate": "on"},
         )
 
         event = AuditEvent.objects.get(action="2fa_backup_codes_generated")

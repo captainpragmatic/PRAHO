@@ -57,6 +57,8 @@ from .forms import (
     LockedPasswordChangeForm,
     LockedSetPasswordForm,
     LoginForm,
+    MFADisableForm,
+    MFARegenerateForm,
     PasswordAuthorityChanged,
     TwoFactorSetupForm,
     TwoFactorVerifyForm,
@@ -920,7 +922,7 @@ def mfa_backup_codes(request: HttpRequest) -> HttpResponse:
     return redirect("users:user_profile")
 
 
-def _confirm_both_factors(request: HttpRequest, locked_user: User) -> str | None:
+def _confirm_both_factors(request: HttpRequest, locked_user: User, password: str, token: str) -> str | None:
     """Check the posted password and a current second factor; return an error, or None.
 
     Mirrors the API's MFADisableSerializer: the caller holds select_for_update on the user,
@@ -930,10 +932,9 @@ def _confirm_both_factors(request: HttpRequest, locked_user: User) -> str | None
     password is not spent.
     """
     incorrect = _("The password or the code is incorrect.")
-    password = request.POST.get("password", "")
     if not password or not locked_user.check_password(password):
         return incorrect
-    token = request.POST.get("token", "").strip()
+    token = token.strip()
     if not locked_user.two_factor_enabled or not MFAService.verify_mfa_code(locked_user, token, request)["success"]:
         return incorrect
     return None
@@ -950,19 +951,33 @@ def mfa_regenerate_backup_codes(request: HttpRequest) -> HttpResponse:
         messages.error(request, _("Two-factor authentication is not enabled."))
         return redirect("users:user_profile")
 
+    form = MFARegenerateForm(request.POST or None)
     if request.method == "POST":
         if limited := _too_many_attempts(
-            request, "users/mfa_regenerate_backup_codes.html", lambda: {"backup_count": len(user.backup_tokens)}
+            request,
+            "users/mfa_regenerate_backup_codes.html",
+            lambda: {"backup_count": len(user.backup_tokens), "form": MFARegenerateForm()},
         ):
             return limited
+        # The confirmation is checked here, not only in the browser (#689), before any code is spent.
+        if not form.is_valid():
+            return render(
+                request,
+                "users/mfa_regenerate_backup_codes.html",
+                {"backup_count": len(user.backup_tokens), "form": form},
+            )
         with transaction.atomic():
             locked_user = User.objects.select_for_update().get(pk=user.pk)
-            error = _confirm_both_factors(request, locked_user)
+            error = _confirm_both_factors(
+                request, locked_user, form.cleaned_data["password"], form.cleaned_data["token"]
+            )
             backup_codes = MFAService.generate_backup_codes(locked_user, request) if error is None else []
         if error is not None:
-            messages.error(request, error)
+            form.add_error(None, error)
             return render(
-                request, "users/mfa_regenerate_backup_codes.html", {"backup_count": len(locked_user.backup_tokens)}
+                request,
+                "users/mfa_regenerate_backup_codes.html",
+                {"backup_count": len(locked_user.backup_tokens), "form": form},
             )
         # A 2FA change rotates the acting session's key, as enable and disable do. Only this
         # session: the codes are not part of the session auth hash and the credential version
@@ -972,7 +987,9 @@ def mfa_regenerate_backup_codes(request: HttpRequest) -> HttpResponse:
         messages.success(request, _("New backup codes have been generated."))
         return _render_backup_codes(request, backup_codes)
 
-    return render(request, "users/mfa_regenerate_backup_codes.html", {"backup_count": len(user.backup_tokens)})
+    return render(
+        request, "users/mfa_regenerate_backup_codes.html", {"backup_count": len(user.backup_tokens), "form": form}
+    )
 
 
 def _mfa_cannot_be_disabled(request: HttpRequest, user: User) -> HttpResponse | None:
@@ -990,28 +1007,34 @@ def _mfa_cannot_be_disabled(request: HttpRequest, user: User) -> HttpResponse | 
 
 @login_required
 @rate_limit(key="user", rate="15/h", method="POST")
-def mfa_disable(request: HttpRequest) -> HttpResponse:
+def mfa_disable(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911  # Distinct fail-closed gates
     """Disable 2FA; needs the password and a current second factor (#595)."""
     # User is guaranteed to be authenticated due to @login_required
     user = cast(User, request.user)
     if refused := _mfa_cannot_be_disabled(request, user):
         return refused
 
+    form = MFADisableForm(request.POST or None)
     if request.method == "POST":
-        if limited := _too_many_attempts(request, "users/mfa_disable.html", dict):
+        if limited := _too_many_attempts(request, "users/mfa_disable.html", lambda: {"form": MFADisableForm()}):
             return limited
+        # The confirmation is checked here, not only in the browser (#689), before any code is spent.
+        if not form.is_valid():
+            return render(request, "users/mfa_disable.html", {"form": form})
         # The password and a current second factor, as the API requires (#595)
         with transaction.atomic():
             locked_user = User.objects.select_for_update().get(pk=user.pk)
             # Re-checked on the locked row, before a code is checked and spent.
             if refused := _mfa_cannot_be_disabled(request, locked_user):
                 return refused
-            error = _confirm_both_factors(request, locked_user)
+            error = _confirm_both_factors(
+                request, locked_user, form.cleaned_data["password"], form.cleaned_data["token"]
+            )
             if error is None:
                 MFAService.disable_totp(locked_user, request=request)
         if error is not None:
-            messages.error(request, error)
-            return render(request, "users/mfa_disable.html")
+            form.add_error(None, error)
+            return render(request, "users/mfa_disable.html", {"form": form})
 
         # 🔒 Rotate session for security after disabling 2FA
         SessionSecurityService.rotate_session_on_2fa_change(request)
@@ -1028,7 +1051,7 @@ def mfa_disable(request: HttpRequest) -> HttpResponse:
         messages.success(request, _("Two-factor authentication has been disabled."))
         return redirect("users:user_profile")
 
-    return render(request, "users/mfa_disable.html")
+    return render(request, "users/mfa_disable.html", {"form": form})
 
 
 @admin_required

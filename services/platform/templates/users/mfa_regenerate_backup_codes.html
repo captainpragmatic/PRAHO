@@ -98,19 +98,8 @@
     <form method="post" class="space-y-6">
             {% csrf_token %}
 
-            <!-- Display form errors -->
-            {% if messages %}
-              {% for message in messages %}
-                {% if message.tags == 'error' %}
-                <div class="bg-red-900 bg-opacity-50 border border-red-600 rounded-lg p-4">
-                  <div class="flex items-center">
-                    <div class="mr-3">{% icon "x" size="lg" %}</div>
-                    <div class="text-red-200 text-sm">{{ message }}</div>
-                  </div>
-                </div>
-                {% endif %}
-              {% endfor %}
-            {% endif %}
+            <!-- Errors, once: the toast carries no error for this form (#689) -->
+            {% form_error_summary form %}
 
             <!-- Verification Input -->
             <div>

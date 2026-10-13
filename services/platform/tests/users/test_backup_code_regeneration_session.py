@@ -45,7 +45,11 @@ class BackupCodeRegenerationSessionTests(TestCase):
         # Regeneration needs the password and a current second factor (#595).
         return self.acting.post(
             reverse("users:mfa_regenerate_backup_codes"),
-            {"password": PASSWORD, "token": pyotp.TOTP(self.user.two_factor_secret).now()},
+            {
+                "password": PASSWORD,
+                "token": pyotp.TOTP(self.user.two_factor_secret).now(),
+                "confirm_regenerate": "on",
+            },
         )
 
     def test_post_cycles_the_acting_session_key(self) -> None:
