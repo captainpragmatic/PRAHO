@@ -19,6 +19,7 @@ except ImportError:
 
 from .base import *  # noqa: F403  # Django settings pattern
 from .log_files import place_log_files, platform_log_dir
+from .storage import media_storage
 
 # ===============================================================================
 # PRODUCTION SECURITY VALIDATION
@@ -313,6 +314,12 @@ CACHES["default"].update(
 
 # Static files — env-driven for deployment flexibility (native, Docker)
 STATIC_ROOT = Path(os.environ.get("STATIC_ROOT", str(BASE_DIR / "staticfiles")))
+# Content-hashed names (app.3f2a9c.css): the reverse proxy caches /static/ as immutable for a year.
+# Media: the filesystem, or a private bucket with MEDIA_STORAGE=s3 (ADR-0057).
+STORAGES = {
+    "default": media_storage(os.environ),
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.ManifestStaticFilesStorage"},
+}
 # Uploads and generated documents: the deployment's media volume or directory, which backups include.
 MEDIA_ROOT = Path(os.environ.get("MEDIA_ROOT", str(BASE_DIR / "media")))
 
@@ -597,9 +604,9 @@ AUDIT_LOG_RETENTION = {
     },
     # Business operations (billing, orders)
     "business_operation": {
-        "retention_days": 3650,  # 10 years (tax requirement)
+        "retention_days": 2374,  # 6.5 years: 5 years from 1 July after the financial year, at the latest
         "action": "archive",
-        "legal_basis": "Romanian Fiscal Code Art. 25",
+        "legal_basis": "Legea contabilitatii 82/1991 art. 25 (Legea 36/2023)",
     },
     # Data protection/GDPR events
     "data_protection": {
@@ -633,9 +640,9 @@ AUDIT_LOG_RETENTION = {
     },
     # Compliance events
     "compliance": {
-        "retention_days": 3650,  # 10 years
+        "retention_days": 2374,  # 6.5 years: 5 years from 1 July after the financial year, at the latest
         "action": "archive",
-        "legal_basis": "Romanian Fiscal Code, e-Factura Regulation",
+        "legal_basis": "Legea contabilitatii 82/1991 art. 25 (Legea 36/2023), e-Factura records",
     },
 }
 

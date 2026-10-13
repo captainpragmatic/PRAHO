@@ -31,9 +31,12 @@ RETENTION_POLICY_SEED: tuple[dict[str, Any], ...] = (
         "category": "business_operation",
         "severity": "",
         "jurisdiction": "RO",
-        "retention_days": 3653,  # 10 years, Legea contabilitatii
+        # 6.5 years: the latest any record from a calendar year must be kept (5 years from
+        # 1 July of the following year), so no business event expires before its legal date
+        # whatever its classification. Financial events are also held by the calendar cutoff.
+        "retention_days": 2374,
         "action": "delete",
-        "legal_basis": "Legea contabilitatii nr. 82/1991 (10-year financial records)",
+        "legal_basis": "Legea contabilitatii 82/1991 art. 25 (Legea 36/2023): 5 years from 1 July after the financial year",
         "is_mandatory": True,
     },
     {

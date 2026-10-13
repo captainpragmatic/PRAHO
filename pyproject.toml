@@ -188,6 +188,7 @@ platform = [
     # File handling & Storage
     "Pillow>=12.1.1",  # CVE-2026-25990: OOB write in PSD parser
     "boto3>=1.28.0",
+    "django-storages[s3]>=1.14.4",  # Opt-in private S3 media (ADR-0057); MEDIA_STORAGE=s3
 
     # PDF Generation
     "reportlab>=3.6.0",

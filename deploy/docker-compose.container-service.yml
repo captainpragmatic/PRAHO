@@ -15,6 +15,15 @@
 #   - DJANGO_ENCRYPTION_KEY, CREDENTIAL_VAULT_MASTER_KEY (production settings)
 #   - PLATFORM_DOMAIN, PORTAL_DOMAIN, PORTAL_TRUSTED_PROXY_CIDRS
 #   - PLATFORM_API_BASE_URL (for portal -> platform communication)
+#
+# Media (uploads and generated documents: invoice PDFs, e-Factura archives, ticket attachments, GDPR
+# exports) needs MEDIA_STORAGE=s3 here: platform and qcluster have no shared volume, and a
+# container's disk is lost when it is replaced (ADR-0057):
+#   - MEDIA_STORAGE=s3, MEDIA_S3_BUCKET, MEDIA_S3_ACCESS_KEY_ID, MEDIA_S3_SECRET_ACCESS_KEY
+#   - optional: MEDIA_S3_ENDPOINT_URL (https, for S3-compatible providers), MEDIA_S3_REGION,
+#     MEDIA_S3_SERVER_SIDE_ENCRYPTION (AES256 or aws:kms)
+#   The bucket stays private (Block Public Access on, no public policy, no object ACLs); its
+#   versioning and a lifecycle rule are the media backup. The portal stores no media.
 
 services:
   # ===========================================================================

@@ -98,7 +98,7 @@ def terms_of_service_view(request: HttpRequest) -> HttpResponse:
 
 
 # A calendar date, as Platform's page states it.
-PRIVACY_POLICY_DATE = date(2024, 12, 27)
+PRIVACY_POLICY_DATE = date(2026, 10, 12)
 
 
 def privacy_policy_view(request: HttpRequest) -> HttpResponse:

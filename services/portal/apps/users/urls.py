@@ -34,5 +34,6 @@ urlpatterns = [
     path("mfa/disable/", views.mfa_disable_view, name="mfa_disable"),
     path("privacy/", views.privacy_dashboard_view, name="privacy_dashboard"),
     path("data-export/", views.data_export_view, name="data_export"),
+    path("data-export/<uuid:export_id>/download/", views.data_export_download_view, name="data_export_download"),
     path("consent-history/", views.consent_history_view, name="consent_history"),
 ]

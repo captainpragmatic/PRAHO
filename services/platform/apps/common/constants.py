@@ -158,7 +158,6 @@ GDPR_LOG_RETENTION_MONTHS: Final[int] = 12
 GDPR_EXPORT_RETENTION_DAYS: Final[int] = 30
 
 # Audit trail
-AUDIT_LOG_RETENTION_YEARS: Final[int] = 10
 FAILED_LOGIN_LOG_RETENTION_MONTHS: Final[int] = (
     6  # DEPRECATED: use SettingsService.get_integer_setting("gdpr.failed_login_retention_months")
 )

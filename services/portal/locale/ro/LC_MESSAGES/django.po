@@ -2308,8 +2308,8 @@ msgid "Authentication required."
 msgstr "Autentificare obligatorie."
 
 #: services/portal/apps/users/views.py:918
-msgid "Data export request submitted successfully. You will receive an email with download instructions within 48 hours."
-msgstr "Cererea de export de date a fost trimisă cu succes. Veți primi un e-mail cu instrucțiuni de descărcare în termen de 48 de ore."
+msgid "Your data export is being prepared. Refresh this page in a few minutes to download it."
+msgstr "Exportul datelor dvs. este în pregătire. Reîncărcați această pagină în câteva minute pentru a-l descărca."
 
 #: services/portal/apps/users/views.py:922
 msgid "Failed to create export request. Please try again."
@@ -4397,8 +4397,8 @@ msgid "By requesting immediate service activation, you acknowledge and agree to 
 msgstr "Prin solicitarea activării imediate a serviciului, recunoașteți și sunteți de acord să renunțați la dreptul de retragere de 14 zile odată ce serviciul este activat, în conformitate cu Directiva UE 2011/83/UE."
 
 #: services/portal/templates/orders/checkout.html:196
-msgid "Your order data will be retained for the duration required by Romanian fiscal law (minimum 10 years). For details, see our"
-msgstr "Datele comenzii dvs. vor fi reținute pentru durata prevăzută de legislația fiscală română (minim 10 ani). Pentru detalii, consultați"
+msgid "Your order data will be retained for the period required by Romanian accounting law (5 years from 1 July of the year after the financial year). For details, see our"
+msgstr "Datele comenzii dvs. vor fi păstrate pe durata prevăzută de legislația contabilă română (5 ani de la 1 iulie a anului următor exercițiului financiar). Pentru detalii, consultați"
 
 #: services/portal/templates/orders/checkout.html:205
 msgid "Back to cart"
@@ -6301,16 +6301,16 @@ msgid "Export Process"
 msgstr "Procesul de export"
 
 #: services/portal/templates/users/data_export.html:82
-msgid "Your request will be processed within 48 hours"
-msgstr "Solicitarea dvs. va fi procesată în termen de 48 de ore"
+msgid "Your export is prepared within a few minutes"
+msgstr "Exportul este pregătit în câteva minute"
 
 #: services/portal/templates/users/data_export.html:83
-msgid "You will receive an email with a secure download link"
-msgstr "Veți primi un email cu un link de descărcare securizat"
+msgid "Download it from this page once it is ready"
+msgstr "Descărcați-l de pe această pagină când este gata"
 
 #: services/portal/templates/users/data_export.html:84
-msgid "The download link expires after 7 days for security"
-msgstr "Link-ul de descărcare expiră după 7 zile din motive de securitate"
+msgid "Each export can be downloaded for 7 days"
+msgstr "Fiecare export poate fi descărcat timp de 7 zile"
 
 #: services/portal/templates/users/data_export.html:85
 msgid "Data will be provided in JSON format"
@@ -7911,3 +7911,16 @@ msgstr "Mergeți la panoul de confidențialitate"
 #: apps/users/views.py
 msgid "Two-factor authentication is required for staff accounts, so it cannot be disabled."
 msgstr "Autentificarea în doi pași este obligatorie pentru conturile de personal, deci nu poate fi dezactivată."
+
+#: services/portal/apps/users/views.py
+msgid "This export is not available to download. Request a new one below."
+msgstr "Acest export nu poate fi descărcat. Solicitați unul nou mai jos."
+
+#: services/portal/apps/users/views.py
+#: services/portal/templates/users/data_export.html
+msgid "This export is too large to download here. Contact support to receive it."
+msgstr "Acest export este prea mare pentru a fi descărcat aici. Contactați suportul pentru a-l primi."
+
+#: services/portal/templates/users/data_export.html
+msgid "Download"
+msgstr "Descarcă"

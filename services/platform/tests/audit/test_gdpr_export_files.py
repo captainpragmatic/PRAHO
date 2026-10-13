@@ -21,6 +21,7 @@ from django.contrib.auth import get_user_model
 from django.db import DatabaseError
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from apps.audit.export_files import read_export_file
 from apps.audit.models import AuditEvent, ComplianceLog, DataExport
@@ -43,7 +44,11 @@ class ExportFileTestCase(TestCase):
         self.user = User.objects.create_user(email=EMAIL, password=PASSWORD, first_name="Exportina")
 
     def completed_export(self) -> DataExport:
-        export = GDPRExportService.create_data_export_request(self.user).unwrap()
+        export = DataExport.objects.create(
+            # Created directly: a second request through the service returns the first export.
+            requested_by=self.user, export_type="gdpr", scope={}, status="pending",
+            expires_at=timezone.now() + timedelta(days=7),
+        )
         result = GDPRExportService.process_data_export(export)
         self.assertTrue(result.is_ok(), result)
         export.refresh_from_db()

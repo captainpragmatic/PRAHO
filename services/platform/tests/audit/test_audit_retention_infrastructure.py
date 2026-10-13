@@ -36,7 +36,8 @@ class RetentionPolicySeedingTestCase(TestCase):
         business = AuditRetentionPolicy.objects.get(category="business_operation", is_active=True)
         self.assertTrue(business.is_mandatory)
         self.assertEqual(business.action, "delete")
-        self.assertGreaterEqual(business.retention_days, 3653)
+        # The latest any record must be kept: 5 years from 1 July after its (calendar) financial year.
+        self.assertGreaterEqual(business.retention_days, 2374)
 
         privacy = AuditRetentionPolicy.objects.get(category="privacy", is_active=True)
         self.assertTrue(privacy.is_mandatory)
@@ -131,7 +132,7 @@ class MandatoryPolicyEnforcementTestCase(TestCase):
 
 
 class AuditSchedulerTestCase(TestCase):
-    def test_creates_all_five_schedules_and_is_idempotent(self) -> None:
+    def test_creates_all_six_schedules_and_is_idempotent(self) -> None:
         from django_q.models import Schedule  # noqa: PLC0415  # Deferred: optional dependency
 
         first = setup_audit_scheduled_tasks()
@@ -143,13 +144,14 @@ class AuditSchedulerTestCase(TestCase):
                 "audit-integrity-cleanup-weekly",
                 "audit-file-integrity-daily",
                 "audit-expired-exports-daily",
+                "audit-pending-exports-every-15-min",
             },
         )
         self.assertTrue(all(outcome == "created" for outcome in first.values()))
 
         second = setup_audit_scheduled_tasks()
         self.assertTrue(all(outcome == "already_exists" for outcome in second.values()))
-        self.assertEqual(Schedule.objects.filter(name__startswith="audit-").count(), 5)
+        self.assertEqual(Schedule.objects.filter(name__startswith="audit-").count(), 6)
 
     def test_retires_pre_consolidation_schedule_names(self) -> None:
         from django_q.models import Schedule  # noqa: PLC0415  # Deferred: optional dependency
@@ -336,7 +338,8 @@ class RetentionJurisdictionGateTestCase(TestCase):
         business = AuditRetentionPolicy.objects.get(category="business_operation", is_active=True)
         self.assertTrue(business.is_mandatory)
         self.assertEqual(business.action, "delete")
-        self.assertGreaterEqual(business.retention_days, 3653)
+        # The latest any record must be kept: 5 years from 1 July after its (calendar) financial year.
+        self.assertGreaterEqual(business.retention_days, 2374)
 
     def test_no_seeded_policy_cites_gdpr_article_7(self) -> None:
         """Art. 7(1) governs the conditions for consent; it prescribes no

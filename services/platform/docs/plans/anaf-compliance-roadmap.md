@@ -49,7 +49,8 @@ Resolve the content-type / standard-name unknowns (#123 gaps 2/7/8) against the 
 the well-scoped #123 backlog — ~1–2 focused weeks once credentials exist; mostly UNVERIFIABLE before.
 
 ### Phase 3 — Retention
-10-year archival of the sealed XML + a retrieval path. Storage concern; can reuse existing object
+Archival of the sealed XML for 5 years from 1 July after the financial year (Legea 82/1991 art. 25,
+as amended by Legea 36/2023) + a retrieval path. Storage concern; can reuse existing object
 storage. Small, independent.
 
 ### Explicitly dropped

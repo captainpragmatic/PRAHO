@@ -376,13 +376,6 @@ CORS_ALLOWED_ORIGINS = [
 CORS_ALLOW_CREDENTIALS = True
 
 # ===============================================================================
-# STATICFILES FOR DEVELOPMENT
-# ===============================================================================
-
-# Disable manifest storage for dev (faster)
-STATICFILES_STORAGE = "django.contrib.staticfiles.storage.StaticFilesStorage"
-
-# ===============================================================================
 # ROMANIAN DEVELOPMENT DEFAULTS
 # ===============================================================================
 

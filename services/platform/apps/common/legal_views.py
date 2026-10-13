@@ -20,7 +20,7 @@ from django.utils.translation import gettext as _
 from apps.common.legal import TERMS_OF_SERVICE_VERSION
 
 # A calendar date: shown as the same day in every timezone. The portal's page states the same one.
-PRIVACY_POLICY_DATE = date(2024, 12, 27)
+PRIVACY_POLICY_DATE = date(2026, 10, 12)
 
 logger = logging.getLogger(__name__)
 

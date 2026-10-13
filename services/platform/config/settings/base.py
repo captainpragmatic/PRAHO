@@ -214,7 +214,12 @@ STATICFILES_DIRS = [
     REPO_ROOT / "shared" / "ui" / "static",  # Shared JS components (modal.js, toast.js)
 ]
 
-STATICFILES_STORAGE = "django.contrib.staticfiles.storage.ManifestStaticFilesStorage"
+# Plain names locally; prod and staging switch staticfiles to the manifest storage, which
+# content-hashes names so the year-long immutable cache on /static/ never serves stale files.
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+}
 
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"

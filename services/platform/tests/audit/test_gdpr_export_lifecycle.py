@@ -43,7 +43,11 @@ class ExportLifecycleTestCase(TestCase):
         self.user = User.objects.create_user(email="lifecycle@example.test", password=PASSWORD)
 
     def completed_export(self, user: object | None = None) -> DataExport:
-        export = GDPRExportService.create_data_export_request(user or self.user).unwrap()
+        export = DataExport.objects.create(
+            # Created directly: a second request through the service returns the first export.
+            requested_by=user or self.user, export_type="gdpr", scope={}, status="pending",
+            expires_at=timezone.now() + timedelta(days=7),
+        )
         self.assertTrue(GDPRExportService.process_data_export(export).is_ok())
         export.refresh_from_db()
         self.assertTrue(self.on_disk(export.file_path))
@@ -124,7 +128,11 @@ class ErasureDeletesExportFilesTests(ExportLifecycleTestCase):
 
     def test_anonymisation_deletes_the_files_only_after_it_commits(self) -> None:
         export = self.completed_export()
-        pending = GDPRExportService.create_data_export_request(self.user).unwrap()
+        pending = DataExport.objects.create(
+            # Created directly: a second request through the service returns the first export.
+            requested_by=self.user, export_type="gdpr", scope={}, status="pending",
+            expires_at=timezone.now() + timedelta(days=7),
+        )
         path = export.file_path
 
         with self.captureOnCommitCallbacks() as callbacks:

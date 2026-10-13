@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Media can live in a private S3-compatible bucket.** For container platforms, where the platform and task-worker containers share no volume and lose their disks on every deploy, `MEDIA_STORAGE=s3` stores invoice PDFs, e-Factura archives, ticket attachments and GDPR exports in a bucket (ADR-0057). The bucket stays private: Django reads every file, and a half-configured bucket stops the start instead of falling back to the container's disk. Every other deployment keeps the filesystem. The staff ticket-attachment download no longer needs a local file path.
+
 ### Fixed
 
 - **Staff can add, edit and delete items on the order edit page.**
@@ -19,6 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Proforma line totals stay on one line**, in the staff form and on the proforma pages.
 - **A draft order page has one preflight summary in its status dialog.** The preflight card repeated the dialog summary's element, id included, so an update from "Validate" could land on the card's copy instead of the dialog.
 - **Links and requests that went to `/app/…` now reach their pages.** Nothing is served under that prefix, so each one answered 404: the page links of the order, invoice, audit-log and GDPR-request lists, the domain list's Renew and View buttons, the domain availability check, the proforma "Send" button, and the GDPR "Apply Filters" button. The GDPR "Download Export" buttons pointed at the home page. They now use the routes, and the domain list no longer offers "Manage DNS", which has no page.
+- **A GDPR data export requested in the portal is generated and can be downloaded.** The request created an export that nothing ever processed, while the page promised an email that was never sent.
+  - **Now.** Platform generates the export in the background, and a sweep picks up any request left waiting, including those made before this fix. The portal page lists each export with a Download button while it can be downloaded (7 days). The file is relayed straight from Platform and not stored on the portal.
+  - **One at a time.** A new request while one is being prepared or can still be downloaded returns that one.
+  - **The pages say what happens:** no email promise, on the portal or on Platform's own privacy page.
+  - **Deploy** Platform with or before the portal.
+- **CSS and JS changes reach returning visitors after a deploy.** Django 5.1 removed the `STATICFILES_STORAGE` setting and 5.2 ignores it, so static files were deployed under their plain names while the reverse proxy tells browsers to cache them for a year. Both services now configure `STORAGES`: production and staging content-hash every file name, local settings keep plain names. The checkout's card logos no longer hardcode a `/static/` URL.
 - **Platform no longer writes an audit row for every page a staff member opens.** (#622)
   - **The bug.** Every signed-in request under `/users/`, `/billing/`, `/customers/`, `/admin/`, `/api/`, `/settings/` or `/tickets/` wrote a `session_activity_*` audit event. The rows had no user attached, only the user's id, the path and the IP in their details, so GDPR export and erasure never found them, and retention kept them for two years. The request log already records each request.
   - **The same path's multiple-address check** stored one cache entry per request, about 1,800 an hour for a page that refreshes itself, and once three addresses were seen it wrote a `suspicious_activity_detected` row on every request for up to an hour. It now keeps one entry per address and records an address once, when it joins the pattern.
@@ -82,6 +92,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Financial records are kept 5 years from 1 July after their financial year, not 10 years.** Legea contabilității 82/1991 art. 25, as amended by Legea 36/2023 (in force 15 January 2023), sets 5 years counted from 1 July of the year after the financial year. Records from 2026, for example, are kept until 1 July 2032.
+  - **Retention** holds financial audit evidence until that date, computed in Romanian time. The business-operations policy keeps every event 6.5 years, the latest any record must be kept, so none expires early whatever its type. More financial event types are recognised: refunds, fiscal corrections, recurring payments, VAT validations, and anything about billing records or gift-card and refund ledgers.
+  - **Anonymisation and full GDPR erasure** no longer blank or delete that evidence. Erasure keeps it with its content and removes only the person's network identity.
+  - **The privacy policy** (updated 12 October 2026) **and checkout** state the new period.
 - **Platform templates are held to the design-system template lint.** (#622) The linter checked only portal templates, so Platform's raw form elements and emoji went unchecked. It now scans Platform and `shared/ui` templates too, and the pre-commit hook no longer skips them. The findings are fixed: 133 raw form elements now use the shared components; 194 keep their markup with a `tmpl-allow` marker naming what the components cannot express (Alpine bindings, option lists built in the template, rows a script clones); and all 95 emoji are gone. A crawl of 143 staff pages found every form control with the same name, type, value, state and htmx wiring as before.
 - **Portal registration asks each customer for the fiscal identity they have.** Companies give a CUI and trade registry number next to the VAT number, and a Romanian company must give a VAT number or a CUI. A CNP is asked only of individuals billed in Romania. When Platform refuses a value (a CNP or CUI that fails its check digit, a VAT number for another CUI), the reason is shown on that field instead of a generic "registration failed". **Deploy the portal with or before Platform.**
 - **Total time limit on Platform calls.** A portal call to Platform now has a total time budget, `PLATFORM_API_TOTAL_BUDGET_SECONDS` (default and maximum 45 s, minimum 5 s). It covers retries and backoff, and the response body is read in chunks with the budget checked between them, so a slow Platform no longer holds a portal worker for minutes.
