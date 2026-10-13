@@ -91,7 +91,8 @@ This template is dynamically loaded and contains only the results section.
     </div>
 
     <!-- Enhanced Pagination with HTMX -->
-    {% include 'components/pagination.html' with page_obj=orders extra_params=extra_params htmx_target='#orders-results' htmx_url='/app/orders/list/' %}
+    {% url 'orders:order_list_htmx' as orders_url %}
+    {% include 'components/pagination.html' with page_obj=orders extra_params=extra_params htmx_target='#orders-results' htmx_url=orders_url %}
 
   {% else %}
     <!-- Empty State -->

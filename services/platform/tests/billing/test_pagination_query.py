@@ -44,7 +44,10 @@ class BillingPaginationQueryTests(TestCase):
                 )
             )
         assert_next_query(
-            self, response, {"q": [SEARCH], "search": [SEARCH], "type": ["proforma"], "facet": ["one", "two"]}
+            self,
+            response,
+            {"q": [SEARCH], "search": [SEARCH], "type": ["proforma"], "facet": ["one", "two"]},
+            htmx_view="billing:billing_list_htmx",
         )
 
     def test_full_billing_list_next_link_round_trips_filters(self) -> None:

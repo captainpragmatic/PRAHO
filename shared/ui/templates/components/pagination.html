@@ -8,7 +8,7 @@ Clean, accessible, and responsive pagination following 2024 UI best practices.
 Usage:
 {% include 'components/pagination.html' with page_obj=page_obj %}
 {% include 'components/pagination.html' with page_obj=invoices extra_params='&filter=pending' %}
-{% include 'components/pagination.html' with page_obj=logs htmx_target='#results' htmx_url='/app/audit/logs/list/' %}
+{% url 'audit:logs_list' as logs_url %}{% include 'components/pagination.html' with page_obj=logs htmx_target='#results' htmx_url=logs_url %}
 
 Required Parameters:
 - page_obj: Django paginator page object (has_previous, has_next, etc.)

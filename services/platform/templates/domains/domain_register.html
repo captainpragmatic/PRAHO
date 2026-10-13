@@ -256,7 +256,7 @@ document.addEventListener('DOMContentLoaded', function() {
             formData.append('domain_name', domainName);
             formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
 
-            const response = await fetch('/app/domains/check-availability/', {
+            const response = await fetch('{% url "domains:check_availability" %}', {
                 method: 'POST',
                 body: formData
             });

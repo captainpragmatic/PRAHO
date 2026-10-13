@@ -19,8 +19,8 @@
   function ic(key) {
     return (cfg().icons && cfg().icons[key]) || "";
   }
-  // The server emits the order URL; a hard-coded "/app/orders/" prefix made every item
-  // request 404, since orders are served under /orders/.
+  // The server emits the order URL; a hard-coded prefix that no route serves made every
+  // item request 404.
   function base() {
     return (cfg().orderUrl || "").replace(/\/$/, "");
   }
