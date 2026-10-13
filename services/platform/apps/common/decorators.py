@@ -56,6 +56,11 @@ def staff_required(view_func: Callable[..., HttpResponse]) -> Callable[..., Http
     return wrapper
 
 
+def is_administrator(user: Any) -> bool:
+    """The administrator rule: staff_role 'admin' or a superuser. One definition for every gate."""
+    return bool(getattr(user, "is_superuser", False) or getattr(user, "staff_role", "") == "admin")
+
+
 def admin_required(view_func: Callable[..., HttpResponse]) -> Callable[..., HttpResponse]:
     """
     Decorator that requires user to be admin (staff_role='admin' or is_superuser)
@@ -67,9 +72,7 @@ def admin_required(view_func: Callable[..., HttpResponse]) -> Callable[..., Http
         if not request.user.is_authenticated:
             return HttpResponseRedirect(_build_login_url(request))
 
-        user = request.user
-        # Check if user is admin
-        if not (user.is_superuser or getattr(user, "staff_role", "") == "admin"):
+        if not is_administrator(request.user):
             return HttpResponseForbidden("Administrator privileges required")
 
         return view_func(request, *args, **kwargs)

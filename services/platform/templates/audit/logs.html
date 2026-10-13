@@ -51,7 +51,8 @@ Dark theme interface for staff/admin audit log monitoring
                         </div>
                     </div>
 
-                    <!-- User Filter -->
+                    <!-- User Filter: every account, for administrators only (#689) -->
+                    {% if show_network_identity %}
                     <div class="relative">
                         <label for="audit-user" class="block text-sm font-medium text-slate-300 mb-2">
                             {% trans "User" %}
@@ -65,6 +66,7 @@ Dark theme interface for staff/admin audit log monitoring
                             {% endfor %}
                         </select>
                     </div>
+                    {% endif %}
 
                     <!-- Action Type Filter -->
                     <div class="relative">
@@ -101,10 +103,12 @@ Dark theme interface for staff/admin audit log monitoring
                         </select>
                     </div>
 
-                    <!-- IP Address Search -->
+                    <!-- IP Address Search: administrators only (#689) -->
+                    {% if show_network_identity %}
                     <div>
                         {% include 'components/input.html' with label='IP Address' placeholder='Search by IP...' name='ip_address' html_id='ip_address' %}
                     </div>
+                    {% endif %}
 
                     <!-- Search Changes -->
                     <div>

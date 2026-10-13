@@ -996,67 +996,6 @@ class MFAService:
     def get_enabled_methods(user: "User") -> list[str]:
         return MFAService._get_available_methods(user)
 
-    @staticmethod
-    def verify_second_factor(request: HttpRequest, user: "User", method: str, token: str) -> dict[str, Any]:
-        """Verify the provided second-factor token for the given method."""
-        result: dict[str, Any] = {"success": False}
-
-        # Rate limiting
-        if not MFAService._check_rate_limit(user):
-            result["error"] = "Rate limit exceeded"
-            # Generic audit for compatibility with enhanced tests
-            AuditService.log_simple_event(
-                event_type="mfa_verification_failed", user=user, metadata={"reason": "rate_limited"}
-            )
-            return result
-
-        try:
-            if method == "totp":
-                ok = TOTPService.verify_token(user, token, request)
-                result.update({"success": ok, "method": "totp"})
-            elif method == "backup_code":
-                ok = (
-                    user.verify_backup_code(token)
-                    if hasattr(user, "verify_backup_code")
-                    else BackupCodeService.verify_and_consume_code(user, token)
-                )
-                result.update({"success": ok, "method": "backup_code"})
-            else:
-                result["error"] = f"Unsupported MFA method: {method}"
-                AuditService.log_simple_event(
-                    event_type="mfa_verification_failed", user=user, metadata={"method": method}
-                )
-                return result
-
-            # Audit via generic interface for tests
-            AuditService.log_simple_event(
-                event_type="mfa_verification_success" if result["success"] else "mfa_verification_failed",
-                user=user,
-                metadata={"method": method, "ip": request.META.get("REMOTE_ADDR")},
-            )
-            if not result["success"]:
-                result["error"] = "Invalid MFA token"
-            return result
-        except Exception as e:  # pragma: no cover
-            logger.error(f"🔥 [MFA] verify_second_factor error: {e}")
-            result["error"] = "Internal error"
-            return result
-
-    @staticmethod
-    def disable_all_mfa_methods(request: HttpRequest, user: "User") -> dict[str, Any]:
-        """Disable TOTP, clear backup codes, and remove WebAuthn credentials."""
-        try:
-            with transaction.atomic():
-                MFAService.apply_state_change(user, action="disable")
-                WebAuthnCredential.objects.filter(user=user).delete()
-            AuditService.log_simple_event(
-                event_type="mfa_disabled", user=user, metadata={"by": getattr(request.user, "email", None)}
-            )
-            return {"success": True}
-        except Exception as e:  # pragma: no cover
-            logger.error(f"🔥 [MFA] disable_all_mfa_methods error: {e}")
-            return {"success": False, "error": "Internal error"}
-
     # ===============================================================================
     # PRIVATE HELPER METHODS
     # ===============================================================================

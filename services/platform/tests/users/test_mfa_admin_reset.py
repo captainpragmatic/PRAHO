@@ -120,8 +120,9 @@ class AdminResetTests(TestCase):
         self.assertContains(page, 'data-action="confirm-submit"')
         self.assertContains(page, 'data-confirm="')
 
+        # Other staff roles cannot open the person page at all (#689), so they never see the reset.
         self.client.force_login(self.colleague)
-        self.assertNotContains(self.client.get(detail_url), reset_url)
+        self.assertEqual(self.client.get(detail_url).status_code, 403)
 
         self.client.force_login(self.admin)
         own_page = self.client.get(reverse("users:user_detail", kwargs={"pk": self.admin.pk}))

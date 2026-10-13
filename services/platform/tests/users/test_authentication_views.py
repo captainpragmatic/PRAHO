@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from datetime import timedelta
+from typing import Any
 from unittest.mock import Mock, patch
 
 import pyotp
@@ -526,6 +527,31 @@ class UserListViewTest(BaseViewTestCase):
         self.assertEqual([user.pk for user in response.context["users"]], [self.user.pk])
         self.assertContains(response, self.user.email)
         self.assertNotContains(response, self.admin_user.email)
+
+
+class UserPagesAdministratorOnlyTest(BaseViewTestCase):
+    """Every account, staff and customer alike, is listed here: administrators only (#689)."""
+
+    def _staff(self, role: str) -> Any:
+        return UserModel.objects.create_user(
+            email=f"{role}@example.com", password="staffpass123", is_staff=True, staff_role=role
+        )
+
+    def test_other_staff_roles_are_refused_both_pages(self) -> None:
+        for role in ("support", "billing", "manager"):
+            with self.subTest(role=role):
+                self.client.force_login(self._staff(role))
+                self.assertEqual(self.client.get(reverse("users:user_list")).status_code, 403)
+                detail = reverse("users:user_detail", kwargs={"pk": self.user.pk})
+                self.assertEqual(self.client.get(detail).status_code, 403)
+
+    def test_administrators_still_see_both_pages(self) -> None:
+        for administrator in (self.staff_user, self.admin_user):
+            with self.subTest(administrator=administrator.email):
+                self.client.force_login(administrator)
+                self.assertEqual(self.client.get(reverse("users:user_list")).status_code, 200)
+                detail = reverse("users:user_detail", kwargs={"pk": self.user.pk})
+                self.assertEqual(self.client.get(detail).status_code, 200)
 
 
 class UserDetailViewTest(BaseViewTestCase):

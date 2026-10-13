@@ -215,7 +215,7 @@ class AuditMiddleware:
         }
 
         # Don't log sensitive data
-        if request.path.startswith("/admin/") or "password" in request.path.lower():
+        if "password" in request.path.lower():
             audit_data["sensitive"] = True
         else:
             audit_data["query_params"] = dict(request.GET)
@@ -931,7 +931,6 @@ class StaffOnlyPlatformMiddleware:
         public_paths = {
             "/auth/login/",
             "/auth/logout/",
-            "/admin/",  # Django admin has its own authentication
             "/api/",  # API has its own authentication via portal service
             "/i18n/",  # Language switching
         }

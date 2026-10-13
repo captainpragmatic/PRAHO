@@ -167,7 +167,7 @@
                 {% trans "Mark as Failed" as mark_failed_label %}
                 {% with export_id=export_request.id|stringformat:"s" %}{% button mark_failed_label variant="danger" size="xs" icon="x" data_action="show" attrs="data-target=fail-modal-"|add:export_id %}{% endwith %}
 
-            {% elif export_request.status == 'completed' and not is_expired and file_exists %}
+            {% elif export_request.status == 'completed' and not is_expired and file_exists and can_download %}
                 {% url 'audit:download_user_export' export_request.id as download_url %}
                 {% trans "Download Export" as bt7 %}{% button bt7 variant="primary" size="sm" href=download_url %}
 

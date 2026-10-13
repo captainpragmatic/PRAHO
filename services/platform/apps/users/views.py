@@ -27,7 +27,7 @@ from django.db import Error as DatabaseFailure
 from django.db import models, transaction
 from django.db.models import QuerySet
 from django.forms import Form
-from django.http import HttpRequest, HttpResponse, HttpResponseBase, JsonResponse
+from django.http import HttpRequest, HttpResponse, HttpResponseBase, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render, resolve_url
 from django.urls import reverse, reverse_lazy
 from django.utils.crypto import constant_time_compare
@@ -41,7 +41,7 @@ from django.views.generic import DetailView, ListView
 
 from apps.audit.services import AuthenticationAuditService, LoginFailureEventData, LogoutEventData
 from apps.common.constants import BACKUP_CODE_LOW_WARNING_THRESHOLD
-from apps.common.decorators import admin_required
+from apps.common.decorators import admin_required, is_administrator
 from apps.common.rate_limiting import rate_limit
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.transactions import best_effort_atomic
@@ -1112,6 +1112,16 @@ def user_profile(request: HttpRequest) -> HttpResponse:
 # ===============================================================================
 
 
+def _refuse_non_administrators(request: HttpRequest) -> HttpResponse | None:
+    """The user pages list every account, staff and customers alike: administrators only (#689)."""
+    if not request.user.is_authenticated or not getattr(request.user, "is_staff_user", False):
+        messages.error(request, _("You do not have permission to access this page."))
+        return redirect("dashboard")
+    if not _is_administrator(request.user):
+        return HttpResponseForbidden(_("Only administrators can view user accounts."))
+    return None
+
+
 class UserListView(LoginRequiredMixin, ListView):
     """List all users (admin only)"""
 
@@ -1126,9 +1136,9 @@ class UserListView(LoginRequiredMixin, ListView):
         return context
 
     def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
-        if not request.user.is_authenticated or not getattr(request.user, "is_staff_user", False):
-            messages.error(request, _("You do not have permission to access this page."))
-            return redirect("dashboard")
+        refusal = _refuse_non_administrators(request)
+        if refusal is not None:
+            return refusal
         return cast(HttpResponse, super().dispatch(request, *args, **kwargs))
 
     def get_queryset(self) -> QuerySet[User]:
@@ -1153,7 +1163,7 @@ class UserListView(LoginRequiredMixin, ListView):
 
 def _is_administrator(user: Any) -> bool:
     """The same rule as `admin_required`."""
-    return bool(getattr(user, "is_superuser", False) or getattr(user, "staff_role", "") == "admin")
+    return is_administrator(user)
 
 
 class UserDetailView(LoginRequiredMixin, DetailView):
@@ -1171,9 +1181,9 @@ class UserDetailView(LoginRequiredMixin, DetailView):
         return get_object_or_404(queryset.prefetch_related("customer_memberships__customer"), pk=self.kwargs["pk"])
 
     def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
-        if not request.user.is_authenticated or not getattr(request.user, "is_staff_user", False):
-            messages.error(request, _("You do not have permission to access this page."))
-            return redirect("dashboard")
+        refusal = _refuse_non_administrators(request)
+        if refusal is not None:
+            return refusal
         return cast(HttpResponse, super().dispatch(request, *args, **kwargs))
 
     def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
@@ -1184,7 +1194,6 @@ class UserDetailView(LoginRequiredMixin, DetailView):
             {
                 "profile": getattr(user, "profile", None),
                 "accessible_customers": user.get_accessible_customers(),
-                "recent_logins": UserLoginLog.objects.filter(user=user).order_by("-timestamp")[:10],
                 "customer_memberships": CustomerMembership.objects.filter(user=user).select_related("customer"),
                 # The recovery path for a lost device: administrators, for someone else's account.
                 "can_reset_mfa": _is_administrator(self.request.user) and user.pk != self.request.user.pk,

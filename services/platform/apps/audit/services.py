@@ -5027,6 +5027,7 @@ class AuditSearchService:
         """Build advanced audit query with multiple filters and performance optimization."""
         queryset: models.QuerySet[Any, Any] = AuditEvent.objects.select_related("user", "content_type")
         query_info = {"filters_applied": [], "performance_hints": [], "estimated_cost": "low"}
+        filters = cls._limit_filters_for_viewer(filters, user)
 
         # Apply all filter groups
         queryset = cls._apply_basic_filters(queryset, filters, query_info)
@@ -5085,6 +5086,24 @@ class AuditSearchService:
         return queryset
 
     @classmethod
+    def _limit_filters_for_viewer(cls, filters: dict[str, Any], user: User) -> dict[str, Any]:
+        """Only administrators may narrow by where someone connected from (#689).
+
+        Every view and every saved search reaches the database through here, so a
+        crafted URL or a shared search cannot get around the rule.
+        """
+        from .network_identity import can_see_network_identity, is_address_like  # noqa: PLC0415
+
+        if can_see_network_identity(user):
+            return filters
+        limited = {key: value for key, value in filters.items() if key not in {"ip_addresses", "session_keys"}}
+        search_text = limited.get("search_text")
+        if isinstance(search_text, str) and is_address_like(search_text):
+            # Recorded values can hold an address; keep the search to text that never does.
+            limited["search_values"] = False
+        return limited
+
+    @classmethod
     def _apply_technical_filters(
         cls, queryset: models.QuerySet[Any, Any], filters: dict[str, Any], query_info: dict[str, Any]
     ) -> models.QuerySet[Any, Any]:
@@ -5115,12 +5134,10 @@ class AuditSearchService:
         """Apply content-based filters (text search, sensitivity)."""
         if filters.get("search_text"):
             search_text = filters["search_text"]
-            queryset = queryset.filter(
-                Q(description__icontains=search_text)
-                | Q(old_values__icontains=search_text)
-                | Q(new_values__icontains=search_text)
-                | Q(action__icontains=search_text)
-            )
+            matches = Q(description__icontains=search_text) | Q(action__icontains=search_text)
+            if filters.get("search_values", True):
+                matches |= Q(old_values__icontains=search_text) | Q(new_values__icontains=search_text)
+            queryset = queryset.filter(matches)
             query_info["filters_applied"].append("text_search")
             query_info["estimated_cost"] = "medium"
 
@@ -5205,6 +5222,12 @@ class AuditSearchService:
             # Action suggestions
             action_choices = [choice[0] for choice in AuditEvent.ACTION_CHOICES if query.lower() in choice[0].lower()]
             suggestions["actions"] = action_choices[:limit]
+
+            from .network_identity import can_see_network_identity  # noqa: PLC0415
+
+            # Accounts and addresses are for administrators only (#689); action names are for everyone.
+            if not can_see_network_identity(user):
+                return suggestions
 
             # User suggestions (staff only for privacy). Use the canonical is_staff_user so
             # role-only staff (staff_role set, is_staff=False) — who already pass the endpoint's

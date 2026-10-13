@@ -9,7 +9,7 @@ from django.contrib.sessions.models import Session
 from django.core.cache import cache
 from django.db import connection
 from django.http import HttpResponse
-from django.test import Client, RequestFactory, TestCase, override_settings
+from django.test import Client, TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils.crypto import salted_hmac
@@ -362,27 +362,21 @@ class SessionAuthHashBindingTests(HMACTestMixin, TestCase):
         self.assertEqual(self.validate_session(self.user.get_session_auth_hash()).status_code, 200)
         self.assertTrue(self.user.two_factor_enabled is False)
 
-    def test_disable_all_and_recovery_each_revoke_sessions(self) -> None:
-        for action in ("disable_all", "recover"):
+    def test_disable_and_recovery_each_revoke_sessions(self) -> None:
+        for action in ("disable", "recover"):
             with self.subTest(action=action):
                 self.user.two_factor_enabled = True
                 self.user.two_factor_secret = pyotp.random_base32()
                 self.user.save()
                 old_hash = self.user.get_session_auth_hash()
-                if action == "disable_all":
-                    credential = WebAuthnCredential.objects.create(
-                        user=self.user, credential_id="revocation-test", public_key="public-key", name="Key"
-                    )
-                    request = RequestFactory().post("/")
-                    request.user = self.user
-                    self.assertTrue(MFAService.disable_all_mfa_methods(request, self.user)["success"])
-                    self.assertFalse(WebAuthnCredential.objects.filter(pk=credential.pk).exists())
+                if action == "disable":
+                    MFAService.apply_state_change(self.user, action="disable")
                 else:
                     SessionSecurityService.secure_account_after_password_reset(self.user)
                 fresh = User.objects.get(pk=self.user.pk)
-                # A password reset keeps enrolled 2FA (#595); disabling everything does not.
+                # A password reset keeps enrolled 2FA (#595); disabling it does not.
                 self.assertEqual(fresh.two_factor_enabled, action == "recover")
-                if action == "disable_all":
+                if action == "disable":
                     self.assertEqual(fresh.two_factor_secret, "")
                     self.assertEqual(fresh.backup_tokens, [])
                 self.assertNotEqual(fresh.get_session_auth_hash(), old_hash)

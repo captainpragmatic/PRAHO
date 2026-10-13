@@ -990,7 +990,8 @@ class TestAuditRetentionService(TestCase):
 
 class TestAuditSearchService(TestCase):
     def setUp(self):
-        self.user = _make_user(is_staff=True)
+        # IP and session filters are for administrators (#689); these tests cover how the filters work.
+        self.user = _make_user(is_staff=True, staff_role="admin")
         self.ct = ContentType.objects.get_for_model(User)
 
     def _create_event(self, **kwargs):
@@ -1150,11 +1151,12 @@ class TestAuditSearchService(TestCase):
     def test_get_search_suggestions_role_only_staff(self):
         """#271: role-only staff (staff_role set, is_staff=False) get user suggestions.
 
-        The gate previously read native `is_staff`, so a support/admin/billing/manager user
-        without the Django flag was silently denied suggestions despite passing the endpoint's
-        staff guard. It now uses the canonical `is_staff_user`.
+        The gate previously read native `is_staff`, so a staff user without the Django flag
+        was silently denied suggestions despite passing the endpoint's staff guard. It now uses
+        the canonical `is_staff_user`. Account suggestions are for administrators (#689), so
+        the role-only user here is an administrator.
         """
-        role_only_staff = _make_user(is_staff=False, staff_role="support")
+        role_only_staff = _make_user(is_staff=False, staff_role="admin")
         self.assertTrue(role_only_staff.is_staff_user)  # canonical: role grants staff status
         _make_user(email="findme@example.com", first_name="Find", last_name="Me")
 
