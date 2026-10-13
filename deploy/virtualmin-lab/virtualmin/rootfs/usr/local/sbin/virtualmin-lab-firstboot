@@ -1,0 +1,29 @@
+#!/bin/bash
+# Installer phase 4 on first boot: the exact post-install configuration step
+# virtualmin-install.sh runs for `--minimal --bundle LAMP`, then the markers
+# the installer writes after a successful run. Idempotent through a marker.
+set -euo pipefail
+
+marker=/var/lib/virtualmin-lab/configured
+if [ -f "${marker}" ]; then
+  exit 0
+fi
+
+install -d -m 0755 /var/lib/virtualmin-lab
+
+hostname -f >/dev/null
+
+virtualmin-config-system --bundle MiniLAMP --log /var/log/virtualmin-config-system.log
+
+if [ ! -f /etc/virtualmin-license ]; then
+  umask 077
+  printf 'SerialNumber=GPL\nLicenseKey=GPL\n' > /etc/virtualmin-license
+fi
+
+version="$(dpkg-query -W -f='${Version}' webmin-virtual-server)"
+now="$(date +%s)"
+echo "${version}=${now}" > /etc/webmin/virtual-server/installed
+echo "${version}=${now}" > /etc/webmin/virtual-server/installed-auto
+
+date -u +%Y-%m-%dT%H:%M:%SZ > "${marker}"
+echo "Virtualmin ${version} configured"
