@@ -151,3 +151,33 @@ def test_a_failed_save_is_reported_and_a_redirect_is_followed(
     answer.update(status=200, headers={"HX-Redirect": detail_path}, body="")
     form.get_by_role("button", name="Add Item", exact=True).click()
     page.wait_for_url(lambda url: urlsplit(url).path == detail_path)
+
+
+def test_leaving_the_page_during_a_refresh_reports_no_error(
+    monitored_staff_page: Page, order_edit: OrderEditScenario
+) -> None:
+    """Leaving the page cancels the refreshes still running, and that is not an error.
+
+    After a save the script refreshes the totals and then the financial summary. A reload while the
+    summary was still loading made the browser cancel that fetch, and the script logged the cancelled
+    fetch as an error (the nightly caught it on a slow runner). The summary request is held here, so
+    the reload always lands while it is in flight.
+    """
+    page = monitored_staff_page
+    detail_path = f"/orders/{order_edit['order_id']}/"
+    page.goto(f"{PLATFORM_BASE_URL}{detail_path}edit/")
+
+    def hold_the_summary(route: Route) -> None:
+        if route.request.headers.get("hx-target") != "financial-summary":
+            route.continue_()
+        # Otherwise never answered: the reload below cancels it.
+
+    page.route(f"**{detail_path}", hold_the_summary)
+    page.get_by_role("button", name="Add First Item", exact=True).click()
+    form = page.locator("form[data-order-item-form]")
+    form.locator('select[name="product"]').select_option(order_edit["plain_product_id"])
+    with page.expect_request(lambda request: request.headers.get("hx-target") == "financial-summary"):
+        form.get_by_role("button", name="Add Item", exact=True).click()
+
+    page.reload()
+    expect(page.locator('#order-items-section tr[id^="order-item-"]')).to_have_count(1)
