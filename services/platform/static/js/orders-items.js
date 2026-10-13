@@ -93,6 +93,12 @@
     updatePricePreview(form);
   }
 
+  // Leaving the page cancels the fetches still running, and the browser rejects each one
+  // ("Failed to fetch"). That is not a failure to report: every handler below returns first.
+  var leaving = false;
+  window.addEventListener("pagehide", function () { leaving = true; });
+  window.addEventListener("pageshow", function () { leaving = false; });  // back from the cache
+
   // A form fetch answered with a redirect or an error page must not be shown as the form.
   var REDIRECTED = new Error("redirected");
   function formHtml(response) {
@@ -180,7 +186,7 @@
           if (firstInput) { firstInput.focus(); }
         })
         .catch(function (error) {
-          if (error === REDIRECTED) { return; }
+          if (leaving || error === REDIRECTED) { return; }
           console.error("Error loading edit form:", error);
           formContainer.innerHTML =
             '<div class="text-center text-red-400 py-4"><span class="mr-2">' +
@@ -243,7 +249,7 @@
           if (firstInput) { firstInput.focus(); }
         })
         .catch(function (error) {
-          if (error === REDIRECTED) { return; }
+          if (leaving || error === REDIRECTED) { return; }
           console.error("Error loading add form:", error);
           formContainer.innerHTML =
             '<div class="text-center text-red-400 py-4"><span class="mr-2">' +
@@ -305,6 +311,7 @@
         }
       })
       .catch(function (error) {
+        if (leaving) { return; }
         console.error("Error deleting item:", error);
         window.alert(t("errDelete"));
       });
@@ -322,7 +329,10 @@
         orderItemsSection.outerHTML = html;
         refreshFinancialSummary();
       })
-      .catch(function (error) { console.error("Error refreshing order items:", error); });
+      .catch(function (error) {
+        if (leaving) { return; }
+        console.error("Error refreshing order items:", error);
+      });
   }
 
   function refreshOrderItemsSmart() {
@@ -344,6 +354,7 @@
         updateOrderTotals();
       })
       .catch(function (error) {
+        if (leaving) { return; }
         console.error("Error smart refreshing order items:", error);
         refreshOrderItemsSection();
       });
@@ -364,7 +375,10 @@
         });
         refreshFinancialSummary();
       })
-      .catch(function (error) { console.error("Error updating order totals:", error); });
+      .catch(function (error) {
+        if (leaving) { return; }
+        console.error("Error updating order totals:", error);
+      });
   }
 
   function refreshFinancialSummary() {
@@ -384,7 +398,10 @@
         var fresh = doc.getElementById("financial-summary");
         if (fresh && financialSummary) { financialSummary.outerHTML = fresh.outerHTML; }
       })
-      .catch(function (error) { console.error("Error refreshing financial summary:", error); });
+      .catch(function (error) {
+        if (leaving) { return; }
+        console.error("Error refreshing financial summary:", error);
+      });
   }
 
   function showNotification(type, message) {
@@ -443,6 +460,7 @@
           }
         })
         .catch(function (error) {
+          if (leaving) { return; }
           console.error("Form submission error:", error);
           window.alert(t("errSubmit"));
         });
