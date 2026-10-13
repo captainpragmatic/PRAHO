@@ -151,6 +151,7 @@ MIDDLEWARE = [
     "apps.common.middleware.StaffOnlyPlatformMiddleware",  # After auth — blocks non-staff
     "apps.common.middleware.StaffMFAEnrollmentMiddleware",  # Staff without 2FA can only enrol while the policy is on
     "apps.common.middleware.PortalServiceHMACMiddleware",  # After auth — staff bypass needs request.user
+    "apps.common.middleware.StoreUnavailableMiddleware",  # 503 when the second-factor counter store fails
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "apps.common.middleware.AuditMiddleware",
     "apps.common.middleware.SessionSecurityMiddleware",

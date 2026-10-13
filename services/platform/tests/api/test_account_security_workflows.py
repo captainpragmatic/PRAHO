@@ -157,7 +157,8 @@ class AccountSecurityWorkflows(HMACTestMixin, TestCase):
 
     def test_recovery_code_regeneration_rejects_totp_replay(self):
         secret, _ = self.enroll()
-        token = pyotp.TOTP(secret).now()
+        # The code that confirmed enrolment is spent (#689); the next 30-second step's code is not.
+        token = pyotp.TOTP(secret).at(time.time() + 30)
         first = self.request_security("mfa/regenerate-backup-codes/", password="Original-secure123!", token=token)
         self.assertEqual(first.status_code, 200, first.content)
         codes = first.json()["backup_codes"]

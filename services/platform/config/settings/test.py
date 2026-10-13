@@ -39,6 +39,8 @@ test_middleware = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "apps.common.localisation_middleware.LocalisationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
+    # Kept in tests: second-factor views rely on it to answer a counter-store failure with 503.
+    "apps.common.middleware.StoreUnavailableMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 

@@ -956,6 +956,45 @@ class StaffOnlyPlatformMiddleware:
             return redirect("users:login")
 
 
+class StoreUnavailableMiddleware:
+    """A 503, never a wrong-code answer, when the counter store behind second factors is unreachable.
+
+    Used codes and the attempt budget live in the counter store (#689). When it fails nothing was
+    decided, so the person is charged nothing and told to try again. One middleware answers for
+    every view that checks a second factor, Platform pages and the Portal's API alike.
+    """
+
+    def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]):
+        self.get_response = get_response
+
+    def __call__(self, request: HttpRequest) -> HttpResponse:
+        return self.get_response(request)
+
+    def process_exception(self, request: HttpRequest, exception: Exception) -> HttpResponse | None:
+        from apps.users.mfa import MFAStoreUnavailable  # noqa: PLC0415  # Circular: users imports common
+
+        if not isinstance(exception, MFAStoreUnavailable):
+            return None
+        logger.error("🔥 [MFA] Counter store unavailable during a second-factor check on %s", request.path)
+        if request.path.startswith("/api/"):
+            return _store_unavailable_response()
+        # Inline, like MaintenanceModeMiddleware: rendering base.html while the database is
+        # degraded could turn this 503 into a 500.
+        response = HttpResponse(
+            '<!doctype html><html><head><title>503</title></head><body style="font-family:system-ui;'
+            "background:#0f172a;color:#e2e8f0;display:flex;align-items:center;justify-content:center;"
+            'height:100vh;margin:0"><div style="text-align:center"><h1>'
+            + str(_("Temporarily unavailable"))
+            + "</h1><p>"
+            + str(_("Your code could not be checked just now. Nothing was counted against you. Please try again."))
+            + "</p></div></body></html>",
+            status=503,
+            content_type="text/html",
+        )
+        response["Retry-After"] = str(HMAC_STORE_RETRY_AFTER_SECONDS)
+        return response
+
+
 class MaintenanceModeMiddleware:
     """
     🚧 Platform-wide maintenance gate (ADR-0042).

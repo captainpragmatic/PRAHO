@@ -76,6 +76,7 @@ MIDDLEWARE: list[str] = [
     "apps.common.middleware.StaffOnlyPlatformMiddleware",  # Block customer access to platform (after AuthenticationMiddleware and MessageMiddleware)
     "apps.common.middleware.StaffMFAEnrollmentMiddleware",  # Staff without 2FA can only enrol while the policy is on (before the HMAC staff bypass)
     "apps.common.middleware.PortalServiceHMACMiddleware",  # HMAC auth for portal API requests (after AuthenticationMiddleware)
+    "apps.common.middleware.StoreUnavailableMiddleware",  # 503 when the second-factor counter store fails
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 

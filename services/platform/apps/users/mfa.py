@@ -19,6 +19,7 @@ import io
 import logging
 import secrets
 import string
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, Union, cast
 
@@ -27,8 +28,7 @@ import qrcode
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import check_password, make_password
-from django.core.cache import cache
-from django.db import models, transaction
+from django.db import DatabaseError, InterfaceError, models, transaction
 from django.http import HttpRequest
 from django.utils import timezone
 
@@ -206,6 +206,40 @@ class WebAuthnCredential(models.Model):
 # ===============================================================================
 
 
+class MFAStoreUnavailable(Exception):  # noqa: N818  # names the condition, like DatabaseError
+    """The counter store holding used codes and the attempt budget could not be reached.
+
+    Nothing was decided: the code was neither accepted nor refused, so nobody is charged a
+    failed attempt. Answered 503 by StoreUnavailableMiddleware, never as a wrong code.
+    """
+
+
+# A used code stays refused for three 30-second steps: the current one and the drift either side.
+_USED_CODE_SECONDS = 90
+_ATTEMPT_WINDOW_SECONDS = 300
+
+
+def _counters_call[T](operation: Callable[[], T]) -> T:
+    """Run one counter-store operation in its own savepoint; a store failure becomes MFAStoreUnavailable.
+
+    The savepoint keeps a failed statement from aborting the caller's transaction on PostgreSQL,
+    which held the user row lock and was about to record the outcome.
+    """
+    try:
+        with transaction.atomic():
+            return operation()
+    except (DatabaseError, InterfaceError) as error:
+        raise MFAStoreUnavailable from error
+
+
+def _claim_used_code(user_id: int, token: str) -> bool:
+    """Mark a code used for this person; False when another request already did (a replay)."""
+    from apps.common import counters  # noqa: PLC0415  # Deferred: the counter model loads with apps
+
+    # The claim's token is a constant, never the code: claim() stores its token in plain text.
+    return _counters_call(lambda: counters.claim(f"totp_used:{user_id}:{token}", _USED_CODE_SECONDS, "used"))
+
+
 @dataclass(frozen=True)
 class BrowserOrigin:
     """Where a person's browser connected from, when the request in hand is the Portal's signed call."""
@@ -260,33 +294,33 @@ class TOTPService:
             if not secret or not token:
                 return False
 
-            # Check if code was recently used (prevent replay)
-            if user is not None:
-                cache_key = f"totp_used:{user.id}:{token}"
-                if cache.get(cache_key):
-                    logger.warning("⚠️ [TOTP] Replay attempt detected")
-                    return False
+            # Verify with time window tolerance for clock drift, then claim the code atomically:
+            # a wrong code reserves nothing, and of two requests with one code exactly one wins.
+            if not pyotp.TOTP(secret).verify(token, valid_window=TOTPService.TIME_WINDOW_TOLERANCE):
+                return False
+            if user is not None and not _claim_used_code(user.id, token):
+                logger.warning("⚠️ [TOTP] Replay attempt detected")
+                return False
+            return True
 
-            # Verify with time window tolerance for clock drift
-            totp = pyotp.TOTP(secret)
-            if totp.verify(token, valid_window=TOTPService.TIME_WINDOW_TOLERANCE):
-                # Mark token as used for 90 seconds (3 * 30-second periods)
-                if user is not None:
-                    cache.set(cache_key, True, 90)
-                return True
-
-            return False
-
+        except MFAStoreUnavailable:
+            raise
         except Exception as e:
             logger.error(f"🔥 [TOTP] Verification error: {e}")
             return False
 
     @staticmethod
     def verify_enrolment_code(user: "User", secret: str, token: str) -> bool:
-        """Check a code against a secret that is not enabled yet (a pending enrolment)."""
+        """Check a code against a secret that is not enabled yet (a pending enrolment).
+
+        The code is claimed as used, as at sign-in, so the code that confirmed enrolment cannot
+        then be replayed to sign in.
+        """
         if not secret or len(token) != TOTPService.TOTP_DIGITS or not token.isdigit():
             return False
-        return bool(pyotp.TOTP(secret).verify(token, valid_window=TOTPService.TIME_WINDOW_TOLERANCE))
+        if not pyotp.TOTP(secret).verify(token, valid_window=TOTPService.TIME_WINDOW_TOLERANCE):
+            return False
+        return _claim_used_code(user.id, token)
 
     @staticmethod
     def generate_qr_code(user: "User", secret: str) -> str:
@@ -985,6 +1019,8 @@ class MFAService:
 
             return result
 
+        except MFAStoreUnavailable:
+            raise  # Nothing was decided; StoreUnavailableMiddleware answers 503.
         except Exception as e:
             logger.error(f"🔥 [MFA] Verification error for {user.email}: {e}")
             result["success"] = False
@@ -1045,20 +1081,21 @@ class MFAService:
         """
         🚦 Rate limit MFA verification attempts
         """
-        cache_key = f"mfa_attempts:{user.id}"
-        attempts = cache.get(cache_key, 0)
+        from apps.common import counters  # noqa: PLC0415  # Deferred: the counter model loads with apps
 
-        if attempts >= MAX_LOGIN_ATTEMPTS:  # Max attempts per 5 minutes
+        # In the counter store, not the cache: a cull or a cache clear must not hand the budget back.
+        attempts = _counters_call(lambda: counters.increment(f"mfa_attempts:{user.id}", _ATTEMPT_WINDOW_SECONDS))
+        if attempts > MAX_LOGIN_ATTEMPTS:  # Max attempts per 5 minutes, this one included
             logger.error(f"🔥 [MFA] Rate limit exceeded for user {user.email}")
             return False
-
-        cache.set(cache_key, attempts + 1, 300)  # 5 minute window
         return True
 
     @staticmethod
     def _reset_rate_limit(user: "User") -> None:
         """Give back the attempt budget after a verified login, so honest logins never drain it."""
-        cache.delete(f"mfa_attempts:{user.id}")
+        from apps.common import counters  # noqa: PLC0415  # Deferred: the counter model loads with apps
+
+        _counters_call(lambda: counters.reset(f"mfa_attempts:{user.id}"))
 
     @staticmethod
     def _get_available_methods(user: "User") -> list[str]:
