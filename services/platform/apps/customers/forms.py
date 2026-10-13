@@ -14,7 +14,6 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import transaction
-from django.forms.models import ModelChoiceField  # For form field type checking
 from django.utils.translation import gettext_lazy as _
 
 from apps.common.cui_validator import normalize_cui_digits
@@ -56,6 +55,28 @@ def clean_cui_value(cui: str | None) -> str:
 
 
 MAX_EU_VAT_NUMBER_LENGTH = 20  # longest EU format (country prefix included) with room for separators
+
+
+class ExistingAccountByEmailField(forms.EmailField):
+    """An active account named by its exact email address; cleans to the User, or None when left empty.
+
+    Linking an account to a customer used to offer a dropdown of every active account, staff
+    and customers alike, to every staff role. The user list is for administrators (#689), so
+    here the account is named, not picked from a list.
+    """
+
+    default_error_messages: ClassVar[dict[str, Any]] = {
+        "unknown": _("No active account uses this email address."),
+    }
+
+    def clean(self, value: Any) -> Any:
+        email = super().clean(value)
+        if not email:
+            return None
+        account = User.objects.filter(email__iexact=email, is_active=True).first()
+        if account is None:
+            raise ValidationError(self.error_messages["unknown"], code="unknown")
+        return account
 
 
 # ===============================================================================
@@ -443,19 +464,18 @@ class CustomerCreationForm(CountryDefaultsMixin, forms.Form):
         widget=forms.RadioSelect(attrs={"class": "user-action-radio"}),
     )
 
-    existing_user = forms.ModelChoiceField(
-        queryset=User.objects.filter(is_active=True),
+    existing_user = ExistingAccountByEmailField(
         required=False,
         label=_("Existing User"),
-        help_text=_("Select an existing user to assign as owner"),
-        widget=forms.Select(
+        help_text=_("The email address of the account to assign as owner"),
+        widget=forms.EmailInput(
             attrs={
                 "class": "w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500",
                 "x-show": "userAction === 'link'",
                 "x-cloak": "true",
+                "autocomplete": "off",
             }
         ),
-        empty_label=_("Select a user..."),
     )
 
     send_welcome_email = forms.BooleanField(
@@ -742,8 +762,8 @@ class CustomerCreationForm(CountryDefaultsMixin, forms.Form):
             raise ValidationError(_("VAT number must be in format RO followed by 6-10 digits"))
 
         # User action validation
-        if user_action == "link" and not existing_user:
-            raise ValidationError(_("Please select an existing user to link."))
+        if user_action == "link" and not existing_user and "existing_user" not in self.errors:
+            raise ValidationError(_("Enter the email address of the account to link."))
 
         if user_action == "create" and email and User.objects.filter(email=email).exists():
             raise ValidationError(
@@ -1471,14 +1491,14 @@ class CustomerUserAssignmentForm(forms.Form):
     )
 
     # Link existing user
-    existing_user = forms.ModelChoiceField(
-        queryset=User.objects.filter(is_active=True),
+    existing_user = ExistingAccountByEmailField(
         required=False,
-        label=_("Select Existing User"),
-        help_text=_("Choose a user to link to this customer"),
-        widget=forms.Select(
+        label=_("Existing User Email"),
+        help_text=_("The email address of the account to link to this customer"),
+        widget=forms.EmailInput(
             attrs={
-                "class": "w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500"
+                "class": "w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500",
+                "autocomplete": "off",
             }
         ),
     )
@@ -1511,14 +1531,15 @@ class CustomerUserAssignmentForm(forms.Form):
         super().__init__(*args, **kwargs)
         self.customer = customer
 
-        # Exclude users who are already members of this customer
-        if customer:
-            existing_member_ids = CustomerMembership.objects.filter(customer=customer).values_list("user_id", flat=True)
-
-            # Update the queryset for existing_user field
-            existing_user_field = self.fields["existing_user"]
-            if isinstance(existing_user_field, ModelChoiceField):
-                existing_user_field.queryset = User.objects.filter(is_active=True).exclude(id__in=existing_member_ids)
+    def clean_existing_user(self) -> User | None:
+        account: User | None = self.cleaned_data.get("existing_user")
+        if (
+            account is not None
+            and self.customer is not None
+            and CustomerMembership.objects.filter(customer=self.customer, user=account).exists()
+        ):
+            raise ValidationError(_("This account is already linked to this customer."))
+        return account
 
     def clean(self) -> dict[str, Any]:
         try:
@@ -1542,8 +1563,8 @@ class CustomerUserAssignmentForm(forms.Form):
 
         elif user_action == "link":
             # Validate existing user selection
-            if not cleaned_data.get("existing_user"):
-                self.add_error("existing_user", _("Please select a user to link"))
+            if not cleaned_data.get("existing_user") and "existing_user" not in self.errors:
+                self.add_error("existing_user", _("Enter the email address of the account to link"))
 
         return cleaned_data
 

@@ -945,6 +945,8 @@ def gdpr_export_requests_list(request: HttpRequest) -> HttpResponse:
         "export_requests": export_requests,
         "current_time": timezone.now(),
         "extra_params": pagination_query(request),
+        # A person's full export is for administrators only (#689).
+        "can_download": can_see_network_identity(request.user),
     }
 
     # Check if HTMX request
@@ -1177,8 +1179,10 @@ def load_saved_search(request: HttpRequest, query_id: uuid.UUID) -> HttpResponse
         # Build URL with query parameters - using urlencode for proper escaping
         # to prevent URL injection attacks (OWASP A03:2021 - Injection)
         base_url = "/audit/logs/"
-        # Filter out empty values and properly encode parameters
-        filtered_params = {k: v for k, v in search_query.query_params.items() if v}
+        # Filter out empty values and properly encode parameters. A search an administrator
+        # shared may name an address or a session, which other roles may not see (#689).
+        hidden_params = set() if can_see_network_identity(request.user) else {"ip_address", "session_key"}
+        filtered_params = {k: v for k, v in search_query.query_params.items() if v and k not in hidden_params}
         query_string = urlencode(filtered_params) if filtered_params else ""
         redirect_url = f"{base_url}?{query_string}" if query_string else base_url
 

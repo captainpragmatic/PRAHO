@@ -14,24 +14,12 @@ from apps.common.decorators import is_administrator
 
 HIDDEN = "[hidden]"
 
-# Keys that name a network identity wherever they appear in recorded values.
-_IDENTITY_KEYS = frozenset(
-    {
-        "ip",
-        "ip_address",
-        "client_ip",
-        "remote_addr",
-        "remote_ip",
-        "forwarded_for",
-        "x_forwarded_for",
-        "user_agent",
-        "session_key",
-        "session_id",
-    }
-)
+# Fragments that name a network identity wherever they appear in a recorded key, whether the
+# key came from a model field, a request header (HTTP_X_FORWARDED_FOR) or a nested dict.
+_IDENTITY_KEY_FRAGMENTS = ("ip_address", "client_ip", "remote_addr", "remote_ip", "forwarded", "user_agent", "session")
 
-# Search text made only of address characters may be probing for an address.
-_ADDRESS_LIKE = re.compile(r"^[0-9a-fA-F.:]+$")
+# Runs of address characters; each one is checked with ipaddress, so ordinary words and numbers stay.
+_ADDRESS_CANDIDATE = re.compile(r"[0-9A-Fa-f:.]{2,}")
 
 
 def can_see_network_identity(user: Any) -> bool:
@@ -39,8 +27,8 @@ def can_see_network_identity(user: Any) -> bool:
 
 
 def _is_identity_key(key: object) -> bool:
-    name = str(key).lower().replace("-", "_")
-    return name in _IDENTITY_KEYS or name.endswith(("_ip", "_ip_address", "_user_agent"))
+    name = str(key).lower().replace("-", "_").removeprefix("http_")
+    return name == "ip" or name.endswith("_ip") or any(fragment in name for fragment in _IDENTITY_KEY_FRAGMENTS)
 
 
 def _is_address(value: str) -> bool:
@@ -51,17 +39,34 @@ def _is_address(value: str) -> bool:
     return True
 
 
+def _hide_address(match: re.Match[str]) -> str:
+    token = match.group(0)
+    core = token.strip(".:")
+    host, separator, port = core.rpartition(":")
+    if _is_address(core) or (separator and port.isdigit() and _is_address(host)):
+        return HIDDEN
+    return token
+
+
+def _hide_addresses_in_text(text: str) -> str:
+    """Every IPv4 or IPv6 address in free text, with or without a port, replaced."""
+    return _ADDRESS_CANDIDATE.sub(_hide_address, text)
+
+
 def redact_network_identity(value: Any) -> Any:
-    """A copy of recorded values with every address, user agent and session key hidden."""
+    """A copy of recorded values with every address, user agent and session key hidden.
+
+    Identity-named keys lose their whole value, addresses used as keys are renamed, and
+    addresses inside any other text are replaced where they stand.
+    """
     if isinstance(value, dict):
-        return {key: HIDDEN if _is_identity_key(key) else redact_network_identity(item) for key, item in value.items()}
+        redacted: dict[Any, Any] = {}
+        for index, (key, item) in enumerate(value.items()):
+            shown_key = f"{HIDDEN} {index}" if isinstance(key, str) and _is_address(key) else key
+            redacted[shown_key] = HIDDEN if _is_identity_key(key) else redact_network_identity(item)
+        return redacted
     if isinstance(value, list):
         return [redact_network_identity(item) for item in value]
-    if isinstance(value, str) and _is_address(value):
-        return HIDDEN
+    if isinstance(value, str):
+        return _hide_addresses_in_text(value)
     return value
-
-
-def is_address_like(text: str) -> bool:
-    """Search text that could match part of an address (digits, hex, dots and colons only)."""
-    return bool(_ADDRESS_LIKE.match(text.strip()))

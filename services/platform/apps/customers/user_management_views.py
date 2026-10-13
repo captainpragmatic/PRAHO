@@ -52,10 +52,10 @@ def customer_add_user(request: HttpRequest, customer_id: int) -> HttpResponse:
             messages.error(request, _("Email address is required."))
             return redirect("customers:detail", customer_id=customer.id)
 
-        try:
-            user = User.objects.get(email=user_email)
-        except User.DoesNotExist:
-            messages.error(request, _("User with email '{}' not found.").format(user_email))
+        # Named by exact email, never picked from a list of every account (#689).
+        user = User.objects.filter(email__iexact=user_email, is_active=True).first()
+        if user is None:
+            messages.error(request, _("No active account uses the email address '{}'.").format(user_email))
             return redirect("customers:detail", customer_id=customer.id)
 
         # Check if user is already assigned
@@ -70,13 +70,8 @@ def customer_add_user(request: HttpRequest, customer_id: int) -> HttpResponse:
         return redirect("customers:detail", customer_id=customer.id)
 
     # GET request - show form
-    available_users = (
-        User.objects.filter(is_active=True).exclude(customer_memberships__customer=customer).order_by("email")
-    )
-
     context = {
         "customer": customer,
-        "available_users": available_users,
         "role_choices": CustomerMembership.CUSTOMER_ROLE_CHOICES,
         "breadcrumb_items": [
             {"text": _("Dashboard"), "url": reverse("dashboard")},

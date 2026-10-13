@@ -5092,15 +5092,15 @@ class AuditSearchService:
         Every view and every saved search reaches the database through here, so a
         crafted URL or a shared search cannot get around the rule.
         """
-        from .network_identity import can_see_network_identity, is_address_like  # noqa: PLC0415
+        from .network_identity import can_see_network_identity  # noqa: PLC0415
 
         if can_see_network_identity(user):
             return filters
         limited = {key: value for key, value in filters.items() if key not in {"ip_addresses", "session_keys"}}
-        search_text = limited.get("search_text")
-        if isinstance(search_text, str) and is_address_like(search_text):
-            # Recorded values can hold an address; keep the search to text that never does.
-            limited["search_values"] = False
+        # Recorded values can hold an address, a user agent or a session key, and a search
+        # that matches them is an oracle for them, one character at a time. Other roles search
+        # descriptions and action names only.
+        limited["search_values"] = False
         return limited
 
     @classmethod
