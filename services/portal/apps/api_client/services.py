@@ -183,6 +183,17 @@ def _read_body_within(response: requests.Response, deadline: _CallDeadline) -> N
         response.close()  # Returns a fully read connection to the pool; drops one cut short.
 
 
+_MAX_USER_AGENT_LENGTH = 512
+
+
+def _browser_payload(client_ip: str, user_agent: str) -> dict[str, str]:
+    """The customer's browser for Platform's audit trail: its address, when meaningful, and its user agent."""
+    payload = _client_ip_payload(client_ip)
+    if user_agent and user_agent.isprintable():
+        payload["client_user_agent"] = user_agent[:_MAX_USER_AGENT_LENGTH]
+    return payload
+
+
 def _client_ip_payload(client_ip: str) -> dict[str, str]:
     """Include a valid, normalized client IP in the signed request only when it means something.
 
@@ -1069,18 +1080,33 @@ class PlatformAPIClient:
             logger.warning(f"⚠️ [API Client] Failed to setup TOTP MFA: {e}")
             return None
 
-    def verify_totp_mfa(self, customer_id: str, token: str, user_id: int | None = None) -> dict[str, Any] | None:
-        """Verify TOTP token and enable MFA"""
-        try:
-            data = self._make_request(
-                "POST", "/users/mfa/verify/", user_id=user_id, data={"customer_id": customer_id, "token": token}
-            )
-            return data if data.get("success") else None
-        except PlatformAPIError as e:
-            if e.is_degraded:
-                raise
-            logger.warning(f"⚠️ [API Client] Failed to verify TOTP: {e}")
-            return None
+    def verify_totp_mfa(  # noqa: PLR0913  # The code, the password and who sent them, each one fact
+        self,
+        customer_id: str,
+        token: str,
+        password: str,
+        *,
+        user_id: int | None = None,
+        client_ip: str = "",
+        user_agent: str = "",
+    ) -> dict[str, Any]:
+        """Confirm the pending setup with a code and the current password; returns the recovery codes.
+
+        A refusal raises PlatformAPIError whose response_data carries Platform's code
+        (mfa_incorrect, mfa_setup_expired, mfa_already_enabled), so the caller can tell a wrong
+        guess from an expired setup or an account already enrolled.
+        """
+        return self._make_request(
+            "POST",
+            "/users/mfa/verify/",
+            user_id=user_id,
+            data={
+                "customer_id": customer_id,
+                "token": token,
+                "password": password,
+                **_browser_payload(client_ip, user_agent),
+            },
+        )
 
     def setup_webauthn_mfa(self, customer_id: str) -> dict[str, Any] | None:
         """Initialize WebAuthn/Passkey MFA setup"""
@@ -1093,20 +1119,24 @@ class PlatformAPIClient:
             logger.warning(f"⚠️ [API Client] Failed to setup WebAuthn MFA: {e}")
             return None
 
-    def regenerate_backup_codes(self, user_id: int, password: str, token: str) -> dict[str, Any]:
+    def regenerate_backup_codes(
+        self, user_id: int, password: str, token: str, *, client_ip: str = "", user_agent: str = ""
+    ) -> dict[str, Any]:
         return self._make_request(
             "POST",
             "/users/mfa/regenerate-backup-codes/",
             user_id=user_id,
-            data={"user_id": user_id, "password": password, "token": token},
+            data={"user_id": user_id, "password": password, "token": token, **_browser_payload(client_ip, user_agent)},
         )
 
-    def disable_mfa(self, user_id: int, password: str, token: str) -> dict[str, object] | None:
+    def disable_mfa(
+        self, user_id: int, password: str, token: str, *, client_ip: str = "", user_agent: str = ""
+    ) -> dict[str, object] | None:
         data = self._make_request(
             "POST",
             "/users/mfa/disable/",
             user_id=user_id,
-            data={"user_id": user_id, "password": password, "token": token},
+            data={"user_id": user_id, "password": password, "token": token, **_browser_payload(client_ip, user_agent)},
         )
         return data if data.get("success") else None
 
