@@ -54,6 +54,10 @@ def test_items_are_added_edited_and_deleted_on_the_edit_page(
     expect(unit).to_have_value("1500")
     expect(setup).to_have_value("500")
     expect(form.locator('[data-preview="total"]')).to_have_text("RON 20.00")
+    # The setup fee is charged once, as the saved item computes it: 2 x 15.00 + 5.00.
+    form.locator('input[name="quantity"]').fill("2")
+    expect(form.locator('[data-preview="total"]')).to_have_text("RON 35.00")
+    form.locator('input[name="quantity"]').fill("1")
 
     # A yearly period is priced at twelve months.
     form.locator('select[name="billing_period"]').select_option("annual")

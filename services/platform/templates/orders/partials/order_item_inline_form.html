@@ -32,7 +32,8 @@ Simplified version of the full form for better UX in table context
                   {% if form.product.value == option.value %}selected{% endif %}
                   data-product-type="{{ option.data.product_type }}"
                   data-requires-domain="{{ option.data.requires_domain }}"
-                  data-prices='{{ option.data.prices|default:"{}" }}'>
+                  data-prices='{{ option.data.prices|default:"{}" }}'
+                  data-setup-cents="{{ option.data.setup_cents }}">
             {{ option.label }}
           </option>
         {% endfor %}

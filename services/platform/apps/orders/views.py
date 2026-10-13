@@ -51,6 +51,7 @@ from apps.users.models import User
 from .models import Order, OrderItem
 from .preflight import OrderPreflightValidationService
 from .services import (
+    ORDERABLE_BILLING_PERIODS,
     OrderService,
     StatusChangeData,
 )
@@ -230,7 +231,7 @@ def _apply_posted_billing_period(item: OrderItem, request: HttpRequest) -> None:
     empty value keeps whatever the item already has.
     """
     period = request.POST.get("billing_period", "")
-    if period in OrderItem.BILLING_PERIOD_CHOICES:
+    if period in ORDERABLE_BILLING_PERIODS:
         item.billing_period = period
 
 
@@ -1526,15 +1527,15 @@ def _render_order_item_form(
     products = Product.objects.filter(is_active=True).order_by("name")
 
     # Convert billing period choices to component format
-    billing_period_choices = [
-        ("once", _("One Time")),
-        ("monthly", _("Monthly")),
-        ("quarterly", _("Quarterly")),
-        ("semiannual", _("Semi-Annual")),
-        ("annual", _("Annual")),
-        ("biennial", _("Biennial")),
-        ("triennial", _("Triennial")),
-    ]
+    # Only periods an order can be fulfilled with: a two- or three-year item has no service cycle.
+    period_labels = {
+        "once": _("One Time"),
+        "monthly": _("Monthly"),
+        "quarterly": _("Quarterly"),
+        "semiannual": _("Semi-Annual"),
+        "annual": _("Annual"),
+    }
+    billing_period_choices = [(period, period_labels[period]) for period in ORDERABLE_BILLING_PERIODS]
 
     billing_period_options = [{"value": choice[0], "label": str(choice[1])} for choice in billing_period_choices]
 
@@ -1560,6 +1561,8 @@ def _render_order_item_form(
                     # The script compares strings: a Python bool would render "True".
                     "requires_domain": "true" if product.requires_domain else "false",
                     "prices": json.dumps(prices_data),  # JSON-encoded pricing data for auto-population
+                    # The product's setup fee, the server's reference even for a period with no price.
+                    "setup_cents": product_price.setup_cents if product_price else 0,
                 },
             }
         )
@@ -1630,6 +1633,13 @@ def _process_order_item_update(form: ModelForm[Any], order: Order, pk: uuid.UUID
             if not order.can_edit_items:
                 return json_error("This order's confirmed prices cannot be changed. Cancel it and create a new order.")
             # Update order item
+            # The period before this request, read before anything below can change it.
+            original_config = form.initial.get("config")
+            original_period = (
+                str(original_config.get("billing_period", "monthly"))
+                if isinstance(original_config, dict)
+                else "monthly"
+            )
             updated_item = form.save(commit=False)
             _apply_posted_billing_period(updated_item, request)
 
@@ -1638,12 +1648,6 @@ def _process_order_item_update(form: ModelForm[Any], order: Order, pk: uuid.UUID
 
             # Check what fields were changed
             product_changed = "product" in form.changed_data
-            original_config = form.initial.get("config")
-            original_period = (
-                str(original_config.get("billing_period", "monthly"))
-                if isinstance(original_config, dict)
-                else "monthly"
-            )
             billing_period_changed = updated_item.billing_period != original_period
             pricing_basis_changed = product_changed or billing_period_changed
 

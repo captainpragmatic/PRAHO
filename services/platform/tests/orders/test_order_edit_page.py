@@ -194,6 +194,20 @@ class OrderItemBillingPeriodTests(ItemFormTestBase):
             },
         )
 
+    def test_the_price_the_form_fills_in_is_accepted_without_override_permission(self) -> None:
+        """What the page offers per period is what the server accepts from a support member."""
+        self.client.force_login(self.support)
+        page = self.client.get(
+            reverse("orders:order_item_create", kwargs={"pk": self.order.pk}), HTTP_HX_REQUEST="true"
+        ).content.decode()
+        prices = json.loads(self.product_option(page, self.hosting)["data-prices"])
+
+        for period, price in prices.items():
+            with self.subTest(period=period):
+                response = self.post_item(period, price["unit_cents"])
+                self.assertEqual(response.status_code, 302, response.content[:300])
+        self.assertEqual(self.order.items.count(), len(prices))
+
     def test_an_annual_item_is_saved_annual_at_the_annual_catalog_price(self) -> None:
         response = self.post_item("annual", 10_800)
 
@@ -201,6 +215,49 @@ class OrderItemBillingPeriodTests(ItemFormTestBase):
         [item] = self.order.items.all()
         self.assertEqual(item.billing_period, "annual")
         self.assertEqual(item.unit_price_cents, 10_800)
+
+    def test_changing_the_period_on_edit_reprices_through_the_override_check(self) -> None:
+        """A request without the config field must not move the period past the price check.
+
+        The period setter wrote into the config dict in place, and that same dict is the form's
+        record of the original value, so the change looked like no change: no reprice and no
+        override check, and a monthly item was stored as annual at the monthly price.
+        """
+        self.post_item("monthly", 1_000)
+        item = self.order.items.get()
+        self.client.force_login(self.support)
+
+        response = self.client.post(
+            reverse("orders:order_item_edit", kwargs={"pk": self.order.pk, "item_pk": item.pk}),
+            {
+                "product": str(self.hosting.pk),
+                "quantity": "1",
+                "billing_period": "annual",
+                "unit_price_cents": "1000",
+                "setup_cents": "500",
+                "domain_name": "example.ro",
+            },
+        )
+
+        self.assertIn(response.status_code, (200, 302), response.content[:300])
+        item.refresh_from_db()
+        self.assertEqual((item.billing_period, item.unit_price_cents), ("annual", 10_800))
+
+    def test_the_form_offers_only_periods_an_order_can_be_fulfilled_with(self) -> None:
+        """Two- and three-year periods have no service cycle, so a paid order with one could not
+        be provisioned; the form offered them anyway."""
+        from apps.orders.services import _order_item_billing_period  # noqa: PLC0415
+
+        offered = [
+            option["value"] for option in options(self.item_form(inline=True), "billing_period") if option["value"]
+        ]
+
+        self.assertCountEqual(offered, ["once", "monthly", "quarterly", "semiannual", "annual"])
+        for period in offered:
+            with self.subTest(period=period):
+                self.assertEqual(_order_item_billing_period(OrderItem(config={"billing_period": period})), period)
+        self.post_item("biennial", 1_000)
+        self.assertEqual(self.order.items.get().billing_period, "monthly")
 
     def test_an_unknown_period_falls_back_to_the_stored_default(self) -> None:
         response = self.post_item("fortnightly", 1_000)

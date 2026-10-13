@@ -160,7 +160,7 @@ document.addEventListener('DOMContentLoaded', function() {
         // Convert cents to currency
         const unitPrice = (unitPriceCents / 100).toFixed(2);
         const setupPrice = (setupCents / 100).toFixed(2);
-        const totalPerUnit = ((unitPriceCents + setupCents) / 100).toFixed(2);
+        const totalPerUnit = (unitPriceCents / 100).toFixed(2);
 
         // Update displays
         document.getElementById('unit-price-display').textContent = `${currency} ${unitPrice}`;
@@ -168,7 +168,8 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('total-price-display').textContent = `${currency} ${totalPerUnit}`;
 
         // Update tax preview
-        const lineTotal = (unitPriceCents + setupCents) * quantity;
+        // As OrderItem computes it: the setup fee is charged once, not per unit.
+        const lineTotal = unitPriceCents * quantity + setupCents;
         const subtotal = lineTotal / 100;
         const vatAmount = subtotal * 0.21; // 21% VAT
         const total = subtotal + vatAmount;
@@ -239,7 +240,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
 
                 if (!setupInput.dataset.manualOverride) {
-                    setupInput.value = '0';
+                    setupInput.value = selectedOption.dataset.setup_cents || '0';
                 }
             }
         } catch (e) {

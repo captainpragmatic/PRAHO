@@ -57,7 +57,8 @@
     var unit = integerValue(field(form, "unit_price_cents"), 0);
     var setup = integerValue(field(form, "setup_cents"), 0);
     var quantity = integerValue(field(form, "quantity"), 1);
-    var amounts = { unit: unit, setup: setup, total: (unit + setup) * quantity };
+    // As OrderItem computes it: the setup fee is charged once, not per unit.
+    var amounts = { unit: unit, setup: setup, total: unit * quantity + setup };
     Object.keys(amounts).forEach(function (key) {
       var el = form.querySelector('[data-preview="' + key + '"]');
       if (el) { el.textContent = currency + " " + (amounts[key] / 100).toFixed(2); }
@@ -86,8 +87,22 @@
     // A price someone typed is kept; otherwise the catalog price for the period, or nothing
     // when the product has none, so a stale automatic price is never submitted as an override.
     if (!unit.dataset.manualOverride) { unit.value = price ? price.unit_cents : ""; }
-    if (!setup.dataset.manualOverride) { setup.value = price ? price.setup_cents : "0"; }
+    if (!setup.dataset.manualOverride) {
+      setup.value = price ? price.setup_cents : (option.dataset.setupCents || "0");
+    }
     updatePricePreview(form);
+  }
+
+  // A form fetch answered with a redirect or an error page must not be shown as the form.
+  var REDIRECTED = new Error("redirected");
+  function formHtml(response) {
+    var redirectTo = response.headers.get("HX-Redirect");
+    if (redirectTo) {
+      window.location.assign(redirectTo);
+      throw REDIRECTED;
+    }
+    if (!response.ok) { throw new Error("HTTP " + response.status); }
+    return response.text();
   }
 
   function initItemForm(container) {
@@ -157,7 +172,7 @@
         method: "GET",
         headers: { "HX-Request": "true", "X-Requested-With": "XMLHttpRequest" },
       })
-        .then(function (response) { return response.text(); })
+        .then(formHtml)
         .then(function (html) {
           formContainer.innerHTML = html;
           initItemForm(formContainer);
@@ -165,6 +180,7 @@
           if (firstInput) { firstInput.focus(); }
         })
         .catch(function (error) {
+          if (error === REDIRECTED) { return; }
           console.error("Error loading edit form:", error);
           formContainer.innerHTML =
             '<div class="text-center text-red-400 py-4"><span class="mr-2">' +
@@ -219,7 +235,7 @@
         method: "GET",
         headers: { "HX-Request": "true", "X-Requested-With": "XMLHttpRequest" },
       })
-        .then(function (response) { return response.text(); })
+        .then(formHtml)
         .then(function (html) {
           formContainer.innerHTML = html;
           initItemForm(formContainer);
@@ -227,6 +243,7 @@
           if (firstInput) { firstInput.focus(); }
         })
         .catch(function (error) {
+          if (error === REDIRECTED) { return; }
           console.error("Error loading add form:", error);
           formContainer.innerHTML =
             '<div class="text-center text-red-400 py-4"><span class="mr-2">' +
@@ -284,7 +301,7 @@
           if (activeEditRowId === itemId) { activeEditRowId = null; }
           showNotification("success", t("itemDeleted"));
         } else {
-          window.alert(t("errorPrefix") + " " + (data.error || t("unknownError")));
+          window.alert(t("errorPrefix") + " " + (data.message || t("unknownError")));
         }
       })
       .catch(function (error) {
@@ -399,21 +416,24 @@
       })
         .then(function (response) {
           var isJson = (response.headers.get("Content-Type") || "").indexOf("application/json") !== -1;
-          return response.text().then(function (body) { return { isJson: isJson, body: body }; });
+          var redirectTo = response.headers.get("HX-Redirect");
+          return response.text().then(function (body) {
+            return { ok: response.ok, isJson: isJson, redirectTo: redirectTo, body: body };
+          });
         })
         .then(function (result) {
           var html = result.body;
-          if (result.isJson) {
+          if (result.redirectTo) {
+            // The server sends the whole page elsewhere (sign-in, or 2FA setup the staff policy requires).
+            window.location.assign(result.redirectTo);
+          } else if (result.isJson) {
             // A refusal (validation, price override) answers JSON; keep the form and say why.
             var data = {};
             try { data = JSON.parse(html); } catch (err) { data = {}; }
             showFormError(form, data.message || t("unknownError"));
-          } else if (html.indexOf("data-order-item-form") !== -1) {
-            var formContainer = form.closest('[id*="form-container"]');
-            if (formContainer) {
-              formContainer.innerHTML = html;
-              initItemForm(formContainer);
-            }
+          } else if (!result.ok || html.indexOf('id="order-items-section"') === -1) {
+            // An error page, a sign-in page or anything else that is not the items list.
+            showFormError(form, t("errSubmit"));
           } else {
             updateOrderTotals();
             cancelAddItemForm();
