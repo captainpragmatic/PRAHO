@@ -101,18 +101,22 @@ without 2FA can only enrol:
 - `StaffMFAEnrollmentMiddleware` sends a staff session without 2FA to TOTP setup on every
   Platform page, so sessions that already exist are caught as well as new sign-ins. It is
   registered in base, prod and staging, which each define `MIDDLEWARE`.
-- API token issuance (both the API and the staff token page), the Portal login, and the
-  Portal's signed identity checks refuse such an account; an existing Portal session ends at
-  its next check.
+- API token issuance (both the API and the staff token page), the Portal login, and every
+  signed Portal call made for such an account refuse it: the identity checks in
+  `apps/api/secure_auth.py`, session validation, and the few calls that name their user
+  themselves (company creation, the person's GDPR calls). An existing Portal session ends at its
+  next check.
 - Staff cannot disable 2FA, on Platform or through the Portal.
 
 `staff_mfa_required()` in `apps/users/mfa.py` is the setting's only reader; the checks use
 `two_factor_enabled` and `User.is_staff_user`.
 
 Enrolment asks for the current password, checked on the locked row in the transaction that
-enables 2FA, and keeps one secret until it succeeds or the person starts over. Setup, disable
-and backup-code regeneration allow 15 attempts an hour per user and answer a wrong password
-and a wrong code alike.
+enables 2FA, binds the session to the credentials that transaction committed, and keeps one
+secret until it succeeds or the person starts over (a GET that redirects, so a submitted form
+never replaces the scanned secret). On Platform, setup, disable and backup-code regeneration
+allow 15 attempts an hour per user; on Platform and in the Portal API they answer a wrong
+password and a wrong code alike, and a refused attempt stays audited.
 
 **Recovery.** An administrator resets another person's 2FA from their user page
 (`users:mfa_admin_reset`: admin only, POST, confirmed, never your own account). The audit
@@ -121,7 +125,13 @@ end at once; their Portal session ends at its next session check (at most about 
 as after any credential change. When no administrator can sign in, for example a sole
 administrator who has lost both their authenticator and their backup codes,
 `manage.py reset_two_factor --email … --reason …` does the same from the server and is
-audited as an operator action with no actor.
+audited as an operator action with no actor, naming the server account that ran it.
+
+The event's user is whoever acted (the administrator), as for other audit events; the reset
+account is its subject (the content object), so queries by user (GDPR export, the audit
+filter) list it under the administrator. The reset asks for no password re-entry: misusing it
+takes a hijacked administrator session and the target's password, and the event is high
+severity and flagged for review.
 
 ### Testing Strategy
 - Unit tests: `tests/users/test_mfa_services.py`
