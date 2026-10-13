@@ -38,3 +38,15 @@
   --color-primary-900: hsl(220 90% 22%);
   --color-primary-950: hsl(220 90% 14%);
 }
+
+/* Proforma line items (billing/proforma_form.html): the header and every row are separate grids,
+   so they share this one column template to stay aligned. The total column has a fixed minimum
+   (not max-content, which each row would resolve from its own amount) wide enough for a grouped
+   "9,999,999.99" in text-sm tabular figures plus its padding, with room for wider fonts than macOS
+   (measured: 999,999.99 at 21% is 92.5px of text at 14px); the remove column fits its button.
+   The other columns may shrink to nothing (minmax(0, …)) so the total never overflows its cell. */
+@utility proforma-line-grid {
+  grid-template-columns:
+    minmax(0, 3fr) minmax(0, 2fr) minmax(0, 2fr) minmax(0, 2fr)
+    minmax(8.5rem, 2fr) minmax(2.75rem, 1fr);
+}
