@@ -434,7 +434,7 @@ class VirtualminBackupService:
                 {
                     "domain": account.domain,
                     "source": f"{_REMOTE_ARCHIVE_DIR}/{archive_name}",
-                    "all-features": True,
+                    "all-features": "",  # bare flag; True would arrive as "--all-features True"
                 },
                 self._backup_command_timeout(),
             )
@@ -935,26 +935,31 @@ class VirtualminBackupService:
             gateway = VirtualminGateway(vm_config)
 
             dest = f"{_REMOTE_ARCHIVE_DIR}/{metadata['archive_name']}"
+            # remote.cgi turns each parameter into argv: "" -> bare "--flag",
+            # anything else -> "--flag value". A boolean True would reach
+            # backup-domain.pl as "--all-features True" ("Unknown parameter").
+            # --newformat is omitted: it requires dest to be a directory, and
+            # the transport fetches exactly one archive file.
             backup_params: dict[str, Any] = {
                 "domain": account.domain,
                 "dest": dest,
-                "all-features": True,
-                "all-virtualservers": False,
-                "newformat": True,
+                "all-features": "",
             }
 
-            # Add feature-specific flags
-            if not config.include_email:
-                backup_params["skip-features"] = "mail"
-            if not config.include_databases:
-                skip_features = str(backup_params.get("skip-features", ""))
-                backup_params["skip-features"] = skip_features + ",mysql" if skip_features else "mysql"
-            if not config.include_files:
-                skip_features = str(backup_params.get("skip-features", ""))
-                backup_params["skip-features"] = skip_features + ",dir" if skip_features else "dir"
-            if not config.include_ssl:
-                skip_features = str(backup_params.get("skip-features", ""))
-                backup_params["skip-features"] = skip_features + ",ssl" if skip_features else "ssl"
+            # --except-feature filters the list --all-features built; one
+            # repeated parameter per excluded component, in a stable order.
+            excluded = [
+                feature
+                for included, feature in (
+                    (config.include_email, "mail"),
+                    (config.include_databases, "mysql"),
+                    (config.include_files, "dir"),
+                    (config.include_ssl, "ssl"),
+                )
+                if not included
+            ]
+            if excluded:
+                backup_params["except-feature"] = excluded
 
             # Execute backup
             self._update_backup_progress(backup_id, "backing_up", 30)
@@ -980,8 +985,9 @@ class VirtualminBackupService:
             backup_params: dict[str, Any] = {
                 "domain": account.domain,
                 "dest": dest,
-                "only-features": "virtualmin,dir",  # Config and basic structure only
-                "newformat": True,
+                # Config and basic structure only: one --feature per feature
+                # (backup-domain has no --only-features option).
+                "feature": ["virtualmin", "dir"],
             }
 
             self._update_backup_progress(backup_id, "backing_up_config", 50)

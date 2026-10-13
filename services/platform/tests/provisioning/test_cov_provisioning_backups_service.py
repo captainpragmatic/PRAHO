@@ -100,13 +100,13 @@ class BackupServiceCoverageTests(VirtualminTaskTestBase):
 
         for config, skipped in (
             (BackupConfig(), None),
-            (BackupConfig(include_email=False), "mail"),
-            (BackupConfig(include_databases=False), "mysql"),
-            (BackupConfig(include_files=False), "dir"),
-            (BackupConfig(include_ssl=False), "ssl"),
+            (BackupConfig(include_email=False), ["mail"]),
+            (BackupConfig(include_databases=False), ["mysql"]),
+            (BackupConfig(include_files=False), ["dir"]),
+            (BackupConfig(include_ssl=False), ["ssl"]),
             (
                 BackupConfig(include_email=False, include_databases=False, include_files=False, include_ssl=False),
-                "mail,mysql,dir,ssl",
+                ["mail", "mysql", "dir", "ssl"],
             ),
         ):
             with (
@@ -118,8 +118,9 @@ class BackupServiceCoverageTests(VirtualminTaskTestBase):
             self.assertEqual(result.unwrap(), f"/tmp/{metadata['archive_name']}")  # noqa: S108  # Remote node path.
             self.assertEqual(sent[-1]["domain"], self.account.domain)
             self.assertEqual(sent[-1]["dest"], result.unwrap())
-            self.assertEqual(sent[-1].get("skip-features"), skipped)
-            self.assertTrue(sent[-1]["all-features"])
+            self.assertEqual(sent[-1].get("except-feature"), skipped)
+            # Bare flag: remote.cgi sends a non-empty value as a separate argv token.
+            self.assertEqual(sent[-1]["all-features"], "")
             self.assertEqual(self.backups.get_backup_status("full-id")["progress"], 30)
 
     def test_config_only_backup_uses_config_features_and_returns_remote_path(self) -> None:
@@ -134,7 +135,7 @@ class BackupServiceCoverageTests(VirtualminTaskTestBase):
         with patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=transport):
             result = self.backups._execute_backup_by_type(config, self.account, "config-id", metadata)
         self.assertEqual(result.unwrap(), f"/tmp/{metadata['archive_name']}")  # noqa: S108  # Remote node path.
-        self.assertEqual(sent[0]["only-features"], "virtualmin,dir")
+        self.assertEqual(sent[0]["feature"], ["virtualmin", "dir"])
         self.assertNotIn("all-features", sent[0])
         self.assertEqual(self.backups.get_backup_status("config-id")["status"], "backing_up_config")
 

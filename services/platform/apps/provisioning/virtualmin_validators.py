@@ -580,6 +580,18 @@ class VirtualminValidator:
             # XSS/injection check for key
             SecureInputValidator._check_malicious_patterns(key)
 
+            # A list is sent as a repeated parameter ("--feature a --feature b");
+            # every element gets the same checks as a single string value.
+            if isinstance(value, (list, tuple)):
+                if not all(isinstance(item, str) for item in value):
+                    raise ValidationError(_("Parameter '%(key)s' list values must be strings") % {"key": key})
+                for item in value:
+                    SecureInputValidator._check_malicious_patterns(item)
+                    if len(item) > MAX_PARAMETER_VALUE_LENGTH:
+                        raise ValidationError(_("Parameter '%(key)s' value too long") % {"key": key})
+                validated_params[key] = list(value)
+                continue
+
             # Validate parameter values based on type
             if isinstance(value, str):
                 # XSS/injection check for string values
