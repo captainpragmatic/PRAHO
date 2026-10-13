@@ -16,6 +16,8 @@ Only administrators may switch it: it sits in the admin-only platform zone of th
 
 from __future__ import annotations
 
+import shutil
+import tempfile
 from typing import Any
 
 import pyotp
@@ -300,6 +302,25 @@ class StaffMFAPortalTests(HMACTestMixin, PolicyTestBase):
         for response in (created, history, export):
             self.assertEqual(response.status_code, 401, response.content[:200])
         self.assertEqual(Customer.objects.count(), customers_before)
+
+    def test_the_portal_export_download_refuses_staff_without_2fa(self) -> None:
+        """The export download (#685) names its user in the signed body too."""
+        from apps.audit.services import GDPRExportService  # noqa: PLC0415
+
+        media = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, media, ignore_errors=True)
+        with override_settings(MEDIA_ROOT=media):
+            export = GDPRExportService.create_data_export_request(self.staff).unwrap()
+            self.assertTrue(GDPRExportService.process_data_export(export).is_ok())
+            path = f"/api/gdpr/data-export/{export.pk}/download/"
+            # Control: with the policy off the file is served, so a refusal below is the policy's.
+            self.assertEqual(self.portal_post(path, {"user_id": self.staff.pk}).status_code, 200)
+
+            set_policy(True)
+            refused = self.portal_post(path, {"user_id": self.staff.pk})
+
+        self.assertEqual(refused.status_code, 401)
+        self.assertNotIn(b"user_profile", refused.content)
 
     def test_enrolled_staff_keep_the_portal_while_the_policy_is_on(self) -> None:
         """Positive control: the policy refuses staff without 2FA, not staff."""

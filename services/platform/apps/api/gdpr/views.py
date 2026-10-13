@@ -194,6 +194,9 @@ def data_export_download_api(request: Request, request_data: dict[str, Any], exp
         user = User.objects.get(id=int(str(user_id)), is_active=True)
     except (User.DoesNotExist, ValueError, TypeError):
         return _uniform_error_response()
+    # Named by the signed body, not through secure_auth: the staff 2FA policy applies here too.
+    if staff_must_enrol(user):
+        return _uniform_error_response("Authentication required", 401)
 
     export = DataExport.objects.filter(pk=export_id, requested_by_id=user.id).first()
     if export is None or not export.is_downloadable:
