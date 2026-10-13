@@ -326,6 +326,24 @@ class TaxConfiguration:
         return VATResult(vat_cents=vat_cents, total_cents=amount_cents + vat_cents, vat_rate_percent=vat_rate)
 
     @classmethod
+    def preview_vat_rate(cls, customer_info: CustomerVATInfo) -> tuple[VATScenario, Decimal]:
+        """The VAT rate a document for this customer would carry, as a fraction (0.21), audit-free.
+
+        Unlike calculate_vat it honours the customer's profile overrides in customer_info (VAT
+        payer, custom rate, VIES evidence), so it agrees with the rate a priced document gets.
+        Unlike calculate_vat_for_document it writes no audit row, so a page may show it on every
+        view. The caller supplies vies_verified from vies_refusal_reason, which records nothing.
+        The fraction is the unit OrderItem.tax_rate uses; display code formats the percentage.
+        """
+        scenario, rate_percent, _is_business, _vat_number = cls._determine_vat_scenario(
+            str(customer_info.get("country") or ""),
+            bool(customer_info.get("is_business")),
+            customer_info.get("vat_number"),
+            customer_info=customer_info,
+        )
+        return scenario, (rate_percent / Decimal("100")).quantize(Decimal("0.0001"))
+
+    @classmethod
     def invalidate_cache(cls, country_code: str | None = None) -> None:
         """Invalidate tax rate cache."""
         if country_code:

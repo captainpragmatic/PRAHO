@@ -9,7 +9,7 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from apps.billing.currency_policy import get_selling_currency_policy
-from apps.common.tax_service import TaxService
+from apps.billing.services import preview_customer_vat_rate
 from apps.provisioning.relationship_models import ServiceDomain
 from apps.provisioning.service_models import Server, Service, ServicePlan, ServicePlanPrice
 
@@ -376,16 +376,14 @@ class ServiceDetailSerializer(serializers.ModelSerializer):
         return ServicePlanAvailableSerializer(plans, many=True, context={"currency_code": obj.currency_id}).data
 
     def get_total_monthly_cost(self, obj: Service) -> Decimal:
-        """Get total monthly cost including VAT"""
+        """Get total monthly cost including the customer's own VAT (#689)."""
         base_price = self.get_monthly_price(obj)
-        vat_multiplier = Decimal("1") + TaxService.get_vat_rate("RO", as_decimal=True)
-        return round(base_price * vat_multiplier, 2)  # Romanian VAT (current rate)
+        return round(base_price + base_price * preview_customer_vat_rate(obj.customer), 2)
 
     def get_vat_amount(self, obj: Service) -> Decimal:
-        """Get VAT amount"""
+        """Get the VAT at the customer's own rate: reverse charge, non-EU and custom rates included (#689)."""
         base_price = self.get_monthly_price(obj)
-        vat_rate = TaxService.get_vat_rate("RO", as_decimal=True)
-        return round(base_price * vat_rate, 2)  # Romanian VAT (current rate)
+        return round(base_price * preview_customer_vat_rate(obj.customer), 2)
 
     def get_next_billing_date(self, obj: Service) -> str | None:
         """Get next billing date"""

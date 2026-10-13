@@ -26,9 +26,10 @@
           <span class="text-blue-300 text-xl">{% icon "info" %}</span>
         </div>
         <div class="ml-3">
-          <h4 class="text-sm font-medium text-blue-200">{% trans 'Romanian VAT Compliance' %}</h4>
+          <h4 class="text-sm font-medium text-blue-200">{% trans 'VAT' %}</h4>
           <div class="mt-1 text-sm text-blue-300">
-            <p>{% trans 'VAT will be automatically calculated at 21% for Romanian customers. Prices are stored in cents for precision.' %}</p>
+            <p>{% blocktrans with percent=vat_preview.percent %}This order's items are charged VAT at {{ percent }}%, from the customer's tax details. Prices are stored in cents for precision.{% endblocktrans %}</p>
+            {% if vat_preview.reason %}<p>{{ vat_preview.reason }}</p>{% endif %}
           </div>
         </div>
       </div>
@@ -115,7 +116,7 @@
                 <span id="preview-subtotal">{{ order.currency }} 0.00</span>
               </div>
               <div class="flex justify-between">
-                <span>{% trans "VAT (21%):" %}</span>
+                <span>{% blocktrans with percent=vat_preview.percent %}VAT ({{ percent }}%):{% endblocktrans %}</span>
                 <span id="preview-vat">{{ order.currency }} 0.00</span>
               </div>
               <div class="flex justify-between font-semibold border-t border-green-700 pt-1">
@@ -148,8 +149,10 @@
   </div>
 </form>
 
+{{ vat_preview.rate|json_script:"order-item-vat-rate" }}
 <script nonce="{{ csp_nonce }}">
 document.addEventListener('DOMContentLoaded', function() {
+    const vatRate = parseFloat(JSON.parse(document.getElementById('order-item-vat-rate').textContent)) || 0;
     // Update price displays when values change
     function updatePriceDisplays() {
         const unitPriceCents = parseInt(document.getElementById('id_unit_price_cents').value || '0');
@@ -171,7 +174,7 @@ document.addEventListener('DOMContentLoaded', function() {
         // As OrderItem computes it: the setup fee is charged once, not per unit.
         const lineTotal = unitPriceCents * quantity + setupCents;
         const subtotal = lineTotal / 100;
-        const vatAmount = subtotal * 0.21; // 21% VAT
+        const vatAmount = subtotal * vatRate; // the order's own rate, a fraction
         const total = subtotal + vatAmount;
 
         document.getElementById('preview-subtotal').textContent = `${currency} ${subtotal.toFixed(2)}`;
