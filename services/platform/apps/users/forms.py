@@ -464,6 +464,7 @@ def apply_password_change(user_pk: int, new_password: str, *, still_authorised: 
     from django.db import transaction  # noqa: PLC0415
 
     from .pending_totp import discard  # noqa: PLC0415  # Circular: pending_totp imports models
+    from .security_notices import notify_credential_change  # noqa: PLC0415  # Circular: imports tasks
 
     with transaction.atomic():
         locked = User.objects.select_for_update().get(pk=user_pk)
@@ -473,6 +474,7 @@ def apply_password_change(user_pk: int, new_password: str, *, still_authorised: 
         locked.set_password(new_password)
         locked.save(update_fields=["password"])
         discard(user_pk)
+        notify_credential_change(user_pk, "password_changed")
         return User.objects.select_related("credential_version").get(pk=user_pk)
 
 

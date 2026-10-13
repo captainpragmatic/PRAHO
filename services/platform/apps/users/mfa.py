@@ -714,8 +714,23 @@ class MFAService:
             credential_version.refresh_from_db(fields=["version"])
             if audit_event is not None:
                 AuditService.log_2fa_event(audit_event)
+            MFAService._notify_state_change(user.pk, action, audit_event)
         # Replace a previously cached version (including a cached missing row).
         user.credential_version = credential_version
+
+    @staticmethod
+    def _notify_state_change(user_pk: int, action: str, audit_event: TwoFactorAuditRequest | None) -> None:
+        """Email the account holder about 2FA turned on, off or reset (#689), once this commits."""
+        from .security_notices import notify_credential_change  # noqa: PLC0415  # Circular: imports tasks
+
+        if action == "enable":
+            notify_credential_change(user_pk, "2fa_enabled")
+        elif action == "disable" and audit_event is not None and audit_event.event_type == "2fa_admin_reset":
+            by_operator = audit_event.context.actor_type == "system"
+            actor_email = "" if by_operator or audit_event.actor is None else audit_event.actor.email
+            notify_credential_change(user_pk, "2fa_reset", actor_email=actor_email, by_operator=by_operator)
+        elif action == "disable":
+            notify_credential_change(user_pk, "2fa_disabled")
 
     @staticmethod
     def enable_totp(
@@ -877,6 +892,10 @@ class MFAService:
             codes = BackupCodeService.generate_codes(user)
             # Only the codes: a full save of this instance would write back every other column.
             user.save(update_fields=["backup_tokens"])
+
+            from .security_notices import notify_credential_change  # noqa: PLC0415  # Circular: imports tasks
+
+            notify_credential_change(user.pk, "backup_codes")
 
             # 📊 Audit log generation
             MFAService._log_2fa_event_isolated(

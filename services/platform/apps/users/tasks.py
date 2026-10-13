@@ -754,3 +754,60 @@ def setup_user_security_scheduled_tasks() -> dict[str, str]:
 
     logger.info(f"✅ [UserSecurity] Scheduled tasks setup: {tasks_created}")
     return tasks_created
+
+
+def deliver_security_notice(user_id: int, event: str, actor_email: str, by_operator: bool) -> dict[str, Any]:
+    """Email the account holder that their 2FA or password changed, in their language (#689).
+
+    Queued by apps.users.security_notices after the change commits. Retries follow Django-Q's
+    ack_failure semantics; a failed send is logged and reported, never raised into the worker.
+    """
+    from django.utils import translation  # noqa: PLC0415
+    from django.utils.translation import gettext  # noqa: PLC0415
+
+    from apps.common.localisation_services import (  # noqa: PLC0415
+        get_localisation_defaults,
+        user_localisation_preferences,
+    )
+    from apps.settings.services import get_default_from_email  # noqa: PLC0415
+
+    user = User.objects.filter(pk=user_id, is_active=True).select_related("profile").first()
+    if user is None:
+        logger.info("💡 [Security Notice] Not sent: no active account %s", user_id)
+        return {"sent": False, "reason": "no_active_account"}
+
+    language = user_localisation_preferences(user).get("preferred_language") or (
+        get_localisation_defaults().default_language
+    )
+    with translation.override(language):
+        subjects = {
+            "2fa_enabled": gettext("Two-factor authentication was turned on"),
+            "2fa_disabled": gettext("Two-factor authentication was turned off"),
+            "2fa_reset": gettext("Two-factor authentication was reset"),
+            "backup_codes": gettext("New backup codes were created"),
+            "password_changed": gettext("Your password was changed"),
+        }
+        if event not in subjects:
+            logger.error("🔥 [Security Notice] Unknown event %r for user %s", event, user_id)
+            return {"sent": False, "reason": "unknown_event"}
+        context = {"user": user, "event": event, "actor_email": actor_email, "by_operator": by_operator}
+        subject = subjects[event]
+        text_message = render_to_string("users/emails/security_notice.txt", context)
+        html_message = render_to_string("users/emails/security_notice.html", context)
+
+    try:
+        sent = send_mail(
+            subject=subject,
+            message=text_message,
+            from_email=get_default_from_email(),
+            recipient_list=[user.email],
+            html_message=html_message,
+            fail_silently=False,
+        )
+    except Exception as exc:
+        logger.exception("🔥 [Security Notice] Failed to send %s to user %s (%s)", event, user_id, type(exc).__name__)
+        return {"sent": False, "reason": "delivery"}
+    if not sent:
+        return {"sent": False, "reason": "delivery"}
+    logger.info("✅ [Security Notice] %s sent to user %s", event, user_id)
+    return {"sent": True, "event": event}

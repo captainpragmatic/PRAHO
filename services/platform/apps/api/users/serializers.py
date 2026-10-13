@@ -26,7 +26,9 @@ from apps.common.localisation import DATE_FORMAT_CHOICES, LANGUAGE_CHOICES
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.validators import log_security_event
 from apps.users.mfa import MFAService
+from apps.users.pending_totp import discard as discard_pending_totp
 from apps.users.pending_totp import get_or_create_pending
+from apps.users.security_notices import notify_credential_change
 
 if TYPE_CHECKING:
     from apps.users.models import User
@@ -312,6 +314,9 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
                 user.two_factor_secret = ""
                 fields.append("_two_factor_secret")
             user.save(update_fields=fields)
+            # A setup secret shown before the reset must not be confirmable after it (ADR-0058).
+            discard_pending_totp(user.pk)
+            notify_credential_change(user.pk, "password_changed")
             request = self.context.get("request")
             log_security_event(
                 "password_reset_completed", {"user_id": user.pk}, get_safe_client_ip(request) if request else None
