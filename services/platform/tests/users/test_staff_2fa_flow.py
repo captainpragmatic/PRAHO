@@ -76,9 +76,15 @@ class TOTPSetupTests(StaffTestBase):
         page = self.setup_page()
         secret = page.context["secret"]
         # The page offers it: someone whose app holds a different secret needs a way out.
-        self.assertContains(page, 'href="/auth/mfa/setup/totp/?restart=1"')
+        self.assertContains(page, 'name="restart"')
 
-        self.assertNotEqual(self.client.get(self.url, {"restart": "1"}, follow=True).context["secret"], secret)
+        restarted = self.client.post(self.url, {"restart": "1"}, follow=True)
+        self.assertNotEqual(restarted.context["secret"], secret)
+
+    def test_a_link_cannot_start_over(self) -> None:
+        """#689: starting over by GET let a link on another site swap the secret someone had scanned."""
+        secret = self.setup_page().context["secret"]
+        self.assertEqual(self.client.get(self.url, {"restart": "1"}).context["secret"], secret)
 
     def test_starting_over_then_submitting_enrols_with_the_new_secret(self) -> None:
         """The setup form has no action, so a browser posts back to the URL it came from.
@@ -86,7 +92,7 @@ class TOTPSetupTests(StaffTestBase):
         Starting over used to rotate the secret on any request with ?restart=1, including that
         POST, so the code from the app never matched and every try spent one of 15 an hour.
         """
-        restarted = self.client.get(self.url, {"restart": "1"})
+        restarted = self.client.post(self.url, {"restart": "1"})
         self.assertRedirects(restarted, self.url, fetch_redirect_response=False)
         secret = self.setup_page().context["secret"]
 

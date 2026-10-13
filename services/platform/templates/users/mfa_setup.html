@@ -132,8 +132,12 @@
             {# The secret stays the same until enrolment succeeds; this is the way to a fresh one. #}
             <p class="mt-4 text-xs text-slate-400">
               {% trans "Your app shows codes for a different account?" %}
-              <a href="{{ restart_url }}" class="text-blue-400 hover:text-blue-300 underline">{% trans "Start over with a new code" %}</a>
             </p>
+            <form method="post" action="{{ restart_url }}" class="mt-1">
+              {% csrf_token %}
+              <input type="hidden" name="restart" value="1">
+              {% trans "Start over with a new code" as restart_label %}{% button restart_label type="submit" variant="secondary" size="xs" %}
+            </form>
           </div>
         </div>
 

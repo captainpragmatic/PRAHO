@@ -724,9 +724,10 @@ def mfa_setup_totp(request: HttpRequest) -> HttpResponse:
         messages.info(request, _("2FA is already enabled for your account."))
         return redirect("users:user_profile")
 
-    if request.method == "GET" and request.GET.get("restart"):
-        # A fresh secret, then the bare URL: the setup form posts back to the address it came
-        # from, and a POST must never replace the secret the person has just scanned.
+    if request.method == "POST" and request.POST.get("restart"):
+        # A fresh secret, then the page again. A POST of its own, never a GET: a link on another
+        # site must not be able to swap the secret someone has just scanned. The enrolment form
+        # never sends this field.
         restart_pending_enrolment(user)
         return redirect("users:mfa_setup_totp")
 
@@ -760,7 +761,7 @@ def _setup_context(user: User, secret: str, form: TwoFactorSetupForm) -> dict[st
         "steps": TWO_FACTOR_STEPS,
         "current_step": 2,
         "back_url": reverse("users:mfa_setup"),  # Explicit back to method selection
-        "restart_url": reverse("users:mfa_setup_totp") + "?restart=1",
+        "restart_url": reverse("users:mfa_setup_totp"),
     }
 
 

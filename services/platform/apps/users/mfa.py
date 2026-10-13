@@ -249,12 +249,20 @@ class BrowserOrigin:
 
 
 def _origin_ip(request: HttpRequest | None, origin: BrowserOrigin | None) -> str | None:
-    """The browser's address: the one the Portal signed, else this request's own client address."""
-    return (origin and origin.ip) or (get_safe_client_ip(request) if request else None)
+    """The browser's address: the one the Portal signed, else this request's own client address.
+
+    With an origin, only the origin counts, field by field included: a Portal call that sent no
+    user agent must not be recorded with the Portal server's agent next to the browser's address.
+    """
+    if origin is not None:
+        return origin.ip
+    return get_safe_client_ip(request) if request else None
 
 
 def _origin_user_agent(request: HttpRequest | None, origin: BrowserOrigin | None) -> str | None:
-    return (origin and origin.user_agent) or (request.META.get("HTTP_USER_AGENT") if request else None)
+    if origin is not None:
+        return origin.user_agent
+    return request.META.get("HTTP_USER_AGENT") if request else None
 
 
 class TOTPService:

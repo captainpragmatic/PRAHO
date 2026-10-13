@@ -57,7 +57,7 @@ class WebTOTPEnrolmentStorageTests(TestCase):
         self.assertFalse(PendingTOTPEnrolment.objects.filter(user=self.user).exists())
 
     def test_regenerated_codes_are_shown_in_the_response_and_stored_nowhere(self) -> None:
-        secret, _ = self._enrol()
+        self._enrol()
         self.user.refresh_from_db()
         response = self.client.post(
             reverse("users:mfa_regenerate_backup_codes"),
@@ -70,8 +70,12 @@ class WebTOTPEnrolmentStorageTests(TestCase):
         self.assertIn("no-store", response["Cache-Control"])
         self.assertNotIn("new_backup_codes", self.client.session)
         self.assertFalse(any(_sessions_hold(code) for code in codes))
-        self.assertTrue(secret)
 
     def test_the_old_codes_page_no_longer_reads_anything(self) -> None:
-        response = self.client.get(reverse("users:mfa_backup_codes"))
-        self.assertRedirects(response, reverse("users:user_profile"), fetch_redirect_response=False)
+        # Codes left in a session by the old flow are not shown by the old page.
+        session = self.client.session
+        session["new_backup_codes"] = ["LEFTOVER1", "LEFTOVER2"]
+        session.save()
+        response = self.client.get(reverse("users:mfa_backup_codes"), follow=True)
+        self.assertRedirects(response, reverse("users:user_profile"))
+        self.assertNotContains(response, "LEFTOVER1")

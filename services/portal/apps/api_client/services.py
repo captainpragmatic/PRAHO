@@ -1169,20 +1169,6 @@ class PlatformAPIClient:
         """GET a Platform billing API endpoint (/api/billing/<endpoint>); see `post_billing`."""
         return self._make_request("GET", f"/api/billing/{endpoint}", user_id=user_id, params=params)
 
-    def get_invoice_pdf(self, invoice_id: int, user_id: str) -> bytes:
-        """Download invoice PDF."""
-        return self._make_binary_request("POST", f"/api/billing/invoices/{invoice_id}/pdf/", data={"user_id": user_id})
-
-    # ===============================================================================
-    # SERVICES API ENDPOINTS
-    # ===============================================================================
-
-    def get_customer_services(self, customer_id: int, user_id: int) -> list[dict[str, Any]]:
-        """Get services for customer"""
-        data = self._make_request("GET", f"/customers/{customer_id}/services/", user_id=user_id)
-        results = data.get("results", data.get("services", []))
-        return cast(list[dict[str, Any]], results) if isinstance(results, list) else []
-
     # ===============================================================================
     # DASHBOARD DATA
     # ===============================================================================

@@ -144,3 +144,17 @@ class PendingTOTPEnrolmentTests(TestCase):
     def test_discard_is_harmless_without_an_enrolment(self) -> None:
         discard(self.user.pk)
         self.assertFalse(PendingTOTPEnrolment.objects.filter(user=self.user).exists())
+
+    def test_the_cleanup_task_removes_only_expired_enrolments(self) -> None:
+        from apps.users.tasks import cleanup_expired_2fa_sessions  # noqa: PLC0415
+
+        fresh = User.objects.create_user(email="fresh@example.ro", password=PASSWORD)
+        get_or_create_pending(self.user)
+        get_or_create_pending(fresh)
+        PendingTOTPEnrolment.objects.filter(user=self.user).update(expires_at=timezone.now() - timedelta(minutes=1))
+
+        result = cleanup_expired_2fa_sessions()
+
+        self.assertEqual(result["results"]["cleaned_pending_enrolments"], 1)
+        self.assertFalse(PendingTOTPEnrolment.objects.filter(user=self.user).exists())
+        self.assertTrue(PendingTOTPEnrolment.objects.filter(user=fresh).exists())

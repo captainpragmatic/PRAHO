@@ -241,6 +241,13 @@ def cleanup_expired_2fa_sessions() -> dict[str, Any]:
 
             results["cleaned_challenges"] = challenge_cleanup_count
 
+            # Authenticator setups nobody confirmed: their secret is useless past expiry (ADR-0058).
+            from apps.users.pending_totp import PendingTOTPEnrolment  # noqa: PLC0415
+
+            results["cleaned_pending_enrolments"] = PendingTOTPEnrolment.objects.filter(
+                expires_at__lt=timezone.now()
+            ).delete()[0]
+
             # Clean up inactive/expired WebAuthn credentials (optional)
             old_webauthn_cutoff = timezone.now() - timedelta(days=90)
             inactive_webauthn = WebAuthnCredential.objects.filter(is_active=False, created_at__lt=old_webauthn_cutoff)

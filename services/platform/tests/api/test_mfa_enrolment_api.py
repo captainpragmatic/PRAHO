@@ -98,6 +98,7 @@ class MFAEnrolmentAPITests(HMACTestMixin, TestCase):
         self.setup_secret()
         response = self.call("mfa/verify/", password=PASSWORD, token="11111111")
         self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["token"], ["Enter the 6-digit code from your authenticator app."])
         self.user.refresh_from_db()
         self.assertFalse(self.user.mfa_enabled)
 
@@ -124,3 +125,25 @@ class MFAEnrolmentAPITests(HMACTestMixin, TestCase):
                 event = AuditEvent.objects.filter(user=self.user, action=action).latest("timestamp")
                 self.assertEqual(event.ip_address, BROWSER_IP)
                 self.assertEqual(event.user_agent, BROWSER_AGENT)
+
+    def test_the_browser_agent_is_taken_only_from_a_signed_printable_bounded_value(self) -> None:
+        """An agent with control characters is dropped, and a long one is cut to 512 characters."""
+        for index, (agent, recorded) in enumerate((("Bad\x07Agent", None), ("A" * 600, "A" * 512))):
+            with self.subTest(agent=agent[:12]):
+                self.user = User.objects.create_user(email=f"agent{index}@example.com", password=PASSWORD)
+                CustomerMembership.objects.create(user=self.user, customer=self.customer, role="owner")
+                secret = self.setup_secret()
+                body = {
+                    "user_id": self.user.pk,
+                    "customer_id": self.customer.pk,
+                    "password": PASSWORD,
+                    "token": pyotp.TOTP(secret).now(),
+                    "client_ip": BROWSER_IP,
+                    "client_user_agent": agent,
+                }
+                # The request itself comes from the Portal server, with its own agent.
+                self.portal_post("/api/users/mfa/verify/", body, HTTP_USER_AGENT="PortalServer/1.0")
+                event = AuditEvent.objects.get(user=self.user, action="2fa_enabled")
+                self.assertEqual(event.ip_address, BROWSER_IP)
+                # Never the Portal server's own agent in place of the browser's.
+                self.assertEqual(event.user_agent or None, recorded)
