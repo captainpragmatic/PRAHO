@@ -741,6 +741,8 @@ DEFAULT_THROTTLE_RATES = {
     "auth_reset_ip": "5/minute",
     "auth_register_ip": "5/minute",
     "auth_register_confirm_ip": "5/minute",
+    # Per person: password and second-factor checks through the Portal (MFACredentialThrottle).
+    "mfa_credential": "15/hour",
     "sustained": "2000/hour",
     "api_burst": "120/min",
     # No throttle class uses this scope: it is validated at startup (apps.common.apps) so DRF's

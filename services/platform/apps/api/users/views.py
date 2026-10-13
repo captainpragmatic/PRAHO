@@ -44,6 +44,7 @@ from apps.common.performance.rate_limiting import (
     BurstRateThrottle,
     CustomerRateThrottle,
     EndpointRateThrottle,
+    MFACredentialThrottle,
     PortalHMACBurstThrottle,
     PortalHMACRateThrottle,
     RegistrationConfirmClientIPThrottle,
@@ -732,6 +733,10 @@ def mfa_setup_api(request: HttpRequest, user: User) -> Response:
 
 _MAX_USER_AGENT_LENGTH = 512
 
+# The global defaults (REST_FRAMEWORK["DEFAULT_THROTTLE_CLASSES"]), kept when a view adds its own:
+# @throttle_classes replaces the list rather than extending it.
+_DEFAULT_PORTAL_THROTTLES = (PortalHMACRateThrottle, PortalHMACBurstThrottle, CustomerRateThrottle, BurstRateThrottle)
+
 
 def _browser_origin(request: HttpRequest) -> BrowserOrigin:
     """The customer's browser, as the Portal signed it; only a body the HMAC middleware verified counts."""
@@ -754,6 +759,8 @@ _ENROLMENT_REFUSALS: dict[str, tuple[str, Any]] = {
 @api_view(["POST"])
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
+# Above @require_user_authentication: its wrapper hides this view's throttles otherwise.
+@throttle_classes([*_DEFAULT_PORTAL_THROTTLES, MFACredentialThrottle])
 @require_user_authentication
 def mfa_verify_api(request: HttpRequest, user: User) -> Response:
     """Confirm the pending enrolment with the password and a code; return the recovery codes once.
@@ -788,6 +795,8 @@ def mfa_verify_api(request: HttpRequest, user: User) -> Response:
 @api_view(["POST"])
 @authentication_classes([])
 @permission_classes([AllowAny])
+# Above @require_user_authentication: its wrapper hides this view's throttles otherwise.
+@throttle_classes([*_DEFAULT_PORTAL_THROTTLES, MFACredentialThrottle])
 @require_user_authentication
 def mfa_disable_api(request: HttpRequest, user: User) -> Response:
     """Require current password and a second factor before removing MFA."""
@@ -1269,6 +1278,8 @@ def verify_customer_access_api(request: HttpRequest, user: User) -> Response:
 @api_view(["PUT"])
 @authentication_classes([])
 @permission_classes([AllowAny])
+# Above @require_user_authentication: its wrapper hides this view's throttles otherwise.
+@throttle_classes([*_DEFAULT_PORTAL_THROTTLES, MFACredentialThrottle])
 @require_user_authentication
 def password_change_api(request: HttpRequest, user: User) -> Response:
     """Change the signed user's password after reauthentication on the Platform."""
@@ -1300,6 +1311,8 @@ def password_change_api(request: HttpRequest, user: User) -> Response:
 @api_view(["POST"])
 @authentication_classes([])
 @permission_classes([AllowAny])
+# Above @require_user_authentication: its wrapper hides this view's throttles otherwise.
+@throttle_classes([*_DEFAULT_PORTAL_THROTTLES, MFACredentialThrottle])
 @require_user_authentication
 def mfa_regenerate_backup_codes_api(request: HttpRequest, user: User) -> Response:
     """Replace recovery codes only after password and second-factor verification."""
