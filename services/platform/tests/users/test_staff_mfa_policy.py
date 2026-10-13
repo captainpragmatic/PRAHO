@@ -142,7 +142,11 @@ class StaffMFAThroughProductionMiddlewareTests(PolicyTestBase):
         self.assertEqual(response.status_code, 403)
         self.assertIn("two-factor", response.json()["error"].lower())
 
-    def test_the_settings_page_cannot_switch_the_policy_off(self) -> None:
+    def test_an_unenrolled_admin_cannot_switch_the_policy_off(self) -> None:
+        """Without the gate an administrator could; with it, the only way off is to enrol first."""
+        admin = User.objects.create_user(email="unenrolled-admin@example.ro", password=PASSWORD, staff_role="admin")
+        self.client.force_login(admin)
+
         response = self.client.post(
             reverse("settings:save_change_set"),
             data={"changes": {KEY: False}, "baselines": {KEY: None}},
@@ -279,6 +283,40 @@ class StaffMFAPortalTests(HMACTestMixin, PolicyTestBase):
         member = {"user_id": self.member.pk, "customer_id": self.customer.pk}
         self.assertEqual(self.portal_post("/api/customers/details/", member).status_code, 200)
 
+    def test_the_portal_calls_that_name_their_own_user_refuse_one_without_2fa(self) -> None:
+        """Company creation and the person's GDPR calls resolve the signed user themselves."""
+        from apps.customers.models import Customer  # noqa: PLC0415
+
+        set_policy(True)
+        customers_before = Customer.objects.count()
+
+        created = self.portal_post(
+            "/api/customers/create/",
+            {"user_id": self.staff.pk, "action": "create_company", "company_data": {"company_name": "Refused SRL"}},
+        )
+        history = self.portal_post("/api/gdpr/consent-history/", {"user_id": self.staff.pk})
+        export = self.portal_post("/api/gdpr/data-export/", {"user_id": self.staff.pk, "action": "status"})
+
+        for response in (created, history, export):
+            self.assertEqual(response.status_code, 401, response.content[:200])
+        self.assertEqual(Customer.objects.count(), customers_before)
+
+    def test_enrolled_staff_keep_the_portal_while_the_policy_is_on(self) -> None:
+        """Positive control: the policy refuses staff without 2FA, not staff."""
+        CustomerMembership.objects.create(user=self.enrolled, customer=self.customer, role="owner")
+        set_policy(True)
+        signed = {"user_id": self.enrolled.pk, "customer_id": self.customer.pk}
+
+        self.assertEqual(self.login(self.enrolled, mfa_token=self.backup_codes[0]).status_code, 200)
+        session = {
+            "user_id": self.enrolled.pk,
+            "session_auth_hash": User.objects.get(pk=self.enrolled.pk).get_session_auth_hash(),
+        }
+        self.assertEqual(self.portal_post("/api/users/session/validate/", session).status_code, 200)
+        self.assertEqual(self.portal_post("/api/customers/details/", signed).status_code, 200)
+        self.assertEqual(self.portal_post("/api/users/mfa/status/", signed).status_code, 200)
+        self.assertEqual(self.portal_post("/api/gdpr/consent-history/", {"user_id": self.enrolled.pk}).status_code, 200)
+
     def test_staff_cannot_disable_2fa_through_the_portal(self) -> None:
         set_policy(True)
         token = pyotp.TOTP(self.secret).now()
@@ -288,6 +326,7 @@ class StaffMFAPortalTests(HMACTestMixin, PolicyTestBase):
         )
 
         self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["code"], "staff_mfa_required")
         self.enrolled.refresh_from_db()
         self.assertTrue(self.enrolled.two_factor_enabled)
 

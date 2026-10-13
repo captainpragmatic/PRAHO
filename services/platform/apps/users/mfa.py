@@ -718,7 +718,7 @@ class MFAService:
         reason: str | None = None,
         request: HttpRequest | None = None,
         *,
-        by_operator: bool = False,
+        operator: str | None = None,
     ) -> bool:
         """
         🔓 Disable TOTP/2FA with audit trail
@@ -728,7 +728,8 @@ class MFAService:
             admin_user: Admin performing the action (if any); recorded as the event's actor
             reason: Reason for disabling
             request: HTTP request for context
-            by_operator: A server-side reset (`manage.py reset_two_factor`), recorded with no actor
+            operator: The server account that ran `manage.py reset_two_factor`; such a reset is
+                recorded with no actor, as the operator has no account in the application
         """
         try:
             if not user.two_factor_enabled:
@@ -756,8 +757,10 @@ class MFAService:
                 event_type = "2fa_admin_reset"
                 description = f"TOTP/2FA disabled by admin {admin_user.email} for user {user.email}"
                 actor = admin_user
-            elif by_operator:
-                metadata.update({"reset_by": "operator_command", "reason": reason or "Operator reset"})
+            elif operator is not None:
+                metadata.update(
+                    {"reset_by": "operator_command", "operator": operator, "reason": reason or "Operator reset"}
+                )
                 event_type = "2fa_admin_reset"
                 description = f"TOTP/2FA disabled by an operator command for user {user.email}"
                 actor_type = "system"

@@ -21,6 +21,7 @@ from apps.api.secure_auth import (
 )
 from apps.audit.services import GDPRConsentService, GDPRExportService
 from apps.common.performance.rate_limiting import BurstRateThrottle, CustomerRateThrottle
+from apps.users.mfa import staff_must_enrol
 from apps.users.models import User
 
 logger = logging.getLogger(__name__)
@@ -88,6 +89,9 @@ def consent_history_api(request: Request, request_data: dict[str, Any]) -> Respo
         user = User.objects.get(id=int(user_id), is_active=True)
     except (User.DoesNotExist, ValueError, TypeError):
         return _uniform_error_response()
+    # Named by the signed body, not through secure_auth: the staff 2FA policy applies here too.
+    if staff_must_enrol(user):
+        return _uniform_error_response("Authentication required", 401)
 
     consent_history = GDPRConsentService.get_consent_history(user)
     cookie_history = GDPRConsentService.get_cookie_consent_history(user)
@@ -121,6 +125,9 @@ def data_export_api(request: Request, request_data: dict[str, Any]) -> Response:
         user = User.objects.get(id=int(user_id), is_active=True)
     except (User.DoesNotExist, ValueError, TypeError):
         return _uniform_error_response()
+    # Named by the signed body, not through secure_auth: the staff 2FA policy applies here too.
+    if staff_must_enrol(user):
+        return _uniform_error_response("Authentication required", 401)
 
     action = request_data.get("action", "request")
 

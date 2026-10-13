@@ -6,6 +6,7 @@ Romanian-localized authentication and profile forms.
 import logging
 import secrets
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -635,23 +636,30 @@ def mfa_method_selection(request: HttpRequest) -> HttpResponse:
     return render(request, "users/mfa_method_selection.html", context)
 
 
-def _too_many_attempts(request: HttpRequest, template: str, context: dict[str, Any]) -> HttpResponse | None:
+def _too_many_attempts(
+    request: HttpRequest, template: str, context: Callable[[], dict[str, Any]]
+) -> HttpResponse | None:
     """A 429 page once the per-user hourly budget of a credential form is spent.
 
-    Unlike the login's limit, this one is not lifted for tests: tests that need it on say so.
+    Unlike the login's limit, this one is not lifted for tests: tests that need it on say so. The
+    page context is built only when the budget is spent.
     """
     if not getattr(request, "limited", False):
         return None
     messages.error(request, _("Too many attempts. Please wait an hour and try again."))
-    return render(request, template, context, status=429)
+    return render(request, template, context(), status=429)
 
 
-def _enrol_totp(request: HttpRequest, user: User, secret: str, form: TwoFactorSetupForm) -> list[str] | None:
-    """Enable TOTP when the password and the code are both right; return the backup codes, or None.
+def _enrol_totp(
+    request: HttpRequest, user: User, secret: str, form: TwoFactorSetupForm
+) -> tuple[list[str], User] | None:
+    """Enable TOTP when the password and the code are both right; return the codes and the account.
 
     The password is checked on the locked row, inside the transaction that enables 2FA, so a
     password changed meanwhile is not accepted. The code may be from the previous 30-second step,
-    as at sign-in. One answer covers a wrong password and a wrong code.
+    as at sign-in. One answer covers a wrong password and a wrong code. The account returned is
+    read inside the same transaction, so the session binds to the credentials this enrolment
+    committed: a password reset landing afterwards still ends the session.
     """
     with transaction.atomic():
         locked_user = User.objects.select_for_update().get(pk=user.pk)
@@ -663,7 +671,8 @@ def _enrol_totp(request: HttpRequest, user: User, secret: str, form: TwoFactorSe
             form.add_error(None, _("The password or the code is incorrect."))
             return None
         _secret, backup_codes = MFAService.enable_totp(locked_user, request, secret=secret)
-    return backup_codes
+        enrolled = User.objects.select_related("credential_version").get(pk=user.pk)
+    return backup_codes, enrolled
 
 
 @login_required
@@ -680,20 +689,26 @@ def mfa_setup_totp(request: HttpRequest) -> HttpResponse:
         messages.info(request, _("2FA is already enabled for your account."))
         return redirect("users:user_profile")
 
+    if request.method == "GET" and request.GET.get("restart"):
+        # A fresh secret, then the bare URL: the setup form posts back to the address it came
+        # from, and a POST must never replace the secret the person has just scanned.
+        request.session["2fa_secret"] = TOTPService.generate_secret()
+        return redirect("users:mfa_setup_totp")
     secret = request.session.get("2fa_secret")
-    if not secret or request.GET.get("restart"):
+    if not secret:
         secret = TOTPService.generate_secret()
         request.session["2fa_secret"] = secret
 
     form = TwoFactorSetupForm(request.POST or None)
     if request.method == "POST":
-        if limited := _too_many_attempts(request, "users/mfa_setup.html", _setup_context(user, secret, form)):
+        if limited := _too_many_attempts(request, "users/mfa_setup.html", lambda: _setup_context(user, secret, form)):
             return limited
-        backup_codes = _enrol_totp(request, user, secret, form) if form.is_valid() else None
-        if backup_codes is not None:
+        enrolment = _enrol_totp(request, user, secret, form) if form.is_valid() else None
+        if enrolment is not None:
+            backup_codes, enrolled = enrolment
             # 🔒 Rotate session for security after enabling 2FA
             SessionSecurityService.rotate_session_on_2fa_change(request)
-            update_session_auth_hash(request, User.objects.get(pk=user.pk))
+            update_session_auth_hash(request, enrolled)
             request.session.pop("2fa_secret", None)
             # Shown once on the next page
             request.session["new_backup_codes"] = backup_codes
@@ -925,7 +940,7 @@ def mfa_regenerate_backup_codes(request: HttpRequest) -> HttpResponse:
 
     if request.method == "POST":
         if limited := _too_many_attempts(
-            request, "users/mfa_regenerate_backup_codes.html", {"backup_count": len(user.backup_tokens)}
+            request, "users/mfa_regenerate_backup_codes.html", lambda: {"backup_count": len(user.backup_tokens)}
         ):
             return limited
         with transaction.atomic():
@@ -972,7 +987,7 @@ def mfa_disable(request: HttpRequest) -> HttpResponse:
         return refused
 
     if request.method == "POST":
-        if limited := _too_many_attempts(request, "users/mfa_disable.html", {}):
+        if limited := _too_many_attempts(request, "users/mfa_disable.html", dict):
             return limited
         # The password and a current second factor, as the API requires (#595)
         with transaction.atomic():

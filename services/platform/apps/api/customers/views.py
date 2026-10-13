@@ -46,6 +46,7 @@ from apps.customers.contact_models import CustomerAddress
 from apps.customers.contact_service import AddressData, ContactService
 from apps.customers.models import Customer, CustomerTaxProfile
 from apps.provisioning.service_models import Service
+from apps.users.mfa import staff_must_enrol
 from apps.users.models import CustomerMembership, User
 from apps.users.services import SecureCustomerUserService
 
@@ -315,6 +316,10 @@ def customer_create_api(request: HttpRequest) -> Response:
             user = User.objects.get(id=user_id, is_active=True)
         except User.DoesNotExist:
             return Response({"success": False, "error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+        # This call names its user itself rather than through secure_auth, so it applies the
+        # staff 2FA policy itself, as the identity checks there do.
+        if staff_must_enrol(user):
+            return Response({"success": False, "error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
 
         # Use CustomerCreationSerializer to validate and create customer
         serializer = CustomerCreationSerializer(data=company_data, context={"request": request, "user": user})

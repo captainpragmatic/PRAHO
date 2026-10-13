@@ -73,6 +73,21 @@ class AdminResetTests(TestCase):
         response = their_browser.get(reverse("users:user_profile"))
         self.assertEqual(response.status_code, 302)
         self.assertIn(reverse("users:login"), response["Location"])
+        # The session rows themselves are gone, not only invalid against the new credentials.
+        from django.contrib.sessions.models import Session  # noqa: PLC0415
+
+        self.assertFalse(
+            [s for s in Session.objects.all() if str(s.get_decoded().get("_auth_user_id")) == str(self.target.pk)]
+        )
+
+    def test_the_reset_needs_the_csrf_token(self) -> None:
+        browser = Client(enforce_csrf_checks=True)
+        browser.force_login(self.admin)
+
+        response = browser.post(reverse("users:mfa_admin_reset", kwargs={"pk": self.target.pk}))
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(User.objects.get(pk=self.target.pk).two_factor_enabled)
 
     def test_only_an_administrator_may_reset(self) -> None:
         self.assertEqual(self.reset(self.colleague, self.target).status_code, 403)
@@ -135,6 +150,7 @@ class OperatorResetCommandTests(TestCase):
         self.assertEqual(event.object_id, str(self.person.pk))
         self.assertEqual(event.metadata["reset_by"], "operator_command")
         self.assertIn("Lost phone and codes", event.metadata["reason"])
+        self.assertTrue(event.metadata["operator"])  # the account on the server that ran it
         self.assertIn(self.person.email, output.getvalue())
 
     def test_the_command_needs_a_known_enrolled_account_and_a_reason(self) -> None:

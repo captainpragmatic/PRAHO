@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from typing import Any
 
@@ -77,7 +78,52 @@ class TOTPSetupTests(StaffTestBase):
         # The page offers it: someone whose app holds a different secret needs a way out.
         self.assertContains(page, 'href="/auth/mfa/setup/totp/?restart=1"')
 
-        self.assertNotEqual(self.client.get(self.url, {"restart": "1"}).context["secret"], secret)
+        self.assertNotEqual(self.client.get(self.url, {"restart": "1"}, follow=True).context["secret"], secret)
+
+    def test_starting_over_then_submitting_enrols_with_the_new_secret(self) -> None:
+        """The setup form has no action, so a browser posts back to the URL it came from.
+
+        Starting over used to rotate the secret on any request with ?restart=1, including that
+        POST, so the code from the app never matched and every try spent one of 15 an hour.
+        """
+        restarted = self.client.get(self.url, {"restart": "1"})
+        self.assertRedirects(restarted, self.url, fetch_redirect_response=False)
+        secret = self.setup_page().context["secret"]
+
+        response = self.client.post(self.url + "?restart=1", {"token": pyotp.TOTP(secret).now(), "password": PASSWORD})
+
+        self.assertRedirects(response, reverse("users:mfa_backup_codes"), fetch_redirect_response=False)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.two_factor_enabled)
+        self.assertEqual(self.user.two_factor_secret, secret)
+
+    def test_a_credential_change_after_enrolment_is_not_adopted_by_the_session(self) -> None:
+        """The session is bound to the credentials enrolment committed, not to a later read.
+
+        Re-reading the user after the commit let a password reset landing in between be adopted,
+        so the enrolling session survived a credential change meant to end it.
+        """
+        from unittest.mock import patch  # noqa: PLC0415
+
+        from apps.users.services import SessionSecurityService  # noqa: PLC0415
+
+        secret = self.setup_page().context["secret"]
+        rotate = SessionSecurityService.rotate_session_on_2fa_change
+
+        def rotate_then_reset_elsewhere(request: Any) -> None:
+            rotate(request)
+            concurrent = User.objects.get(pk=self.user.pk)
+            concurrent.set_password("reset-elsewhere-Passphrase-2026")
+            concurrent.save(update_fields=["password"])
+
+        with patch.object(
+            SessionSecurityService, "rotate_session_on_2fa_change", side_effect=rotate_then_reset_elsewhere
+        ):
+            self.client.post(self.url, {"token": pyotp.TOTP(secret).now(), "password": PASSWORD})
+
+        response = self.client.get(reverse("users:user_profile"))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse("users:login"), response["Location"])
 
     def test_the_previous_code_is_accepted_as_at_sign_in(self) -> None:
         secret = self.setup_page().context["secret"]
@@ -328,7 +374,44 @@ class TwoFactorCopyTests(StaffTestBase):
         from pathlib import Path  # noqa: PLC0415
 
         templates = Path(__file__).parents[2] / "templates" / "users"
-        unescaped = [
-            path.name for path in templates.glob("*.html") if "confirm('{% trans" in path.read_text(encoding="utf-8")
-        ]
+        sources = {path.name: path.read_text(encoding="utf-8") for path in templates.glob("*.html")}
+        unescaped = [name for name, source in sources.items() if "confirm('{% trans" in source]
         self.assertEqual(unescaped, [])
+        # The scan reaches the two dialogs it was written for, so an empty result means something.
+        escaped = sorted(
+            name for name, source in sources.items() if "|escapejs }}');" in source and "confirm(" in source
+        )
+        self.assertEqual(escaped, ["mfa_disable.html", "mfa_regenerate_backup_codes.html"])
+
+
+@override_settings(
+    PLATFORM_API_SECRET=HMAC_TEST_SECRET,
+    MIDDLEWARE=HMAC_TEST_MIDDLEWARE,
+    HMAC_ALLOW_LEGACY_SECRET=True,
+    CACHES=LOCMEM,
+)
+class PortalCredentialRefusalTests(HMACTestMixin, StaffTestBase):
+    """Through the Portal API: one answer for both factors, and the failed attempt stays audited.
+
+    The refusal used to raise inside the transaction that would have applied the change, which
+    rolled back the failed-verification audit row with it.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.user = User.objects.create_user(email="portal-refusal@example.ro", password=PASSWORD)
+        self.secret = self.enrol()
+
+    def test_a_wrong_password_and_a_wrong_code_get_the_same_answer_and_are_audited(self) -> None:
+        for path in ("/api/users/mfa/disable/", "/api/users/mfa/regenerate-backup-codes/"):
+            wrong_password = self.portal_post(
+                path, {"user_id": self.user.pk, "password": "not-the-password", "token": pyotp.TOTP(self.secret).now()}
+            )
+            wrong_code = self.portal_post(path, {"user_id": self.user.pk, "password": PASSWORD, "token": "00000000"})
+            with self.subTest(path=path):
+                self.assertEqual((wrong_password.status_code, wrong_code.status_code), (400, 400))
+                self.assertEqual(wrong_password.json(), wrong_code.json())
+                self.assertIn(GENERIC_ERROR, json.dumps(wrong_code.json()))
+        self.assertEqual(AuditEvent.objects.filter(action="2fa_verification_failed", user=self.user).count(), 2)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.two_factor_enabled)

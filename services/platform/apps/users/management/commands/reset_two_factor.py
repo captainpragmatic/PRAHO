@@ -7,6 +7,7 @@ reset is audited as an operator action, and the person's Platform sessions end.
     manage.py reset_two_factor --email someone@example.ro --reason "Lost phone and backup codes"
 """
 
+import getpass
 from typing import Any
 
 from django.core.management.base import BaseCommand, CommandError, CommandParser
@@ -15,6 +16,14 @@ from django.db import transaction
 from apps.users.mfa import MFAService
 from apps.users.models import User
 from apps.users.services import SessionSecurityService
+
+
+def _operator() -> str:
+    """The server account running the command, for the audit trail."""
+    try:
+        return getpass.getuser()
+    except (KeyError, OSError):  # no passwd entry for the uid, as in some containers
+        return "unknown"
 
 
 class Command(BaseCommand):
@@ -36,7 +45,7 @@ class Command(BaseCommand):
                 raise CommandError(f"No account with the email {email}.")
             if not user.two_factor_enabled:
                 raise CommandError(f"{user.email} has no two-factor authentication to reset.")
-            MFAService.disable_totp(user, reason=f"Operator reset: {reason}", by_operator=True)
+            MFAService.disable_totp(user, reason=f"Operator reset: {reason}", operator=_operator())
 
         SessionSecurityService.invalidate_all_sessions_for_user(user.pk)
         self.stdout.write(f"Two-factor authentication reset for {user.email}; their sessions have ended.")

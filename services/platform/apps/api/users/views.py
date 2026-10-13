@@ -748,15 +748,24 @@ def mfa_disable_api(request: HttpRequest, user: User) -> Response:
     with transaction.atomic():
         user = User.objects.select_for_update().get(pk=user.pk)
         if staff_cannot_disable_mfa(user):
+            # The code lets the Portal tell this refusal from wrong credentials.
             return Response(
-                {"success": False, "error": str(_("Two-factor authentication is required for staff accounts."))},
+                {
+                    "success": False,
+                    "code": "staff_mfa_required",
+                    "error": str(_("Two-factor authentication is required for staff accounts.")),
+                },
                 status=status.HTTP_403_FORBIDDEN,
             )
         serializer = MFADisableSerializer(data=request.data, context={"request": request, "user": user})
-        serializer.is_valid(raise_exception=True)
-        result = serializer.save()
-        result["session_auth_hash"] = user.get_session_auth_hash()
-        return Response(result)
+        if serializer.is_valid():
+            result = serializer.save()
+            result["session_auth_hash"] = user.get_session_auth_hash()
+            return Response(result)
+        errors = serializer.errors
+    # Answered after the transaction ends, not raised inside it, so the failed attempt's audit
+    # row is committed rather than rolled back with the change that did not happen.
+    return Response(errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 @api_view(["POST"])
@@ -1250,6 +1259,9 @@ def mfa_regenerate_backup_codes_api(request: HttpRequest, user: User) -> Respons
         user = User.objects.select_for_update().get(pk=user.pk)
         # Reuse the credential validation, without executing the disable operation.
         serializer = MFADisableSerializer(data=request.data, context={"request": request, "user": user})
-        serializer.is_valid(raise_exception=True)
-        codes = MFAService.generate_backup_codes(user, request)
-    return Response({"success": True, "backup_codes": codes})
+        if serializer.is_valid():
+            codes = MFAService.generate_backup_codes(user, request)
+            return Response({"success": True, "backup_codes": codes})
+        errors = serializer.errors
+    # As for disable: the refusal is answered outside the transaction so its audit row stays.
+    return Response(errors, status=status.HTTP_400_BAD_REQUEST)
