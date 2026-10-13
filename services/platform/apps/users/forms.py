@@ -4,11 +4,13 @@ Romanian-localized authentication and profile forms.
 """
 
 import re
+from collections.abc import Callable
 from typing import Any, ClassVar, TypeVar, cast
 
 from django import forms
 from django.conf import settings
-from django.contrib.auth.forms import UserCreationForm
+from django.contrib.auth.forms import PasswordChangeForm, SetPasswordForm, UserCreationForm
+from django.contrib.auth.tokens import default_token_generator
 from django.core.exceptions import ValidationError
 from django.utils import timezone  # For GDPR consent timestamps
 from django.utils.translation import gettext_lazy as _
@@ -436,3 +438,82 @@ class CustomerMembershipForm(forms.ModelForm):
             "role": _("Role"),
             "is_primary": _("Primary Membership"),
         }
+
+
+# ===============================================================================
+# PASSWORD WRITES (#689)
+# ===============================================================================
+
+
+class PasswordAuthorityChanged(Exception):  # noqa: N818  # names the condition, like DatabaseError
+    """What allowed this password write (the old password, a reset link) no longer holds on the row."""
+
+
+def apply_password_change(user_pk: int, new_password: str, *, still_authorised: Callable[[User], bool]) -> User:
+    """Write a new password under the row lock, after re-checking what authorised it.
+
+    The forms validate against the instance loaded at the start of the request. Saving that
+    instance whole wrote back anything changed meanwhile (an administrator's 2FA reset, the
+    cached profile), and a password changed by another request was overwritten by one whose
+    authority it had already lost. Here the row is locked, the authority re-checked on it, the
+    policy re-run against it, and only the password column written. A pending authenticator
+    setup is dropped (ADR-0058). The account is returned as committed, so the caller binds the
+    session to the new credentials.
+    """
+    from django.contrib.auth.password_validation import validate_password  # noqa: PLC0415
+    from django.db import transaction  # noqa: PLC0415
+
+    from .pending_totp import discard  # noqa: PLC0415  # Circular: pending_totp imports models
+
+    with transaction.atomic():
+        locked = User.objects.select_for_update().get(pk=user_pk)
+        if not still_authorised(locked):
+            raise PasswordAuthorityChanged
+        validate_password(new_password, locked)
+        locked.set_password(new_password)
+        locked.save(update_fields=["password"])
+        discard(user_pk)
+        return User.objects.select_related("credential_version").get(pk=user_pk)
+
+
+class LockedPasswordChangeForm(PasswordChangeForm):
+    """Django's change form, with the write done by apply_password_change.
+
+    save(commit=False) sets the password on the instance only, as Django's does.
+    """
+
+    def save(self, commit: bool = True) -> User:
+        if not commit:
+            return cast(User, super().save(commit=False))
+        old_password = self.cleaned_data["old_password"]
+        written = apply_password_change(
+            self.user.pk,
+            self.cleaned_data["new_password1"],
+            still_authorised=lambda locked: locked.check_password(old_password),
+        )
+        self.user = written
+        return written
+
+
+class LockedSetPasswordForm(SetPasswordForm):
+    """Django's reset form, with the write done by apply_password_change.
+
+    The link's token is re-checked on the locked row: it is derived from the password hash, so
+    a password changed after the link was opened invalidates it.
+    """
+
+    def __init__(self, user: User, *args: Any, reset_token: str = "", **kwargs: Any) -> None:
+        super().__init__(user, *args, **kwargs)
+        self.reset_token = reset_token
+
+    def save(self, commit: bool = True) -> User:
+        if not commit:
+            return cast(User, super().save(commit=False))
+        token = self.reset_token
+        written = apply_password_change(
+            self.user.pk,
+            self.cleaned_data["new_password1"],
+            still_authorised=lambda locked: bool(token) and default_token_generator.check_token(locked, token),
+        )
+        self.user = written
+        return written

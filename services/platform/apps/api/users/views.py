@@ -65,6 +65,7 @@ from apps.users.mfa import (
 )
 from apps.users.models import APIToken, CustomerMembership, User, UserProfile
 from apps.users.pending_totp import complete_enrolment
+from apps.users.pending_totp import discard as discard_pending_totp
 from apps.users.services import APITokenService, SessionSecurityService
 
 from .serializers import (
@@ -1303,6 +1304,7 @@ def password_change_api(request: HttpRequest, user: User) -> Response:
             return Response({"success": False, "error": "Invalid authentication code"}, status=400)
         user.set_password(new_password)
         user.save(update_fields=["password"])
+        discard_pending_totp(user.pk)  # A secret shown before the change must not be confirmable after it.
         SessionSecurityService.invalidate_all_sessions_for_user(user.id)
         log_security_event("portal_password_changed", {"user_id": user.id}, get_safe_client_ip(request))
     return Response({"success": True, "session_auth_hash": user.get_session_auth_hash()})

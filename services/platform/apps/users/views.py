@@ -16,6 +16,7 @@ from django.contrib.auth import authenticate, login, logout, update_session_auth
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib.auth.views import (
+    INTERNAL_RESET_SESSION_TOKEN,
     PasswordChangeView,
     PasswordResetCompleteView,
     PasswordResetConfirmView,
@@ -26,7 +27,14 @@ from django.db import Error as DatabaseFailure
 from django.db import models, transaction
 from django.db.models import QuerySet
 from django.forms import Form
-from django.http import HttpRequest, HttpResponse, HttpResponseBase, HttpResponseForbidden, JsonResponse
+from django.http import (
+    HttpRequest,
+    HttpResponse,
+    HttpResponseBase,
+    HttpResponseForbidden,
+    HttpResponseRedirect,
+    JsonResponse,
+)
 from django.shortcuts import get_object_or_404, redirect, render, resolve_url
 from django.urls import reverse, reverse_lazy
 from django.utils.crypto import constant_time_compare
@@ -46,7 +54,10 @@ from apps.common.request_ip import get_safe_client_ip
 from apps.common.transactions import best_effort_atomic
 
 from .forms import (
+    LockedPasswordChangeForm,
+    LockedSetPasswordForm,
     LoginForm,
+    PasswordAuthorityChanged,
     TwoFactorSetupForm,
     TwoFactorVerifyForm,
     UserProfileForm,
@@ -476,36 +487,43 @@ class SecurePasswordResetConfirmView(PasswordResetConfirmView):
             return render(request, self.template_name, {"form": self.get_form(), "validlink": False})
         return super().dispatch(request, *args, **kwargs)
 
+    form_class = LockedSetPasswordForm
+
+    def get_form_kwargs(self) -> dict[str, Any]:
+        kwargs = super().get_form_kwargs()
+        # Re-checked on the locked row when the password is written (#689).
+        kwargs["reset_token"] = self.request.session.get(INTERNAL_RESET_SESSION_TOKEN, "")
+        return kwargs
+
     def form_valid(self, form: Any) -> HttpResponse:
-        # Log successful password reset for audit
-        user = form.user
+        """Write the password and secure the account in one transaction, after the link is re-checked."""
+        client_ip = get_safe_client_ip(self.request)
+        user_agent = self.request.META.get("HTTP_USER_AGENT", "")
+        try:
+            with transaction.atomic():
+                user = form.save()
+                UserLoginLog.objects.create(
+                    user=user, ip_address=client_ip, user_agent=user_agent, status="password_reset_completed"
+                )
+                # Reset any account lockout since password was reset
+                if user.account_locked_until:
+                    user.account_locked_until = None
+                    user.failed_login_attempts = 0
+                    user.save(update_fields=["account_locked_until", "failed_login_attempts"])
+                    UserLoginLog.objects.create(
+                        user=user, ip_address=client_ip, user_agent=user_agent, status="account_lockout_reset"
+                    )
+                # 🔒 Sign out every session; enrolled MFA is kept, as in the API reset (#595)
+                SessionSecurityService.secure_account_after_password_reset(user, client_ip)
+        except PasswordAuthorityChanged:
+            form.add_error(None, _("This reset link is no longer valid. Please request a new one."))
+            return self.form_invalid(form)
 
-        # Enhanced security logging
-        UserLoginLog.objects.create(
-            user=user,
-            ip_address=get_safe_client_ip(self.request),
-            user_agent=self.request.META.get("HTTP_USER_AGENT", ""),
-            status="password_reset_completed",
-        )
-
-        # Reset any account lockout since password was reset
-        if hasattr(user, "account_locked_until") and user.account_locked_until:
-            user.account_locked_until = None
-            user.failed_login_attempts = 0  # Reset failed attempts counter
-            user.save(update_fields=["account_locked_until", "failed_login_attempts"])
-
-            # Log lockout reset
-            UserLoginLog.objects.create(
-                user=user,
-                ip_address=get_safe_client_ip(self.request),
-                user_agent=self.request.META.get("HTTP_USER_AGENT", ""),
-                status="account_lockout_reset",
-            )
-
-        # 🔒 Sign out every session; enrolled MFA is kept, as in the API reset (#595)
-        SessionSecurityService.secure_account_after_password_reset(user, get_safe_client_ip(self.request))
-
-        return super().form_valid(form)
+        # What Django's view does after its own save, without saving a second time.
+        del self.request.session[INTERNAL_RESET_SESSION_TOKEN]
+        if self.post_reset_login:
+            login(self.request, user, self.post_reset_login_backend)
+        return HttpResponseRedirect(self.get_success_url())
 
     def form_invalid(self, form: Form) -> HttpResponse:
         # Log failed password reset confirmation
@@ -547,6 +565,7 @@ class SecurePasswordChangeView(PasswordChangeView):
 
     template_name = "users/password_change.html"
     success_url = reverse_lazy("users:user_profile")
+    form_class = LockedPasswordChangeForm
 
     def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
         if getattr(request, "limited", False):
@@ -562,19 +581,25 @@ class SecurePasswordChangeView(PasswordChangeView):
         return super().dispatch(request, *args, **kwargs)
 
     def form_valid(self, form: Form) -> HttpResponse:
-        # Log successful password change for audit - user is guaranteed to be authenticated due to LoginRequiredMixin
+        """Write the password under the row lock (#689), then rotate and rebind this session to it."""
+        try:
+            user = cast(LockedPasswordChangeForm, form).save()
+        except PasswordAuthorityChanged:
+            form.add_error(None, _("Your password was changed while this form was open. Enter it again."))
+            return self.form_invalid(form)
+
         UserLoginLog.objects.create(
-            user=cast(User, self.request.user),
+            user=user,
             ip_address=get_safe_client_ip(self.request),
             user_agent=self.request.META.get("HTTP_USER_AGENT", ""),
             status="password_changed",
         )
-
-        # 🔒 Rotate session for security after password change
-        SessionSecurityService.rotate_session_on_password_change(self.request)
+        # 🔒 Rotate session for security after password change, then bind it to the new password
+        SessionSecurityService.rotate_session_on_password_change(self.request, user)
+        update_session_auth_hash(self.request, user)
 
         messages.success(self.request, _("Your password has been changed successfully!"))
-        return super().form_valid(form)
+        return HttpResponseRedirect(self.get_success_url())
 
     def form_invalid(self, form: Form) -> HttpResponse:
         # Log failed password change attempt - user is guaranteed to be authenticated due to LoginRequiredMixin
