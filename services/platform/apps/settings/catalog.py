@@ -348,6 +348,19 @@ CATALOG: tuple[SettingDef, ...] = (
         label=_("S3 bucket name"),
     ),
     SettingDef(
+        key="backup.s3_endpoint_url",
+        data_type="string",
+        default="",
+        group="backup",
+        section=_("S3 storage"),
+        label=_("S3 endpoint URL"),
+        help_text=_(
+            "Leave empty for Amazon S3. For S3-compatible storage such as MinIO, enter its URL, "
+            "e.g. https://s3.example.com:9000. Buckets are then addressed path-style."
+        ),
+        advanced=True,
+    ),
+    SettingDef(
         key="billing.default_currency",
         data_type="string",
         default="RON",

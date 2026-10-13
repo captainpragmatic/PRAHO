@@ -701,9 +701,24 @@ class VirtualminBackupService:
             aws_access_key = SettingsService.get_setting("backup.aws_access_key_id")
             aws_secret_key = SettingsService.get_setting("backup.aws_secret_access_key")
             aws_region = SettingsService.get_setting("backup.aws_region", "eu-west-1")
+            # Empty = AWS. A custom endpoint (MinIO, Ceph RGW) is addressed
+            # path-style: virtual-hosted bucket names do not resolve there.
+            endpoint_url = str(SettingsService.get_setting("backup.s3_endpoint_url", "") or "").strip()
+            endpoint_kwargs: dict[str, Any] = {}
+            if endpoint_url:
+                from botocore.config import Config as BotoConfig  # noqa: PLC0415  # Optional dependency
+
+                endpoint_kwargs = {
+                    "endpoint_url": endpoint_url,
+                    "config": BotoConfig(s3={"addressing_style": "path"}),
+                }
 
             self._s3_client = boto3.client(
-                "s3", aws_access_key_id=aws_access_key, aws_secret_access_key=aws_secret_key, region_name=aws_region
+                "s3",
+                aws_access_key_id=aws_access_key,
+                aws_secret_access_key=aws_secret_key,
+                region_name=aws_region,
+                **endpoint_kwargs,
             )
         return self._s3_client
 
