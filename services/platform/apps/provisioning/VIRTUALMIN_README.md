@@ -309,6 +309,23 @@ result = dr.rebuild_server_from_praho(server)  # recreates accounts from PRAHO d
 - Budgets derive from each job's size estimate against
   `provisioning.backup_min_transfer_mib_s`; full + config backups only
   (incremental was removed until a real incremental contract exists).
+- remote.cgi turns each parameter into argv. An empty value is a bare
+  `--flag`; any other value is `--flag value`; a list repeats the pair.
+  Flags must therefore be sent as `""`, never `True`. Virtualmin 8.3.0 rejects
+  unknown options outright.
+  - Full backups send `all-features` plus one `except-feature` per excluded
+    component.
+  - Config-only backups send `feature=virtualmin` and `feature=dir`.
+  - Neither sends `newformat`, which needs a directory destination.
+- The 8.x JSON listings key attributes in snake_case (`username`, `disabled`).
+  Read them through `listing_attribute()` and `listing_enabled()`.
+- `backup.s3_endpoint_url` points the archive store at S3-compatible storage
+  such as MinIO; the client then uses path-style addressing.
+- Proving ground: `deploy/virtualmin-lab/` provides two Virtualmin 8.3.0
+  nodes plus MinIO.
+  - `make test-virtualmin-lab` runs the full backup and restore round trip.
+  - `make virtualmin-probe` refreshes the differential-backup evidence in
+    `docs/domain/virtualmin-incremental-contract.md`.
 
 ## 🎯 Key Benefits
 
