@@ -7,10 +7,11 @@ worked in a browser, although each endpoint had unit tests.
 """
 
 from collections.abc import Callable
-from typing import TypedDict
+from typing import Any, TypedDict
+from urllib.parse import urlsplit
 
 import pytest
-from playwright.sync_api import Page, expect
+from playwright.sync_api import Page, Route, expect
 
 from tests.e2e.helpers import PLATFORM_BASE_URL
 
@@ -112,3 +113,41 @@ def test_the_full_page_item_form_shows_the_domain_field_for_a_domain_product(
 
     page.locator("#id_product").select_option(order_edit["plain_product_id"])
     expect(domain_section).to_be_hidden()
+
+
+@pytest.mark.expect_server_errors("status of 500", "/items/add/")
+def test_a_failed_save_is_reported_and_a_redirect_is_followed(
+    monitored_staff_page: Page, order_edit: OrderEditScenario
+) -> None:
+    """A save answered with an error page, or sent elsewhere, is never reported as saved.
+
+    The script used to treat any answer that was not JSON or a form as the saved list: it closed the
+    form and said "saved" over a server error, and stayed put when the server sent the page to sign in.
+    """
+    page = monitored_staff_page
+    detail_path = f"/orders/{order_edit['order_id']}/"
+    page.goto(f"{PLATFORM_BASE_URL}{detail_path}edit/")
+    page.get_by_role("button", name="Add First Item", exact=True).click()
+    form = page.locator("form[data-order-item-form]")
+    form.locator('select[name="product"]').select_option(order_edit["plain_product_id"])
+
+    answer: dict[str, Any] = {}
+
+    def fake_save(route: Route) -> None:
+        if route.request.method == "POST":
+            route.fulfill(**answer)
+        else:
+            route.continue_()
+
+    page.route("**/items/add/", fake_save)
+
+    answer.update(status=500, content_type="text/html", body="<h1>Server Error (500)</h1>")
+    form.get_by_role("button", name="Add Item", exact=True).click()
+    expect(form.locator("[data-form-error]")).to_have_text("Error submitting form. Please try again.")
+    expect(page.get_by_text("Item saved successfully")).to_have_count(0)
+    expect(page.locator('#order-items-section tr[id^="order-item-"]')).to_have_count(0)
+
+    answer.clear()
+    answer.update(status=200, headers={"HX-Redirect": detail_path}, body="")
+    form.get_by_role("button", name="Add Item", exact=True).click()
+    page.wait_for_url(lambda url: urlsplit(url).path == detail_path)
