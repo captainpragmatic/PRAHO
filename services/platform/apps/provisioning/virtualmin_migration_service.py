@@ -18,7 +18,7 @@ from django.utils import timezone
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 
 from .placement import order_placement_candidates
-from .virtualmin_gateway import VirtualminConfig, VirtualminGateway
+from .virtualmin_gateway import VirtualminConfig, VirtualminGateway, listing_attribute, listing_enabled
 from .virtualmin_gateway import explicit_rejection as _explicit_rejection
 from .virtualmin_migration_models import VirtualminMigration, account_has_active_operation
 from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
@@ -108,12 +108,11 @@ def list_migration_domains(gateway: VirtualminGateway, *, strict: bool = True) -
             logger.warning("⚠️ [VirtualminMigration] Skipping malformed listing row: %r", item)
             continue
         values = item["values"]
-        state = _scalar(values.get("Status", "")).lower()
         rows.append(
             {
                 "domain": str(item["name"]),
-                "username": _scalar(values.get("Username", "")),
-                "enabled": True if state.startswith("enable") else False if state.startswith("disable") else None,
+                "username": listing_attribute(values, "Username"),
+                "enabled": listing_enabled(values),
                 "attributes": values,
             }
         )
