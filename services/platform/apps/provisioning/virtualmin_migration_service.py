@@ -79,12 +79,6 @@ def AnsibleService() -> AnsibleRunner:  # noqa: N802  # Lazy constructor preserv
     return Runner()
 
 
-def _scalar(value: object) -> str:
-    if isinstance(value, list):
-        return " ".join(str(item) for item in value).strip()
-    return str(value).strip()
-
-
 def list_migration_domains(gateway: VirtualminGateway, *, strict: bool = True) -> Result[list[dict[str, Any]], str]:
     """Reuse call()'s VirtualminResponseParser output, retaining multiline attributes.
 
@@ -515,10 +509,11 @@ class VirtualminMigrationService:
         if target["username"] != source["username"] or target["enabled"] is not False:
             raise ValueError("Restored domain owner or disabled state differs from snapshot")
         for key in ("Server byte quota", "Bandwidth limit", "Features"):
-            if key not in source["attributes"]:
+            # Either key form: text label or the 8.x JSON snake_case key.
+            expected = listing_attribute(source["attributes"], key)
+            if not expected:
                 continue
-            expected = _scalar(source["attributes"][key])
-            actual = _scalar(target["attributes"].get(key, ""))
+            actual = listing_attribute(target["attributes"], key)
             if key == "Features":
                 expected, actual = " ".join(sorted(expected.split())), " ".join(sorted(actual.split()))
             if actual != expected:
