@@ -70,8 +70,8 @@ def has_invalid_a_label(hostname: str) -> bool:
     return False
 
 
-# Allowed user roles for customer membership
-ALLOWED_CUSTOMER_ROLES = ["owner", "admin", "manager", "viewer"]
+# Allowed user roles for customer membership, derived from the model so the two cannot drift
+ALLOWED_CUSTOMER_ROLES = tuple(value for value, _label in CustomerMembership.CUSTOMER_ROLE_CHOICES)
 
 # Admin-only fields that should never be in user input
 RESTRICTED_USER_FIELDS = [
