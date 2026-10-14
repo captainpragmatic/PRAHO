@@ -166,9 +166,10 @@ def resolve_chain_job(job: VirtualminProvisioningJob, *, resolved_by: str, note:
     In this order: the job's cancel marker is written on the node under the per-domain lock
     (a delayed or waiting run of that token can then never start), the chain is invalidated,
     and only then is the account released, the last two in one transaction. If the marker
-    cannot be written, nothing changes and the account stays held. A job that never recorded a
-    domain id never dispatched a step, and one whose step already concluded has nothing left to
-    cancel; neither needs the node.
+    cannot be written, nothing changes and the account stays held. A step is dispatched only
+    after its domain id reached the job row (and while the job was still owned), so a job without
+    one never started a step; one whose step already concluded has nothing left to cancel.
+    Neither needs the node.
     """
     from .virtualmin_backup_service import VirtualminBackupService  # noqa: PLC0415  # Circular
 

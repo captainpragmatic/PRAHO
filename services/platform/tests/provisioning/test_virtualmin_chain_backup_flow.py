@@ -105,7 +105,11 @@ class ChainBackupFlowTests(BackupNodeFixture):
         return BackupConfig(chain_role=role, chain=ChainContext(**{**defaults, **chain}))
 
     def _backup(self, config: BackupConfig) -> Any:
-        return self.svc.backup_domain(account=self.account, config=config, note_sink=self.noted.append)
+        def note(entry: dict[str, Any]) -> int:
+            self.noted.append(entry)
+            return 1
+
+        return self.svc.backup_domain(account=self.account, config=config, note_sink=note)
 
     def _manifest(self) -> dict[str, Any]:
         return json.loads(self.s3.put_object.call_args_list[1].kwargs["Body"])
@@ -142,9 +146,10 @@ class ChainBackupFlowTests(BackupNodeFixture):
         order: list[str] = []
         self.noted = []
 
-        def note(entry: dict[str, Any]) -> None:
+        def note(entry: dict[str, Any]) -> int:
             order.append("note")
             self.noted.append(entry)
+            return 1
 
         original = self.ansible.run_playbook.side_effect
 

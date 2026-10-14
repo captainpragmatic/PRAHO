@@ -865,17 +865,18 @@ def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:  # n
     service = VirtualminBackupService(job.server)
     params = job.parameters
 
-    def persist_note(note: dict[str, Any]) -> None:
+    def persist_note(note: dict[str, Any]) -> int:
         # Token-fenced parameter merge: evidence (e.g. the safety backup id, a chain job's domain
         # id) is durable BEFORE any destructive dispatch, and a superseded runner cannot write it.
+        # Returns the rows written: 0 means the runner was superseded and the caller must not dispatch.
         current = (
             VirtualminProvisioningJob.objects.filter(pk=job.pk, execution_token=token)
             .values_list("parameters", flat=True)
             .first()
         )
         if current is None:
-            return
-        VirtualminProvisioningJob.objects.filter(pk=job.pk, execution_token=token).update(
+            return 0
+        return VirtualminProvisioningJob.objects.filter(pk=job.pk, execution_token=token).update(
             parameters={**current, **note}, updated_at=timezone.now()
         )
 

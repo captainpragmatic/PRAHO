@@ -180,7 +180,9 @@ class ConfirmStoppedTests(ChainFixtures, ExclusionCase):
                 self.assertEqual((self.account.chain_base_id, self.account.chain_epoch), (self.base.pk, 2))
                 self.assertTrue(account_has_active_operation(self.account))
 
-    def test_a_job_that_never_recorded_a_domain_id_never_dispatched_a_step(self) -> None:
+    def test_a_job_without_a_domain_id_has_nothing_to_cancel_on_the_node(self) -> None:
+        # Dispatch refuses a step whose domain id (and archive name) were not durably recorded
+        # (MissedNoteTests), so a job in attention without one never started a node step.
         params = {k: v for k, v in self.job.parameters.items() if k != "virtualmin_domain_id"}
         VirtualminProvisioningJob.objects.filter(pk=self.job.pk).update(parameters=params)
         self.resolve(Err("must not be called"))
@@ -219,3 +221,86 @@ class ConfirmStoppedTests(ChainFixtures, ExclusionCase):
         self.assertRegex(variables["chain_domain"], r"^[A-Za-z0-9][A-Za-z0-9.-]*$")
         self.assertRegex(variables["chain_token"], r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
         self.assertEqual(self.calls[0]["kwargs"], {"token": self.token, "mode": "cancel", "domain_id": DOMAIN_ID})
+
+
+class MissedNoteTests(ChainFixtures, ExclusionCase):
+    """A step is dispatched only when the evidence a cancel needs is durable and the job is still ours."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.account = self._account()
+        self.enable_incremental_backups()
+
+    def admit(self, role: str = "base") -> VirtualminProvisioningJob:
+        from apps.provisioning.virtualmin_backup_service import BackupConfig  # noqa: PLC0415
+
+        if role == "differential":
+            self.live_chain(self.account, epoch=2)
+        with patch("django_q.tasks.async_task"):
+            return VirtualminBackupManagementService(self.server).create_backup_job(
+                self.account, BackupConfig(chain_role=role)
+            ).unwrap()
+
+    def run_job(self, job: VirtualminProvisioningJob, *, during_domain_id_read: Any = None) -> Any:
+        """Run the job through the real runner and service, with only the node and the listing faked."""
+
+        def read_domain_id(service: VirtualminBackupService, account: Any) -> Any:
+            if during_domain_id_read is not None:
+                during_domain_id_read()
+            return Ok(DOMAIN_ID)
+
+        with (
+            patch.object(VirtualminBackupService, "_validate_backup_preconditions", return_value=Ok(None)),
+            patch.object(VirtualminBackupService, "_domain_features", return_value=None),
+            patch.object(VirtualminBackupService, "_read_domain_id", autospec=True, side_effect=read_domain_id),
+            patch.object(VirtualminBackupService, "run_chain_step", autospec=True) as step,
+        ):
+            outcome = virtualmin_tasks.run_virtualmin_backup(str(job.pk))
+        self.step = step
+        job.refresh_from_db()
+        return outcome
+
+    def test_a_takeover_between_the_domain_id_read_and_the_note_dispatches_nothing(self) -> None:
+        for role in ("base", "differential"):
+            with self.subTest(role=role):
+                job = self.admit(role)
+
+                def take_over(job: VirtualminProvisioningJob = job) -> None:
+                    VirtualminProvisioningJob.take_over_execution(job.pk, "attention", "Worker interrupted")
+
+                self.run_job(job, during_domain_id_read=take_over)
+                self.step.assert_not_called()
+                self.assertNotIn("virtualmin_domain_id", job.parameters)
+                self.assertEqual(job.status, "attention")
+                VirtualminProvisioningJob.objects.filter(pk=job.pk).update(status="failed")
+
+    def test_a_deadline_that_passes_after_the_note_dispatches_nothing(self) -> None:
+        job = self.admit("base")
+
+        def expire() -> None:
+            VirtualminProvisioningJob.objects.filter(pk=job.pk).update(
+                execution_deadline=timezone.now() - timedelta(seconds=1)
+            )
+
+        self.run_job(job, during_domain_id_read=expire)
+        self.step.assert_not_called()
+        self.assertEqual(job.parameters["virtualmin_domain_id"], DOMAIN_ID, "the note was written before the expiry")
+
+    def test_a_job_that_keeps_its_token_dispatches_the_step_after_recording_it(self) -> None:
+        job = self.admit("base")
+        VirtualminProvisioningJob.objects.filter(pk=job.pk).update()  # no interference
+        self.step_calls: list[str] = []
+
+        def fail_step(*args: Any, **kwargs: Any) -> Any:
+            row = VirtualminProvisioningJob.objects.get(pk=job.pk)
+            self.step_calls.append(str(row.parameters.get("virtualmin_domain_id")))
+            return Err("node refused", retriability=Retriability.NOT_RETRIABLE)
+
+        with (
+            patch.object(VirtualminBackupService, "_validate_backup_preconditions", return_value=Ok(None)),
+            patch.object(VirtualminBackupService, "_domain_features", return_value=None),
+            patch.object(VirtualminBackupService, "_read_domain_id", return_value=Ok(DOMAIN_ID)),
+            patch.object(VirtualminBackupService, "run_chain_step", autospec=True, side_effect=fail_step),
+        ):
+            virtualmin_tasks.run_virtualmin_backup(str(job.pk))
+        self.assertEqual(self.step_calls, [DOMAIN_ID], "the id is durable before the step runs")

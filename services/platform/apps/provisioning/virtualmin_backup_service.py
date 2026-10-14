@@ -378,7 +378,7 @@ class VirtualminBackupService:
         backup_id: str,
         backup_metadata: dict[str, Any],
         config: BackupConfig,
-        note_sink: Callable[[dict[str, Any]], None] | None = None,
+        note_sink: Callable[[dict[str, Any]], int] | None = None,
     ) -> Result[dict[str, Any], str]:
         """Execute the backup workflow as a chain of operations"""
         # Validate backup preconditions
@@ -474,7 +474,7 @@ class VirtualminBackupService:
         config: BackupConfig | None = None,
         progress_key: str | None = None,
         ownership: Callable[[], bool] | None = None,
-        note_sink: Callable[[dict[str, Any]], None] | None = None,
+        note_sink: Callable[[dict[str, Any]], int] | None = None,
     ) -> Result[dict[str, Any], str]:
         """
         Create comprehensive backup of Virtualmin domain.
@@ -550,7 +550,7 @@ class VirtualminBackupService:
         target_server: VirtualminServer | None = None,
         progress_key: str | None = None,
         ownership: Callable[[], bool] | None = None,
-        note_sink: Callable[[dict[str, Any]], None] | None = None,
+        note_sink: Callable[[dict[str, Any]], int] | None = None,
     ) -> Result[dict[str, Any], str]:
         """Restore a domain from a published backup (transport-based, fail-closed).
 
@@ -579,7 +579,7 @@ class VirtualminBackupService:
         config: RestoreConfig,
         target_server: VirtualminServer,
         restore_id: str,
-        note_sink: Callable[[dict[str, Any]], None] | None,
+        note_sink: Callable[[dict[str, Any]], int] | None,
     ) -> Result[dict[str, Any], str]:
         from .spool import release_spool_reservation  # noqa: PLC0415
 
@@ -641,8 +641,13 @@ class VirtualminBackupService:
                         retriability=Retriability.NOT_RETRIABLE,
                     )
                 safety_id = str(safety.unwrap().get("backup_id", ""))
-                if note_sink is not None:
-                    note_sink({"safety_backup_id": safety_id})
+                # The safety backup id is the operator's way back: a note that reached no row
+                # (the runner was superseded) means no destructive step may follow.
+                if note_sink is not None and note_sink({"safety_backup_id": safety_id}) == 0:
+                    return Err(
+                        "Restore execution superseded; the safety backup was not recorded",
+                        retriability=Retriability.NOT_RETRIABLE,
+                    )
             else:
                 safety_id = ""
 
@@ -1310,7 +1315,7 @@ class VirtualminBackupService:
         account: VirtualminAccount,
         config: BackupConfig,
         metadata: dict[str, Any],
-        note_sink: Callable[[dict[str, Any]], None] | None,
+        note_sink: Callable[[dict[str, Any]], int] | None,
     ) -> Result[None, str]:
         """Everything a chain step needs from the node, durable BEFORE the step is dispatched.
 
@@ -1340,7 +1345,15 @@ class VirtualminBackupService:
             return Err(domain_id.unwrap_err(), retriability=retriability_of(domain_id))
         metadata["virtualmin_domain_id"] = domain_id.unwrap()
         if note_sink is not None:
-            note_sink({"virtualmin_domain_id": domain_id.unwrap()})
+            # A cancel needs this id, so a step is dispatched only when it reached the job row
+            # (zero rows: the runner was superseded between the read and the write), and only
+            # while the job is still ours.
+            recorded = note_sink({"virtualmin_domain_id": domain_id.unwrap()})
+            if recorded == 0 or not self._owns_execution():
+                return Err(
+                    "Backup execution superseded before the chain step was recorded; no remote work performed",
+                    retriability=Retriability.NOT_RETRIABLE,
+                )
         return Ok(None)
 
     def run_chain_step(
@@ -1391,6 +1404,9 @@ class VirtualminBackupService:
         }
         if config.chain_role == CHAIN_ROLE_DIFFERENTIAL:
             variables["chain_expected_fp"] = chain.expected_fp
+        # The last gate before the node is touched: a superseded runner must not start a step.
+        if not self._owns_execution():
+            return Err("Backup execution superseded; no remote work performed", retriability=Retriability.NOT_RETRIABLE)
         self._update_backup_progress(backup_id, "backing_up", 30)
         self._chain_step_state = "dispatched"
         outcome = self.run_chain_step(variables, token=chain.token, mode=config.chain_role, domain_id=domain_id)
