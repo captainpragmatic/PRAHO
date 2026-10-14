@@ -174,7 +174,7 @@ TESTING = True
 configure_rate_limiting(globals(), enabled=False)
 
 # Disable DRF throttling in tests to prevent 429s from rapid API calls
-REST_FRAMEWORK["DEFAULT_THROTTLE_CLASSES"] = []
+REST_FRAMEWORK = {**REST_FRAMEWORK, "DEFAULT_THROTTLE_CLASSES": []}
 
 # ===============================================================================
 # ENCRYPTION (Test AES-256-GCM key — URL-safe base64 of 32 random bytes)

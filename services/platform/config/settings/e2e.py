@@ -63,4 +63,4 @@ if "django.middleware.csrf.CsrfViewMiddleware" not in MIDDLEWARE:
     )
 CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
 configure_rate_limiting(globals(), enabled=False)
-REST_FRAMEWORK["DEFAULT_THROTTLE_CLASSES"] = []
+REST_FRAMEWORK = {**REST_FRAMEWORK, "DEFAULT_THROTTLE_CLASSES": []}
