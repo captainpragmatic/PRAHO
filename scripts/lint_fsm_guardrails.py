@@ -56,18 +56,6 @@ FSM_APPS = frozenset(
     }
 )
 
-# Non-model files within FSM apps that exclusively touch non-FSM models.
-# Model files are auto-detected via AST (no manual exclusion needed).
-# This list is only for service/view/task files that work with non-FSM models
-# like VirtualminTask, PaymentRetryAttempt, CollectionRun, UsageAggregation, etc.
-NON_FSM_SERVICE_FILES = frozenset(
-    {
-        "billing/tasks.py",
-        "provisioning/virtualmin_service.py",
-        "provisioning/virtualmin_views.py",
-    }
-)
-
 # Paths that are allowed to use __dict__ bypass
 ALLOWED_DICT_BYPASS_PATHS = frozenset(
     {
@@ -238,10 +226,10 @@ def _should_check_status_patterns(path: str) -> bool:
     if model_check is not None:
         return model_check
 
-    # Tier 2: Non-model files — use app-level scoping + service exclusion
-    if not _is_fsm_app_file(path):
-        return False
-    return not any(path.endswith(f) for f in NON_FSM_SERVICE_FILES)
+    # Tier 2: Non-model files — use app-level scoping. No file is exempt as a whole: a write to a
+    # model that is not FSM-protected says so on its own line with `# fsm-bypass: <reason>`, so new
+    # code in the same file is still checked.
+    return _is_fsm_app_file(path)
 
 
 def _is_in_transition_method(lines: list[str], line_idx: int) -> bool:
@@ -273,6 +261,16 @@ def _has_fsm_bypass_comment(line: str) -> bool:
     return "# fsm-bypass:" in line
 
 
+def _is_bypassed(lines: list[str], index: int) -> bool:
+    """A statement is bypassed by a comment on its line or on a comment-only line right above.
+
+    The line above is for statements the formatter would wrap around a trailing comment.
+    """
+    if _has_fsm_bypass_comment(lines[index]):
+        return True
+    return index > 0 and lines[index - 1].strip().startswith("# fsm-bypass:")
+
+
 # ---------------------------------------------------------------------------
 # Checks
 # ---------------------------------------------------------------------------
@@ -302,7 +300,7 @@ def check_direct_status_assignment(path: Path, lines: list[str], result: ScanRes
         # Exclusion patterns for field definitions (class-level, not instance assignment)
         definition_pattern = re.compile(rf"^\s+{field_name}\s*=\s*(FSMField|models\.)")
         for i, line in enumerate(lines):
-            if not pattern.search(line) or _has_fsm_bypass_comment(line):
+            if not pattern.search(line) or _is_bypassed(lines, i):
                 continue
             # Skip field definitions (class body: `status = FSMField(...)`)
             if definition_pattern.search(line):
@@ -351,7 +349,7 @@ def check_queryset_update(path: Path, lines: list[str], result: ScanResult) -> N
         pattern = re.compile(rf"\.update\([^)]*{field_name}\s*=")
         for i, line in enumerate(lines):
             # Single-line match
-            if pattern.search(line) and not _has_fsm_bypass_comment(line):
+            if pattern.search(line) and not _is_bypassed(lines, i):
                 result.violations.append(
                     Violation(
                         file=str_path,
@@ -366,7 +364,7 @@ def check_queryset_update(path: Path, lines: list[str], result: ScanResult) -> N
             # so strip comments before checking for unclosed paren.
             code_part = line.split("#")[0].rstrip()
             if ".update(" in line and code_part.endswith(("(", ",")):
-                if _has_fsm_bypass_comment(line):
+                if _is_bypassed(lines, i):
                     continue
                 joined = line
                 for j in range(i + 1, min(i + 10, len(lines))):

@@ -1101,7 +1101,7 @@ def _find_retry_result_payment(original_payment: Any, intent_result: Any) -> Any
 def _claim_payment_retry(retry_id: Any, retry_model: Any) -> bool:
     """Atomically claim one due retry so overlapping workers cannot double-charge it."""
     return (
-        retry_model.objects.filter(id=retry_id, status="pending").update(
+        retry_model.objects.filter(id=retry_id, status="pending").update(  # fsm-bypass: CharField status
             status="processing",
             executed_at=timezone.now(),
         )
@@ -1114,7 +1114,7 @@ def _reclaim_stale_payment_retries(retry_model: Any, *, now: datetime) -> int:
     reclaimed = retry_model.objects.filter(
         status="processing",
         executed_at__lt=now - PAYMENT_RETRY_LEASE_TIMEOUT,
-    ).update(
+    ).update(  # fsm-bypass: CharField status
         status="pending",
         executed_at=None,
         updated_at=now,
@@ -1134,12 +1134,12 @@ def _execute_payment_retry(retry: Any, retry_model: Any) -> int | None:
     if retry.result_payment_id is not None:
         result_payment = retry.result_payment
         if result_payment.status == "succeeded":
-            retry.status = "success"
+            retry.status = "success"  # fsm-bypass: CharField status
             retry.failure_reason = ""
             retry.save(update_fields=["status", "failure_reason", "updated_at"])
             return int(result_payment.amount_cents)
         if result_payment.status == "failed":
-            retry.status = "failed"
+            retry.status = "failed"  # fsm-bypass: CharField status
             retry.failure_reason = str(result_payment.meta.get("gateway_error") or "Payment declined")
             _schedule_next_retry(retry, retry_model)
             retry.save(update_fields=["status", "failure_reason", "updated_at"])
@@ -1187,12 +1187,12 @@ def _execute_payment_retry(retry: Any, retry_model: Any) -> int | None:
         and result_payment is not None
     ):
         result_payment.refresh_from_db()
-        retry.status = "success"
+        retry.status = "success"  # fsm-bypass: CharField status
         retry.failure_reason = ""
         retry.save()
         return int(result_payment.amount_cents)
 
-    retry.status = "failed"
+    retry.status = "failed"  # fsm-bypass: CharField status
     retry.failure_reason = str(
         confirm_result.get("error") or intent_result.get("error") or confirm_result.get("status") or "Payment declined"
     )
@@ -1250,6 +1250,7 @@ def run_payment_collection() -> dict[str, Any]:  # noqa: PLR0915  # linear batch
                 recovered_cents = _execute_payment_retry(retry, PaymentRetryAttempt)
             except Exception as exc:
                 logger.error(f"Error processing retry {retry.id}: {exc}")
+                # fsm-bypass: CharField status
                 retry.status = "failed"
                 retry.failure_reason = str(exc)
                 retry.save()
@@ -1268,7 +1269,7 @@ def run_payment_collection() -> dict[str, Any]:  # noqa: PLR0915  # linear batch
         run.total_failed = failed
         run.amount_recovered_cents = total_recovered_cents
         run.completed_at = timezone.now()
-        run.status = "completed"
+        run.status = "completed"  # fsm-bypass: CharField status
         run.save()
         _log_collection_run_event(
             "collection_run_completed",
@@ -1297,7 +1298,7 @@ def run_payment_collection() -> dict[str, Any]:  # noqa: PLR0915  # linear batch
         # so dashboards and the next scheduled run see a failed batch, not a live one.
         if run is not None:
             try:
-                run.status = "failed"
+                run.status = "failed"  # fsm-bypass: CharField status
                 run.error_message = str(e)
                 run.completed_at = timezone.now()
                 run.save(update_fields=["status", "error_message", "completed_at"])
