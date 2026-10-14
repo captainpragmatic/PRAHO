@@ -86,6 +86,24 @@ class AuditEventImmutabilityGuardTestCase(TestCase):
         with self.assertRaises(AuditImmutabilityError):
             AuditEvent.objects.filter(pk=self.event.pk).update(description="blocked")
 
+    def test_escape_hatch_requires_an_auditable_reason(self) -> None:
+        """A blank reason names no mutator, so it must not unlock the guard."""
+        for reason in ("", "   ", "\t\n"):
+            with self.subTest(reason=reason):
+                with self.assertRaises(ValueError), audit_mutation_allowed(reason):
+                    pass
+                with self.assertRaises(AuditImmutabilityError):
+                    AuditEvent.objects.filter(pk=self.event.pk).update(description="blank reason")
+        self.event.refresh_from_db()
+        self.assertEqual(self.event.description, "guard test")
+
+    def test_blank_inner_reason_does_not_end_the_outer_one(self) -> None:
+        with audit_mutation_allowed("outer"):
+            with self.assertRaises(ValueError), audit_mutation_allowed(""):
+                pass
+            updated = AuditEvent.objects.filter(pk=self.event.pk).update(description="outer still holds")
+        self.assertEqual(updated, 1)
+
     def test_user_deletion_cascade_survives_the_guard(self) -> None:
         """Django's SET_NULL cascade runs on _base_manager, deliberately unguarded -
         deleting a user must not explode on their audit trail."""

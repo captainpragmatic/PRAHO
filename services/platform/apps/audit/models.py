@@ -44,7 +44,12 @@ def audit_mutation_allowed(reason: str) -> Iterator[None]:
     any other ORM mutation raises AuditImmutabilityError. The guard is an ORM-layer
     defense - raw SQL and _base_manager (framework FK cascades) bypass it, which is
     what the integrity MAC exists to catch.
+
+    The reason is what makes the mutation auditable, so a blank one is refused
+    instead of unlocking the guard anonymously.
     """
+    if not reason or not reason.strip():
+        raise ValueError("audit_mutation_allowed() requires a non-blank reason")
     previous = getattr(_audit_mutation_context, "reason", None)
     _audit_mutation_context.reason = reason
     try:
@@ -54,7 +59,7 @@ def audit_mutation_allowed(reason: str) -> Iterator[None]:
 
 
 def _mutation_allowed() -> bool:
-    return getattr(_audit_mutation_context, "reason", None) is not None
+    return bool(getattr(_audit_mutation_context, "reason", None))
 
 
 class AuditEventQuerySet(models.QuerySet["AuditEvent"]):
