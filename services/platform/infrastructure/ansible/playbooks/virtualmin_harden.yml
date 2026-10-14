@@ -136,6 +136,13 @@
         proto: tcp
       notify: Enable ufw
 
+    # A task, not only the handler: a handler fires only when a rule changed,
+    # so a firewall someone switched off with every rule already in place
+    # would otherwise stay off.
+    - name: Enable UFW
+      community.general.ufw:
+        state: enabled
+
     # Automatic security updates
     - name: Configure unattended-upgrades
       ansible.builtin.template:

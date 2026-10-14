@@ -186,6 +186,21 @@ class NodeFirewallPlaybookTests(SimpleTestCase):
         removed = task_named("virtualmin_harden.yml", "Remove any-source SSH and Webmin rules")
         self.assertIs(removed["community.general.ufw"]["delete"], True)
 
+    def test_the_firewall_ends_enabled_even_when_no_rule_changed(self) -> None:
+        # Observed in the lab: with every rule in place and UFW switched off, the
+        # notify-only handler never fired and the play left the firewall off.
+        names = [task.get("name") for task in tasks("virtualmin_harden.yml")]
+        enable = task_named("virtualmin_harden.yml", "Enable UFW")
+        self.assertEqual(enable["community.general.ufw"], {"state": "enabled"})
+        self.assertNotIn("when", enable)
+        last_rule = max(
+            index
+            for index, task in enumerate(tasks("virtualmin_harden.yml"))
+            if "rule" in (task.get("community.general.ufw") or {})
+            or "default" in (task.get("community.general.ufw") or {})
+        )
+        self.assertGreater(names.index("Enable UFW"), last_rule)
+
     def test_the_deploy_cannot_lock_platform_out(self) -> None:
         names = [task.get("name") for task in tasks("virtualmin_harden.yml")]
         check = task_named("virtualmin_harden.yml", "Require this connection's source in the allowlist")
