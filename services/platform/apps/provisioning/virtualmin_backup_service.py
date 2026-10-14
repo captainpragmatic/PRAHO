@@ -13,6 +13,7 @@ Implements the critical missing functionality for "Cattle Not Pets" architecture
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import logging
@@ -56,10 +57,37 @@ except ImportError:
 # Differential-chain role of a backup (docs/domain/virtualmin-incremental-contract.md).
 # Virtualmin keeps one differential base per domain, and every full backup sent
 # WITHOUT `no-differential` replaces it. A "standalone" backup never touches the
-# base; only a backup explicitly marked "base" may (re)set it.
+# base; only a "base" may (re)set it, and a "differential" is relative to it.
+# Base and differential backups never go through remote.cgi: each is one locked
+# node-side step (virtualmin_chain_backup.yml) that binds the archive to the
+# snapshot fingerprint it was made against.
 CHAIN_ROLE_STANDALONE = "standalone"
 CHAIN_ROLE_BASE = "base"
-CHAIN_ROLES = frozenset({CHAIN_ROLE_STANDALONE, CHAIN_ROLE_BASE})
+CHAIN_ROLE_DIFFERENTIAL = "differential"
+CHAIN_ROLES = frozenset({CHAIN_ROLE_STANDALONE, CHAIN_ROLE_BASE, CHAIN_ROLE_DIFFERENTIAL})
+CHAIN_PLAYBOOK = "virtualmin_chain_backup.yml"
+# Manifests written from here on carry this version. A manifest without the field is
+# a legacy standalone backup; a version or role this code does not know is refused,
+# never read as legacy.
+MANIFEST_VERSION = 1
+KNOWN_MANIFEST_VERSIONS = frozenset({MANIFEST_VERSION})
+
+
+@dataclass(frozen=True)
+class ChainContext:
+    """What a base or differential backup was admitted against.
+
+    Minted by admission under the account lock: the run ``token`` names this job's
+    node-side step (and its cancel marker), ``epoch`` is the account's chain epoch
+    at admission, and a differential also pins the base it extends and the snapshot
+    fingerprint that base left behind.
+    """
+
+    token: str
+    epoch: int = 0
+    base_backup_id: str = ""
+    base_job_id: str = ""
+    expected_fp: str = ""
 
 
 @dataclass
@@ -72,29 +100,111 @@ class BackupConfig:
     include_files: bool = True
     include_ssl: bool = True
     chain_role: str = CHAIN_ROLE_STANDALONE
+    chain: ChainContext | None = None
 
     def chain_role_error(self) -> str | None:
         """Why this config cannot run with its chain role, or None when it can."""
         if self.chain_role not in CHAIN_ROLES:
             return f"Unknown backup chain role: {self.chain_role!r}"
-        if self.chain_role == CHAIN_ROLE_BASE and not (
+        if self.chain_role != CHAIN_ROLE_STANDALONE and not (
             self.backup_type == "full"
             and self.include_email
             and self.include_databases
             and self.include_files
             and self.include_ssl
         ):
-            return "A differential base must be a full backup of every component"
+            return "A differential base or differential must be a full backup of every component"
         return None
 
 
 def differential_flags(chain_role: str) -> dict[str, str]:
-    """remote.cgi flags that keep a non-base backup-domain call off the base.
+    """remote.cgi flags that keep a standalone backup-domain call off the base.
 
     `no-differential` is a bare flag (an empty value becomes `--no-differential`);
-    the lab proved it leaves the per-domain base untouched.
+    the lab proved it leaves the per-domain base untouched. A base or differential
+    is never sent through remote.cgi, so asking for its flags is a bug.
     """
-    return {} if chain_role == CHAIN_ROLE_BASE else {"no-differential": ""}
+    if chain_role != CHAIN_ROLE_STANDALONE:
+        raise ValueError(f"A {chain_role!r} backup runs as a node-side chain step, not through remote.cgi")
+    return {"no-differential": ""}
+
+
+_CHAIN_FP_RE = re.compile(r"^(|ABSENT|[0-9a-f]{64}:[0-9]+)$")
+_CHAIN_SHA_RE = re.compile(r"^([0-9a-f]{64})?$")
+_CHAIN_RESULT_RE = re.compile(r"CHAIN_RESULT=([A-Za-z0-9+/=]+)")
+_CHAIN_OUTCOMES = frozenset({"ok", "refused", "failed", "cancelled"})
+
+
+@dataclass(frozen=True)
+class ChainStepResult:
+    """The one result line of a node-side chain step (see files/praho-chain-backup.sh)."""
+
+    outcome: str
+    reason: str
+    ran: bool
+    mode: str
+    fp_before: str
+    fp_after: str
+    backup_rc: int
+    sha256: str
+    size: int
+    detail: str
+    archive: str
+
+    @property
+    def snapshot_moved(self) -> bool:
+        """True when the step changed the snapshot (or could not show that it did not)."""
+        return self.ran and self.fp_after != self.fp_before
+
+
+def parse_chain_step_result(  # noqa: PLR0911  # One exit per way a result line can be unusable
+    stdout: str, *, token: str, mode: str, domain_id: str
+) -> Result[ChainStepResult, str]:
+    """Parse and cross-check the single result line; anything else is uncertain.
+
+    The step echoes its token, mode and domain id; a line that names a different
+    run is not evidence about this one.
+    """
+
+    def uncertain(message: str) -> Err[str]:
+        return Err(f"Chain step result unusable: {message}", retriability=Retriability.UNKNOWN)
+
+    encoded = set(_CHAIN_RESULT_RE.findall(stdout))
+    if len(encoded) != 1:
+        return uncertain(f"expected exactly one result line, found {len(encoded)}")
+    try:
+        payload = json.loads(base64.b64decode(encoded.pop(), validate=True))
+    except ValueError:
+        return uncertain("not decodable")
+    if not isinstance(payload, dict):
+        return uncertain("not an object")
+    try:
+        step = ChainStepResult(
+            outcome=str(payload["outcome"]),
+            reason=str(payload["reason"]),
+            ran=payload["ran"] is True,
+            mode=str(payload["mode"]),
+            fp_before=str(payload["fp_before"]),
+            fp_after=str(payload["fp_after"]),
+            backup_rc=int(payload["backup_rc"]),
+            sha256=str(payload["sha256"]),
+            size=int(payload["size"]),
+            detail=str(payload["detail"]),
+            archive=str(payload["archive"]),
+        )
+    except (KeyError, TypeError, ValueError):
+        return uncertain("missing or malformed field")
+    if (payload.get("token"), payload.get("domain_id")) != (token, domain_id) or step.mode != mode:
+        return uncertain("it names a different run")
+    if step.outcome not in _CHAIN_OUTCOMES:
+        return uncertain(f"unknown outcome {step.outcome!r}")
+    if not (_CHAIN_FP_RE.match(step.fp_before) and _CHAIN_FP_RE.match(step.fp_after)):
+        return uncertain("malformed fingerprint")
+    if not _CHAIN_SHA_RE.match(step.sha256) or step.size < 0:
+        return uncertain("malformed archive evidence")
+    if step.outcome == "ok" and not (step.ran and step.sha256 and step.size > 0):
+        return uncertain("success without archive evidence")
+    return Ok(step)
 
 
 @dataclass
@@ -175,6 +285,7 @@ class VirtualminBackupService:
         self.server = server
         self._s3_client = None
         self._backup_bucket = None
+        self._chain_step_state: str | None = None
 
     def _call_checked(
         self, gateway: VirtualminGateway, program: str, params: dict[str, Any], timeout_seconds: int
@@ -204,6 +315,8 @@ class VirtualminBackupService:
         role_error = config.chain_role_error()
         if role_error is not None:
             return Err(role_error, retriability=Retriability.NOT_RETRIABLE)
+        if config.chain_role != CHAIN_ROLE_STANDALONE:
+            return self._execute_chain_backup(account, backup_id, backup_metadata, config)
         backup_type = config.backup_type
         if backup_type == "full":
             return self._execute_full_backup(account, backup_id, backup_metadata, config)
@@ -217,7 +330,12 @@ class VirtualminBackupService:
             return Err(f"Unsupported backup type: {backup_type}")
 
     def _backup_workflow_chain(  # noqa: PLR0911  # Complexity: cohesive workflow
-        self, account: VirtualminAccount, backup_id: str, backup_metadata: dict[str, Any], config: BackupConfig
+        self,
+        account: VirtualminAccount,
+        backup_id: str,
+        backup_metadata: dict[str, Any],
+        config: BackupConfig,
+        note_sink: Callable[[dict[str, Any]], None] | None = None,
     ) -> Result[dict[str, Any], str]:
         """Execute the backup workflow as a chain of operations"""
         # Validate backup preconditions
@@ -236,11 +354,17 @@ class VirtualminBackupService:
         if not self._owns_execution():
             return Err("Backup execution superseded; no remote work performed")
 
+        if config.chain_role != CHAIN_ROLE_STANDALONE:
+            prepared = self._prepare_chain_dispatch(account, backup_metadata, note_sink)
+            if prepared.is_err():
+                self._update_backup_progress(backup_id, "failed", 100)
+                return Err(prepared.unwrap_err(), retriability=retriability_of(prepared))
+
         # Execute backup based on type
         backup_result = self._execute_backup_by_type(config, account, backup_id, backup_metadata)
         if backup_result.is_err():
             self._update_backup_progress(backup_id, "failed", 100)
-            return Err(backup_result.unwrap_err())
+            return Err(backup_result.unwrap_err(), retriability=retriability_of(backup_result))
 
         # The archive is written by the remote Virtualmin backup-domain API; it
         # lives on the node until the fetch playbook pulls it into the spool
@@ -255,6 +379,17 @@ class VirtualminBackupService:
         if fetch_result.is_err():
             self._update_backup_progress(backup_id, "failed", 100)
             return Err(fetch_result.unwrap_err())
+
+        # A chain archive is only evidence for the snapshot fingerprint the node step read
+        # while making it; what the fetch delivered must be exactly that archive.
+        vouched = backup_metadata.get("chain_remote_sha256")
+        if vouched is not None and vouched != backup_metadata.get("checksum_sha256_remote"):
+            self._release_spool_artifacts(backup_metadata)
+            self._update_backup_progress(backup_id, "failed", 100)
+            return Err(
+                "The fetched archive is not the one the chain step vouched for; refusing to publish",
+                retriability=Retriability.NOT_RETRIABLE,
+            )
 
         try:
             # Verify backup integrity (local spool file vs the remote checksum).
@@ -296,6 +431,7 @@ class VirtualminBackupService:
         config: BackupConfig | None = None,
         progress_key: str | None = None,
         ownership: Callable[[], bool] | None = None,
+        note_sink: Callable[[dict[str, Any]], None] | None = None,
     ) -> Result[dict[str, Any], str]:
         """
         Create comprehensive backup of Virtualmin domain.
@@ -326,7 +462,10 @@ class VirtualminBackupService:
             self._update_backup_progress(backup_id, "initializing", 0)
 
             # Execute backup workflow
-            return self._backup_workflow_chain(account, backup_id, backup_metadata, config)
+            workflow = self._backup_workflow_chain(account, backup_id, backup_metadata, config, note_sink)
+            if config.chain_role != CHAIN_ROLE_STANDALONE and workflow.is_err():
+                return self._settle_chain_error(workflow)
+            return workflow
 
         except Exception as e:
             logger.error(f"Backup failed for account {account.domain}: {e}")
@@ -336,6 +475,23 @@ class VirtualminBackupService:
         finally:
             self._progress_key = None
             self._ownership = None
+            self._chain_step_state = None
+
+    def _settle_chain_error(self, failure: Result[dict[str, Any], str]) -> Result[dict[str, Any], str]:
+        """Keep UNKNOWN only for an error that leaves the node step itself uncertain.
+
+        The job layer parks a chain job in attention (keeping the account exclusion) on
+        UNKNOWN. That must mean "a dispatched node step may still be running or may have
+        changed the snapshot", not "something after or before it failed vaguely": a
+        precondition failure dispatched nothing, and a transport or publication failure
+        after a conclusive step leaves chain state fully known.
+        """
+        if (
+            retriability_of(failure) is Retriability.UNKNOWN
+            and getattr(self, "_chain_step_state", None) != "dispatched"
+        ):
+            return Err(failure.unwrap_err(), retriability=Retriability.NOT_RETRIABLE)
+        return failure
 
     def _owns_execution(self) -> bool:
         """Stage-boundary ownership check; True when no fencing was requested."""
@@ -823,6 +979,13 @@ class VirtualminBackupService:
             "include_files": config.include_files,
             "include_ssl": config.include_ssl,
             "chain_role": config.chain_role,
+            "manifest_version": MANIFEST_VERSION,
+            "base_backup_id": config.chain.base_backup_id if config.chain else "",
+            "chain_epoch": config.chain.epoch if config.chain else 0,
+            "node_id": str(self.server.pk),
+            "virtualmin_domain_id": "",
+            "fp_before": "",
+            "fp_after": "",
             "version": "1.0",
             "status": "in_progress",
             "archive_name": self._generate_archive_name(),
@@ -1078,6 +1241,106 @@ class VirtualminBackupService:
         except Exception as e:
             logger.error(f"Full backup execution failed: {e}")
             return Err(f"Full backup failed: {e!s}")
+
+    def _read_domain_id(self, account: VirtualminAccount) -> Result[str, str]:
+        """Virtualmin's numeric id of the domain, from list-domains; digits only."""
+        gateway = VirtualminGateway(VirtualminConfig(server=self.server))
+        result = gateway.call("list-domains", {"domain": account.domain, "multiline": ""})
+        if result.is_err() or not result.unwrap().success:
+            return Err("Could not read the domain id for a chain backup", retriability=Retriability.RETRIABLE)
+        rows = result.unwrap().data.get("data")
+        for row in rows if isinstance(rows, list) else []:
+            if isinstance(row, dict) and row.get("name") == account.domain and isinstance(row.get("values"), dict):
+                domain_id = listing_attribute(row["values"], "ID")
+                if re.fullmatch(r"[0-9]{1,30}", domain_id):
+                    return Ok(domain_id)
+        return Err(
+            f"Domain {account.domain} has no usable id in the node listing", retriability=Retriability.NOT_RETRIABLE
+        )
+
+    def _prepare_chain_dispatch(
+        self,
+        account: VirtualminAccount,
+        metadata: dict[str, Any],
+        note_sink: Callable[[dict[str, Any]], None] | None,
+    ) -> Result[None, str]:
+        """Everything a chain step needs from the node, durable BEFORE the step is dispatched.
+
+        The domain id is recorded on the job first: if the step is later cancelled, the
+        cancel marker needs the id, and a step that never recorded one never ran.
+        """
+        domain_id = self._read_domain_id(account)
+        if domain_id.is_err():
+            return Err(domain_id.unwrap_err(), retriability=retriability_of(domain_id))
+        metadata["virtualmin_domain_id"] = domain_id.unwrap()
+        if note_sink is not None:
+            note_sink({"virtualmin_domain_id": domain_id.unwrap()})
+        return Ok(None)
+
+    def run_chain_step(
+        self, variables: dict[str, Any], *, token: str, mode: str, domain_id: str
+    ) -> Result[ChainStepResult, str]:
+        """Run virtualmin_chain_backup.yml once; every non-conclusive outcome is UNKNOWN."""
+        from apps.infrastructure.ansible_service import AnsibleService  # noqa: PLC0415  # Circular
+
+        deployment = getattr(self.server, "node_deployment", None)
+        if deployment is None:
+            return Err(
+                f"Server {self.server.hostname} is manually registered (no managed node_deployment); "
+                "chain backups are unavailable",
+                retriability=Retriability.NOT_RETRIABLE,
+            )
+        lock_wait = int(variables.get("chain_lock_wait_seconds", 60))
+        timeout = self._backup_command_timeout() + lock_wait + 120
+        result = AnsibleService().run_playbook(deployment, CHAIN_PLAYBOOK, variables, timeout_seconds=timeout)
+        if result.is_err():
+            return Err(f"Chain step could not run: {result.unwrap_err()}", retriability=Retriability.UNKNOWN)
+        run = result.unwrap()
+        if not run.success:
+            # The step may have started before ansible lost it (a timeout kills only the
+            # local ansible process): never read a failed playbook as "nothing ran".
+            return Err(
+                f"Chain step playbook failed or timed out (rc={run.return_code}); node state is uncertain",
+                retriability=Retriability.UNKNOWN,
+            )
+        return parse_chain_step_result(run.stdout, token=token, mode=mode, domain_id=domain_id)
+
+    def _execute_chain_backup(
+        self, account: VirtualminAccount, backup_id: str, metadata: dict[str, Any], config: BackupConfig
+    ) -> Result[str, str]:
+        """Base or differential: one locked node-side step, never remote.cgi."""
+        chain = config.chain
+        domain_id = str(metadata.get("virtualmin_domain_id", ""))
+        if chain is None or not chain.token or not domain_id:
+            return Err("A chain backup needs its admission context", retriability=Retriability.NOT_RETRIABLE)
+        if config.chain_role == CHAIN_ROLE_DIFFERENTIAL and not chain.expected_fp:
+            return Err("A differential needs the base's snapshot fingerprint", retriability=Retriability.NOT_RETRIABLE)
+        variables: dict[str, Any] = {
+            "chain_action": "run",
+            "chain_mode": config.chain_role,
+            "chain_domain": account.domain,
+            "chain_domain_id": domain_id,
+            "chain_token": chain.token,
+            "chain_archive": str(metadata["archive_name"]),
+        }
+        if config.chain_role == CHAIN_ROLE_DIFFERENTIAL:
+            variables["chain_expected_fp"] = chain.expected_fp
+        self._update_backup_progress(backup_id, "backing_up", 30)
+        self._chain_step_state = "dispatched"
+        outcome = self.run_chain_step(variables, token=chain.token, mode=config.chain_role, domain_id=domain_id)
+        if outcome.is_err():
+            return Err(outcome.unwrap_err(), retriability=retriability_of(outcome))
+        self._chain_step_state = "settled"
+        step = outcome.unwrap()
+        metadata.update({"fp_before": step.fp_before, "fp_after": step.fp_after})
+        if step.outcome != "ok":
+            retriability = Retriability.RETRIABLE if step.reason == "lock_busy" else Retriability.NOT_RETRIABLE
+            where = "refused" if not step.ran else "failed on the node"
+            return Err(
+                f"Chain {config.chain_role} {where}: {step.reason} {step.detail}".strip(), retriability=retriability
+            )
+        metadata["chain_remote_sha256"] = step.sha256
+        return Ok(f"{REMOTE_ARCHIVE_DIR}/{metadata['archive_name']}")
 
     def _execute_config_backup(
         self, account: VirtualminAccount, backup_id: str, metadata: dict[str, Any], config: BackupConfig

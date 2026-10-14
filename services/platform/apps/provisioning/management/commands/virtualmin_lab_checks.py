@@ -20,6 +20,12 @@ never touches the round-trip domain on vm-a. Each check fails the command:
 4. Node backup (virtualmin_backup.yml, applied twice): exactly one enabled,
    non-differential schedule and no legacy one; Webmin cron runs it; running
    it as cron does writes a non-empty archive and keeps the differential base.
+4b. Chain step (virtualmin_chain_backup.yml, through AnsibleService): a base resets
+   the snapshot to a fresh fingerprint, and a base with nothing changed still
+   changes it (so a fingerprint can tell two bases apart); a differential passes
+   the fingerprint check, leaves the snapshot byte-identical and archives only
+   the changed files; a stale fingerprint, a cancelled token and a held lock
+   each refuse before any backup runs, and a refused differential archives nothing.
 5. Node deploy (virtualmin.yml post-install tasks on an installed node): the
    play succeeds, and the API user it creates authenticates, can disable and
    enable a domain, lists the templates, and runs PRAHO's own backup (with
@@ -44,6 +50,7 @@ import io
 import logging
 import re
 import subprocess
+import time
 import uuid
 from decimal import Decimal
 from typing import Any
@@ -83,6 +90,7 @@ class Command(BaseCommand):
             try:
                 base = self._check_differential_base_and_staging(account, node)
                 self._check_node_backup_playbook(server, node, base)
+                self._check_chain_node_step(server, node)
                 user, password, api_gateway = self._check_node_deploy_playbook(server)
                 self._check_api_user_lock(node, user, password, api_gateway)
                 self._check_firewall(server, node, api_gateway)
@@ -347,6 +355,204 @@ class Command(BaseCommand):
         after = self._file_state(node, base)
         self._ok("the scheduled run kept the differential base", after == before, f"{before} -> {after}")
         node_exec(node.container, "sh", "-c", "rm -rf /var/backups/virtualmin/????-??-??")
+
+    # ------------------------------------------------------------- check 4b
+
+    def _chain_step(  # noqa: PLR0913  # Mirrors the playbook's inputs
+        self,
+        server: Any,
+        node: LabNode,
+        mode: str,
+        token: str,
+        *,
+        expected_fp: str = "",
+        action: str = "run",
+        lock_wait: int = 60,
+    ) -> Any:
+        """Run virtualmin_chain_backup.yml through AnsibleService; return the parsed result line."""
+        from apps.provisioning.virtualmin_backup_service import (  # noqa: PLC0415
+            VirtualminBackupService,
+        )
+
+        domain_id = node_exec(
+            node.container, "virtualmin", "list-domains", "--domain", CHECK_DOMAIN, "--id-only"
+        ).strip()
+        variables: dict[str, Any] = {
+            "chain_action": action,
+            "chain_mode": mode if action == "run" else "",
+            "chain_domain": CHECK_DOMAIN,
+            "chain_domain_id": domain_id,
+            "chain_token": token,
+            "chain_lock_wait_seconds": lock_wait,
+            "chain_archive": f"virtualmin_backup_{uuid.uuid4().hex}.tar.gz" if action == "run" else "",
+        }
+        if expected_fp:
+            variables["chain_expected_fp"] = expected_fp
+        outcome = VirtualminBackupService(server).run_chain_step(
+            variables, token=token, mode=mode if action == "run" else "cancel", domain_id=domain_id
+        )
+        if outcome.is_err():
+            raise CommandError(f"chain step {mode}/{action} unusable: {outcome.unwrap_err()}")
+        return outcome.unwrap()
+
+    def _check_chain_node_step(self, server: Any, node: LabNode) -> None:  # noqa: PLR0915  # One linear lab scenario
+        """The locked node-side step: fresh snapshot, differential contents, and every refusal."""
+        from apps.provisioning.virtualmin_backup_service import REMOTE_ARCHIVE_DIR  # noqa: PLC0415
+
+        self.stdout.write("Check 4b: the chain step (virtualmin_chain_backup.yml)")
+        domain_id = node_exec(
+            node.container, "virtualmin", "list-domains", "--domain", CHECK_DOMAIN, "--id-only"
+        ).strip()
+        home = f"/home/{CHECK_USER}/public_html"
+
+        def token() -> str:
+            return str(uuid.uuid4())  # One fresh run token per step
+
+        def write_file(name: str, content: str) -> None:
+            node_exec(
+                node.container,
+                "sh",
+                "-c",
+                'printf "%s\n" "$2" > "$1" && chown "$3" "$1"',
+                "sh",
+                f"{home}/{name}",
+                content,
+                CHECK_USER,
+            )
+
+        def staged() -> list[str]:
+            return self._staged(node)
+
+        def regular_files(archive: str) -> set[str]:
+            """Regular files in the archive's directory member (dirs and special entries excluded)."""
+            listing = node_exec(
+                node.container,
+                "sh",
+                "-c",
+                'set -e; d=$(mktemp -d); trap \'rm -rf "$d"\' EXIT; tar -xzf "$1" -C "$d"; '
+                'tar -tvf "$d"/*_dir.tar > "$d/list"; awk \'/^-/ {print $NF}\' "$d/list"',
+                "sh",
+                f"{REMOTE_ARCHIVE_DIR}/{archive}",
+            )
+            return {line.strip() for line in listing.splitlines() if line.strip()}
+
+        def discard(*steps: Any) -> None:
+            for step in steps:
+                path = f"{REMOTE_ARCHIVE_DIR}/{step.archive}"
+                node_exec(node.container, "rm", "-f", path, f"{path}.dom", f"{path}.info")
+
+        write_file("chain-keep.txt", "unchanged after the base")
+        write_file("chain-edit.txt", "first")
+        try:
+            base = self._chain_step(server, node, "base", token())
+            self._ok("a base step succeeds", base.outcome == "ok" and base.ran, base)
+            self._ok(
+                "a base leaves a fresh snapshot (present, not the one before)",
+                base.fp_after not in ("", "ABSENT", base.fp_before),
+                base,
+            )
+            self._ok(
+                "the step's fp_after is the snapshot on the node",
+                base.fp_after == self._fingerprint(node, domain_id),
+                base,
+            )
+            self._ok(
+                "a base archive is complete (holds the unchanged file)",
+                "./public_html/chain-keep.txt" in regular_files(base.archive),
+            )
+
+            again = self._chain_step(server, node, "base", token())
+            self._ok(
+                "Q9: a base with NO change still changes the snapshot hash",
+                again.outcome == "ok" and again.fp_before == base.fp_after and again.fp_after != again.fp_before,
+                (again.fp_before, again.fp_after),
+            )
+            discard(base)
+
+            write_file("chain-edit.txt", "second")
+            write_file("chain-new.txt", "new file")
+            diff = self._chain_step(server, node, "differential", token(), expected_fp=again.fp_after)
+            self._ok("a differential passes the fingerprint check", diff.outcome == "ok" and diff.ran, diff)
+            self._ok(
+                "a differential leaves the snapshot byte-identical",
+                diff.fp_after == diff.fp_before == again.fp_after == self._fingerprint(node, domain_id),
+                diff,
+            )
+            files = regular_files(diff.archive)
+            self._ok(
+                "a differential archive holds only the changed files",
+                {"./public_html/chain-edit.txt", "./public_html/chain-new.txt"} <= files
+                and "./public_html/chain-keep.txt" not in files,
+                sorted(files),
+            )
+            self._ok(
+                "a differential archive is smaller than the base archive",
+                diff.size < again.size,
+                (diff.size, again.size),
+            )
+            discard(diff, again)
+
+            stale = self._chain_step(server, node, "differential", token(), expected_fp="ABSENT")
+            self._ok(
+                "a differential with a stale fingerprint is refused before any backup runs",
+                (stale.outcome, stale.reason, stale.ran) == ("refused", "fingerprint_mismatch", False),
+                stale,
+            )
+            self._ok("the refused differential archived nothing", not staged(), staged())
+
+            cancelled = token()
+            marker = self._chain_step(server, node, "base", cancelled, action="cancel")
+            self._ok("a cancel writes its marker under the lock", marker.outcome == "cancelled", marker)
+            refused = self._chain_step(server, node, "base", cancelled)
+            self._ok(
+                "a cancelled token refuses to run",
+                (refused.outcome, refused.reason, refused.ran) == ("refused", "cancelled", False) and not staged(),
+                refused,
+            )
+            fresh = self._chain_step(server, node, "base", token())
+            self._ok("another token still runs", fresh.outcome == "ok", fresh)
+            discard(fresh)
+
+            held = subprocess.Popen(  # Holds the node's per-domain lock for the check
+                ["docker", "exec", node.container, "flock", f"/run/praho/chain-{domain_id}.lock", "sleep", "40"],  # noqa: S607
+            )
+            try:
+                time.sleep(3)
+                busy = self._chain_step(server, node, "base", token(), lock_wait=5)
+                self._ok(
+                    "a step cannot start while the lock is held",
+                    (busy.outcome, busy.reason, busy.ran) == ("refused", "lock_busy", False),
+                    busy,
+                )
+            finally:
+                held.terminate()
+                held.wait(timeout=30)
+        finally:
+            node_exec(
+                node.container,
+                "sh",
+                "-c",
+                'rm -f /run/praho/chain-"$1".* "$2"/virtualmin_backup_*',
+                "sh",
+                domain_id,
+                REMOTE_ARCHIVE_DIR,
+            )
+            node_exec(
+                node.container, "rm", "-f", f"{home}/chain-keep.txt", f"{home}/chain-edit.txt", f"{home}/chain-new.txt"
+            )
+        logger.info("✅ [VirtualminLab] Chain step checks passed")
+
+    def _fingerprint(self, node: LabNode, domain_id: str) -> str:
+        """The node's snapshot fingerprint, computed independently of the step's script."""
+        return node_exec(
+            node.container,
+            "sh",
+            "-c",
+            'f=/var/webmin/modules/virtual-server/incremental/"$1"; if [ -f "$f" ]; '
+            'then printf "%s:%s" "$(sha256sum < "$f" | cut -d" " -f1)" "$(stat -c %s "$f")"; else printf ABSENT; fi',
+            "sh",
+            domain_id,
+        ).strip()
 
     # ------------------------------------------------------------- check 5
 

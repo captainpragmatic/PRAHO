@@ -21,6 +21,7 @@ from apps.common.types import Err, Ok
 from apps.provisioning import virtualmin_tasks
 from apps.provisioning.virtualmin_backup_service import (
     CHAIN_ROLE_BASE,
+    CHAIN_ROLE_DIFFERENTIAL,
     CHAIN_ROLE_STANDALONE,
     REMOTE_ARCHIVE_DIR,
     BackupConfig,
@@ -74,19 +75,26 @@ class BackupDispatchChainRoleTests(VirtualminTaskTestBase):
                 self.assertNotIn("--differential", argv)
                 self.assertEqual(parse_like_virtualmin(argv, _BACKUP_VALUED, _BACKUP_BARE), [])
 
-    def test_only_an_explicit_complete_base_may_reset_the_base(self) -> None:
-        result, sent = self._dispatch(BackupConfig(chain_role=CHAIN_ROLE_BASE))
-        self.assertTrue(result.is_ok(), result)
-        argv = remote_cgi_argv(sent[0])
-        self.assertNotIn("--no-differential", argv)
-        self.assertIn("--all-features", argv)
+    def test_a_base_is_never_sent_through_remote_cgi(self) -> None:
+        """A plain full over remote.cgi resets the snapshot with nothing binding it to the archive.
+
+        Bases and differentials run as locked node-side steps (test_virtualmin_chain_backup_flow);
+        a remote.cgi dispatch for those roles would be an unfenced snapshot writer.
+        """
+        for role in (CHAIN_ROLE_BASE, CHAIN_ROLE_DIFFERENTIAL):
+            with self.subTest(role=role):
+                result, sent = self._dispatch(BackupConfig(chain_role=role))
+                self.assertTrue(result.is_err(), result)
+                self.assertEqual(sent, [])
 
     def test_incomplete_or_unknown_roles_are_refused_before_dispatch(self) -> None:
         for config in (
             BackupConfig(backup_type="config_only", chain_role=CHAIN_ROLE_BASE),
             BackupConfig(include_email=False, chain_role=CHAIN_ROLE_BASE),
             BackupConfig(include_ssl=False, chain_role=CHAIN_ROLE_BASE),
-            BackupConfig(chain_role="differential"),
+            BackupConfig(backup_type="config_only", chain_role=CHAIN_ROLE_DIFFERENTIAL),
+            BackupConfig(include_databases=False, chain_role=CHAIN_ROLE_DIFFERENTIAL),
+            BackupConfig(chain_role="bogus"),
             BackupConfig(chain_role=""),
         ):
             with self.subTest(config=config):
