@@ -11,6 +11,7 @@ from __future__ import annotations
 import uuid
 from contextlib import ExitStack
 from datetime import timedelta
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
@@ -311,6 +312,69 @@ class MissedNoteTests(ChainRunnerCase):
         self.assertEqual(self.step_calls, [DOMAIN_ID], "the id is durable before the step runs")
 
 
+class StrandedArchiveTests(ConfirmStoppedTests):
+    """After a parked step is stopped, the archive and .dom sidecar it may have left are removed."""
+
+    ARCHIVE = "virtualmin_backup_" + "a" * 32 + ".tar.gz"
+
+    def setUp(self) -> None:
+        super().setUp()
+        params = {**self.job.parameters, "archive_name": self.ARCHIVE}
+        VirtualminProvisioningJob.objects.filter(pk=self.job.pk).update(parameters=params)
+        self.playbooks: list[tuple[str, dict[str, Any]]] = []
+        self.cleanup_result: Any = Ok(SimpleNamespace(success=True))
+
+    def resolve_with_cleanup(self, step: Any) -> None:
+        def run_playbook(deployment: Any, playbook: str, variables: dict[str, Any], **kwargs: Any) -> Any:
+            self.job.refresh_from_db()
+            self.playbooks.append((playbook, {**variables, "_job_status": self.job.status}))
+            return self.cleanup_result
+
+        with (
+            patch.object(VirtualminBackupService, "run_chain_step", autospec=True, return_value=step),
+            patch("apps.infrastructure.ansible_service.AnsibleService.run_playbook", side_effect=run_playbook),
+            patch.object(type(self.server), "node_deployment", create=True, new=object()),
+        ):
+            self.client.post(self.url, {"note": "node checked"})
+        self.job.refresh_from_db()
+
+    def test_the_staged_archive_is_removed_after_the_marker_and_the_release(self) -> None:
+        self.resolve_with_cleanup(Ok(cancel_result()))
+        self.assertEqual(self.job.status, "failed")
+        self.assertEqual(
+            [(name, v["archive_name"]) for name, v in self.playbooks],
+            [("virtualmin_remote_cleanup.yml", self.ARCHIVE)],
+        )
+        self.assertEqual(self.playbooks[0][1]["_job_status"], "failed", "cleanup runs after the marker and release")
+
+    def test_a_failed_cleanup_is_reported_but_does_not_hold_the_account(self) -> None:
+        self.cleanup_result = Err("ssh unreachable")
+        self.resolve_with_cleanup(Ok(cancel_result()))
+        self.assertEqual(self.job.status, "failed")
+        self.assertIn("cleanup", self.job.status_message)
+        self.assertFalse(account_has_active_operation(self.account))
+
+    def test_nothing_is_removed_when_the_marker_could_not_be_written(self) -> None:
+        self.resolve_with_cleanup(Ok(cancel_result(outcome="refused", reason="lock_busy")))
+        self.assertEqual(self.job.status, "attention")
+        self.assertEqual(self.playbooks, [])
+
+    def test_a_job_that_recorded_no_archive_removes_nothing(self) -> None:
+        params = {k: v for k, v in self.job.parameters.items() if k != "archive_name"}
+        VirtualminProvisioningJob.objects.filter(pk=self.job.pk).update(parameters=params)
+        self.resolve_with_cleanup(Ok(cancel_result()))
+        self.assertEqual(self.job.status, "failed")
+        self.assertEqual(self.playbooks, [])
+
+    def test_a_job_whose_step_already_concluded_still_removes_its_archive(self) -> None:
+        # The step finished, but its fetch may not have: the staged archive can still be there.
+        VirtualminProvisioningJob.objects.filter(pk=self.job.pk).update(
+            result={"backup_id": "d-1", "fp_before": SNAP_A, "fp_after": SNAP_A}
+        )
+        self.resolve_with_cleanup(Err("must not be called"))
+        self.assertEqual([name for name, _ in self.playbooks], ["virtualmin_remote_cleanup.yml"])
+
+
 class NodeLostTests(ChainFixtures, ExclusionCase):
     """A chain job on a node that is gone is released without the node, but only when the node is gone."""
 
@@ -434,6 +498,41 @@ class NodeLostTests(ChainFixtures, ExclusionCase):
         self.job.refresh_from_db()
         self.assertEqual(self.job.status, "failed")
         self.assertEqual(VirtualminProvisioningJob.finish_execution(self.job.pk, self.token, "completed", ""), 0)
+
+    def test_a_recorded_archive_is_cleaned_in_the_background_unless_the_deployment_is_destroyed(self) -> None:
+        VirtualminServer.objects.filter(pk=self.server.pk).update(status="failed")
+        params = {**self.job.parameters, "archive_name": "virtualmin_backup_" + "b" * 32 + ".tar.gz"}
+        VirtualminProvisioningJob.objects.filter(pk=self.job.pk).update(parameters=params)
+        with patch("django_q.tasks.async_task") as queued:
+            self.client.post(self.url)
+        self.assertEqual(
+            [call.args for call in queued.call_args_list],
+            [("apps.provisioning.virtualmin_tasks.remove_chain_job_archive", str(self.job.pk))],
+        )
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.status, "failed")
+        VirtualminProvisioningJob.objects.filter(pk=self.job.pk).update(status="attention")
+        self.deployment("destroyed")
+        with patch("django_q.tasks.async_task") as queued:
+            self.client.post(self.url)
+        queued.assert_not_called()
+
+    def test_the_cleanup_task_removes_the_archive_and_reports_a_failure(self) -> None:
+        archive = "virtualmin_backup_" + "b" * 32 + ".tar.gz"
+        VirtualminProvisioningJob.objects.filter(pk=self.job.pk).update(
+            status="failed", parameters={**self.job.parameters, "archive_name": archive}
+        )
+        calls: list[str] = []
+        with patch.object(
+            VirtualminBackupService, "remove_staged_archive", autospec=True, side_effect=lambda s, name: calls.append(name) or Ok(None)
+        ):
+            self.assertTrue(virtualmin_tasks.remove_chain_job_archive(str(self.job.pk))["success"])
+        self.assertEqual(calls, [archive])
+        with patch.object(VirtualminBackupService, "remove_staged_archive", return_value=Err("unreachable")):
+            outcome = virtualmin_tasks.remove_chain_job_archive(str(self.job.pk))
+        self.assertFalse(outcome["success"])
+        self.job.refresh_from_db()
+        self.assertIn("cleanup failed", self.job.status_message)
 
     def test_only_chain_jobs_in_attention_can_be_resolved_this_way(self) -> None:
         VirtualminServer.objects.filter(pk=self.server.pk).update(status="failed")

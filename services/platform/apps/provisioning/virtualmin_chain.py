@@ -249,7 +249,39 @@ def resolve_chain_job(job: VirtualminProvisioningJob, *, resolved_by: str, note:
             transaction.set_rollback(True)
             return Err("Only a job awaiting attention can be resolved.")
         invalidate_chain(locked)
+    # The cancel marker is on the node, so the step can never start again: whatever it left
+    # staged (the archive and its .dom sidecar with database passwords) can go.
+    remove_stranded_archive(job)
     return Ok(True)
+
+
+def remove_stranded_archive(job: VirtualminProvisioningJob) -> str:
+    """Remove the archive a stopped chain step may have left staged; returns a warning or "".
+
+    A cleanup failure never holds the account: it is logged and appended to the job's message
+    for the operator, because the staged files then still need removing by hand.
+    """
+    from .virtualmin_backup_service import VirtualminBackupService  # noqa: PLC0415  # Circular
+
+    archive_name = str((job.parameters or {}).get("archive_name", ""))
+    if not archive_name:
+        return ""
+    removed = VirtualminBackupService(job.server).remove_staged_archive(archive_name)
+    if removed.is_ok():
+        logger.info("✅ [Chain] Removed stranded archive %s for job %s", archive_name, job.pk)
+        return ""
+    warning = f"staged archive cleanup failed for {archive_name}: {removed.unwrap_err()}"
+    logger.warning("⚠️ [Chain] %s (job %s)", warning, job.pk)
+    message = VirtualminProvisioningJob.objects.filter(pk=job.pk).values_list("status_message", flat=True).first() or ""
+    VirtualminProvisioningJob.objects.filter(pk=job.pk).update(
+        status_message=f"{message} ({warning})".strip(), updated_at=timezone.now()
+    )
+    return warning
+
+
+def _deployment_destroyed(server: VirtualminServer) -> bool:
+    deployment = getattr(server, "node_deployment", None)
+    return bool(deployment is not None and deployment.is_destroyed)
 
 
 def node_lost_refusal(server: VirtualminServer) -> str | None:
@@ -259,10 +291,7 @@ def node_lost_refusal(server: VirtualminServer) -> str | None:
     destroyed (decommissioned). Any other state means the node may still be running the step,
     and only "confirm stopped" (which proves it with a cancel marker) can release the job.
     """
-    if server.status == "failed":
-        return None
-    deployment = getattr(server, "node_deployment", None)
-    if deployment is not None and deployment.is_destroyed:
+    if server.status == "failed" or _deployment_destroyed(server):
         return None
     return "The node is not marked failed or decommissioned; confirm the step stopped instead"
 
@@ -301,4 +330,10 @@ def resolve_chain_job_node_lost(job: VirtualminProvisioningJob, *, resolved_by: 
             return Err("Only a job awaiting attention can be resolved.")
         invalidate_chain(locked)
     logger.warning("⚠️ [Chain] Node declared lost: job=%s server=%s by=%s", job.pk, job.server_id, resolved_by)
+    # If the node is still reachable (a failed health check is not proof it is gone) its staging
+    # is cleaned in the background; the request never waits on a node declared lost.
+    if (job.parameters or {}).get("archive_name") and not _deployment_destroyed(server):
+        from django_q.tasks import async_task  # noqa: PLC0415
+
+        async_task("apps.provisioning.virtualmin_tasks.remove_chain_job_archive", str(job.pk))
     return Ok(True)

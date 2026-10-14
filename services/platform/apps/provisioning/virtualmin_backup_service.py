@@ -823,6 +823,24 @@ class VirtualminBackupService:
         except Exception:
             logger.warning("⚠️ [Restore] Remote archive cleanup failed for %s", archive_name)
 
+    def remove_staged_archive(self, archive_name: str) -> Result[None, str]:
+        """Remove one staged archive and its sidecars from this server's private staging directory."""
+        from apps.infrastructure.ansible_service import AnsibleService  # noqa: PLC0415  # Circular
+
+        if not _ARCHIVE_NAME_RE.match(archive_name):
+            return Err("Not a PRAHO archive name; nothing removed", retriability=Retriability.NOT_RETRIABLE)
+        deployment = getattr(self.server, "node_deployment", None)
+        if deployment is None:
+            return Err("The server has no managed node deployment", retriability=Retriability.NOT_RETRIABLE)
+        result = AnsibleService().run_playbook(
+            deployment, "virtualmin_remote_cleanup.yml", {"archive_name": archive_name}, timeout_seconds=300
+        )
+        if result.is_err():
+            return Err(str(result.unwrap_err()), retriability=Retriability.UNKNOWN)
+        if not result.unwrap().success:
+            return Err("The cleanup playbook failed on the node", retriability=Retriability.UNKNOWN)
+        return Ok(None)
+
     def list_backups(
         self, account: VirtualminAccount | None = None, backup_type: str | None = None, max_age_days: int | None = None
     ) -> Result[list[dict[str, Any]], str]:
@@ -1352,10 +1370,14 @@ class VirtualminBackupService:
             return Err(domain_id.unwrap_err(), retriability=retriability_of(domain_id))
         metadata["virtualmin_domain_id"] = domain_id.unwrap()
         if note_sink is not None:
-            # A cancel needs this id, so a step is dispatched only when it reached the job row
-            # (zero rows: the runner was superseded between the read and the write), and only
-            # while the job is still ours.
-            recorded = note_sink({"virtualmin_domain_id": domain_id.unwrap()})
+            # A cancel needs this id, and a stopped step may leave its archive (and the .dom
+            # sidecar with database passwords) staged on the node, so the archive name is recorded
+            # in the same note. A step is dispatched only when the note reached the job row (zero
+            # rows: the runner was superseded between the read and the write), and only while the
+            # job is still ours.
+            recorded = note_sink(
+                {"virtualmin_domain_id": domain_id.unwrap(), "archive_name": str(metadata["archive_name"])}
+            )
             if recorded == 0 or not self._owns_execution():
                 return Err(
                     "Backup execution superseded before the chain step was recorded; no remote work performed",

@@ -958,6 +958,17 @@ def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:  # n
     return {"status": "completed" if rows else "superseded", "job_id": job_id}
 
 
+def remove_chain_job_archive(job_id: str) -> dict[str, Any]:
+    """Remove the archive a resolved chain job left staged on its node (best effort, never raises)."""
+    from .virtualmin_chain import remove_stranded_archive  # noqa: PLC0415
+
+    job = VirtualminProvisioningJob.objects.select_related("server").filter(pk=job_id).first()
+    if job is None:
+        return {"success": False, "job_id": job_id, "error": "missing"}
+    warning = remove_stranded_archive(job)
+    return {"success": not warning, "job_id": job_id, "warning": warning}
+
+
 def run_virtualmin_backup(job_id: str) -> dict[str, Any]:
     return _run_backup_restore_job(job_id, "backup_domain")
 

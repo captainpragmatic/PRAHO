@@ -160,7 +160,11 @@ class ChainBackupFlowTests(BackupNodeFixture):
         self.ansible.run_playbook.side_effect = played
         self.svc.backup_domain(account=self.account, config=self._config(CHAIN_ROLE_BASE), note_sink=note)
         self.assertEqual(order[:2], ["note", "virtualmin_chain_backup.yml"])
-        self.assertEqual(self.noted, [{"virtualmin_domain_id": DOMAIN_ID}])
+        # The archive name rides in the same note, so one rowcount covers both and a later
+        # "confirm stopped" knows which staged archive (and .dom sidecar) to remove.
+        self.assertEqual(len(self.noted), 1)
+        self.assertEqual(self.noted[0]["virtualmin_domain_id"], DOMAIN_ID)
+        self.assertRegex(self.noted[0]["archive_name"], r"^virtualmin_backup_[0-9a-f]{32}\.tar\.gz$")
 
     def test_a_refused_step_ran_nothing_and_publishes_nothing(self) -> None:
         for reason, expected in (
