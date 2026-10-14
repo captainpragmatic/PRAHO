@@ -18,6 +18,7 @@ from apps.settings.services import SettingsService
 from .virtualmin_gateway import VirtualminConfig, VirtualminGateway
 from .virtualmin_models import VirtualminAccount, VirtualminServer
 from .virtualmin_service import VirtualminProvisioningService
+from .virtualmin_units import quota_parameters
 from .virtualmin_validators import DEFAULT_VIRTUALMIN_TEMPLATE
 
 logger = logging.getLogger(__name__)
@@ -399,11 +400,8 @@ class VirtualminDisasterRecoveryService:
         bandwidth_quota_mb: int | None,
     ) -> None:
         """Restore disk and bandwidth quotas for a rebuilt domain via Virtualmin API."""
-        params: dict[str, str] = {"domain": domain}
-        if disk_quota_mb is not None:
-            params["quota"] = str(disk_quota_mb)
-        if bandwidth_quota_mb is not None:
-            params["bw"] = str(bandwidth_quota_mb)
+        # The same conversion create-domain applies: disk in KiB, bandwidth in bytes, -1 sent as 0.
+        params: dict[str, str] = {"domain": domain, **quota_parameters(disk_quota_mb, bandwidth_quota_mb)}
 
         try:
             config = VirtualminConfig(server=server)

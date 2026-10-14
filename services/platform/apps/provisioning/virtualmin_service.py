@@ -44,6 +44,7 @@ from .virtualmin_models import (
     VirtualminProvisioningJob,
     VirtualminServer,
 )
+from .virtualmin_units import quota_parameters
 from .virtualmin_validators import DEFAULT_VIRTUALMIN_TEMPLATE, VirtualminValidator
 
 if TYPE_CHECKING:
@@ -415,13 +416,8 @@ class VirtualminProvisioningService:
                 "default-features": "",
             }
 
-            # Virtualmin expects disk quotas in KiB and bandwidth in bytes.
-            # Zero and the account's -1 bandwidth sentinel mean unlimited.
-            if account.disk_quota_mb is not None:
-                params["quota"] = str(account.disk_quota_mb * 1024)
-
-            if account.bandwidth_quota_mb is not None:
-                params["bandwidth"] = str(max(0, account.bandwidth_quota_mb) * 1024 * 1024)
+            # Disk in KiB and bandwidth in bytes; zero and the -1 sentinel mean unlimited (shared with recovery).
+            params.update(quota_parameters(account.disk_quota_mb, account.bandwidth_quota_mb))
 
             # Make API call
             result = gateway.call("create-domain", params, correlation_id=job.correlation_id)
