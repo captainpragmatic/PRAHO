@@ -76,7 +76,7 @@ class RebuildServerFromPrahoTests(TestCase):
             "apps.provisioning.virtualmin_service.VirtualminProvisioningService._execute_domain_creation",
             side_effect=fake_execute,
         ):
-            result = service.rebuild_server_from_praho(self.server, dry_run=False)
+            result = service._legacy_rebuild(self.server, dry_run=False)
 
         self.assertTrue(result.is_ok(), result.unwrap_err() if result.is_err() else "")
         data = result.unwrap()
@@ -99,7 +99,7 @@ class RebuildServerFromPrahoTests(TestCase):
                 return_value=Ok(self.account),
             ) as mock_reprovision,
         ):
-            result = service.rebuild_server_from_praho(self.server, dry_run=False)
+            result = service._legacy_rebuild(self.server, dry_run=False)
 
         self.assertTrue(result.is_ok())
         mock_create.assert_not_called()
@@ -113,7 +113,7 @@ class RebuildServerFromPrahoTests(TestCase):
             "apps.provisioning.virtualmin_service.VirtualminProvisioningService.reprovision_virtualmin_account",
             return_value=Ok(self.account),
         ):
-            service.rebuild_server_from_praho(self.server, dry_run=False)
+            service._legacy_rebuild(self.server, dry_run=False)
 
         self.server.refresh_from_db()
         # One active account exists on this server after rebuild.
@@ -142,7 +142,7 @@ class RebuildServerFromPrahoTests(TestCase):
                 return_value=Ok(True),
             ) as mock_suspend,
         ):
-            result = service.rebuild_server_from_praho(self.server, dry_run=False)
+            result = service._legacy_rebuild(self.server, dry_run=False)
 
         mock_suspend.assert_called_once()
         data = result.unwrap()

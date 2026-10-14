@@ -46,20 +46,32 @@ class VirtualminDisasterRecoveryService:
         self, target_server: VirtualminServer, dry_run: bool = True
     ) -> Result[dict[str, Any], str]:
         """
-        🚨 NUCLEAR OPTION: Rebuild entire Virtualmin server from PRAHO data.
+        Plan the rebuild of a Virtualmin server from PRAHO data. Dry run only.
 
-        This is the ultimate expression of PRAHO-as-Source-of-Truth:
-        - Completely ignore current Virtualmin state
-        - Recreate all accounts based on PRAHO database
-        - Servers are truly replaceable infrastructure
+        The rebuild recreates *empty* domains: the account records come back but the customers'
+        files, databases and mail do not, which reads as a recovery while losing the data. A real
+        run is therefore refused until the recover-to-node service (ADR-0061, phase 2) restores
+        accounts from their backups and replaces this method.
 
         Args:
             target_server: Clean Virtualmin server to rebuild
-            dry_run: If True, only report what would be done
+            dry_run: Must be True (the default); False is refused
 
         Returns:
-            Result with rebuild plan or execution summary
+            Result with the rebuild plan, or an error when a real run is requested
         """
+        if not dry_run:
+            logger.warning(f"⚠️ [DisasterRecovery] Refused a real rebuild of {target_server.hostname}: dry run only")
+            return Err(
+                "Rebuilding a server from PRAHO data recreates empty domains and loses the customers' "
+                "data, so only a dry run is available until backup-based recovery replaces it."
+            )
+        return self._legacy_rebuild(target_server, dry_run=True)
+
+    def _legacy_rebuild(  # Retired entry point: ADR-0061 phase 2 replaces it, so its live path stays unreachable
+        self, target_server: VirtualminServer, dry_run: bool
+    ) -> Result[dict[str, Any], str]:
+        """The pre-ADR-0061 rebuild. Only the dry-run plan is reachable from the public entry point."""
         try:
             # Get all PRAHO accounts that should exist on this server
             praho_accounts = VirtualminAccount.objects.filter(
