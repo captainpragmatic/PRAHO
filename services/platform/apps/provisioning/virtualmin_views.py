@@ -58,6 +58,7 @@ from .virtualmin_gateway import VirtualminConfig, VirtualminGateway
 from .virtualmin_migration_models import account_has_active_migration
 from .virtualmin_migration_service import VirtualminMigrationService, list_migration_domains
 from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
+from .virtualmin_pair_restore import is_pair_job, resolve_pair_job
 from .virtualmin_service import (
     VirtualminBackupManagementService,
     VirtualminProvisioningService,
@@ -558,6 +559,14 @@ def virtualmin_job_resolve(request: HttpRequest, job_id: str) -> HttpResponse:
         # A base or differential step may still be running on the node: confirm it is stopped
         # (cancel marker under the lock), clear the chain, then release.
         resolved = resolve_chain_job(job, resolved_by=actor, note=str(note))
+        if resolved.is_err():
+            messages.error(request, resolved.unwrap_err())
+            return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
+        rows = 1
+    elif job.status == "attention" and is_pair_job(job.operation, job.parameters or {}):
+        # A pair restore leaves the domain behind a maintenance page and disabled: the node is
+        # asked to release it (cancel marker, barrier down) before the account is released.
+        resolved = resolve_pair_job(job, resolved_by=actor, note=str(note))
         if resolved.is_err():
             messages.error(request, resolved.unwrap_err())
             return redirect("provisioning:virtualmin_job_status", job_id=job.pk)

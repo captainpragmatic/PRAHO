@@ -116,6 +116,7 @@ class AnsibleService:
             "virtualmin_backup_fetch.yml",
             "virtualmin_backup_push.yml",
             "virtualmin_chain_backup.yml",
+            "virtualmin_pair_restore.yml",
             "virtualmin_remote_cleanup.yml",
             "blesta_harden.yml",
             "blesta_backup.yml",

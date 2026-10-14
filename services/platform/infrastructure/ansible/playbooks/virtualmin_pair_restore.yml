@@ -1,0 +1,68 @@
+---
+# Restore a base backup and its differential as ONE locked node execution, or release a pair
+# restore that stopped midway. files/praho-pair-restore.sh does all of it under the per-domain
+# chain lock: a maintenance virtual host (503) plus disable-domain as a two-layer write barrier,
+# re-applied and verified after each restore step. The domain is left disabled; PRAHO's
+# reconcile (ADR-0051) is the only thing that enables it again.
+#
+#   pair_action=restore  restores pair_base_archive, then pair_diff_archive (both already pushed
+#                        to the private staging directory), verifying their sha256 first
+#   pair_action=release  writes the job's cancel marker and takes the maintenance host down
+- name: Restore a backup pair behind a write barrier, or release one
+  hosts: all
+  gather_facts: false
+  become: false
+  vars:
+    # Must match REMOTE_ARCHIVE_DIR in apps/provisioning/virtualmin_backup_service.py.
+    remote_archive_dir: /var/lib/praho-transfer
+    pair_lock_wait_seconds: 60
+    pair_step_hold_seconds: 0
+    pair_base_archive: ""
+    pair_diff_archive: ""
+    pair_base_sha: ""
+    pair_diff_sha: ""
+  tasks:
+    - name: Validate pair restore inputs
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+          - pair_action in ['restore', 'release']
+          - chain_domain is match('^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$')
+          - chain_domain_id is match('^[0-9]{1,30}$')
+          - chain_token is match('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+          - pair_lock_wait_seconds | string is match('^[0-9]{1,4}$')
+          - pair_step_hold_seconds | string is match('^[0-9]{1,2}$')
+          - pair_action == 'release' or pair_base_archive is match('^virtualmin_backup_[0-9a-f]{32}\.tar\.gz$')
+          - pair_action == 'release' or pair_diff_archive is match('^virtualmin_backup_[0-9a-f]{32}\.tar\.gz$')
+          - pair_action == 'release' or pair_base_sha is match('^[0-9a-f]{64}$')
+          - pair_action == 'release' or pair_diff_sha is match('^[0-9a-f]{64}$')
+
+    - name: Run the pair step under the per-domain lock
+      ansible.builtin.script:
+        cmd: files/praho-pair-restore.sh
+      environment:
+        PRAHO_PAIR_ACTION: "{{ pair_action }}"
+        PRAHO_DOMAIN: "{{ chain_domain }}"
+        PRAHO_DOMAIN_ID: "{{ chain_domain_id }}"
+        PRAHO_CHAIN_TOKEN: "{{ chain_token }}"
+        PRAHO_LOCK_WAIT: "{{ pair_lock_wait_seconds }}"
+        PRAHO_STAGING_DIR: "{{ remote_archive_dir }}"
+        PRAHO_BASE_ARCHIVE: "{{ pair_base_archive }}"
+        PRAHO_DIFF_ARCHIVE: "{{ pair_diff_archive }}"
+        PRAHO_BASE_SHA: "{{ pair_base_sha }}"
+        PRAHO_DIFF_SHA: "{{ pair_diff_sha }}"
+        PRAHO_STEP_HOLD: "{{ pair_step_hold_seconds }}"
+      register: pair_step
+      changed_when: true
+
+    - name: Require exactly one result line
+      vars:
+        pair_result_lines: "{{ pair_step.stdout_lines | select('match', '^PAIR_RESULT=[A-Za-z0-9+/=]+$') | list }}"
+      ansible.builtin.assert:
+        that:
+          - pair_result_lines | length == 1
+        fail_msg: "The pair step did not print exactly one result line"
+
+    - name: Emit the structured pair result
+      ansible.builtin.debug:
+        msg: "{{ pair_step.stdout_lines | select('match', '^PAIR_RESULT=[A-Za-z0-9+/=]+$') | first }}"

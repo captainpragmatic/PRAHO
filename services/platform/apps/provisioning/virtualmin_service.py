@@ -37,6 +37,7 @@ from .virtualmin_backup_service import (
     CHAIN_ROLE_STANDALONE,
     BackupConfig,
     RestoreConfig,
+    VirtualminBackupService,
 )
 from .virtualmin_drain_service import coordinate_health_failure
 from .virtualmin_gateway import (
@@ -1801,6 +1802,7 @@ class VirtualminBackupManagementService:
         task_path: str,
         execute_inline: bool,
         source_bound: bool,
+        task_budget: int | None = None,
     ) -> Result[VirtualminProvisioningJob, str]:
         """Durable admission: account lock + exclusion + pending row + queued task.
 
@@ -1821,7 +1823,7 @@ class VirtualminBackupManagementService:
         from .virtualmin_backup_service import backup_task_timeout  # noqa: PLC0415  # Circular
 
         estimated = estimated_transfer_bytes(account.current_disk_usage_mb or 0)
-        budget = backup_task_timeout(
+        budget = task_budget or backup_task_timeout(
             estimated, chain=parameters.get("chain_role", CHAIN_ROLE_STANDALONE) != CHAIN_ROLE_STANDALONE
         )
         retry_window = int(str(settings.Q_CLUSTER.get("retry", 0)))
@@ -1869,6 +1871,85 @@ class VirtualminBackupManagementService:
                 return Err(f"{operation} failed: {job.status_message or job.status}")
         logger.info("✅ [BackupJobs] Admitted %s job %s (budget %ss)", operation, job.pk, budget)
         return Ok(job)
+
+    def create_pair_restore_job(  # noqa: PLR0913  # Pair identity, target, actor and execution seams
+        self,
+        account: VirtualminAccount,
+        base_backup_id: str,
+        differential_backup_id: str,
+        target_server: VirtualminServer | None = None,
+        initiated_by: str = "system",
+        *,
+        force_restore: bool = False,
+        execute_inline: bool = False,
+        step_hold_seconds: int = 0,
+    ) -> Result[VirtualminProvisioningJob, str]:
+        """Admit a pair restore: a base and its differential, restored as one workflow.
+
+        Refuses early what the workflow would refuse later (exact lineage, from the manifests), so
+        no job is created for a pair that cannot be restored. The budget covers both archives and
+        every stage of the workflow, and is checked against the broker visibility window by
+        ``_admit_job`` like any other job. A pair restore always overwrites the live domain, so
+        the caller must say so (``force_restore``).
+        """
+        from .spool import estimated_transfer_bytes  # noqa: PLC0415  # Circular
+        from .virtualmin_pair_restore import (  # noqa: PLC0415  # Circular
+            RESTORE_MODE_PAIR,
+            pair_lineage_refusal,
+            pair_restore_task_timeout,
+        )
+
+        if not force_restore:
+            return Err("A pair restore overwrites the live domain; it must be confirmed explicitly")
+        try:
+            target_server = target_server or self.server
+            backups = VirtualminBackupService(target_server)
+            manifests: dict[str, dict[str, Any]] = {}
+            for label, backup_id in (("base", base_backup_id), ("differential", differential_backup_id)):
+                read = backups.read_manifest(backup_id)
+                if read.is_err():
+                    return Err(f"The {label} backup could not be read: {read.unwrap_err()}")
+                manifests[label] = read.unwrap()
+            refusal = pair_lineage_refusal(
+                manifests["base"], manifests["differential"], service_id=account.service_id, domain=account.domain
+            )
+            if refusal is not None:
+                return Err(refusal)
+            sizes = [int(manifests[label].get("file_size_bytes") or 0) for label in ("base", "differential")]
+            budget = pair_restore_task_timeout(
+                estimated_transfer_bytes(account.current_disk_usage_mb or 0), sizes[0], sizes[1]
+            )
+            parameters = {
+                "restore_mode": RESTORE_MODE_PAIR,
+                "base_backup_id": base_backup_id,
+                "differential_backup_id": differential_backup_id,
+                "pair_token": str(uuid.uuid4()),
+                "pair_step_hold_seconds": step_hold_seconds,
+                "restore_email": True,
+                "restore_databases": True,
+                "restore_files": True,
+                "restore_ssl": True,
+                "force_restore": True,
+                "target_server_id": str(target_server.id),
+                "initiated_by": initiated_by,
+            }
+            original_server = self.server
+            self.server = target_server
+            try:
+                return self._admit_job(
+                    account,
+                    operation="restore_domain",
+                    parameters=parameters,
+                    task_path="apps.provisioning.virtualmin_tasks.run_virtualmin_restore",
+                    execute_inline=execute_inline,
+                    source_bound=False,
+                    task_budget=budget,
+                )
+            finally:
+                self.server = original_server
+        except Exception as e:
+            logger.error(f"Pair restore job creation failed: {e}")
+            return Err(f"Pair restore job failed: {e!s}")
 
     def create_restore_job(
         self,

@@ -823,7 +823,19 @@ def _audit_job(job_id: Any) -> None:
         audit_job_status_transition(job)
 
 
-def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:  # noqa: C901, PLR0911, PLR0912  # Cohesive claim→run→terminal pipeline
+def _queue_reconcile_after_pair(job: VirtualminProvisioningJob, params: dict[str, Any]) -> None:
+    """After a pair restore ends (finished, or refused with the node untouched), converge the account.
+
+    A pair restore leaves the domain disabled and the account suspended in PRAHO's view; the
+    reconcile - the single writer of the enabled state (ADR-0051) - enables it again when the
+    service is active. It is queued only once the job is terminal, because reconcile yields to a
+    running restore.
+    """
+    if str(params.get("restore_mode", "")) == "pair" and job.account is not None and job.account.service_id:
+        reconcile_virtualmin_service_state_async(str(job.account.service_id))
+
+
+def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:  # noqa: C901, PLR0911, PLR0912, PLR0915  # Cohesive claim→run→terminal pipeline
     """Shared token-claimed runner for backup/restore jobs. Never raises."""
     from uuid import uuid4  # noqa: PLC0415
 
@@ -906,8 +918,12 @@ def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:  # n
             account=job.account, config=config, progress_key=str(job.pk), ownership=owns, note_sink=persist_note
         )
     else:
+        pair = str(params.get("restore_mode", "")) == "pair"
         restore_config = RestoreConfig(
-            backup_id=str(params.get("backup_id", "")),
+            backup_id=str(params.get("base_backup_id" if pair else "backup_id", "")),
+            differential_backup_id=str(params.get("differential_backup_id", "")) if pair else "",
+            pair_token=str(params.get("pair_token", "")),
+            pair_step_hold_seconds=int(params.get("pair_step_hold_seconds", 0) or 0),
             restore_email=bool(params.get("restore_email", True)),
             restore_databases=bool(params.get("restore_databases", True)),
             restore_files=bool(params.get("restore_files", True)),
@@ -942,6 +958,7 @@ def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:  # n
         )
         if rows:
             _audit_job(job.pk)
+            _queue_reconcile_after_pair(job, params)
         logger.warning("⚠️ [BackupJobs] %s job %s failed: %s", operation, job_id, error)
         return {"status": "failed" if rows else "superseded", "job_id": job_id, "error": error}
     if operation == "backup_domain" and str(params.get("chain_role", CHAIN_ROLE_STANDALONE)) != CHAIN_ROLE_STANDALONE:
@@ -954,6 +971,7 @@ def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:  # n
     rows = VirtualminProvisioningJob.finish_execution(job.pk, token, "completed", "", dict(result.unwrap()))
     if rows:
         _audit_job(job.pk)
+        _queue_reconcile_after_pair(job, params)
     logger.info("✅ [BackupJobs] %s job %s completed", operation, job_id)
     return {"status": "completed" if rows else "superseded", "job_id": job_id}
 

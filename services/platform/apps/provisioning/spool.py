@@ -59,3 +59,14 @@ def acquire_spool_reservation(
 
 def release_spool_reservation(archive_name: str) -> None:
     SpoolReservation.objects.filter(archive_name=archive_name).delete()
+
+
+def renew_spool_reservation(archive_name: str, ttl_seconds: int) -> int:
+    """Extend a held reservation's lease; returns the rows renewed (0: it lapsed or was released).
+
+    A multi-archive workflow holds files in the spool across stages that can each take a long
+    time, so every stage renews the leases of the archives it is still holding.
+    """
+    return SpoolReservation.objects.filter(archive_name=archive_name).update(
+        expires_at=timezone.now() + timedelta(seconds=ttl_seconds)
+    )

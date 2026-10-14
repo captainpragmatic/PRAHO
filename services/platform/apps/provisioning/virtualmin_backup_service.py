@@ -265,6 +265,11 @@ class RestoreConfig:
     restore_files: bool = True
     restore_ssl: bool = True
     force_restore: bool = False
+    # A pair restore (base = backup_id, then this differential) runs as one workflow behind a
+    # write barrier; pair_token names its node-side run, pair_step_hold_seconds is for tests.
+    differential_backup_id: str = ""
+    pair_token: str = ""
+    pair_step_hold_seconds: int = 0
 
 
 logger = logging.getLogger(__name__)
@@ -585,6 +590,10 @@ class VirtualminBackupService:
         self._ownership = ownership
         try:
             self._update_restore_progress(restore_id, "initializing", 0)
+            if config.differential_backup_id:
+                from .virtualmin_pair_restore import restore_pair  # noqa: PLC0415  # Circular
+
+                return restore_pair(self, account, config, target_server, restore_id, note_sink)
             return self._restore_workflow(account, config, target_server, restore_id, note_sink)
         except Exception as e:
             logger.error(f"Restore failed for account {account.domain}: {e}")
@@ -945,6 +954,15 @@ class VirtualminBackupService:
         if not isinstance(parsed, dict):
             return Err(f"manifest {key} is not an object")
         return Ok(parsed)
+
+    def read_manifest(self, backup_id: str) -> Result[dict[str, Any], str]:
+        """A published backup's manifest by id (no list filters); Err when unreadable."""
+        try:
+            return self._read_manifest(
+                self._get_s3_client(), self._get_backup_bucket(), f"virtualmin-backups/{backup_id}/metadata.json"
+            )
+        except Exception as error:
+            return Err(f"manifest for {backup_id} could not be read: {error}")
 
     def _differentials_naming(self, s3_client: Any, bucket_name: str, base_id: str) -> Result[list[str], str]:
         """Every stored differential that names ``base_id``, found WITHOUT any list filter.
