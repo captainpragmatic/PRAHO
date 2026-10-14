@@ -90,7 +90,7 @@ class ServiceSummaryStatusCountTests(TestCase):
         for query, expected in [
             ("Service 0", 1),
             ("Summary Plan", 25),
-            ("Bucharest node", 1),
+            ("Bucharest node", 0),  # the node is not customer-visible, so it is not searchable either
             ("foreign", 0),
             ("active", 25),
         ]:
