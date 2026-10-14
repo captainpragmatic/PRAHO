@@ -164,6 +164,25 @@ jobs:
           tests.api.test_api_token_concurrency.APITokenPostgresConcurrencyTests \
           --settings=config.settings.ci --verbosity=2
 
+    # Every platform test that skips itself on SQLite, found by scanning the tests rather than
+    # by a list someone has to keep current. tests/integration/test_postgres_gated_tests_run_in_ci.py
+    # fails if this step goes missing or a gate idiom the scan cannot see appears.
+    - name: PostgreSQL-gated tests (derived from the tests themselves)
+      timeout-minutes: 30
+      env:
+        DJANGO_SETTINGS_MODULE: config.settings.ci
+        DB_NAME: postgres
+        DB_USER: test
+        DB_PASSWORD: test
+        DB_HOST: localhost
+      run: |
+        set -euo pipefail
+        modules=$("$UV_PROJECT_ENVIRONMENT/bin/python" scripts/pg_gated_test_modules.py)
+        cd services/platform
+        # shellcheck disable=SC2086  # one dotted label per line; word splitting is the intent
+        PYTHONPATH="$PWD" "$UV_PROJECT_ENVIRONMENT/bin/python" manage.py test $modules \
+          --settings=config.settings.ci --verbosity=2
+
     - name: Platform tests with coverage (no failfast — complete picture)
       run: |
         floor=$(make -s print-PLATFORM_COVERAGE_FLOOR)
