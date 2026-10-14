@@ -287,7 +287,7 @@ signature = HMAC-SHA256(secret, str(int(ts)) + "." + body)
 ### Endpoint
 
 ```
-POST /orders/payment/webhook/
+POST /order/payment/webhook/
 ```
 
 - CSRF-exempt (HMAC-authenticated inter-service endpoint)

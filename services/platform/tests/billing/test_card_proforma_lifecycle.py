@@ -568,12 +568,13 @@ class TestConfirmOrderConvertsProformaBeforeWebhook(CardProformaTestBase):
 class TestConfirmOrderIdempotentAfterWebhook(CardProformaTestBase):
     """Phase 2 verification: confirm_order is idempotent when webhook already converted proforma."""
 
-    def test_confirm_order_returns_409_when_order_already_paid(self) -> None:
-        """confirm_order returns 409 when webhook has already confirmed the order.
+    def test_confirm_order_is_idempotent_when_order_already_paid(self) -> None:
+        """confirm_order answers 200 when the webhook has already confirmed the order.
 
         The Phase 3 transaction re-checks order.status. If the webhook beat the
         confirm_order endpoint and advanced the order to paid/provisioning, Phase 3
-        detects this and returns 409 — no double-confirm, no duplicate invoice.
+        detects this and answers success without confirming again, so there is no
+        double-confirm and no duplicate invoice.
         """
         from apps.api.orders.views import confirm_order  # noqa: PLC0415
 
@@ -605,7 +606,7 @@ class TestConfirmOrderIdempotentAfterWebhook(CardProformaTestBase):
         ):
             response = confirm_order(request, str(order.id))
 
-        # CODEX-8 fix: idempotent — already-confirmed orders return 200 (not 409)
+        # Idempotent: an already-confirmed order answers 200, not a conflict
         self.assertEqual(
             response.status_code,
             200,

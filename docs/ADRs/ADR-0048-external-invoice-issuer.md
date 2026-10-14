@@ -170,9 +170,11 @@ cost the estimate assumed, and the operator accepted SPV blindness knowingly.
   exercised through the same gateway so the fallback stays real rather than becoming
   code that merely still compiles.
 - Three behaviours are assumed and gated in code pending vendor confirmation:
-  that a 429 on a write is refused before the document is created, whether VAT is
+  whether a 429 on a write is refused before the document is created, whether VAT is
   computed per line or on the document total, and whether `precision` applies to VAT
-  rounding. Recorded as questions 5 and 6 to `api@smartbill.ro`.
+  rounding. Recorded as questions 5 and 6 to `api@smartbill.ro`. Until SmartBill
+  confirms its throttle envelope, writes treat every 429 as ambiguous, whatever the
+  body says. The token is still blocked for every worker.
 
 ## Alternatives Considered
 

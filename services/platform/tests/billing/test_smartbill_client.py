@@ -126,6 +126,19 @@ class PacingTests(TransactionTestCase):
 
         self.assertEqual(request.call_count, 1)
 
+    def test_a_429_with_error_text_on_a_write_is_ambiguous_and_still_blocks_the_token(self) -> None:
+        """The verdict must not licence a replay, and the throttle must still be recorded."""
+        body = json.dumps({"errorText": "Limita de apeluri depasita!", "number": ""})
+        with patch(
+            "apps.billing.issuers.smartbill.client.safe_request",
+            return_value=_response(429, body, {"Retry-After": "300"}),
+        ):
+            result = SmartBillClient(CREDS).create_invoice({"companyVatCode": "RO1"})
+
+        self.assertIs(result.verdict, Verdict.AMBIGUOUS)
+        gate = SmartBillRateGate.objects.get(token_fingerprint=SmartBillRateGate.fingerprint(CREDS.token))
+        self.assertIsNotNone(gate.blocked_until)
+
     def test_a_429_suppresses_every_worker(self) -> None:
         """Throttling is recorded centrally, not handed to one caller."""
         body = json.dumps({"errors": [{"code": "rate_limit_exceeded"}]})

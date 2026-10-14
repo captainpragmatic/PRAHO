@@ -181,7 +181,7 @@ PLATFORM_TO_PORTAL_WEBHOOK_SECRET = os.environ.get(
 # Portal payment webhook URL (defaults to local portal for development)
 PORTAL_PAYMENT_WEBHOOK_URL = os.environ.get(
     "PORTAL_PAYMENT_WEBHOOK_URL",
-    "http://localhost:8701/orders/payment/webhook/",
+    "http://localhost:8701/order/payment/webhook/",
 )
 
 # ===============================================================================

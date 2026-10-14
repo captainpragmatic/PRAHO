@@ -426,28 +426,33 @@ class VirtualminProvisioningService:
                     )
 
                     try:
-                        # Update account status
-                        account.status = "active"
-                        account.provisioned_at = timezone.now()
-                        account.save(update_fields=["status", "provisioned_at", "updated_at"])
+                        # One transaction: recovery reads an active account as "already counted",
+                        # so the account must never be active without the server's count raised.
+                        with transaction.atomic():
+                            account.status = "active"
+                            account.provisioned_at = timezone.now()
+                            account.save(update_fields=["status", "provisioned_at", "updated_at"])
 
-                        # Update server stats (track for rollback)
-                        old_domain_count = account.server.current_domains
-                        VirtualminServer.objects.filter(pk=account.server_id).update(
-                            current_domains=models.F("current_domains") + 1, updated_at=timezone.now()
-                        )
-                        account.server.refresh_from_db(fields=["current_domains"])
+                            # Update server stats (track for rollback)
+                            old_domain_count = account.server.current_domains
+                            VirtualminServer.objects.filter(pk=account.server_id).update(
+                                current_domains=models.F("current_domains") + 1, updated_at=timezone.now()
+                            )
+                            account.server.refresh_from_db(fields=["current_domains"])
 
-                        rollback_operations.append(
-                            {
-                                "operation": "revert_server_stats",
-                                "params": {"domain_count": old_domain_count},
-                                "description": f"Revert server domain count to {old_domain_count}",
-                            }
-                        )
+                            # Recorded for a later rollback of the completed job only. If this block
+                            # fails, the transaction has already undone the increment, so the error
+                            # path below must not revert it a second time.
+                            completed_rollback = [
+                                *rollback_operations,
+                                {
+                                    "operation": "revert_server_stats",
+                                    "params": {"domain_count": old_domain_count},
+                                    "description": f"Revert server domain count to {old_domain_count}",
+                                },
+                            ]
 
-                        # Mark job as completed
-                        job.mark_completed(response.data, rollback_operations)
+                            job.mark_completed(response.data, completed_rollback)
 
                         logger.info(f"✅ [VirtualminService] Successfully created domain {account.domain}")
                         return Ok(response.data)
@@ -1042,7 +1047,7 @@ class VirtualminProvisioningService:
             logger.exception(f"Error unsuspending account {account.domain}: {e}")
             return Err(str(e))
 
-    def delete_account(  # Complexity: multi-step business logic  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: cohesive workflow
+    def delete_account(  # Complexity: multi-step business logic  # noqa: PLR0911, PLR0912, PLR0915  # Complexity: cohesive workflow
         self, account: VirtualminAccount
     ) -> Result[bool, str]:  # Complexity: Virtualmin workflow  # Complexity: multi-step business logic
         """
@@ -1113,7 +1118,6 @@ class VirtualminProvisioningService:
             )
             job.save()
             job.mark_started()
-            stats_decremented = 0
 
             # Make API call
             result = gateway.call("delete-domain", {"domain": account.domain}, correlation_id=job.correlation_id)
@@ -1123,19 +1127,20 @@ class VirtualminProvisioningService:
 
                 if response.success:
                     try:
-                        # Update server stats (relative, lost-update safe; the
-                        # rowcount records whether a decrement actually applied
-                        # so rollback never invents usage)
-                        stats_decremented = VirtualminServer.objects.filter(
-                            pk=account.server_id, current_domains__gt=0
-                        ).update(current_domains=models.F("current_domains") - 1, updated_at=timezone.now())
-                        account.server.refresh_from_db(fields=["current_domains"])
+                        # One transaction: the count, the terminated status and the job move
+                        # together, so a crash between them can never leave the domain uncounted
+                        # while the account still looks live for a retry to decrement again.
+                        with transaction.atomic():
+                            VirtualminServer.objects.filter(pk=account.server_id, current_domains__gt=0).update(
+                                current_domains=models.F("current_domains") - 1, updated_at=timezone.now()
+                            )
+                            account.server.refresh_from_db(fields=["current_domains"])
 
-                        # Mark account as terminated (don't delete for audit trail)
-                        account.status = "terminated"
-                        account.save(update_fields=["status", "updated_at"])
+                            # Mark account as terminated (don't delete for audit trail)
+                            account.status = "terminated"
+                            account.save(update_fields=["status", "updated_at"])
 
-                        job.mark_completed(response.data)
+                            job.mark_completed(response.data)
 
                         # Mark idempotency as complete
                         IdempotencyManager.complete(idempotency_key, {"success": True})
@@ -1172,19 +1177,6 @@ class VirtualminProvisioningService:
                             rollback_details=rollback_details,
                         )
                         _clear_idempotency_key(idempotency_key, operation="delete", domain=account.domain)
-
-                        # Try to at least revert server stats — but only if this
-                        # operation's decrement actually applied, or the +1
-                        # would invent capacity usage out of nothing
-                        try:
-                            if stats_decremented:
-                                VirtualminServer.objects.filter(pk=account.server_id).update(
-                                    current_domains=models.F("current_domains") + 1, updated_at=timezone.now()
-                                )
-                                account.server.refresh_from_db(fields=["current_domains"])
-                            logger.info(f"✅ [VirtualminService] Reverted server domain count for {account.domain}")
-                        except Exception as revert_error:
-                            logger.error(f"🔥 [VirtualminService] Failed to revert server stats: {revert_error}")
 
                         return Err(
                             f"Deletion failed during database update (CRITICAL: domain already deleted): {db_error}"
