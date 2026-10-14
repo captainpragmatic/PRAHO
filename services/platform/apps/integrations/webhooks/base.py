@@ -122,9 +122,9 @@ class BaseWebhookProcessor(ABC):
             metadata = WebhookRequestMetadata(signature, headers, raw_body, ip_address, user_agent)
             result = (
                 self._validate_payload(payload)
-                .and_then(self._check_duplicates)
                 .and_then(lambda event_info: self._create_context(payload, metadata, event_info))
                 .and_then(self._verify_signature_with_context)
+                .and_then(self._check_duplicates)
                 .and_then(self._create_and_process_event)
             )
 
@@ -165,14 +165,18 @@ class BaseWebhookProcessor(ABC):
 
         return Ok({"event_id": event_id, "event_type": event_type})
 
-    def _check_duplicates(self, event_info: dict[str, str]) -> Result[dict[str, str], str]:
-        """Step 2: Check for duplicate webhook processing.
+    def _check_duplicates(self, context: WebhookContext) -> Result[WebhookContext, str]:
+        """Step 4: Check for duplicate webhook processing.
+
+        This runs only after the signature has been verified. Answering "already processed"
+        to an unauthenticated caller would confirm that an event id exists and hand back the
+        internal id of the stored event.
 
         Note: This is a preliminary check only. The authoritative duplicate check
         happens inside _create_and_process_event within the atomic block, which uses
         database constraints (unique_together) to prevent race conditions.
         """
-        event_id = event_info["event_id"]
+        event_id = context.event_info["event_id"]
 
         # source_name is guaranteed to be not None after __init__ validation
         assert self.source_name is not None
@@ -181,12 +185,12 @@ class BaseWebhookProcessor(ABC):
             # Return special error that will be handled as success
             return Err(f"DUPLICATE:{event_id}")
 
-        return Ok(event_info)
+        return Ok(context)
 
     def _create_context(
         self, payload: dict[str, Any], metadata: WebhookRequestMetadata, event_info: dict[str, str]
     ) -> Result[WebhookContext, str]:
-        """Step 3: Create webhook processing context."""
+        """Step 2: Create webhook processing context."""
         context = WebhookContext(
             payload=payload,
             signature=metadata.signature,
@@ -199,7 +203,7 @@ class BaseWebhookProcessor(ABC):
         return Ok(context)
 
     def _verify_signature_with_context(self, context: WebhookContext) -> Result[WebhookContext, str]:
-        """Step 4: Verify webhook signature using context."""
+        """Step 3: Verify webhook signature using context."""
         if not self.verify_signature(context.payload, context.signature, context.headers, context.raw_body):
             return Err("❌ Invalid webhook signature")
 
