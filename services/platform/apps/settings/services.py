@@ -6,6 +6,7 @@ Centralized configuration management with Redis caching and type safety.
 from __future__ import annotations
 
 import decimal
+import ipaddress
 import json
 import logging
 import re
@@ -328,6 +329,13 @@ class SettingsService:
             not isinstance(value, list) or any(not isinstance(item, int) or isinstance(item, bool) for item in value)
         ):
             raise ValidationError(_("%(key)s: list values must be integers") % {"key": key})
+        if rules.get("item_format") == "ip_network" and isinstance(value, list):
+            for item in value:
+                if not cls._is_specific_ip_network(item):
+                    raise ValidationError(
+                        _("%(key)s: '%(item)s' is not an IP address or network with no host bits set")
+                        % {"key": key, "item": item}
+                    )
         item_minimum = rules.get("item_min")
         if item_minimum is not None and isinstance(value, list) and any(item < int(item_minimum) for item in value):
             raise ValidationError(
@@ -342,6 +350,17 @@ class SettingsService:
         order = rules.get("order")
         if order == "descending" and isinstance(value, list) and value != sorted(value, reverse=True):
             raise ValidationError(_("%(key)s: list values must be in descending order") % {"key": key})
+
+    @staticmethod
+    def _is_specific_ip_network(item: object) -> bool:
+        """An address or a strict network (no host bits), never the catch-all /0."""
+        if not isinstance(item, str) or item != item.strip() or not item:
+            return False
+        try:
+            network = ipaddress.ip_network(item, strict=True)
+        except ValueError:
+            return False
+        return network.prefixlen > 0
 
     @classmethod
     def _validation_error(cls, key: str, exc: ValidationError) -> SettingValidationError:

@@ -8,6 +8,7 @@ Handles inventory generation, playbook execution, and log capture.
 from __future__ import annotations
 
 import contextlib
+import ipaddress
 import json
 import logging
 import os
@@ -36,6 +37,30 @@ logger = logging.getLogger(__name__)
 # Path to ansible files
 ANSIBLE_BASE_PATH = Path(__file__).parent.parent.parent / "infrastructure" / "ansible"
 PLAYBOOKS_PATH = ANSIBLE_BASE_PATH / "playbooks"
+
+
+def node_admin_allowed_cidrs() -> list[str]:
+    """The node admin allowlist as explicit networks, for Webmin and UFW (ADR-0060).
+
+    Every entry gets a prefix: Webmin reads a bare "203.0.113.0" as the whole
+    203.0.113.x range, and compares IPv6 only in lower case. An entry that does
+    not parse, or a catch-all /0, is dropped and logged, never widened; an empty
+    list reaches the playbooks as empty and they refuse to run.
+    """
+    raw = SettingsService.get_setting("infrastructure.node_admin_allowed_cidrs", []) or []
+    networks: list[str] = []
+    for item in raw if isinstance(raw, list) else []:
+        try:
+            network = ipaddress.ip_network(str(item).strip(), strict=True)
+        except ValueError:
+            logger.error("🔥 [Ansible] Ignoring invalid node admin allowlist entry %r", item)
+            continue
+        if network.prefixlen == 0:
+            logger.error("🔥 [Ansible] Ignoring catch-all node admin allowlist entry %r", item)
+            continue
+        if network.with_prefixlen not in networks:
+            networks.append(network.with_prefixlen)
+    return networks
 
 
 @dataclass
@@ -506,6 +531,8 @@ ansible_python_interpreter=/usr/bin/python3
             "backup_schedule": backup_schedule,
             # Force hostname setting
             "virtualmin_force_hostname": True,
+            # Who may reach SSH and Webmin (API user lock + firewall, ADR-0060)
+            "node_admin_allowed_cidrs": node_admin_allowed_cidrs(),
         }
 
         # Add S3 backup settings when S3 storage is configured

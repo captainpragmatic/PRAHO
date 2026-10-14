@@ -118,6 +118,7 @@ efactura.validation.strict_mode
 efactura.validation.xsd_enabled
 infrastructure.auto_drain_enabled
 infrastructure.drain_enabled
+infrastructure.node_admin_allowed_cidrs
 integrations.smartbill_invoice_series
 integrations.smartbill_measuring_unit
 integrations.smartbill_tax_names

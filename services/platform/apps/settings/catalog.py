@@ -1549,6 +1549,23 @@ CATALOG: tuple[SettingDef, ...] = (
         advanced=True,
     ),
     SettingDef(
+        key="infrastructure.node_admin_allowed_cidrs",
+        data_type="list",
+        default=[],
+        group="advanced",
+        section=_("Infrastructure"),
+        label=_("Node admin allowlist"),
+        help_text=_(
+            "Addresses or networks (CIDR) that may reach a node's SSH and Webmin: Platform's egress "
+            "addresses plus the operators' admin networks. The node playbooks lock the Virtualmin API "
+            "user and the firewall for ports 22 and 10000 to this list, and refuse to run while it is "
+            "empty (ADR-0060)."
+        ),
+        input_kind="chips",
+        advanced=True,
+        validation={"min_items": 0, "item_type": "string", "item_format": "ip_network", "unique_items": True},
+    ),
+    SettingDef(
         key="infrastructure.drain_enabled",
         data_type="boolean",
         default=False,
