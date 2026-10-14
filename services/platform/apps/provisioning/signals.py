@@ -540,6 +540,11 @@ def _handle_new_service_plan_creation(instance: ServicePlan) -> None:
     """
     from apps.billing.currency_thresholds import get_currency_threshold_cents  # noqa: PLC0415
 
+    # create() keeps values as given until the row is reloaded, so they may still be strings.
+    # Read them through their fields, or "45.00" * 100 repeats the text and the comparison raises.
+    price_monthly = ServicePlan._meta.get_field("price_monthly").to_python(instance.price_monthly)
+    disk_space_gb = ServicePlan._meta.get_field("disk_space_gb").to_python(instance.disk_space_gb)
+
     # Legacy plan fields record RON; explicit retail rows have their own price audit.
     # Savepoint: a failed audit INSERT must not poison the caller's transaction.
     with transaction.atomic():
@@ -550,7 +555,7 @@ def _handle_new_service_plan_creation(instance: ServicePlan) -> None:
                 new_values={
                     "name": instance.name,
                     "plan_type": instance.plan_type,
-                    "price_monthly": float(instance.price_monthly),
+                    "price_monthly": float(price_monthly),
                     "price_quarterly": float(instance.price_quarterly) if instance.price_quarterly else None,
                     "price_annual": float(instance.price_annual) if instance.price_annual else None,
                     "setup_fee": float(instance.setup_fee) if instance.setup_fee else None,
@@ -566,7 +571,7 @@ def _handle_new_service_plan_creation(instance: ServicePlan) -> None:
                     "compliance_event": True,
                     "pricing_event": True,
                     "currency": "RON",
-                    "high_value_plan": instance.price_monthly * 100
+                    "high_value_plan": price_monthly * 100
                     >= get_currency_threshold_cents(
                         "provisioning.high_value_thresholds_cents",
                         "RON",
@@ -575,7 +580,7 @@ def _handle_new_service_plan_creation(instance: ServicePlan) -> None:
                             _DEFAULT_HIGH_VALUE_PLAN_THRESHOLD_CENTS,
                         ),
                     ),
-                    "enterprise_plan": (instance.disk_space_gb and instance.disk_space_gb >= ENTERPRISE_DISK_THRESHOLD),
+                    "enterprise_plan": bool(disk_space_gb and disk_space_gb >= ENTERPRISE_DISK_THRESHOLD),
                 },
             ),
         )
