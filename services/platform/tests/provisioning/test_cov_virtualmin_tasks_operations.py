@@ -136,12 +136,14 @@ class LifecycleTaskEffectsTests(VirtualminCoverageCase):
 
     def test_read_timeouts_return_unknown_failure_without_retrying_mutations(self) -> None:
         account = self._account()
+        # A delete that may already have run parks for an operator and keeps the account excluded;
+        # suspend and unsuspend are idempotent and simply fail.
         cases = (
-            (virtualmin_tasks.suspend_virtualmin_account, "active"),
-            (virtualmin_tasks.unsuspend_virtualmin_account, "suspended"),
-            (virtualmin_tasks.delete_virtualmin_account, "error"),
+            (virtualmin_tasks.suspend_virtualmin_account, "active", "failed"),
+            (virtualmin_tasks.unsuspend_virtualmin_account, "suspended", "failed"),
+            (virtualmin_tasks.delete_virtualmin_account, "error", "attention"),
         )
-        for task, status in cases:
+        for task, status, job_status in cases:
             with self.subTest(task=task.__name__):
                 account.status = status
                 account.save(update_fields=["status"])
@@ -152,7 +154,7 @@ class LifecycleTaskEffectsTests(VirtualminCoverageCase):
                 self.assertFalse(result["success"])
                 self.assertEqual(result["retriability"], Retriability.UNKNOWN.value)
                 job = VirtualminProvisioningJob.objects.filter(account=account).latest("created_at")
-                self.assertEqual(job.status, "failed")
+                self.assertEqual(job.status, job_status)
                 self.assertIsNone(job.next_retry_at)
 
     def test_reconciliation_returns_suspend_failure_without_changing_account(self) -> None:

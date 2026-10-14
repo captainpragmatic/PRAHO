@@ -1234,14 +1234,14 @@ class VirtualminProvisioningService:
                 else:
                     error_msg = response.data.get("error", "Deletion failed")
                     retriability = classify_virtualmin_application_error(response)
-                    job.mark_failed(error_msg, response.data, retriability=retriability)
+                    job.settle_failure(error_msg, response.data, retriability=retriability)
                     _clear_idempotency_key(idempotency_key, operation="delete", domain=account.domain)
                     return Err(error_msg, retriability=retriability)
 
             else:
                 error = result.unwrap_err()
                 error_msg = str(error)
-                job.mark_failed(error_msg, retriability=retriability_of(result))
+                job.settle_failure(error_msg, retriability=retriability_of(result))
                 _clear_idempotency_key(idempotency_key, operation="delete", domain=account.domain)
                 return Err(error_msg, retriability=retriability_of(result))
 
@@ -1405,14 +1405,14 @@ class VirtualminProvisioningService:
             error_msg = str(result.unwrap_err())
             # Thread the gateway's retriability so a RETRIABLE failure during a
             # retry keeps next_retry_at armed instead of stranding the job.
-            job.mark_failed(error_msg, retriability=retriability_of(result))
+            job.settle_failure(error_msg, retriability=retriability_of(result))
             return Err(error_msg, retriability=retriability_of(result))
 
         response = result.unwrap()
         if not response.success:
             error_msg = response.data.get("error", f"{program} failed")
             retriability = classify_virtualmin_application_error(response)
-            job.mark_failed(error_msg, response.data, retriability=retriability)
+            job.settle_failure(error_msg, response.data, retriability=retriability)
             return Err(error_msg, retriability=retriability)
 
         previous_status = account.status
