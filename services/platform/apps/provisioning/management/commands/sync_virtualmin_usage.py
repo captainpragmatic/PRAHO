@@ -92,7 +92,17 @@ class Command(BaseCommand):
                         account.bandwidth_quota_mb = domain_info["bandwidth_quota_mb"]
 
                     account.last_sync_at = timezone.now()
-                    account.save()
+                    # Only the columns this sync owns: a full save would write back stale chain fields.
+                    account.save(
+                        update_fields=[
+                            "current_disk_usage_mb",
+                            "current_bandwidth_usage_mb",
+                            "disk_quota_mb",
+                            "bandwidth_quota_mb",
+                            "last_sync_at",
+                            "updated_at",
+                        ]
+                    )
 
                     self.stdout.write(
                         f"✅ {account.domain}: "
