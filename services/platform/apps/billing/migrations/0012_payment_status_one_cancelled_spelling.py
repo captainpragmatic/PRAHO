@@ -5,6 +5,12 @@ from django.conf import settings
 from django.db import migrations, models
 
 
+def adopt_one_cancelled_spelling(apps, schema_editor):
+    """Rows written with the other spelling move to "cancelled" before the CHECK narrows."""
+    payment = apps.get_model("billing", "Payment")
+    payment.objects.filter(status="canceled").update(status="cancelled")
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -18,6 +24,7 @@ class Migration(migrations.Migration):
             model_name='payment',
             name='payment_status_valid_values',
         ),
+        migrations.RunPython(adopt_one_cancelled_spelling, migrations.RunPython.noop),
         migrations.AlterField(
             model_name='payment',
             name='status',
