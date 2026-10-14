@@ -9,6 +9,7 @@ operator's resolution releasing the node before the account.
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 from unittest.mock import patch
 
@@ -22,6 +23,7 @@ from apps.provisioning.virtualmin_backup_service import VirtualminBackupService
 from apps.provisioning.virtualmin_migration_models import account_has_active_operation
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob
 from apps.provisioning.virtualmin_service import VirtualminBackupManagementService
+from apps.settings.services import SettingsService
 from tests.provisioning.test_virtualmin_account_exclusion import ExclusionCase
 from tests.provisioning.test_virtualmin_chain_playbook import SNAP_A, SNAP_B
 from tests.provisioning.test_virtualmin_chain_state import ChainFixtures
@@ -418,3 +420,42 @@ class PairResolutionTests(PairRestoreCase):
         job.refresh_from_db()
         self.assertEqual(job.status, "failed")
         self.assertIn("pair-resolver@example.com", job.status_message)
+
+
+class PairBudgetSettingsTests(PairRestoreCase):
+    """The settings that size the budget and the reservation leases reach the pair restore."""
+
+    GIB = 1024**3
+
+    def budget(self) -> int:
+        return pair.pair_restore_task_timeout(256 * 1024**2, 20 * self.GIB, 5 * self.GIB)
+
+    def test_the_backup_timeout_sizes_the_safety_backup_and_both_restores(self) -> None:
+        before = self.budget()
+        SettingsService.update_setting("provisioning.migration_backup_timeout_seconds", 2800)
+        # +1000 for the safety backup's own backup call, +2000 for the two restores on the node.
+        self.assertEqual(self.budget() - before, 3000)
+
+    def test_the_transfer_timeout_caps_what_each_push_may_be_budgeted(self) -> None:
+        before = self.budget()
+        SettingsService.update_setting("provisioning.migration_transfer_timeout_seconds", 600)
+        self.assertLess(self.budget(), before)
+
+    def test_a_faster_minimum_transfer_rate_shortens_the_downloads_and_pushes(self) -> None:
+        before = self.budget()
+        SettingsService.update_setting("provisioning.backup_min_transfer_mib_s", 40)
+        self.assertLess(self.budget(), before)
+
+    def test_held_archives_are_leased_for_the_transfer_timeout_plus_a_margin(self) -> None:
+        from apps.provisioning.virtualmin_backup_service import RestoreConfig  # noqa: PLC0415
+
+        SettingsService.update_setting("provisioning.migration_transfer_timeout_seconds", 1234)
+        leases: list[int] = []
+        config = RestoreConfig(
+            backup_id="base-1", differential_backup_id="diff-1", force_restore=True, pair_token=str(uuid.uuid4())
+        )
+        with patch("apps.provisioning.spool.renew_spool_reservation", side_effect=lambda name, ttl: leases.append(ttl)):
+            outcome = pair.restore_pair(VirtualminBackupService(self.server), self.account, config, self.server, "r-1", None)
+        self.assertTrue(outcome.is_ok(), outcome)
+        self.assertEqual(set(leases), {1234 + 600})
+        self.assertEqual(len(leases), 4, "both held archives, before each of the two pushes")

@@ -360,7 +360,9 @@ def restore_pair(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  # Distinct 
         # ---- one standalone safety backup of the target -------------------------------------------
         service._update_restore_progress(restore_id, "safety_backup", 35)
         safety = VirtualminBackupService(target_server).backup_domain(
-            account=account, config=BackupConfig(chain_role=CHAIN_ROLE_STANDALONE), ownership=service._ownership
+            account=account,
+            config=BackupConfig(chain_role=CHAIN_ROLE_STANDALONE),
+            ownership=getattr(service, "_ownership", None),
         )
         if safety.is_err():
             return Err(
