@@ -45,12 +45,14 @@ from apps.common.performance.rate_limiting import (
     EndpointRateThrottle,
     PortalHMACBurstThrottle,
     PortalHMACRateThrottle,
+    RateLimitStoreUnavailable,
     RegistrationConfirmClientIPThrottle,
     ResetClientIPThrottle,
     fixed_window_limited,
     forwarded_client_ip,
 )
 from apps.common.request_ip import get_safe_client_ip
+from apps.common.store_unavailable import store_unavailable_response
 from apps.common.transactions import best_effort_atomic
 from apps.common.validators import log_security_event
 from apps.customers.models import Customer
@@ -111,7 +113,11 @@ def _record_failed_attempt(email: str) -> None:
 def _charge_login_failure(forwarded_ip: str | None) -> None:
     """Charge the per-client login failure budget; successful logins never count."""
     if forwarded_ip is not None:
-        fixed_window_limited(f"login_ip:{forwarded_ip}", settings.THROTTLE_RATES["auth_login_ip"])
+        try:
+            fixed_window_limited(f"login_ip:{forwarded_ip}", settings.THROTTLE_RATES["auth_login_ip"])
+        except RateLimitStoreUnavailable:
+            # The credentials were already judged wrong; the answer stays 401 and the outage is logged.
+            logger.error("🔥 [Portal API Auth] Could not charge a failed login to its client budget")
 
 
 @csrf_exempt  # nosemgrep: no-csrf-exempt — HMAC-authenticated inter-service endpoint
@@ -139,9 +145,13 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911 -- 
         client_ip = get_safe_client_ip(request)
         forwarded_ip = forwarded_client_ip(request)
         if forwarded_ip is not None:
-            limited, retry_after = fixed_window_limited(
-                f"login_ip:{forwarded_ip}", settings.THROTTLE_RATES["auth_login_ip"], charge=False
-            )
+            try:
+                limited, retry_after = fixed_window_limited(
+                    f"login_ip:{forwarded_ip}", settings.THROTTLE_RATES["auth_login_ip"], charge=False
+                )
+            except RateLimitStoreUnavailable:
+                # Not throttled, and no credential work: the same 503 the HMAC middleware gives.
+                return store_unavailable_response()
             if limited:
                 response = JsonResponse(
                     {"success": False, "error": _("Too many login attempts"), "retry_after": retry_after},
