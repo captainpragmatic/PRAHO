@@ -7,6 +7,7 @@ without needing the lab.
 
 from __future__ import annotations
 
+import yaml
 from django.test import SimpleTestCase
 
 from tests.provisioning.test_virtualmin_transfer_playbooks import PLAYBOOKS, command_text, load, task_named, tasks
@@ -138,3 +139,65 @@ class NodeBackupPlaybookTests(SimpleTestCase):
         self.assertIn("length == (1 if backup_enabled else 0)", joined)
         self.assertIn("['differential'][0] == 'No'", joined)
         self.assertIn("['enabled'][0] == 'Yes'", joined)
+
+
+class NodeFirewallPlaybookTests(SimpleTestCase):
+    """virtualmin_harden.yml: SSH and Webmin reachable only from the node admin allowlist (ADR-0060)."""
+
+    ADMIN_PORTS = frozenset({"22", "10000"})
+
+    @staticmethod
+    def _group_vars() -> dict[str, list[object]]:
+        loaded = yaml.safe_load((PLAYBOOKS.parent / "group_vars" / "all.yml").read_text())
+        assert isinstance(loaded, dict)
+        return loaded
+
+    def test_admin_ports_are_not_open_to_everyone(self) -> None:
+        group_vars = self._group_vars()
+        public = {str(port) for port in group_vars["firewall_allowed_tcp_ports"]}
+        self.assertFalse(public & self.ADMIN_PORTS, public)
+        self.assertEqual({str(port) for port in group_vars["firewall_admin_tcp_ports"]}, self.ADMIN_PORTS)
+        # Web, mail, FTP, DNS and Usermin stay public.
+        self.assertLessEqual({"80", "443", "25", "465", "587", "993", "995", "21", "53", "20000"}, public)
+
+    def test_play_refuses_an_empty_allowlist_before_touching_the_firewall(self) -> None:
+        names = [task.get("name") for task in tasks("virtualmin_harden.yml")]
+        guard = task_named("virtualmin_harden.yml", "Refuse an empty node admin allowlist")
+        self.assertIn("node_admin_allowed_cidrs | length > 0", guard["ansible.builtin.assert"]["that"])
+        first_ufw = min(
+            index for index, task in enumerate(tasks("virtualmin_harden.yml")) if "community.general.ufw" in task
+        )
+        self.assertLess(names.index("Refuse an empty node admin allowlist"), first_ufw)
+
+    def test_admin_ports_are_allowed_only_from_the_allowlist(self) -> None:
+        task = task_named("virtualmin_harden.yml", "Allow SSH and Webmin from the node admin allowlist")
+        rule = task["community.general.ufw"]
+        self.assertEqual(rule["rule"], "allow")
+        self.assertEqual(rule["from_ip"], "{{ item.1 }}")
+        self.assertEqual(rule["port"], "{{ item.0 }}")
+        self.assertIn("product(node_admin_allowed_cidrs)", task["loop"])
+        self.assertIn("firewall_admin_tcp_ports", task["loop"])
+        for other in tasks("virtualmin_harden.yml"):
+            spec = other.get("community.general.ufw") or {}
+            if spec.get("rule") == "allow" and not spec.get("delete") and "from_ip" not in spec:
+                with self.subTest(task=other.get("name")):
+                    self.assertNotIn("firewall_admin_tcp_ports", str(other.get("loop", "")))
+                    self.assertNotIn(str(spec.get("port")), self.ADMIN_PORTS)
+        removed = task_named("virtualmin_harden.yml", "Remove any-source SSH and Webmin rules")
+        self.assertIs(removed["community.general.ufw"]["delete"], True)
+
+    def test_the_deploy_cannot_lock_platform_out(self) -> None:
+        names = [task.get("name") for task in tasks("virtualmin_harden.yml")]
+        check = task_named("virtualmin_harden.yml", "Require this connection's source in the allowlist")
+        self.assertIn("SSH_CLIENT", str(check))
+        # The source is checked and the allow rules exist before the deny default.
+        for earlier in (
+            "Require this connection's source in the allowlist",
+            "Allow SSH and Webmin from the node admin allowlist",
+        ):
+            with self.subTest(task=earlier):
+                self.assertLess(names.index(earlier), names.index("Configure UFW defaults"))
+        self.assertLess(
+            names.index("Allow SSH and Webmin from the node admin allowlist"),
+            names.index("Remove any-source SSH and Webmin rules"),
+        )
