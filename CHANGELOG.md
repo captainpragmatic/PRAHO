@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **API throttles and attempt budgets count in the shared counter store.** The DRF throttles, the invitation limit, the MFA verification budget and the staff view rate limit kept their counts with a read and a write on the default cache, so concurrent requests lost each other's hits and a cache cull could hand a whole budget back. Each now charges one atomic counter, and a counter store outage answers 503 with `Retry-After` instead of looking like a throttle (429).
+- **A successful login no longer refills the per-address failure budget.** A password sprayer could sign in to their own account between guesses to reset it. Only the account's own counter is cleared.
+- **Invoices, refunds and subscriptions refuse a stale status write.** A second actor working from an old copy could overwrite the first one's transition. They now raise `ConcurrentTransition` like orders and payments.
+- **A payment is `cancelled`, spelled once.** The US spelling is removed from the choices and the CHECK constraint.
+- **A blank reason no longer unlocks the audit immutability guard.**
 - **A lost reply to a write is no longer sent twice.** Outbound requests re-resolved DNS and resent after any connection error, and a connection reset can arrive after the body was delivered. A reset on an invoice or upload POST could therefore issue a second SmartBill invoice or a second e-Factura submission.
   - **Now.** Writes are never resent by the transport, whatever the policy says. The SmartBill, e-Factura, Cloudflare, Vultr and Virtualmin policies also say so explicitly. Reads still fall back to a fresh address.
 - **A webhook proves its sender before it is deduplicated.** An unsigned POST that reused the id of a processed event was answered with success and the internal id of the stored event. It is now refused like any other unsigned request.
