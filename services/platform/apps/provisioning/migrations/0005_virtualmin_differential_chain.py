@@ -7,7 +7,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('provisioning', '0003_virtualmin_default_template_name'),
+        ('provisioning', '0004_virtualmin_legacy_template_name'),
     ]
 
     operations = [
