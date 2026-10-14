@@ -132,28 +132,28 @@ These are live defects today. Each ships with a test that fails without it.
 ## Phase 2: cutover, bridge and recovery
 
 ### The cutover contract
-1. **Lower the TTL.**
-   - Record each record's `previous_ttl`, then lower it.
-   - The wait starts only when every owned record confirms the lower TTL.
-   - Cancellation or failure restores `previous_ttl`.
-2. **Write barrier on the source,** proven in the lab:
-   - `disable-domain`;
-   - the account's cron jobs suspended;
-   - its processes stopped;
-   - database writes blocked (the user's privileges revoked on its databases).
+1. **Lower the TTL.** Record each record's `previous_ttl`, then lower it. The wait starts only when every owned record confirms the lower TTL. Cancellation or failure restores `previous_ttl`.
+2. **Write barrier on the source,** proven in the lab, with **persisted state and verified compensation.**
+   - The barrier: `disable-domain`, the account's cron jobs suspended, its processes stopped, and database writes blocked (privileges revoked on its databases).
+   - **Before applying it,** PRAHO records the cron state and the database grants on the migration.
+   - **A failure before step 5** restores exactly that state and verifies it with a real database write and a cron listing.
    - Mail accounts do not migrate until phase 5 adds queue drain and forwarding.
-3. **Back up, restore onto the target, verify** (existing steps).
-4. **Install the bridge on the source** (reverse proxy to the target) and verify it answers.
-5. **Point of no return:** in one fenced transaction, set `account.server` and `AccountHostname.target_server` to the target.
-   - From here the target is the only writer.
-   - No path may reactivate the source copy or delete the target.
-6. **Converge DNS** to the target. Progress is persisted per record (A and AAAA separately), retried until the authoritative servers agree. It is never rolled back.
-7. **Bridge window,** then verify routing again.
-8. **Remove the retained source content, with the bridge vhost still in place.**
-9. **Tear down the bridge** and restore the TTL.
+3. **Back up, restore onto the target, verify it.** The target stays disabled and unreachable: no DNS change and no bridge, so nothing has written to it yet.
+4. **Point of no return,** before anything can write to the target.
+   - In one fenced transaction, set `account.server` and `AccountHostname.target_server` to the target.
+   - From here only "keep target" actions exist: no path may reactivate the source copy or delete the target.
+5. **Enable the target** with the intended grants and cron state (the ones recorded in step 2).
+6. **Install the bridge on the source** (a reverse proxy to the target) and verify it answers.
+7. **Converge DNS** to the target. Progress is persisted per record (A and AAAA separately), retried until the authoritative servers agree. It is never rolled back.
+8. **Bridge window,** then verify routing again.
+9. **Remove the retained source content, with the bridge vhost still in place.**
+10. **Tear down the bridge** and restore the TTL.
 
-- After step 5, `needs_review` offers only "keep target" actions: retry convergence, extend the bridge.
-- Before step 5, an operator may choose "keep source": remove the target copy and its alias, keeping the label.
+- **Before step 4, "keep source"** restores the barrier state (step 2) and removes the target copy and its alias, keeping the label.
+- **After step 4, `needs_review`** offers only "keep target" actions: retry convergence, extend the bridge.
+- **Tests:**
+  - a failure right after the bridge is activated replays forward and never offers "keep source";
+  - a failure during backup restores the recorded grants and cron state, and a database write works afterwards.
 
 ### Tasks
 1. **P2.1 Make migrations able to wait.**
@@ -163,20 +163,20 @@ These are live defects today. Each ships with a test that fails without it.
    - Tests: a deferred handler leaves the loop and is re-run later; a drain waits rather than pausing.
 2. **P2.2 Add the cutover states (migration 0006)** for the contract's steps. Add `VirtualminMigration.drain` (FK). `RESUME_POLICY` gets a policy for every new state; replay converges forward after step 5.
 3. **P2.3 TTL lowering and restore** (contract step 1).
-4. **P2.4 Write barrier,** proven in the lab (contract step 2). The test proves a cron write and a database write both fail after the barrier.
+4. **P2.4 Write barrier with persisted state and compensation,** proven in the lab (contract step 2). Tests: a cron write and a database write both fail after the barrier; after a pre-cutover failure, the recorded grants and cron state are back and a database write succeeds.
 5. **P2.5 Bridge.**
    - `MigrationBridge` with FSM `pending` → `active` → `removing_source` → `torn_down`, plus `failed` and `ConcurrentTransitionMixin`.
    - Playbook `virtualmin_bridge.yml`.
    - `start_migration` refuses while any bridge for the account is not `torn_down`.
-6. **P2.6 Point of no return and convergence** (contract steps 5 and 6).
+6. **P2.6 Point of no return, target enablement and convergence** (contract steps 4 to 7).
    - `_repoint` becomes verification only.
    - Tests:
-     - a crash between steps 5 and 6 replays to convergence;
+     - a crash between steps 4 and 7 replays to convergence;
      - A succeeding while AAAA fails leaves the AAAA progress pending and retried;
      - the sweep never points DNS back at the source.
-7. **P2.7 Cleanup** (contract steps 7 to 9), retryable, in that order.
+7. **P2.7 Cleanup** (contract steps 8 to 10), retryable, in that order.
 8. **P2.8 Drain finalisation.**
-   - Auto-confirm (system actor, audited) only when every migration is past step 9 and no bridge is `pending`, `active` or `failed`.
+   - Auto-confirm (system actor, audited) only when every migration is past step 10 and no bridge is `pending`, `active` or `failed`.
    - Hostnames of non-live accounts (error, provisioning) left on the drained node are retired, so its IP being reused later cannot be taken over.
 9. **P2.9 Recovery onto a new node, with the same contract in "source unavailable" mode.**
    - No barrier and no bridge.
@@ -254,17 +254,15 @@ These are live defects today. Each ships with a test that fails without it.
 
 ## Paths that must keep records in sync
 
-- **Every `account.server` change** goes through `sync_account_hostname`, and a structural test enforces it:
-  - `_repoint` (migration);
-  - `reprovision_virtualmin_account`;
+- **Every `account.server` change** goes through the ownership model (`target_server` and the sync), and a structural test enforces it:
+  - the migration's point of no return;
+  - `reprovision_virtualmin_account` (after P0.4: only on a verified create);
   - the account sync view;
   - `VirtualminAccountForm`;
+  - recovery;
   - server deletion (cascade).
-- **Every deletion** retires the name:
-  - `delete_account`;
-  - `_execute_rollback`'s delete-domain;
-  - migration rollback deleting the target;
-  - the `pre_delete` signal.
+- **Only termination retires a name:** the two writers of `terminated`, and row delete.
+- **Rollback deletes keep the name.** A migration target removed by "keep source", `_rollback`, or `_execute_rollback`'s delete-domain calls `remove_node_alias` on that node only.
 - **Audit actions,** each with a migration and an entry in `BUSINESS_AUDIT_EVENTS.md`:
   - hostname synced, retired and drift repaired;
   - wildcard issued and distributed;
