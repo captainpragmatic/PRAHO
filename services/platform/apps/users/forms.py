@@ -3,7 +3,6 @@ User forms for PRAHO Platform
 Romanian-localized authentication and profile forms.
 """
 
-import re
 from typing import Any, ClassVar, TypeVar, cast
 
 from django import forms
@@ -13,14 +12,12 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone  # For GDPR consent timestamps
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.identity_fields import normalize_phone
 from apps.common.localisation import DATE_FORMAT_CHOICES, INHERIT_LABEL, LANGUAGE_CHOICES, TIMEZONES
 
 from .models import CustomerMembership, User, UserProfile
 
 T = TypeVar("T")
-
-# Romanian validation constants
-MIN_VAT_DIGITS = 6  # Minimum number of digits in Romanian VAT number
 
 
 class OneTimeCodeInput(forms.TextInput):
@@ -122,7 +119,7 @@ class UserRegistrationForm(UserCreationForm):
     phone = forms.CharField(
         label=_("Phone"),
         required=False,
-        help_text=_("Romanian phone number (+40.XX.XXX.XXXX)"),
+        help_text=_("With its country code, e.g. +40 721 123 456"),
         widget=forms.TextInput(
             attrs={
                 "class": "pl-10 focus:ring-blue-500 focus:border-blue-500 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md bg-slate-800 text-white placeholder-slate-400",
@@ -214,15 +211,8 @@ class UserRegistrationForm(UserCreationForm):
         return False
 
     def clean_phone(self) -> str:
-        """Validate Romanian phone number format"""
-        phone: str | None = self.cleaned_data.get("phone")
-        if phone and phone.strip():
-            phone = phone.strip()
-            # Romanian phone patterns: +40.XX.XXX.XXXX, +40 XXX XXX XXX, 07XXXXXXXX
-            # Allow digits with dots or spaces as separators, or plain 10-digit starting with 0
-            if not re.match(r"^(\+40[\.\s]*[0-9][\.\s0-9]{8,11}[0-9]|0[0-9]{9})$", phone):
-                raise ValidationError(_("Invalid phone number format. Use Romanian format: +40.XX.XXX.XXXX"))
-        return phone or ""
+        """The number in international form: a person's country is not known here."""
+        return normalize_phone(self.cleaned_data.get("phone"))
 
     def save(self, commit: bool = True) -> User:
         user = super().save(commit=False)
@@ -318,15 +308,8 @@ class UserProfileForm(forms.ModelForm):
             self.fields["phone"].initial = self.instance.user.phone
 
     def clean_phone(self) -> str:
-        """Validate Romanian phone number format"""
-        phone: str | None = self.cleaned_data.get("phone")
-        if phone and phone.strip():
-            phone = phone.strip()
-            # Romanian phone patterns: +40.XX.XXX.XXXX, +40 XXX XXX XXX, 07XXXXXXXX
-            # Allow digits with dots or spaces as separators, or plain 10-digit starting with 0
-            if not re.match(r"^(\+40[\.\s]*[0-9][\.\s0-9]{8,11}[0-9]|0[0-9]{9})$", phone):
-                raise ValidationError(_("Invalid phone number format. Use Romanian format: +40.XX.XXX.XXXX"))
-        return phone or ""
+        """The number in international form: a person's country is not known here."""
+        return normalize_phone(self.cleaned_data.get("phone"))
 
     def save(self, commit: bool = True) -> UserProfile:
         profile = super().save(commit=False)

@@ -16,9 +16,6 @@ from django.utils.html import escape  # For XSS prevention
 from django.utils.safestring import SafeString, mark_safe
 
 from apps.common.constants import (
-    PHONE_LANDLINE_LENGTH,
-    PHONE_MIN_VALID_LENGTH,
-    PHONE_MOBILE_LENGTH,
     ROMANIAN_IBAN_LENGTH,
     ROMANIAN_PLURAL_FEW_MAX,
     ROMANIAN_PLURAL_FEW_MIN,
@@ -338,47 +335,6 @@ def iban_format(value: str) -> str:
     formatted_parts = [iban[i : i + 4] for i in range(0, len(iban), 4)]
 
     return " ".join(formatted_parts)
-
-
-@register.filter
-def phone_format(value: str, country_code: str = "+40") -> str:
-    """
-    Format Romanian phone numbers
-
-    Usage:
-        {{ contact.phone|phone_format }}      -> "+40 721 123 456"
-        {{ mobile|phone_format:"+49" }}       -> "+49 721 123 456"
-
-    Args:
-        value: Phone number string
-        country_code: Country code prefix
-    """
-    if not value:
-        return ""
-
-    # Remove all non-digit characters
-    digits = re.sub(r"\D", "", str(value))
-
-    # Handle Romanian numbers
-    if country_code == "+40":
-        if digits.startswith("40"):
-            digits = digits[2:]  # Remove country code
-        elif digits.startswith("0"):
-            digits = digits[1:]  # Remove leading 0
-
-        # Format based on length
-        if len(digits) == PHONE_MOBILE_LENGTH:
-            # Mobile: 721123456 -> +40 721 123 456
-            return f"+40 {digits[:3]} {digits[3:6]} {digits[6:]}"
-        elif len(digits) == PHONE_LANDLINE_LENGTH:
-            # Landline: 0213123456 -> +40 21 312 34 56
-            return f"+40 {digits[:2]} {digits[2:5]} {digits[5:7]} {digits[7:]}"
-
-    # For other countries or invalid Romanian numbers, return formatted
-    if len(digits) >= PHONE_MIN_VALID_LENGTH:
-        return f"{country_code} {digits}"
-
-    return value
 
 
 @register.filter

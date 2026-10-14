@@ -36,7 +36,7 @@ class CustomerAPIIntegrationTests(TestCase):
                 "company_data": {
                     "name": "New Integration Company SRL",
                     "company_name": "New Integration Company SRL",
-                    "vat_number": "RO12345678",
+                    "vat_number": "RO12345674",
                     "trade_registry_number": "J40/1234/2026",
                     "billing_address": {
                         "street_address": "Str. Integrarii 1",

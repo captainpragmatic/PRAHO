@@ -9,13 +9,14 @@ import logging
 from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
 
 from django.core.exceptions import ValidationError
-from django.core.validators import RegexValidator
 from django.db import models, transaction
 from django.db.models import Q
 from django.db.models.query import QuerySet
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django_fsm import FSMField, transition
+
+from apps.common.identity_fields import validate_international_phone
 
 if TYPE_CHECKING:
     from apps.users.models import User
@@ -249,7 +250,7 @@ class Customer(SoftDeleteModel):
     )
     primary_phone = models.CharField(
         max_length=20,
-        validators=[RegexValidator(r"^(\+40|0)[0-9]{9,10}$", "Număr telefon invalid")],
+        validators=[validate_international_phone],
         verbose_name=_("Telefon principal"),
         blank=True,
         default="",

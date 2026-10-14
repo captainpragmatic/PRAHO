@@ -30,6 +30,7 @@ from apps.api.secure_auth import (
     require_customer_role_in,
     require_portal_authentication,
 )
+from apps.common.identity_fields import normalize_phone, normalize_vat_number
 from apps.common.localisation import country_name
 from apps.common.localisation_services import get_localisation_defaults
 from apps.common.performance.rate_limiting import (
@@ -73,16 +74,12 @@ def _checked_vat_number(value: str, country: str | None) -> tuple[str, str | Non
     Stored with its prefix as the staff forms store it: a document without VAT evidence states a
     buyer VAT identifier only when its tax ID carries a country prefix, since a bare one is a CUI.
     """
-    from apps.billing.tax_evidence import vat_country  # noqa: PLC0415
-    from apps.common.eu_vat_validator import is_eu_country, parse_vat_number, validate_vat_format  # noqa: PLC0415
+    from apps.settings.services import get_default_country  # noqa: PLC0415  # ADR-0007
 
-    country_code, digits = parse_vat_number(value, default_country=vat_country(country) if country else "RO")
-    if is_eu_country(country_code):
-        result = validate_vat_format(country_code, digits)
-        if not result.is_valid:
-            return value, result.error_message
-        return result.full_vat_number, None
-    return value, None
+    try:
+        return normalize_vat_number(value, country or get_default_country()), None
+    except ValidationError as error:
+        return value, error.messages[0]
 
 
 def _customer_payload_for_role(customer_data: dict[str, object], role: str | None) -> dict[str, object]:
@@ -1326,6 +1323,12 @@ def customer_update(request: HttpRequest, customer: Customer) -> Response:
                     {"success": False, "error": f"Field '{field}' must be a string."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+            if field == "primary_phone" and value.strip():
+                address = customer.get_billing_address()
+                try:
+                    value = normalize_phone(value, address.country if address else "")
+                except ValidationError as error:
+                    return Response({"success": False, "error": error.messages[0]}, status=status.HTTP_400_BAD_REQUEST)
             setattr(customer, field, value.strip())
             update_fields.append(field)
 

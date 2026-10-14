@@ -82,7 +82,7 @@ if TYPE_CHECKING:
     from apps.customers.models import CustomerTaxProfile
 
 
-def normalize_vat_number(raw: object) -> str:
+def compact_vat_number(raw: object) -> str:
     """Uppercase and remove spaces, dots and hyphens, or return empty for a falsy value."""
     # Keep these separators aligned with the revalidation sweep's SQL.
     return re.sub(r"[ .-]", "", str(raw).upper()) if raw else ""
@@ -146,7 +146,7 @@ def vies_refusal_reason(  # noqa: PLR0911  # one return per refusal reason, in p
         return "missing_profile"
     if tax_profile.vies_verification_status != tax_profile.VIESVerificationStatus.VALID:
         return "status_not_valid"
-    if normalize_vat_number(tax_profile.vat_number) != normalize_vat_number(vat_number) or not normalize_vat_number(
+    if compact_vat_number(tax_profile.vat_number) != compact_vat_number(vat_number) or not compact_vat_number(
         vat_number
     ):
         return "number_mismatch"

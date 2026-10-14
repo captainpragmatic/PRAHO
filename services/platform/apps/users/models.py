@@ -18,6 +18,7 @@ from django.utils import timezone
 from django.utils.crypto import salted_hmac
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.identity_fields import validate_international_phone
 from apps.common.localisation import DATE_FORMAT_CHOICES, validate_timezone
 
 if TYPE_CHECKING:
@@ -90,7 +91,12 @@ class User(AbstractUser):
     # Basic information
     username = None  # Remove username field, using email instead
     email = models.EmailField(_("email address"), unique=True)
-    phone = models.CharField(max_length=20, blank=True, help_text=_("Romanian phone number format: +40 721 123 456"))
+    phone = models.CharField(
+        max_length=20,
+        blank=True,
+        validators=[validate_international_phone],
+        help_text=_("With its country code, e.g. +40 721 123 456"),
+    )
 
     # Staff role for internal staff users (empty for customer users)
     staff_role = models.CharField(

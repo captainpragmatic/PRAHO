@@ -41,7 +41,6 @@ class AccountSecurityWorkflows(HMACTestMixin, TestCase):
         for phone, expected in (
             ("+40711223344", "+40711223344"),
             ("+40.722.123.456", "+40722123456"),
-            ("0722 123 456", "0722123456"),
             ("", ""),
         ):
             with self.subTest(phone=phone):
@@ -59,7 +58,8 @@ class AccountSecurityWorkflows(HMACTestMixin, TestCase):
                 self.assertFalse(self.other.phone)
 
     def test_invalid_phone_cannot_partially_update_the_profile(self):
-        for phone in ("+4071122334", "+407112233445", "071122334", "07112233445", "+40711223344junk"):
+        # A national number needs a country, which a profile does not have: "0722 123 456" is refused too.
+        for phone in ("+4071122334", "+407112233445", "071122334", "07112233445", "+40711223344junk", "0722 123 456"):
             with self.subTest(phone=phone):
                 response = self.update_profile(first_name="Do not save", phone=phone)
                 self.assertEqual(response.status_code, 400, response.content)

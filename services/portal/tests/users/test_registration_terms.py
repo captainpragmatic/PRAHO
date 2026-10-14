@@ -9,6 +9,7 @@ No database access — pure form validation logic.
 import unittest
 from unittest.mock import MagicMock, patch
 
+from apps.api_client.services import PlatformAPIError
 from apps.users.forms import CustomerRegistrationForm
 
 # ---------------------------------------------------------------------------
@@ -21,7 +22,7 @@ _BASE_DATA = {
     'last_name': 'Popescu',
     'customer_type': 'srl',
     'company_name': 'Test Company SRL',
-    'vat_number': 'RO12345678',
+    'vat_number': 'RO12345674',  # a CUI with a valid check digit
     'address_line1': 'Str. Test Nr. 1',
     'city': 'București',
     'county': 'București',
@@ -129,8 +130,6 @@ class RegistrationPayloadTermsTestCase(unittest.TestCase):
     @patch('apps.users.forms.api_client')
     def test_register_customer_returns_none_on_api_error(self, mock_api: MagicMock) -> None:
         """register_customer() returns None when the API call raises an exception."""
-        from apps.api_client.services import PlatformAPIError
-
         mock_api.register_customer.side_effect = PlatformAPIError('server error')
 
         form = self._get_validated_form()

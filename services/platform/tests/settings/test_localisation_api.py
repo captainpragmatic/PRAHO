@@ -79,7 +79,7 @@ class LocalisationAPITests(TestCase):
                 ("+40 721 123 456", True),
                 ("+40.721.123.456", True),
                 ("+40721123456", True),
-                ("0721 123 456", True),
+                ("0721 123 456", False),  # a person's country is unknown here: the country code is needed
                 ("+4072112345", False),
                 ("+407211234567", False),
                 ("+40721123456junk", False),

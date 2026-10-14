@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, ClassVar, cast
@@ -19,7 +18,8 @@ from django.utils.translation import gettext_lazy as _
 
 from apps.billing.currency_service import default_selling_currency
 from apps.common.cui_validator import normalize_cui_digits
-from apps.common.localisation import country_name
+from apps.common.identity_fields import clean_with_country, normalize_phone, normalize_vat_number
+from apps.common.localisation import country_name, normalize_country_code
 from apps.common.localisation_forms import CountryDefaultsMixin
 from apps.common.localisation_services import get_localisation_defaults
 from apps.common.types import CurrencyCode
@@ -54,9 +54,6 @@ def clean_cui_value(cui: str | None) -> str:
         return normalize_cui_digits(cui)
     except ValueError as exc:
         raise ValidationError(_("Enter a valid CUI.")) from exc
-
-
-MAX_EU_VAT_NUMBER_LENGTH = 20  # longest EU format (country prefix included) with room for separators
 
 
 # ===============================================================================
@@ -151,6 +148,10 @@ class CustomerForm(forms.ModelForm):
 
         return company_name or ""
 
+    def clean_primary_phone(self) -> str:
+        """The number in international form: this form does not know the customer's country."""
+        return normalize_phone(self.cleaned_data.get("primary_phone"))
+
     def clean_website(self) -> str:
         """Validate website URL for SSRF prevention"""
         website: str | None = self.cleaned_data.get("website")
@@ -164,34 +165,13 @@ class CustomerForm(forms.ModelForm):
 # ===============================================================================
 
 
-def _clean_staff_vat_number(vat_number: str | None, is_vat_payer: bool | None) -> str:
-    """🔒 Shared by both staff forms: Romanian numbers keep the check-digit rule, other EU numbers the format rule."""
+def _clean_staff_vat_number(vat_number: object, is_vat_payer: object, country: object) -> str:
+    """🔒 Shared by the staff forms: an EU VAT number with its prefix, checked; a bare one is the billing country's."""
     if is_vat_payer and not vat_number:
         raise ValidationError(_("VAT number is required for VAT payers"))
-    if not vat_number:
-        return ""
-    # Security: bound the input before any pattern work (ReDoS).
-    if len(vat_number) > MAX_EU_VAT_NUMBER_LENGTH:
-        raise ValidationError(_("VAT number too long"))
-    if not vat_number.startswith("RO"):
-        from apps.common.eu_vat_validator import parse_vat_number, validate_vat_format  # noqa: PLC0415
+    from apps.common.operator import operator_country  # noqa: PLC0415
 
-        country, digits = parse_vat_number(vat_number)
-        format_result = validate_vat_format(country, digits)
-        if not format_result.is_valid:
-            raise ValidationError(_("Invalid EU VAT number."))
-        return format_result.full_vat_number
-    if len(vat_number) > MAX_RO_PREFIXED_ID_LENGTH:  # RO + max 10 digits
-        raise ValidationError(_("VAT number too long"))
-    # Security: [0-9] rather than \d so unicode digits cannot pass.
-    if not re.match(r"^RO[0-9]{6,10}$", vat_number):
-        raise ValidationError(_("VAT number must be in format RO followed by 6-10 digits"))
-    from apps.common.cui_validator import CUIValidator  # noqa: PLC0415
-
-    result = CUIValidator.validate_strict(vat_number)
-    if not result.is_valid:
-        raise ValidationError(_(result.error_message))
-    return vat_number
+    return normalize_vat_number(vat_number, normalize_country_code(country) or operator_country())
 
 
 def _requires_exemption_reason(data: Mapping[str, object], country: str) -> bool:
@@ -222,10 +202,13 @@ class CustomerTaxProfileForm(forms.ModelForm):
         widget=forms.NumberInput(attrs={"step": "0.01", "min": "0", "max": "100"}),
     )
 
+    def _billing_country(self) -> str:
+        address = self.instance.customer.get_billing_address() if self.instance.customer_id else None
+        return address.country if address else ""
+
     def clean(self) -> dict[str, object]:
         cleaned_data = super().clean() or {}
-        address = self.instance.customer.get_billing_address() if self.instance.customer_id else None
-        if _requires_exemption_reason(cleaned_data, address.country if address else ""):
+        if _requires_exemption_reason(cleaned_data, self._billing_country()):
             self.add_error("vat_rate_reason", _("Select a reason for a zero VAT override for an EU business."))
         return cleaned_data
 
@@ -278,8 +261,10 @@ class CustomerTaxProfileForm(forms.ModelForm):
         return clean_cui_value(self.cleaned_data.get("cui"))
 
     def clean_vat_number(self) -> str:
-        """🔒 Validate the VAT number: Romanian check digits, or EU format for another member state."""
-        return _clean_staff_vat_number(self.cleaned_data.get("vat_number"), self.cleaned_data.get("is_vat_payer"))
+        """🔒 An EU VAT number checked against the billing country's rules; another tax ID as entered."""
+        return _clean_staff_vat_number(
+            self.cleaned_data.get("vat_number"), self.cleaned_data.get("is_vat_payer"), self._billing_country()
+        )
 
 
 # ===============================================================================
@@ -506,7 +491,7 @@ class CustomerCreationForm(CountryDefaultsMixin, forms.Form):
     phone = forms.CharField(
         max_length=20,
         label=_("Primary Phone"),
-        help_text=_("Format: +40 21 123 4567 or 0712 345 678"),
+        help_text=_("With its country code, e.g. +40 721 123 456. A Romanian number may start with 0."),
         widget=forms.TextInput(
             attrs={
                 "class": "w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500",
@@ -631,6 +616,7 @@ class CustomerCreationForm(CountryDefaultsMixin, forms.Form):
     )
     county = forms.CharField(
         max_length=100,
+        required=False,
         label=_("County"),
         widget=forms.TextInput(
             attrs={
@@ -722,7 +708,6 @@ class CustomerCreationForm(CountryDefaultsMixin, forms.Form):
 
         customer_type: str | None = cleaned_data.get("customer_type")
         company_name: str | None = cleaned_data.get("company_name")
-        vat_number: str | None = cleaned_data.get("vat_number")
         is_vat_payer: bool | None = cleaned_data.get("is_vat_payer")
         user_action: str | None = cleaned_data.get("user_action")
         existing_user: User | None = cleaned_data.get("existing_user")
@@ -735,12 +720,14 @@ class CustomerCreationForm(CountryDefaultsMixin, forms.Form):
         ):
             raise ValidationError(_("Company name is required for companies, PFA, and NGOs"))
 
-        # Validate VAT number format and requirement
-        if is_vat_payer and not vat_number:
-            raise ValidationError(_("VAT number is required for VAT payers"))
-
-        if vat_number and not re.match(r"^RO\d{6,10}$", vat_number):
-            raise ValidationError(_("VAT number must be in format RO followed by 6-10 digits"))
+        # The phone and VAT number follow the address country's rules (cleaned after those fields)
+        clean_with_country(self, "phone", normalize_phone, cleaned_data.get("country"))
+        clean_with_country(
+            self,
+            "vat_number",
+            lambda value, country: _clean_staff_vat_number(value, is_vat_payer, country),
+            cleaned_data.get("country"),
+        )
 
         # User action validation
         if user_action == "link" and not existing_user:
@@ -1039,6 +1026,7 @@ class CustomerEditForm(CountryDefaultsMixin, forms.Form):
     )
     county = forms.CharField(
         max_length=100,
+        required=False,
         label=_("County"),
         widget=forms.TextInput(
             attrs={
@@ -1060,7 +1048,6 @@ class CustomerEditForm(CountryDefaultsMixin, forms.Form):
     )
     country = forms.CharField(
         max_length=100,
-        initial="Romania",
         label=_("Country"),
         widget=forms.TextInput(
             attrs={
@@ -1142,7 +1129,6 @@ class CustomerEditForm(CountryDefaultsMixin, forms.Form):
     billing_country = forms.CharField(
         max_length=100,
         required=False,
-        initial="Romania",
         label=_("Billing Country"),
         widget=forms.TextInput(
             attrs={
@@ -1287,10 +1273,6 @@ class CustomerEditForm(CountryDefaultsMixin, forms.Form):
         """🔒 The CUI as its digits, check digit verified (an RO prefix is accepted and dropped)."""
         return clean_cui_value(self.cleaned_data.get("cui"))
 
-    def clean_vat_number(self) -> str:
-        """🔒 Validate the VAT number: Romanian check digits, or EU format for another member state."""
-        return _clean_staff_vat_number(self.cleaned_data.get("vat_number"), self.cleaned_data.get("is_vat_payer"))
-
     def clean_website(self) -> str:
         """Validate website URL for SSRF prevention"""
         website: str | None = self.cleaned_data.get("website")
@@ -1306,13 +1288,21 @@ class CustomerEditForm(CountryDefaultsMixin, forms.Form):
         country_field = "country" if billing_same_as_primary else "billing_country"
         if _requires_exemption_reason(cleaned_data, str(cleaned_data.get(country_field) or "")):
             self.add_error("vat_rate_reason", _("Select a reason for a zero VAT override for an EU business."))
+        # Country fields are cleaned after the phone and VAT number, so their country rules apply here.
+        clean_with_country(self, "primary_phone", normalize_phone, cleaned_data.get("country"))
+        is_vat_payer = cleaned_data.get("is_vat_payer")
+        clean_with_country(
+            self,
+            "vat_number",
+            lambda value, country: _clean_staff_vat_number(value, is_vat_payer, country),
+            cleaned_data.get(country_field),
+        )
 
         # If billing address is different from primary, validate billing fields
         if not billing_same_as_primary:
             required_billing_fields = [
                 "billing_address_line1",
                 "billing_city",
-                "billing_county",
                 "billing_postal_code",
             ]
 

@@ -403,14 +403,14 @@ def validate_vat_number(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Explicit va
     from apps.billing.gateways.vies_gateway import VIESGateway  # noqa: PLC0415
     from apps.billing.tax_evidence import vat_identity  # noqa: PLC0415
     from apps.billing.tax_models import VATValidation  # noqa: PLC0415
-    from apps.billing.vies_evidence import normalize_vat_number, profile_vat_identity  # noqa: PLC0415
+    from apps.billing.vies_evidence import compact_vat_number, profile_vat_identity  # noqa: PLC0415
     from apps.common.eu_vat_validator import is_eu_country, validate_vat_format  # noqa: PLC0415
     from apps.common.operator import operator_country  # noqa: PLC0415
     from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415
 
     try:
         tax_profile = CustomerTaxProfile.objects.select_related("customer").get(id=tax_profile_id)
-        validated_number = normalize_vat_number(tax_profile.vat_number)
+        validated_number = compact_vat_number(tax_profile.vat_number)
 
         if not tax_profile.vat_number:
             logger.info("[VAT] No VAT number for tax profile %s", tax_profile_id)
@@ -422,7 +422,7 @@ def validate_vat_number(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Explicit va
         if not is_eu_country(country_code):
             with transaction.atomic():
                 tax_profile = CustomerTaxProfile.objects.select_for_update().get(pk=tax_profile_id)
-                if normalize_vat_number(tax_profile.vat_number) != validated_number:
+                if compact_vat_number(tax_profile.vat_number) != validated_number:
                     logger.warning("⚠️ [VAT] Number changed during validation for profile %s", tax_profile_id)
                     return {"success": True, "skipped": "vat_number_changed"}
                 _update_tax_profile_vies(tax_profile, status="not_applicable")
@@ -438,7 +438,7 @@ def validate_vat_number(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Explicit va
         if not fmt.is_valid:
             with transaction.atomic():
                 tax_profile = CustomerTaxProfile.objects.select_for_update().get(pk=tax_profile_id)
-                if normalize_vat_number(tax_profile.vat_number) != validated_number:
+                if compact_vat_number(tax_profile.vat_number) != validated_number:
                     logger.warning("⚠️ [VAT] Number changed during validation for profile %s", tax_profile_id)
                     return {"success": True, "skipped": "vat_number_changed"}
                 _store_validation(
@@ -509,7 +509,7 @@ def validate_vat_number(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Explicit va
         # Step 4: Bind persistence and outage handling to the current locked profile.
         with transaction.atomic():
             tax_profile = CustomerTaxProfile.objects.select_for_update().get(pk=tax_profile_id)
-            if normalize_vat_number(tax_profile.vat_number) != validated_number:
+            if compact_vat_number(tax_profile.vat_number) != validated_number:
                 logger.warning("⚠️ [VAT] Number changed during validation for profile %s", tax_profile_id)
                 return {"success": True, "skipped": "vat_number_changed"}
             now = timezone.now()

@@ -7927,3 +7927,27 @@ msgstr "Acest export este prea mare pentru a fi descărcat aici. Contactați sup
 #: services/portal/templates/users/data_export.html
 msgid "Download"
 msgstr "Descarcă"
+
+msgid "Enter the phone number with its country code, for example +40 721 123 456."
+msgstr "Introduceți numărul de telefon cu prefixul țării, de exemplu +40 721 123 456."
+
+msgid "The VAT number is too long."
+msgstr "Codul de TVA este prea lung."
+
+msgid "Enter a valid EU VAT number, with or without its country prefix."
+msgstr "Introduceți un cod de TVA UE valid, cu sau fără prefixul țării."
+
+msgid "A Romanian address needs its county."
+msgstr "O adresă din România trebuie să aibă județul."
+
+msgid "With its country code, e.g. +40 721 123 456. A Romanian number may start with 0."
+msgstr "Cu prefixul țării, de ex. +40 721 123 456. Un număr din România poate începe cu 0."
+
+msgid "With its country code, e.g. +40 721 123 456"
+msgstr "Cu prefixul țării, de ex. +40 721 123 456"
+
+msgid "The company's VAT number, with or without the country prefix, if it is VAT-registered."
+msgstr "Codul de TVA al firmei, cu sau fără prefixul țării, dacă este înregistrată în scopuri de TVA."
+
+msgid "Six digits in Romania"
+msgstr "Șase cifre în România"

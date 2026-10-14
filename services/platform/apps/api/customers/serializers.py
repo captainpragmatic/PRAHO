@@ -20,6 +20,7 @@ from apps.billing.currency_service import default_selling_currency
 from apps.billing.fiscal_identity import billing_country_code
 from apps.common.cnp_validator import CNPValidator
 from apps.common.cui_validator import normalize_cui_digits
+from apps.common.identity_fields import normalize_phone, normalize_vat_number
 from apps.common.localisation import country_name, normalize_country_code, resolve_display
 from apps.common.localisation_services import get_localisation_defaults, user_localisation_preferences
 from apps.common.performance.rate_limiting import forwarded_client_ip
@@ -34,9 +35,6 @@ if TYPE_CHECKING:
     from apps.users.models import User
 
 User = get_user_model()
-
-# Romanian validation constants
-MIN_VAT_DIGITS = 6  # Minimum number of digits in Romanian VAT number
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +71,14 @@ class CustomerServiceSerializer(serializers.Serializer):
 # ===============================================================================
 
 
+def _vat_number_for(value: object, country: object) -> str:
+    """The VAT number by its country's rules, refused as a field error on vat_number."""
+    try:
+        return normalize_vat_number(value, country)
+    except DjangoValidationError as error:
+        raise serializers.ValidationError({"vat_number": error.messages}) from error
+
+
 class UserRegistrationDataSerializer(serializers.Serializer):
     """
     Serializer for user data in customer registration.
@@ -88,11 +94,8 @@ class UserRegistrationDataSerializer(serializers.Serializer):
         return value.strip().lower()
 
     def validate_phone(self, value: str) -> str:
-        """Validate Romanian phone format"""
-        normalized = re.sub(r"[\s.]", "", value)
-        if normalized and not re.fullmatch(r"(?:\+40|0)[0-9]{9}", normalized):
-            raise serializers.ValidationError(_("Invalid Romanian phone number format."))
-        return normalized
+        """The number in international form: the portal sends it so, having known the person's country."""
+        return normalize_phone(value)
 
 
 class CustomerRegistrationDataSerializer(serializers.Serializer):
@@ -153,6 +156,8 @@ class CustomerRegistrationDataSerializer(serializers.Serializer):
             # Keep the country this decision used: confirmation, up to a day later, must not
             # resolve a default that has changed meanwhile.
             attrs["country"] = country_name(get_localisation_defaults().default_country)
+        # The VAT number follows the billing country's rules; a bare one is that country's.
+        attrs["vat_number"] = _vat_number_for(attrs.get("vat_number"), attrs["country"])
         if attrs.get("customer_type") == "individual":
             attrs.pop("cui", None)
             attrs.pop("registration_number", None)
@@ -190,21 +195,6 @@ class CustomerRegistrationDataSerializer(serializers.Serializer):
     def validate_company_name(self, value: str) -> str:
         """Normalise only. Uniqueness is checked when the registration is confirmed."""
         return value.strip()
-
-    def validate_vat_number(self, value: str) -> str:
-        """Validate Romanian VAT number format"""
-        if value:
-            value = value.strip().upper()
-            if not value.startswith("RO"):
-                if value.isdigit() and len(value) >= MIN_VAT_DIGITS:
-                    value = f"RO{value}"
-                else:
-                    raise serializers.ValidationError(_("VAT number must start with RO followed by digits."))
-            else:
-                vat_digits = value[2:]
-                if not vat_digits.isdigit() or len(vat_digits) < MIN_VAT_DIGITS:
-                    raise serializers.ValidationError(_("VAT number must start with RO followed by digits."))
-        return value
 
     def validate_data_processing_consent(self, value: bool) -> bool:
         """GDPR consent is required"""
@@ -291,22 +281,19 @@ class CustomerCreationSerializer(serializers.Serializer):
     # Nested contact information
     contact = serializers.DictField(required=False, allow_null=True)
 
-    def validate_vat_number(self, value: str) -> str:
-        """Validate Romanian VAT number format."""
-        if value and value.strip():
-            # Remove spaces and convert to uppercase
-            vat_clean = re.sub(r"[^\w]", "", value.upper())
-
-            # Check if it starts with RO
-            if not vat_clean.startswith("RO"):
-                vat_clean = "RO" + vat_clean
-
-            # Basic format validation
-            if len(vat_clean) < MIN_VAT_DIGITS + 2:  # RO + minimum digits
-                raise serializers.ValidationError(_("Invalid VAT number format"))
-
-            return vat_clean
-        return value
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        """The VAT number and contact phone follow the billing address country's rules."""
+        country = (attrs.get("billing_address") or {}).get("country") or country_name(
+            get_localisation_defaults().default_country
+        )
+        attrs["vat_number"] = _vat_number_for(attrs.get("vat_number"), country)
+        contact = attrs.get("contact") or {}
+        if contact.get("primary_phone"):
+            try:
+                contact["primary_phone"] = normalize_phone(contact["primary_phone"], country)
+            except DjangoValidationError as error:
+                raise serializers.ValidationError({"contact": error.messages}) from error
+        return attrs
 
     def validate_billing_address(self, value: dict) -> dict:
         """Validate billing address structure."""
@@ -354,7 +341,10 @@ class CustomerCreationSerializer(serializers.Serializer):
                     CustomerTaxProfile.objects.create(
                         customer=customer,
                         vat_number=validated_data["vat_number"],
-                        cui=validated_data["vat_number"],  # Same as VAT for simplicity
+                        # A Romanian VAT number is RO + the CUI; any other country's has no CUI.
+                        cui=validated_data["vat_number"].removeprefix("RO")
+                        if validated_data["vat_number"].startswith("RO")
+                        else "",
                         registration_number=validated_data.get("trade_registry_number", ""),
                         is_vat_payer=bool(validated_data.get("vat_number")),
                     )
@@ -487,6 +477,16 @@ class CustomerBillingAddressUpdateSerializer(serializers.Serializer):
     fiscal_code = serializers.CharField(max_length=20, required=False, allow_blank=True)
     registration_number = serializers.CharField(max_length=50, required=False, allow_blank=True)
     vat_number = serializers.CharField(max_length=20, required=False, allow_blank=True)
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        """The phone follows the address country (the stored one when this update leaves it out)."""
+        if attrs.get("phone"):
+            country = attrs.get("country") or self.context.get("country") or ""
+            try:
+                attrs["phone"] = normalize_phone(attrs["phone"], country)
+            except DjangoValidationError as error:
+                raise serializers.ValidationError({"phone": error.messages}) from error
+        return attrs
 
     def validate_postal_code(self, value: str) -> str:
         """Validate Romanian postal code format"""

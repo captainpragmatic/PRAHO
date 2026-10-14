@@ -9,11 +9,13 @@ product state, currency and totals consistency.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.utils.translation import gettext_lazy as _
 
 from apps.common.financial_arithmetic import calculate_document_totals
+from apps.common.identity_fields import requires_county
 from apps.common.localisation import normalize_country_code
 from apps.common.operator import operator_country
 
@@ -27,6 +29,27 @@ class OrderPreflightValidationService:
     """Run comprehensive checks before an order becomes payable."""
 
     @staticmethod
+    def _missing_billing_fields(billing: dict[str, Any]) -> list[str]:
+        """What the billing snapshot lacks; only a Romanian address needs its county."""
+        required_fields = [
+            ("contact_name", _("Please provide a contact name for your order")),
+            ("email", _("Please provide a contact email address")),
+            ("address_line1", _("Please provide your street address")),
+            ("city", _("Please provide your city")),
+            ("county", _("Please provide your county/state")),
+            ("postal_code", _("Please provide your postal/ZIP code")),
+            ("country", _("Please provide your country")),
+        ]
+        missing: list[str] = []
+        for field, message in required_fields:
+            if field == "county" and not requires_county(billing.get("country")):
+                continue
+            if not str(billing.get(field, "")).strip():
+                logger.warning(f"🔎 [Validation] Missing field '{field}' from billing data: {list(billing.keys())}")
+                missing.append(str(message))
+        return missing
+
+    @staticmethod
     def validate(  # noqa: C901, PLR0912, PLR0915  # Cohesive validation pipeline; steps share accumulated findings
         order: Order,
     ) -> tuple[list[str], list[str]]:  # Complexity: order processing pipeline  # Complexity: multi-step business logic
@@ -37,22 +60,7 @@ class OrderPreflightValidationService:
 
         # 1) Customer and billing snapshot completeness
         billing = order.billing_address or {}
-        required_fields = [
-            ("contact_name", _("Please provide a contact name for your order")),
-            ("email", _("Please provide a contact email address")),  # Fixed: was "contact_email"
-            ("address_line1", _("Please provide your street address")),  # Fixed: was "line1"
-            ("city", _("Please provide your city")),
-            ("county", _("Please provide your county/state")),
-            ("postal_code", _("Please provide your postal/ZIP code")),
-            ("country", _("Please provide your country")),
-        ]
-        for field, message in required_fields:
-            field_value = str(billing.get(field, "")).strip()
-            if not field_value:
-                logger.warning(
-                    f"🔎 [Validation] Missing field '{field}': '{field_value}' from billing data: {list(billing.keys())}"
-                )
-                errors.append(str(message))
+        errors.extend(OrderPreflightValidationService._missing_billing_fields(billing))
 
         # Basic email presence - format validation is assumed upstream
         # VAT number presence for businesses (company name given)

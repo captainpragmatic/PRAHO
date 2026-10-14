@@ -175,15 +175,16 @@ class PurchaseIdentityContracts(HMACTestMixin, TestCase):
             self.assertFalse(customer.data_processing_consent)
 
     def test_romanian_phones_are_normalized_and_invalid_lengths_rejected(self):
-        for index, phone in enumerate(("+40.722.123.456", "0722 123 456")):
+        # The portal sends the international form, having read a national number in the customer's country.
+        for index, phone in enumerate(("+40.722.123.456", "+40 722 123 456")):
             user, _customer = self.register(
                 {
                     **self.registration(f"phone{index}@example.com", phone),
                     "customer_data": {**self.registration()["customer_data"], "company_name": f"Phone Company {index}"},
                 }
             )
-            self.assertEqual(user.phone, phone.replace(".", "").replace(" ", ""))
-        for phone in ("+4072212345", "+407221234567", "+40722123456junk"):
+            self.assertEqual(user.phone, "+40722123456")  # stored in international form either way
+        for phone in ("+4072212345", "+407221234567", "+40722123456junk", "0722 123 456"):
             response = self.submit(self.registration(phone=phone))
             self.assertEqual(response.status_code, 400, response.content)
         self.assertEqual(User.objects.count(), 2)

@@ -4,7 +4,6 @@
 
 import io
 import logging
-import re
 import time
 from typing import TYPE_CHECKING, Any, cast
 
@@ -22,6 +21,7 @@ from django.utils.translation import gettext_lazy as _
 from django_q.tasks import async_task
 from rest_framework import serializers
 
+from apps.common.identity_fields import normalize_phone
 from apps.common.localisation import DATE_FORMAT_CHOICES, LANGUAGE_CHOICES
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.validators import log_security_event
@@ -384,11 +384,8 @@ class ProfileUpdateSerializer(serializers.Serializer):
     marketing_emails = serializers.BooleanField(required=False)
 
     def validate_phone(self, value: str) -> str:
-        """Keep the same phone contract across both profile endpoints."""
-        normalized = re.sub(r"[\s.]", "", value)
-        if normalized and not re.fullmatch(r"(?:\+40|0)[0-9]{9}", normalized):
-            raise serializers.ValidationError(_("Invalid Romanian phone number format."))
-        return normalized
+        """The number in international form: the portal sends it so, having known the person's country."""
+        return normalize_phone(value)
 
     def validate_timezone(self, value: str) -> str:
         from apps.common.localisation import validate_timezone  # noqa: PLC0415
