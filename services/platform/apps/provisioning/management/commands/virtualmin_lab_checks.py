@@ -374,6 +374,7 @@ class Command(BaseCommand):
         expected_fp: str = "",
         action: str = "run",
         lock_wait: int = 60,
+        archive: str = "",
     ) -> Any:
         """Run virtualmin_chain_backup.yml through AnsibleService; return the parsed result line."""
         from apps.provisioning.virtualmin_backup_service import (  # noqa: PLC0415
@@ -390,7 +391,7 @@ class Command(BaseCommand):
             "chain_domain_id": domain_id,
             "chain_token": token,
             "chain_lock_wait_seconds": lock_wait,
-            "chain_archive": f"virtualmin_backup_{uuid.uuid4().hex}.tar.gz" if action == "run" else "",
+            "chain_archive": (archive or f"virtualmin_backup_{uuid.uuid4().hex}.tar.gz") if action == "run" else "",
         }
         if expected_fp:
             variables["chain_expected_fp"] = expected_fp
@@ -498,7 +499,7 @@ class Command(BaseCommand):
             )
             discard(diff, again)
 
-            stale = self._chain_step(server, node, "differential", token(), expected_fp="ABSENT")
+            stale = self._chain_step(server, node, "differential", token(), expected_fp="0" * 64 + ":1")
             self._ok(
                 "a differential with a stale fingerprint is refused before any backup runs",
                 (stale.outcome, stale.reason, stale.ran) == ("refused", "fingerprint_mismatch", False),
@@ -656,6 +657,39 @@ class Command(BaseCommand):
                 "the resolved token refuses to run, even for a delayed invocation",
                 (late.outcome, late.reason, late.ran) == ("refused", "cancelled", False),
                 late,
+            )
+
+            # Stranded archive: a step ran and its result was lost, so its archive and the .dom
+            # sidecar (database passwords) sit in staging. Confirm stopped removes them.
+            stranded_token = str(uuid.uuid4())
+            stranded_archive = f"virtualmin_backup_{uuid.uuid4().hex}.tar.gz"
+            ran = self._chain_step(account.server, node, "base", stranded_token, archive=stranded_archive)
+            staged = self._staged(node)
+            self._ok(
+                "a step whose result was lost leaves its archive and sidecar staged",
+                ran.outcome == "ok" and stranded_archive in staged and f"{stranded_archive}.dom" in staged,
+                staged,
+            )
+            parked = VirtualminProvisioningJob.objects.create(
+                operation="backup_domain",
+                account=reload(),
+                server=account.server,
+                status="attention",
+                parameters={
+                    "chain_role": "base",
+                    "chain_token": stranded_token,
+                    "chain_epoch": reload().chain_epoch,
+                    "virtualmin_domain_id": domain_id,
+                    "archive_name": stranded_archive,
+                },
+                result={"retriability": "unknown"},
+            )
+            resolved = resolve_chain_job(parked, resolved_by="lab", note="stranded archive check")
+            self._ok("confirm stopped releases the stranded job", resolved.is_ok(), resolved)
+            self._ok(
+                "nothing is left in staging (archive, .dom and .info are gone)",
+                not self._staged(node),
+                self._staged(node),
             )
 
             # A restore ends the chain too.
